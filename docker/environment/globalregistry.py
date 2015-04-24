@@ -1,4 +1,9 @@
-"""Brings up a set of Global Registry nodes along with databases.
+# coding=utf-8
+"""Authors: Tomasz Lichoń, Konrad Zemek
+Copyright (C) 2015 ACK CYFRONET AGH
+This software is released under the MIT license cited in 'LICENSE.txt'
+
+Brings up a set of Global Registry nodes along with databases.
 They can create separate clusters.
 """
 
@@ -6,8 +11,7 @@ import copy
 import json
 import os
 
-import common
-import docker
+from . import common, docker, dns as dns_mod
 
 
 def _tweak_config(config, name, uid):
@@ -99,11 +103,12 @@ def up(image, bindir, logdir, dns, uid, config_path):
     config['config']['target_dir'] = '/root/bin'
     configs = [_tweak_config(config, node, uid) for node in config['nodes']]
 
-    dns_servers, output = common.set_up_dns(dns, uid)
+    dns_servers, output = dns_mod.set_up_dns(dns, uid)
 
     gr_containers = []
     for cfg in configs:
-        gr_container, node_out = _node_up(image, bindir, logdir, uid, cfg, dns_servers)
+        gr_container, node_out = _node_up(image, bindir, logdir, uid, cfg,
+                                          dns_servers)
         common.merge(output, node_out)
         gr_containers.append(gr_container)
 
