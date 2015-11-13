@@ -15,9 +15,9 @@
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
--include("cluster/worker/modules/datastore/datastore.hrl").
--include("cluster/worker/modules/datastore/datastore_common_internal.hrl").
--include("cluster/worker/elements/task_manager/task_manager.hrl").
+-include_lib("cluster_worker/include/cluster/worker/modules/datastore/datastore.hrl").
+-include_lib("cluster_worker/include/cluster/worker/modules/datastore/datastore_common_internal.hrl").
+-include_lib("cluster_worker/include/cluster/worker/elements/task_manager/task_manager.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API

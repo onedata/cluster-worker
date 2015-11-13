@@ -14,7 +14,7 @@
 -ifndef(DATASTORE_HRL).
 -define(DATASTORE_HRL, 1).
 
--include("cluster/worker/modules/datastore/datastore_models_def.hrl").
+-include_lib("cluster_worker/include/cluster/worker/modules/datastore/datastore_models_def.hrl").
 
 %% Common predicates
 -define(PRED_ALWAYS, fun() -> true end).

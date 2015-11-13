@@ -11,7 +11,7 @@
 -module(datastore_utils).
 -author("Rafal Slota").
 
--include("cluster/worker/modules/datastore/datastore_common_internal.hrl").
+-include_lib("cluster_worker/include/cluster/worker/modules/datastore/datastore_common_internal.hrl").
 
 -define(KEY_LEN, 32).
 

@@ -9,11 +9,11 @@
 %%% This test checks requests routing inside OP cluster.
 %%% @end
 %%%--------------------------------------------------------------------
--module(requests_routing_test_SUITE).
+-module(worker_requests_routing_test_SUITE).
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
--include("cluster/worker/elements/worker_host/worker_protocol.hrl").
+-include_lib("cluster_worker/include/cluster/worker/elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/global_registry/gr_users.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
