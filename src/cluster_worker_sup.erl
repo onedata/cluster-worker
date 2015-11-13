@@ -9,7 +9,7 @@
 %%% which initializes node.
 %%% @end
 %%%--------------------------------------------------------------------
--module(op_worker_sup).
+-module(cluster_worker_sup).
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").

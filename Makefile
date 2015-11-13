@@ -53,7 +53,7 @@ appmock_rel:
 
 relclean:
 	rm -rf rel/test_cluster
-	rm -rf rel/op_worker
+	rm -rf rel/cluster_worker
 	rm -rf appmock/rel/appmock
 	rm -rf op_ccm/rel/op_ccm
 

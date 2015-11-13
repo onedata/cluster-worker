@@ -9,7 +9,7 @@
 %%% supervisor which then initializes appropriate components of node.
 %%% @end
 %%%--------------------------------------------------------------------
--module(op_worker_app).
+-module(cluster_worker_app).
 -author("Michal Wrzeszcz").
 
 -behaviour(application).
@@ -33,7 +33,7 @@
     {error, Reason ::term()}.
 start(_StartType, _StartArgs) ->
     test_node_starter:maybe_start_cover(),
-    op_worker_sup:start_link().
+    cluster_worker_sup:start_link().
 
 %%--------------------------------------------------------------------
 %% @doc

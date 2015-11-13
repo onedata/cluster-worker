@@ -8,11 +8,11 @@
 %%% @doc It is the description of application.
 %%% @end
 %%%--------------------------------------------------------------------
-{application, op_worker,
+{application, cluster_worker,
     [
         {description, "Application starts node of oneprovider cluster"},
         {vsn, git},
-        {registered, [op_worker_sup]},
+        {registered, [cluster_worker_sup]},
         {applications, [
             kernel,
             stdlib,
@@ -30,6 +30,6 @@
             ibrowse,
             cowboy
         ]},
-        {mod, {op_worker_app, []}},
+        {mod, {cluster_worker_app, []}},
         {env, []}
     ]}.
