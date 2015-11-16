@@ -37,10 +37,6 @@
             %% GENERAL
             %% ===================================================================
 
-            %% List of possible ccm nodes - configured automatically by configurator.erl lib, used in GEN_DEV script
-            {ccm_nodes, ['ccm@127.0.0.1']},
-            %% List of all DBMS nodes - configured automatically by configurator.erl lib, used in GEN_DEV script
-            {db_nodes, ['127.0.0.1:49161']},
             %% List of absolute paths to storages used by workers.
             {storage_paths, []},
             %% How long (in ms) should worker wait between heartbeats (when connected to ccm)

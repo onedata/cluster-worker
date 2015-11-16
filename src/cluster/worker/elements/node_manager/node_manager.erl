@@ -235,7 +235,7 @@ handle_info({timer, Msg}, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
-    {ok, CCMNodes} = application:get_env(?APP_NAME, ccm_nodes),
+    {ok, CCMNodes} = ?NODE_MANAGER_PLUGIN:ccm_nodes(),
     case lists:member(Node, CCMNodes) of
         false ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
@@ -305,7 +305,7 @@ connect_to_ccm(State = #state{ccm_con_status = connected}) ->
     State;
 connect_to_ccm(State = #state{ccm_con_status = not_connected}) ->
     % Not connected to CCM, try and automatically schedule the next try
-    {ok, CcmNodes} = application:get_env(?APP_NAME, ccm_nodes),
+    {ok, CcmNodes} = ?NODE_MANAGER_PLUGIN:ccm_nodes(),
     {ok, Interval} = application:get_env(?APP_NAME, ccm_connection_retry_period),
     erlang:send_after(Interval, self(), {timer, connect_to_ccm}),
     case (catch init_net_connection(CcmNodes)) of
