@@ -1,22 +1,13 @@
-REPO	        ?= op-worker
+REPO	        ?= cluster-worker
 
-# distro for package building
-DISTRIBUTION    ?= none
-export DISTRIBUTION
-
-PKG_REVISION    ?= $(shell git describe --tags --always)
-PKG_VERSION	    ?= $(shell git describe --tags --always | tr - .)
-PKG_ID	         = op-worker-$(PKG_VERSION)
-PKG_BUILD	     = 1
 BASE_DIR	     = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
 REBAR	        ?= $(BASE_DIR)/rebar
-PKG_VARS_CONFIG  = pkg.vars.config
 OVERLAY_VARS    ?=
 
 .PHONY: deps test package
 
-all: test_rel
+all: rel
 
 ##
 ## Rebar targets
@@ -31,7 +22,7 @@ deps:
 generate: deps compile
 	./rebar generate $(OVERLAY_VARS)
 
-clean: relclean pkgclean
+clean: relclean
 	./rebar clean
 
 distclean:
@@ -43,19 +34,11 @@ distclean:
 
 rel: generate
 
-test_rel: generate ccm_rel appmock_rel
-
-ccm_rel:
-	make -C op_ccm/ rel
-
-appmock_rel:
-	make -C appmock/ rel
+test_rel: generate
 
 relclean:
 	rm -rf rel/test_cluster
 	rm -rf rel/cluster_worker
-	rm -rf appmock/rel/appmock
-	rm -rf op_ccm/rel/op_ccm
 
 ##
 ## Testing targets
@@ -89,33 +72,3 @@ plt:
 # Dialyzes the project.
 dialyzer: plt
 	dialyzer ./ebin --plt ${PLT} -Werror_handling -Wrace_conditions --fullpath
-
-##
-## Packaging targets
-##
-
-export PKG_VERSION PKG_ID PKG_BUILD BASE_DIR ERLANG_BIN REBAR OVERLAY_VARS RELEASE PKG_VARS_CONFIG
-
-package/$(PKG_ID).tar.gz: deps
-	mkdir -p package
-	rm -rf package/$(PKG_ID)
-	git archive --format=tar --prefix=$(PKG_ID)/ $(PKG_REVISION) | (cd package && tar -xf -)
-	${MAKE} -C package/$(PKG_ID) deps
-	for dep in package/$(PKG_ID) package/$(PKG_ID)/deps/*; do \
-	     echo "Processing dependency: `basename $${dep}`"; \
-	     vsn=`git --git-dir=$${dep}/.git describe --tags 2>/dev/null`; \
-	     mkdir -p $${dep}/priv; \
-	     echo "$${vsn}" > $${dep}/priv/vsn.git; \
-	     sed -i'' "s/{vsn,\\s*git}/{vsn, \"$${vsn}\"}/" $${dep}/src/*.app.src 2>/dev/null || true; \
-	done
-	find package/$(PKG_ID) -depth -name ".git" -exec rm -rf {} \;
-	tar -C package -czf package/$(PKG_ID).tar.gz $(PKG_ID)
-
-dist: package/$(PKG_ID).tar.gz
-	cp package/$(PKG_ID).tar.gz .
-
-package: package/$(PKG_ID).tar.gz
-	${MAKE} -C package -f $(PWD)/deps/node_package/Makefile
-
-pkgclean:
-	rm -rf package
