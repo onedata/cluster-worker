@@ -7,7 +7,7 @@ OVERLAY_VARS    ?=
 
 .PHONY: deps test package
 
-all: rel
+all: deps compile
 
 ##
 ## Rebar targets
@@ -19,26 +19,11 @@ compile:
 deps:
 	./rebar get-deps
 
-generate: deps compile
-	./rebar generate $(OVERLAY_VARS)
-
-clean: relclean
+clean:
 	./rebar clean
 
 distclean:
 	./rebar delete-deps
-
-##
-## Release targets
-##
-
-rel: generate
-
-test_rel: generate
-
-relclean:
-	rm -rf rel/test_cluster
-	rm -rf rel/cluster_worker
 
 ##
 ## Testing targets
