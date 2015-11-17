@@ -29,6 +29,8 @@
 -export([handle_a/1, handle_ns/1, handle_cname/1, handle_soa/1, handle_wks/1,
     handle_ptr/1, handle_hinfo/1, handle_minfo/1, handle_mx/1, handle_txt/1]).
 
+-define(DNS_WORKER_PLUGIN_NAME, dns_worker_plugin).
+
 %% export for unit tests
 -ifdef(TEST).
 -export([parse_domain/1]).
@@ -269,47 +271,7 @@ handle_txt(_Domain) ->
 %%--------------------------------------------------------------------
 -spec parse_domain(Domain :: string()) -> ok | refused | nx_domain.
 parse_domain(DomainArg) ->
-    ProviderDomain = oneprovider:get_provider_domain(),
-    GRDomain = oneprovider:get_gr_domain(),
-    % If requested domain starts with 'www.', ignore the suffix
-    QueryDomain = case DomainArg of
-                      "www." ++ Rest -> Rest;
-                      Other -> Other
-                  end,
-
-    % Check if queried domain ends with provider domain
-    case string:rstr(QueryDomain, ProviderDomain) of
-        0 ->
-            % If not, check if following are true:
-            % 1. GR domain: gr.domain
-            % 2. provider domain: prov_subdomain.gr.domain
-            % 3. queried domain: first_part.gr.domain
-            % If not, return REFUSED
-            QDTail = string:join(tl(string:tokens(QueryDomain, ".")), "."),
-            PDTail = string:join(tl(string:tokens(ProviderDomain, ".")), "."),
-            case QDTail =:= GRDomain andalso PDTail =:= GRDomain of
-                true ->
-                    ok;
-                false ->
-                    refused
-            end;
-        _ ->
-            % Queried domain does end with provider domain
-            case QueryDomain of
-                ProviderDomain ->
-                    ok;
-                _ ->
-                    % Check if queried domain is in form
-                    % 'first_part.provider.domain' - strip out the
-                    % first_part and compare. If not, return NXDOMAIN
-                    case string:join(tl(string:tokens(QueryDomain, ".")), ".") of
-                        ProviderDomain ->
-                            ok;
-                        _ ->
-                            nx_domain
-                    end
-            end
-    end.
+    ?DNS_WORKER_PLUGIN_NAME:parse_domain(DomainArg).
 
 
 %%--------------------------------------------------------------------

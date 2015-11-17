@@ -68,27 +68,6 @@ healthcheck_outofsync_test_() ->
             ?assert(meck:validate(timer))
         end]}.
 
-%% tests parse_domain() function
-domain_parser_test_() ->
-    {setup,
-        fun domain_parser_setup/0,
-        fun domain_parser_teardown/1,
-        [fun() ->
-            % GR domain = onedata.org
-            % Provider domain = prov.onedata.org
-            ?assertEqual(ok, dns_worker:parse_domain("prov.onedata.org")),
-            ?assertEqual(ok, dns_worker:parse_domain("alias.onedata.org")),
-            ?assertEqual(ok, dns_worker:parse_domain("www.alias.onedata.org")),
-            ?assertEqual(ok, dns_worker:parse_domain("www.prov.onedata.org")),
-            ?assertEqual(refused, dns_worker:parse_domain("www.part.alias.onedata.org")),
-            ?assertEqual(ok, dns_worker:parse_domain("www.part.prov.onedata.org")),
-            ?assertEqual(nx_domain, dns_worker:parse_domain("www.part1.part2.prov.onedata.org")),
-            ?assertEqual(refused, dns_worker:parse_domain("agh.edu.pl")),
-            ?assertEqual(8, meck:num_calls(application, get_env, ['_', global_registry_domain])),
-            ?assertEqual(8, meck:num_calls(application, get_env, ['_', provider_domain])),
-            ?assert(meck:validate(application))
-        end]}.
-
 %% tests handling bad requests
 bad_request_handle_test() ->
     ?assertException(throw, {unsupported_request, bad_request}, dns_worker:handle(bad_request)),
@@ -118,8 +97,6 @@ handle_domain_test_() ->
                 ?assertEqual(refused, dns_worker:handle({handle_a, "agh.edu.pl"})),
                 ?assertEqual(refused, dns_worker:handle({handle_ns, "agh.edu.pl"})),
                 ?assertEqual(2, meck:num_calls(worker_host, state_get, ['_', lb_advice])),
-                ?assertEqual(2, meck:num_calls(application, get_env, ['_', global_registry_domain])),
-                ?assertEqual(2, meck:num_calls(application, get_env, ['_', provider_domain])),
                 ?assert(meck:validate(worker_host)),
                 ?assert(meck:validate(application))
             end]},
@@ -131,8 +108,6 @@ handle_domain_test_() ->
                 ?assertEqual(refused, dns_worker:handle({handle_a, "onedata.org"})),
                 ?assertEqual(refused, dns_worker:handle({handle_ns, "onedata.org"})),
                 ?assertEqual(2, meck:num_calls(worker_host, state_get, ['_', lb_advice])),
-                ?assertEqual(2, meck:num_calls(application, get_env, ['_', global_registry_domain])),
-                ?assertEqual(2, meck:num_calls(application, get_env, ['_', provider_domain])),
                 ?assert(meck:validate(worker_host)),
                 ?assert(meck:validate(application))
             end]},
@@ -144,8 +119,6 @@ handle_domain_test_() ->
                 ?assertEqual(refused, dns_worker:handle({handle_a, "cyf.kr.onedata.org"})),
                 ?assertEqual(refused, dns_worker:handle({handle_ns, "cyf.kr.onedata.org"})),
                 ?assertEqual(2, meck:num_calls(worker_host, state_get, ['_', lb_advice])),
-                ?assertEqual(2, meck:num_calls(application, get_env, ['_', global_registry_domain])),
-                ?assertEqual(2, meck:num_calls(application, get_env, ['_', provider_domain])),
                 ?assert(meck:validate(worker_host)),
                 ?assert(meck:validate(application))
             end]}
@@ -163,8 +136,6 @@ a_test_() ->
                         {answer, "one.onedata.org", 60, a, {127, 0, 0, 2}},
                         {aa, true}]}),
             ?assertEqual(1, meck:num_calls(worker_host, state_get, ['_', lb_advice])),
-            ?assertEqual(1, meck:num_calls(application, get_env, ['_', global_registry_domain])),
-            ?assertEqual(1, meck:num_calls(application, get_env, ['_', provider_domain])),
             ?assertEqual(1, meck:num_calls(load_balancing, choose_nodes_for_dns, ['_'])),
             ?assert(meck:validate(worker_host)),
             ?assert(meck:validate(application)),
@@ -183,8 +154,6 @@ ns_test_() ->
                         {answer, "two.onedata.org", 600, ns, "127.0.0.2"},
                         {aa, true}]}),
             ?assertEqual(1, meck:num_calls(worker_host, state_get, ['_', lb_advice])),
-            ?assertEqual(1, meck:num_calls(application, get_env, ['_', global_registry_domain])),
-            ?assertEqual(1, meck:num_calls(application, get_env, ['_', provider_domain])),
             ?assertEqual(1, meck:num_calls(load_balancing, choose_ns_nodes_for_dns, ['_'])),
             ?assert(meck:validate(worker_host)),
             ?assert(meck:validate(application)),
@@ -263,6 +232,18 @@ domain_proper_setup() ->
             node_choices = [{127, 0, 0, 1}, {127, 0, 0, 2}]
         }
     end),
+
+    meck:new(dns_worker_plugin, [non_strict]),
+    meck:expect(dns_worker_plugin, parse_domain,
+        fun(Domain) ->
+            case Domain of
+                "cyf.kr.onedata.org" -> refused; %todo: ask author in 'nx_...' shouldn't be expected in case
+                "onedata.org" -> refused;
+                "agh.edu.pl" -> refused;
+                "one.onedata.org" -> ok;
+                "two.onedata.org" -> ok
+            end
+        end),
 
     meck:new(application, [unstick]),
     meck:expect(application, get_env,
