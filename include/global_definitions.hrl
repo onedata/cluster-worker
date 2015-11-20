@@ -14,7 +14,7 @@
 -define(GLOBAL_DEFINITIONS_HRL, 1).
 
 -include_lib("cluster_worker/include/cluster/worker/modules/datastore/datastore.hrl").
--include("modules/datastore/datastore_specific_models_def.hrl").
+%todo -include("modules/datastore/datastore_specific_models_def.hrl").
 
 %%%===================================================================
 %%% Global names
