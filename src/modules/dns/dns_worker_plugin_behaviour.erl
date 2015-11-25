@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% todo
+%%% This module is used to inject configuration to stock dns of cluster_worker.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(dns_worker_plugin_behaviour).
