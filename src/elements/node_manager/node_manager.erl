@@ -140,7 +140,7 @@ init([]) ->
 
         gen_server:cast(self(), connect_to_ccm),
 
-        NodeIP = check_node_ip_address(),
+        NodeIP = ?NODE_MANAGER_PLUGIN:check_node_ip_address(),
         MonitoringState = monitoring:start(NodeIP),
 
         {ok, #state{node_ip = NodeIP,
@@ -242,7 +242,7 @@ handle_cast({update_lb_advices, Advices}, State) ->
     {noreply, NewState};
 
 handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
-    NodeIP = check_node_ip_address(),
+    NodeIP = ?NODE_MANAGER_PLUGIN:check_node_ip_address(),
     NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
     {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
 
@@ -602,24 +602,5 @@ start_worker(Module, Args) ->
         _:Error ->
             ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
             {error, Error}
-    end.
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks IP address of this node by asking GR. If the check cannot be performed,
-%% it assumes a 127.0.0.1 address and logs an alert.
-%% @end
-%%--------------------------------------------------------------------
--spec check_node_ip_address() -> IPV4Addr :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()}.
-check_node_ip_address() ->
-    try
-        {ok, IPBin} = gr_providers:check_ip_address(provider),
-        {ok, IP} = inet_parse:ipv4_address(binary_to_list(IPBin)),
-        IP
-    catch T:M ->
-        ?alert_stacktrace("Cannot check external IP of node, defaulting to 127.0.0.1 - ~p:~p", [T, M]),
-        {127, 0, 0, 1}
     end.
 

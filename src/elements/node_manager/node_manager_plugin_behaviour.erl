@@ -74,6 +74,14 @@
   {ok, NewState :: term()} | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks and returns IP address of node_manager.
+%% @end
+%%--------------------------------------------------------------------
+-callback check_node_ip_address() -> IPV4Addr :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()}.
+
+%%--------------------------------------------------------------------
 %% @doc
 %% List of modules to be loaded. Consistient with modules_with_args
 %% as in the original implementation.
