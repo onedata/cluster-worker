@@ -19,7 +19,7 @@
 %% custom initialisation.
 %% @end
 %%--------------------------------------------------------------------
--callback on_init(Args :: term()) -> ok | {error, Reason :: term()}.
+-callback on_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -100,11 +100,10 @@
 %% List ccm nodes to be used by node manager.
 %% @end
 %%--------------------------------------------------------------------
--callback ccm_nodes() -> Nodes :: [atom()].
-
+-callback ccm_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 %%--------------------------------------------------------------------
 %% @doc
 %% List db nodes to be used by node manager.
 %% @end
 %%--------------------------------------------------------------------
--callback db_nodes() -> Nodes :: [atom()].
+-callback db_nodes() -> {ok, Nodes :: [atom()]} | undefined.
