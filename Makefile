@@ -14,12 +14,15 @@ all: deps compile
 ##
 
 compile:
+	rm -rf cluster_worker && mkdir cluster_worker
+	ln -sf `pwd`/include cluster_worker/include
 	./rebar compile
 
 deps:
 	./rebar get-deps
 
 clean:
+	rm -rf cluster_worker
 	./rebar clean
 
 distclean:
