@@ -154,9 +154,9 @@ terminate(_Reason, _Req, _State) ->
 -spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
     Status :: healthcheck_response(),
     ClusterStatus :: {?APP_NAME, Status, NodeStatuses :: [
-        {node(), Status, [
-            {ModuleName :: module(), Status}
-        ]}
+    {node(), Status, [
+    {ModuleName :: module(), Status}
+    ]}
     ]}.
 get_cluster_status(Timeout) ->
     case check_ccm(Timeout) of
@@ -191,9 +191,9 @@ get_cluster_status(Timeout) ->
     Node :: node(),
     Status :: healthcheck_response(),
     ClusterStatus :: {?APP_NAME, Status, NodeStatuses :: [
-        {node(), Status, [
-            {ModuleName :: module(), Status}
-        ]}
+    {node(), Status, [
+    {ModuleName :: module(), Status}
+    ]}
     ]}.
 calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses) ->
     NodeStatuses =

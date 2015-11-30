@@ -80,6 +80,28 @@
             %% List of protocols which will be available on http_worker_rest_port.
             {protocol_plugins, [rest_protocol_plugin, cdmi_protocol_plugin]}, %% todo remove (discover why needed despite moving to op_worker)
 
+
+            %% ===================================================================
+            %% GLOBAL REGISTRY INTERFACING
+            %% ===================================================================
+
+            %% Indicates if GR cert should be verified against system's CA bundle.
+            %% If this is set to true and CA bundle cannot be found, provider
+            %% application won't start at all.
+            {verify_gr_cert, false}, %todo should be enabled as in develop (state during merge)
+            %% Global Registry hostname.
+            {global_registry_domain, "onedata.org"},
+            %% Path to .pem file containing the orginal CSR to be signed by GR.
+            {global_registry_provider_csr_path, "{{platform_etc_dir}}/certs/grpcsr.pem"},
+            %% Path to .pem file containing the private key to the grpcert.
+            {global_registry_provider_key_path, "{{platform_etc_dir}}/certs/grpkey.pem"},
+            %% Path to .pem file containing the certificate signed by Global Registry CA, used for authorizing requests to it.
+            {global_registry_provider_cert_path, "{{platform_etc_dir}}/certs/grpcert.pem"},
+            %% Path to .pem file containing the Global Registry CA certificate.
+            {global_registry_ca_cert_path, "{{platform_etc_dir}}/cacerts/grpCA.pem"},
+            %% Global Registry REST API port.
+            {global_registry_rest_port, 8443},
+
             %% ===================================================================
             %% DNS
             %% ===================================================================
