@@ -202,7 +202,6 @@ delete(Level, ModelName, Key) ->
     delete(Level, ModelName, Key, ?PRED_ALWAYS).
 
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Deletes #document with given key. Sync operation on memory with sync operation on disk
@@ -458,7 +457,6 @@ normalize_link_target({LinkName, #document{key = TargetKey} = Doc}) ->
     normalize_link_target({LinkName, {TargetKey, model_name(Doc)}});
 normalize_link_target({_LinkName, {_TargetKey, ModelName}} = ValidLink) when is_atom(ModelName) ->
     ValidLink.
-
 
 
 %%--------------------------------------------------------------------
