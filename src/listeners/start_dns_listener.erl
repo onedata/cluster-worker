@@ -29,7 +29,7 @@
 %% {@link listener_starter_behaviour} callback start_listener/1.
 %% @end
 %%--------------------------------------------------------------------
--spec start_listener() -> {ok, pid()} | no_return().
+-spec start_listener() -> ok | {error, Reason :: term()}.
 start_listener() ->
   {ok, DNSPort} = application:get_env(?APP_NAME, dns_port),
   {ok, EdnsMaxUdpSize} = application:get_env(?APP_NAME, edns_max_udp_size),

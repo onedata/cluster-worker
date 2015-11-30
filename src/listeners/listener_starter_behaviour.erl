@@ -18,7 +18,7 @@
 %% Do your work & start it.
 %% @end
 %%--------------------------------------------------------------------
--callback start_listener() -> {ok, pid()} | no_return().
+-callback start_listener() -> ok | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc

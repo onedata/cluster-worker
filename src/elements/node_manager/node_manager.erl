@@ -131,7 +131,7 @@ init([]) ->
         ok = ?NODE_MANAGER_PLUGIN:on_init([]),
         ?info("Plugin initailised"),
 
-        lists:foreach(fun(Module) -> erlang:apply(Module, start_listener, []) end, node_manager:listeners()),
+        lists:foreach(fun(Module) -> ok = erlang:apply(Module, start_listener, []) end, node_manager:listeners()),
         ?info("All listeners started"),
 
         next_mem_check(),
