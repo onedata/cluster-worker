@@ -17,7 +17,7 @@
 -include_lib("cluster_worker/include/modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
--define(NODE_MANAGER_PLUGIN, node_manager_plugin). %todo rethink how to avoid such solution
+-define(NODE_MANAGER_PLUGIN, node_manager_plugin).
 
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
