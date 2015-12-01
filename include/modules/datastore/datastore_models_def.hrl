@@ -13,8 +13,6 @@
 -ifndef(DATASTORE_MODELS_HRL).
 -define(DATASTORE_MODELS_HRL, 1).
 
--include("proto/common/credentials.hrl").
-
 %% Wrapper for all models' records
 -record(document, {
     key :: datastore:ext_key(),
