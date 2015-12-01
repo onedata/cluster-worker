@@ -30,10 +30,10 @@
 
 %% Model that controls utilization of cache
 -record(cache_controller, {
-    timestamp = {0,0,0} :: tuple(),
+    timestamp = {0, 0, 0} :: tuple(),
     action = non :: atom(),
     last_user = non :: string() | non,
-    last_action_time = {0,0,0} :: tuple(),
+    last_action_time = {0, 0, 0} :: tuple(),
     deleted_links = [] :: list()
 }).
 
