@@ -5,8 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Common definions and configurations for datastore.
-%%%      This header may be used anywhere to get access to datastore API helpers
+%%% @doc This header may be used anywhere to get access to datastore API helpers
 %%%      and model definitions.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -15,25 +14,6 @@
 -define(DATASTORE_HRL, 1).
 
 -include_lib("cluster_worker/include/modules/datastore/datastore_models_def.hrl").
-
-%% Common predicates
--define(PRED_ALWAYS, fun() -> true end).
-
-
-%% Utils
--define(RESPONSE(R), begin
-                         {ok, Response} = R,
-                         Response
-                     end
-).
-
-%% Common funs
--define(GET_ALL,
-    fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (Obj, Acc) ->
-            {next, [Obj | Acc]}
-    end).
+-include_lib("cluster_worker/include/modules/datastore/datastore_common.hrl").
 
 -endif.

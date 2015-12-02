@@ -14,7 +14,7 @@
 -behaviour(worker_plugin_behaviour).
 
 -include("global_definitions.hrl").
--include_lib("cluster_worker/include/modules/datastore/datastore_engine.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 -define(NODE_MANAGER_PLUGIN, node_manager_plugin).

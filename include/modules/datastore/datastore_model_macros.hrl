@@ -5,14 +5,12 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Contains common definitions of types and helper macros.
+%%% @doc Contains common helper macros.
+%%%      Shall be used only via datastore_model_helpers header file.
 %%% @end
 %%%-------------------------------------------------------------------
 -ifndef(DATASTORE_MODEL_HELPER_HRL).
 -define(DATASTORE_MODEL_HELPER_HRL, 1).
-
--include_lib("cluster_worker/include/modules/datastore/datastore.hrl").
--include_lib("cluster_worker/include/modules/datastore/datastore_common_internal.hrl").
 
 %% Name of current model
 -define(MODEL_NAME, ?MODULE).

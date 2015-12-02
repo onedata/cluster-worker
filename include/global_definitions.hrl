@@ -13,8 +13,6 @@
 -ifndef(GLOBAL_DEFINITIONS_HRL).
 -define(GLOBAL_DEFINITIONS_HRL, 1).
 
--include_lib("cluster_worker/include/modules/datastore/datastore.hrl").
-
 %%%===================================================================
 %%% Global names
 %%%===================================================================
@@ -48,10 +46,5 @@
 -define(HEALTHCHECK_ERROR_LOG_MSG(_Msg, _Args),
     lists:flatten(io_lib:format("Healthcheck error in ~p on node ~p: " ++ _Msg, [?MODULE, node()] ++ _Args))).
 
-%%%===================================================================
-%%% Global identities
-%%%===================================================================
-
--define(GLOBALREGISTRY_IDENTITY, #identity{user_id = <<"GLOBALREGISTRY">>}).
 
 -endif.
