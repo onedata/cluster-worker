@@ -29,7 +29,7 @@
 -define(NODE_MANAGER_PLUGIN, node_manager_plugin).
 
 %% API
--export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0, modules/0, listeners/0, modules_with_args/0]).
+-export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0, modules/0, listeners/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -40,13 +40,12 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of loaded modules. Consistient with modules_with_args
-%% as in the original implementation.
+%% List of loaded modules.
 %% @end
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
-    ?NODE_MANAGER_PLUGIN:modules().
+    lists:map(fun({Module, _}) -> Module end, ?NODE_MANAGER_PLUGIN:modules_with_args()).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -56,15 +55,6 @@ modules() ->
 -spec listeners() -> Listeners :: [atom()].
 listeners() ->
     ?NODE_MANAGER_PLUGIN:listeners().
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of modules (accompanied by their configs) loaded by node_manager.
-%% @end
-%%--------------------------------------------------------------------
--spec modules_with_args() -> Models :: [{atom(), [any()]}].
-modules_with_args() ->
-    ?NODE_MANAGER_PLUGIN:modules_with_args().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -498,7 +488,7 @@ init_node() ->
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, modules_with_args()),
+    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, ?NODE_MANAGER_PLUGIN:modules_with_args()),
     ?info("All workers started"),
     ok.
 

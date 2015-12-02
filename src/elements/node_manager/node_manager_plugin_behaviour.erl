@@ -83,14 +83,6 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of modules to be loaded. Consistient with modules_with_args
-%% as in the original implementation.
-%% @end
-%%--------------------------------------------------------------------
--callback modules() -> Models :: [atom()].
-
-%%--------------------------------------------------------------------
-%% @doc
 %% List of listeners to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
