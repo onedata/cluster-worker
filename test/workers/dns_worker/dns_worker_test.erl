@@ -203,21 +203,6 @@ healthcheck_outofsync_teardown(_) ->
 
 %%%-------------------------------------------------------------------
 
-domain_parser_setup() ->
-    meck:new(application, [unstick]),
-    meck:expect(application, get_env,
-        fun(_, Param) ->
-            case Param of
-                global_registry_domain -> {ok, "onedata.org"};
-                provider_domain -> {ok, "prov.onedata.org"}
-            end
-        end).
-
-domain_parser_teardown(_) ->
-    meck:unload(application).
-
-%%%-------------------------------------------------------------------
-
 domain_undefined_lbadvice_setup() ->
     meck:new(worker_host, [unstick]),
     meck:expect(worker_host, state_get, fun(_, lb_advice) -> undefined end).
