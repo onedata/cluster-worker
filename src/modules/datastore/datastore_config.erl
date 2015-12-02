@@ -16,6 +16,9 @@
 
 -behaviour(datastore_config_behaviour).
 
+-include("modules/datastore/datastore_common_internal.hrl").
+-include_lib("ctool/include/logging.hrl").
+
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 
 %% datastore_config_behaviour callbacks
@@ -39,9 +42,8 @@ models() -> [
 %% @end
 %%--------------------------------------------------------------------
 -spec global_caches() -> Models :: [model_behaviour:model_type()].
-global_caches() -> [
-  some_record
-] ++ ?DATASTORE_CONFIG_PLUGIN:global_caches().
+global_caches() ->
+  filter_models_by_level(?GLOBALLY_CACHED_LEVEL, models_potentially_cached()).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -50,4 +52,28 @@ global_caches() -> [
 %%--------------------------------------------------------------------
 -spec local_caches() -> Models :: [model_behaviour:model_type()].
 local_caches() ->
-  ?DATASTORE_CONFIG_PLUGIN:local_caches().
+  filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()).
+
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Retains models with given store_level.
+%% @end
+%%--------------------------------------------------------------------
+filter_models_by_level(Level, Models) ->
+  lists:filter(fun(Model) -> (Model:model_init())#model_config.store_level == Level end, Models).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Retains models which could be cached. For instance excludes models
+%% which introduce endless recursion.
+%% @end
+%%--------------------------------------------------------------------
+models_potentially_cached() ->
+  models() -- [cache_controller].
