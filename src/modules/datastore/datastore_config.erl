@@ -50,4 +50,4 @@ global_caches() -> [
 %%--------------------------------------------------------------------
 -spec local_caches() -> Models :: [model_behaviour:model_type()].
 local_caches() ->
-  [] ++ ?DATASTORE_CONFIG_PLUGIN:local_caches().
+  ?DATASTORE_CONFIG_PLUGIN:local_caches().

@@ -12,7 +12,7 @@
 -module(transaction).
 -author("Michal Wrzeszcz").
 
--include_lib("cluster_worker/include/elements/task_manager/task_manager.hrl").
+-include("elements/task_manager/task_manager.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% Rollback function gets Context as only argument.

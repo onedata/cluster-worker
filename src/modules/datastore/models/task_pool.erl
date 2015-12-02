@@ -12,7 +12,7 @@
 -author("Michał Wrzeszcz").
 -behaviour(model_behaviour).
 
--include_lib("cluster_worker/include/elements/task_manager/task_manager.hrl").
+-include("elements/task_manager/task_manager.hrl").
 -include("modules/datastore/datastore_internal_model.hrl").
 
 %% model_behaviour callbacks

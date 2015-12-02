@@ -21,8 +21,8 @@
 -behaviour(gen_server).
 
 -include("global_definitions.hrl").
--include_lib("cluster_worker/include/elements/node_manager/node_manager.hrl").
--include_lib("cluster_worker/include/elements/worker_host/worker_protocol.hrl").
+-include("elements/node_manager/node_manager.hrl").
+-include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 

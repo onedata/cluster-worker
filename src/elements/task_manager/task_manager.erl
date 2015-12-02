@@ -14,7 +14,7 @@
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
--include_lib("cluster_worker/include/elements/task_manager/task_manager.hrl").
+-include("elements/task_manager/task_manager.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").

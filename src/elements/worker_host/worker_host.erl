@@ -17,7 +17,7 @@
 -behaviour(gen_server).
 
 -include("global_definitions.hrl").
--include_lib("cluster_worker/include/elements/worker_host/worker_protocol.hrl").
+-include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% This record is used by worker_host (it contains its state). It describes
