@@ -233,22 +233,6 @@ handle_cast(ccm_conn_ack, State) ->
     NewState = ccm_conn_ack(State),
     {noreply, NewState};
 
-handle_cast(do_heartbeat, State) ->
-    NewState = do_heartbeat(State),
-    {noreply, NewState};
-
-handle_cast({update_lb_advices, Advices}, State) ->
-    NewState = update_lb_advices(State, Advices),
-    {noreply, NewState};
-
-handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
-    NodeIP = ?NODE_MANAGER_PLUGIN:check_node_ip_address(),
-    NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
-    {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
-
-handle_cast(stop, State) ->
-    {stop, normal, State};
-
 handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
     last_cache_cleaning = Last} = State) when CacheControl =:= true ->
     MemUsage = monitoring:mem_usage(MonState),
@@ -280,6 +264,22 @@ handle_cast(check_tasks, State) ->
     spawn(task_manager, check_and_rerun_all, []),
     next_task_check(),
     {noreply, State};
+
+handle_cast(do_heartbeat, State) ->
+    NewState = do_heartbeat(State),
+    {noreply, NewState};
+
+handle_cast({update_lb_advices, Advices}, State) ->
+    NewState = update_lb_advices(State, Advices),
+    {noreply, NewState};
+
+handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
+    NodeIP = ?NODE_MANAGER_PLUGIN:check_node_ip_address(),
+    NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
+    {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
+
+handle_cast(stop, State) ->
+    {stop, normal, State};
 
 handle_cast(_Request, State) ->
   ?NODE_MANAGER_PLUGIN:handle_cast_extension(_Request, State).
@@ -357,81 +357,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Plans next tasks list checking.
-%% @end
-%%--------------------------------------------------------------------
--spec next_task_check() -> TimerRef :: reference().
-next_task_check() ->
-    {ok, IntervalMin} = application:get_env(?APP_NAME, task_checking_period_minutes),
-    Interval = timer:minutes(IntervalMin),
-    erlang:send_after(Interval, self(), {timer, check_tasks}).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Plans next memory checking.
-%% @end
-%%--------------------------------------------------------------------
--spec next_mem_check() -> TimerRef :: reference().
-next_mem_check() ->
-    {ok, IntervalMin} = application:get_env(?APP_NAME, check_mem_interval_minutes),
-    Interval = timer:minutes(IntervalMin),
-    % random to reduce probability that two nodes clear memory simultanosly
-    erlang:send_after(crypto:rand_uniform(round(0.8 * Interval), round(1.2 * Interval)), self(), {timer, check_mem}).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Clears memory caches.
-%% @end
-%%--------------------------------------------------------------------
--spec free_memory(NodeMem :: number()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
-free_memory(NodeMem) ->
-    try
-        AvgMem = gen_server:call({global, ?CCM}, get_avg_mem_usage),
-        ClearingOrder = case NodeMem >= AvgMem of
-                            true ->
-                                [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
-                            _ ->
-                                [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
-                        end,
-        ?info("Clearing memory in order: ~p", [ClearingOrder]),
-        lists:foldl(fun
-            ({_Aggressive, _StoreType}, ok) ->
-                ok;
-            ({Aggressive, StoreType}, _) ->
-                Ans = caches_controller:clear_cache(NodeMem, Aggressive, StoreType),
-                case Ans of
-                    mem_usage_too_high ->
-                        ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
-                    _ ->
-                        ok
-                end,
-                Ans
-        end, start, ClearingOrder)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
-            {error, E2}
-    end.
-
-free_memory() ->
-    try
-        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
-        lists:foreach(fun
-            ({Aggressive, StoreType}) ->
-                caches_controller:clear_cache(100, Aggressive, StoreType)
-        end, ClearingOrder)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
-            {error, E2}
-    end.
-
 
 %%--------------------------------------------------------------------
 %% @private
@@ -603,4 +528,80 @@ start_worker(Module, Args) ->
             ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
             {error, Error}
     end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Clears memory caches.
+%% @end
+%%--------------------------------------------------------------------
+-spec free_memory(NodeMem :: number()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
+free_memory(NodeMem) ->
+    try
+        AvgMem = gen_server:call({global, ?CCM}, get_avg_mem_usage),
+        ClearingOrder = case NodeMem >= AvgMem of
+                            true ->
+                                [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
+                            _ ->
+                                [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
+                        end,
+        ?info("Clearing memory in order: ~p", [ClearingOrder]),
+        lists:foldl(fun
+                        ({_Aggressive, _StoreType}, ok) ->
+                            ok;
+                        ({Aggressive, StoreType}, _) ->
+                            Ans = caches_controller:clear_cache(NodeMem, Aggressive, StoreType),
+                            case Ans of
+                                mem_usage_too_high ->
+                                    ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
+                                _ ->
+                                    ok
+                            end,
+                            Ans
+                    end, start, ClearingOrder)
+    catch
+        E1:E2 ->
+            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
+            {error, E2}
+    end.
+
+free_memory() ->
+    try
+        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
+        lists:foreach(fun
+                          ({Aggressive, StoreType}) ->
+                              caches_controller:clear_cache(100, Aggressive, StoreType)
+                      end, ClearingOrder)
+    catch
+        E1:E2 ->
+            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
+            {error, E2}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Plans next memory checking.
+%% @end
+%%--------------------------------------------------------------------
+-spec next_mem_check() -> TimerRef :: reference().
+next_mem_check() ->
+    {ok, IntervalMin} = application:get_env(?APP_NAME, check_mem_interval_minutes),
+    Interval = timer:minutes(IntervalMin),
+    % random to reduce probability that two nodes clear memory simultanosly
+    erlang:send_after(crypto:rand_uniform(round(0.8 * Interval), round(1.2 * Interval)), self(), {timer, check_mem}).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Plans next tasks list checking.
+%% @end
+%%--------------------------------------------------------------------
+-spec next_task_check() -> TimerRef :: reference().
+next_task_check() ->
+    {ok, IntervalMin} = application:get_env(?APP_NAME, task_checking_period_minutes),
+    Interval = timer:minutes(IntervalMin),
+    erlang:send_after(Interval, self(), {timer, check_tasks}).
 
