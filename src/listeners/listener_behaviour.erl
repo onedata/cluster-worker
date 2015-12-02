@@ -9,7 +9,7 @@
 %%% It is the behaviour of each cluster listener.
 %%% @end
 %%%-------------------------------------------------------------------
--module(listener_starter_behaviour).
+-module(listener_behaviour).
 -author("Michal Zmuda").
 
 
@@ -18,11 +18,11 @@
 %% Do your work & start it.
 %% @end
 %%--------------------------------------------------------------------
--callback start_listener() -> ok | {error, Reason :: term()}.
+-callback start() -> ok | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% The listener will not be used anymore. Clean up!
 %% @end
 %%--------------------------------------------------------------------
--callback stop_listener() -> ok | {error, Reason :: term()}.
+-callback stop() -> ok | {error, Reason :: term()}.
