@@ -21,19 +21,3 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback models() -> Models :: [model_behaviour:model_type()].
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of models to be cached globally. Should not contain modules
-%% cached by default.
-%% @end
-%%--------------------------------------------------------------------
--callback global_caches() -> Models :: [model_behaviour:model_type()].
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of models to be cached locally. Should not contain modules
-%% cached by default.
-%% @end
-%%--------------------------------------------------------------------
--callback local_caches() -> Models :: [model_behaviour:model_type()].
