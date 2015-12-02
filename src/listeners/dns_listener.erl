@@ -8,7 +8,7 @@
 %%% @doc dns listener starting & stopping
 %%% @end
 %%%--------------------------------------------------------------------
--module(start_dns_listener).
+-module(dns_listener).
 -author("Tomasz Lichon").
 -author("Michal Zmuda").
 
