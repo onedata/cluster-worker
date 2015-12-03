@@ -1,6 +1,6 @@
 %%%--------------------------------------------------------------------
-%%% @author Michal Wrzeszcz
-%%% @copyright (C) 2014 ACK CYFRONET AGH
+%%% @author Michal Zmuda
+%%% @copyright (C) 2015 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
@@ -10,7 +10,7 @@
 %%% @end
 %%%--------------------------------------------------------------------
 -module(cluster_worker_app).
--author("Michal Wrzeszcz").
+-author("Michal Zmuda").
 
 -behaviour(application).
 
