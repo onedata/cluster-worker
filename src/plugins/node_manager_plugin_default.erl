@@ -56,7 +56,8 @@ db_nodes() ->
 -spec listeners() -> Listeners :: [atom()].
 listeners() -> [
   dns_listener,
-  gui_listener
+  nagios_listener,
+  redirector_listener
 ].
 
 %%--------------------------------------------------------------------
@@ -68,7 +69,8 @@ listeners() -> [
 -spec modules_with_args() -> Models :: [{atom(), [any()]}].
 modules_with_args() -> [
   {datastore_worker, []},
-  {dns_worker, []}
+  {dns_worker, []},
+  {http_worker, []}
 ].
 
 %%--------------------------------------------------------------------
@@ -79,6 +81,7 @@ modules_with_args() -> [
 %%--------------------------------------------------------------------
 -spec on_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
 on_init([]) ->
+  test_worker_host_sup:start_link(),
   ok.
 
 %%--------------------------------------------------------------------

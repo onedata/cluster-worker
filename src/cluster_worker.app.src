@@ -71,10 +71,10 @@
             %% ===================================================================
 
             % names of modules implementing given plugins
-            {datastore_config_plugin, datastore_config_plugin},
-            {node_manager_plugin, node_manager_plugin},
-            {http_worker_plugin, http_worker_plugin},
-            {dns_worker_plugin, dns_worker_plugin},
+            {datastore_config_plugin, datastore_config_plugin_default},
+            {node_manager_plugin, node_manager_plugin_default},
+            {http_worker_plugin, http_worker_plugin_default},
+            {dns_worker_plugin, dns_worker_plugin_default},
 
             %% ===================================================================
             %% HTTP_WORKER

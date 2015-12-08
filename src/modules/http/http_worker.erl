@@ -57,15 +57,12 @@ handle(ping) ->
 
 handle(healthcheck) ->
   Endpoints = plugins:apply(?HTTP_WORKER_PLUGIN, healthcheck_endpoints, []),
-  OwnResult = lists:foldl(
+  lists:foldl(
     fun
-      ({Module, Endpoint}, ok) -> ?error("LOL ~p:healthcheck(~p)", [Module, Endpoint]), Module:healthcheck(Endpoint);
+      ({Module, Endpoint}, ok) -> Module:healthcheck(Endpoint);
       (_, Error) -> Error
-    end, ok, Endpoints),
-  case OwnResult of
-    ok -> plugins:apply(?HTTP_WORKER_PLUGIN, handle, [healthcheck]);
-    Error -> Error
-  end;
+    end, ok, Endpoints
+  );
 
 handle({spawn_handler, SocketPid}) ->
   Pid = spawn(

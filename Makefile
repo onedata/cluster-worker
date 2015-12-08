@@ -7,11 +7,14 @@ OVERLAY_VARS    ?=
 
 .PHONY: deps test package
 
-all: deps compile
+all: test_rel
 
 ##
 ## Rebar targets
 ##
+
+recompile:
+	./rebar compile skip_deps=true
 
 compile:
 	./rebar compile
@@ -19,12 +22,34 @@ compile:
 deps:
 	./rebar get-deps
 
-clean:
-	rm -rf cluster_worker
+generate: deps compile
+	./rebar generate $(OVERLAY_VARS)
+
+clean: relclean
 	./rebar clean
 
 distclean:
 	./rebar delete-deps
+
+##
+## Release targets
+##
+
+rel: generate
+
+test_rel: generate ccm_rel appmock_rel
+
+ccm_rel:
+	make -C op_ccm/ rel
+
+appmock_rel:
+	make -C appmock/ rel
+
+relclean:
+	rm -rf rel/test_cluster
+	rm -rf rel/op_worker
+	rm -rf appmock/rel/appmock
+	rm -rf op_ccm/rel/op_ccm
 
 ##
 ## Testing targets
