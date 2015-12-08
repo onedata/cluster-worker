@@ -28,7 +28,6 @@
   Args :: [term()].
 
 apply(PluginName, Name, Args) ->
-  ?error("WTF ~p", [[PluginName, Name, Args, application:get_env(?APP_NAME, PluginName)]]),
   case application:get_env(?APP_NAME, PluginName) of
     undefined ->
       Default = defaults_plugin_name(PluginName),
