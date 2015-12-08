@@ -65,6 +65,24 @@
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 5},
 
+
+            %% ===================================================================
+            %% HTTP_WORKER
+            %% ===================================================================
+
+            %% Port on which nagios is available
+            {http_worker_nagios_port, 6666},
+            %% Port on which standard HTTP will be opened to redirect requests to HTTPS
+            {http_worker_redirect_port, 80},
+            %% Number of accepting processes in http_worker listener
+            {http_worker_number_of_acceptors, 100},
+            %% Number of accepting processes on port 80 (redirecting to https)
+            {http_worker_number_of_http_acceptors, 50},
+            %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
+            {http_worker_max_keepalive, 30},
+            %% Socket timeout in sek
+            {http_worker_socket_timeout_seconds, 60},
+
             %% ===================================================================
             %% MISC
             %% ===================================================================

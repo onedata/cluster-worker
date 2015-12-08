@@ -83,7 +83,7 @@ handle(Req, State) ->
     NewReq =
         case ClusterStatus of
             error ->
-                {ok, Req2} = opn_cowboy_bridge:apply(cowboy_req, reply, [500, Req]),
+                {ok, Req2} = cowboy_req:reply(500, Req),
                 Req2;
             {ok, {?APP_NAME, AppStatus, NodeStatuses}} ->
                 MappedClusterState = lists:map(
@@ -109,8 +109,7 @@ handle(Req, State) ->
                 Reply = io_lib:format("~s", [lists:flatten(Export)]),
 
                 % Send the reply
-                {ok, Req2} = opn_cowboy_bridge:apply(cowboy_req, reply,
-                    [200, [{<<"content-type">>, <<"application/xml">>}], Reply, Req]),
+                {ok, Req2} = cowboy_req:reply(200, [{<<"content-type">>, <<"application/xml">>}], Reply, Req),
                 Req2
         end,
     {ok, NewReq, State}.
