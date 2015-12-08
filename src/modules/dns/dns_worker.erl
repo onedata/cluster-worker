@@ -271,7 +271,7 @@ handle_txt(_Domain) ->
 %%--------------------------------------------------------------------
 -spec parse_domain(Domain :: string()) -> ok | refused | nx_domain.
 parse_domain(DomainArg) ->
-    ?DNS_WORKER_PLUGIN_NAME:parse_domain(DomainArg).
+    plugins:apply(?DNS_WORKER_PLUGIN_NAME, parse_domain, [DomainArg]).
 
 
 %%--------------------------------------------------------------------

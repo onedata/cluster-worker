@@ -34,7 +34,7 @@ models() -> [
   some_record,
   cache_controller,
   task_pool
-] ++ ?DATASTORE_CONFIG_PLUGIN:models().
+] ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []).
 
 %%--------------------------------------------------------------------
 %% @doc

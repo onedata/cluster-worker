@@ -39,7 +39,7 @@
 -spec init(Args :: term()) -> Result when
   Result :: {ok, State :: worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
-  ?HTTP_WORKER_PLUGIN:init(_Args).
+  plugins:apply(?HTTP_WORKER_PLUGIN, init, [_Args]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -56,14 +56,14 @@ handle(ping) ->
   pong;
 
 handle(healthcheck) ->
-  Endpoints = ?HTTP_WORKER_PLUGIN:healthcheck_endpoints(),
+  Endpoints = plugins:apply(?HTTP_WORKER_PLUGIN, healthcheck_endpoints, []),
   OwnResult = lists:foldl(
     fun
       ({Module, Endpoint}, ok) -> ?error("LOL ~p:healthcheck(~p)", [Module, Endpoint]), Module:healthcheck(Endpoint);
       (_, Error) -> Error
     end, ok, Endpoints),
   case OwnResult of
-    ok -> ?HTTP_WORKER_PLUGIN:handle(healthcheck);
+    ok -> plugins:apply(?HTTP_WORKER_PLUGIN, handle, [healthcheck]);
     Error -> Error
   end;
 
@@ -77,7 +77,7 @@ handle({spawn_handler, SocketPid}) ->
   {ok, Pid};
 
 handle(_Request) ->
-  ?HTTP_WORKER_PLUGIN:handle(_Request).
+  plugins:apply(?HTTP_WORKER_PLUGIN, handle, [_Request]).
 
 %%--------------------------------------------------------------------
 %% @doc

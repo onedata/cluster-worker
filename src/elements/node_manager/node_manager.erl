@@ -45,7 +45,7 @@
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
-    lists:map(fun({Module, _}) -> Module end, ?NODE_MANAGER_PLUGIN:modules_with_args()).
+    lists:map(fun({Module, _}) -> Module end, plugins:apply(?NODE_MANAGER_PLUGIN, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,7 +54,7 @@ modules() ->
 %%--------------------------------------------------------------------
 -spec listeners() -> Listeners :: [atom()].
 listeners() ->
-    ?NODE_MANAGER_PLUGIN:listeners().
+    plugins:apply(?NODE_MANAGER_PLUGIN, listeners, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -118,7 +118,8 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit,true),
     try
-        ok = ?NODE_MANAGER_PLUGIN:on_init([]),
+        ok = plugins:apply(?NODE_MANAGER_PLUGIN, on_init, [[]]),
+
         ?info("Plugin initailised"),
 
         lists:foreach(fun(Module) -> ok = erlang:apply(Module, start, []) end, node_manager:listeners()),
@@ -130,7 +131,7 @@ init([]) ->
 
         gen_server:cast(self(), connect_to_ccm),
 
-        NodeIP = ?NODE_MANAGER_PLUGIN:check_node_ip_address(),
+        NodeIP = plugins:apply(?NODE_MANAGER_PLUGIN, check_node_ip_address, []),
         MonitoringState = monitoring:start(NodeIP),
 
         {ok, #state{node_ip = NodeIP,
@@ -200,7 +201,7 @@ handle_call(enable_cache_control, _From, State) ->
     {reply, ok, State#state{cache_control = true}};
 
 handle_call(_Request, _From, State) ->
-    ?NODE_MANAGER_PLUGIN:handle_call_extension(_Request, _From, State).
+    plugins:apply(?NODE_MANAGER_PLUGIN, handle_call_extension, [_Request, _From, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -264,7 +265,7 @@ handle_cast({update_lb_advices, Advices}, State) ->
     {noreply, NewState};
 
 handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
-    NodeIP = ?NODE_MANAGER_PLUGIN:check_node_ip_address(),
+    NodeIP = plugins:apply(?NODE_MANAGER_PLUGIN, check_node_ip_address, []),
     NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
     {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
 
@@ -272,7 +273,7 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(_Request, State) ->
-  ?NODE_MANAGER_PLUGIN:handle_cast_extension(_Request, State).
+    plugins:apply(?NODE_MANAGER_PLUGIN, handle_cast_extension, [_Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -293,7 +294,7 @@ handle_info({timer, Msg}, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
-    {ok, CCMNodes} = ?NODE_MANAGER_PLUGIN:ccm_nodes(),
+    {ok, CCMNodes} = plugins:apply(?NODE_MANAGER_PLUGIN, ccm_nodes, []),
     case lists:member(Node, CCMNodes) of
         false ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
@@ -307,7 +308,7 @@ handle_info({nodedown, Node}, State) ->
     {noreply, State};
 
 handle_info(_Request,  State) ->
-  ?NODE_MANAGER_PLUGIN:handle_info_extension(_Request, State).
+    plugins:apply(?NODE_MANAGER_PLUGIN, handle_info_extension, [_Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -329,7 +330,7 @@ terminate(_Reason, _State) ->
     lists:foreach(fun(Module) -> erlang:apply(Module, stop, []) end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
-    ?NODE_MANAGER_PLUGIN:on_terminate(_Reason, _State).
+    plugins:apply(?NODE_MANAGER_PLUGIN, on_terminate, [_Reason, _State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -342,7 +343,7 @@ terminate(_Reason, _State) ->
     OldVsn :: Vsn | {down, Vsn},
     Vsn :: term().
 code_change(_OldVsn, State, _Extra) ->
-    ?NODE_MANAGER_PLUGIN:on_code_change(_OldVsn, State, _Extra).
+    plugins:apply(?NODE_MANAGER_PLUGIN, on_code_change, [_OldVsn, State, _Extra]).
 
 %%%===================================================================
 %%% Internal functions
@@ -367,10 +368,10 @@ connect_to_ccm(State = #state{ccm_con_status = connected}) ->
     State;
 connect_to_ccm(State = #state{ccm_con_status = not_connected}) ->
     % Not connected to CCM, try and automatically schedule the next try
-    {ok, CcmNodes} = ?NODE_MANAGER_PLUGIN:ccm_nodes(),
+    {ok, CCMNodes} = plugins:apply(?NODE_MANAGER_PLUGIN, ccm_nodes, []),
     {ok, Interval} = application:get_env(?APP_NAME, ccm_connection_retry_period),
     erlang:send_after(Interval, self(), {timer, connect_to_ccm}),
-    case (catch init_net_connection(CcmNodes)) of
+    case (catch init_net_connection(CCMNodes)) of
         ok ->
             ?info("Initializing connection to CCM"),
             gen_server:cast({global, ?CCM}, {ccm_conn_req, node()}),
@@ -488,7 +489,7 @@ init_node() ->
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, ?NODE_MANAGER_PLUGIN:modules_with_args()),
+    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, plugins:apply(?NODE_MANAGER_PLUGIN, modules_with_args, [])),
     ?info("All workers started"),
     ok.
 

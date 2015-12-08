@@ -38,7 +38,7 @@ init(_Args) ->
 
     %% Get Riak nodes
     DBNodes =
-        case ?NODE_MANAGER_PLUGIN:db_nodes() of
+        case plugins:apply(?NODE_MANAGER_PLUGIN, db_nodes, []) of
             {ok, Nodes} ->
                 lists:map(
                     fun(NodeString) ->
