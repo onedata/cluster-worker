@@ -15,7 +15,8 @@
 -behaviour(worker_plugin_behaviour).
 -behaviour(endpoint_healthcheck_behaviour).
 
--include("modules/datastore/datastore.hrl").
+-include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_common.hrl").
 -include_lib("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 

@@ -15,7 +15,7 @@ src/gui_static/n2o
 *.pyc
 *.o
 
-rel/op_worker
+rel/cluster_worker
 rel/test_cluster
 rel/*.rpm
 

@@ -29,7 +29,7 @@
                         "ccm_nodes": [
                             "ccm"
                         ],
-                        "worker_num": 2
+                        "worker_num": 5
                     }
                 }
             },
@@ -56,8 +56,51 @@
                             "ccm"
                         ],
                         "db_nodes": [
-                            "127.0.0.1:49161"
-                        ]
+                            "127.0.0.1:49162"
+                        ],
+                        "verify_gr_cert": false
+                    }
+                },
+                "worker3": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "ccm_nodes": [
+                            "ccm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49163"
+                        ],
+                        "verify_gr_cert": false
+                    }
+                },
+                "worker4": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "ccm_nodes": [
+                            "ccm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49164"
+                        ],
+                        "verify_gr_cert": false
+                    }
+                },
+                "worker5": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "ccm_nodes": [
+                            "ccm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49165"
+                        ],
+                        "verify_gr_cert": false
                     }
                 }
             }

@@ -29,7 +29,7 @@
                         "ccm_nodes": [
                             "ccm"
                         ],
-                        "worker_num": 2
+                        "worker_num": 5
                     }
                 }
             },
@@ -57,7 +57,50 @@
                         ],
                         "db_nodes": [
                             "127.0.0.1:49161"
-                        ]
+                        ],
+                        "verify_gr_cert": false
+                    }
+                },
+                "worker3": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "ccm_nodes": [
+                            "ccm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49161"
+                        ],
+                        "verify_gr_cert": false
+                    }
+                },
+                "worker4": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "ccm_nodes": [
+                            "ccm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49161"
+                        ],
+                        "verify_gr_cert": false
+                    }
+                },
+                "worker5": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "ccm_nodes": [
+                            "ccm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49161"
+                        ],
+                        "verify_gr_cert": false
                     }
                 }
             }
