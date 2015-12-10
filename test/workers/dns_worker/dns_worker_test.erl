@@ -190,8 +190,13 @@ healthcheck_outofsync_setup() ->
         end),
 
     meck:new(application, [unstick]),
-    meck:expect(application, get_env, fun(_, dns_disp_out_of_sync_threshold) ->
-        {ok, 10} end),
+    meck:expect(application, get_env,
+        fun(_, Param) ->
+            case Param of
+                dns_worker_plugin -> {ok, dns_worker_plugin};
+                dns_disp_out_of_sync_threshold -> {ok, 10}
+            end
+        end),
 
     meck:new(timer, [unstick]),
     meck:expect(timer, now_diff, fun(_Now, _LastUpdate) -> 12000 end).
@@ -234,6 +239,7 @@ domain_proper_setup() ->
     meck:expect(application, get_env,
         fun(_, Param) ->
             case Param of
+                dns_worker_plugin -> {ok, dns_worker_plugin};
                 global_registry_domain -> {ok, "onedata.org"};
                 provider_domain -> {ok, "prov.onedata.org"};
                 current_loglevel -> {ok, info};
