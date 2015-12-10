@@ -97,7 +97,6 @@ direct_cast_test(Config) ->
         utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
     end,
 
-    ct:print("NUMS ~p",[[TestProc, ProcNum]]),
     Ans = spawn_and_check(TestProc, ProcNum),
     ?assertMatch({ok, _}, Ans),
     {_, Times} = Ans,
