@@ -424,7 +424,7 @@ healthcheck() ->
 %%--------------------------------------------------------------------
 -spec driver_to_module(atom()) -> atom().
 driver_to_module(?PERSISTENCE_DRIVER) ->
-    {ok, DriverModule} = application:get_env(?APP_NAME, ?PERSISTENCE_DRIVER),
+    {ok, DriverModule} = application:get_env(?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
     DriverModule;
 driver_to_module(Driver) ->
     Driver.

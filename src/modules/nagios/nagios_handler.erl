@@ -52,9 +52,9 @@ init(_Type, Req, _Opts) ->
 %%--------------------------------------------------------------------
 -spec handle(term(), term()) -> {ok, cowboy_req:req(), term()}.
 handle(Req, State) ->
-    {ok, Timeout} = application:get_env(?APP_NAME, nagios_healthcheck_timeout),
-    {ok, CachingTime} = application:get_env(?APP_NAME, nagios_caching_time),
-    CachedResponse = case application:get_env(?APP_NAME, nagios_cache) of
+    {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
+    {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
+    CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
                          {ok, {LastCheck, LastValue}} ->
                              case utils:milliseconds_diff(now(), LastCheck) < CachingTime of
                                  true ->
@@ -73,8 +73,8 @@ handle(Req, State) ->
                             Status = get_cluster_status(Timeout),
                             % Save cluster state in cache, but only if there was no error
                             case Status of
-                                {ok, {?APP_NAME, ok, _}} ->
-                                    application:set_env(?APP_NAME, nagios_cache, {now(), Status});
+                                {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
+                                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache, {now(), Status});
                                 _ ->
                                     skip
                             end,
@@ -85,7 +85,7 @@ handle(Req, State) ->
             error ->
                 {ok, Req2} = cowboy_req:reply(500, Req),
                 Req2;
-            {ok, {?APP_NAME, AppStatus, NodeStatuses}} ->
+            {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, NodeStatuses}} ->
                 MappedClusterState = lists:map(
                     fun({Node, NodeStatus, NodeComponents}) ->
                         NodeDetails = lists:map(
@@ -96,7 +96,7 @@ handle(Req, State) ->
                                              end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),
-                        {?APP_NAME, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
+                        {?CLUSTER_WORKER_APP_NAME, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
                     end, NodeStatuses),
 
                 {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(now()),
@@ -152,7 +152,7 @@ terminate(_Reason, _Req, _State) ->
 %%--------------------------------------------------------------------
 -spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
     Status :: healthcheck_response(),
-    ClusterStatus :: {?APP_NAME, Status, NodeStatuses :: [
+    ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
     {node(), Status, [
     {ModuleName :: module(), Status}
     ]}
@@ -189,7 +189,7 @@ get_cluster_status(Timeout) ->
     WorkerStatuses :: [{Node, [{Worker :: atom(), Status}]}],
     Node :: node(),
     Status :: healthcheck_response(),
-    ClusterStatus :: {?APP_NAME, Status, NodeStatuses :: [
+    ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
     {node(), Status, [
     {ModuleName :: module(), Status}
     ]}
@@ -234,7 +234,7 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, Worker
             end
         end, ok, NodeStatuses),
     % Sort node statuses by node name
-    {ok, {?APP_NAME, AppStatus, lists:usort(NodeStatuses)}}.
+    {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, lists:usort(NodeStatuses)}}.
 
 
 %%--------------------------------------------------------------------

@@ -17,8 +17,6 @@
 -include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
--define(NODE_MANAGER_PLUGIN, node_manager_plugin).
-
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
 -export([state_get/1, state_put/2]).
@@ -38,7 +36,7 @@ init(_Args) ->
 
     %% Get Riak nodes
     DBNodes =
-        case plugins:apply(?NODE_MANAGER_PLUGIN, db_nodes, []) of
+        case plugins:apply(node_manager_plugin, db_nodes, []) of
             {ok, Nodes} ->
                 lists:map(
                     fun(NodeString) ->

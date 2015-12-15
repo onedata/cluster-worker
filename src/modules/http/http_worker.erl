@@ -40,7 +40,7 @@
 -spec init(Args :: term()) -> Result when
   Result :: {ok, State :: worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
-  plugins:apply(?HTTP_WORKER_PLUGIN, init, [_Args]).
+  plugins:apply(http_worker_plugin, init, [_Args]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -57,7 +57,7 @@ handle(ping) ->
   pong;
 
 handle(healthcheck) ->
-  Endpoints = plugins:apply(?HTTP_WORKER_PLUGIN, healthcheck_endpoints, []),
+  Endpoints = plugins:apply(http_worker_plugin, healthcheck_endpoints, []),
   lists:foldl(
     fun
       ({Module, Endpoint}, ok) -> Module:healthcheck(Endpoint);
@@ -75,7 +75,7 @@ handle({spawn_handler, SocketPid}) ->
   {ok, Pid};
 
 handle(_Request) ->
-  plugins:apply(?HTTP_WORKER_PLUGIN, handle, [_Request]).
+  plugins:apply(http_worker_plugin, handle, [_Request]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -100,7 +100,7 @@ cleanup() ->
 -spec healthcheck(Endpoint :: atom()) -> ok | {error, Reason :: atom()}.
 
 healthcheck(nagios) ->
-  {ok, GuiPort} = application:get_env(?APP_NAME, http_worker_nagios_port),
+  {ok, GuiPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_nagios_port),
   case http_client:get("http://127.0.0.1:" ++ integer_to_list(GuiPort),
     [], <<>>, [insecure]) of
     {ok, _, _, _} ->
@@ -110,7 +110,7 @@ healthcheck(nagios) ->
   end;
 
 healthcheck(redirector) ->
-  {ok, RdrctPort} = application:get_env(?APP_NAME, http_worker_redirect_port),
+  {ok, RdrctPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_redirect_port),
   case http_client:get("http://127.0.0.1:" ++ integer_to_list(RdrctPort),
     [], <<>>, [insecure]) of
     {ok, _, _, _} ->

@@ -123,7 +123,7 @@ handle_call(healthcheck, _From, #state{last_update = LastUpdate} = State) ->
                 [{?LB_ADVICE_KEY, undefined}] ->
                     {error, no_lb_advice_received};
                 _ ->
-                    {ok, Threshold} = application:get_env(?APP_NAME, dns_disp_out_of_sync_threshold),
+                    {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_disp_out_of_sync_threshold),
                     % Threshold is in millisecs, now_diff is in microsecs
                     case utils:milliseconds_diff(now(), LastUpdate) > Threshold of
                         true -> out_of_sync;

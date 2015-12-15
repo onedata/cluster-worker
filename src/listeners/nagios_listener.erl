@@ -33,13 +33,13 @@
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-  {ok, Port} = application:get_env(?APP_NAME, http_worker_nagios_port),
+  {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_nagios_port),
   {ok, NbAcceptors} =
-    application:get_env(?APP_NAME, http_worker_number_of_acceptors),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_number_of_acceptors),
   {ok, MaxKeepAlive} =
-    application:get_env(?APP_NAME, http_worker_max_keepalive),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_max_keepalive),
   {ok, Timeout} =
-    application:get_env(?APP_NAME, http_worker_socket_timeout_seconds),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_socket_timeout_seconds),
 
   Dispatch = [
     {'_', [
@@ -70,8 +70,11 @@ start() ->
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
   case catch cowboy:stop_listener(?NAGIOS_LISTENER) of
-    (ok) -> ok;
-    (Error) -> ?error("Error on stopping listener ~p: ~p", [?NAGIOS_LISTENER, Error])
+    (ok) ->
+      ok;
+    (Error) ->
+      ?error("Error on stopping listener ~p: ~p", [?NAGIOS_LISTENER, Error]),
+      {error, nagios_stop_error}
   end.
 
 %%%===================================================================

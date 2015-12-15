@@ -10,6 +10,7 @@
 %%% manages a DNS server module.
 %%% In addition, it implements {@link dns_handler_behaviour} -
 %%% DNS query handling logic.
+%%% TODO - migrate dns from ctool
 %%% @end
 %%%-------------------------------------------------------------------
 -module(dns_worker).
@@ -28,8 +29,6 @@
 %% dns_handler_behaviour callbacks
 -export([handle_a/1, handle_ns/1, handle_cname/1, handle_soa/1, handle_wks/1,
     handle_ptr/1, handle_hinfo/1, handle_minfo/1, handle_mx/1, handle_txt/1]).
-
--define(DNS_WORKER_PLUGIN_NAME, dns_worker_plugin).
 
 %% export for unit tests
 -ifdef(TEST).
@@ -94,7 +93,7 @@ handle({handle_a, Domain}) ->
                 ok ->
                     % Prefix OK, return nodes to connect to
                     Nodes = load_balancing:choose_nodes_for_dns(LBAdvice),
-                    {ok, TTL} = application:get_env(?APP_NAME, dns_a_response_ttl),
+                    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_a_response_ttl),
                     {ok,
                             [dns_server:answer_record(Domain, TTL, ?S_A, IP) || IP <- Nodes] ++
                             [dns_server:authoritative_answer_flag(true)]
@@ -117,7 +116,7 @@ handle({handle_ns, Domain}) ->
                 ok ->
                     % Prefix OK, return NS nodes of the cluster
                     Nodes = load_balancing:choose_ns_nodes_for_dns(LBAdvice),
-                    {ok, TTL} = application:get_env(?APP_NAME, dns_ns_response_ttl),
+                    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_ns_response_ttl),
                     {ok,
                             [dns_server:answer_record(Domain, TTL, ?S_NS, inet_parse:ntoa(IP)) || IP <- Nodes] ++
                             [dns_server:authoritative_answer_flag(true)]
@@ -140,7 +139,7 @@ handle(_Request) ->
 -spec cleanup() -> Result when
     Result :: ok.
 cleanup() ->
-    dns_server:stop(?APPLICATION_SUPERVISOR_NAME).
+    dns_server:stop(?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME).
 
 
 %%%===================================================================
@@ -271,7 +270,7 @@ handle_txt(_Domain) ->
 %%--------------------------------------------------------------------
 -spec parse_domain(Domain :: string()) -> ok | refused | nx_domain.
 parse_domain(DomainArg) ->
-    plugins:apply(?DNS_WORKER_PLUGIN_NAME, parse_domain, [DomainArg]).
+    plugins:apply(dns_worker_plugin, parse_domain, [DomainArg]).
 
 
 %%--------------------------------------------------------------------
@@ -287,7 +286,7 @@ healthcheck() ->
         undefined ->
             {error, no_lb_advice_received};
         _ ->
-            {ok, Threshold} = application:get_env(?APP_NAME, dns_disp_out_of_sync_threshold),
+            {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_disp_out_of_sync_threshold),
             % Threshold is in millisecs, now_diff is in microsecs
             case timer:now_diff(now(), LastUpdate) > Threshold * 1000 of
                 true ->
@@ -307,8 +306,8 @@ healthcheck() ->
 %%--------------------------------------------------------------------
 -spec check_dns_connectivity() -> ok | {error, server_not_responding}.
 check_dns_connectivity() ->
-    {ok, HealthcheckTimeout} = application:get_env(?APP_NAME, nagios_healthcheck_timeout),
-    {ok, DNSPort} = application:get_env(?APP_NAME, dns_port),
+    {ok, HealthcheckTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
+    {ok, DNSPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_port),
     Query = inet_dns:encode(
         #dns_rec{
             header = #dns_header{

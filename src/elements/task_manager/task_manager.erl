@@ -160,7 +160,7 @@ do_task(Task, Num) ->
     catch
         E1:E2 ->
             ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
-            {ok, Interval} = application:get_env(?APP_NAME, task_fail_sleep_time_ms),
+            {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_sleep_time_ms),
             timer:sleep(Interval),
             do_task(Task, Num - 1)
     end.

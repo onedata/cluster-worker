@@ -38,11 +38,11 @@
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
   {ok, RedirectPort} =
-    application:get_env(?APP_NAME, http_worker_redirect_port),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_redirect_port),
   {ok, RedirectNbAcceptors} =
-    application:get_env(?APP_NAME, http_worker_number_of_http_acceptors),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_number_of_http_acceptors),
   {ok, Timeout} =
-    application:get_env(?APP_NAME, http_worker_socket_timeout_seconds),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_socket_timeout_seconds),
   RedirectDispatch = [
     {'_', [
       {'_', opn_cowboy_bridge,
@@ -75,6 +75,9 @@ start() ->
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
   case catch cowboy:stop_listener(?HTTP_REDIRECTOR_LISTENER) of
-    (ok) -> ok;
-    (Error) -> ?error("Error on stopping listener ~p: ~p", [?HTTP_REDIRECTOR_LISTENER, Error])
+    (ok) ->
+      ok;
+    (Error) ->
+      ?error("Error on stopping listener ~p: ~p", [?HTTP_REDIRECTOR_LISTENER, Error]),
+      {error, redirector_stop_error}
   end.

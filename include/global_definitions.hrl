@@ -18,11 +18,11 @@
 %%%===================================================================
 
 %% Name of the application.
--define(APP_NAME, cluster_worker).
+-define(CLUSTER_WORKER_APP_NAME, cluster_worker).
 
 %% Local name (name and node is used to identify it) of supervisor that
 %% coordinates application at each node (one supervisor per node).
--define(APPLICATION_SUPERVISOR_NAME, cluster_worker_sup).
+-define(CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME, cluster_worker_sup).
 
 %% Local name (name and node is used to identify it) of supervisor that
 %% coordinates workers at each node

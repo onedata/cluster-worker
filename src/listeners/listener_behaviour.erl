@@ -6,7 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% It is the behaviour of each cluster listener.
+%%% It is the behaviour of each listener attached by node manager.
+%%% Listeners start just after node manager does  and they are stopped
+%%% on node manager termination.
+%%% Most often they are http or tcp listeners.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(listener_behaviour).

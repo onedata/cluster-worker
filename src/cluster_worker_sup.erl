@@ -38,7 +38,7 @@
     | {shutdown, term()}
     | term().
 start_link() ->
-    supervisor:start_link({local, ?APPLICATION_SUPERVISOR_NAME}, ?MODULE, []).
+    supervisor:start_link({local, ?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME}, ?MODULE, []).
 
 %%%===================================================================
 %% Supervisor callbacks

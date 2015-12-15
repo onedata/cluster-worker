@@ -499,7 +499,7 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
         Doc = #document{key = Uuid, value = V},
         create_or_update(Level, Doc, UpdateFun),
 
-        {ok, SleepTime} = application:get_env(?APP_NAME, cache_to_disk_delay_ms),
+        {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
         timer:sleep(SleepTime),
 
         Task = fun() ->
@@ -534,7 +534,7 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
                                    end
                            end;
                        _ ->
-                           {ok, ForceTime} = application:get_env(?APP_NAME, cache_to_disk_force_delay_ms),
+                           {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
                            case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
                                true ->
                                    UpdateFun2 = fun(Record) ->

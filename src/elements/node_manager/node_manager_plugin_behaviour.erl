@@ -14,8 +14,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Callback executed on node manager init callback execution. At time
-%% of invocation node_manager is not set init'ed yet. Use to inject
+%% This callback is executed when node manager starts. At time
+%% of invocation, node_manager is not set init'ed yet. Use to inject
 %% custom initialisation.
 %% @end
 %%--------------------------------------------------------------------
@@ -23,7 +23,9 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Extension to default node manager callback. Matched as last.
+%% Extension to handle_call callback from node manager.
+%% When none of handle_call matches in node manager,
+%% this callback is executed.
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_call_extension(Request :: term(), From :: {pid(), Tag :: term()}, State :: term()) ->
@@ -36,7 +38,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Extension to default node manager callback. Matched as last.
+%% Extension to handle_cast callback from node manager.
+%% Works like handle_call_extension.
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_cast_extension(Request :: term(), State :: term()) ->
@@ -46,7 +49,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Extension to default node manager callback. Matched as last.
+%% Extension to handle_info callback from node manager.
+%% Works like handle_call_extension.
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_info_extension(Info :: timeout | term(), State :: term()) ->
@@ -56,9 +60,9 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Callback executed on node manager terminate callback execution.
-%% Invoked after default callback actions. Invoked with original
-%% arguments. Returns final result of termination.
+%% This callback is executed when node manager stops.
+%% Invoked with same arguments like node manager terminate callback.
+%% Returns final result of terminate.
 %% @end
 %%--------------------------------------------------------------------
 -callback on_terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()), State :: term()) ->
@@ -66,8 +70,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Callback executed on node manager code_change callback execution.
-%% Invoked before default callback actions.
+%% Callback executed when code_change from node manager is triggered.
+%% Invoked before any of node manager actions.
 %% @end
 %%--------------------------------------------------------------------
 -callback on_code_change(OldVsn :: (term() | {down, term()}), State :: term(), Extra :: term()) ->

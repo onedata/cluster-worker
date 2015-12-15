@@ -6,8 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc Contains common definitions of types and helper macros.
-%%%      This header must be included by model definition files and shall not be included
-%%%      anywhere else.
+%%%      This header must be included by model definition files
+%%%      and shall not be included anywhere else.
+%%%      Intended for external applications use
+%%%      (do not use datastore_internal_model file).
 %%% @end
 %%%-------------------------------------------------------------------
 -ifndef(DATASTORE_MODEL_HRL).

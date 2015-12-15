@@ -31,15 +31,15 @@
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-  {ok, DNSPort} = application:get_env(?APP_NAME, dns_port),
-  {ok, EdnsMaxUdpSize} = application:get_env(?APP_NAME, edns_max_udp_size),
+  {ok, DNSPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_port),
+  {ok, EdnsMaxUdpSize} = application:get_env(?CLUSTER_WORKER_APP_NAME, edns_max_udp_size),
   {ok, TCPNumAcceptors} =
-    application:get_env(?APP_NAME, dns_tcp_acceptor_pool_size),
-  {ok, TCPTImeout} = application:get_env(?APP_NAME, dns_tcp_timeout_seconds),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, dns_tcp_acceptor_pool_size),
+  {ok, TCPTImeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_tcp_timeout_seconds),
   OnFailureFun = fun() ->
     ?error("Could not start DNS server on node ~p.", [node()])
   end,
-  ok = dns_server:start(?APPLICATION_SUPERVISOR_NAME, DNSPort, dns_worker,
+  ok = dns_server:start(?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME, DNSPort, dns_worker,
     EdnsMaxUdpSize, TCPNumAcceptors, TCPTImeout, OnFailureFun).
 
 %%--------------------------------------------------------------------

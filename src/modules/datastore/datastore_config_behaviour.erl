@@ -8,8 +8,6 @@
 %%% @doc
 %%% His behaviour is used to inject datastore config related to use of
 %%% specific models.
-%%% Module implementing it should be named datastore_config_plugin.
-%%% This is required element.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_config_behaviour).

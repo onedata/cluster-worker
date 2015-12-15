@@ -9,7 +9,7 @@
 %%% which initializes node.
 %%% @end
 %%%--------------------------------------------------------------------
--module(test_worker_host_sup).
+-module(standalone_host_sup).
 -author("Michal Zmuda").
 
 -include("global_definitions.hrl").

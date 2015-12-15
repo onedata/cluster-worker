@@ -31,7 +31,7 @@ mem_clearing_test_() ->
             MemTarget = Mem0 + ToAdd/2,
             MemUsage = Mem0 + ToAdd,
 
-            application:set_env(?APP_NAME, mem_to_clear_cache, MemTarget),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache, MemTarget),
 
             OneMB = list_to_binary(prepare_list(1024*1024)),
             ets:new(test, [named_table, public, set]),

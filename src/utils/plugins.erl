@@ -28,7 +28,7 @@
   Args :: [term()].
 
 apply(PluginName, Name, Args) ->
-  case application:get_env(?APP_NAME, PluginName) of
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, PluginName) of
     undefined ->
       Default = defaults_plugin_name(PluginName),
       ?error("plugin known as '~p' has no module defined - defaulting to ~p", [PluginName, Default]),

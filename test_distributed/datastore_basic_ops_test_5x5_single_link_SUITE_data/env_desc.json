@@ -57,8 +57,7 @@
                         ],
                         "db_nodes": [
                             "127.0.0.1:49162"
-                        ],
-                        "verify_gr_cert": false
+                        ]
                     }
                 },
                 "worker3": {
@@ -71,8 +70,7 @@
                         ],
                         "db_nodes": [
                             "127.0.0.1:49163"
-                        ],
-                        "verify_gr_cert": false
+                        ]
                     }
                 },
                 "worker4": {
@@ -85,8 +83,7 @@
                         ],
                         "db_nodes": [
                             "127.0.0.1:49164"
-                        ],
-                        "verify_gr_cert": false
+                        ]
                     }
                 },
                 "worker5": {
@@ -99,8 +96,7 @@
                         ],
                         "db_nodes": [
                             "127.0.0.1:49165"
-                        ],
-                        "verify_gr_cert": false
+                        ]
                     }
                 }
             }

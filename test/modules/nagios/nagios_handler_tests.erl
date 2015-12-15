@@ -64,8 +64,8 @@ calculate_cluster_status_test() ->
     ],
 
     {ok, ClusterStatus} = nagios_handler:calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses),
-    ?assertMatch({?APP_NAME, error, _}, ClusterStatus),
-    {?APP_NAME, error, NodeStatuses} = ClusterStatus,
+    ?assertMatch({?CLUSTER_WORKER_APP_NAME, error, _}, ClusterStatus),
+    {?CLUSTER_WORKER_APP_NAME, error, NodeStatuses} = ClusterStatus,
 
     % Check 1st node's statuses
     ?assertMatch({?NODE_1, _, _}, lists:keyfind(?NODE_1, 1, NodeStatuses)),

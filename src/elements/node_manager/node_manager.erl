@@ -26,7 +26,7 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
--define(NODE_MANAGER_PLUGIN, node_manager_plugin).
+-define(node_manager_plugin, node_manager_plugin).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0, modules/0, listeners/0]).
@@ -45,7 +45,7 @@
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
-    lists:map(fun({Module, _}) -> Module end, plugins:apply(?NODE_MANAGER_PLUGIN, modules_with_args, [])).
+    lists:map(fun({Module, _}) -> Module end, plugins:apply(node_manager_plugin, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,7 +54,7 @@ modules() ->
 %%--------------------------------------------------------------------
 -spec listeners() -> Listeners :: [atom()].
 listeners() ->
-    plugins:apply(?NODE_MANAGER_PLUGIN, listeners, []).
+    plugins:apply(node_manager_plugin, listeners, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -118,7 +118,7 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit,true),
     try
-        ok = plugins:apply(?NODE_MANAGER_PLUGIN, on_init, [[]]),
+        ok = plugins:apply(node_manager_plugin, on_init, [[]]),
 
         ?info("Plugin initailised"),
 
@@ -131,7 +131,7 @@ init([]) ->
 
         gen_server:cast(self(), connect_to_ccm),
 
-        NodeIP = plugins:apply(?NODE_MANAGER_PLUGIN, check_node_ip_address, []),
+        NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
         MonitoringState = monitoring:start(NodeIP),
 
         {ok, #state{node_ip = NodeIP,
@@ -201,7 +201,7 @@ handle_call(enable_cache_control, _From, State) ->
     {reply, ok, State#state{cache_control = true}};
 
 handle_call(_Request, _From, State) ->
-    plugins:apply(?NODE_MANAGER_PLUGIN, handle_call_extension, [_Request, _From, State]).
+    plugins:apply(node_manager_plugin, handle_call_extension, [_Request, _From, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -235,7 +235,7 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                        State#state{last_cache_cleaning = os:timestamp()};
                    _ ->
                        Now = os:timestamp(),
-                       {ok, CleaningPeriod} = application:get_env(?APP_NAME, clear_cache_max_period_ms),
+                       {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
                        case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
                            true ->
                                spawn(fun() -> free_memory() end),
@@ -265,7 +265,7 @@ handle_cast({update_lb_advices, Advices}, State) ->
     {noreply, NewState};
 
 handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
-    NodeIP = plugins:apply(?NODE_MANAGER_PLUGIN, check_node_ip_address, []),
+    NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
     NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
     {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
 
@@ -273,7 +273,7 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(_Request, State) ->
-    plugins:apply(?NODE_MANAGER_PLUGIN, handle_cast_extension, [_Request, State]).
+    plugins:apply(node_manager_plugin, handle_cast_extension, [_Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -294,7 +294,7 @@ handle_info({timer, Msg}, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
-    {ok, CCMNodes} = plugins:apply(?NODE_MANAGER_PLUGIN, ccm_nodes, []),
+    {ok, CCMNodes} = plugins:apply(node_manager_plugin, ccm_nodes, []),
     case lists:member(Node, CCMNodes) of
         false ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
@@ -308,7 +308,7 @@ handle_info({nodedown, Node}, State) ->
     {noreply, State};
 
 handle_info(_Request,  State) ->
-    plugins:apply(?NODE_MANAGER_PLUGIN, handle_info_extension, [_Request, State]).
+    plugins:apply(node_manager_plugin, handle_info_extension, [_Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -330,7 +330,7 @@ terminate(_Reason, _State) ->
     lists:foreach(fun(Module) -> erlang:apply(Module, stop, []) end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
-    plugins:apply(?NODE_MANAGER_PLUGIN, on_terminate, [_Reason, _State]).
+    plugins:apply(node_manager_plugin, on_terminate, [_Reason, _State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -343,7 +343,7 @@ terminate(_Reason, _State) ->
     OldVsn :: Vsn | {down, Vsn},
     Vsn :: term().
 code_change(_OldVsn, State, _Extra) ->
-    plugins:apply(?NODE_MANAGER_PLUGIN, on_code_change, [_OldVsn, State, _Extra]).
+    plugins:apply(node_manager_plugin, on_code_change, [_OldVsn, State, _Extra]).
 
 %%%===================================================================
 %%% Internal functions
@@ -362,14 +362,14 @@ connect_to_ccm(State = #state{ccm_con_status = registered}) ->
     State;
 connect_to_ccm(State = #state{ccm_con_status = connected}) ->
     % Connected, but not registered (workers did not start), check again in some time
-    {ok, Interval} = application:get_env(?APP_NAME, ccm_connection_retry_period),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, ccm_connection_retry_period),
     gen_server:cast({global, ?CCM}, {ccm_conn_req, node()}),
     erlang:send_after(Interval, self(), {timer, connect_to_ccm}),
     State;
 connect_to_ccm(State = #state{ccm_con_status = not_connected}) ->
     % Not connected to CCM, try and automatically schedule the next try
-    {ok, CCMNodes} = plugins:apply(?NODE_MANAGER_PLUGIN, ccm_nodes, []),
-    {ok, Interval} = application:get_env(?APP_NAME, ccm_connection_retry_period),
+    {ok, CCMNodes} = plugins:apply(node_manager_plugin, ccm_nodes, []),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, ccm_connection_retry_period),
     erlang:send_after(Interval, self(), {timer, connect_to_ccm}),
     case (catch init_net_connection(CCMNodes)) of
         ok ->
@@ -393,7 +393,7 @@ ccm_conn_ack(State = #state{ccm_con_status = connected}) ->
     init_node(),
     ?info("Node initialized"),
     gen_server:cast({global, ?CCM}, {init_ok, node()}),
-    {ok, Interval} = application:get_env(?APP_NAME, heartbeat_interval),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     State#state{ccm_con_status = registered};
 ccm_conn_ack(State) ->
@@ -413,7 +413,7 @@ ccm_conn_ack(State) ->
 %%--------------------------------------------------------------------
 -spec do_heartbeat(State :: #state{}) -> #state{}.
 do_heartbeat(#state{ccm_con_status = registered, monitoring_state = MonState} = State) ->
-    {ok, Interval} = application:get_env(?APP_NAME, heartbeat_interval),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
     NodeState = monitoring:get_node_state(NewMonState),
@@ -489,7 +489,7 @@ init_node() ->
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, plugins:apply(?NODE_MANAGER_PLUGIN, modules_with_args, [])),
+    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.
 
@@ -503,7 +503,7 @@ init_workers() ->
 -spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
 start_worker(Module, Args) ->
     try
-        {ok, LoadMemorySize} = application:get_env(?APP_NAME, worker_load_memory_size),
+        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
         {ok, _} = supervisor:start_child(
             ?MAIN_WORKER_SUPERVISOR_NAME,
@@ -578,7 +578,7 @@ free_memory() ->
 %%--------------------------------------------------------------------
 -spec next_mem_check() -> TimerRef :: reference().
 next_mem_check() ->
-    {ok, IntervalMin} = application:get_env(?APP_NAME, check_mem_interval_minutes),
+    {ok, IntervalMin} = application:get_env(?CLUSTER_WORKER_APP_NAME, check_mem_interval_minutes),
     Interval = timer:minutes(IntervalMin),
     % random to reduce probability that two nodes clear memory simultanosly
     erlang:send_after(crypto:rand_uniform(round(0.8 * Interval), round(1.2 * Interval)), self(), {timer, check_mem}).
@@ -592,7 +592,7 @@ next_mem_check() ->
 %%--------------------------------------------------------------------
 -spec next_task_check() -> TimerRef :: reference().
 next_task_check() ->
-    {ok, IntervalMin} = application:get_env(?APP_NAME, task_checking_period_minutes),
+    {ok, IntervalMin} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_checking_period_minutes),
     Interval = timer:minutes(IntervalMin),
     erlang:send_after(Interval, self(), {timer, check_tasks}).
 

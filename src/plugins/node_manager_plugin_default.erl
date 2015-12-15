@@ -36,7 +36,7 @@
 %%--------------------------------------------------------------------
 -spec ccm_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 ccm_nodes() ->
-  application:get_env(?APP_NAME, ccm_nodes).
+  application:get_env(?CLUSTER_WORKER_APP_NAME, ccm_nodes).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -45,7 +45,7 @@ ccm_nodes() ->
 %%--------------------------------------------------------------------
 -spec db_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 db_nodes() ->
-  application:get_env(?APP_NAME, db_nodes).
+  application:get_env(?CLUSTER_WORKER_APP_NAME, db_nodes).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -81,7 +81,7 @@ modules_with_args() -> [
 %%--------------------------------------------------------------------
 -spec on_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
 on_init([]) ->
-  test_worker_host_sup:start_link(),
+  standalone_host_sup:start_link(),
   ok.
 
 %%--------------------------------------------------------------------
