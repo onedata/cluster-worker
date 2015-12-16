@@ -9,8 +9,8 @@
 %%%      Shall be used only via datastore_model_helpers header file.
 %%% @end
 %%%-------------------------------------------------------------------
--ifndef(DATASTORE_MODEL_HELPER_HRL).
--define(DATASTORE_MODEL_HELPER_HRL, 1).
+-ifndef(DATASTORE_MODEL_MACROS_HRL).
+-define(DATASTORE_MODEL_MACROS_HRL, 1).
 
 %% Name of current model
 -define(MODEL_NAME, ?MODULE).
