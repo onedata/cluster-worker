@@ -26,10 +26,20 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
--define(node_manager_plugin, node_manager_plugin).
+-define(CLUSTER_WORKER_MODULES, [
+    {datastore_worker, []},
+    {dns_worker, []},
+    {http_worker, []}
+]).
+-define(CLUSTER_WORKER_LISTENERS, [
+    dns_listener,
+    nagios_listener,
+    redirector_listener
+]).
 
 %% API
--export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0, modules/0, listeners/0]).
+-export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
+    modules/0, listeners/0, cluster_worker_modules/0, cluster_worker_listeners/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -39,6 +49,25 @@
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @doc
+%% List of modules provided by cluster-worker.
+%% Use in plugins when specifying modules_with_args.
+%% @end
+%%--------------------------------------------------------------------
+-spec cluster_worker_modules() -> Models :: [atom()].
+cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of listeners provided by cluster-worker.
+%% Use in plugins when specifying listeners.
+%% @end
+%%--------------------------------------------------------------------
+-spec cluster_worker_listeners() -> Listeners :: [atom()].
+cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
+
+%%--------------------------------------------------------------------
+
 %% @doc
 %% List of loaded modules.
 %% @end

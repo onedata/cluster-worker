@@ -111,3 +111,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback db_nodes() -> {ok, Nodes :: [atom()]} | undefined.
+
+%% @doc
+%% List db nodes to be used by node manager.
+%% @end
+%%--------------------------------------------------------------------
+-callback app_name() -> {ok, Name :: atom()}.

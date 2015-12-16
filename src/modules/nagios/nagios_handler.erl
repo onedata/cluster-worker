@@ -96,7 +96,8 @@ handle(Req, State) ->
                                              end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),
-                        {?CLUSTER_WORKER_APP_NAME, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
+                        {ok, NodeName} = node_manager_plugin:app_name(),
+                        {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
                     end, NodeStatuses),
 
                 {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(now()),

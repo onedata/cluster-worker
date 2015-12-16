@@ -30,12 +30,12 @@
 apply(PluginName, Name, Args) ->
   case application:get_env(?CLUSTER_WORKER_APP_NAME, PluginName) of
     undefined ->
-      Default = defaults_plugin_name(PluginName),
+      Default = default_plugin_name(PluginName),
       ?error("plugin known as '~p' has no module defined - defaulting to ~p", [PluginName, Default]),
       erlang:apply(Default, Name, Args);
     {ok, Module} ->
       erlang:apply(Module, Name, Args)
   end.
 
-defaults_plugin_name(PluginName) ->
+default_plugin_name(PluginName) ->
   list_to_atom(atom_to_list(PluginName) ++ "_default").

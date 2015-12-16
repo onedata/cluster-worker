@@ -20,6 +20,11 @@
 -include_lib("ctool/include/logging.hrl").
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
+-define(DEFAULT_MODELS, [
+  some_record,
+  cache_controller,
+  task_pool
+]).
 
 %% datastore_config_behaviour callbacks
 -export([models/0, global_caches/0, local_caches/0]).
@@ -30,11 +35,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec models() -> Models :: [model_behaviour:model_type()].
-models() -> [
-  some_record,
-  cache_controller,
-  task_pool
-] ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []).
+models() -> ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []).
 
 %%--------------------------------------------------------------------
 %% @doc
