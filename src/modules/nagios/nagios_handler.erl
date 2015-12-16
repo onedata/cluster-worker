@@ -96,7 +96,7 @@ handle(Req, State) ->
                                              end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),
-                        {ok, NodeName} = node_manager_plugin:app_name(),
+                        {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
                         {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
                     end, NodeStatuses),
 
