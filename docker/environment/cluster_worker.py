@@ -8,12 +8,12 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 import os
 import subprocess
 import sys
-from . import common, docker, any_worker, globalregistry
+from . import common, docker, worker, globalregistry
 
 DOCKER_BINDIR_PATH = '/root/build'
 
 def up(image, bindir, dns_server, uid, config_path, logdir=None):
-    return any_worker.up(image, bindir, dns_server, uid, config_path, ClusterWorkerConfigurator(), logdir)
+    return worker.up(image, bindir, dns_server, uid, config_path, ClusterWorkerConfigurator(), logdir)
 
 
 class ClusterWorkerConfigurator:
@@ -23,8 +23,8 @@ class ClusterWorkerConfigurator:
     def configure_started_instance(self, bindir, instance, config, os_config, output):
         pass
 
-    def tweak_run_parameters(self, config, volumes):
-        return volumes
+    def extra_volumes(self, config):
+        return []
 
     def app_name(self):
         return "cluster_worker"
