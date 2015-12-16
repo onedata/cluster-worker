@@ -54,7 +54,7 @@
 %% Use in plugins when specifying modules_with_args.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_worker_modules() -> Models :: [atom()].
+-spec cluster_worker_modules() -> Models :: [{atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
