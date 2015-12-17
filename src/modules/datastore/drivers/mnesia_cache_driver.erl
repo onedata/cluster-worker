@@ -128,9 +128,13 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
                     inject_key(Key, datastore_utils:shallow_to_record(NewValue)), write),
                 {ok, Key};
             [Value] when is_function(Diff) ->
-                NewValue = Diff(strip_key(Value)),
-                ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
-                {ok, Key}
+                case Diff(strip_key(Value)) of
+                    {ok, NewValue} ->
+                        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
+                        {ok, Key};
+                    {error, Reason} ->
+                        {error, Reason}
+                end
         end
     end).
 
@@ -171,9 +175,13 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
                     inject_key(Key, datastore_utils:shallow_to_record(NewValue)), write),
                 {ok, Key};
             [OldValue] when is_function(Diff) ->
-                NewValue = Diff(strip_key(OldValue)),
-                ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
-                {ok, Key}
+                case Diff(strip_key(OldValue)) of
+                    {ok, NewValue} ->
+                        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
+                        {ok, Key};
+                    {error, Reason} ->
+                        {error, Reason}
+                end
         end
     end).
 
@@ -309,7 +317,7 @@ foreach_link(#model_config{} = ModelConfig, Key, Fun, AccIn) ->
 -spec list_next([term()] | '$end_of_table', term(), datastore:list_fun(), term()) ->
     {ok, Acc :: term()} | datastore:generic_error().
 list_next([Obj | R], Handle, Fun, AccIn) ->
-    Doc =  #document{key = get_key(Obj), value = strip_key(Obj)},
+    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
             list_next(R, Handle, Fun, NewAcc);

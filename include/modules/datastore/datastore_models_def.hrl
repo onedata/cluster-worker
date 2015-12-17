@@ -5,8 +5,8 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Template of models definitions. Shall not be included directly
-%%% in any erl file. Includes file containig actual definitions.
+%%% @doc Internal models definitions. Shall not be included directly
+%%% in any erl file.
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -30,19 +30,18 @@
 
 %% Model that controls utilization of cache
 -record(cache_controller, {
-    timestamp = {0, 0, 0} :: tuple(),
+    timestamp = {0, 0, 0} :: erlang:timestamp(),
     action = non :: atom(),
     last_user = non :: string() | non,
-    last_action_time = {0, 0, 0} :: tuple(),
+    last_action_time = {0, 0, 0} :: erlang:timestamp(),
     deleted_links = [] :: list()
 }).
 
-%% sample model with example fields
+%% Description of task to be done
 -record(task_pool, {
     task :: task_manager:task(),
     owner :: pid(),
     node :: node()
 }).
-
 
 -endif.
