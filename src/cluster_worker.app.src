@@ -1,0 +1,141 @@
+%%%--------------------------------------------------------------------
+%%% @author Michal Zmuda
+%%% @copyright (C) 2013 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
+%%% @end
+%%%--------------------------------------------------------------------
+%%% @doc It is the description of application.
+%%% @end
+%%%--------------------------------------------------------------------
+{application, cluster_worker,
+    [
+        {description, "Application starts node of oneprovider cluster"},
+        {vsn, git},
+        {registered, [cluster_worker_sup]},
+        {applications, [
+            kernel,
+            stdlib,
+            sasl,
+            public_key,
+            crypto,
+            % Meck is needed only for development purposes, should be removed before release.
+            meck,
+            % ctool already requires those apps below, but they are here
+            % for awareness of them being used in the project and
+            % to make sure they are started before the application.
+            gproc,
+            lager,
+            ssl2,
+            hackney,
+            web_client,
+            cowboy
+        ]},
+        {mod, {cluster_worker_app, []}},
+        {env, [
+
+            %% ===================================================================
+            %% GENERAL
+            %% ===================================================================
+
+            %% List of absolute paths to storages used by workers.
+            {storage_paths, []},
+            %% How long (in ms) should worker wait between heartbeats (when connected to ccm)
+            {heartbeat_interval, 500},
+            %% How long (in ms) should worker wait between next connection try (when not registered in ccm)
+            {ccm_connection_retry_period, 1000},
+            %% Memory size which stores information about worker load
+            {worker_load_memory_size, 1000},
+            %% Memory usage level above which caches will be cleared
+            {mem_to_clear_cache, 80},
+            %% How long task should wait between function calls (when function execution ends with error)
+            {task_fail_sleep_time_ms, 1000},
+            %% The memory will be cleared once a period defined in this variable, even when usage level is acceptable
+            {clear_cache_max_period_ms, 86400}, % 1 day
+            %% How often node manager checks if caches cleaning is needed
+            {check_mem_interval_minutes, 5},
+            %% List of beam directories to be covered, cover is not started if list is empty
+            {covered_dirs, []},
+            %% List of modules to be excluded during cover analysis
+            {covered_excluded_modules, []},
+            %% Minimal delay in cache dumping to disk (changes done before this time causes cancelation of dump)
+            {cache_to_disk_delay_ms, 5000},
+            %% Maximal delay in cache dumping to disk
+            {cache_to_disk_force_delay_ms, 30000},
+            %% Period between checkings of tasks lists (to find tasks without owner)
+            {task_checking_period_minutes, 5},
+
+
+            %% ===================================================================
+            %% PLUGINS
+            %% ===================================================================
+
+            % names of modules implementing given plugins
+            {datastore_config_plugin, datastore_config_plugin_default},
+            {node_manager_plugin, node_manager_plugin_default},
+            {http_worker_plugin, http_worker_plugin_default},
+            {dns_worker_plugin, dns_worker_plugin_default},
+
+            %% ===================================================================
+            %% HTTP_WORKER
+            %% ===================================================================
+
+            %% Port on which nagios is available
+            {http_worker_nagios_port, 6666},
+            %% Port on which standard HTTP will be opened to redirect requests to HTTPS
+            {http_worker_redirect_port, 80},
+            %% Number of accepting processes in http_worker listener
+            {http_worker_number_of_acceptors, 100},
+            %% Number of accepting processes on port 80 (redirecting to https)
+            {http_worker_number_of_http_acceptors, 50},
+            %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
+            {http_worker_max_keepalive, 30},
+            %% Socket timeout in sek
+            {http_worker_socket_timeout_seconds, 60},
+
+            %% ===================================================================
+            %% NAGIOS
+            %% ===================================================================
+
+            %% Answers from nagios will be cached for maximum of this time (in ms) and served from cache.
+            %% The reason is that a healthcheck can generate a considerable traffic.
+            {nagios_caching_time, 500},
+            %% Time in ms after healthcheck is considered failed
+            {nagios_healthcheck_timeout, 5000},
+
+
+            %% ===================================================================
+            %% DISPATCHER
+            %% ===================================================================
+
+            %% Time in ms that must have passed since last update of dispatcher
+            %% or DNS to assume they are out of sync.
+            {dns_disp_out_of_sync_threshold, 10000},
+
+            %% ===================================================================
+            %% DNS
+            %% ===================================================================
+
+            %% DNS port
+            {dns_port, 53},
+            %% How long dns response of type A remains valid (in sec)
+            {dns_a_response_ttl, 60},
+            %% How long dns response of type NS remains valid (in sec)
+            {dns_ns_response_ttl, 600},
+            %% Maximum supported UDP size, that will be advertised by the server (via EDNS). If a client advertises a bigger
+            %% value, it will be assumed to be as high as this.
+            {edns_max_udp_size, 1280},
+            %% Number of dns tcp acceptors
+            {dns_tcp_acceptor_pool_size, 20},
+            %% Time (in sec) after which dns closes idle connection
+            {dns_tcp_timeout_seconds, 20},
+
+            %% ===================================================================
+            %% DATASTORE
+            %% ===================================================================
+
+            %% Persistence driver to use in datastore.
+            %% Supported values: couchbase_datastore_driver, riak_datastore_driver
+            {persistence_driver_module, 'couchbase_datastore_driver'}
+        ]}
+    ]}.
