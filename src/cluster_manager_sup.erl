@@ -9,7 +9,7 @@
 %%% It is the main supervisor. It starts (as it child) cluster manager
 %%% @end
 %%%-------------------------------------------------------------------
--module(op_ccm_sup).
+-module(cluster_manager_sup).
 -author("Tomasz Lichon").
 
 -behaviour(supervisor).

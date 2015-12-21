@@ -1,4 +1,4 @@
-REPO            ?= op-ccm
+REPO            ?= cluster-manager
 
 # distro for package building
 DISTRIBUTION    ?= none
@@ -6,7 +6,7 @@ export DISTRIBUTION
 
 PKG_REVISION    ?= $(shell git describe --tags --always)
 PKG_VERSION	    ?= $(shell git describe --tags --always | tr - .)
-PKG_ID           = oneprovider-ccm-$(PKG_VERSION)
+PKG_ID           = oneprovider-cm-$(PKG_VERSION)
 PKG_BUILD        = 1
 BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
@@ -45,7 +45,7 @@ rel: generate
 
 relclean:
 	rm -rf rel/test_cluster
-	rm -rf rel/op_ccm
+	rm -rf rel/cluster_manager
 
 ##
 ## Testing targets

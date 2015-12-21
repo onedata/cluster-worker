@@ -10,7 +10,7 @@
 %%% supervisor which then initializes appropriate components of node.
 %%% @end
 %%%-------------------------------------------------------------------
--module(op_ccm).
+-module(cluster_manager).
 -author("Tomasz Lichon").
 
 -behaviour(application).
@@ -40,7 +40,7 @@
     {error, Reason :: term()}).
 start(_StartType, _StartArgs) ->
     test_node_starter:maybe_start_cover(),
-    op_ccm_sup:start_link().
+    cluster_manager_sup:start_link().
 
 %%--------------------------------------------------------------------
 %% @private
