@@ -10,7 +10,7 @@
 %%% This module coordinates central cluster.
 %%% @end
 %%%-------------------------------------------------------------------
--module(cluster_manager).
+-module(cluster_manager_worker).
 -author("Michal Wrzeszcz").
 -author("Tomasz Lichon").
 
