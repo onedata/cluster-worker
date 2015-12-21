@@ -37,15 +37,15 @@ distclean:
 
 rel: generate
 
-test_rel: generate ccm_rel
+test_rel: generate cm_rel
 
-ccm_rel:
-	make -C op_ccm/ rel
+cm_rel:
+	make -C cluster_manager/ rel
 
 relclean:
 	rm -rf rel/test_cluster
 	rm -rf rel/cluster_worker
-	rm -rf op_ccm/rel/op_ccm
+	rm -rf cluster_manager/rel/cluster_manager
 
 ##
 ## Testing targets

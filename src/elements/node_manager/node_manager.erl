@@ -10,7 +10,7 @@
 %%% @doc
 %%% This module is a gen_server that coordinates the
 %%% life cycle of node. It starts/stops appropriate services and communicates
-%%% with ccm.
+%%% with cluster manager.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(node_manager).
@@ -158,13 +158,13 @@ init([]) ->
         next_task_check(),
         ?info("All checks performed"),
 
-        gen_server:cast(self(), connect_to_ccm),
+        gen_server:cast(self(), connect_to_cm),
 
         NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
         MonitoringState = monitoring:start(NodeIP),
 
         {ok, #state{node_ip = NodeIP,
-            ccm_con_status = not_connected,
+            cm_con_status = not_connected,
             monitoring_state = MonitoringState}}
     catch
         _:Error ->
@@ -192,7 +192,7 @@ init([]) ->
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
 
-handle_call(healthcheck, _From, State = #state{ccm_con_status = ConnStatus}) ->
+handle_call(healthcheck, _From, State = #state{cm_con_status = ConnStatus}) ->
     Reply = case ConnStatus of
                 registered -> ok;
                 _ -> out_of_sync
@@ -245,12 +245,12 @@ handle_call(_Request, _From, State) ->
     | {stop, Reason :: term(), NewState},
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
-handle_cast(connect_to_ccm, State) ->
-    NewState = connect_to_ccm(State),
+handle_cast(connect_to_cm, State) ->
+    NewState = connect_to_cm(State),
     {noreply, NewState};
 
-handle_cast(ccm_conn_ack, State) ->
-    NewState = ccm_conn_ack(State),
+handle_cast(cm_conn_ack, State) ->
+    NewState = cm_conn_ack(State),
     {noreply, NewState};
 
 handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
@@ -323,16 +323,16 @@ handle_info({timer, Msg}, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
-    {ok, CCMNodes} = plugins:apply(node_manager_plugin, ccm_nodes, []),
-    case lists:member(Node, CCMNodes) of
+    {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+    case lists:member(Node, CMNodes) of
         false ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
         true ->
             ok
             % TODO maybe node_manager should be restarted along with all workers to
             % avoid desynchronization of modules between nodes.
-%%             ?error("Connection to CCM lost, restarting node"),
-%%             throw(connection_to_ccm_lost)
+%%             ?error("Connection to cluster manager lost, restarting node"),
+%%             throw(connection_to_cm_lost)
     end,
     {noreply, State};
 
@@ -381,76 +381,76 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Connects with ccm and tells that the node is alive.
-%% First it establishes network connection, next sends message to ccm.
+%% Connects with cluster manager and tells that the node is alive.
+%% First it establishes network connection, next sends message to cluster manager.
 %% @end
 %%--------------------------------------------------------------------
--spec connect_to_ccm(State :: #state{}) -> #state{}.
-connect_to_ccm(State = #state{ccm_con_status = registered}) ->
+-spec connect_to_cm(State :: #state{}) -> #state{}.
+connect_to_cm(State = #state{cm_con_status = registered}) ->
     % Already registered, do nothing
     State;
-connect_to_ccm(State = #state{ccm_con_status = connected}) ->
+connect_to_cm(State = #state{cm_con_status = connected}) ->
     % Connected, but not registered (workers did not start), check again in some time
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, ccm_connection_retry_period),
-    gen_server:cast({global, ?CCM}, {ccm_conn_req, node()}),
-    erlang:send_after(Interval, self(), {timer, connect_to_ccm}),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, cm_connection_retry_period),
+    gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
+    erlang:send_after(Interval, self(), {timer, connect_to_cm}),
     State;
-connect_to_ccm(State = #state{ccm_con_status = not_connected}) ->
-    % Not connected to CCM, try and automatically schedule the next try
-    {ok, CCMNodes} = plugins:apply(node_manager_plugin, ccm_nodes, []),
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, ccm_connection_retry_period),
-    erlang:send_after(Interval, self(), {timer, connect_to_ccm}),
-    case (catch init_net_connection(CCMNodes)) of
+connect_to_cm(State = #state{cm_con_status = not_connected}) ->
+    % Not connected to cluster manager, try and automatically schedule the next try
+    {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, cm_connection_retry_period),
+    erlang:send_after(Interval, self(), {timer, connect_to_cm}),
+    case (catch init_net_connection(CMNodes)) of
         ok ->
-            ?info("Initializing connection to CCM"),
-            gen_server:cast({global, ?CCM}, {ccm_conn_req, node()}),
-            State#state{ccm_con_status = connected};
+            ?info("Initializing connection to cluster manager"),
+            gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
+            State#state{cm_con_status = connected};
         Err ->
-            ?debug("No connection with CCM: ~p, retrying in ~p ms", [Err, Interval]),
-            State#state{ccm_con_status = not_connected}
+            ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
+            State#state{cm_con_status = not_connected}
     end.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Saves information about ccm connection when ccm answers to its request
+%% Saves information about cluster manager connection when cluster manager answers to its request
 %% @end
 %%--------------------------------------------------------------------
--spec ccm_conn_ack(State :: term()) -> #state{}.
-ccm_conn_ack(State = #state{ccm_con_status = connected}) ->
-    ?info("Successfully connected to CCM"),
+-spec cm_conn_ack(State :: term()) -> #state{}.
+cm_conn_ack(State = #state{cm_con_status = connected}) ->
+    ?info("Successfully connected to cluster manager"),
     init_node(),
     ?info("Node initialized"),
-    gen_server:cast({global, ?CCM}, {init_ok, node()}),
+    gen_server:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
-    State#state{ccm_con_status = registered};
-ccm_conn_ack(State) ->
+    State#state{cm_con_status = registered};
+cm_conn_ack(State) ->
     % Already registered or not connected, do nothing
-    ?warning("node_manager received redundant ccm_conn_ack"),
+    ?warning("node_manager received redundant cm_conn_ack"),
     State.
 
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Performs calls to CCM with heartbeat. The heartbeat message consists of
+%% Performs calls to cluster manager with heartbeat. The heartbeat message consists of
 %% current monitoring data. The data is updated directly before sending.
-%% The CCM will perform an 'update_lb_advices' cast perodically, using
+%% The cluster manager will perform an 'update_lb_advices' cast perodically, using
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
 -spec do_heartbeat(State :: #state{}) -> #state{}.
-do_heartbeat(#state{ccm_con_status = registered, monitoring_state = MonState} = State) ->
+do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState} = State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
     NodeState = monitoring:get_node_state(NewMonState),
-    ?debug("Sending heartbeat to CCM"),
-    gen_server:cast({global, ?CCM}, {heartbeat, NodeState}),
+    ?debug("Sending heartbeat to cluster manager"),
+    gen_server:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     State#state{monitoring_state = NewMonState};
 
-% Stop heartbeat if node_manager is not registered in CCM
+% Stop heartbeat if node_manager is not registered in cluster manager
 do_heartbeat(State) ->
     State.
 
@@ -458,7 +458,7 @@ do_heartbeat(State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Receives lb advices update from CCM and follows it to DNS worker and dispatcher.
+%% Receives lb advices update from cluster manager and follows it to DNS worker and dispatcher.
 %% @end
 %%--------------------------------------------------------------------
 -spec update_lb_advices(State :: #state{}, LBAdvices) -> #state{} when
@@ -483,7 +483,7 @@ init_net_connection([Node | Nodes]) ->
     case net_adm:ping(Node) of
         pong ->
             global:sync(),
-            case global:whereis_name(?CCM) of
+            case global:whereis_name(?CLUSTER_MANAGER) of
                 undefined ->
                     ?error("Connection to node ~p global_synch error", [Node]),
                     rpc:eval_everywhere(erlang, disconnect_node, [node()]),
@@ -505,7 +505,7 @@ init_net_connection([Node | Nodes]) ->
 %%--------------------------------------------------------------------
 -spec init_node() -> ok.
 init_node() ->
-    {ok, NodeToSync} = gen_server:call({global, ?CCM}, get_node_to_sync),
+    {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
     ok = datastore:ensure_state_loaded(NodeToSync),
     ?info("Datastore synchronized"),
     init_workers().
@@ -513,7 +513,7 @@ init_node() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts all workers on node, and notifies
-%% ccm about successfull init
+%% cluster manager about successfull init
 %% @end
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
@@ -559,7 +559,7 @@ start_worker(Module, Args) ->
 -spec free_memory(NodeMem :: number()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
 free_memory(NodeMem) ->
     try
-        AvgMem = gen_server:call({global, ?CCM}, get_avg_mem_usage),
+        AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
         ClearingOrder = case NodeMem >= AvgMem of
                             true ->
                                 [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];

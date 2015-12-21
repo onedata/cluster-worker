@@ -40,10 +40,10 @@
 
             %% List of absolute paths to storages used by workers.
             {storage_paths, []},
-            %% How long (in ms) should worker wait between heartbeats (when connected to ccm)
+            %% How long (in ms) should worker wait between heartbeats (when connected to cm)
             {heartbeat_interval, 500},
-            %% How long (in ms) should worker wait between next connection try (when not registered in ccm)
-            {ccm_connection_retry_period, 1000},
+            %% How long (in ms) should worker wait between next connection try (when not registered in cm)
+            {cm_connection_retry_period, 1000},
             %% Memory size which stores information about worker load
             {worker_load_memory_size, 1000},
             %% Memory usage level above which caches will be cleared
