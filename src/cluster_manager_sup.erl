@@ -77,7 +77,7 @@ init([]) ->
 %%--------------------------------------------------------------------
 -spec cluster_manager_spec() -> supervisor:child_spec().
 cluster_manager_spec() ->
-    Id = Module = cluster_manager,
+    Id = Module = cluster_manager_server,
     Restart = permanent,
     Shutdown = timer:seconds(5),
     Type = worker,
