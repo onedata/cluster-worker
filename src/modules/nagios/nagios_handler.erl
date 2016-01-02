@@ -148,7 +148,7 @@ terminate(_Reason, _Req, _State) ->
 %% ]}
 %% Status can be: ok | out_of_sync | error | atom()
 %%
-%% If CCM cannot be contacted, the function returns 'error' atom.
+%% If cluster manager cannot be contacted, the function returns 'error' atom.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
@@ -159,7 +159,7 @@ terminate(_Reason, _Req, _State) ->
     ]}
     ]}.
 get_cluster_status(Timeout) ->
-    case check_ccm(Timeout) of
+    case check_cm(Timeout) of
         error ->
             error;
         Nodes ->
@@ -240,17 +240,17 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, Worker
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Contacts CCM for healthcheck and gathers information about cluster state.
+%% Contacts cluster manager for healthcheck and gathers information about cluster state.
 %% @end
 %%--------------------------------------------------------------------
--spec check_ccm(Timeout :: integer()) -> Nodes :: [node()] | error.
-check_ccm(Timeout) ->
+-spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
+check_cm(Timeout) ->
     try
-        {ok, Nodes} = gen_server:call({global, ?CCM}, healthcheck, Timeout),
+        {ok, Nodes} = gen_server:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout),
         Nodes
     catch
         Type:Error ->
-            ?error("CCM error during healthcheck: ~p:~p", [Type, Error]),
+            ?error("Cluster manager error during healthcheck: ~p:~p", [Type, Error]),
             error
     end.
 

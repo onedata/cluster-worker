@@ -22,7 +22,7 @@
 
 %% This record is used by worker_host (it contains its state). It describes
 %% plugin that is used and state of this plugin. It contains also
-%% information about time of requests processing (used by ccm during
+%% information about time of requests processing (used by cluster manager during
 %% load balancing). The two list of Loads are accessible, When second list
 %% becomes full, it overrides first list . Loads storing works similarly to
 %% round robin databases
@@ -329,7 +329,7 @@ send_response(Plugin, BeforeProcessingRequest, #worker_request{id = MsgId, reply
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Adds information about ended request to host memory (ccm uses
+%% Adds information about ended request to host memory (cluster manager uses
 %% it to control cluster load).
 %% @end
 %%--------------------------------------------------------------------

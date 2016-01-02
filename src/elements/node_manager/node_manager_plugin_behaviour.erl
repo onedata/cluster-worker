@@ -101,10 +101,10 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List ccm nodes to be used by node manager.
+%% List cluster manager nodes to be used by node manager.
 %% @end
 %%--------------------------------------------------------------------
--callback ccm_nodes() -> {ok, Nodes :: [atom()]} | undefined.
+-callback cm_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 %%--------------------------------------------------------------------
 %% @doc
 %% List db nodes to be used by node manager.
