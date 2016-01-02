@@ -9,7 +9,7 @@
 %%% It is the main supervisor. It starts (as it child) cluster manager
 %%% @end
 %%%-------------------------------------------------------------------
--module(op_ccm_sup).
+-module(cluster_manager_sup).
 -author("Tomasz Lichon").
 
 -behaviour(supervisor).
@@ -77,7 +77,7 @@ init([]) ->
 %%--------------------------------------------------------------------
 -spec cluster_manager_spec() -> supervisor:child_spec().
 cluster_manager_spec() ->
-    Id = Module = cluster_manager,
+    Id = Module = cluster_manager_server,
     Restart = permanent,
     Shutdown = timer:seconds(5),
     Type = worker,

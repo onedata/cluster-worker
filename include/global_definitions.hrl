@@ -18,10 +18,10 @@
 %%%===================================================================
 
 %% Name of the application.
--define(APP_NAME, op_ccm).
+-define(APP_NAME, cluster_manager).
 
 %% Local name (name and node is used to identify it) of supervisor that
 %% coordinates application at each node (one supervisor per node).
--define(APPLICATION_SUPERVISOR_NAME, op_ccm_sup).
+-define(APPLICATION_SUPERVISOR_NAME, cluster_manager_sup).
 
 -endif.

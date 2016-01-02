@@ -10,7 +10,7 @@
 %%% This module coordinates central cluster.
 %%% @end
 %%%-------------------------------------------------------------------
--module(cluster_manager).
+-module(cluster_manager_server).
 -author("Michal Wrzeszcz").
 -author("Tomasz Lichon").
 
@@ -28,7 +28,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
-%% This record is used by ccm (it contains its state). It describes
+%% This record is used by cm (it contains its state). It describes
 %% nodes, dispatchers and workers in cluster. It also contains reference
 %% to process used to monitor if nodes are alive.
 -record(state, {
@@ -57,7 +57,7 @@
 start_link() ->
     case gen_server:start_link(?MODULE, [], []) of
         {ok, Pid} ->
-            global:re_register_name(?CCM, Pid),
+            global:re_register_name(?CLUSTER_MANAGER, Pid),
             {ok, Pid};
         Error ->
             Error
@@ -71,7 +71,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok.
 stop() ->
-    gen_server:cast({global, ?CCM}, stop).
+    gen_server:cast({global, ?CLUSTER_MANAGER}, stop).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -155,8 +155,8 @@ handle_call(_Request, _From, State) ->
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
 
-handle_cast({ccm_conn_req, Node}, State) ->
-    NewState = ccm_conn_req(State, Node),
+handle_cast({cm_conn_req, Node}, State) ->
+    NewState = cm_conn_req(State, Node),
     {noreply, NewState};
 
 handle_cast({init_ok, Node}, State) ->
@@ -193,7 +193,7 @@ handle_cast(_Request, State) ->
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
 handle_info({timer, Msg}, State) ->
-    gen_server:cast({global, ?CCM}, Msg),
+    gen_server:cast({global, ?CLUSTER_MANAGER}, Msg),
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
@@ -246,23 +246,23 @@ code_change(_OldVsn, State, _Extra) ->
 %% Receive heartbeat from node_manager
 %% @end
 %%--------------------------------------------------------------------
--spec ccm_conn_req(State :: #state{}, SenderNode :: node()) -> NewState :: #state{}.
-ccm_conn_req(State = #state{nodes = Nodes, uninitialized_nodes = InitNodes}, SenderNode) ->
+-spec cm_conn_req(State :: #state{}, SenderNode :: node()) -> NewState :: #state{}.
+cm_conn_req(State = #state{nodes = Nodes, uninitialized_nodes = InitNodes}, SenderNode) ->
     ?info("Connection request from node: ~p", [SenderNode]),
     case lists:member(SenderNode, Nodes) or lists:member(SenderNode, InitNodes) of
         true ->
-            gen_server:cast({?NODE_MANAGER_NAME, SenderNode}, ccm_conn_ack),
+            gen_server:cast({?NODE_MANAGER_NAME, SenderNode}, cm_conn_ack),
             State;
         false ->
             ?info("New node: ~p", [SenderNode]),
             try
                 erlang:monitor_node(SenderNode, true),
                 NewInitNodes = add_node_to_list(SenderNode, InitNodes),
-                gen_server:cast({?NODE_MANAGER_NAME, SenderNode}, ccm_conn_ack),
+                gen_server:cast({?NODE_MANAGER_NAME, SenderNode}, cm_conn_ack),
                 State#state{uninitialized_nodes = NewInitNodes}
             catch
                 _:Error ->
-                    ?warning_stacktrace("Checking node ~p, in ccm failed with error: ~p",
+                    ?warning_stacktrace("Checking node ~p, in cm failed with error: ~p",
                         [SenderNode, Error]),
                     State
             end

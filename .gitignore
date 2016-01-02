@@ -8,7 +8,7 @@
 *.beam
 *.pyc
 
-rel/op_ccm
+rel/cluster_manager
 rel/test_cluster
 
 test/eunit_results
