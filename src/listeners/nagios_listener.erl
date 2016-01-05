@@ -33,13 +33,13 @@
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_nagios_port),
+    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_nagios_port),
     {ok, NbAcceptors} =
-        application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_number_of_acceptors),
+        application:get_env(?CLUSTER_WORKER_APP_NAME, http_number_of_acceptors),
     {ok, MaxKeepAlive} =
-        application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_max_keepalive),
+        application:get_env(?CLUSTER_WORKER_APP_NAME, http_max_keepalive),
     {ok, Timeout} =
-        application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_socket_timeout_seconds),
+        application:get_env(?CLUSTER_WORKER_APP_NAME, http_socket_timeout_seconds),
 
     Dispatch = [
         {'_', [
@@ -84,10 +84,10 @@ stop() ->
 %% Returns the status of a listener.
 %% @end
 %%--------------------------------------------------------------------
--callback healthcheck() -> ok | {error, server_not_responding}.
+-spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
     {ok, NagiosPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_worker_nagios_port),
+        http_nagios_port),
     case http_client:get("http://127.0.0.1:" ++ integer_to_list(NagiosPort),
         [], <<>>, [insecure]) of
         {ok, _, _, _} ->

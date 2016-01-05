@@ -14,6 +14,7 @@
 
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("kernel/src/inet_dns.hrl").
 
 -behaviour(listener_behaviour).
 
@@ -58,8 +59,9 @@ stop() ->
 %% Returns the status of a listener.
 %% @end
 %%--------------------------------------------------------------------
--callback healthcheck() -> ok | {error, server_not_responding}.
+-spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
+    % @todo check TCP listener too
     {ok, HealthcheckTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
     {ok, DNSPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_port),
     Query = inet_dns:encode(

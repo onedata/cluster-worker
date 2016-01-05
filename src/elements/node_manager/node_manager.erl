@@ -28,8 +28,7 @@
 
 -define(CLUSTER_WORKER_MODULES, [
     {datastore_worker, []},
-    {dns_worker, []},
-    {http_worker, []}
+    {dns_worker, []}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
     dns_listener,

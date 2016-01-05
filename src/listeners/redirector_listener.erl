@@ -38,14 +38,14 @@
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
     {ok, RedirectPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_worker_redirect_port),
+        http_redirect_port),
     {ok, RedirectNbAcceptors} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_worker_number_of_http_acceptors),
+        http_number_of_http_acceptors),
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_worker_socket_timeout_seconds),
+        http_socket_timeout_seconds),
     RedirectDispatch = [
         {'_', [
-            {'_', opn_redirect_handler, []}
+            {'_', redirector_handler, []}
         ]}
     ],
     Result = cowboy:start_http(?HTTP_REDIRECTOR_LISTENER, RedirectNbAcceptors,
@@ -85,10 +85,10 @@ stop() ->
 %% Returns the status of a listener.
 %% @end
 %%--------------------------------------------------------------------
--callback healthcheck() -> ok | {error, server_not_responding}.
+-spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
     {ok, RedirectorPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_worker_redirect_port),
+        http_redirect_port),
     case http_client:get("http://127.0.0.1:" ++ integer_to_list(RedirectorPort),
         [], <<>>, [insecure]) of
         {ok, _, _, _} ->

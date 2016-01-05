@@ -44,15 +44,10 @@ handle(Req, State) ->
                    _ -> FullHostname
                end,
     {Path, _} = cowboy_req:path(Req),
-    {ok, Req2} = opn_cowboy_bridge:apply(cowboy_req, reply, [
-        301,
-        [
-            {<<"location">>, <<"https://", Hostname/binary, Path/binary, "?", QS/binary>>},
-            {<<"content-type">>, <<"text/html">>}
-        ],
-        <<"">>,
-        Req
-    ]),
+    {ok, Req2} = cowboy_req:reply(301, [
+        {<<"location">>, <<"https://", Hostname/binary, Path/binary, "?", QS/binary>>},
+        {<<"content-type">>, <<"text/html">>}
+    ], <<"">>, Req),
     {ok, Req2, State}.
 
 %%--------------------------------------------------------------------
