@@ -12,13 +12,17 @@ from . import common, docker, worker, globalregistry
 
 DOCKER_BINDIR_PATH = '/root/build'
 
+
 def up(image, bindir, dns_server, uid, config_path, logdir=None):
     return worker.up(image, bindir, dns_server, uid, config_path, ClusterWorkerConfigurator(), logdir)
 
 
 class ClusterWorkerConfigurator:
-    def tweak_config(self, cfg, uid):
+    def tweak_config(self, cfg, instance, uid):
         return cfg
+
+    def additional_commands(self, bindir, config, domain, worker_ips):
+        return ''
 
     def configure_started_instance(self, bindir, instance, config, output):
         pass

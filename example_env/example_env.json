@@ -188,14 +188,31 @@
     },
     "globalregistry_domains": {
         "gr": {
+            "db_driver": "couchbase",
+            "cluster_manager": {
+                "cm": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "cm_nodes": [
+                            "cm"
+                        ],
+                        "worker_num": 1
+                    }
+                }
+            },
             "globalregistry": {
                 "node1": {
                     "vm.args": {
-                        "setcookie": "cookie3"
+                        "setcookie": "test_cookie"
                     },
                     "sys.config": {
+                        "cm_nodes": [
+                            "cm"
+                        ],
                         "db_nodes": [
-                            "db"
+                            "127.0.0.1:49161"
                         ],
                         "http_domain": {
                             "string": "127.0.0.1"

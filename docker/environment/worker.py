@@ -16,6 +16,7 @@ from . import common, docker, riak, couchbase, dns, cluster_manager
 CLUSTER_WAIT_FOR_NAGIOS_SECONDS = 60 * 2
 # mounting point for op-worker-node docker
 DOCKER_BINDIR_PATH = '/root/build'
+LOGFILE = '/tmp/run.log'
 
 
 def cluster_domain(instance, uid):
@@ -55,33 +56,53 @@ def _tweak_config(config, name, instance, uid, configurator):
     vm_args = cfg['nodes']['node']['vm.args']
     vm_args['name'] = worker_erl_node_name(name, instance, uid)
 
-    cfg = configurator.tweak_config(cfg, uid)
+    cfg = configurator.tweak_config(cfg, uid, instance)
     return cfg, sys_config['db_nodes']
 
 
-def _node_up(image, bindir, config, dns_servers, db_node_mappings, logdir, configurator):
+def _node_up(worker_id, bindir, config, domain, worker_ips, gen_dev_args, configurator):
+    command = '''set -e
+mkdir -p /root/bin/node/log/
+echo 'while ((1)); do chown -R {uid}:{gid} /root/bin/node/log; sleep 1; done' > /root/bin/chown_logs.sh
+bash /root/bin/chown_logs.sh &
+cat <<"EOF" > /tmp/gen_dev_args.json
+{gen_dev_args}
+EOF
+escript bamboos/gen_dev/gen_dev.escript /tmp/gen_dev_args.json
+mkdir -p /root/bin/node/resources/
+cat <<"EOF" > /root/bin/node/resources/dns.config
+{additional_commands}
+EOF
+/root/bin/node/bin/{executable} console >> {logfile}'''
+    additional_commands = configurator.additional_commands(bindir, config, domain, worker_ips)
+
+    command = command.format(
+        gen_dev_args=json.dumps({configurator.app_name(): gen_dev_args}),
+        additional_commands=additional_commands,
+        uid=os.geteuid(),
+        gid=os.getegid(),
+        executable=configurator.app_name(),
+        logfile=LOGFILE
+    )
+
+    docker.exec_(
+        container=worker_id,
+        detach=True,
+        interactive=True,
+        tty=True,
+        command=command)
+
+
+def _docker_up(image, bindir, config, dns_servers, db_node_mappings, logdir, configurator):
+    """Starts the docker but does not start GR
+    as dns.config update is needed first
+    """
     node_name = config['nodes']['node']['vm.args']['name']
     db_nodes = config['nodes']['node']['sys.config']['db_nodes']
     for i in range(len(db_nodes)):
         db_nodes[i] = db_node_mappings[db_nodes[i]]
 
     (name, sep, hostname) = node_name.partition('@')
-
-    command = '''mkdir -p /root/bin/node/log/
-echo 'while ((1)); do chown -R {uid}:{gid} /root/bin/node/log; sleep 1; done' > /root/bin/chown_logs.sh
-bash /root/bin/chown_logs.sh &
-cat <<"EOF" > /tmp/gen_dev_args.json
-{gen_dev_args}
-EOF
-set -e
-escript bamboos/gen_dev/gen_dev.escript /tmp/gen_dev_args.json
-/root/bin/node/bin/{executable} console'''
-    command = command.format(
-        gen_dev_args=json.dumps({configurator.app_name(): config}),
-        uid=os.geteuid(),
-        gid=os.getegid(),
-        executable=configurator.app_name()
-    )
 
     volumes = [(bindir, DOCKER_BINDIR_PATH, 'ro')]
     volumes += configurator.extra_volumes(config)
@@ -100,7 +121,7 @@ escript bamboos/gen_dev/gen_dev.escript /tmp/gen_dev_args.json
         workdir=DOCKER_BINDIR_PATH,
         volumes=volumes,
         dns_list=dns_servers,
-        command=command)
+        command=['bash'])
 
     # create system users and groups (if specified)
     if 'os_config' in config:
@@ -209,11 +230,17 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None):
         # Start the workers
         workers = []
         worker_ips = []
+        worker_configs = {}
         for cfg in configs:
-            worker, node_out = _node_up(image, bindir, cfg, dns_servers, db_node_mappings, logdir, configurator)
+            worker, node_out = _docker_up(image, bindir, cfg, dns_servers, db_node_mappings, logdir, configurator)
             workers.append(worker)
-            worker_ips.append(common.get_docker_ip(worker))
+            worker_configs[worker] = cfg
             common.merge(output, node_out)
+            worker_ips.append(common.get_docker_ip(worker))
+
+        domain = cluster_domain(instance, uid)
+        for id in worker_configs:
+            _node_up(id, bindir, config, domain, worker_ips, worker_configs[id], configurator)
 
         # Wait for all workers to start
         common.wait_until(_ready, workers, CLUSTER_WAIT_FOR_NAGIOS_SECONDS)

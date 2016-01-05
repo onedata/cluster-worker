@@ -18,12 +18,15 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None):
 
 
 class ProviderWorkerConfigurator:
-    def tweak_config(self, cfg, uid):
+    def tweak_config(self, cfg, instance, uid):
         sys_config = cfg['nodes']['node']['sys.config']
         if 'global_registry_domain' in sys_config:
             gr_hostname = globalregistry.gr_domain(sys_config['global_registry_domain'], uid)
             sys_config['global_registry_domain'] = gr_hostname
         return cfg
+
+    def additional_commands(self, bindir, config, domain, worker_ips):
+        return ''
 
     def configure_started_instance(self, bindir, instance, config, output):
         if 'os_config' in config[self.domains_attribute()][instance]:

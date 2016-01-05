@@ -10,7 +10,7 @@ import os
 import copy
 import subprocess
 import json
-from . import appmock, client, common, globalregistry, cluster_manager, \
+from . import appmock, client, common, gr_worker, cluster_manager, \
     provider_worker, cluster_worker, docker, dns
 
 
@@ -57,15 +57,9 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
         # so that dockers that start after can immediately see the domains.
         dns.maybe_restart_with_configuration('auto', uid, output)
 
-    # Start globalregistry instances
-    if 'globalregistry_domains' in config:
-        gr_output = globalregistry.up(image, bin_gr, dns_server,
-                                      uid, config_path, logdir)
-        common.merge(output, gr_output)
-        # Make sure GR domains are added to the dns server.
-        # Setting first arg to 'auto' will force the restart and this is needed
-        # so that dockers that start after can immediately see the domains.
-        dns.maybe_restart_with_configuration('auto', uid, output)
+    # Start provider cluster instances
+    setup_worker(gr_worker, bin_op_worker, 'globalregistry_domains',
+                 bin_cluster_manager, config, config_path, dns_server, image, logdir, output, uid)
 
     # Start provider cluster instances
     setup_worker(provider_worker, bin_op_worker, 'provider_domains',
