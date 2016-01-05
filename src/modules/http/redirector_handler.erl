@@ -8,7 +8,7 @@
 %%% @doc This module handles requests directed to http and returns a 301 redirect to https.
 %%% @end
 %%%--------------------------------------------------------------------
--module(opn_redirect_handler).
+-module(redirector_handler).
 -author("Lukasz Opiola").
 
 -include_lib("ctool/include/logging.hrl").

@@ -23,6 +23,15 @@
 %%--------------------------------------------------------------------
 -callback start() -> ok | {error, Reason :: term()}.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns the status of a listener.
+%% @end
+%%--------------------------------------------------------------------
+-callback healthcheck() -> ok | {error, server_not_responding}.
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% The listener will not be used anymore. Clean up!

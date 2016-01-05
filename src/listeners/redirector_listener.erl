@@ -23,8 +23,8 @@
 
 -behaviour(listener_behaviour).
 
-%% listener_starter_behaviour callbacks
--export([start/0, stop/0]).
+%% listener_behaviour callbacks
+-export([start/0, stop/0, healthcheck/0]).
 
 %%%===================================================================
 %%% listener_starter_behaviour callbacks
@@ -37,35 +37,31 @@
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-  {ok, RedirectPort} =
-    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_redirect_port),
-  {ok, RedirectNbAcceptors} =
-    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_number_of_http_acceptors),
-  {ok, Timeout} =
-    application:get_env(?CLUSTER_WORKER_APP_NAME, http_worker_socket_timeout_seconds),
-  RedirectDispatch = [
-    {'_', [
-      {'_', opn_cowboy_bridge,
-        [
-          {delegation, true},
-          {handler_module, opn_redirect_handler},
-          {handler_opts, []}
+    {ok, RedirectPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_worker_redirect_port),
+    {ok, RedirectNbAcceptors} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_worker_number_of_http_acceptors),
+    {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_worker_socket_timeout_seconds),
+    RedirectDispatch = [
+        {'_', [
+            {'_', opn_redirect_handler, []}
         ]}
-    ]}
-  ],
-  Result = cowboy:start_http(?HTTP_REDIRECTOR_LISTENER, RedirectNbAcceptors,
-    [
-      {port, RedirectPort}
     ],
-    [
-      {env, [{dispatch, cowboy_router:compile(RedirectDispatch)}]},
-      {max_keepalive, 1},
-      {timeout, timer:seconds(Timeout)}
-    ]),
-  case Result of
-    {ok, _} -> ok;
-    _ -> Result
-  end.
+    Result = cowboy:start_http(?HTTP_REDIRECTOR_LISTENER, RedirectNbAcceptors,
+        [
+            {port, RedirectPort}
+        ],
+        [
+            {env, [{dispatch, cowboy_router:compile(RedirectDispatch)}]},
+            {max_keepalive, 1},
+            {timeout, timer:seconds(Timeout)}
+        ]),
+    case Result of
+        {ok, _} -> ok;
+        _ -> Result
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -74,10 +70,29 @@ start() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
-  case catch cowboy:stop_listener(?HTTP_REDIRECTOR_LISTENER) of
-    (ok) ->
-      ok;
-    (Error) ->
-      ?error("Error on stopping listener ~p: ~p", [?HTTP_REDIRECTOR_LISTENER, Error]),
-      {error, redirector_stop_error}
-  end.
+    case catch cowboy:stop_listener(?HTTP_REDIRECTOR_LISTENER) of
+        (ok) ->
+            ok;
+        (Error) ->
+            ?error("Error on stopping listener ~p: ~p",
+                [?HTTP_REDIRECTOR_LISTENER, Error]),
+            {error, redirector_stop_error}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns the status of a listener.
+%% @end
+%%--------------------------------------------------------------------
+-callback healthcheck() -> ok | {error, server_not_responding}.
+healthcheck() ->
+    {ok, RedirectorPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_worker_redirect_port),
+    case http_client:get("http://127.0.0.1:" ++ integer_to_list(RedirectorPort),
+        [], <<>>, [insecure]) of
+        {ok, _, _, _} ->
+            ok;
+        _ ->
+            {error, server_not_responding}
+    end.
