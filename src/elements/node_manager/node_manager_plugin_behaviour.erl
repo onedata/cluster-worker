@@ -113,7 +113,7 @@
 -callback db_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 
 %% @doc
-%% List db nodes to be used by node manager.
+%% Returns the name of the application that bases on cluster worker.
 %% @end
 %%--------------------------------------------------------------------
 -callback app_name() -> {ok, Name :: atom()}.
