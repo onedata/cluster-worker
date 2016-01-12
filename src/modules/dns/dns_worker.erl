@@ -30,11 +30,6 @@
 -export([handle_a/1, handle_ns/1, handle_cname/1, handle_soa/1, handle_wks/1,
     handle_ptr/1, handle_hinfo/1, handle_minfo/1, handle_mx/1, handle_txt/1]).
 
-%% export for unit tests
--ifdef(TEST).
--export([parse_domain/1]).
--endif.
-
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
 %%%===================================================================
@@ -81,7 +76,7 @@ handle({update_lb_advice, LBAdvice}) ->
     ok = worker_host:state_put(?MODULE, last_update, now()),
     ok = worker_host:state_put(?MODULE, lb_advice, LBAdvice);
 
-handle({handle_a, Domain}) ->
+handle({Method, Domain}) ->
     LBAdvice = worker_host:state_get(?MODULE, lb_advice),
     ?debug("DNS A request: ~s, current advice: ~p", [Domain, LBAdvice]),
     case LBAdvice of
@@ -89,42 +84,7 @@ handle({handle_a, Domain}) ->
             % The DNS server is still out of sync, return serv fail
             serv_fail;
         _ ->
-            case parse_domain(Domain) of
-                ok ->
-                    % Prefix OK, return nodes to connect to
-                    Nodes = load_balancing:choose_nodes_for_dns(LBAdvice),
-                    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_a_response_ttl),
-                    {ok,
-                            [dns_server:answer_record(Domain, TTL, ?S_A, IP) || IP <- Nodes] ++
-                            [dns_server:authoritative_answer_flag(true)]
-                    };
-                Other ->
-                    % Return whatever parse_domain returned (nx_domain | refused)
-                    Other
-            end
-    end;
-
-handle({handle_ns, Domain}) ->
-    LBAdvice = worker_host:state_get(?MODULE, lb_advice),
-    ?debug("DNS NS request: ~s, current advice: ~p", [Domain, LBAdvice]),
-    case LBAdvice of
-        undefined ->
-            % The DNS server is still out of sync, return serv fail
-            serv_fail;
-        _ ->
-            case parse_domain(Domain) of
-                ok ->
-                    % Prefix OK, return NS nodes of the cluster
-                    Nodes = load_balancing:choose_ns_nodes_for_dns(LBAdvice),
-                    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_ns_response_ttl),
-                    {ok,
-                            [dns_server:answer_record(Domain, TTL, ?S_NS, inet_parse:ntoa(IP)) || IP <- Nodes] ++
-                            [dns_server:authoritative_answer_flag(true)]
-                    };
-                Other ->
-                    % Return whatever parse_domain returned (nx_domain | refused)
-                    Other
-            end
+            plugins:apply(dns_worker_plugin, resolve, [Method, Domain, LBAdvice])
     end;
 
 handle(_Request) ->
@@ -175,8 +135,8 @@ handle_ns(Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_cname(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_cname(_Domain) ->
-    not_impl.
+handle_cname(Domain) ->
+    worker_proxy:call(dns_worker, {handle_cname, Domain}).
 
 
 %%--------------------------------------------------------------------
@@ -186,8 +146,8 @@ handle_cname(_Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_mx(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_mx(_Domain) ->
-    not_impl.
+handle_mx(Domain) ->
+    worker_proxy:call(dns_worker, {handle_mx, Domain}).
 
 
 %%--------------------------------------------------------------------
@@ -197,8 +157,8 @@ handle_mx(_Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_soa(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_soa(_Domain) ->
-    not_impl.
+handle_soa(Domain) ->
+    worker_proxy:call(dns_worker, {handle_soa, Domain}).
 
 
 %%--------------------------------------------------------------------
@@ -208,8 +168,8 @@ handle_soa(_Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_wks(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_wks(_Domain) ->
-    not_impl.
+handle_wks(Domain) ->
+    worker_proxy:call(dns_worker, {handle_wks, Domain}).
 
 
 %%--------------------------------------------------------------------
@@ -219,8 +179,8 @@ handle_wks(_Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_ptr(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_ptr(_Domain) ->
-    not_impl.
+handle_ptr(Domain) ->
+    worker_proxy:call(dns_worker, {handle_ptr, Domain}).
 
 
 %%--------------------------------------------------------------------
@@ -230,8 +190,8 @@ handle_ptr(_Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_hinfo(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_hinfo(_Domain) ->
-    not_impl.
+handle_hinfo(Domain) ->
+    worker_proxy:call(dns_worker, {handle_hinfo, Domain}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -241,8 +201,8 @@ handle_hinfo(_Domain) ->
 %%--------------------------------------------------------------------
 -spec handle_minfo(Domain :: string()) -> dns_handler_behaviour:handler_reply().
 %% ====================================================================
-handle_minfo(_Domain) ->
-    not_impl.
+handle_minfo(Domain) ->
+    worker_proxy:call(dns_worker, {handle_minfo, Domain}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -251,27 +211,12 @@ handle_minfo(_Domain) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_txt(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_txt(_Domain) ->
-    not_impl.
+handle_txt(Domain) ->
+    worker_proxy:call(dns_worker, {handle_txt, Domain}).
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Parses the DNS query domain and check if it ends with provider domain.
-%% Accepts only domains that fulfill above condition and have a
-%% maximum of one part subdomain.
-%% Returns NXDOMAIN when the query domain has more parts.
-%% Returns REFUSED when query domain is not the same as provider's.
-%% @end
-%%--------------------------------------------------------------------
--spec parse_domain(Domain :: string()) -> ok | refused | nx_domain.
-parse_domain(DomainArg) ->
-    plugins:apply(dns_worker_plugin, parse_domain, [DomainArg]).
-
 
 %%--------------------------------------------------------------------
 %% @doc

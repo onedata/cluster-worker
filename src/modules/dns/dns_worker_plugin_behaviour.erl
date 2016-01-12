@@ -13,13 +13,9 @@
 -author("Michal Zmuda").
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
-%% Parses the DNS query domain and check if it ends with correct domain.
-%% Accepts only domains that fulfill above condition and have a
-%% maximum of one part subdomain.
-%% Returns NXDOMAIN when the query domain has more parts.
-%% Returns REFUSED when query domain is not like intended.
+%% todo
 %% @end
 %%--------------------------------------------------------------------
--callback parse_domain(Domain :: string()) -> ok | refused | nx_domain.
+-callback resolve(Method :: atom(), Domain :: string(), LbAdvice :: term()) ->
+    dns_handler_behaviour:handler_reply().
