@@ -397,17 +397,24 @@ connect_to_cm(State = #state{cm_con_status = connected}) ->
     State;
 connect_to_cm(State = #state{cm_con_status = not_connected}) ->
     % Not connected to cluster manager, try and automatically schedule the next try
-    {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, cm_connection_retry_period),
     erlang:send_after(Interval, self(), {timer, connect_to_cm}),
-    case (catch init_net_connection(CMNodes)) of
-        ok ->
-            ?info("Initializing connection to cluster manager"),
-            gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
-            State#state{cm_con_status = connected};
-        Err ->
-            ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
-            State#state{cm_con_status = not_connected}
+    case whereis(?MAIN_WORKER_SUPERVISOR_NAME) of
+        undefined ->
+            % Main application did not started workers supervisor
+            ?debug("Workers supervisor not started, retrying in ~p ms", [Interval]),
+            State#state{cm_con_status = not_connected};
+        _ ->
+            {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+            case (catch init_net_connection(CMNodes)) of
+                ok ->
+                    ?info("Initializing connection to cluster manager"),
+                    gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
+                    State#state{cm_con_status = connected};
+                Err ->
+                    ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
+                    State#state{cm_con_status = not_connected}
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -568,18 +575,18 @@ free_memory(NodeMem) ->
                         end,
         ?info("Clearing memory in order: ~p", [ClearingOrder]),
         lists:foldl(fun
-                        ({_Aggressive, _StoreType}, ok) ->
-                            ok;
-                        ({Aggressive, StoreType}, _) ->
-                            Ans = caches_controller:clear_cache(NodeMem, Aggressive, StoreType),
-                            case Ans of
-                                mem_usage_too_high ->
-                                    ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
-                                _ ->
-                                    ok
-                            end,
-                            Ans
-                    end, start, ClearingOrder)
+            ({_Aggressive, _StoreType}, ok) ->
+                ok;
+            ({Aggressive, StoreType}, _) ->
+                Ans = caches_controller:clear_cache(NodeMem, Aggressive, StoreType),
+                case Ans of
+                    mem_usage_too_high ->
+                        ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
+                    _ ->
+                        ok
+                end,
+                Ans
+        end, start, ClearingOrder)
     catch
         E1:E2 ->
             ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
@@ -590,9 +597,9 @@ free_memory() ->
     try
         ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
         lists:foreach(fun
-                          ({Aggressive, StoreType}) ->
-                              caches_controller:clear_cache(100, Aggressive, StoreType)
-                      end, ClearingOrder)
+            ({Aggressive, StoreType}) ->
+                caches_controller:clear_cache(100, Aggressive, StoreType)
+        end, ClearingOrder)
     catch
         E1:E2 ->
             ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
