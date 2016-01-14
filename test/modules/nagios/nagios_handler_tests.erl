@@ -22,9 +22,13 @@
 -define(NODE_4, 'worker4@host.com').
 
 -define(WORKER_1, dns_worker).
--define(WORKER_2, http_worker).
+-define(WORKER_2, second_worker).
 -define(WORKER_3, other_worker).
 -define(WORKER_4, another_worker).
+
+-define(LISTENER_1, nagios_listener).
+-define(LISTENER_2, dns_listener).
+-define(LISTENER_3, redirector_listener).
 
 % ClusterStatus is in form:
 % {op_worker, Status1, [
@@ -34,8 +38,11 @@
 %         {Worker1, Status5},
 %         {Worker2, Status6},
 %         {Worker3, Status7},
+%         {Listener1, Status8},
+%         {Listener2, Status9},
+%         {Listener3, Status10}
 %     ]},
-%     {Node2, Status8, [
+%     {Node2, Status11, [
 %         ...
 %     ]}
 % ]}
@@ -62,8 +69,32 @@ calculate_cluster_status_test() ->
         {?NODE_3, [{?WORKER_2, ok}, {?WORKER_3, ok}]},
         {?NODE_4, [{?WORKER_1, ok}, {?WORKER_3, ok}]}
     ],
+    ListenerStatuses = [
+        {?NODE_1, [
+            {?LISTENER_1, {error, server_not_responding}},
+            {?LISTENER_2, ok},
+            {?LISTENER_3, ok}
+        ]},
+        {?NODE_2, [
+            {?LISTENER_1, ok},
+            {?LISTENER_2, {error, server_not_responding}},
+            {?LISTENER_3, {error, server_not_responding}}
+        ]},
+        {?NODE_3, [
+            {?LISTENER_1, ok},
+            {?LISTENER_2, ok},
+            {?LISTENER_3, ok}
+        ]},
+        {?NODE_4, [
+            {?LISTENER_1, ok},
+            {?LISTENER_2, ok},
+            {?LISTENER_3, ok}
+        ]}
+    ],
 
-    {ok, ClusterStatus} = nagios_handler:calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses),
+    {ok, ClusterStatus} = nagios_handler:calculate_cluster_status(
+        Nodes, NodeManagerStatuses, DistpatcherStatuses,
+        WorkerStatuses, ListenerStatuses),
     ?assertMatch({?CLUSTER_WORKER_APP_NAME, error, _}, ClusterStatus),
     {?CLUSTER_WORKER_APP_NAME, error, NodeStatuses} = ClusterStatus,
 
@@ -72,24 +103,40 @@ calculate_cluster_status_test() ->
     {?NODE_1, error, Node1Status} = lists:keyfind(?NODE_1, 1, NodeStatuses),
     ?assertEqual(ok, proplists:get_value(?NODE_MANAGER_NAME, Node1Status)),
     ?assertEqual(ok, proplists:get_value(?DISPATCHER_NAME, Node1Status)),
-    ?assertEqual({error, other_error}, proplists:get_value(?WORKER_1, Node1Status)),
+    ?assertEqual({error, other_error},
+        proplists:get_value(?WORKER_1, Node1Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_2, Node1Status)),
+    ?assertEqual({error, server_not_responding},
+        proplists:get_value(?LISTENER_1, Node1Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_2, Node1Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_3, Node1Status)),
 
     % Check 2nd node's statuses
     ?assertMatch({?NODE_2, _, _}, lists:keyfind(?NODE_2, 1, NodeStatuses)),
     {?NODE_2, error, Node2Status} = lists:keyfind(?NODE_2, 1, NodeStatuses),
-    ?assertEqual({error, some_error}, proplists:get_value(?NODE_MANAGER_NAME, Node2Status)),
+    ?assertEqual({error, some_error},
+        proplists:get_value(?NODE_MANAGER_NAME, Node2Status)),
     ?assertEqual(ok, proplists:get_value(?DISPATCHER_NAME, Node2Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_3, Node2Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_4, Node2Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_1, Node2Status)),
+    ?assertEqual({error, server_not_responding},
+        proplists:get_value(?LISTENER_2, Node2Status)),
+    ?assertEqual({error, server_not_responding},
+        proplists:get_value(?LISTENER_3, Node2Status)),
 
     % Check 3rd node's statuses
     ?assertMatch({?NODE_3, _, _}, lists:keyfind(?NODE_3, 1, NodeStatuses)),
-    {?NODE_3, out_of_sync, Node3Status} = lists:keyfind(?NODE_3, 1, NodeStatuses),
+    {?NODE_3, out_of_sync, Node3Status} =
+        lists:keyfind(?NODE_3, 1, NodeStatuses),
     ?assertEqual(ok, proplists:get_value(?NODE_MANAGER_NAME, Node3Status)),
-    ?assertEqual(out_of_sync, proplists:get_value(?DISPATCHER_NAME, Node3Status)),
+    ?assertEqual(out_of_sync,
+        proplists:get_value(?DISPATCHER_NAME, Node3Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_2, Node3Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_3, Node3Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_1, Node3Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_2, Node3Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_3, Node3Status)),
 
     % Check 4th node's statuses
     ?assertMatch({?NODE_4, _, _}, lists:keyfind(?NODE_4, 1, NodeStatuses)),
@@ -98,6 +145,9 @@ calculate_cluster_status_test() ->
     ?assertEqual(ok, proplists:get_value(?DISPATCHER_NAME, Node4Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_1, Node4Status)),
     ?assertEqual(ok, proplists:get_value(?WORKER_3, Node4Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_1, Node4Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_2, Node4Status)),
+    ?assertEqual(ok, proplists:get_value(?LISTENER_3, Node4Status)),
 
     ?assert(meck:validate(nagios_handler)),
     ok = meck:unload(nagios_handler).
