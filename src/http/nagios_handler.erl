@@ -357,7 +357,7 @@ check_listeners(Nodes, Listeners, Timeout) ->
 %%--------------------------------------------------------------------
 -spec arrange_by_node(Nodes :: [atom()], ItemStatuses) ->
     [{Node :: atom(), [{Listener :: atom(), Status :: healthcheck_response()}]}] when
-    ItemStatuses :: {INode :: node(), IName :: atom(), Result :: healthcheck_response()}.
+    ItemStatuses :: [{INode :: node(), IName :: atom(), Result :: healthcheck_response()}].
 arrange_by_node(Nodes, ItemStatuses) ->
     ItemsByNode = lists:foldl(
         fun({INode, IName, Status}, Proplist) ->
