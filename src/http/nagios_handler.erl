@@ -91,7 +91,8 @@ handle(Req, State) ->
                         NodeDetails = lists:map(
                             fun({Component, Status}) ->
                                 StatusList = case Status of
-                                                 {error, Desc} -> "error: " ++ atom_to_list(Desc);
+                                                 {error, Desc} ->
+                                                     "error: " ++ atom_to_list(Desc);
                                                  _ -> atom_to_list(Status)
                                              end,
                                 {Component, [{status, StatusList}], []}
@@ -323,22 +324,7 @@ check_workers(Nodes, Workers, Timeout) ->
                 end,
             {WNode, WName, Result}
         end, Workers),
-
-    WorkersByNode = lists:foldl(
-        fun({WNode, WName, Status}, Proplist) ->
-            NewWorkerList = [{WName, Status} | proplists:get_value(WNode, Proplist, [])],
-            [{WNode, NewWorkerList} | proplists:delete(WNode, Proplist)]
-        end, [], WorkerStatuses),
-
-    % If a node hosts no workers, it won't be on the WorkersByNode list, so lets add it.
-    EmptyNodes = lists:foldl(
-        fun(Node, Acc) ->
-            case proplists:get_value(Node, WorkersByNode) of
-                undefined -> [{Node, []} | Acc];
-                _ -> Acc
-            end
-        end, [], Nodes),
-    WorkersByNode ++ EmptyNodes.
+    arrange_by_node(Nodes, WorkerStatuses).
 
 
 %%--------------------------------------------------------------------
@@ -361,19 +347,30 @@ check_listeners(Nodes, Listeners, Timeout) ->
                 end,
             {LNode, LName, Result}
         end, Listeners),
+    arrange_by_node(Nodes, ListenerStatuses).
 
-    ListenersByNode = lists:foldl(
-        fun({LNode, LName, Status}, Proplist) ->
-            NewListenerList = [{LName, Status} | proplists:get_value(LNode, Proplist, [])],
-            [{LNode, NewListenerList} | proplists:delete(LNode, Proplist)]
-        end, [], ListenerStatuses),
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Arranges given items (workers, listeners) by node and includes empty nodes.
+%% @end
+%%--------------------------------------------------------------------
+-spec arrange_by_node(Nodes :: [atom()], ItemStatuses) ->
+    [{Node :: atom(), [{Listener :: atom(), Status :: healthcheck_response()}]}] when
+    ItemStatuses :: {INode :: node(), IName :: atom(), Result :: healthcheck_response()}.
+arrange_by_node(Nodes, ItemStatuses) ->
+    ItemsByNode = lists:foldl(
+        fun({INode, IName, Status}, Proplist) ->
+            NewItemList = [{IName, Status} | proplists:get_value(INode, Proplist, [])],
+            [{INode, NewItemList} | proplists:delete(INode, Proplist)]
+        end, [], ItemStatuses),
 
     % If a has no listeners, it won't be on the ListenersByNode list, so lets add it.
     EmptyNodes = lists:foldl(
         fun(Node, Acc) ->
-            case proplists:get_value(Node, ListenersByNode) of
+            case proplists:get_value(Node, ItemsByNode) of
                 undefined -> [{Node, []} | Acc];
                 _ -> Acc
             end
         end, [], Nodes),
-    ListenersByNode ++ EmptyNodes.
+    ItemsByNode ++ EmptyNodes.
