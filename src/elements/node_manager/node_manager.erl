@@ -159,7 +159,8 @@ init([]) ->
                         ok;
                     _ ->
                         ?error("The port ~B for ~p is not free. Terminating.",
-                            [erlang:apply(Module, port, []), Module])
+                            [erlang:apply(Module, port, []), Module]),
+                        throw(ports_are_not_free)
                 end
             end, node_manager:listeners()),
 
