@@ -365,7 +365,7 @@ arrange_by_node(Nodes, ItemStatuses) ->
             [{INode, NewItemList} | proplists:delete(INode, Proplist)]
         end, [], ItemStatuses),
 
-    % If a has no listeners, it won't be on the ListenersByNode list, so lets add it.
+    % If a node has no listeners, it won't be on the ListenersByNode list, so lets add it.
     EmptyNodes = lists:foldl(
         fun(Node, Acc) ->
             case proplists:get_value(Node, ItemsByNode) of
