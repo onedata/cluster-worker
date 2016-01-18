@@ -236,7 +236,9 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None):
             workers.append(worker)
             worker_configs[worker] = cfg
             common.merge(current_output, node_out)
-            worker_ips.append(common.get_docker_ip(worker))
+            ip = common.get_docker_ip(worker)
+            worker_ips.append(ip)
+            cfg['nodes']['node']['sys.config']['external_ip'] = ip
 
         domain = cluster_domain(instance, uid)
         for id in worker_configs:

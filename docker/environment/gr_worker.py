@@ -32,17 +32,14 @@ class GRWorkerConfigurator:
         dns_config = open(dns_cfg_path).read()
 
         gr_ips = worker_ips
-        dns_ips = worker_ips
-
         ip_addresses = {
-            domain: gr_ips
+            domain: ["ALL"]
         }
-        ns_servers = []
-        for i in range(len(dns_ips)):
-            ns = 'ns{0}.{1}'.format(i, domain)
-            ns_servers.append(ns)
-            ip_addresses[ns] = [dns_ips[i]]
+
+        ns_servers = ['ns.{0}'.format(domain)]
         primary_ns = ns_servers[0]
+        ip_addresses[primary_ns] = ["ALL"]
+
         mail_exchange = 'mail.{0}'.format(domain)
         ip_addresses[mail_exchange] = [gr_ips[0]]
         admin_mailbox = 'dns-admin.{0}'.format(domain)
@@ -73,8 +70,7 @@ class GRWorkerConfigurator:
             ns_servers,
             dns_config)
 
-        mail_exchange = '{{mail_exchange, [\n        {{10, "{0}"}}\n    ]}},' \
-            .format(mail_exchange)
+        mail_exchange = '{{mail_exchange, [\n        {{10, "{0}"}}\n    ]}},'.format(mail_exchange)
         dns_config = re.sub(
             re.compile(r"\{mail_exchange,\s*\[[^\]]*\]\},", re.MULTILINE),
             mail_exchange,
