@@ -55,4 +55,10 @@
     transactional_global_cache = Transactions
 }).
 
+-record(links, {
+    key,
+    model,
+    link_map = #{}
+}).
+
 -endif.
