@@ -25,13 +25,15 @@ class ProviderWorkerConfigurator:
             sys_config['global_registry_domain'] = gr_hostname
         return cfg
 
-    def configure_started_instance(self, bindir, instance, config, os_config, output):
-        create_storages(config['os_configs'][os_config]['storages'],
-                        output[self.nodes_list_attribute()],
-                        config[self.domains_attribute()][instance][self.app_name()], bindir)
+    def configure_started_instance(self, bindir, instance, config, output):
+        if 'os_config' in config[self.domains_attribute()][instance]:
+            os_config = config[self.domains_attribute()][instance]['os_config']
+            create_storages(config['os_configs'][os_config]['storages'],
+                            output[self.nodes_list_attribute()],
+                            config[self.domains_attribute()][instance][self.app_name()], bindir)
 
     def extra_volumes(self, config):
-        return [common.volume_for_storage(s) for s in config['os_config']['storages']]
+        return [common.volume_for_storage(s) for s in config['os_config']['storages']] if 'os_config' in config else []
 
     def app_name(self):
         return "op_worker"
@@ -52,16 +54,16 @@ def create_storages(storages, op_nodes, op_config, bindir):
     pwd = common.get_script_dir()
     command = ['cp', os.path.join(pwd, script_name), os.path.join(bindir, script_name)]
     subprocess.check_call(command)
-    # execute escript
-    for node in op_nodes:
-        container = node.split("@")[1]
-        worker_name = container.split(".")[0]
-        cookie = op_config[worker_name]['vm.args']['setcookie']
-        script_path = os.path.join(DOCKER_BINDIR_PATH, script_name)
-        for st_path in storages:
-            st_name = st_path
-            command = ['escript', script_path, cookie, node, st_name, st_path]
-            assert 0 is docker.exec_(container, command, tty=True, stdout=sys.stdout, stderr=sys.stderr)
+    # execute escript on one of the nodes (storage is common fo the whole provider)
+    first_node = op_nodes[0]
+    container = first_node.split("@")[1]
+    worker_name = container.split(".")[0]
+    cookie = op_config[worker_name]['vm.args']['setcookie']
+    script_path = os.path.join(DOCKER_BINDIR_PATH, script_name)
+    for st_path in storages:
+        st_name = st_path
+        command = ['escript', script_path, cookie, first_node, st_name, st_path]
+        assert 0 is docker.exec_(container, command, tty=True, stdout=sys.stdout, stderr=sys.stderr)
     # clean-up
     command = ['rm', os.path.join(bindir, script_name)]
     subprocess.check_call(command)

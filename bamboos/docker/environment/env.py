@@ -11,7 +11,7 @@ import copy
 import subprocess
 import json
 from . import appmock, client, common, globalregistry, cluster_manager, \
-    provider_worker, cluster_worker, docker, dns
+    worker, provider_worker, cluster_worker, docker, dns
 
 
 def default(key):
@@ -68,34 +68,12 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
         dns.maybe_restart_with_configuration('auto', uid, output)
 
     # Start provider cluster instances
-    if 'provider_domains' in config:
-        # Start cluster_manager instances
-        cluster_manager_output = cluster_manager.up(image, bin_cluster_manager, dns_server,
-                                        uid, config_path, logdir)
-        common.merge(output, cluster_manager_output)
+    setup_worker(provider_worker, bin_op_worker, 'provider_domains',
+                 bin_cluster_manager, config, config_path, dns_server, image, logdir, output, uid)
 
-        # Start op_worker instances
-        op_worker_output = provider_worker.up(image, bin_op_worker, dns_server, uid, config_path, logdir)
-        common.merge(output, op_worker_output)
-        # Make sure OP domains are added to the dns server.
-        # Setting first arg to 'auto' will force the restart and this is needed
-        # so that dockers that start after can immediately see the domains.
-        dns.maybe_restart_with_configuration('auto', uid, output)
-
-    # Start provider cluster instances
-    if 'cluster_domains' in config:
-        # Start cluster_manager instances
-        cluster_manager_output = cluster_manager.up(image, bin_cluster_manager, dns_server,
-                                        uid, config_path, logdir, domains_name='cluster_domains')
-        common.merge(output, cluster_manager_output)
-
-        # Start op_worker instances
-        cluster_worker_output = cluster_worker.up(image, bin_cluster_worker, dns_server, uid, config_path, logdir)
-        common.merge(output, cluster_worker_output)
-        # Make sure OP domains are added to the dns server.
-        # Setting first arg to 'auto' will force the restart and this is needed
-        # so that dockers that start after can immediately see the domains.
-        dns.maybe_restart_with_configuration('auto', uid, output)
+    # Start stock cluster worker instances
+    setup_worker(cluster_worker, bin_cluster_worker, 'cluster_domains',
+                 bin_cluster_manager, config, config_path, dns_server, image, logdir, output, uid)
 
     # Start oneclient instances
     if 'oneclient' in config:
@@ -115,7 +93,7 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
             for cfg_node in config['provider_domains'][provider_name][
                 'op_worker'].keys():
                 providers_map[provider_name]['nodes'].append(
-                    provider_worker.worker_erl_node_name(cfg_node,
+                    worker.worker_erl_node_name(cfg_node,
                                                          provider_name, uid))
                 providers_map[provider_name]['cookie'] = \
                     config['provider_domains'][provider_name]['op_worker'][
@@ -153,3 +131,19 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
         )
 
     return output
+
+
+def setup_worker(worker, bin_worker, domains_name, bin_cm, config, config_path, dns_server, image, logdir, output, uid):
+    if domains_name in config:
+        # Start cluster_manager instances
+        cluster_manager_output = cluster_manager.up(image, bin_cm, dns_server, uid, config_path, logdir,
+                                                    domains_name=domains_name)
+        common.merge(output, cluster_manager_output)
+
+        # Start op_worker instances
+        cluster_worker_output = worker.up(image, bin_worker, dns_server, uid, config_path, logdir)
+        common.merge(output, cluster_worker_output)
+        # Make sure OP domains are added to the dns server.
+        # Setting first arg to 'auto' will force the restart and this is needed
+        # so that dockers that start after can immediately see the domains.
+        dns.maybe_restart_with_configuration('auto', uid, output)
