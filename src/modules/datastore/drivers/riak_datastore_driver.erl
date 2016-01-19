@@ -35,13 +35,23 @@
 -type riak_connection() :: {riak_node(), ConnectionHandle :: term()}.
 
 %% store_driver_behaviour callbacks
--export([init_bucket/3, healthcheck/1]).
+-export([init_driver/1, init_bucket/3, healthcheck/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback init_driver/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
+init_driver(State) ->
+    {ok, State}.
+
 
 %%--------------------------------------------------------------------
 %% @doc

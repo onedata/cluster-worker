@@ -34,7 +34,7 @@
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
 
-    %% Get Riak nodes
+    %% Get DB nodes
     DBNodes =
         case plugins:apply(node_manager_plugin, db_nodes, []) of
             {ok, Nodes} ->
@@ -47,13 +47,20 @@ init(_Args) ->
                 []
         end,
 
-    State = lists:foldl(
+    State0 = #{db_nodes => DBNodes},
+    State1 = lists:foldl(
+        fun(Driver, StateAcc0) ->
+            DriverMod = datastore:driver_to_module(Driver),
+            DriverMod:init_driver(StateAcc0)
+        end, State0, [?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER, ?PERSISTENCE_DRIVER]),
+
+    State2 = lists:foldl(
         fun(Model, StateAcc) ->
             #model_config{name = RecordName} = ModelConfig = Model:model_init(),
             maps:put(RecordName, ModelConfig, StateAcc)
-        end, #{}, datastore_config:models()),
+        end, State1, datastore_config:models()),
 
-    {ok, State#{db_nodes => DBNodes}}.
+    {ok, State2}.
 
 %%--------------------------------------------------------------------
 %% @doc
