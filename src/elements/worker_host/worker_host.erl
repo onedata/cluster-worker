@@ -144,9 +144,9 @@ handle_call(_Request, _From, State) ->
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
 %% Spawning migrated to worker proxy
-%% handle_cast(#worker_request{} = Req, State = #host_state{plugin = Plugin}) ->
-%%     spawn(fun() -> proc_request(Plugin, Req) end),
-%%     {noreply, State};
+ handle_cast(#worker_request{} = Req, State = #host_state{plugin = Plugin}) ->
+     spawn(fun() -> proc_request(Plugin, Req) end),
+     {noreply, State};
 
 handle_cast({progress_report, Report}, State) ->
     NewLoadInfo = save_progress(Report, State#host_state.load_info),
@@ -179,7 +179,7 @@ handle_info({'EXIT', Pid, Reason}, State) ->
     {noreply, State};
 
 handle_info({timer, Msg}, State) ->
-    gen_server:cast(self(), Msg),
+    gen_server:cast(self(), #worker_request{req = Msg}),
     {noreply, State};
 
 handle_info(Msg, State) ->
