@@ -51,7 +51,8 @@ init(_Args) ->
     State1 = lists:foldl(
         fun(Driver, StateAcc0) ->
             DriverMod = datastore:driver_to_module(Driver),
-            DriverMod:init_driver(StateAcc0)
+            {ok, NState} = DriverMod:init_driver(StateAcc0),
+            NState
         end, State0, [?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER, ?PERSISTENCE_DRIVER]),
 
     State2 = lists:foldl(
