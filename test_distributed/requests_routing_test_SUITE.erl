@@ -32,6 +32,7 @@ all() ->
 
 -define(REQUEST_TIMEOUT, timer:seconds(10)).
 -define(REPEATS, 100).
+-define(SUCCESS_RATE, 95).
 
 %%%===================================================================
 %%% Test functions
@@ -39,6 +40,7 @@ all() ->
 
 -performance([
     {repeats, ?REPEATS},
+    {success_rate, ?SUCCESS_RATE},
     {description, "Performs one worker_proxy call per use case"},
     {config, [{name, simple_call}, {description, "Basic config for test"}]}
 ]).
@@ -66,6 +68,7 @@ simple_call_test(Config) ->
 
 -performance([
     {repeats, ?REPEATS},
+    {success_rate, ?SUCCESS_RATE},
     {parameters, [
         [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
         [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
@@ -107,6 +110,7 @@ direct_cast_test(Config) ->
 
 -performance([
     {repeats, ?REPEATS},
+    {success_rate, ?SUCCESS_RATE},
     {parameters, [
         [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
         [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
@@ -148,6 +152,7 @@ redirect_cast_test(Config) ->
 
 -performance([
     {repeats, ?REPEATS},
+    {success_rate, ?SUCCESS_RATE},
     {parameters, [
         [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
         [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
