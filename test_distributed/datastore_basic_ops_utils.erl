@@ -606,12 +606,10 @@ unset_hooks(Case, Config) ->
 
     case check_config_name(Case) of
         global ->
-            ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
-            ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000));
+            clear_cache(W);
         local ->
             lists:foreach(fun(Wr) ->
-                ?assertMatch(ok, ?call(Wr, caches_controller, wait_for_cache_dump, [])),
-                ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Wr}, clear_mem_synch, 60000))
+                clear_cache(Wr)
             end, Workers),
             test_utils:mock_validate_and_unload(Workers, caches_controller);
         _ ->
@@ -625,6 +623,15 @@ unset_hooks(Case, Config) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+clear_cache(W) ->
+    case performance:is_stress_test() of
+        false ->
+            ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
+            ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000));
+        _ ->
+            ok
+    end.
 
 for(1, F) ->
     F();
