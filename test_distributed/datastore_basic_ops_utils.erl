@@ -49,7 +49,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     TestFun = fun(DocsSet) ->
@@ -127,7 +127,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     SaveMany = fun(DocsSet) ->
@@ -183,7 +183,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     UpdateMany = fun(DocsSet) ->
@@ -271,7 +271,7 @@ get_test(Config, Level) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     GetMany = fun(DocsSet) ->
@@ -358,7 +358,7 @@ exists_test(Config, Level) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     ExistMultiCheck = fun(DocsSet) ->
@@ -433,12 +433,7 @@ mixed_test(Config, Level) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    case performance:is_stress_test() of
-        true ->
-            put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
-        _ ->
-            disable_cache_control(Workers)
-    end,
+    set_test_type(Workers),
     Master = self(),
 
     CreateMany = fun(DocsSet) ->
@@ -720,4 +715,15 @@ check_config_name(Case) ->
             end;
         _ ->
             no_hooks
+    end.
+
+set_test_type(Workers) ->
+    case {performance:is_stress_test(), performance:is_standard_test()} of
+        {true, _} ->
+            put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
+        {false, false} ->
+            put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
+            disable_cache_control(Workers);
+        _ ->
+            disable_cache_control(Workers)
     end.
