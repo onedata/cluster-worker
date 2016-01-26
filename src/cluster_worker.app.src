@@ -73,25 +73,24 @@
             % names of modules implementing given plugins
             {datastore_config_plugin, datastore_config_plugin_default},
             {node_manager_plugin, node_manager_plugin_default},
-            {http_worker_plugin, http_worker_plugin_default},
             {dns_worker_plugin, dns_worker_plugin_default},
 
             %% ===================================================================
-            %% HTTP_WORKER
+            %% HTTP
             %% ===================================================================
 
             %% Port on which nagios is available
-            {http_worker_nagios_port, 6666},
+            {http_nagios_port, 6666},
             %% Port on which standard HTTP will be opened to redirect requests to HTTPS
-            {http_worker_redirect_port, 80},
-            %% Number of accepting processes in http_worker listener
-            {http_worker_number_of_acceptors, 100},
+            {http_redirect_port, 80},
+            %% Number of accepting processes in http listeners
+            {http_number_of_acceptors, 100},
             %% Number of accepting processes on port 80 (redirecting to https)
-            {http_worker_number_of_http_acceptors, 50},
+            {http_number_of_http_acceptors, 50},
             %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
-            {http_worker_max_keepalive, 30},
+            {http_max_keepalive, 30},
             %% Socket timeout in sek
-            {http_worker_socket_timeout_seconds, 60},
+            {http_socket_timeout_seconds, 60},
 
             %% ===================================================================
             %% NAGIOS

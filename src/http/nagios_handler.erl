@@ -91,7 +91,8 @@ handle(Req, State) ->
                         NodeDetails = lists:map(
                             fun({Component, Status}) ->
                                 StatusList = case Status of
-                                                 {error, Desc} -> "error: " ++ atom_to_list(Desc);
+                                                 {error, Desc} ->
+                                                     "error: " ++ atom_to_list(Desc);
                                                  _ -> atom_to_list(Status)
                                              end,
                                 {Component, [{status, StatusList}], []}
@@ -141,6 +142,9 @@ terminate(_Reason, _Req, _State) ->
 %%         {Worker1, W1Status},
 %%         {Worker2, W2Status},
 %%         {Worker3, W3Status},
+%%         {Listener1, L1Status},
+%%         {Listener2, L2Status},
+%%         {Listener3, L3Status}
 %%     ]},
 %%     {Node2, Node2Status, [
 %%         ...
@@ -168,7 +172,9 @@ get_cluster_status(Timeout) ->
                 DistpatcherStatuses = check_dispatchers(Nodes, Timeout),
                 Workers = [{Node, Name} || Node <- Nodes, Name <- node_manager:modules()],
                 WorkerStatuses = check_workers(Nodes, Workers, Timeout),
-                {ok, _} = calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses)
+                Listeners = [{Node, Name} || Node <- Nodes, Name <- node_manager:listeners()],
+                ListenerStatuses = check_listeners(Nodes, Listeners, Timeout),
+                {ok, _} = calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses, ListenerStatuses)
             catch
                 Type:Error ->
                     ?error_stacktrace("Unexpected error during healthcheck: ~p:~p", [Type, Error]),
@@ -183,11 +189,13 @@ get_cluster_status(Timeout) ->
 %% constructing it from statuses of all components.
 %% @end
 %%--------------------------------------------------------------------
--spec calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses) -> {ok, ClusterStatus} when
+-spec calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses, ListenerStatuses) ->
+    {ok, ClusterStatus} when
     Nodes :: [Node],
     NodeManagerStatuses :: [{Node, Status}],
     DistpatcherStatuses :: [{Node, Status}],
     WorkerStatuses :: [{Node, [{Worker :: atom(), Status}]}],
+    ListenerStatuses :: [{Node, [{Listener :: atom(), Status}]}],
     Node :: node(),
     Status :: healthcheck_response(),
     ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
@@ -195,18 +203,19 @@ get_cluster_status(Timeout) ->
     {ModuleName :: module(), Status}
     ]}
     ]}.
-calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses) ->
+calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses, ListenerStatuses) ->
     NodeStatuses =
         lists:map(
             fun(Node) ->
                 % Get all statuses for this node
                 % They are all in form:
                 % {ModuleName, ok | out_of_sync | {error, atom()}}
-                AllStatuses = [
+                AllStatuses = lists:flatten([
                     {?NODE_MANAGER_NAME, proplists:get_value(Node, NodeManagerStatuses)},
-                    {?DISPATCHER_NAME, proplists:get_value(Node, DistpatcherStatuses)}
-                    | lists:usort(proplists:get_value(Node, WorkerStatuses))
-                ],
+                    {?DISPATCHER_NAME, proplists:get_value(Node, DistpatcherStatuses)},
+                    lists:usort(proplists:get_value(Node, WorkerStatuses)),
+                    lists:usort(proplists:get_value(Node, ListenerStatuses))
+                ]),
                 % Calculate status of the whole node - it's the same as the worst status of any child
                 % ok < out_of_sync < error
                 % i. e. if any node component has an error, node's status will be 'error'.
@@ -315,19 +324,53 @@ check_workers(Nodes, Workers, Timeout) ->
                 end,
             {WNode, WName, Result}
         end, Workers),
+    arrange_by_node(Nodes, WorkerStatuses).
 
-    WorkersByNode = lists:foldl(
-        fun({WNode, WName, Status}, Proplist) ->
-            NewWorkerList = [{WName, Status} | proplists:get_value(WNode, Proplist, [])],
-            [{WNode, NewWorkerList} | proplists:delete(WNode, Proplist)]
-        end, [], WorkerStatuses),
 
-    % If a node hosts no workers, it won't be on the WorkersByNode list, so lets add it.
+%%--------------------------------------------------------------------
+%% @doc
+%% Health-checks given listeners on given node. The check is performed in parallel (one process per listener).
+%% Listeners are grouped into one list per each node. Nodes without workers will have empty lists.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_listeners(Nodes :: [atom()], Listeners :: [{Node :: atom(), ListenerName :: atom()}], Timeout :: integer()) ->
+    [{Node :: atom(), [{Listener :: atom(), Status :: healthcheck_response()}]}].
+check_listeners(Nodes, Listeners, Timeout) ->
+    ListenerStatuses = utils:pmap(
+        fun({LNode, LName}) ->
+            Result =
+                try
+                    rpc:call(LNode, LName, healthcheck, [], Timeout)
+                catch T:M ->
+                    ?error("Connection error during check of listener ~p at ~p: ~p:~p", [LName, LNode, T, M]),
+                    {error, timeout}
+                end,
+            {LNode, LName, Result}
+        end, Listeners),
+    arrange_by_node(Nodes, ListenerStatuses).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Arranges given items (workers, listeners) by node and includes empty nodes.
+%% @end
+%%--------------------------------------------------------------------
+-spec arrange_by_node(Nodes :: [atom()], ItemStatuses) ->
+    [{Node :: atom(), [{Listener :: atom(), Status :: healthcheck_response()}]}] when
+    ItemStatuses :: [{INode :: node(), IName :: atom(), Result :: healthcheck_response()}].
+arrange_by_node(Nodes, ItemStatuses) ->
+    ItemsByNode = lists:foldl(
+        fun({INode, IName, Status}, Proplist) ->
+            NewItemList = [{IName, Status} | proplists:get_value(INode, Proplist, [])],
+            [{INode, NewItemList} | proplists:delete(INode, Proplist)]
+        end, [], ItemStatuses),
+
+    % If a node has no listeners, it won't be on the ListenersByNode list, so lets add it.
     EmptyNodes = lists:foldl(
         fun(Node, Acc) ->
-            case proplists:get_value(Node, WorkersByNode) of
+            case proplists:get_value(Node, ItemsByNode) of
                 undefined -> [{Node, []} | Acc];
                 _ -> Acc
             end
         end, [], Nodes),
-    WorkersByNode ++ EmptyNodes.
+    ItemsByNode ++ EmptyNodes.

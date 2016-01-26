@@ -28,8 +28,7 @@
 
 -define(CLUSTER_WORKER_MODULES, [
     {datastore_worker, []},
-    {dns_worker, []},
-    {http_worker, []}
+    {dns_worker, []}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
     dns_listener,
@@ -74,7 +73,8 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
-    lists:map(fun({Module, _}) -> Module end, plugins:apply(node_manager_plugin, modules_with_args, [])).
+    lists:map(fun({Module, _}) ->
+        Module end, plugins:apply(node_manager_plugin, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -145,13 +145,29 @@ refresh_ip_address() ->
     State :: term(),
     Timeout :: non_neg_integer() | infinity.
 init([]) ->
-    process_flag(trap_exit,true),
+    process_flag(trap_exit, true),
     try
         ok = plugins:apply(node_manager_plugin, on_init, [[]]),
 
         ?info("Plugin initailised"),
 
-        lists:foreach(fun(Module) -> ok = erlang:apply(Module, start, []) end, node_manager:listeners()),
+        ?info("Checking if all ports are free..."),
+        lists:foreach(
+            fun(Module) ->
+                case erlang:apply(Module, healthcheck, []) of
+                    {error, server_not_responding} ->
+                        ok;
+                    _ ->
+                        ?error("The port ~B for ~p is not free. Terminating.",
+                            [erlang:apply(Module, port, []), Module]),
+                        throw(ports_are_not_free)
+                end
+            end, node_manager:listeners()),
+
+        ?info("Ports OK, starting listeners..."),
+
+        lists:foreach(fun(Module) ->
+            ok = erlang:apply(Module, start, []) end, node_manager:listeners()),
         ?info("All listeners started"),
 
         next_mem_check(),
@@ -329,14 +345,14 @@ handle_info({nodedown, Node}, State) ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
         true ->
             ok
-            % TODO maybe node_manager should be restarted along with all workers to
-            % avoid desynchronization of modules between nodes.
+    % TODO maybe node_manager should be restarted along with all workers to
+    % avoid desynchronization of modules between nodes.
 %%             ?error("Connection to cluster manager lost, restarting node"),
 %%             throw(connection_to_cm_lost)
     end,
     {noreply, State};
 
-handle_info(_Request,  State) ->
+handle_info(_Request, State) ->
     plugins:apply(node_manager_plugin, handle_info_extension, [_Request, State]).
 
 %%--------------------------------------------------------------------
@@ -356,7 +372,8 @@ handle_info(_Request,  State) ->
 terminate(_Reason, _State) ->
     ?info("Shutting down ~p due to ~p", [?MODULE, _Reason]),
 
-    lists:foreach(fun(Module) -> erlang:apply(Module, stop, []) end, node_manager:listeners()),
+    lists:foreach(fun(Module) ->
+        erlang:apply(Module, stop, []) end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
     plugins:apply(node_manager_plugin, on_terminate, [_Reason, _State]).
@@ -525,7 +542,8 @@ init_node() ->
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    lists:foreach(fun({Module, Args}) -> ok = start_worker(Module, Args) end, plugins:apply(node_manager_plugin, modules_with_args, [])),
+    lists:foreach(fun({Module, Args}) ->
+        ok = start_worker(Module, Args) end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.
 
