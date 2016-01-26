@@ -55,6 +55,7 @@
     transactional_global_cache = Transactions
 }).
 
+%% Internal semi-model used by document that holds links between documents
 -record(links, {
     key,
     model,

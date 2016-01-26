@@ -25,6 +25,9 @@
 
 -define(LINKS_KEY_SUFFIX, "$$").
 
+%% Base port for gateway endpoints
+-define(GATEWAY_BASE_PORT, 5084).
+
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
@@ -54,8 +57,16 @@ init_driver(#{db_nodes := DBNodes} = State) ->
     {ok, State#{db_gateways => maps:from_list(Gateways)}}.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
+%% Spawned couchbase-sync-gateway connects to given couchbase node and gives CouchDB-like
+%% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
+%% @end
+%%--------------------------------------------------------------------
+-spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
 start_gateway(Parent, N, Hostname, Port) ->
-    GWPort = 5084 + N,
+    GWPort = ?GATEWAY_BASE_PORT + N,
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
 
@@ -76,6 +87,13 @@ start_gateway(Parent, N, Hostname, Port) ->
     gateway_loop(State).
 
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Loop for managing Erlang Port (couchbase-sync-gateway).
+%% @end
+%%--------------------------------------------------------------------
+-spec gateway_loop(State :: #{atom() => term()}) -> no_return().
 gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port} = State) ->
     try port_command(PortFD, <<"ping">>) of
         true -> ok
@@ -146,7 +164,6 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
                 {ok, #document{rev = undefined}} ->
                     create(ModelConfig, Doc);
                 {ok, #document{rev = Rev}} ->
-%%                    ?info("Resave with rev: ~p", [Rev]),
                     save(ModelConfig, Doc#document{rev = Rev})
             end
         end);
@@ -160,7 +177,6 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
     
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-%%    ?info("Save ~p with rev: ~p", [Key, Rev]),
     case couchbeam:save_doc(DB, Doc) of
         {ok, {_}} ->
             {ok, Key};
@@ -180,7 +196,6 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    ?info("Save ~p with rev: ~p", [Key, Doc]),
     case couchbeam:save_doc(DB, Doc, [{<<"new_edits">>, <<"false">>}]) of
         {ok, {_}} ->
             {ok, Key};
@@ -258,7 +273,7 @@ create_or_update(#model_config{} = _ModelConfig, #document{key = _Key, value = _
 get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
     {ok, DB} = get_db(),
     case couchbeam:open_doc(DB, to_driver_key(Bucket, Key)) of
-        {ok, {Proplist} = Doc} ->
+        {ok, {Proplist} = _Doc} ->
             {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
             Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
             Proplist2 = Proplist -- Proplist1,
@@ -500,11 +515,6 @@ to_binary(Term) ->
     term_to_base64(Term).
 
 
-rev(Rev) when is_list(Rev) ->
-    list_to_binary(Rev);
-rev(Rev) when is_binary(Rev) ->
-    Rev.
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -520,6 +530,13 @@ from_binary(Bin) ->
     Bin.
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Translates given internal model's record format into couchbeam document.
+%% @end
+%%--------------------------------------------------------------------
+-spec to_json_term(term()) -> term().
 to_json_term(Term) when is_integer(Term) ->
     Term;
 to_json_term(Term) when is_binary(Term) ->
@@ -545,6 +562,13 @@ to_json_term(Term) ->
     to_binary(Term).
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Translates given couchbeam document into internal model's record format.
+%% @end
+%%--------------------------------------------------------------------
+-spec from_json_term(term()) -> term().
 from_json_term(Term) when is_integer(Term) ->
     Term;
 from_json_term(Term) when is_boolean(Term) ->
@@ -558,7 +582,7 @@ from_json_term({Term}) when is_list(Term) ->
         false ->
             Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
             maps:from_list(Proplist2);
-        {_, RecordType} ->
+        {_, _RecordType} ->
             Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<"RECORD::">>],
             Proplist1 = lists:sort(Proplist0),
             {_, Values} = lists:unzip(Proplist1),
@@ -568,19 +592,43 @@ from_json_term(Term) when is_binary(Term) ->
     from_binary(Term).
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns key for document holding links for given document.
+%% @end
+%%--------------------------------------------------------------------
 -spec links_doc_key(Bucket :: atom(), Key :: datastore:key()) -> BinKey :: binary().
 links_doc_key(_Bucket, Key) ->
     <<Key/binary, ?LINKS_KEY_SUFFIX>>.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Generates key used by driver itself for storing document for given Bucket/Key combination.
+%% @end
+%%--------------------------------------------------------------------
 -spec to_driver_key(Bucket :: datastore:bucket(), Key :: datastore:key()) -> BinKey :: binary().
 to_driver_key(Bucket, Key) ->
     base64:encode(term_to_binary({Bucket, Key})).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Reverses to_driver_key/1
+%% @end
+%%--------------------------------------------------------------------
 -spec from_driver_key(RawKey :: binary()) -> {Bucket :: datastore:bucket(), Key :: datastore:key()}.
 from_driver_key(RawKey) ->
     binary_to_term(base64:decode(RawKey)).
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns DB handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
 -spec get_db() -> {ok, term()} | {error, term()}.
 get_db() ->
     Gateways = maps:values(datastore_worker:state_get(db_gateways)),
@@ -603,16 +651,13 @@ get_db() ->
 %%                                    CHANGES                                         %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-
-%% API
-
 -record(state, {
     callback,
     until,
     last_seq
 }).
+
+%% API
 
 changes_start_link(Callback, Since, Until) ->
     {ok, Db} = get_db(),
@@ -621,7 +666,7 @@ changes_start_link(Callback, Since, Until) ->
 
 
 init([Callback, Until]) ->
-    ?info("INIT CHANGES ~p", [Until]),
+    ?debug("Starting changes stream until ~p", [Until]),
     {ok, #state{callback = Callback, until = Until}}.
 
 handle_change({done, _LastSeq}, State) ->
@@ -659,7 +704,7 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 terminate(Reason, _State) ->
-    ?info("~p terminating with reason ~p~n", [?MODULE, Reason]),
+    ?warning("~p terminating with reason ~p~n", [?MODULE, Reason]),
     ok.
 
 
@@ -674,10 +719,7 @@ process_raw_doc({RawDoc}) ->
     {_, Key} = from_driver_key(RawKey),
     RawDoc1 = [KV || {<<"_", _/binary>>, _} = KV <- RawDoc],
     RawDoc2 = RawDoc -- RawDoc1,
-    RevInfo = rev_to_rev_info(Rev),
     {ok, {RawRichDoc}} = couchbeam:open_doc(DB, RawKey, [{<<"revs">>, <<"true">>}, {<<"rev">>, Rev}]),
-
-%%    ?info("RawRichDoc ~p", [RawRichDoc]),
     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, RawRichDoc),
     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
