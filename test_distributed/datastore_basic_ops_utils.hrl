@@ -14,7 +14,8 @@
 
 -define(basic_test_def(Desc),
     [
-        {repeats, 1},
+        {repeats, 5},
+        {success_rate, 80},
         {parameters, [
             [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
             [{name, docs_per_thead}, {value, 3}, {description, "Number of documents used by single threads."}],
@@ -24,6 +25,8 @@
         {description, Desc},
         {config, [{name, single_short_thread},
             {description, "Test config that uses single thread that does only few operations on few docs"},
+            {repeats, 20},
+            {success_rate, 95},
             {parameters, [
                 [{name, threads_num}, {value, 1}],
                 [{name, docs_per_thead}, {value, 5}],
@@ -73,6 +76,7 @@
 -define(long_test_def,
     [
         {repeats, 30},
+        {success_rate, 95},
         {parameters, [
             [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
             [{name, docs_per_thead}, {value, 3}, {description, "Number of documents used by single threads."}],
