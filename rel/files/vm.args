@@ -8,7 +8,7 @@
 +W w
 
 ## Increase number of concurrent ports/sockets
-## Warning: too high growth consumes a lot o memory
+## Warning: too high growth of this param consumes a lot of memory
 -env ERL_MAX_PORTS 1000000
 
 ## Increase number of processes
