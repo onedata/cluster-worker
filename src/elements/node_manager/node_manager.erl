@@ -414,17 +414,24 @@ connect_to_cm(State = #state{cm_con_status = connected}) ->
     State;
 connect_to_cm(State = #state{cm_con_status = not_connected}) ->
     % Not connected to cluster manager, try and automatically schedule the next try
-    {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, cm_connection_retry_period),
     erlang:send_after(Interval, self(), {timer, connect_to_cm}),
-    case (catch init_net_connection(CMNodes)) of
-        ok ->
-            ?info("Initializing connection to cluster manager"),
-            gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
-            State#state{cm_con_status = connected};
-        Err ->
-            ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
-            State#state{cm_con_status = not_connected}
+    case whereis(?MAIN_WORKER_SUPERVISOR_NAME) of
+        undefined ->
+            % Main application did not started workers supervisor
+            ?debug("Workers supervisor not started, retrying in ~p ms", [Interval]),
+            State#state{cm_con_status = not_connected};
+        _ ->
+            {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+            case (catch init_net_connection(CMNodes)) of
+                ok ->
+                    ?info("Initializing connection to cluster manager"),
+                    gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
+                    State#state{cm_con_status = connected};
+                Err ->
+                    ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
+                    State#state{cm_con_status = not_connected}
+            end
     end.
 
 %%--------------------------------------------------------------------
