@@ -12,6 +12,8 @@
 -module(cluster_worker_specs).
 -author("Michal Zmuda").
 
+-include("global_definitions.hrl").
+
 %% API
 -export([main_worker_sup_spec/0, request_dispatcher_spec/0, node_manager_spec/0]).
 
@@ -23,7 +25,7 @@
 %%--------------------------------------------------------------------
 -spec main_worker_sup_spec() -> supervisor:child_spec().
 main_worker_sup_spec() ->
-  Id = Module = main_worker_sup,
+  Id = Module = ?MAIN_WORKER_SUPERVISOR_NAME,
   Restart = permanent,
   Shutdown = infinity,
   Type = supervisor,

@@ -14,6 +14,7 @@
 -module(datastore_basic_ops_utils).
 -author("Michal Wrzeszcz").
 
+-include("global_definitions.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("annotations/include/annotations.hrl").
@@ -48,7 +49,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     TestFun = fun(DocsSet) ->
@@ -126,7 +127,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     SaveMany = fun(DocsSet) ->
@@ -182,7 +183,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     UpdateMany = fun(DocsSet) ->
@@ -270,7 +271,7 @@ get_test(Config, Level) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     GetMany = fun(DocsSet) ->
@@ -357,7 +358,7 @@ exists_test(Config, Level) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    disable_cache_control(Workers),
+    set_test_type(Workers),
     Master = self(),
 
     ExistMultiCheck = fun(DocsSet) ->
@@ -432,12 +433,7 @@ mixed_test(Config, Level) ->
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
 
-    case performance:is_stress_test() of
-        true ->
-            put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
-        _ ->
-            disable_cache_control(Workers)
-    end,
+    set_test_type(Workers),
     Master = self(),
 
     CreateMany = fun(DocsSet) ->
@@ -553,9 +549,84 @@ mixed_test(Config, Level) ->
             description = "Average time of get/exist"}
     ].
 
+set_hooks(Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    ok = test_node_starter:load_modules(Workers, [?MODULE]),
+
+    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    ModelConfig = lists:map(fun(Method) ->
+        {some_record, Method}
+    end, Methods),
+
+    case check_config_name(Case) of
+        global ->
+            ok;
+        local ->
+            test_utils:mock_new(Workers, caches_controller),
+            test_utils:mock_expect(Workers, caches_controller, cache_to_datastore_level, fun(ModelName) ->
+                case lists:member(ModelName, datastore_config:global_caches() -- [some_record]) of
+                    true -> global_only;
+                    _ -> local_only
+                end
+            end),
+            test_utils:mock_expect(Workers, caches_controller, cache_to_task_level, fun(ModelName) ->
+                case lists:member(ModelName, datastore_config:global_caches() -- [some_record]) of
+                    true -> cluster;
+                    _ -> node
+                end
+            end);
+        _ ->
+            lists:foreach(fun(W) ->
+                lists:foreach(fun(MC) ->
+                    ?assert(?call(W, ets, delete_object, [datastore_local_state, {MC, cache_controller}]))
+                end, ModelConfig)
+            end, Workers)
+    end,
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 250)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, 1000))
+    end, Workers),
+
+    Config.
+
+unset_hooks(Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    [W | _] = Workers,
+
+    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    ModelConfig = lists:map(fun(Method) ->
+        {some_record, Method}
+    end, Methods),
+
+    case check_config_name(Case) of
+        global ->
+            clear_cache(W);
+        local ->
+            lists:foreach(fun(Wr) ->
+                clear_cache(Wr)
+            end, Workers),
+            test_utils:mock_validate_and_unload(Workers, caches_controller);
+        _ ->
+            lists:foreach(fun(Wr) ->
+                lists:foreach(fun(MC) ->
+                    ?assert(?call(Wr, ets, insert, [datastore_local_state, {MC, cache_controller}]))
+                end, ModelConfig)
+            end, Workers)
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+clear_cache(W) ->
+    case performance:is_stress_test() of
+        false ->
+            ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
+            ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000));
+        _ ->
+            ok
+    end.
 
 for(1, F) ->
     F();
@@ -632,68 +703,6 @@ disable_cache_control(Workers) ->
         ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
     end, Workers).
 
-set_hooks(Case, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    ok = test_node_starter:load_modules(Workers, [?MODULE]),
-
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
-    ModelConfig = lists:map(fun(Method) ->
-        {some_record, Method}
-    end, Methods),
-
-    case check_config_name(Case) of
-        global ->
-            ok;
-        local ->
-            test_utils:mock_new(Workers, caches_controller),
-            test_utils:mock_expect(Workers, caches_controller, cache_to_datastore_level, fun(ModelName) ->
-                case lists:member(ModelName, datastore_config:global_caches() -- [some_record]) of
-                    true -> global_only;
-                    _ -> local_only
-                end
-            end),
-            test_utils:mock_expect(Workers, caches_controller, cache_to_task_level, fun(ModelName) ->
-                case lists:member(ModelName, datastore_config:global_caches() -- [some_record]) of
-                    true -> cluster;
-                    _ -> node
-                end
-            end);
-        _ ->
-            lists:foreach(fun(W) ->
-                lists:foreach(fun(MC) ->
-                    ?assert(?call(W, ets, delete_object, [datastore_local_state, {MC, cache_controller}]))
-                end, ModelConfig)
-            end, Workers)
-    end,
-    Config.
-
-unset_hooks(Case, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    [W | _] = Workers,
-
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
-    ModelConfig = lists:map(fun(Method) ->
-        {some_record, Method}
-    end, Methods),
-
-    case check_config_name(Case) of
-        global ->
-            ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
-            ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000));
-        local ->
-            lists:foreach(fun(Wr) ->
-                ?assertMatch(ok, ?call(Wr, caches_controller, wait_for_cache_dump, [])),
-                ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Wr}, clear_mem_synch, 60000))
-            end, Workers),
-            test_utils:mock_validate_and_unload(Workers, caches_controller);
-        _ ->
-            lists:foreach(fun(Wr) ->
-                lists:foreach(fun(MC) ->
-                    ?assert(?call(Wr, ets, insert, [datastore_local_state, {MC, cache_controller}]))
-                end, ModelConfig)
-            end, Workers)
-    end.
-
 check_config_name(Case) ->
     CStr = atom_to_list(Case),
     case (string:str(CStr, "cache") > 0) and (string:str(CStr, "sync") == 0) of
@@ -706,4 +715,15 @@ check_config_name(Case) ->
             end;
         _ ->
             no_hooks
+    end.
+
+set_test_type(Workers) ->
+    case {performance:is_stress_test(), performance:is_standard_test()} of
+        {true, _} ->
+            put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
+        {false, false} ->
+            put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
+            disable_cache_control(Workers);
+        _ ->
+            disable_cache_control(Workers)
     end.
