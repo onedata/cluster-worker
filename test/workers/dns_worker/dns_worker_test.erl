@@ -62,7 +62,6 @@ healthcheck_outofsync_test_() ->
             ?assertEqual(1, meck:num_calls(worker_host, state_get, ['_', lb_advice])),
             ?assertEqual(1, meck:num_calls(worker_host, state_get, ['_', last_update])),
             ?assertEqual(1, meck:num_calls(application, get_env, ['_', dns_disp_out_of_sync_threshold])),
-            ?assertEqual(1, meck:num_calls(timer, now_diff, '_')),
             ?assert(meck:validate(application)),
             ?assert(meck:validate(worker_host)),
             ?assert(meck:validate(timer))
@@ -170,7 +169,7 @@ healthcheck_undefined_setup() ->
         fun(_, Param) ->
             case Param of
                 lb_advice -> undefined;
-                last_update -> {1, 2, 3}
+                last_update -> 1
             end
         end).
 
@@ -185,7 +184,7 @@ healthcheck_outofsync_setup() ->
         fun(_, Param) ->
             case Param of
                 lb_advice -> some_lb;
-                last_update -> {1, 2, 3}
+                last_update -> 1
             end
         end),
 

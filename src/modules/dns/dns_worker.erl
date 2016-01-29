@@ -78,7 +78,7 @@ handle(healthcheck) ->
 
 handle({update_lb_advice, LBAdvice}) ->
     ?debug("DNS update of load_balancing advice: ~p", [LBAdvice]),
-    ok = worker_host:state_put(?MODULE, last_update, now()),
+    ok = worker_host:state_put(?MODULE, last_update, erlang:system_time(micro_seconds)),
     ok = worker_host:state_put(?MODULE, lb_advice, LBAdvice);
 
 handle({handle_a, Domain}) ->
@@ -287,8 +287,8 @@ healthcheck() ->
             {error, no_lb_advice_received};
         _ ->
             {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_disp_out_of_sync_threshold),
-            % Threshold is in millisecs, now_diff is in microsecs
-            case timer:now_diff(now(), LastUpdate) > Threshold * 1000 of
+            % Threshold is in millisecs, LastUpdate is in microsecs
+            case (erlang:system_time(micro_seconds) - LastUpdate) > Threshold * 1000 of
                 true ->
                     % DNS is out of sync
                     out_of_sync;
