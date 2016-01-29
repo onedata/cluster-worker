@@ -657,18 +657,43 @@ get_db() ->
     last_seq
 }).
 
+-type gen_changes_state() :: #{}.
+
 %% API
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Starts changes stream with given callback function that is called on every change received from DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec changes_start_link(
+    Callback :: fun((Seq :: non_neg_integer(), datastore:document() | stream_ended, model_behaviour:model_type() | undefined) -> ok),
+    Since :: non_neg_integer(), Until :: non_neg_integer()) -> {ok, pid()}.
 changes_start_link(Callback, Since, Until) ->
     {ok, Db} = get_db(),
     Opts = [{<<"include_docs">>, <<"true">>}, {since, Since}, {<<"revs_info">>, <<"true">>}],
     gen_changes:start_link(?MODULE, Db, Opts, [Callback, Until]).
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% init/1 callback for gen_changes server.
+%% @end
+%%--------------------------------------------------------------------
+-spec init(Args :: [term()]) -> {ok, gen_changes_state()}.
 init([Callback, Until]) ->
     ?debug("Starting changes stream until ~p", [Until]),
     {ok, #state{callback = Callback, until = Until}}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% handle_change/2 callback for gen_changes server.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_change(term(), gen_changes_state()) -> {noreply, gen_changes_state()} | {stop, normal, gen_changes_state()}.
 handle_change({done, _LastSeq}, State) ->
     {noreply, State};
 
@@ -680,29 +705,56 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             Seq = seq(Change),
             RawDocOnceAgian = jiffy:decode(jsx:encode(RawDoc)),
             Document = process_raw_doc(RawDocOnceAgian),
-%%            ?info("Got change 2 ~p ~p", [model(Document), Document]),
             catch Callback(Seq, Document, model(Document)),
             State#state{last_seq = Seq}
         catch
             _:Reason ->
-                ?error_stacktrace("ZOMG ~p", [Reason]),
+                ?error_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
                 State
         end,
     {noreply, NewChanges};
-handle_change(Change, #state{callback = Callback, until = Until, last_seq = LastSeq} = State) ->
-    ?info("[ STOPPED ] Until ~p, LastSeq ~p", [Until, LastSeq]),
+handle_change(_Change, #state{callback = Callback, until = Until, last_seq = LastSeq} = State) ->
+    ?info("Changes stream has ended: until ~p, LastSeq ~p", [Until, LastSeq]),
     Callback(LastSeq, stream_ended, undefined),
     {stop, normal, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% handle_call/3 callback for gen_changes server.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_call(term(), pid(), gen_changes_state()) -> {reply, term(), gen_changes_state()}.
 handle_call(_Req, _From, State) ->
     {reply, _Req, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% handle_cast/2 callback for gen_changes server.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_cast(term(), gen_changes_state()) -> {noreply, gen_changes_state()}.
 handle_cast(_Msg, State) -> {noreply, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% handle_info/2 callback for gen_changes server.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_info(term(), gen_changes_state()) -> {noreply, gen_changes_state()}.
 handle_info(Info, State) ->
     ?log_bad_request(Info),
     {noreply, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% terminate/2 callback for gen_changes server.
+%% @end
+%%--------------------------------------------------------------------
+-spec terminate(term(), gen_changes_state()) -> ok.
 terminate(Reason, _State) ->
     ?warning("~p terminating with reason ~p~n", [?MODULE, Reason]),
     ok.
@@ -712,6 +764,13 @@ terminate(Reason, _State) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Converts raw document given by CouchDB to datastore's #document.
+%% @end
+%%--------------------------------------------------------------------
+-spec process_raw_doc(term()) -> datastore:document().
 process_raw_doc({RawDoc}) ->
     {ok, DB} = get_db(),
     {_, Rev} = lists:keyfind(<<"_rev">>, 1, RawDoc),
@@ -726,25 +785,52 @@ process_raw_doc({RawDoc}) ->
 
     #document{key = Key, rev = {Start, Revs}, value = from_json_term({RawDoc2})}.
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Extracts CouchDB document term from changes term received from couchbeam library.
+%% @end
+%%--------------------------------------------------------------------
+-spec doc({change, term()}) -> term().
 doc({change,{Props}}) ->
     {_, Doc} = lists:keyfind(<<"doc">>, 1, Props),
     Doc.
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Extracts CouchDB 'seq info' term from changes term received from couchbeam library.
+%% @end
+%%--------------------------------------------------------------------
+-spec seq(term()) -> non_neg_integer().
 seq({change, {Props}}) ->
     {_, LastSeq} = lists:keyfind(<<"seq">>, 1, Props),
     LastSeq.
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Extracts model type from given #document.
+%% @end
+%%--------------------------------------------------------------------
+-spec model(datastore:document()) -> model_behaviour:model_type().
 model(#document{value = #links{model = ModelName}}) ->
     ModelName;
 model(#document{value = Value}) ->
     element(1, Value).
 
 
-rev_to_rev_info(Rev) ->
-    [NumBin, Hash] = binary:split(Rev, <<"-">>),
-    {binary_to_integer(NumBin), [Hash]}.
-
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Converts given 'rev info' tuple into text (binary) representation.
+%% @end
+%%--------------------------------------------------------------------
+-spec rev_info_to_rev({Num :: non_neg_integer() | binary(), [Hash :: binary()]}) ->
+    binary().
 rev_info_to_rev({Num, [_Hash | _] = Revs}) when is_integer(Num) ->
     rev_info_to_rev({integer_to_binary(Num), Revs});
 rev_info_to_rev({NumBin, [Hash | _]}) when is_binary(NumBin) ->
