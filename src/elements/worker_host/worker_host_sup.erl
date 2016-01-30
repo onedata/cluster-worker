@@ -52,19 +52,10 @@ start_link(Name, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
-    {ok, {SupFlags :: {RestartStrategy :: supervisor:strategy(),
-        MaxR :: non_neg_integer(), MaxT :: non_neg_integer()},
-        [ChildSpec :: supervisor:child_spec()]
-    }} |
-    ignore.
+    {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 init(Args) ->
-    DefaultRestartStrategy = one_for_one,
-    DefaultMaxRestarts = 1000,
-    DefaultRestartTimeWindowSecs = 3600,
-    SupervisorSpec = proplists:get_value(supervisor_spec, Args, {
-        DefaultRestartStrategy,
-        DefaultMaxRestarts,
-        DefaultRestartTimeWindowSecs
+    SupervisorSpec = proplists:get_value(supervisor_spec, Args, #{
+        strategy => one_for_all, intensity => 1000, period => 3600
     }),
     ChildrenSpec = proplists:get_value(supervisor_child_spec, Args, []),
 
