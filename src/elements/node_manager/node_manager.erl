@@ -239,6 +239,12 @@ handle_call(clear_mem_synch, _From, State) ->
     caches_controller:delete_old_keys(globally_cached, 0),
     {reply, ok, State};
 
+% only for tests
+handle_call(force_clear_mem_synch, _From, State) ->
+    A1 = caches_controller:delete_all_keys(locally_cached),
+    A2 = caches_controller:delete_all_keys(globally_cached),
+    {reply, {A1, A2}, State};
+
 handle_call(disable_cache_control, _From, State) ->
     {reply, ok, State#state{cache_control = false}};
 

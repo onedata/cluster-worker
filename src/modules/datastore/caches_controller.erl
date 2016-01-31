@@ -24,7 +24,8 @@
 %% API
 -export([clear_local_cache/1, clear_global_cache/1, clear_local_cache/2, clear_global_cache/2]).
 -export([clear_cache/2, clear_cache/3, should_clear_cache/1, get_hooks_config/1, wait_for_cache_dump/0]).
--export([delete_old_keys/2, get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
+-export([delete_old_keys/2, delete_all_keys/1]).
+-export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 
 %%%===================================================================
 %%% API
@@ -181,13 +182,26 @@ delete_old_keys(locally_cached, TimeWindow) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Clears all documents from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_all_keys(StoreType :: globally_cached | locally_cached) -> ok | cleared.
+delete_all_keys(globally_cached) ->
+  delete_all_keys(global_only, datastore_config:global_caches());
+
+delete_all_keys(locally_cached) ->
+  delete_all_keys(local_only, datastore_config:local_caches()).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Waits for dumping cache to disk
 %% @end
 %%--------------------------------------------------------------------
 -spec wait_for_cache_dump() ->
   ok | dump_error.
 wait_for_cache_dump() ->
-  wait_for_cache_dump(300).
+  {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
+  wait_for_cache_dump(round(Delay/1000) + 2).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -303,4 +317,57 @@ safe_delete(Level, ModelName, Key) ->
       ?error_stacktrace("Error in cache controller safe_delete. "
       ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, Key}, E1, E2]),
       {error, safe_delete_failed}
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Clears all documents from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_all_keys(Level :: global_only | local_only, Caches :: list()) -> ok | cleared.
+delete_all_keys(Level, Caches) ->
+  {ok, Uuids} = cache_controller:list(Level, 0),
+  UuidsNum = length(Uuids),
+  lists:foreach(fun(Uuid) ->
+    {ModelName, Key} = decode_uuid(Uuid),
+    value_delete(Level, ModelName, Key),
+    FullArgs = [cache_controller:model_init(), Uuid, ?PRED_ALWAYS],
+    erlang:apply(datastore:level_to_driver(Level), delete, FullArgs)
+  end, Uuids),
+
+  ClearedNum = lists:foldl(fun(Cache, Sum) ->
+    {ok, Docs} = datastore:list(Level, Cache, ?GET_ALL, []),
+    DocsNum = length(Docs),
+    lists:foreach(fun(Doc) ->
+      value_delete(Level, Cache, Doc#document.key)
+    end, Docs),
+    Sum + DocsNum
+  end, 0, Caches),
+
+  case UuidsNum + ClearedNum of
+    0 ->
+      ok;
+    _ ->
+      cleared
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes info from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec value_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(), Key :: datastore:key()) ->
+  ok | datastore:generic_error().
+value_delete(Level, ModelName, Key) ->
+  try
+    ModelConfig = ModelName:model_init(),
+    FullArgs2 = [ModelConfig, Key, ?PRED_ALWAYS],
+    erlang:apply(datastore:level_to_driver(Level), delete, FullArgs2)
+  catch
+    E1:E2 ->
+      ?error_stacktrace("Error in cache controller value_delete. "
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, Key}, E1, E2]),
+      {error, delete_failed}
   end.
