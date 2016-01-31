@@ -48,9 +48,10 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
-init_driver(#{db_nodes := DBNodes} = State) ->
+init_driver(#{db_nodes := DBNodes0} = State) ->
+    DBNodes = [ lists:nth(crypto:rand_uniform(1, length(DBNodes0) + 1), DBNodes0) ],
     Gateways = lists:map(
-        fun({N, {Hostname, Port}}) ->
+        fun({N, {Hostname, _Port}}) ->
             GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, 8091], timer:seconds(5)),
             {N, GWState}
         end, lists:zip(lists:seq(1, length(DBNodes)), DBNodes)),
@@ -81,7 +82,8 @@ start_gateway(Parent, N, Hostname, Port) ->
 
     State = #{
         server => self(), port_fd => PortFD, status => running, id => {node(), N},
-        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port
+        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
+        start_time => erlang:system_time(milli_seconds)
     },
     proc_lib:init_ack(Parent, State),
     gateway_loop(State).
@@ -94,7 +96,7 @@ start_gateway(Parent, N, Hostname, Port) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
-gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port} = State) ->
+gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, start_time := ST } = State) ->
     try port_command(PortFD, <<"ping">>) of
         true -> ok
     catch
@@ -102,6 +104,9 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             self() ! {port_comm_error, Reason0}
 
     end,
+
+    CT = erlang:system_time(milli_seconds),
+    MinRestartTime = ST + timer:seconds(5),
 
     NewState =
         receive
@@ -120,19 +125,26 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             {port_comm_error, Reason} ->
                 ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
                 State#{status => failed};
+            restart when CT > MinRestartTime ->
+                State#{status => restarting};
+            restart ->
+                State;
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
                 State
         after timer:seconds(1) ->
-            gateway_loop(State)
+            State
         end,
     case NewState of
         #{status := running} ->
             gateway_loop(NewState);
         #{status := closed} ->
             ok;
+        #{status := restarting} ->
+            catch port_close(PortFD),
+            start_gateway(self(), N, Hostname, Port);
         #{status := failed} ->
-            timer:sleep(500),
+            catch port_close(PortFD),
             start_gateway(self(), N, Hostname, Port)
     end.
 
@@ -172,12 +184,10 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
         true -> error(term_to_big);
         false -> ok
     end,
-
-    {ok, DB} = get_db(),
     
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case couchbeam:save_doc(DB, Doc) of
+    case db_run(couchbeam, save_doc, [Doc], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -192,11 +202,9 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
         false -> ok
     end,
 
-    {ok, DB} = get_db(),
-
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case couchbeam:save_doc(DB, Doc, [{<<"new_edits">>, <<"false">>}]) of
+    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -239,11 +247,9 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
         false -> ok
     end,
 
-    {ok, DB} = get_db(),
-    
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case couchbeam:save_doc(DB, Doc) of
+    case db_run(couchbeam, save_doc, [Doc], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -271,8 +277,7 @@ create_or_update(#model_config{} = _ModelConfig, #document{key = _Key, value = _
 -spec get(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
-    {ok, DB} = get_db(),
-    case couchbeam:open_doc(DB, to_driver_key(Bucket, Key)) of
+    case db_run(couchbeam, open_doc, [to_driver_key(Bucket, Key)], 3) of
         {ok, {Proplist} = _Doc} ->
             {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
             Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
@@ -307,8 +312,6 @@ list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
 delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
-            {ok, DB} = get_db(),
-            
             case Pred() of
                 true ->
                     case get(ModelConfig, Key) of
@@ -321,7 +324,7 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                         {ok, #document{value = Value, rev = Rev}} ->
                             {Props} = to_json_term(Value),
                             Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-                            case couchbeam:delete_doc(DB, Doc) of
+                            case db_run(couchbeam, delete_doc, [Doc], 3) of
                                 ok ->
                                     ok;
                                 {ok, _} ->
@@ -629,22 +632,37 @@ from_driver_key(RawKey) ->
 %% Returns DB handle used by couchbeam library to connect to couchdb-based DB.
 %% @end
 %%--------------------------------------------------------------------
--spec get_db() -> {ok, term()} | {error, term()}.
+-spec get_db() -> {ok, {pid, term()}} | {error, term()}.
 get_db() ->
     Gateways = maps:values(datastore_worker:state_get(db_gateways)),
     ActiveGateways = [GW || #{status := running} = GW <- Gateways],
 
-    case ActiveGateways of
-        [] ->
+    case length(ActiveGateways) of
+        0 ->
             ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
             {error, no_active_gateway};
         _ ->
-            #{gw_port := Port} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
+            #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
             Server = couchbeam:server_connection("localhost", Port),
-            couchbeam:open_db(Server, <<"default">>)
+            case couchbeam:open_db(Server, <<"default">>) of
+                {ok, DB} ->
+                    {ok, {ServerLoop, DB}};
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 
+-spec db_run(atom(), atom(), [term()], non_neg_integer()) -> term().
+db_run(Mod, Fun, Args, Retry) ->
+    {ok, {ServerPid, DB}} = get_db(),
+    case apply(Mod, Fun, [DB | Args]) of
+        {error, econnrefused} when Retry > 0 ->
+            ?info("Unable to connect to ~p",[DB]),
+            ServerPid ! restart,
+            db_run(Mod, Fun, Args, Retry - 1);
+        Other -> Other
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -657,7 +675,7 @@ get_db() ->
     last_seq
 }).
 
--type gen_changes_state() :: #{}.
+-type gen_changes_state() :: #state{}.
 
 %% API
 
