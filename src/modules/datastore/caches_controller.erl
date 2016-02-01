@@ -201,7 +201,7 @@ delete_all_keys(locally_cached) ->
   ok | dump_error.
 wait_for_cache_dump() ->
   {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
-  wait_for_cache_dump(round(Delay/1000) + 2).
+  wait_for_cache_dump(round(Delay/1000) + 3).
 
 %%--------------------------------------------------------------------
 %% @doc

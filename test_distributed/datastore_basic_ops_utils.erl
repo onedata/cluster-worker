@@ -603,9 +603,15 @@ unset_hooks(Case, Config) ->
         global ->
             clear_cache(W);
         local ->
-            lists:foreach(fun(Wr) ->
-                clear_cache(Wr)
-            end, Workers),
+            try
+                lists:foreach(fun(Wr) ->
+                    clear_cache(Wr)
+                end, Workers)
+            catch
+                _:_ ->
+                    % Warning showed, let unload mocks
+                    ok
+            end,
             test_utils:mock_validate_and_unload(Workers, caches_controller);
         _ ->
             lists:foreach(fun(Wr) ->
