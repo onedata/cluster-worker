@@ -26,7 +26,7 @@
 -define(REQUEST_TIMEOUT, timer:seconds(30)).
 
 -export([create_delete_test/2, create_sync_delete_test/2, save_test/2, save_sync_test/2, update_test/2,
-    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, set_hooks/2, unset_hooks/2]).
+    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, set_hooks/2, unset_hooks/2, clear_cache/1]).
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
@@ -603,9 +603,15 @@ unset_hooks(Case, Config) ->
         global ->
             clear_cache(W);
         local ->
-            lists:foreach(fun(Wr) ->
-                clear_cache(Wr)
-            end, Workers),
+            try
+                lists:foreach(fun(Wr) ->
+                    clear_cache(Wr)
+                end, Workers)
+            catch
+                _:_ ->
+                    % Warning showed, let unload mocks
+                    ok
+            end,
             test_utils:mock_validate_and_unload(Workers, caches_controller);
         _ ->
             lists:foreach(fun(Wr) ->
@@ -620,13 +626,10 @@ unset_hooks(Case, Config) ->
 %%%===================================================================
 
 clear_cache(W) ->
-    case performance:is_stress_test() of
-        false ->
-            ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
-            ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000));
-        _ ->
-            ok
-    end.
+    A1 = ?call(W, caches_controller, wait_for_cache_dump, []),
+    A2 = gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
+    A3 = gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_mem_synch, 60000),
+    ?assertMatch({ok, ok, {ok, ok}}, {A1, A2, A3}).
 
 for(1, F) ->
     F();

@@ -443,8 +443,7 @@ end_per_testcase(Case, Config) when
 end_per_testcase(_, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     [W | _] = Workers,
-    ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
-    ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, ?TIMEOUT)).
+    datastore_basic_ops_utils:clear_cache(W).
 
 %%%===================================================================
 %%% Internal functions
