@@ -689,7 +689,7 @@ db_run(Mod, Fun, Args, Retry) ->
     Callback :: fun((Seq :: non_neg_integer(), datastore:document() | stream_ended, model_behaviour:model_type() | undefined) -> ok),
     Since :: non_neg_integer(), Until :: non_neg_integer()) -> {ok, pid()}.
 changes_start_link(Callback, Since, Until) ->
-    {ok, Db} = get_db(),
+    {ok, {_, Db}} = get_db(),
     Opts = [{<<"include_docs">>, <<"true">>}, {since, Since}, {<<"revs_info">>, <<"true">>}],
     gen_changes:start_link(?MODULE, Db, Opts, [Callback, Until]).
 
@@ -790,13 +790,12 @@ terminate(Reason, _State) ->
 %%--------------------------------------------------------------------
 -spec process_raw_doc(term()) -> datastore:document().
 process_raw_doc({RawDoc}) ->
-    {ok, DB} = get_db(),
     {_, Rev} = lists:keyfind(<<"_rev">>, 1, RawDoc),
     {_, RawKey} = lists:keyfind(<<"_id">>, 1, RawDoc),
     {_, Key} = from_driver_key(RawKey),
     RawDoc1 = [KV || {<<"_", _/binary>>, _} = KV <- RawDoc],
     RawDoc2 = RawDoc -- RawDoc1,
-    {ok, {RawRichDoc}} = couchbeam:open_doc(DB, RawKey, [{<<"revs">>, <<"true">>}, {<<"rev">>, Rev}]),
+    {ok, {RawRichDoc}} = db_run(couchbeam, open_doc, [RawKey, [{<<"revs">>, <<"true">>}, {<<"rev">>, Rev}]], 3),
     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, RawRichDoc),
     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
