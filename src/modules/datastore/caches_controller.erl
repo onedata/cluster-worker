@@ -18,6 +18,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -292,8 +293,8 @@ safe_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key],
-    Module = datastore:driver_to_module(datastore:level_to_driver(Level)),
-    case worker_proxy:call(datastore_worker, {driver_call, Module, get, FullArgs}) of
+    case worker_proxy:call(datastore_worker,
+      {driver_call, datastore:driver_to_module(?PERSISTENCE_DRIVER), get, FullArgs}) of
       {ok, Doc} ->
         Value = Doc#document.value,
         Pred = fun() ->

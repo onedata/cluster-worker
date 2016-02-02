@@ -621,15 +621,15 @@ unset_hooks(Case, Config) ->
             end, Workers)
     end.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
 clear_cache(W) ->
     A1 = ?call(W, caches_controller, wait_for_cache_dump, []),
     A2 = gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
     A3 = gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_mem_synch, 60000),
     ?assertMatch({ok, ok, {ok, ok}}, {A1, A2, A3}).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 for(1, F) ->
     F();

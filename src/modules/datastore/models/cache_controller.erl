@@ -637,8 +637,7 @@ log_link_del(Key, ModelName, LinkNames, start, Args, Level) ->
         ModelConfig = ModelName:model_init(),
         FullArgs = [ModelConfig | Args],
         ok = worker_proxy:call(datastore_worker, {driver_call, datastore:driver_to_module(?PERSISTENCE_DRIVER), delete_links, FullArgs}, timer:minutes(5)),
-        {ok, _} = log_link_del(Key, ModelName, LinkNames, stop, Args, Level),
-        ok
+        ok = log_link_del(Key, ModelName, LinkNames, stop, Args, Level)
     end,
     {task, Task};
 log_link_del(Key, ModelName, LinkNames, stop, _Args, Level) ->
@@ -652,7 +651,12 @@ log_link_del(Key, ModelName, LinkNames, stop, _Args, Level) ->
                     {ok, Record#cache_controller{deleted_links = DL -- [LinkNames]}}
             end
         end,
-        update(Level, Uuid, UpdateFun)
+        case update(Level, Uuid, UpdateFun) of
+            {ok, _} ->
+                ok;
+            {error, {not_found, _}} ->
+                ok
+        end
     catch
         E1:E2 ->
             ?error_stacktrace("Error in cache_controller log_link_del. Args: ~p. Error: ~p:~p.",
