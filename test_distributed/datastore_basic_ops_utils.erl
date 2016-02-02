@@ -617,7 +617,9 @@ unset_hooks(Case, Config) ->
             lists:foreach(fun(Wr) ->
                 lists:foreach(fun(MC) ->
                     ?assert(?call(Wr, ets, insert, [datastore_local_state, {MC, cache_controller}]))
-                end, ModelConfig)
+                end, ModelConfig),
+                % Clear docs that may be recognized as cached in further tests
+                gen_server:call({?NODE_MANAGER_NAME, Wr}, force_clear_mem_synch, 60000)
             end, Workers)
     end.
 
