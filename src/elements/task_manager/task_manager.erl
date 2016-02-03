@@ -25,7 +25,7 @@
 -export_type([task/0, level/0]).
 
 %% API
--export([start_task/2, start_task/3, check_and_rerun_all/0]).
+-export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0]).
 -export([save_pid/3, update_pid/3]).
 
 -define(TASK_SAVE_TIMEOUT, timer:seconds(10)).
@@ -81,6 +81,18 @@ check_and_rerun_all() ->
     check_and_rerun_all(?CLUSTER_LEVEL).
 % TODO - list at persistent driver needed
 %%     check_and_rerun_all(?PERSISTENT_LEVEL).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Kills all tasks.
+%% @end
+%%--------------------------------------------------------------------
+-spec kill_all() -> ok.
+kill_all() ->
+    kill_all(?NODE_LEVEL),
+    kill_all(?CLUSTER_LEVEL).
+% TODO - list at persistent driver needed
+%%     kill_all(?PERSISTENT_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -175,4 +187,18 @@ check_and_rerun_all(Level) ->
     {ok, Tasks} = task_pool:list_failed(Level),
     lists:foreach(fun(Task) ->
         start_task(Task, Level, update_pid)
+    end, Tasks).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Kills all tasks.
+%% @end
+%%--------------------------------------------------------------------
+-spec kill_all(Level :: level()) -> ok.
+kill_all(Level) ->
+    {ok, Tasks} = task_pool:list(Level),
+    lists:foreach(fun(Task) ->
+        task_pool:delete(Level, Task#document.key),
+        Value = Task#document.value,
+        exit(Value#task_pool.owner, stopped_by_manager)
     end, Tasks).

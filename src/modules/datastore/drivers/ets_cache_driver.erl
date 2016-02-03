@@ -108,7 +108,7 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
     case ets:lookup(table_name(ModelConfig), Key) of
         [] ->
             case ets:insert_new(table_name(ModelConfig), {Key, Value}) of
-                false -> {error, conflict};
+                false -> update(ModelConfig, Key, Diff);
                 true -> {ok, Key}
             end;
         [{_, OldValue}] ->
@@ -124,7 +124,7 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
     case ets:lookup(table_name(ModelConfig), Key) of
         [] ->
             case ets:insert_new(table_name(ModelConfig), {Key, Value}) of
-                false -> {error, conflict};
+                false -> update(ModelConfig, Key, Diff);
                 true -> {ok, Key}
             end;
         [{_, OldValue}] ->
