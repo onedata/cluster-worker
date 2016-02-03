@@ -240,9 +240,10 @@ handle_call(clear_mem_synch, _From, State) ->
     {reply, ok, State};
 
 % only for tests
-handle_call(force_clear_mem_synch, _From, State) ->
+handle_call(force_clear_node, _From, State) ->
     A1 = caches_controller:delete_all_keys(locally_cached),
     A2 = caches_controller:delete_all_keys(globally_cached),
+    task_manager:kill_all(),
     {reply, {A1, A2}, State};
 
 handle_call(disable_cache_control, _From, State) ->

@@ -51,6 +51,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
 
     set_test_type(Workers),
     Master = self(),
+    AnswerDesc = get(file_beg),
 
     TestFun = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -62,7 +63,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
                         value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                     }]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -86,7 +87,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
                 Ans = ?call_store(Fun2, Level, [
                     some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -129,6 +130,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
 
     set_test_type(Workers),
     Master = self(),
+    AnswerDesc = get(file_beg),
 
     SaveMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -140,7 +142,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
                         value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                     }]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -157,7 +159,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
             Ans = ?call_store(Fun2, Level, [
                 some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -185,6 +187,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
 
     set_test_type(Workers),
     Master = self(),
+    AnswerDesc = get(file_beg),
 
     UpdateMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -195,7 +198,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
                     #{field1 => I + J}
                 ]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -218,7 +221,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
                     value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                 }]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -239,7 +242,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
             Ans = ?call_store(Fun3, Level, [
                 some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -273,6 +276,7 @@ get_test(Config, Level) ->
 
     set_test_type(Workers),
     Master = self(),
+    AnswerDesc = get(file_beg),
 
     GetMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -282,7 +286,7 @@ get_test(Config, Level) ->
                     some_record, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -305,7 +309,7 @@ get_test(Config, Level) ->
                     value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                 }]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -326,7 +330,7 @@ get_test(Config, Level) ->
             Ans = ?call_store(delete, Level, [
                 some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -360,6 +364,7 @@ exists_test(Config, Level) ->
 
     set_test_type(Workers),
     Master = self(),
+    AnswerDesc = get(file_beg),
 
     ExistMultiCheck = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -369,7 +374,7 @@ exists_test(Config, Level) ->
                     some_record, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -389,7 +394,7 @@ exists_test(Config, Level) ->
                     value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                 }]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -410,7 +415,7 @@ exists_test(Config, Level) ->
             Ans = ?call_store(delete, Level, [
                 some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
-            Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
     end,
 
@@ -435,6 +440,7 @@ mixed_test(Config, Level) ->
 
     set_test_type(Workers),
     Master = self(),
+    AnswerDesc = get(file_beg),
 
     CreateMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -446,7 +452,7 @@ mixed_test(Config, Level) ->
                         value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                     }]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -461,7 +467,7 @@ mixed_test(Config, Level) ->
                         value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
                     }]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -475,7 +481,7 @@ mixed_test(Config, Level) ->
                     #{field1 => I + J}
                 ]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -497,7 +503,7 @@ mixed_test(Config, Level) ->
                     some_record, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -510,7 +516,7 @@ mixed_test(Config, Level) ->
                     some_record, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
-                Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
         end)
     end,
@@ -529,7 +535,7 @@ mixed_test(Config, Level) ->
                     Ans = ?call_store(delete, Level, [
                         some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
                     AfterProcessing = os:timestamp(),
-                    Master ! {store_ans, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                    Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
                 end)
             end,
 
@@ -619,14 +625,14 @@ unset_hooks(Case, Config) ->
                     ?assert(?call(Wr, ets, insert, [datastore_local_state, {MC, cache_controller}]))
                 end, ModelConfig),
                 % Clear docs that may be recognized as cached in further tests
-                gen_server:call({?NODE_MANAGER_NAME, Wr}, force_clear_mem_synch, 60000)
+                gen_server:call({?NODE_MANAGER_NAME, Wr}, force_clear_node, 60000)
             end, Workers)
     end.
 
 clear_cache(W) ->
     A1 = ?call(W, caches_controller, wait_for_cache_dump, []),
     A2 = gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
-    A3 = gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_mem_synch, 60000),
+    A3 = gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_node, 60000),
     ?assertMatch({ok, ok, {ok, ok}}, {A1, A2, A3}).
 
 %%%===================================================================
@@ -656,19 +662,15 @@ spawn_at_nodes([], Nodes2, Threads, DocsSetNum, DocNumInSet, ConflictedThreads, 
     spawn_at_nodes(Nodes2, [], Threads, DocsSetNum, DocNumInSet, ConflictedThreads, Fun, Pids);
 spawn_at_nodes([N | Nodes], Nodes2, Threads, DocsSetNum, DocNumInSet, ConflictedThreads, Fun, Pids) ->
     Master = self(),
-    FileBeg = case performance:is_stress_test() of
-                  true ->
-                      "_" ++ get(file_beg) ++ "_";
-                  _ ->
-                      "_"
-              end,
+    AnswerDesc = get(file_beg),
+    FileBeg = "_" ++ AnswerDesc ++ "_",
     Pid = spawn(N, fun() ->
         try
             receive start -> ok end,
             Fun(integer_to_list(DocsSetNum) ++ FileBeg)
         catch
             E1:E2 ->
-                Master ! {store_ans, {uncatched_error, E1, E2, erlang:get_stacktrace()}, 0}
+                Master ! {store_ans, AnswerDesc, {uncatched_error, E1, E2, erlang:get_stacktrace()}, 0}
         end
     end),
     spawn_at_nodes(Nodes, [N | Nodes2], Threads - 1, DocsSetNum, DocNumInSet + 1, ConflictedThreads, Fun, [Pid | Pids]).
@@ -680,8 +682,9 @@ count_answers(0, TmpAns) ->
     TmpAns;
 
 count_answers(Num, {OkNum, OkTime, ErrorNum, ErrorTime, ErrorsList}) ->
+    AnswerDesc = get(file_beg),
     NewAns = receive
-                 {store_ans, Ans, Time} ->
+                 {store_ans, AnswerDesc, Ans, Time} ->
                      case Ans of
                          ok ->
                              {OkNum + 1, OkTime + Time, ErrorNum, ErrorTime, ErrorsList};
@@ -723,12 +726,14 @@ check_config_name(Case) ->
     end.
 
 set_test_type(Workers) ->
-    case {performance:is_stress_test(), performance:is_standard_test()} of
-        {true, _} ->
-            put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
-        {false, false} ->
-            put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
-            disable_cache_control(Workers);
-        _ ->
-            disable_cache_control(Workers)
-    end.
+    put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
+    disable_cache_control(Workers).
+%%     case {performance:is_stress_test(), performance:is_standard_test()} of
+%%         {true, _} ->
+%%             put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
+%%         {false, false} ->
+%%             put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
+%%             disable_cache_control(Workers);
+%%         _ ->
+%%             disable_cache_control(Workers)
+%%     end.

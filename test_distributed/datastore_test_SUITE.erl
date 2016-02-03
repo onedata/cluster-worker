@@ -20,6 +20,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).
@@ -120,15 +121,18 @@ old_keys_cleaning_test(Config) ->
         }])),
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     CorruptedUuid = caches_controller:get_cache_uuid(CorruptedKey, some_record),
+    ModelConfig = some_record:model_init(),
+    DModule = ?call(Worker1, datastore, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    PModule = ?call(Worker1, datastore, driver_to_module, [?PERSISTENCE_DRIVER]),
     ?assertMatch(ok, ?call(Worker2, cache_controller, delete, [?GLOBAL_ONLY_LEVEL, CorruptedUuid])),
 
     ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 1])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [global_only, some_record, CorruptedKey])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, CorruptedKey])),
+    ?assertMatch({ok, true}, ?call(Worker2, DModule, exists, [ModelConfig, CorruptedKey])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, CorruptedKey])),
 
     ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [global_only, some_record, CorruptedKey])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, CorruptedKey])),
+    ?assertMatch({ok, false}, ?call(Worker2, DModule, exists, [ModelConfig, CorruptedKey])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, CorruptedKey])),
     ok.
 
 % helper fun used by old_keys_cleaning_test
@@ -449,7 +453,7 @@ end_per_testcase(Case, Config) when
             ?assert(?call(W, ets, insert, [datastore_local_state, {MC, cache_controller}]))
         end, ModelConfig),
         % Clear docs that may be recognized as cached in further tests
-        gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_mem_synch, 60000)
+        gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_node, 60000)
     end, Workers);
 
 end_per_testcase(_, Config) ->
