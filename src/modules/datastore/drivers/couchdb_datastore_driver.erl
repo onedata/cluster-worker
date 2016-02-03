@@ -637,18 +637,19 @@ get_db() ->
     Gateways = maps:values(datastore_worker:state_get(db_gateways)),
     ActiveGateways = [GW || #{status := running} = GW <- Gateways],
 
-    case length(ActiveGateways) of
-        0 ->
+    case ActiveGateways of
+        [] ->
             ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
             {error, no_active_gateway};
         _ ->
-            #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
-            Server = couchbeam:server_connection("localhost", Port),
-            case couchbeam:open_db(Server, <<"default">>) of
-                {ok, DB} ->
-                    {ok, {ServerLoop, DB}};
-                {error, Reason} ->
-                    {error, Reason}
+            try
+                #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
+                Server = couchbeam:server_connection("localhost", Port),
+                {ok, DB} = couchbeam:open_db(Server, <<"default">>),
+                {ok, {ServerLoop, DB}}
+            catch
+                _:Reason ->
+                    Reason %% Just to silence dialyzer since couchbeam methods supposedly have no return.
             end
     end.
 
