@@ -1,11 +1,12 @@
 %%%-------------------------------------------------------------------
 %%% @author Rafal Slota
-%%% @copyright (C) 2015 ACK CYFRONET AGH
+%%% @copyright (C) 2016 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc CouchBase database driver.
+%%% @doc CouchDB database driver (REST based) that supports changes stream
+%%%      and connecting to couchbase via couchbase's sync_gateway (that emulates CouchDB API).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(couchdb_datastore_driver).
@@ -637,18 +638,19 @@ get_db() ->
     Gateways = maps:values(datastore_worker:state_get(db_gateways)),
     ActiveGateways = [GW || #{status := running} = GW <- Gateways],
 
-    case length(ActiveGateways) of
-        0 ->
+    case ActiveGateways of
+        [] ->
             ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
             {error, no_active_gateway};
         _ ->
-            #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
-            Server = couchbeam:server_connection("localhost", Port),
-            case couchbeam:open_db(Server, <<"default">>) of
-                {ok, DB} ->
-                    {ok, {ServerLoop, DB}};
-                {error, Reason} ->
-                    {error, Reason}
+            try
+                #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
+                Server = couchbeam:server_connection("localhost", Port),
+                {ok, DB} = couchbeam:open_db(Server, <<"default">>),
+                {ok, {ServerLoop, DB}}
+            catch
+                _:Reason ->
+                    Reason %% Just to silence dialyzer since couchbeam methods supposedly have no return.
             end
     end.
 
@@ -687,7 +689,7 @@ db_run(Mod, Fun, Args, Retry) ->
 %%--------------------------------------------------------------------
 -spec changes_start_link(
     Callback :: fun((Seq :: non_neg_integer(), datastore:document() | stream_ended, model_behaviour:model_type() | undefined) -> ok),
-    Since :: non_neg_integer(), Until :: non_neg_integer()) -> {ok, pid()}.
+    Since :: non_neg_integer(), Until :: non_neg_integer() | infinity) -> {ok, pid()}.
 changes_start_link(Callback, Since, Until) ->
     {ok, {_, Db}} = get_db(),
     Opts = [{<<"include_docs">>, <<"true">>}, {since, Since}, {<<"revs_info">>, <<"true">>}],
