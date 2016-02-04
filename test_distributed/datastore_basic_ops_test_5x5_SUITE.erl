@@ -13,7 +13,7 @@
 
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
--include_lib("annotations/include/annotations.hrl").
+-include_lib("ctool/include/test/performance.hrl").
 -include("datastore_basic_ops_utils.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -36,207 +36,288 @@
     mixed_global_cache_test/1, mixed_local_cache_test/1
 ]).
 
--performance({test_cases,
-    [create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
-        create_delete_global_store_test, no_transactions_create_delete_global_store_test,
-        save_global_store_test, no_transactions_save_global_store_test, update_global_store_test,
-        no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
-        create_delete_local_store_test, save_local_store_test, update_local_store_test,
-        get_local_store_test, exists_local_store_test,
-        create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
-        create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
-        get_global_cache_test, exists_global_cache_test,
-        create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
-        create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
-        get_local_cache_test, exists_local_cache_test,
-        mixed_db_test, mixed_global_store_test, mixed_local_store_test,
-        mixed_global_cache_test, mixed_local_cache_test
-    ]
-}).
+-define(PERFORMANCE_CASES, [
+    create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
+    create_delete_global_store_test, no_transactions_create_delete_global_store_test,
+    save_global_store_test, no_transactions_save_global_store_test, update_global_store_test,
+    no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
+    create_delete_local_store_test, save_local_store_test, update_local_store_test,
+    get_local_store_test, exists_local_store_test,
+    create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
+    create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
+    get_global_cache_test, exists_global_cache_test,
+    create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
+    create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
+    get_local_cache_test, exists_local_cache_test,
+    mixed_db_test, mixed_global_store_test, mixed_local_store_test,
+    mixed_global_cache_test, mixed_local_cache_test
+]).
+
+-define(TEST_CASES, [
+    create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
+    create_delete_global_store_test, no_transactions_create_delete_global_store_test,
+    save_global_store_test, no_transactions_save_global_store_test, update_global_store_test,
+    no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
+    create_delete_local_store_test, save_local_store_test, update_local_store_test,
+    get_local_store_test, exists_local_store_test,
+    create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
+    create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
+    get_global_cache_test, exists_global_cache_test,
+    create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
+    create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
+    get_local_cache_test, exists_local_cache_test
+]).
+
 all() ->
-    [create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
-        create_delete_global_store_test, no_transactions_create_delete_global_store_test,
-        save_global_store_test, no_transactions_save_global_store_test, update_global_store_test,
-        no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
-        create_delete_local_store_test, save_local_store_test, update_local_store_test,
-        get_local_store_test, exists_local_store_test,
-        create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
-        create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
-        get_global_cache_test, exists_global_cache_test,
-        create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
-        create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
-        get_local_cache_test, exists_local_cache_test
-    ].
+    ?ALL(?TEST_CASES, ?PERFORMANCE_CASES).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
 
--performance(?create_delete_test_def).
 create_delete_db_test(Config) ->
-    datastore_basic_ops_utils:create_delete_test(Config, disk_only).
+	?PERFORMANCE(Config, ?create_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_delete_test(Config, disk_only)
+		end).
 
--performance(?save_test_def).
 save_db_test(Config) ->
-    datastore_basic_ops_utils:save_test(Config, disk_only).
+	?PERFORMANCE(Config, ?save_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_test(Config, disk_only)
+		end).
 
--performance(?update_test_def).
 update_db_test(Config) ->
-    datastore_basic_ops_utils:update_test(Config, disk_only).
+	?PERFORMANCE(Config, ?update_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_test(Config, disk_only)
+		end).
 
--performance(?get_test_def).
 get_db_test(Config) ->
-    datastore_basic_ops_utils:get_test(Config, disk_only).
+	?PERFORMANCE(Config, ?get_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:get_test(Config, disk_only)
+		end).
 
--performance(?exists_test_def).
 exists_db_test(Config) ->
-    datastore_basic_ops_utils:exists_test(Config, disk_only).
+	?PERFORMANCE(Config, ?exists_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:exists_test(Config, disk_only)
+		end).
 
 %% ====================================================================
 
--performance(?create_delete_test_def).
 create_delete_global_store_test(Config) ->
-    datastore_basic_ops_utils:create_delete_test(Config, global_only).
+	?PERFORMANCE(Config, ?create_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_delete_test(Config, global_only)
+		end).
 
--performance(?no_transactions_create_delete_test_def).
 no_transactions_create_delete_global_store_test(Config) ->
-    datastore_basic_ops_utils:create_delete_test(Config, global_only).
+	?PERFORMANCE(Config, ?no_transactions_create_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_delete_test(Config, global_only)
+		end).
 
--performance(?save_test_def).
 save_global_store_test(Config) ->
-    datastore_basic_ops_utils:save_test(Config, global_only).
+	?PERFORMANCE(Config, ?save_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_test(Config, global_only)
+		end).
 
--performance(?no_transactions_save_test_def).
 no_transactions_save_global_store_test(Config) ->
-    datastore_basic_ops_utils:save_test(Config, global_only).
+	?PERFORMANCE(Config, ?no_transactions_save_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_test(Config, global_only)
+		end).
 
--performance(?update_test_def).
 update_global_store_test(Config) ->
-    datastore_basic_ops_utils:update_test(Config, global_only).
+	?PERFORMANCE(Config, ?update_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_test(Config, global_only)
+		end).
 
--performance(?no_transactions_update_test_def).
 no_transactions_update_global_store_test(Config) ->
-    datastore_basic_ops_utils:update_test(Config, global_only).
+	?PERFORMANCE(Config, ?no_transactions_update_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_test(Config, global_only)
+		end).
 
--performance(?get_test_def).
 get_global_store_test(Config) ->
-    datastore_basic_ops_utils:get_test(Config, global_only).
+	?PERFORMANCE(Config, ?get_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:get_test(Config, global_only)
+		end).
 
--performance(?exists_test_def).
 exists_global_store_test(Config) ->
-    datastore_basic_ops_utils:exists_test(Config, global_only).
+	?PERFORMANCE(Config, ?exists_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:exists_test(Config, global_only)
+		end).
 
 %% ====================================================================
 
--performance(?create_delete_test_def).
 create_delete_local_store_test(Config) ->
-    datastore_basic_ops_utils:create_delete_test(Config, local_only).
+	?PERFORMANCE(Config, ?create_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_delete_test(Config, local_only)
+		end).
 
--performance(?save_test_def).
 save_local_store_test(Config) ->
-    datastore_basic_ops_utils:save_test(Config, local_only).
+	?PERFORMANCE(Config, ?save_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_test(Config, local_only)
+		end).
 
--performance(?update_test_def).
 update_local_store_test(Config) ->
-    datastore_basic_ops_utils:update_test(Config, local_only).
+	?PERFORMANCE(Config, ?update_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_test(Config, local_only)
+		end).
 
--performance(?get_test_def).
 get_local_store_test(Config) ->
-    datastore_basic_ops_utils:get_test(Config, local_only).
+	?PERFORMANCE(Config, ?get_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:get_test(Config, local_only)
+		end).
 
--performance(?exists_test_def).
 exists_local_store_test(Config) ->
-    datastore_basic_ops_utils:exists_test(Config, local_only).
+	?PERFORMANCE(Config, ?exists_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:exists_test(Config, local_only)
+		end).
 
 %% ====================================================================
 
--performance(?create_delete_test_def).
 create_delete_global_cache_test(Config) ->
-    datastore_basic_ops_utils:create_delete_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?create_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_delete_test(Config, globally_cached)
+		end).
 
--performance(?save_test_def).
 save_global_cache_test(Config) ->
-    datastore_basic_ops_utils:save_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?save_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_test(Config, globally_cached)
+		end).
 
--performance(?update_test_def).
 update_global_cache_test(Config) ->
-    datastore_basic_ops_utils:update_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?update_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_test(Config, globally_cached)
+		end).
 
--performance(?create_sync_delete_test_def).
 create_sync_delete_global_cache_test(Config) ->
-    datastore_basic_ops_utils:create_sync_delete_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?create_sync_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_sync_delete_test(Config, globally_cached)
+		end).
 
--performance(?save_sync_test_def).
 save_sync_global_cache_test(Config) ->
-    datastore_basic_ops_utils:save_sync_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?save_sync_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_sync_test(Config, globally_cached)
+		end).
 
--performance(?update_sync_test_def).
 update_sync_global_cache_test(Config) ->
-    datastore_basic_ops_utils:update_sync_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?update_sync_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_sync_test(Config, globally_cached)
+		end).
 
--performance(?get_test_def).
 get_global_cache_test(Config) ->
-    datastore_basic_ops_utils:get_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?get_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:get_test(Config, globally_cached)
+		end).
 
--performance(?exists_test_def).
 exists_global_cache_test(Config) ->
-    datastore_basic_ops_utils:exists_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?exists_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:exists_test(Config, globally_cached)
+		end).
 
 %% ====================================================================
 
--performance(?create_delete_test_def).
 create_delete_local_cache_test(Config) ->
-    datastore_basic_ops_utils:create_delete_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?create_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_delete_test(Config, locally_cached)
+		end).
 
--performance(?save_test_def).
 save_local_cache_test(Config) ->
-    datastore_basic_ops_utils:save_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?save_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_test(Config, locally_cached)
+		end).
 
--performance(?update_test_def).
 update_local_cache_test(Config) ->
-    datastore_basic_ops_utils:update_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?update_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_test(Config, locally_cached)
+		end).
 
--performance(?create_sync_delete_test_def).
 create_sync_delete_local_cache_test(Config) ->
-    datastore_basic_ops_utils:create_sync_delete_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?create_sync_delete_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:create_sync_delete_test(Config, locally_cached)
+		end).
 
--performance(?save_sync_test_def).
 save_sync_local_cache_test(Config) ->
-    datastore_basic_ops_utils:save_sync_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?save_sync_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:save_sync_test(Config, locally_cached)
+		end).
 
--performance(?update_sync_test_def).
 update_sync_local_cache_test(Config) ->
-    datastore_basic_ops_utils:update_sync_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?update_sync_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:update_sync_test(Config, locally_cached)
+		end).
 
--performance(?get_test_def).
 get_local_cache_test(Config) ->
-    datastore_basic_ops_utils:get_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?get_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:get_test(Config, locally_cached)
+		end).
 
--performance(?exists_test_def).
 exists_local_cache_test(Config) ->
-    datastore_basic_ops_utils:exists_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?exists_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:exists_test(Config, locally_cached)
+		end).
 
 %% ====================================================================
 
--performance(?long_test_def).
 mixed_db_test(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, disk_only).
+	?PERFORMANCE(Config, ?long_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:mixed_test(Config, disk_only)
+		end).
 
--performance(?long_test_def).
 mixed_global_store_test(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, global_only).
+	?PERFORMANCE(Config, ?long_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:mixed_test(Config, global_only)
+		end).
 
--performance(?long_test_def).
 mixed_local_store_test(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, local_only).
+	?PERFORMANCE(Config, ?long_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:mixed_test(Config, local_only)
+		end).
 
--performance(?long_test_def).
 mixed_global_cache_test(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, globally_cached).
+	?PERFORMANCE(Config, ?long_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:mixed_test(Config, globally_cached)
+		end).
 
--performance(?long_test_def).
 mixed_local_cache_test(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, locally_cached).
+	?PERFORMANCE(Config, ?long_test_def,
+		fun(Config) -> 
+			    datastore_basic_ops_utils:mixed_test(Config, locally_cached)
+		end).
 
 %%%===================================================================
 %%% SetUp and TearDown functions

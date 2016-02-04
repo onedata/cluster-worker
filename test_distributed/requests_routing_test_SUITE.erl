@@ -19,16 +19,18 @@
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/performance.hrl").
--include_lib("annotations/include/annotations.hrl").
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 -export([simple_call_test/1, direct_cast_test/1, redirect_cast_test/1, mixed_cast_test/1]).
 -export([mixed_cast_test_core/1]).
 
--performance({test_cases, [simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test]}).
+-define(TEST_CASES, [
+    simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test
+]).
+
 all() ->
-    [simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test].
+    ?ALL(?TEST_CASES, ?TEST_CASES).
 
 -define(REQUEST_TIMEOUT, timer:seconds(10)).
 -define(REPEATS, 100).
@@ -38,150 +40,158 @@ all() ->
 %%% Test functions
 %%%===================================================================
 
--performance([
-    {repeats, ?REPEATS},
-    {success_rate, ?SUCCESS_RATE},
-    {description, "Performs one worker_proxy call per use case"},
-    {config, [{name, simple_call}, {description, "Basic config for test"}]}
-]).
 simple_call_test(Config) ->
-    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    ?PERFORMANCE(Config, [
+            {repeats, ?REPEATS},
+            {success_rate, ?SUCCESS_RATE},
+            {description, "Performs one worker_proxy call per use case"},
+            {config, [{name, simple_call}, {description, "Basic config for test"}]}
+        ],
+        fun(Config) ->
+            [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
-    T1 = os:timestamp(),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping, ?REQUEST_TIMEOUT])),
-    T2 = os:timestamp(),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
-    T3 = os:timestamp(),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
-    T4 = os:timestamp(),
+            T1 = os:timestamp(),
+            ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping, ?REQUEST_TIMEOUT])),
+            T2 = os:timestamp(),
+            ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
+            T3 = os:timestamp(),
+            ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
+            T4 = os:timestamp(),
 
-    [
-        #parameter{name = dispatcher, value = utils:milliseconds_diff(T2, T1), unit = "ms",
-            description = "Time of call without specified target node (decision made by dispatcher)"},
-        #parameter{name = local_processing, value = utils:milliseconds_diff(T3, T2), unit = "ms",
-            description = "Time of call with default arguments processed locally"},
-        #parameter{name = remote_processing, value = utils:milliseconds_diff(T4, T3), unit = "ms",
-            description = "Time of call with default arguments delegated to other node"}
-    ].
+            [
+                #parameter{name = dispatcher, value = utils:milliseconds_diff(T2, T1), unit = "ms",
+                    description = "Time of call without specified target node (decision made by dispatcher)"},
+                #parameter{name = local_processing, value = utils:milliseconds_diff(T3, T2), unit = "ms",
+                    description = "Time of call with default arguments processed locally"},
+                #parameter{name = remote_processing, value = utils:milliseconds_diff(T4, T3), unit = "ms",
+                    description = "Time of call with default arguments delegated to other node"}
+            ]
+        end).
 
 %%%===================================================================
 
--performance([
-    {repeats, ?REPEATS},
-    {success_rate, ?SUCCESS_RATE},
-    {parameters, [
-        [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
-        [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
-    ]},
-    {description, "Performs many one worker_proxy calls (dispatcher decide where they will be processed), using many threads"},
-    {config, [{name, direct_cast},
-        {parameters, [
-            [{name, proc_num}, {value, 100}],
-            [{name, proc_repeats}, {value, 100}]
-        ]},
-        {description, "Basic config for test"}
-    ]}
-]).
 direct_cast_test(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ProcSendNum = ?config(proc_repeats, Config),
-    ProcNum = ?config(proc_num, Config),
+    ?PERFORMANCE(Config, [
+            {repeats, ?REPEATS},
+            {success_rate, ?SUCCESS_RATE},
+            {parameters, [
+                [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
+                [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
+            ]},
+            {description, "Performs many one worker_proxy calls (dispatcher decide where they will be processed), using many threads"},
+            {config, [{name, direct_cast},
+                {parameters, [
+                    [{name, proc_num}, {value, 100}],
+                    [{name, proc_repeats}, {value, 100}]
+                ]},
+                {description, "Basic config for test"}
+            ]}
+        ],
+        fun(Config) ->
+            [Worker | _] = ?config(cluster_worker_nodes, Config),
+            ProcSendNum = ?config(proc_repeats, Config),
+            ProcNum = ?config(proc_num, Config),
 
-    TestProc = fun() ->
-        Self = self(),
-        SendReq = fun(MsgId) ->
-            ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [dns_worker, ping, {proc, Self}, MsgId]))
-        end,
+            TestProc = fun() ->
+                Self = self(),
+                SendReq = fun(MsgId) ->
+                    ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [dns_worker, ping, {proc, Self}, MsgId]))
+                end,
 
-        BeforeProcessing = os:timestamp(),
-        for(1, ProcSendNum, SendReq),
-        count_answers(ProcSendNum),
-        AfterProcessing = os:timestamp(),
-        utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
-    end,
+                BeforeProcessing = os:timestamp(),
+                for(1, ProcSendNum, SendReq),
+                count_answers(ProcSendNum),
+                AfterProcessing = os:timestamp(),
+                utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+            end,
 
-    Ans = spawn_and_check(TestProc, ProcNum),
-    ?assertMatch({ok, _}, Ans),
-    {_, Times} = Ans,
-    #parameter{name = routing_time, value = Times, unit = "ms",
-        description = "Aggregated time of all calls performed via dispatcher"}.
+            Ans = spawn_and_check(TestProc, ProcNum),
+            ?assertMatch({ok, _}, Ans),
+            {_, Times} = Ans,
+            #parameter{name = routing_time, value = Times, unit = "ms",
+                description = "Aggregated time of all calls performed via dispatcher"}
+        end).
 
 %%%===================================================================
 
--performance([
-    {repeats, ?REPEATS},
-    {success_rate, ?SUCCESS_RATE},
-    {parameters, [
-        [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
-        [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
-    ]},
-    {description, "Performs many one worker_proxy calls with default arguments but delegated to other node, using many threads"},
-    {config, [{name, redirect_cast},
-        {parameters, [
-            [{name, proc_num}, {value, 100}],
-            [{name, proc_repeats}, {value, 100}]
-        ]},
-        {description, "Basic config for test"}
-    ]}
-]).
 redirect_cast_test(Config) ->
-    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
-    ProcSendNum = ?config(proc_repeats, Config),
-    ProcNum = ?config(proc_num, Config),
+    ?PERFORMANCE(Config, [
+            {repeats, ?REPEATS},
+            {success_rate, ?SUCCESS_RATE},
+            {parameters, [
+                [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
+                [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
+            ]},
+            {description, "Performs many one worker_proxy calls with default arguments but delegated to other node, using many threads"},
+            {config, [{name, redirect_cast},
+                {parameters, [
+                    [{name, proc_num}, {value, 100}],
+                    [{name, proc_repeats}, {value, 100}]
+                ]},
+                {description, "Basic config for test"}
+            ]}
+        ],
+        fun(Config) ->
+            [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+            ProcSendNum = ?config(proc_repeats, Config),
+            ProcNum = ?config(proc_num, Config),
 
-    TestProc = fun() ->
-        Self = self(),
-        SendReq = fun(MsgId) ->
-            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, MsgId]))
-        end,
+            TestProc = fun() ->
+                Self = self(),
+                SendReq = fun(MsgId) ->
+                    ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, MsgId]))
+                end,
 
-        BeforeProcessing = os:timestamp(),
-        for(1, ProcSendNum, SendReq),
-        count_answers(ProcSendNum),
-        AfterProcessing = os:timestamp(),
-        utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
-    end,
+                BeforeProcessing = os:timestamp(),
+                for(1, ProcSendNum, SendReq),
+                count_answers(ProcSendNum),
+                AfterProcessing = os:timestamp(),
+                utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+            end,
 
-    Ans = spawn_and_check(TestProc, ProcNum),
-    ?assertMatch({ok, _}, Ans),
-    {_, Times} = Ans,
-    #parameter{name = routing_time, value = Times, unit = "ms",
-        description = "Aggregated time of all calls with default arguments but delegated to other node"}.
+            Ans = spawn_and_check(TestProc, ProcNum),
+            ?assertMatch({ok, _}, Ans),
+            {_, Times} = Ans,
+            #parameter{name = routing_time, value = Times, unit = "ms",
+                description = "Aggregated time of all calls with default arguments but delegated to other node"}
+        end).
 
 %%%===================================================================
 
--performance([
-    {repeats, ?REPEATS},
-    {success_rate, ?SUCCESS_RATE},
-    {parameters, [
-        [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
-        [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
-    ]},
-    {description, "Performs many one worker_proxy calls with various arguments"},
-    {config, [{name, short_procs},
-        {parameters, [
-            [{name, proc_num}, {value, 100}],
-            [{name, proc_repeats}, {value, 1}]
-        ]},
-        {description, "Multiple threads, each thread does only one operation of each type"}
-    ]},
-    {config, [{name, one_proc},
-        {parameters, [
-            [{name, proc_num}, {value, 1}],
-            [{name, proc_repeats}, {value, 100}]
-        ]},
-        {description, "One thread does many operations"}
-    ]},
-    {config, [{name, long_procs},
-        {parameters, [
-            [{name, proc_num}, {value, 100}],
-            [{name, proc_repeats}, {value, 100}]
-        ]},
-        {description, "Many threads do many operations"}
-    ]}
-]).
 mixed_cast_test(Config) ->
-    mixed_cast_test_core(Config).
+    ?PERFORMANCE(Config, [
+            {repeats, ?REPEATS},
+            {success_rate, ?SUCCESS_RATE},
+            {parameters, [
+                [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
+                [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
+            ]},
+            {description, "Performs many one worker_proxy calls with various arguments"},
+            {config, [{name, short_procs},
+                {parameters, [
+                    [{name, proc_num}, {value, 100}],
+                    [{name, proc_repeats}, {value, 1}]
+                ]},
+                {description, "Multiple threads, each thread does only one operation of each type"}
+            ]},
+            {config, [{name, one_proc},
+                {parameters, [
+                    [{name, proc_num}, {value, 1}],
+                    [{name, proc_repeats}, {value, 100}]
+                ]},
+                {description, "One thread does many operations"}
+            ]},
+            {config, [{name, long_procs},
+                {parameters, [
+                    [{name, proc_num}, {value, 100}],
+                    [{name, proc_repeats}, {value, 100}]
+                ]},
+                {description, "Many threads do many operations"}
+            ]}
+        ],
+        fun(Config) ->
+            mixed_cast_test_core(Config)
+        end).
 
 %%%===================================================================
 %%% Functions cores (to be reused in stress tests)
