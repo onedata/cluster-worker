@@ -605,8 +605,9 @@ start_gateway(Parent, N, Hostname, Port) ->
     State = #{
         server => self(), port_fd => PortFD, status => running, id => {node(), N},
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds)
+        start_time => erlang:system_time(milli_seconds), parent => Parent
     },
+    monitor(process, Parent),
     proc_lib:init_ack(Parent, State),
     gateway_loop(State).
 
@@ -617,7 +618,8 @@ start_gateway(Parent, N, Hostname, Port) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
-gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, start_time := ST} = State) ->
+gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port,
+    start_time := ST, parent := Parent} = State) ->
     try port_command(PortFD, <<"ping">>) of
         true -> ok
     catch
@@ -651,8 +653,11 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                 State#{status => restarting};
             restart ->
                 State;
+            {'DOWN', _, process, Parent, Reason} ->
+                catch port_close(PortFD),
+                State#{status => closed};
             stop ->
-                    catch port_close(PortFD),
+                catch port_close(PortFD),
                 State#{status => closed};
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
@@ -782,14 +787,8 @@ handle_info(Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate(term(), gen_changes_state()) -> ok.
-terminate(Reason, #{db_gateways := Gateways}) ->
+terminate(Reason, _State) ->
     ?warning("~p terminating with reason ~p~n", [?MODULE, Reason]),
-    GatewayList = maps:values(Gateways),
-    lists:foreach(
-        fun(#{server := Pid}) ->
-            Pid ! stop
-        end, GatewayList),
-
     ok.
 
 
