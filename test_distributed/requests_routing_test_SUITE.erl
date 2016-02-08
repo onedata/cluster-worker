@@ -241,7 +241,9 @@ spawn_and_check(Fun, Num) ->
                 {ok, Time} -> {ok, Time + Sum}
             after ?REQUEST_TIMEOUT ->
                 {error, timeout}
-            end
+            end;
+        Err ->
+            Err
     end.
 
 for(N, N, F) ->

@@ -20,6 +20,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).
@@ -29,16 +30,16 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 -export([
-    local_cache_test/1, global_cache_test/1, global_cache_atomic_update_test/1,
-    global_cache_list_test/1, persistance_test/1, local_cache_list_test/1,
+    local_test/1, global_test/1, global_atomic_update_test/1,
+    global_list_test/1, persistance_test/1, local_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1, link_walk_test/1,
     cache_monitoring_test/1, old_keys_cleaning_test/1, cache_clearing_test/1]).
 -export([utilize_memory/2]).
 
 -performance({test_cases, []}).
 all() ->
-    [local_cache_test, global_cache_test, global_cache_atomic_update_test,
-        global_cache_list_test, persistance_test, local_cache_list_test,
+    [local_test, global_test, global_atomic_update_test,
+        global_list_test, persistance_test, local_list_test,
         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
         cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test].
 
@@ -120,15 +121,18 @@ old_keys_cleaning_test(Config) ->
         }])),
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     CorruptedUuid = caches_controller:get_cache_uuid(CorruptedKey, some_record),
+    ModelConfig = some_record:model_init(),
+    DModule = ?call(Worker1, datastore, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    PModule = ?call(Worker1, datastore, driver_to_module, [?PERSISTENCE_DRIVER]),
     ?assertMatch(ok, ?call(Worker2, cache_controller, delete, [?GLOBAL_ONLY_LEVEL, CorruptedUuid])),
 
     ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 1])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [global_only, some_record, CorruptedKey])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, CorruptedKey])),
+    ?assertMatch({ok, true}, ?call(Worker2, DModule, exists, [ModelConfig, CorruptedKey])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, CorruptedKey])),
 
     ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [global_only, some_record, CorruptedKey])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, CorruptedKey])),
+    ?assertMatch({ok, false}, ?call(Worker2, DModule, exists, [ModelConfig, CorruptedKey])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, CorruptedKey])),
     ok.
 
 % helper fun used by old_keys_cleaning_test
@@ -172,7 +176,7 @@ cache_clearing_test(Config) ->
     Mem0Node = ?call(Worker2, erlang, memory, [total]),
     ct:print("Mem0 ~p xxx ~p", [Mem0, Mem0Node]),
     FreeMem = 100 - Mem0,
-    ToAdd = min(20, FreeMem / 2),
+    ToAdd = min(10, FreeMem / 2),
     MemTarget = Mem0 + ToAdd / 2,
     MemUsage = Mem0 + ToAdd,
 
@@ -183,9 +187,9 @@ cache_clearing_test(Config) ->
     ct:print("Mem1 ~p xxx ~p", [Mem1, Mem1Node]),
     ?assert(Mem1 > MemTarget),
 
-    ?assertEqual(ok, ?call(Worker2, caches_controller, wait_for_cache_dump, []), 30),
+    ?assertEqual(ok, ?call(Worker2, caches_controller, wait_for_cache_dump, []), 150),
     % TODO Add answer checking when DB nodes will be run at separate machine
-    CheckMemAns = gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, ?TIMEOUT),
+    CheckMemAns = gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, timer:minutes(5)),
 %%     ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, ?TIMEOUT)),
     [{_, Mem2}] = monitoring:get_memory_stats(),
     Mem2Node = ?call(Worker2, erlang, memory, [total]),
@@ -217,7 +221,7 @@ utilize_memory(MemUsage, MemTarget) ->
     ok.
 
 %% Simple usage of get/update/create/exists/delete on local cache driver (on several nodes)
-local_cache_test(Config) ->
+local_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
     Level = local_only,
@@ -244,7 +248,7 @@ local_cache_test(Config) ->
 
 
 %% Simple usage of get/update/create/exists/delete on global cache driver (on several nodes)
-global_cache_test(Config) ->
+global_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
     Level = ?GLOBAL_ONLY_LEVEL,
@@ -272,7 +276,7 @@ persistance_test(Config) ->
 
 
 %% Atomic update on global cache driver (on several nodes)
-global_cache_atomic_update_test(Config) ->
+global_atomic_update_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
     Level = ?GLOBAL_ONLY_LEVEL,
@@ -317,12 +321,12 @@ global_cache_atomic_update_test(Config) ->
 
 
 %% list operation on global cache driver (on several nodes)
-global_cache_list_test(Config) ->
+global_list_test(Config) ->
     generic_list_test(?config(cluster_worker_nodes, Config), ?GLOBAL_ONLY_LEVEL).
 
 
 %% list operation on local cache driver (on several nodes)
-local_cache_list_test(Config) ->
+local_list_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
     generic_list_test([Worker1], ?LOCAL_ONLY_LEVEL),
@@ -401,7 +405,12 @@ end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) when
+    Case =:= local_test;
+    Case =:= global_test;
+    Case =:= global_atomic_update_test;
+    Case =:= global_list_test;
     Case =:= persistance_test;
+    Case =:= local_list_test;
     Case =:= disk_only_links_test;
     Case =:= global_only_links_test;
     Case =:= link_walk_test ->
@@ -423,7 +432,12 @@ init_per_testcase(_, Config) ->
     Config.
 
 end_per_testcase(Case, Config) when
+    Case =:= local_test;
+    Case =:= global_test;
+    Case =:= global_atomic_update_test;
+    Case =:= global_list_test;
     Case =:= persistance_test;
+    Case =:= local_list_test;
     Case =:= disk_only_links_test;
     Case =:= global_only_links_test;
     Case =:= link_walk_test ->
@@ -437,14 +451,15 @@ end_per_testcase(Case, Config) when
     lists:foreach(fun(W) ->
         lists:foreach(fun(MC) ->
             ?assert(?call(W, ets, insert, [datastore_local_state, {MC, cache_controller}]))
-        end, ModelConfig)
+        end, ModelConfig),
+        % Clear docs that may be recognized as cached in further tests
+        gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_node, 60000)
     end, Workers);
 
 end_per_testcase(_, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     [W | _] = Workers,
-    ?assertMatch(ok, ?call(W, caches_controller, wait_for_cache_dump, [])),
-    ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, ?TIMEOUT)).
+    datastore_basic_ops_utils:clear_cache(W).
 
 %%%===================================================================
 %%% Internal functions
