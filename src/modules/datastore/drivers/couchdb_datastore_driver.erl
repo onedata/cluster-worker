@@ -108,20 +108,6 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
             {error, Reason}
     end.
 
-force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
-    ok = assert_value_size(Value),
-
-    {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
-        {ok, {_}} ->
-            {ok, Key};
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link store_driver_behaviour} callback update/3.
@@ -582,6 +568,28 @@ db_run(Mod, Fun, Args, Retry) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Inserts given document to database while preserving revision number. Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec force_save(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+    ok = assert_value_size(Value),
+
+    {Props} = to_json_term(Value),
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
+    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
+        {ok, {_}} ->
+            {ok, Key};
+        {error, conflict} ->
+            {error, already_exists};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
 %% Spawned couchbase-sync-gateway connects to given couchbase node and gives CouchDB-like
 %% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
@@ -625,7 +633,6 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     catch
         _:Reason0 ->
             self() ! {port_comm_error, Reason0}
-
     end,
 
     CT = erlang:system_time(milli_seconds),
