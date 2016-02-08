@@ -288,7 +288,7 @@ healthcheck() ->
         _ ->
             {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_disp_out_of_sync_threshold),
             % Threshold is in millisecs, LastUpdate is in microsecs
-            case (erlang:system_time(micro_seconds) - LastUpdate) > Threshold * 1000 of
+            case (erlang:system_time(micro_seconds) - LastUpdate) / 1000 > Threshold of
                 true ->
                     % DNS is out of sync
                     out_of_sync;
