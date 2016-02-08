@@ -65,99 +65,6 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
-%% Spawned couchbase-sync-gateway connects to given couchbase node and gives CouchDB-like
-%% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
-%% @end
-%%--------------------------------------------------------------------
--spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
-start_gateway(Parent, N, Hostname, Port) ->
-    GWPort = ?GATEWAY_BASE_PORT + N,
-    GWAdminPort = GWPort + 1000,
-    ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
-
-    BinPath = "/opt/couchbase-sync-gateway/bin/sync_gateway",
-    PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
-        "-bucket", "default",
-        "-url", "http://" ++ binary_to_list(Hostname) ++ ":" ++ integer_to_list(Port),
-        "-adminInterface", "127.0.0.1:" ++ integer_to_list(GWAdminPort),
-        "-interface", ":" ++ integer_to_list(GWPort)
-    ]}]),
-    erlang:link(PortFD),
-
-    State = #{
-        server => self(), port_fd => PortFD, status => running, id => {node(), N},
-        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds)
-    },
-    proc_lib:init_ack(Parent, State),
-    gateway_loop(State).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Loop for managing Erlang Port (couchbase-sync-gateway).
-%% @end
-%%--------------------------------------------------------------------
--spec gateway_loop(State :: #{atom() => term()}) -> no_return().
-gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, start_time := ST} = State) ->
-    try port_command(PortFD, <<"ping">>) of
-        true -> ok
-    catch
-        _:Reason0 ->
-            self() ! {port_comm_error, Reason0}
-
-    end,
-
-    CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + timer:seconds(5),
-
-    NewState =
-        receive
-            {PortFD, {data, {_, Data}}} ->
-                case binary:matches(Data, <<"HTTP:">>) of
-                    [] ->
-                        ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
-                    _ -> ok
-                end,
-                State;
-            {PortFD, closed} ->
-                State#{status => closed};
-
-            {'EXIT', PortFD, Reason} ->
-                ?error("CouchBase gateway's port ~p exited with reason: ~p", [State, Reason]),
-                State#{status => failed};
-            {port_comm_error, Reason} ->
-                ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
-                State#{status => failed};
-            restart when CT > MinRestartTime ->
-                State#{status => restarting};
-            restart ->
-                State;
-            stop ->
-                catch port_close(PortFD),
-                State#{status => closed};
-            Other ->
-                ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
-                State
-        after timer:seconds(1) ->
-            State
-        end,
-    case NewState of
-        #{status := running} ->
-            gateway_loop(NewState);
-        #{status := closed} ->
-            ok;
-        #{status := restarting} ->
-            catch port_close(PortFD),
-            start_gateway(self(), N, Hostname, Port);
-        #{status := failed} ->
-            catch port_close(PortFD),
-            start_gateway(self(), N, Hostname, Port)
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% {@link store_driver_behaviour} callback init_bucket/3.
 %% @end
 %%--------------------------------------------------------------------
@@ -664,6 +571,109 @@ db_run(Mod, Fun, Args, Retry) ->
         Other -> Other
     end.
 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%                          couchbase-sync-gateway management                         %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
+%% Spawned couchbase-sync-gateway connects to given couchbase node and gives CouchDB-like
+%% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
+%% @end
+%%--------------------------------------------------------------------
+-spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
+start_gateway(Parent, N, Hostname, Port) ->
+    GWPort = ?GATEWAY_BASE_PORT + N,
+    GWAdminPort = GWPort + 1000,
+    ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
+
+    BinPath = "/opt/couchbase-sync-gateway/bin/sync_gateway",
+    PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
+        "-bucket", "default",
+        "-url", "http://" ++ binary_to_list(Hostname) ++ ":" ++ integer_to_list(Port),
+        "-adminInterface", "127.0.0.1:" ++ integer_to_list(GWAdminPort),
+        "-interface", ":" ++ integer_to_list(GWPort)
+    ]}]),
+    erlang:link(PortFD),
+
+    State = #{
+        server => self(), port_fd => PortFD, status => running, id => {node(), N},
+        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
+        start_time => erlang:system_time(milli_seconds)
+    },
+    proc_lib:init_ack(Parent, State),
+    gateway_loop(State).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Loop for managing Erlang Port (couchbase-sync-gateway).
+%% @end
+%%--------------------------------------------------------------------
+-spec gateway_loop(State :: #{atom() => term()}) -> no_return().
+gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, start_time := ST} = State) ->
+    try port_command(PortFD, <<"ping">>) of
+        true -> ok
+    catch
+        _:Reason0 ->
+            self() ! {port_comm_error, Reason0}
+
+    end,
+
+    CT = erlang:system_time(milli_seconds),
+    MinRestartTime = ST + timer:seconds(5),
+
+    NewState =
+        receive
+            {PortFD, {data, {_, Data}}} ->
+                case binary:matches(Data, <<"HTTP:">>) of
+                    [] ->
+                        ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    _ -> ok
+                end,
+                State;
+            {PortFD, closed} ->
+                State#{status => closed};
+
+            {'EXIT', PortFD, Reason} ->
+                ?error("CouchBase gateway's port ~p exited with reason: ~p", [State, Reason]),
+                State#{status => failed};
+            {port_comm_error, Reason} ->
+                ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
+                State#{status => failed};
+            restart when CT > MinRestartTime ->
+                State#{status => restarting};
+            restart ->
+                State;
+            stop ->
+                    catch port_close(PortFD),
+                State#{status => closed};
+            Other ->
+                ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
+                State
+        after timer:seconds(1) ->
+            State
+        end,
+    case NewState of
+        #{status := running} ->
+            gateway_loop(NewState);
+        #{status := closed} ->
+            ok;
+        #{status := restarting} ->
+                catch port_close(PortFD),
+            start_gateway(self(), N, Hostname, Port);
+        #{status := failed} ->
+                catch port_close(PortFD),
+            start_gateway(self(), N, Hostname, Port)
+    end.
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                    CHANGES                                         %%
@@ -680,7 +690,6 @@ db_run(Mod, Fun, Args, Retry) ->
 %% API
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Starts changes stream with given callback function that is called on every change received from DB.
 %% @end
@@ -775,11 +784,11 @@ handle_info(Info, State) ->
 -spec terminate(term(), gen_changes_state()) -> ok.
 terminate(Reason, #{db_gateways := Gateways}) ->
     ?warning("~p terminating with reason ~p~n", [?MODULE, Reason]),
-    Gateways = maps:values(Gateways),
+    GatewayList = maps:values(Gateways),
     lists:foreach(
         fun(#{server := Pid}) ->
             Pid ! stop
-        end, Gateways),
+        end, GatewayList),
 
     ok.
 
