@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc CouchDB database driver (REST based) that supports changes stream
 %%%      and connecting to couchbase via couchbase's sync_gateway (that emulates CouchDB API).
+%%%      Values of document saved with this driver cannot be bigger then 512kB.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(couchdb_datastore_driver).
@@ -25,6 +26,9 @@
 -define(ATOM_PREFIX, "ATOM::").
 
 -define(LINKS_KEY_SUFFIX, "$$").
+
+%% Maximum size of document's value.
+-define(MAX_VALUE_SIZE, 512 * 1024).
 
 %% Base port for gateway endpoints
 -define(GATEWAY_BASE_PORT, 5084).
@@ -50,7 +54,7 @@
 %%--------------------------------------------------------------------
 -spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init_driver(#{db_nodes := DBNodes0} = State) ->
-    DBNodes = [ lists:nth(crypto:rand_uniform(1, length(DBNodes0) + 1), DBNodes0) ],
+    DBNodes = [lists:nth(crypto:rand_uniform(1, length(DBNodes0) + 1), DBNodes0)],
     Gateways = lists:map(
         fun({N, {Hostname, _Port}}) ->
             GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, 8091], timer:seconds(5)),
@@ -58,96 +62,6 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
         end, lists:zip(lists:seq(1, length(DBNodes)), DBNodes)),
     {ok, State#{db_gateways => maps:from_list(Gateways)}}.
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
-%% Spawned couchbase-sync-gateway connects to given couchbase node and gives CouchDB-like
-%% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
-%% @end
-%%--------------------------------------------------------------------
--spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
-start_gateway(Parent, N, Hostname, Port) ->
-    GWPort = ?GATEWAY_BASE_PORT + N,
-    GWAdminPort = GWPort + 1000,
-    ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
-
-    BinPath = "/opt/couchbase-sync-gateway/bin/sync_gateway",
-    PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
-        "-bucket", "default",
-        "-url", "http://" ++ binary_to_list(Hostname) ++ ":" ++ integer_to_list(Port),
-        "-adminInterface", "127.0.0.1:" ++ integer_to_list(GWAdminPort),
-        "-interface", ":" ++ integer_to_list(GWPort)
-    ]}]),
-    erlang:link(PortFD),
-
-    State = #{
-        server => self(), port_fd => PortFD, status => running, id => {node(), N},
-        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds)
-    },
-    proc_lib:init_ack(Parent, State),
-    gateway_loop(State).
-
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Loop for managing Erlang Port (couchbase-sync-gateway).
-%% @end
-%%--------------------------------------------------------------------
--spec gateway_loop(State :: #{atom() => term()}) -> no_return().
-gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, start_time := ST } = State) ->
-    try port_command(PortFD, <<"ping">>) of
-        true -> ok
-    catch
-        _:Reason0 ->
-            self() ! {port_comm_error, Reason0}
-
-    end,
-
-    CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + timer:seconds(5),
-
-    NewState =
-        receive
-            {PortFD, {data, {_, Data}}} ->
-                case binary:matches(Data, <<"HTTP:">>) of
-                    [] ->
-                        ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
-                    _ -> ok
-                end,
-                State;
-            {PortFD, closed} ->
-                State#{status => closed};
-            {'EXIT', PortFD, Reason} ->
-                ?error("CouchBase gateway's port ~p exited with reason: ~p", [State, Reason]),
-                State#{status => failed};
-            {port_comm_error, Reason} ->
-                ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
-                State#{status => failed};
-            restart when CT > MinRestartTime ->
-                State#{status => restarting};
-            restart ->
-                State;
-            Other ->
-                ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
-                State
-        after timer:seconds(1) ->
-            State
-        end,
-    case NewState of
-        #{status := running} ->
-            gateway_loop(NewState);
-        #{status := closed} ->
-            ok;
-        #{status := restarting} ->
-            catch port_close(PortFD),
-            start_gateway(self(), N, Hostname, Port);
-        #{status := failed} ->
-            catch port_close(PortFD),
-            start_gateway(self(), N, Hostname, Port)
-    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -181,31 +95,11 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
             end
         end);
 save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
-    case byte_size(term_to_binary(Value)) > 512 * 1024 of
-        true -> error(term_to_big);
-        false -> ok
-    end,
-    
+    ok = assert_value_size(Value),
+
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(couchbeam, save_doc, [Doc], 3) of
-        {ok, {_}} ->
-            {ok, Key};
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
-    case byte_size(term_to_binary(Value)) > 512 * 1024 of
-        true -> error(term_to_big);
-        false -> ok
-    end,
-
-    {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -243,10 +137,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value = Value}) ->
-    case byte_size(term_to_binary(Value)) > 512 * 1024 of
-        true -> error(term_to_big);
-        false -> ok
-    end,
+    ok = assert_value_size(Value),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -660,11 +551,140 @@ db_run(Mod, Fun, Args, Retry) ->
     {ok, {ServerPid, DB}} = get_db(),
     case apply(Mod, Fun, [DB | Args]) of
         {error, econnrefused} when Retry > 0 ->
-            ?info("Unable to connect to ~p",[DB]),
+            ?info("Unable to connect to ~p", [DB]),
             ServerPid ! restart,
             db_run(Mod, Fun, Args, Retry - 1);
         Other -> Other
     end.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%                          couchbase-sync-gateway management                         %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts given document to database while preserving revision number. Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec force_save(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+    ok = assert_value_size(Value),
+
+    {Props} = to_json_term(Value),
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
+    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
+        {ok, {_}} ->
+            {ok, Key};
+        {error, conflict} ->
+            {error, already_exists};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
+%% Spawned couchbase-sync-gateway connects to given couchbase node and gives CouchDB-like
+%% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
+%% @end
+%%--------------------------------------------------------------------
+-spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
+start_gateway(Parent, N, Hostname, Port) ->
+    GWPort = ?GATEWAY_BASE_PORT + N,
+    GWAdminPort = GWPort + 1000,
+    ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
+
+    BinPath = "/opt/couchbase-sync-gateway/bin/sync_gateway",
+    PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
+        "-bucket", "default",
+        "-url", "http://" ++ binary_to_list(Hostname) ++ ":" ++ integer_to_list(Port),
+        "-adminInterface", "127.0.0.1:" ++ integer_to_list(GWAdminPort),
+        "-interface", ":" ++ integer_to_list(GWPort)
+    ]}]),
+    erlang:link(PortFD),
+
+    State = #{
+        server => self(), port_fd => PortFD, status => running, id => {node(), N},
+        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
+        start_time => erlang:system_time(milli_seconds), parent => Parent
+    },
+    monitor(process, Parent),
+    proc_lib:init_ack(Parent, State),
+    gateway_loop(State).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Loop for managing Erlang Port (couchbase-sync-gateway).
+%% @end
+%%--------------------------------------------------------------------
+-spec gateway_loop(State :: #{atom() => term()}) -> no_return().
+gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port,
+    start_time := ST, parent := Parent} = State) ->
+    try port_command(PortFD, <<"ping">>) of
+        true -> ok
+    catch
+        _:Reason0 ->
+            self() ! {port_comm_error, Reason0}
+    end,
+
+    CT = erlang:system_time(milli_seconds),
+    MinRestartTime = ST + timer:seconds(5),
+
+    NewState =
+        receive
+            {PortFD, {data, {_, Data}}} ->
+                case binary:matches(Data, <<"HTTP:">>) of
+                    [] ->
+                        ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    _ -> ok
+                end,
+                State;
+            {PortFD, closed} ->
+                State#{status => closed};
+
+            {'EXIT', PortFD, Reason} ->
+                ?error("CouchBase gateway's port ~p exited with reason: ~p", [State, Reason]),
+                State#{status => failed};
+            {port_comm_error, Reason} ->
+                ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
+                State#{status => failed};
+            restart when CT > MinRestartTime ->
+                State#{status => restarting};
+            restart ->
+                State;
+            {'DOWN', _, process, Parent, Reason} ->
+                catch port_close(PortFD),
+                State#{status => closed};
+            stop ->
+                catch port_close(PortFD),
+                State#{status => closed};
+            Other ->
+                ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
+                State
+        after timer:seconds(1) ->
+            State
+        end,
+    case NewState of
+        #{status := running} ->
+            gateway_loop(NewState);
+        #{status := closed} ->
+            ok;
+        #{status := restarting} ->
+                catch port_close(PortFD),
+            start_gateway(self(), N, Hostname, Port);
+        #{status := failed} ->
+                catch port_close(PortFD),
+            start_gateway(self(), N, Hostname, Port)
+    end.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -682,7 +702,6 @@ db_run(Mod, Fun, Args, Retry) ->
 %% API
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Starts changes stream with given callback function that is called on every change received from DB.
 %% @end
@@ -812,7 +831,7 @@ process_raw_doc({RawDoc}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec doc({change, term()}) -> term().
-doc({change,{Props}}) ->
+doc({change, {Props}}) ->
     {_, Doc} = lists:keyfind(<<"doc">>, 1, Props),
     Doc.
 
@@ -854,3 +873,17 @@ rev_info_to_rev({Num, [_Hash | _] = Revs}) when is_integer(Num) ->
     rev_info_to_rev({integer_to_binary(Num), Revs});
 rev_info_to_rev({NumBin, [Hash | _]}) when is_binary(NumBin) ->
     <<NumBin/binary, "-", Hash/binary>>.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Ensure that given term does not exceed maximum document's value size.
+%% @end
+%%--------------------------------------------------------------------
+-spec assert_value_size(Value :: term()) -> ok | no_return().
+assert_value_size(Value) ->
+    case byte_size(term_to_binary(Value)) > ?MAX_VALUE_SIZE of
+        true -> error(term_to_big);
+        false -> ok
+    end.
