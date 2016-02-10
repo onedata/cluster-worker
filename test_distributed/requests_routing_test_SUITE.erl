@@ -24,6 +24,7 @@
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 -export([simple_call_test/1, direct_cast_test/1, redirect_cast_test/1, mixed_cast_test/1]).
 -export([mixed_cast_test_core/1]).
+-export([simple_call_test_base/1, direct_cast_test_base/1, redirect_cast_test_base/1, mixed_cast_test_base/1]).
 
 -define(TEST_CASES, [
     simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test
@@ -46,27 +47,27 @@ simple_call_test(Config) ->
             {success_rate, ?SUCCESS_RATE},
             {description, "Performs one worker_proxy call per use case"},
             {config, [{name, simple_call}, {description, "Basic config for test"}]}
-        ],
-        fun(Config) ->
-            [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+        ]).
 
-            T1 = os:timestamp(),
-            ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping, ?REQUEST_TIMEOUT])),
-            T2 = os:timestamp(),
-            ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
-            T3 = os:timestamp(),
-            ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
-            T4 = os:timestamp(),
+simple_call_test_base(Config) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
-            [
-                #parameter{name = dispatcher, value = utils:milliseconds_diff(T2, T1), unit = "ms",
-                    description = "Time of call without specified target node (decision made by dispatcher)"},
-                #parameter{name = local_processing, value = utils:milliseconds_diff(T3, T2), unit = "ms",
-                    description = "Time of call with default arguments processed locally"},
-                #parameter{name = remote_processing, value = utils:milliseconds_diff(T4, T3), unit = "ms",
-                    description = "Time of call with default arguments delegated to other node"}
-            ]
-        end).
+    T1 = os:timestamp(),
+    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping, ?REQUEST_TIMEOUT])),
+    T2 = os:timestamp(),
+    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
+    T3 = os:timestamp(),
+    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
+    T4 = os:timestamp(),
+
+    [
+        #parameter{name = dispatcher, value = utils:milliseconds_diff(T2, T1), unit = "ms",
+            description = "Time of call without specified target node (decision made by dispatcher)"},
+        #parameter{name = local_processing, value = utils:milliseconds_diff(T3, T2), unit = "ms",
+            description = "Time of call with default arguments processed locally"},
+        #parameter{name = remote_processing, value = utils:milliseconds_diff(T4, T3), unit = "ms",
+            description = "Time of call with default arguments delegated to other node"}
+    ].
 
 %%%===================================================================
 
@@ -86,32 +87,31 @@ direct_cast_test(Config) ->
                 ]},
                 {description, "Basic config for test"}
             ]}
-        ],
-        fun(Config) ->
-            [Worker | _] = ?config(cluster_worker_nodes, Config),
-            ProcSendNum = ?config(proc_repeats, Config),
-            ProcNum = ?config(proc_num, Config),
+        ]).
 
-            TestProc = fun() ->
-                Self = self(),
-                SendReq = fun(MsgId) ->
-                    ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [dns_worker, ping, {proc, Self}, MsgId]))
-                end,
+direct_cast_test_base(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ProcSendNum = ?config(proc_repeats, Config),
+    ProcNum = ?config(proc_num, Config),
 
-                BeforeProcessing = os:timestamp(),
-                for(1, ProcSendNum, SendReq),
-                count_answers(ProcSendNum),
-                AfterProcessing = os:timestamp(),
-                utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
-            end,
+    TestProc = fun() ->
+        Self = self(),
+        SendReq = fun(MsgId) ->
+            ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [dns_worker, ping, {proc, Self}, MsgId]))
+        end,
 
-            Ans = spawn_and_check(TestProc, ProcNum),
-            ?assertMatch({ok, _}, Ans),
-            {_, Times} = Ans,
-            #parameter{name = routing_time, value = Times, unit = "ms",
-                description = "Aggregated time of all calls performed via dispatcher"}
-        end).
+        BeforeProcessing = os:timestamp(),
+        for(1, ProcSendNum, SendReq),
+        count_answers(ProcSendNum),
+        AfterProcessing = os:timestamp(),
+        utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+    end,
 
+    Ans = spawn_and_check(TestProc, ProcNum),
+    ?assertMatch({ok, _}, Ans),
+    {_, Times} = Ans,
+    #parameter{name = routing_time, value = Times, unit = "ms",
+        description = "Aggregated time of all calls performed via dispatcher"}.
 %%%===================================================================
 
 redirect_cast_test(Config) ->
@@ -130,31 +130,31 @@ redirect_cast_test(Config) ->
                 ]},
                 {description, "Basic config for test"}
             ]}
-        ],
-        fun(Config) ->
-            [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
-            ProcSendNum = ?config(proc_repeats, Config),
-            ProcNum = ?config(proc_num, Config),
+        ]).
 
-            TestProc = fun() ->
-                Self = self(),
-                SendReq = fun(MsgId) ->
-                    ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, MsgId]))
-                end,
+redirect_cast_test_base(Config) ->
+        [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+        ProcSendNum = ?config(proc_repeats, Config),
+        ProcNum = ?config(proc_num, Config),
 
-                BeforeProcessing = os:timestamp(),
-                for(1, ProcSendNum, SendReq),
-                count_answers(ProcSendNum),
-                AfterProcessing = os:timestamp(),
-                utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+        TestProc = fun() ->
+            Self = self(),
+            SendReq = fun(MsgId) ->
+                ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, MsgId]))
             end,
 
-            Ans = spawn_and_check(TestProc, ProcNum),
-            ?assertMatch({ok, _}, Ans),
-            {_, Times} = Ans,
-            #parameter{name = routing_time, value = Times, unit = "ms",
-                description = "Aggregated time of all calls with default arguments but delegated to other node"}
-        end).
+            BeforeProcessing = os:timestamp(),
+            for(1, ProcSendNum, SendReq),
+            count_answers(ProcSendNum),
+            AfterProcessing = os:timestamp(),
+            utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+        end,
+
+        Ans = spawn_and_check(TestProc, ProcNum),
+        ?assertMatch({ok, _}, Ans),
+        {_, Times} = Ans,
+        #parameter{name = routing_time, value = Times, unit = "ms",
+            description = "Aggregated time of all calls with default arguments but delegated to other node"}.
 
 %%%===================================================================
 
@@ -188,10 +188,10 @@ mixed_cast_test(Config) ->
                 ]},
                 {description, "Many threads do many operations"}
             ]}
-        ],
-        fun(Config) ->
-            mixed_cast_test_core(Config)
-        end).
+        ]).
+
+mixed_cast_test_base(Config) ->
+    mixed_cast_test_core(Config).
 
 %%%===================================================================
 %%% Functions cores (to be reused in stress tests)

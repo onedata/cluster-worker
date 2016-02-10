@@ -29,11 +29,12 @@
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
--export([
-    local_test/1, global_test/1, global_atomic_update_test/1,
+%%tests
+-export([local_test/1, global_test/1, global_atomic_update_test/1,
     global_list_test/1, persistance_test/1, local_list_test/1,
-    disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1, link_walk_test/1,
-    cache_monitoring_test/1, old_keys_cleaning_test/1, cache_clearing_test/1]).
+    disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
+    link_walk_test/1, cache_monitoring_test/1, old_keys_cleaning_test/1,
+    cache_clearing_test/1]).
 -export([utilize_memory/2]).
 
 all() ->
@@ -41,7 +42,8 @@ all() ->
         local_test, global_test, global_atomic_update_test,
         global_list_test, persistance_test, local_list_test,
         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-        cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test]).
+        cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test
+    ]).
 
 %%%===================================================================
 %%% Test functions

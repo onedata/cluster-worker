@@ -22,9 +22,16 @@
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+%%tests
 -export([stress_test/1,
     datastore_mixed_db_test/1, datastore_mixed_global_store_test/1, datastore_mixed_local_store_test/1,
     datastore_mixed_global_cache_test/1, datastore_mixed_local_cache_test/1, mixed_cast_test/1
+]).
+%%test_bases
+-export([stress_test_base/1,
+  datastore_mixed_db_test_base/1, datastore_mixed_global_store_test_base/1,
+  datastore_mixed_local_store_test_base/1, datastore_mixed_global_cache_test_base/1,
+  datastore_mixed_local_cache_test_base/1, mixed_cast_test_base/1
 ]).
 
 -define(STRESS_CASES, [
@@ -50,10 +57,10 @@ stress_test(Config) ->
             {description, "Main stress test function. Links together all cases to be done multiple times as one continous test."},
             {success_rate, 95},
             {config, [{name, stress}, {description, "Basic config for stress test"}]}
-        ],
-        fun(Config) ->
-            performance:stress_test(Config)
-        end).
+        ]).
+
+stress_test_base(Config) ->
+    performance:stress_test(Config).
 
 %%%===================================================================
 
@@ -66,24 +73,24 @@ datastore_mixed_db_test(Config) ->
                 [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
             ]},
             {description, "Performs multiple datastore operations using many threads. Level - database."}
-        ],
-        fun(Config) ->
-            datastore_basic_ops_utils:mixed_test(Config, disk_only)
-        end).
+        ]).
+
+datastore_mixed_db_test_base(Config) ->
+    datastore_basic_ops_utils:mixed_test(Config, disk_only).
 
 datastore_mixed_global_store_test(Config) ->
-   ?PERFORMANCE(Config, [
-           {parameters, [
-               [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-               [{name, docs_per_thead}, {value, 3}, {description, "Number of documents used by single threads."}],
-               [{name, ops_per_doc}, {value, 5}, {description, "Number of oprerations on each document."}],
-               [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
-           ]},
-           {description, "Performs multiple datastore operations using many threads. Level - global store."}
-       ],
-       fun(Config) ->
-           datastore_basic_ops_utils:mixed_test(Config, global_only)
-       end).
+  ?PERFORMANCE(Config, [
+    {parameters, [
+      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+      [{name, docs_per_thead}, {value, 3}, {description, "Number of documents used by single threads."}],
+      [{name, ops_per_doc}, {value, 5}, {description, "Number of oprerations on each document."}],
+      [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
+    ]},
+    {description, "Performs multiple datastore operations using many threads. Level - global store."}
+  ]).
+
+datastore_mixed_global_store_test_base(Config) ->
+    datastore_basic_ops_utils:mixed_test(Config, global_only).
 
 datastore_mixed_local_store_test(Config) ->
     ?PERFORMANCE(Config, [
@@ -94,10 +101,10 @@ datastore_mixed_local_store_test(Config) ->
                 [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
             ]},
             {description, "Performs multiple datastore operations using many threads. Level - local store."}
-        ],
-        fun(Config) ->
-          datastore_basic_ops_utils:mixed_test(Config, local_only)
-        end).
+        ]).
+
+datastore_mixed_local_store_test_base(Config) ->
+    datastore_basic_ops_utils:mixed_test(Config, local_only).
 
 datastore_mixed_global_cache_test(Config) ->
     ?PERFORMANCE(Config, [
@@ -108,24 +115,24 @@ datastore_mixed_global_cache_test(Config) ->
           [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
         ]},
         {description, "Performs multiple datastore operations using many threads. Level - global cache."}
-      ],
-      fun(Config) ->
-        datastore_basic_ops_utils:mixed_test(Config, globally_cached)
-      end).
+      ]).
+
+datastore_mixed_global_cache_test_base(Config) ->
+   datastore_basic_ops_utils:mixed_test(Config, globally_cached).
 
 datastore_mixed_local_cache_test(Config) ->
-  ?PERFORMANCE(Config, [
-      {parameters, [
-        [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-        [{name, docs_per_thead}, {value, 3}, {description, "Number of documents used by single threads."}],
-        [{name, ops_per_doc}, {value, 5}, {description, "Number of oprerations on each document."}],
-        [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
-      ]},
-      {description, "Performs multiple datastore operations using many threads. Level - local cache."}
-    ],
-  fun(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, locally_cached)
-  end).
+    ?PERFORMANCE(Config, [
+        {parameters, [
+          [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+          [{name, docs_per_thead}, {value, 3}, {description, "Number of documents used by single threads."}],
+          [{name, ops_per_doc}, {value, 5}, {description, "Number of oprerations on each document."}],
+          [{name, conflicted_threads}, {value, 10}, {description, "Number of threads that work with the same documents set."}]
+        ]},
+        {description, "Performs multiple datastore operations using many threads. Level - local cache."}
+      ]).
+
+datastore_mixed_local_cache_test_base(Config) ->
+    datastore_basic_ops_utils:mixed_test(Config, locally_cached).
 
 %%%===================================================================
 
@@ -136,10 +143,10 @@ mixed_cast_test(Config) ->
         [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
       ]},
       {description, "Performs many one worker_proxy calls with various arguments"}
-    ],
-    fun(Config) ->
-      requests_routing_test_SUITE:mixed_cast_test_core(Config)
-    end).
+    ]).
+
+mixed_cast_test_base(Config) ->
+    requests_routing_test_SUITE:mixed_cast_test_core(Config).
 
 
 %%%===================================================================
