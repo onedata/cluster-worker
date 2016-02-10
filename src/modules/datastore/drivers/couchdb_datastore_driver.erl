@@ -34,7 +34,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/4, force_save/2]).
+-export([start_gateway/4, force_save/2, db_run/4]).
 
 -export([changes_start_link/3]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
