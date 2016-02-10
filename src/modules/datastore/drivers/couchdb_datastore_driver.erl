@@ -601,7 +601,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
 
-    BinPath = "/opt/couchbase-sync-gateway/bin/sync_gateway",
+    BinPath = code:priv_dir(cluster_worker) ++ "/sync_gateway",
     PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
         "-bucket", "default",
         "-url", "http://" ++ binary_to_list(Hostname) ++ ":" ++ integer_to_list(Port),
