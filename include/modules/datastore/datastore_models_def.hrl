@@ -44,4 +44,18 @@
     node :: node()
 }).
 
+%% TODO: inject in tests, VFS-1630
+%% Test models
+-record(test_record_1, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
+-record(test_record_2, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
 -endif.

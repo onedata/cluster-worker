@@ -23,7 +23,11 @@
 -define(DEFAULT_MODELS, [
   some_record,
   cache_controller,
-  task_pool
+  task_pool,
+
+  %% TODO: inject in tests, VFS-1630
+  test_record_1,
+  test_record_2
 ]).
 
 %% datastore_config_behaviour callbacks
