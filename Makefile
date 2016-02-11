@@ -20,7 +20,6 @@ compile:
 	./rebar compile
 
 deps:
-	git submodule update --init --recursive
 	./rebar get-deps
 
 generate: deps compile
