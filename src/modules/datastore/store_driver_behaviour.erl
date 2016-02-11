@@ -15,6 +15,15 @@
 
 -export_type([driver_action/0]).
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes given driver locally (this method is executed per-node).
+%% @end
+%%--------------------------------------------------------------------
+-callback init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Initializes given bucket locally (this method is executed per-node).

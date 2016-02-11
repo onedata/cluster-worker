@@ -43,11 +43,39 @@
                             "cm"
                         ],
                         "db_nodes": [
-                            "127.0.0.1:49161",
-                            "127.0.0.1:49162",
-                            "127.0.0.1:49163",
-                            "127.0.0.1:49164",
-                            "127.0.0.1:49165"
+                            "127.0.0.1:49161"
+                        ]
+                    }
+                }
+            }
+        },
+        "p2": {
+            "db_driver": "couchdb",
+            "os_config": "cfg1",
+            "cluster_manager": {
+                "cm": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "cm_nodes": [
+                            "cm"
+                        ],
+                        "worker_num": 1
+                    }
+                }
+            },
+            "cluster_worker": {
+                "worker1": {
+                    "vm.args": {
+                        "setcookie": "test_cookie"
+                    },
+                    "sys.config": {
+                        "cm_nodes": [
+                            "cm"
+                        ],
+                        "db_nodes": [
+                            "127.0.0.1:49161"
                         ]
                     }
                 }
