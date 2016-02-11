@@ -19,4 +19,4 @@ Getting Started
 
 Support
 -------
-For more information visit project *Confluence* or write to <wrzeszcz@agh.edu.pl>.
+For more information visit project *Confluence* or write to <info@onedata.org>.
