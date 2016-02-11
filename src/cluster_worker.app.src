@@ -11,7 +11,7 @@
 {application, cluster_worker,
     [
         {description, "Application starts node of oneprovider cluster"},
-        {vsn, git},
+        {vsn, "2.0.0"},
         {registered, [cluster_worker_sup]},
         {applications, [
             kernel,
