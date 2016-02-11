@@ -58,7 +58,6 @@ stress_test(Config) ->
             {success_rate, 95},
             {config, [{name, stress}, {description, "Basic config for stress test"}]}
         ]).
-
 stress_test_base(Config) ->
     performance:stress_test(Config).
 
@@ -74,7 +73,6 @@ datastore_mixed_db_test(Config) ->
             ]},
             {description, "Performs multiple datastore operations using many threads. Level - database."}
         ]).
-
 datastore_mixed_db_test_base(Config) ->
     datastore_basic_ops_utils:mixed_test(Config, disk_only).
 
@@ -88,7 +86,6 @@ datastore_mixed_global_store_test(Config) ->
     ]},
     {description, "Performs multiple datastore operations using many threads. Level - global store."}
   ]).
-
 datastore_mixed_global_store_test_base(Config) ->
     datastore_basic_ops_utils:mixed_test(Config, global_only).
 
@@ -102,7 +99,6 @@ datastore_mixed_local_store_test(Config) ->
             ]},
             {description, "Performs multiple datastore operations using many threads. Level - local store."}
         ]).
-
 datastore_mixed_local_store_test_base(Config) ->
     datastore_basic_ops_utils:mixed_test(Config, local_only).
 
@@ -116,7 +112,6 @@ datastore_mixed_global_cache_test(Config) ->
         ]},
         {description, "Performs multiple datastore operations using many threads. Level - global cache."}
       ]).
-
 datastore_mixed_global_cache_test_base(Config) ->
    datastore_basic_ops_utils:mixed_test(Config, globally_cached).
 
@@ -130,7 +125,6 @@ datastore_mixed_local_cache_test(Config) ->
         ]},
         {description, "Performs multiple datastore operations using many threads. Level - local cache."}
       ]).
-
 datastore_mixed_local_cache_test_base(Config) ->
     datastore_basic_ops_utils:mixed_test(Config, locally_cached).
 

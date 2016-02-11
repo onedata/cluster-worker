@@ -48,31 +48,26 @@ all() ->
 
 create_delete_db_test(Config) ->
 	?PERFORMANCE(Config, ?create_delete_test_def).
-
 create_delete_db_test_base(Config) ->
 	datastore_basic_ops_utils:create_delete_test(Config, disk_only).
 
 save_db_test(Config) ->
 	?PERFORMANCE(Config, ?save_test_def).
-
 save_db_test_base(Config) ->
 	datastore_basic_ops_utils:save_test(Config, disk_only).
 
 update_db_test(Config) ->
 	?PERFORMANCE(Config, ?update_test_def).
-
 update_db_test_base(Config) ->
 	datastore_basic_ops_utils:update_test(Config, disk_only).
 
 get_db_test(Config) ->
 	?PERFORMANCE(Config, ?get_test_def).
-
 get_db_test_base(Config) ->
 	datastore_basic_ops_utils:get_test(Config, disk_only).
 
 exists_db_test(Config) ->
 	?PERFORMANCE(Config, ?exists_test_def).
-
 exists_db_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, disk_only).
 
@@ -80,31 +75,26 @@ exists_db_test_base(Config) ->
 
 create_delete_global_cache_test(Config) ->
 	?PERFORMANCE(Config, ?create_delete_test_def).
-
 create_delete_global_cache_test_base(Config) ->
 	datastore_basic_ops_utils:create_delete_test(Config, globally_cached).
 
 save_global_cache_test(Config) ->
 	?PERFORMANCE(Config, ?save_test_def).
-
 save_global_cache_test_base(Config) ->
 	datastore_basic_ops_utils:save_test(Config, globally_cached).
 
 update_global_cache_test(Config) ->
 	?PERFORMANCE(Config, ?update_test_def).
-
 update_global_cache_test_base(Config) ->
 	datastore_basic_ops_utils:update_test(Config, globally_cached).
 
 get_global_cache_test(Config) ->
 	?PERFORMANCE(Config, ?get_test_def).
-
 get_global_cache_test_base(Config) ->
 	datastore_basic_ops_utils:get_test(Config, globally_cached).
 
 exists_global_cache_test(Config) ->
 	?PERFORMANCE(Config, ?exists_test_def).
-
 exists_global_cache_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, globally_cached).
 
@@ -112,31 +102,26 @@ exists_global_cache_test_base(Config) ->
 
 create_delete_local_cache_test(Config) ->
 	?PERFORMANCE(Config, ?create_delete_test_def).
-
 create_delete_local_cache_test_base(Config) ->
 	datastore_basic_ops_utils:create_delete_test(Config, locally_cached).
 
 save_local_cache_test(Config) ->
 	?PERFORMANCE(Config, ?save_test_def).
-
 save_local_cache_test_base(Config) ->
 	datastore_basic_ops_utils:save_test(Config, locally_cached).
 
 update_local_cache_test(Config) ->
 	?PERFORMANCE(Config, ?update_test_def).
-
 update_local_cache_test_base(Config) ->
 	datastore_basic_ops_utils:update_test(Config, locally_cached).
 
 get_local_cache_test(Config) ->
 	?PERFORMANCE(Config, ?get_test_def).
-
 get_local_cache_test_base(Config) ->
 	datastore_basic_ops_utils:get_test(Config, locally_cached).
 
 exists_local_cache_test(Config) ->
 	?PERFORMANCE(Config, ?exists_test_def).
-
 exists_local_cache_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, locally_cached).
 
