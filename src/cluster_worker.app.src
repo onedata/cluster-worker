@@ -134,7 +134,7 @@
             %% ===================================================================
 
             %% Persistence driver to use in datastore.
-            %% Supported values: couchbase_datastore_driver, riak_datastore_driver
-            {persistence_driver_module, 'couchbase_datastore_driver'}
+            %% Supported values: couchbase_datastore_driver, riak_datastore_driver, couchdb_datastore_driver
+            {persistence_driver_module, 'couchdb_datastore_driver'}
         ]}
     ]}.
