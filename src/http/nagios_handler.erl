@@ -56,7 +56,7 @@ handle(Req, State) ->
     {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
     CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
                          {ok, {LastCheck, LastValue}} ->
-                             case (erlang:system_time(micro_seconds) - LastCheck) < CachingTime of
+                             case (erlang:monotonic_time(milli_seconds) - LastCheck) < CachingTime of
                                  true ->
                                      ?debug("Serving nagios response from cache"),
                                      {true, LastValue};
@@ -75,7 +75,7 @@ handle(Req, State) ->
                             case Status of
                                 {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
                                     application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache,
-                                        {erlang:system_time(micro_seconds), Status});
+                                        {erlang:monotonic_time(milli_seconds), Status});
                                 _ ->
                                     skip
                             end,

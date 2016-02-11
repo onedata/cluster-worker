@@ -47,20 +47,20 @@ all() ->
 simple_call_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
-    T1 = os:timestamp(),
+    T1 = erlang:monotonic_time(milli_seconds),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping, ?REQUEST_TIMEOUT])),
-    T2 = os:timestamp(),
+    T2 = erlang:monotonic_time(milli_seconds),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
-    T3 = os:timestamp(),
+    T3 = erlang:monotonic_time(milli_seconds),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
-    T4 = os:timestamp(),
+    T4 = erlang:monotonic_time(milli_seconds),
 
     [
-        #parameter{name = dispatcher, value = utils:milliseconds_diff(T2, T1), unit = "ms",
+        #parameter{name = dispatcher, value = T2 - T1, unit = "ms",
             description = "Time of call without specified target node (decision made by dispatcher)"},
-        #parameter{name = local_processing, value = utils:milliseconds_diff(T3, T2), unit = "ms",
+        #parameter{name = local_processing, value = T3 - T2, unit = "ms",
             description = "Time of call with default arguments processed locally"},
-        #parameter{name = remote_processing, value = utils:milliseconds_diff(T4, T3), unit = "ms",
+        #parameter{name = remote_processing, value = T4 - T3, unit = "ms",
             description = "Time of call with default arguments delegated to other node"}
     ].
 
@@ -93,11 +93,11 @@ direct_cast_test(Config) ->
             ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [dns_worker, ping, {proc, Self}, MsgId]))
         end,
 
-        BeforeProcessing = os:timestamp(),
+        BeforeProcessing = erlang:monotonic_time(milli_seconds),
         for(1, ProcSendNum, SendReq),
         count_answers(ProcSendNum),
-        AfterProcessing = os:timestamp(),
-        utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+        AfterProcessing = erlang:monotonic_time(milli_seconds),
+        AfterProcessing - BeforeProcessing
     end,
 
     Ans = spawn_and_check(TestProc, ProcNum),
@@ -135,11 +135,11 @@ redirect_cast_test(Config) ->
             ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, MsgId]))
         end,
 
-        BeforeProcessing = os:timestamp(),
+        BeforeProcessing = erlang:monotonic_time(milli_seconds),
         for(1, ProcSendNum, SendReq),
         count_answers(ProcSendNum),
-        AfterProcessing = os:timestamp(),
-        utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+        AfterProcessing = erlang:monotonic_time(milli_seconds),
+        AfterProcessing - BeforeProcessing
     end,
 
     Ans = spawn_and_check(TestProc, ProcNum),
@@ -199,11 +199,11 @@ mixed_cast_test_core(Config) ->
             ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, 2 * MsgId]))
         end,
 
-        BeforeProcessing = os:timestamp(),
+        BeforeProcessing = erlang:monotonic_time(milli_seconds),
         for(1, ProcSendNum, SendReq),
         count_answers(2 * ProcSendNum),
-        AfterProcessing = os:timestamp(),
-        utils:milliseconds_diff(AfterProcessing, BeforeProcessing)
+        AfterProcessing =erlang:monotonic_time(milli_seconds),
+        AfterProcessing - BeforeProcessing
     end,
 
     Ans = spawn_and_check(TestProc, ProcNum),

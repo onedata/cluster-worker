@@ -179,12 +179,13 @@ healthcheck_undefined_teardown(_) ->
 %%%-------------------------------------------------------------------
 
 healthcheck_outofsync_setup() ->
+    Time = erlang:monotonic_time(milli_seconds),
     meck:new(worker_host, [unstick]),
     meck:expect(worker_host, state_get,
         fun(_, Param) ->
             case Param of
                 lb_advice -> some_lb;
-                last_update -> 1
+                last_update -> Time
             end
         end),
 
@@ -193,7 +194,7 @@ healthcheck_outofsync_setup() ->
         fun(_, Param) ->
             case Param of
                 dns_worker_plugin -> {ok, dns_worker_plugin};
-                dns_disp_out_of_sync_threshold -> {ok, 10}
+                dns_disp_out_of_sync_threshold -> {ok, 0}
             end
         end),
 
