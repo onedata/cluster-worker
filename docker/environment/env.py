@@ -58,7 +58,7 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
         dns.maybe_restart_with_configuration('auto', uid, output)
 
     # Start provider cluster instances
-    setup_worker(gr_worker, bin_op_worker, 'globalregistry_domains',
+    setup_worker(gr_worker, bin_gr, 'globalregistry_domains',
                  bin_cluster_manager, config, config_path, dns_server, image, logdir, output, uid)
 
     # Start provider cluster instances
