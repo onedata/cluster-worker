@@ -137,7 +137,7 @@ cat <<"EOF" > /tmp/gen_dev_args.json
 {gen_dev_args}
 EOF
 escript bamboos/gen_dev/gen_dev.escript /tmp/gen_dev_args.json
-cat <<"EOF" > /root/bin/node/resources/dns.config
+cat <<"EOF" > /root/bin/node/data/dns.config
 {dns_config}
 EOF
 /root/bin/node/bin/globalregistry console >> {logfile}'''
@@ -242,7 +242,7 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None):
         domain = gr_domain(gr_instance, uid)
 
         dns_cfg_path = os.path.join(os.path.abspath(bindir),
-                                    input_dir, 'resources', 'dns.config')
+                                    input_dir, 'data', 'dns.config')
         orig_dns_cfg = open(dns_cfg_path).read()
         # Update dns.config file on each GR node
         for id in gr_configs:

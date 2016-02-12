@@ -16,7 +16,7 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None, dnsconfig_path=
     if dnsconfig_path is None:
         config = common.parse_json_file(config_path)
         input_dir = config['dirs_config']['globalregistry']['input_dir']
-        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'resources', 'dns.config')
+        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'data', 'dns.config')
 
     return worker.up(image, bindir, dns_server, uid, config_path, GRWorkerConfigurator(dnsconfig_path), logdir)
 

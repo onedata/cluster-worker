@@ -67,8 +67,8 @@ cat <<"EOF" > /tmp/gen_dev_args.json
 {gen_dev_args}
 EOF
 escript bamboos/gen_dev/gen_dev.escript /tmp/gen_dev_args.json
-mkdir -p /root/bin/node/resources/
-cat <<"EOF" > /root/bin/node/resources/dns.config
+mkdir -p /root/bin/node/data/
+cat <<"EOF" > /root/bin/node/data/dns.config
 {additional_commands}
 EOF
 /root/bin/node/bin/{executable} console >> {logfile}'''
