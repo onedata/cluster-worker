@@ -138,7 +138,6 @@ mixed_cast_test(Config) ->
       ]},
       {description, "Performs many one worker_proxy calls with various arguments"}
     ]).
-
 mixed_cast_test_base(Config) ->
     requests_routing_test_SUITE:mixed_cast_test_core(Config).
 
