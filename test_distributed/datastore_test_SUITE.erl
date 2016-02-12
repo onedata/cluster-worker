@@ -65,11 +65,11 @@ cache_monitoring_test(Config) ->
         }])),
 
     Uuid = caches_controller:get_cache_uuid(Key, some_record),
-    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 10),
-    ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 10),
+    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
+    ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
 
     ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key]), 10),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key]), 5),
 
     % Check dump delay
     Key2 = <<"key2">>,
@@ -77,10 +77,11 @@ cache_monitoring_test(Config) ->
         ?assertMatch({ok, _}, ?call(Worker1, some_record, save, [#document{
             key = Key2,
             value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
-        }]), 10)
+        }])),
+        timer:sleep(3500) % do not change to active waiting
     end),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key2]), 10),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key2]), 10),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key2])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key2]), 5),
 
     % Check forced dump
     Key3 = <<"key3">>,
@@ -88,9 +89,10 @@ cache_monitoring_test(Config) ->
         ?assertMatch({ok, _}, ?call(Worker1, some_record, save, [#document{
             key = Key3,
             value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
-        }]), 10)
+        }])),
+        timer:sleep(3500) % do not change to active waiting
     end),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key3]), 10),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key3])),
 
     ok.
 
