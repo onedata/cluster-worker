@@ -22,7 +22,7 @@
 -include_lib("annotations/include/annotations.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 -export([stress_test/1,
     datastore_mixed_db_test/1, datastore_mixed_global_store_test/1, datastore_mixed_local_store_test/1,
     datastore_mixed_global_cache_test/1, datastore_mixed_local_cache_test/1, mixed_cast_test/1
@@ -45,6 +45,7 @@ all() ->
 
 -performance([
     {description, "Main stress test function. Links together all cases to be done multiple times as one continous test."},
+    {success_rate, 95},
     {config, [{name, stress}, {description, "Basic config for stress test"}]}
 ]).
 stress_test(Config) ->
@@ -134,6 +135,28 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
+
+init_per_testcase(Case, Config) when
+    Case =:= datastore_mixed_db_test;
+    Case =:= datastore_mixed_global_store_test;
+    Case =:= datastore_mixed_local_store_test;
+    Case =:= datastore_mixed_local_cache_test;
+    Case =:= datastore_mixed_global_cache_test ->
+    datastore_basic_ops_utils:set_hooks(Case, Config);
+
+init_per_testcase(_Case, Config) ->
+    Config.
+
+end_per_testcase(Case, Config) when
+    Case =:= datastore_mixed_db_test;
+    Case =:= datastore_mixed_global_store_test;
+    Case =:= datastore_mixed_local_store_test;
+    Case =:= datastore_mixed_local_cache_test;
+    Case =:= datastore_mixed_global_cache_test ->
+    datastore_basic_ops_utils:unset_hooks(Case, Config);
+
+end_per_testcase(_Case, _Config) ->
+    ok.
 
 %%%===================================================================
 %%% Internal functions

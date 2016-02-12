@@ -11,7 +11,7 @@
 {application, cluster_worker,
     [
         {description, "Application starts node of oneprovider cluster"},
-        {vsn, git},
+        {vsn, "2.0.0"},
         {registered, [cluster_worker_sup]},
         {applications, [
             kernel,
@@ -134,7 +134,7 @@
             %% ===================================================================
 
             %% Persistence driver to use in datastore.
-            %% Supported values: couchbase_datastore_driver, riak_datastore_driver
-            {persistence_driver_module, 'couchbase_datastore_driver'}
+            %% Supported values: couchbase_datastore_driver, riak_datastore_driver, couchdb_datastore_driver
+            {persistence_driver_module, 'couchdb_datastore_driver'}
         ]}
     ]}.

@@ -1,0 +1,4 @@
+[submodule "vendor/sync_gateway"]
+	path = vendor/sync_gateway
+	url = https://github.com/couchbase/sync_gateway.git
+	branch = origin/1.2.0
