@@ -7,16 +7,24 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 
 import os
 import re
-from . import worker
+from . import worker, common
 
 DOCKER_BINDIR_PATH = '/root/build'
 
 
-def up(image, bindir, dns_server, uid, config_path, logdir=None):
-    return worker.up(image, bindir, dns_server, uid, config_path, GRWorkerConfigurator(), logdir)
+def up(image, bindir, dns_server, uid, config_path, logdir=None, dnsconfig_path=None):
+    if dnsconfig_path is None:
+        config = common.parse_json_file(config_path)
+        input_dir = config['dirs_config']['globalregistry']['input_dir']
+        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'resources', 'dns.config')
+
+    return worker.up(image, bindir, dns_server, uid, config_path, GRWorkerConfigurator(dnsconfig_path), logdir)
 
 
 class GRWorkerConfigurator:
+    def __init__(self, dnsconfig_path):
+        self.dnsconfig_path = dnsconfig_path
+
     def tweak_config(self, cfg, uid, domain):
         sys_config = cfg['nodes']['node']['sys.config']
         if 'http_domain' in sys_config:
@@ -27,9 +35,8 @@ class GRWorkerConfigurator:
         pass
 
     def additional_commands(self, bindir, config, domain, worker_ips):
-        input_dir = config['dirs_config']['globalregistry']['input_dir']
-        dns_cfg_path = os.path.join(os.path.abspath(bindir), input_dir, 'resources', 'dns.config')
-        dns_config = open(dns_cfg_path).read()
+        dnsconfig_path = self.dnsconfig_path
+        dns_config = open(dnsconfig_path).read()
 
         gr_ips = worker_ips
         ip_addresses = {
