@@ -191,6 +191,7 @@
     "globalregistry_domains": {
         "gr": {
             "globalregistry": {
+                "gui_livereload": true,
                 "node1": {
                     "vm.args": {
                         "setcookie": "cookie3"

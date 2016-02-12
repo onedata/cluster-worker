@@ -11,10 +11,12 @@ import copy
 import json
 import os
 import re
-
-from . import common, docker, dns
+from . import common, docker, dns, gui_livereload
 
 LOGFILE = '/tmp/run.log'
+# mounting point for globalregistry docker
+DOCKER_BINDIR_PATH = '/root/build'
+
 
 def gr_domain(gr_instance, uid):
     """Formats domain for a GR."""
@@ -193,6 +195,13 @@ sed -i 's/-setcookie monster/-setcookie {cookie}/g' /opt/bigcouch/etc/vm.args
         logdir = os.path.join(os.path.abspath(logdir), gr_hostname)
         volumes.extend([(logdir, '/root/bin/node/log', 'rw')])
 
+    if 'gui_livereload' in config:
+        if config['gui_livereload']:
+            volumes.extend(gui_livereload.required_volumes(
+                os.path.join(bindir, 'rel/gui.config'),
+                bindir,
+                DOCKER_BINDIR_PATH))
+
     # Just start the docker, GR will be started later when dns.config is updated
     gr = docker.run(
         image=image,
@@ -225,16 +234,24 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None):
                 'input_dir': input_dir,
                 'target_dir': '/root/bin'
             },
-            'nodes': config['globalregistry_domains'][gr_instance]['globalregistry']
+            'nodes': config['globalregistry_domains'][gr_instance][
+                'globalregistry']
         }
+
+        # If present, include gui_livereload
+        if 'gui_livereload' in config['globalregistry_domains'][gr_instance]:
+            gen_dev_cfg['gui_livereload'] = config['globalregistry_domains'][
+                gr_instance]['gui_livereload']
 
         tweaked_configs = [_tweak_config(gen_dev_cfg, gr_node, gr_instance, uid)
                            for gr_node in gen_dev_cfg['nodes']]
 
+        gr_nodes = []
         gr_ips = []
         gr_configs = {}
         for cfg in tweaked_configs:
             gr, node_out = _docker_up(image, bindir, cfg, dns_servers, logdir)
+            gr_nodes.append(gr)
             common.merge(output, node_out)
             gr_configs[gr] = cfg
             gr_ips.append(common.get_docker_ip(gr))
@@ -247,6 +264,17 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None):
         # Update dns.config file on each GR node
         for id in gr_configs:
             _node_up(id, domain, gr_ips, gr_ips, orig_dns_cfg, gr_configs[id])
+
+        if 'gui_livereload' in gen_dev_cfg:
+            if gen_dev_cfg['gui_livereload']:
+                print 'Starting GUI livereload for globalregistry {0}.'.format(
+                    gr_instance)
+                for container_id in gr_nodes:
+                    gui_livereload.run(
+                        container_id,
+                        os.path.join(bindir, 'rel/gui.config'),
+                        DOCKER_BINDIR_PATH,
+                        '/root/bin/node')
 
         domains = {
             'domains': {

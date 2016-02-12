@@ -73,6 +73,7 @@
     },
     "globalregistry_domains": {
         "gr": {
+            "gui_livereload": true,
             "globalregistry": {
                 "node1": {
                     "vm.args": {
