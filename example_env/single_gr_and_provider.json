@@ -8,8 +8,8 @@
             "input_dir": "rel/op_worker",
             "target_dir": "rel/test_cluster"
         },
-        "globalregistry": {
-            "input_dir": "rel/globalregistry",
+        "oz_worker": {
+            "input_dir": "rel/oz_worker",
             "target_dir": "rel/test_cluster"
         }
     },
@@ -63,15 +63,15 @@
                         "db_nodes": [
                             "dbnode1"
                         ],
-                        "verify_gr_cert": false,
-                        "global_registry_domain": "gr"
+                        "verify_oz_cert": false,
+                        "zone_domain": "oz"
                     }
                 }
             }
         }
     },
-    "globalregistry_domains": {
-        "gr": {
+    "zone_domains": {
+        "oz": {
             "db_driver": "couchbase",
             "cluster_manager": {
                 "cm": {
@@ -86,7 +86,7 @@
                     }
                 }
             },
-            "globalregistry": {
+            "oz_worker": {
                 "node1": {
                     "vm.args": {
                         "setcookie": "cookie3"

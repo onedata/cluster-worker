@@ -1,21 +1,22 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-"""Authors: Tomasz Lichoń, Konrad Zemek
+"""Authors: Michal Zmuda
 Copyright (C) 2015 ACK CYFRONET AGH
 This software is released under the MIT license cited in 'LICENSE.txt'
 
-A script to bring up a set of Global Registry nodes along with databases.
+A script to bring up a set of onezone nodes along with databases.
 They can create separate clusters.
 Run the script with -h flag to learn about script's running options.
 """
 
 from __future__ import print_function
-import json
-import os
-from environment import common, gr_worker, cluster_manager, dns
 
-parser = common.standard_arg_parser('Bring up globalregistry nodes (workers and cms).')
+import json
+
+from environment import common, dns, env, cluster_manager, zone_worker
+
+parser = common.standard_arg_parser('Bring up zone nodes (workers and cms).')
 parser.add_argument(
     '-l', '--logdir',
     action='store',
@@ -23,15 +24,15 @@ parser.add_argument(
     help='path to a directory where the logs will be stored',
     dest='logdir')
 parser.add_argument(
-    '-bg', '--bin-gr',
+    '-boz', '--bin-oz',
     action='store',
-    default=os.getcwd() + '/globalregistry',
-    help='the path to globalregistry repository (precompiled)',
-    dest='bin_gr')
+    default=env.default('bin_oz'),
+    help='the path to oz_worker repository (precompiled)',
+    dest='bin_oz')
 parser.add_argument(
     '-bcm', '--bin-cm',
     action='store',
-    default=os.getcwd() + '/cluster_manager',
+    default=env.default('bin_cluster_manager'),
     help='the path to cluster_manager repository (precompiled)',
     dest='bin_cluster_manager')
 
@@ -40,7 +41,7 @@ args = parser.parse_args()
 config = common.parse_json_file(args.config_path)
 output = {
     'cluster_manager_nodes': [],
-    'gr_nodes': [],
+    'oz_worker_nodes': [],
 }
 uid = common.generate_uid()
 
@@ -51,11 +52,12 @@ common.merge(output, dns_output)
 # Start cms
 cm_output = cluster_manager.up(args.image, args.bin_cluster_manager,
                                dns_server, uid, args.config_path, args.logdir,
-                               domains_name='globalregistry_domains')
+                               domains_name='zone_domains')
 common.merge(output, cm_output)
 
 # Start workers
-worker_output = gr_worker.up(args.image, args.bin_gr, dns_server, uid, args.config_path, args.logdir)
+worker_output = zone_worker.up(args.image, args.bin_gr, dns_server, uid,
+                               args.config_path, args.logdir)
 common.merge(output, worker_output)
 
 # Make sure domain are added to the dns server

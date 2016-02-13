@@ -7,18 +7,22 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 
 import os
 import re
+
 from . import worker, common
 
 DOCKER_BINDIR_PATH = '/root/build'
 
 
-def up(image, bindir, dns_server, uid, config_path, logdir=None, dnsconfig_path=None):
+def up(image, bindir, dns_server, uid, config_path, logdir=None,
+       dnsconfig_path=None):
     if dnsconfig_path is None:
         config = common.parse_json_file(config_path)
-        input_dir = config['dirs_config']['globalregistry']['input_dir']
-        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'data', 'dns.config')
+        input_dir = config['dirs_config']['oz_worker']['input_dir']
+        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir,
+                                      'data', 'dns.config')
 
-    return worker.up(image, bindir, dns_server, uid, config_path, GRWorkerConfigurator(dnsconfig_path), logdir)
+    return worker.up(image, bindir, dns_server, uid, config_path,
+                     GRWorkerConfigurator(dnsconfig_path), logdir)
 
 
 class GRWorkerConfigurator:
@@ -38,7 +42,7 @@ class GRWorkerConfigurator:
         dnsconfig_path = self.dnsconfig_path
         dns_config = open(dnsconfig_path).read()
 
-        gr_ips = worker_ips
+        oz_ips = worker_ips
         ip_addresses = {
             domain: ["ALL"]
         }
@@ -48,7 +52,7 @@ class GRWorkerConfigurator:
         ip_addresses[primary_ns] = ["ALL"]
 
         mail_exchange = 'mail.{0}'.format(domain)
-        ip_addresses[mail_exchange] = [gr_ips[0]]
+        ip_addresses[mail_exchange] = [oz_ips[0]]
         admin_mailbox = 'dns-admin.{0}'.format(domain)
 
         cname = '{{cname, "{0}"}},'.format(domain)
@@ -77,7 +81,8 @@ class GRWorkerConfigurator:
             ns_servers,
             dns_config)
 
-        mail_exchange = '{{mail_exchange, [\n        {{10, "{0}"}}\n    ]}},'.format(mail_exchange)
+        mail_exchange = '{{mail_exchange, [\n        {{10, "{0}"}}\n    ]}},'. \
+            format(mail_exchange)
         dns_config = re.sub(
             re.compile(r"\{mail_exchange,\s*\[[^\]]*\]\},", re.MULTILINE),
             mail_exchange,
@@ -101,13 +106,13 @@ class GRWorkerConfigurator:
         return []
 
     def app_name(self):
-        return "globalregistry"
+        return "oz_worker"
 
     def domains_attribute(self):
-        return "globalregistry_domains"
+        return "zone_domains"
 
     def domain_env_name(self):
-        return "globalregistry_domain"
+        return "zone_domain"
 
     def nodes_list_attribute(self):
-        return "gr_nodes"
+        return "oz_worker_nodes"

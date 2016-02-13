@@ -8,21 +8,23 @@ Brings up a set of oneprovider worker nodes. They can create separate clusters.
 import os
 import subprocess
 import sys
-from . import common, docker, worker, globalregistry
+
+from . import common, docker, worker, zone
 
 DOCKER_BINDIR_PATH = '/root/build'
 
 
 def up(image, bindir, dns_server, uid, config_path, logdir=None):
-    return worker.up(image, bindir, dns_server, uid, config_path, ProviderWorkerConfigurator(), logdir)
+    return worker.up(image, bindir, dns_server, uid, config_path,
+                     ProviderWorkerConfigurator(), logdir)
 
 
 class ProviderWorkerConfigurator:
     def tweak_config(self, cfg, instance, uid):
         sys_config = cfg['nodes']['node']['sys.config']
-        if 'global_registry_domain' in sys_config:
-            gr_hostname = globalregistry.gr_domain(sys_config['global_registry_domain'], uid)
-            sys_config['global_registry_domain'] = gr_hostname
+        if 'zone_domain' in sys_config:
+            oz_hostname = zone.oz_domain(sys_config['zone_domain'], uid)
+            sys_config['zone_domain'] = oz_hostname
         return cfg
 
     def additional_commands(self, bindir, config, domain, worker_ips):
@@ -33,10 +35,12 @@ class ProviderWorkerConfigurator:
             os_config = config[self.domains_attribute()][instance]['os_config']
             create_storages(config['os_configs'][os_config]['storages'],
                             output[self.nodes_list_attribute()],
-                            config[self.domains_attribute()][instance][self.app_name()], bindir)
+                            config[self.domains_attribute()][instance][
+                                self.app_name()], bindir)
 
     def extra_volumes(self, config):
-        return [common.volume_for_storage(s) for s in config['os_config']['storages']] if 'os_config' in config else []
+        return [common.volume_for_storage(s) for s in config['os_config'][
+            'storages']] if 'os_config' in config else []
 
     def app_name(self):
         return "op_worker"
@@ -55,7 +59,8 @@ def create_storages(storages, op_nodes, op_config, bindir):
     # copy escript to docker host
     script_name = 'create_storage.escript'
     pwd = common.get_script_dir()
-    command = ['cp', os.path.join(pwd, script_name), os.path.join(bindir, script_name)]
+    command = ['cp', os.path.join(pwd, script_name),
+               os.path.join(bindir, script_name)]
     subprocess.check_call(command)
     # execute escript on one of the nodes (storage is common fo the whole provider)
     first_node = op_nodes[0]
@@ -66,7 +71,8 @@ def create_storages(storages, op_nodes, op_config, bindir):
     for st_path in storages:
         st_name = st_path
         command = ['escript', script_path, cookie, first_node, st_name, st_path]
-        assert 0 is docker.exec_(container, command, tty=True, stdout=sys.stdout, stderr=sys.stderr)
+        assert 0 is docker.exec_(container, command, tty=True,
+                                 stdout=sys.stdout, stderr=sys.stderr)
     # clean-up
     command = ['rm', os.path.join(bindir, script_name)]
     subprocess.check_call(command)
