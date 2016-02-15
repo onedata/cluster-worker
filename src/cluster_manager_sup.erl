@@ -52,11 +52,9 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
-    {ok, {SupFlags :: supervisor:sup_flags(),
-        [ChildSpec :: supervisor:child_spec()]
-    }}.
+    {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 init([]) ->
-    {ok, {#{strategy => one_for_all, intensity => 5, period => 10}, [
+    {ok, {#{strategy => one_for_one, intensity => 5, period => 10}, [
         cluster_manager_spec()
     ]}}.
 
@@ -73,8 +71,11 @@ init([]) ->
 %%--------------------------------------------------------------------
 -spec cluster_manager_spec() -> supervisor:child_spec().
 cluster_manager_spec() ->
-    Id = Module = cluster_manager_server,
-    Restart = permanent,
-    Shutdown = timer:seconds(5),
-    Type = worker,
-    {Id, {Module, start_link, []}, Restart, Shutdown, Type, [Module]}.
+    #{
+        id => cluster_manager_server,
+        start => {cluster_manager_server, start_link, []},
+        restart => permanent,
+        shutdown => timer:seconds(5),
+        type => worker,
+        modules => [cluster_manager_server]
+    }.
