@@ -189,6 +189,8 @@ list_docs_to_be_dumped(Level) ->
     Filter = fun
         ('$end_of_table', Acc) ->
             {abort, Acc};
+        (#document{key = Uuid, value = #cache_controller{deleted_links = []}}, Acc) ->
+            {next, [Uuid | Acc]};
         (#document{value = #cache_controller{last_user = non}}, Acc) ->
             {next, Acc};
         (#document{key = Uuid}, Acc) ->
@@ -661,7 +663,7 @@ log_link_del(Key, ModelName, LinkNames, stop, _Args, Level) ->
         E1:E2 ->
             ?error_stacktrace("Error in cache_controller log_link_del. Args: ~p. Error: ~p:~p.",
                 [{Key, ModelName, LinkNames, stop, Level}, E1, E2]),
-            {error, ending_disk_op_failed}
+            {error, ending_disk_link_op_failed}
     end.
 
 before_link_del(Key, ModelName, LinkNames, Level) ->

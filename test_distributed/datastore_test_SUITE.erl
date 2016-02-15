@@ -34,20 +34,133 @@
     global_list_test/1, persistance_test/1, local_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
     link_walk_test/1, cache_monitoring_test/1, old_keys_cleaning_test/1,
-    cache_clearing_test/1]).
+    cache_clearing_test/1, link_monitoring_test/1, create_after_delete_test/1]).
 -export([utilize_memory/2]).
 
+%% all() ->
+%%     ?ALL([
+%%         local_test, global_test, global_atomic_update_test,
+%%         global_list_test, persistance_test, local_list_test,
+%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+%%         cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test, link_monitoring_test,
+%%         create_after_delete_test
+%%     ]).
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test,
-        global_list_test, persistance_test, local_list_test,
-        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-        cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test
+        create_after_delete_test
     ]).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
+
+% Testy - dodajemy testy kasuju/stworz zeby zobaczyc co sie dzieje z cache
+% do performance dodajemy do create i save powtorke, zeby sprawdzic czy cos sie nie zacina po kasowaniu
+% Dodajemy testy w ktorych kasujemy zawartosc cache controllera zeby sprawdzic czy linki itp sa na to odporne
+% Dodajemy testy performance linkow
+% Sprawdzic odswiezanie czasu przy get, fetch link itp
+% Sorawdzic czy dobrze sie zachowa addlink jakby dokumenty nie byly jeszcze zrzucone
+
+create_after_delete_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    LinkedKey = <<"linked_key">>,
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = #some_record{field1 = 2, field2 = <<"efg">>, field3 = {test, tuple2}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [LinkedDoc])),
+
+    Key = <<"key">>,
+    Doc =  #document{
+        key = Key,
+        value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+    ?assertMatch({ok, _}, ?call(Worker2, some_record, create, [Doc])),
+
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link]), 1),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link])),
+
+    Uuid = caches_controller:get_cache_uuid(Key, some_record),
+    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key]), 5),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link])),
+
+    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
+    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, Uuid]),
+    CCD = CC#document.value,
+    ?assertMatch([], CCD#cache_controller.deleted_links, 1),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+
+    ok.
+
+link_monitoring_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    Key = <<"key">>,
+    Doc =  #document{
+        key = Key,
+        value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+
+    LinkedKey = <<"linked_key">>,
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = #some_record{field1 = 2, field2 = <<"efg">>, field3 = {test, tuple2}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [LinkedDoc])),
+
+    Uuid = caches_controller:get_cache_uuid(Key, some_record),
+    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
+    {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, Uuid]),
+    CCD = CC#document.value,
+    ?assertEqual([], CCD#cache_controller.deleted_links),
+
+    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    {ok, CC2} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, Uuid]),
+    CCD2 = CC2#document.value,
+    ?assertEqual([link], CCD2#cache_controller.deleted_links, 1),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+
+    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+
+    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link]), 1),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+    ok.
+
 
 % checks if cache is monitored
 cache_monitoring_test(Config) ->
