@@ -35,7 +35,7 @@
     nodes = [] :: [Node :: node()],
     uninitialized_nodes = [] :: [Node :: node()],
     node_states = [] :: [{Node :: node(), NodeState :: #node_state{}}],
-    last_heartbeat = [] :: [{Node :: node(), Timestamp :: {integer(), integer(), integer()}}],
+    last_heartbeat = [] :: [{Node :: node(), Timestamp :: integer()}],
     lb_state = undefined :: load_balancing:load_balancing_state() | undefined
 }).
 
@@ -294,7 +294,7 @@ heartbeat(#state{node_states = NodeStates, last_heartbeat = LastHeartbeat} = Sta
     #node_state{node = Node} = NodeState,
     ?debug("Heartbeat from node ~p", [Node]),
     NewNodeStates = [{Node, NodeState} | proplists:delete(Node, NodeStates)],
-    NewLastHeartbeat = [{Node, now()} | proplists:delete(Node, LastHeartbeat)],
+    NewLastHeartbeat = [{Node, erlang:monotonic_time(milli_seconds)} | proplists:delete(Node, LastHeartbeat)],
     State#state{node_states = NewNodeStates, last_heartbeat = NewLastHeartbeat}.
 
 %%--------------------------------------------------------------------
@@ -313,12 +313,13 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
             State;
         _ ->
             {_, NodeStates} = lists:unzip(NodeStatesMap),
-            Now = now(),
+            Now = erlang:monotonic_time(milli_seconds),
             % Check which node managers are late with heartbeat ( > 2 * monitoring interval).
             % Assume full CPU usage on them.
             PrecheckedNodeStates = lists:map(
                 fun(#node_state{node = Node} = NodeState) ->
-                    LastHeartbeat = timer:now_diff(Now, proplists:get_value(Node, LastHeartbeats, now())) / 1000,
+                    LastHeartbeat = (Now -
+                        proplists:get_value(Node, LastHeartbeats, erlang:monotonic_time(milli_seconds))),
                     case LastHeartbeat > 2 * Interval of
                         true -> NodeState#node_state{cpu_usage = 100.0};
                         false -> NodeState
