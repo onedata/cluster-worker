@@ -694,7 +694,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 -record(state, {
     callback,
     until,
-    last_seq
+    last_seq = 0
 }).
 
 -type gen_changes_state() :: #state{}.
