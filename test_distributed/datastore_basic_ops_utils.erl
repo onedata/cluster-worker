@@ -558,7 +558,7 @@ set_hooks(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     ok = test_node_starter:load_modules(Workers, [?MODULE]),
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
     ModelConfig = lists:map(fun(Method) ->
         {some_record, Method}
     end, Methods),
@@ -599,7 +599,7 @@ unset_hooks(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     [W | _] = Workers,
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
     ModelConfig = lists:map(fun(Method) ->
         {some_record, Method}
     end, Methods),

@@ -34,7 +34,8 @@
     global_list_test/1, persistance_test/1, local_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
     link_walk_test/1, cache_monitoring_test/1, old_keys_cleaning_test/1,
-    cache_clearing_test/1, link_monitoring_test/1, create_after_delete_test/1]).
+    cache_clearing_test/1, link_monitoring_test/1, create_after_delete_test/1,
+    restoring_cache_from_disk_test/1, prevent_reading_from_disk_test/1]).
 -export([utilize_memory/2]).
 
 %% all() ->
@@ -43,7 +44,7 @@
 %%         global_list_test, persistance_test, local_list_test,
 %%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
 %%         cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test, link_monitoring_test,
-%%         create_after_delete_test
+%%         create_after_delete_test, restoring_cache_from_disk_test, prevent_reading_from_disk_test
 %%     ]).
 all() ->
     ?ALL([
@@ -60,6 +61,9 @@ all() ->
 % Dodajemy testy performance linkow
 % Sprawdzic odswiezanie czasu przy get, fetch link itp
 % Sorawdzic czy dobrze sie zachowa addlink jakby dokumenty nie byly jeszcze zrzucone
+% Sprawdzic czy dobrze jest przywracane z dysku
+% Lepsza obsługa all (skasowanie calego dokumentu)
+% obsluga link_walk i foreach dla cache
 
 create_after_delete_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
@@ -68,6 +72,8 @@ create_after_delete_test(Config) ->
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
     end, Workers),
 
+    ModelConfig = some_record:model_init(),
+    {ok, PModule} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
     LinkedKey = <<"linked_key">>,
     LinkedDoc = #document{
         key = LinkedKey,
@@ -87,26 +93,22 @@ create_after_delete_test(Config) ->
 
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link]), 1),
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]])),
 
     Uuid = caches_controller:get_cache_uuid(Key, some_record),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key]), 5),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, false}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]])),
+    ?assertMatch({ok, true}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]]), 5),
 
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
 
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, Uuid]),
-    CCD = CC#document.value,
-    ?assertMatch([], CCD#cache_controller.deleted_links, 1),
+    LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, some_record),
+    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
 
     ok.
 
@@ -117,6 +119,8 @@ link_monitoring_test(Config) ->
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
     end, Workers),
 
+    ModelConfig = some_record:model_init(),
+    {ok, PModule} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
     Key = <<"key">>,
     Doc =  #document{
         key = Key,
@@ -131,34 +135,87 @@ link_monitoring_test(Config) ->
     },
     ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [LinkedDoc])),
 
-    Uuid = caches_controller:get_cache_uuid(Key, some_record),
-    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
-    {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, Uuid]),
-    CCD = CC#document.value,
-    ?assertEqual([], CCD#cache_controller.deleted_links),
-
+    LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, some_record),
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+    ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
 
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    {ok, CC2} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, Uuid]),
-    CCD2 = CC2#document.value,
-    ?assertEqual([link], CCD2#cache_controller.deleted_links, 1),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+    {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]),
+    CCD = CC#document.value,
+    ?assertEqual(delete_links, CCD#cache_controller.action),
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+    ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
 
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
 
     ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link]), 1),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?DISK_ONLY_LEVEL, Doc, link]), 5),
+    {ok, CC2} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]),
+    CCD2 = CC2#document.value,
+    ?assertEqual(delete_links, CCD2#cache_controller.action),
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+    ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
+    ok.
+
+
+prevent_reading_from_disk_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    ModelConfig = some_record:model_init(),
+    {ok, PModule} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
+    Key = <<"key">>,
+    {CAns, Doc} = ?call(Worker1, some_record, create, [
+        #document{
+            key = Key,
+            value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+        }]),
+    ?assertMatch({ok, _}, {CAns, Doc}),
+    ?assertMatch({ok, true}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]]), 5),
+
+    UpdateFun = fun(Record) ->
+        {ok, Record#some_record{
+            field1 = 2
+        }}
+    end,
+    ?assertMatch({ok, _}, ?call(Worker2, some_record, update, [Doc#document.key, UpdateFun])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, delete, [Key])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
+    ?assertMatch(false, ?call(Worker1, some_record, exists, [Key])),
+    ?assertMatch({ok, false}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]]), 5),
+    ok.
+
+
+restoring_cache_from_disk_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    Key = <<"key">>,
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [
+        #document{
+            key = Key,
+            value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+        }])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key]), 5),
+
+    ?assertMatch({ok, true}, ?call_store(Worker2, delete, [?GLOBAL_ONLY_LEVEL, some_record, Key])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, some_record, Key]), 1),
+
+    ?assertMatch({ok, true}, ?call_store(Worker2, delete, [?GLOBAL_ONLY_LEVEL, some_record, Key])),
+    ?assertMatch(true, ?call(Worker1, some_record, exists, [Key])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, some_record, Key]), 1),
     ok.
 
 
@@ -181,8 +238,8 @@ cache_monitoring_test(Config) ->
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
     ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
 
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key]), 5),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key]), 5),
 
     % Check dump delay
     Key2 = <<"key2">>,
@@ -193,8 +250,8 @@ cache_monitoring_test(Config) ->
         }])),
         timer:sleep(3500) % do not change to active waiting
     end),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [disk_only, some_record, Key2])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key2]), 5),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key2])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key2]), 5),
 
     % Check forced dump
     Key3 = <<"key3">>,
@@ -205,7 +262,7 @@ cache_monitoring_test(Config) ->
         }])),
         timer:sleep(3500) % do not change to active waiting
     end),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, Key3])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key3])),
 
     ok.
 
@@ -270,16 +327,16 @@ check_clearing([{K, TimeWindow} | R] = KeysWithTimes, Worker1, Worker2) ->
 
     Uuid = caches_controller:get_cache_uuid(K, some_record),
     ?assertMatch(false, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [global_only, some_record, K])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, K])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, some_record, K])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, K])),
     ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [K])),
     ?assertMatch(true, ?call(Worker2, some_record, exists, [K])),
 
     lists:foreach(fun({K2, _}) ->
         Uuid2 = caches_controller:get_cache_uuid(K2, some_record),
         ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid2])),
-        ?assertMatch({ok, true}, ?call_store(Worker2, exists, [global_only, some_record, K2])),
-        ?assertMatch({ok, true}, ?call_store(Worker2, exists, [disk_only, some_record, K2]))
+        ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, some_record, K2])),
+        ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, K2]))
     end, R),
 
     check_clearing(R, Worker1, Worker2).
@@ -533,7 +590,7 @@ init_per_testcase(Case, Config) when
     Case =:= link_walk_test ->
     Workers = ?config(cluster_worker_nodes, Config),
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
     ModelConfig = lists:map(fun(Method) ->
         {some_record, Method}
     end, Methods),
@@ -560,7 +617,7 @@ end_per_testcase(Case, Config) when
     Case =:= link_walk_test ->
     Workers = ?config(cluster_worker_nodes, Config),
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
     ModelConfig = lists:map(fun(Method) ->
         {some_record, Method}
     end, Methods),
