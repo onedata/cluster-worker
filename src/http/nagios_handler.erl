@@ -56,7 +56,7 @@ handle(Req, State) ->
     {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
     CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
                          {ok, {LastCheck, LastValue}} ->
-                             case utils:milliseconds_diff(now(), LastCheck) < CachingTime of
+                             case (erlang:monotonic_time(milli_seconds) - LastCheck) < CachingTime of
                                  true ->
                                      ?debug("Serving nagios response from cache"),
                                      {true, LastValue};
@@ -74,7 +74,8 @@ handle(Req, State) ->
                             % Save cluster state in cache, but only if there was no error
                             case Status of
                                 {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
-                                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache, {now(), Status});
+                                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache,
+                                        {erlang:monotonic_time(milli_seconds), Status});
                                 _ ->
                                     skip
                             end,
@@ -101,7 +102,7 @@ handle(Req, State) ->
                         {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
                     end, NodeStatuses),
 
-                {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(now()),
+                {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(erlang:timestamp()),
                 DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
 
                 % Create the reply
