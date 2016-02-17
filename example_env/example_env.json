@@ -204,8 +204,8 @@
     },
     "globalregistry_domains": {
         "gr": {
+            "gui_livereload": true,
             "globalregistry": {
-                "gui_livereload": true,
                 "node1": {
                     "vm.args": {
                         "setcookie": "cookie3"
@@ -370,10 +370,12 @@
                     "setcookie": "cookie7"
                 },
                 "sys.config": {
-                    "multicast_address": {
-                        "string": "239.255.0.1"
-                    },
-                    "verify_gr_cert": false
+                    "onepanel": {
+                        "multicast_address": {
+                            "string": "239.255.0.1"
+                        },
+                        "verify_gr_cert": false
+                    }
                 },
                 "packages": [
                     "cluster_manager",
@@ -389,10 +391,12 @@
                     "setcookie": "cookie7"
                 },
                 "sys.config": {
-                    "multicast_address": {
-                        "string": "239.255.0.1"
-                    },
-                    "verify_gr_cert": false
+                    "onepanel": {
+                        "multicast_address": {
+                            "string": "239.255.0.1"
+                        },
+                        "verify_gr_cert": false
+                    }
                 },
                 "packages": [
                     "cluster_manager",
