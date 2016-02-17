@@ -3,6 +3,7 @@
 .eunit
 .dialyzer.plt
 .idea
+.rebar
 
 src/gui_static/common
 src/gui_static/flatui
