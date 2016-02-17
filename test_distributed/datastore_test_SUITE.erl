@@ -35,20 +35,18 @@
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
     link_walk_test/1, cache_monitoring_test/1, old_keys_cleaning_test/1,
     cache_clearing_test/1, link_monitoring_test/1, create_after_delete_test/1,
-    restoring_cache_from_disk_test/1, prevent_reading_from_disk_test/1]).
+    restoring_cache_from_disk_test/1, prevent_reading_from_disk_test/1,
+    multiple_links_creation_disk_test/1, multiple_links_creation_global_test/1]).
 -export([utilize_memory/2]).
 
-%% all() ->
-%%     ?ALL([
-%%         local_test, global_test, global_atomic_update_test,
-%%         global_list_test, persistance_test, local_list_test,
-%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-%%         cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test, link_monitoring_test,
-%%         create_after_delete_test, restoring_cache_from_disk_test, prevent_reading_from_disk_test
-%%     ]).
 all() ->
     ?ALL([
-        create_after_delete_test
+        local_test, global_test, global_atomic_update_test,
+        global_list_test, persistance_test, local_list_test,
+        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+        cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test, link_monitoring_test,
+        create_after_delete_test, restoring_cache_from_disk_test, prevent_reading_from_disk_test,
+        multiple_links_creation_disk_test, multiple_links_creation_global_test
     ]).
 
 %%%===================================================================
@@ -73,7 +71,7 @@ create_after_delete_test(Config) ->
     end, Workers),
 
     ModelConfig = some_record:model_init(),
-    {ok, PModule} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
     LinkedKey = <<"linked_key">>,
     LinkedDoc = #document{
         key = LinkedKey,
@@ -93,12 +91,12 @@ create_after_delete_test(Config) ->
 
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link]), 1),
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]])),
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link])),
 
     Uuid = caches_controller:get_cache_uuid(Key, some_record),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
-    ?assertMatch({ok, false}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]])),
-    ?assertMatch({ok, true}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]]), 5),
+    ?assertMatch({ok, false}, ?call(Worker1, PModule, exists, [ModelConfig, Key])),
+    ?assertMatch({ok, true}, ?call(Worker1, PModule, exists, [ModelConfig, Key]), 6),
 
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
@@ -108,9 +106,133 @@ create_after_delete_test(Config) ->
     LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, some_record),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 5),
 
     ok.
+
+multiple_links_creation_disk_test(Config) ->
+    [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    multiple_links_creation_test_base(Config, PModule).
+
+multiple_links_creation_global_test(Config) ->
+    [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
+    PModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    multiple_links_creation_test_base(Config, PModule).
+
+multiple_links_creation_test_base(Config, PModule) ->
+    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    ModelConfig = some_record:model_init(),
+    Key = <<"key">>,
+    Doc =  #document{
+        key = Key,
+        value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, Doc])),
+
+    LinkedKey = <<"linked_key">>,
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = #some_record{field1 = 2, field2 = <<"efg">>, field3 = {test, tuple2}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, LinkedDoc])),
+
+    LinkedKey2 = <<"linked_key2">>,
+    LinkedDoc2 = #document{
+        key = LinkedKey2,
+        value = #some_record{field1 = 3, field2 = <<"hij">>, field3 = {test, tuple3}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, LinkedDoc2])),
+
+    LinkedKey3 = <<"linked_key3">>,
+    LinkedDoc3 = #document{
+        key = LinkedKey3,
+        value = #some_record{field1 = 4, field2 = <<"klm">>, field3 = {test, tuple4}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, LinkedDoc3])),
+
+    Self = self(),
+    AddLinks = fun(Links, Send) ->
+        Ans = ?call(Worker1, PModule, add_links, [ModelConfig, Doc#document.key,
+            datastore:normalize_link_target(Links)]),
+        case Send of
+            true ->
+                Self ! {link_ans, Ans};
+            _ ->
+                Ans
+        end
+    end,
+
+    spawn_link(fun() -> AddLinks([{link, LinkedDoc}], true) end),
+    spawn_link(fun() -> AddLinks([{link2, LinkedDoc2}], true) end),
+    spawn_link(fun() -> AddLinks([{link3, LinkedDoc3}], true) end),
+
+    rec_add_link_ans(),
+    rec_add_link_ans(),
+    rec_add_link_ans(),
+
+    F1 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
+    F2 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
+    F3 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+
+    ?assertMatch({{ok, _}, {ok, _}, {ok, _}}, {F1, F2, F3}),
+
+    DeleteLinks = fun(Links, Send) ->
+        Ans = ?call(Worker1, PModule, delete_links, [ModelConfig, Doc#document.key, Links]),
+        case Send of
+            true ->
+                Self ! {link_ans, Ans};
+            _ ->
+                Ans
+        end
+    end,
+
+    spawn_link(fun() -> DeleteLinks([link], true) end),
+    spawn_link(fun() -> DeleteLinks([link2], true) end),
+    spawn_link(fun() -> DeleteLinks([link3], true) end),
+
+    rec_add_link_ans(),
+    rec_add_link_ans(),
+    rec_add_link_ans(),
+
+    F4 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
+    F5 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
+    F6 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+
+    ?assertMatch({{error,link_not_found}, {error,link_not_found}, {error,link_not_found}},
+        {F4, F5, F6}),
+
+    ?assertMatch(ok, AddLinks([{link, LinkedDoc}, {link2, LinkedDoc2}, {link3, LinkedDoc3}], false)),
+    F7 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
+    F8 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
+    F9 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+
+    ?assertMatch({{ok, _}, {ok, _}, {ok, _}}, {F7, F8, F9}),
+
+    ?assertMatch(ok, DeleteLinks(all, false)),
+    F10 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
+    F11 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
+    F12 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+
+    ?assertMatch({{error,link_not_found}, {error,link_not_found}, {error,link_not_found}},
+        {F10, F11, F12}),
+
+    ok.
+
+rec_add_link_ans() ->
+    receive
+        {link_ans, Ans} ->
+            ?assertEqual(ok, Ans)
+    after
+        1000 ->
+            timeout
+    end.
+
 
 link_monitoring_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
@@ -120,7 +242,7 @@ link_monitoring_test(Config) ->
     end, Workers),
 
     ModelConfig = some_record:model_init(),
-    {ok, PModule} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
     Key = <<"key">>,
     Doc =  #document{
         key = Key,
@@ -135,31 +257,50 @@ link_monitoring_test(Config) ->
     },
     ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [LinkedDoc])),
 
+    LinkedKey2 = <<"linked_key2">>,
+    LinkedDoc2 = #document{
+        key = LinkedKey2,
+        value = #some_record{field1 = 3, field2 = <<"hij">>, field3 = {test, tuple3}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [LinkedDoc2])),
+
     LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, some_record),
+    LinkCacheUuid2 = caches_controller:get_cache_uuid({Key, link2}, some_record),
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
 
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
     {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]),
     CCD = CC#document.value,
     ?assertEqual(delete_links, CCD#cache_controller.action),
-    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
     ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
 
-    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch(ok, ?call_store(Worker2, add_links,
+        [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}, {link2, LinkedDoc2}]])),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link2])),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]), 6),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 1),
 
     ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link]), 1),
     {ok, CC2} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]),
     CCD2 = CC2#document.value,
     ?assertEqual(delete_links, CCD2#cache_controller.action),
-    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig | [Doc#document.key, link]]), 5),
+
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link2]), 1),
+    {ok, CC3} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid2]),
+    CCD3 = CC3#document.value,
+    ?assertEqual(delete_links, CCD3#cache_controller.action),
+
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
+    ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]), 1),
     ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
+    ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid2])),
     ok.
 
 
@@ -171,7 +312,7 @@ prevent_reading_from_disk_test(Config) ->
     end, Workers),
 
     ModelConfig = some_record:model_init(),
-    {ok, PModule} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
     Key = <<"key">>,
     {CAns, Doc} = ?call(Worker1, some_record, create, [
         #document{
@@ -179,7 +320,7 @@ prevent_reading_from_disk_test(Config) ->
             value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
         }]),
     ?assertMatch({ok, _}, {CAns, Doc}),
-    ?assertMatch({ok, true}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]]), 5),
+    ?assertMatch({ok, true}, ?call(Worker1, PModule, exists, [ModelConfig, Key]), 6),
 
     UpdateFun = fun(Record) ->
         {ok, Record#some_record{
@@ -190,7 +331,7 @@ prevent_reading_from_disk_test(Config) ->
     ?assertMatch({ok, _}, ?call(Worker1, some_record, delete, [Key])),
     ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
     ?assertMatch(false, ?call(Worker1, some_record, exists, [Key])),
-    ?assertMatch({ok, false}, ?call(Worker1, PModule, exists, [ModelConfig | [Key]]), 5),
+    ?assertMatch({ok, false}, ?call(Worker1, PModule, exists, [ModelConfig, Key]), 6),
     ok.
 
 
@@ -207,7 +348,7 @@ restoring_cache_from_disk_test(Config) ->
             key = Key,
             value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
         }])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key]), 5),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key]), 6),
 
     ?assertMatch({ok, true}, ?call_store(Worker2, delete, [?GLOBAL_ONLY_LEVEL, some_record, Key])),
     ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
@@ -239,7 +380,7 @@ cache_monitoring_test(Config) ->
     ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid]), 1),
 
     ?assertMatch({ok, false}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key]), 5),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key]), 6),
 
     % Check dump delay
     Key2 = <<"key2">>,
@@ -251,7 +392,7 @@ cache_monitoring_test(Config) ->
         timer:sleep(3500) % do not change to active waiting
     end),
     ?assertMatch({ok, false}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key2])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key2]), 5),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?DISK_ONLY_LEVEL, some_record, Key2]), 6),
 
     % Check forced dump
     Key3 = <<"key3">>,

@@ -68,7 +68,7 @@
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1]).
--export([run_synchronized/3]).
+-export([run_synchronized/3, normalize_link_target/1]).
 
 %%%===================================================================
 %%% API
@@ -290,6 +290,7 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
+%% TODO - delete links should not leave any trash after delete of last link without all option
 -spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
     _ModelConfig = ModelName:model_init(),
@@ -744,6 +745,17 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs}, timer:minutes(5));
             {ok, Value} ->
                 {ok, Value};
+            {tasks, Tasks} ->
+                Level = case lists:member(ModelName, datastore_config:global_caches()) of
+                            true -> ?CLUSTER_LEVEL;
+                            _ -> ?NODE_LEVEL
+                        end,
+                lists:foreach(fun
+                    ({task, Task}) ->
+                        ok = task_manager:start_task(Task, Level);
+                    (_) ->
+                        ok % error already logged
+                 end, Tasks);
             {task, Task} ->
                 Level = case lists:member(ModelName, datastore_config:global_caches()) of
                              true -> ?CLUSTER_LEVEL;

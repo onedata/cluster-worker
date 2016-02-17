@@ -313,18 +313,15 @@ before(ModelName, exists, disk_only, [Key], Level2) ->
 before(ModelName, fetch_link, disk_only, [Key, LinkName], Level2) ->
     check_fetch({Key, LinkName}, ModelName, Level2);
 before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
-    lists:foldl(fun({LN, _}, Acc) ->
-        Ans = start_disk_op({Key, LN}, ModelName, add_links, [Key, [LN]], Level2),
-        case Ans of
-            ok ->
-                Acc;
-            _ ->
-                Ans
-        end
-    end, ok, Links);
+    Tasks = lists:foldl(fun({LN, _}, Acc) ->
+        [start_disk_op({Key, LN}, ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
+    end, [], Links),
+    {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
+    timer:sleep(SleepTime),
+    {tasks, Tasks};
 before(ModelName, delete_links, Level, [Key, all], Level) ->
     try
-    ModelConfig = ModelName:model_init(),
+        ModelConfig = ModelName:model_init(),
         AccFun = fun(LinkName, _, Acc) ->
             [LinkName | Acc]
         end,
@@ -365,15 +362,12 @@ before(ModelName, delete_links, disk_only, [Key, all], Level2) ->
         FullArgs = [ModelConfig, Key, AccFun, []],
         {ok, Links} = erlang:apply(
             datastore:driver_to_module(datastore:level_to_driver(disk_only)), foreach_link, FullArgs),
-        lists:foldl(fun(Link, Acc) ->
-            Ans = start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2),
-            case Ans of
-                ok ->
-                    Acc;
-                _ ->
-                    Ans
-            end
-        end, ok, Links)
+        Tasks = lists:foldl(fun(Link, Acc) ->
+            [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
+        end, [], Links),
+        {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
+        timer:sleep(SleepTime),
+        {tasks, Tasks}
     catch
         E1:E2 ->
             ?error_stacktrace("Error in cache_controller before. Args: ~p. Error: ~p:~p.",
@@ -381,15 +375,12 @@ before(ModelName, delete_links, disk_only, [Key, all], Level2) ->
             {error, preparing_disk_op_failed}
     end;
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
-    lists:foldl(fun(Link, Acc) ->
-        Ans = start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2),
-        case Ans of
-            ok ->
-                Acc;
-            _ ->
-                Ans
-        end
-    end, ok, Links);
+    Tasks = lists:foldl(fun(Link, Acc) ->
+        [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
+    end, [], Links),
+    {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
+    timer:sleep(SleepTime),
+    {tasks, Tasks};
 before(_ModelName, _Method, _Level, _Context, _Level2) ->
     ok.
 
@@ -595,6 +586,9 @@ choose_action(Op, Level, ModelName, Key) ->
     Op :: atom(), Args :: list(), Level :: datastore:store_level()) -> ok | {task, task_manager:task()} | {error, Error} when
     Error :: not_last_user | preparing_disk_op_failed.
 start_disk_op(Key, ModelName, Op, Args, Level) ->
+    start_disk_op(Key, ModelName, Op, Args, Level, true).
+
+start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
     try
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
         Pid = pid_to_list(self()),
@@ -608,8 +602,13 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
         Doc = #document{key = Uuid, value = V},
         create_or_update(Level, Doc, UpdateFun),
 
-        {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
-        timer:sleep(SleepTime),
+        case Sleep of
+            true ->
+                {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
+                timer:sleep(SleepTime);
+            _ ->
+                ok
+        end,
 
         Task = fun() ->
             {LastUser, LAT} = case get(Level, Uuid) of
