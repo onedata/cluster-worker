@@ -268,7 +268,7 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None):
         if 'gui_livereload' in gen_dev_cfg:
             if gen_dev_cfg['gui_livereload']:
                 print 'Starting GUI livereload for globalregistry {0}.'.format(
-                    gr_instance)
+                    domain)
                 for container_id in gr_nodes:
                     gui_livereload.run(
                         container_id,
