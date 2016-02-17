@@ -33,7 +33,7 @@
 %% This record is used by requests_dispatcher (it contains its state).
 -record(state, {
     % Time of last ld advice update received from dispatcher
-    last_update = {0, 0, 0} :: {integer(), integer(), integer()}
+    last_update = 0 :: integer()
 }).
 
 %% API
@@ -124,8 +124,8 @@ handle_call(healthcheck, _From, #state{last_update = LastUpdate} = State) ->
                     {error, no_lb_advice_received};
                 _ ->
                     {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_disp_out_of_sync_threshold),
-                    % Threshold is in millisecs, now_diff is in microsecs
-                    case utils:milliseconds_diff(now(), LastUpdate) > Threshold of
+                    % Threshold is in millisecs, LastUpdate is in millisecs
+                    case (erlang:monotonic_time(milli_seconds) - LastUpdate) > Threshold of
                         true -> out_of_sync;
                         false -> ok
                     end
@@ -154,7 +154,7 @@ handle_cast({update_lb_advice, LBAdvice}, State) ->
     ?debug("Dispatcher update of load_balancing advice: ~p", [LBAdvice]),
     % Update LB advice
     ets:insert(?WORKER_MAP_ETS, {?LB_ADVICE_KEY, LBAdvice}),
-    {noreply, State#state{last_update = now()}};
+    {noreply, State#state{last_update = erlang:monotonic_time(milli_seconds)}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};

@@ -3,6 +3,7 @@
 .eunit
 .idea
 .dialyzer.plt
+.rebar
 
 *.iml
 *.beam
