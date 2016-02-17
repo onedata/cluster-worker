@@ -148,16 +148,16 @@ main([InputJson]) ->
                 throw(error)
         end,
         io:format("Global configuration applied sucessfully!~n"),
-        ok
+        halt(0)
     catch
         T:M ->
             io:format("Error in ~s - ~p:~p~n", [escript:script_name(), T, M]),
-            ok
+            halt(1)
     end;
 
 main(_) ->
     io:format("Usage: ~s <input_json>~n", [escript:script_name()]),
-    ok.
+    halt(0).
 
 
 %%%===================================================================
@@ -217,7 +217,7 @@ bin_to_atom(Bin) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Registers provider in Global Registry.
+%% Registers provider in OZ.
 %% @end
 %%--------------------------------------------------------------------
 -spec register_in_onezone(Workers :: [node()], Cookie :: atom(),

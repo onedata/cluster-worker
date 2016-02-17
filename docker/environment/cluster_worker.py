@@ -22,10 +22,10 @@ class ClusterWorkerConfigurator:
     def additional_commands(self, bindir, config, domain, worker_ips):
         return ''
 
-    def configure_started_instance(self, bindir, instance, config, output):
+    def configure_started_instance(self, bindir, instance, config, container_ids, output):
         pass
 
-    def extra_volumes(self, config):
+    def extra_volumes(self, config, bindir):
         return []
 
     def app_name(self):
