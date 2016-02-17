@@ -98,6 +98,7 @@ def _docker_up(image, bindir, config, dns_servers, db_node_mappings, logdir, con
     """Starts the docker but does not start GR
     as dns.config update is needed first
     """
+    app_name = configurator.app_name()
     node_name = config['nodes']['node']['vm.args']['name']
     db_nodes = config['nodes']['node']['sys.config'][app_name]['db_nodes']
     for i in range(len(db_nodes)):
@@ -154,8 +155,7 @@ def _riak_up(cluster_name, db_nodes, dns_servers, uid):
         return db_node_mappings, {}
 
     [dns] = dns_servers
-    riak_output = riak.up('onedata/riak', dns, uid, None, cluster_name,
-                          len(db_node_mappings))
+    riak_output = riak.up('onedata/riak', dns, uid, None, cluster_name, len(db_node_mappings))
 
     return db_node_mappings, riak_output
 
@@ -254,7 +254,7 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None):
             common.merge(current_output, node_out)
             ip = common.get_docker_ip(worker)
             worker_ips.append(ip)
-            cfg['nodes']['node']['sys.config']['external_ip'] = ip
+            cfg['nodes']['node']['sys.config'][configurator.app_name()]['external_ip'] = ip
 
         domain = cluster_domain(instance, uid)
         for id in worker_configs:

@@ -98,6 +98,9 @@
                     },
                     "sys.config": {
                         "oz_worker": {
+                            "cm_nodes": [
+                                "cm"
+                            ],
                             "db_nodes": [
                                 "127.0.0.1:49161"
                             ],

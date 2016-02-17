@@ -7,35 +7,34 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 
 import os
 import re
-
 from . import worker, common
 
 DOCKER_BINDIR_PATH = '/root/build'
 
 
-def up(image, bindir, dns_server, uid, config_path, logdir=None,
-       dnsconfig_path=None):
+def up(image, bindir, dns_server, uid, config_path, logdir=None, dnsconfig_path=None):
     if dnsconfig_path is None:
-        config = common.parse_json_file(config_path)
+        config = common.parse_json_config_file(config_path)
         input_dir = config['dirs_config']['oz_worker']['input_dir']
-        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir,
-                                      'data', 'dns.config')
+
+        # todo: fix as it does not work with env up
+        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'data', 'dns.config')
 
     return worker.up(image, bindir, dns_server, uid, config_path,
-                     GRWorkerConfigurator(dnsconfig_path), logdir)
+                     OZWorkerConfigurator(dnsconfig_path), logdir)
 
 
-class GRWorkerConfigurator:
+class OZWorkerConfigurator:
     def __init__(self, dnsconfig_path):
         self.dnsconfig_path = dnsconfig_path
 
     def tweak_config(self, cfg, uid, domain):
-        sys_config = cfg['nodes']['node']['sys.config']
+        sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         if 'http_domain' in sys_config:
             sys_config['http_domain'] = {'string': domain}
         return cfg
 
-    def configure_started_instance(self, bindir, instance, config, output):
+    def configure_started_instance(self, bindir, instance, config, container_ids, output):
         pass
 
     def additional_commands(self, bindir, config, domain, worker_ips):
@@ -102,7 +101,7 @@ class GRWorkerConfigurator:
 
         return dns_config
 
-    def extra_volumes(self, config):
+    def extra_volumes(self, config, bindir):
         return []
 
     def app_name(self):
