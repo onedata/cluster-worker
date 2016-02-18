@@ -23,7 +23,7 @@
 %%tests
 -export([create_delete_db_test/1, save_db_test/1, update_db_test/1, get_db_test/1, exists_db_test/1,
     create_delete_global_store_test/1, no_transactions_create_delete_global_store_test/1,
-    save_global_store_test/1, no_transactions_save_global_store_test/1, update_global_store_test/1,
+    save_global_store_test/1, update_global_store_test/1,
     no_transactions_update_global_store_test/1, get_global_store_test/1, exists_global_store_test/1,
     create_delete_local_store_test/1, save_local_store_test/1, update_local_store_test/1,
     get_local_store_test/1, exists_local_store_test/1,
@@ -40,7 +40,7 @@
 -export([create_delete_db_test_base/1, save_db_test_base/1, update_db_test_base/1,
 	get_db_test_base/1, exists_db_test_base/1, create_delete_global_store_test_base/1,
 	no_transactions_create_delete_global_store_test_base/1,
-	save_global_store_test_base/1, no_transactions_save_global_store_test_base/1,
+	save_global_store_test_base/1,
 	update_global_store_test_base/1,
 	no_transactions_update_global_store_test_base/1, get_global_store_test_base/1,
 	exists_global_store_test_base/1, create_delete_local_store_test_base/1,
@@ -61,7 +61,7 @@
 -define(PERFORMANCE_CASES, [
     create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
     create_delete_global_store_test, no_transactions_create_delete_global_store_test,
-    save_global_store_test, no_transactions_save_global_store_test, update_global_store_test,
+    save_global_store_test, update_global_store_test,
     no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
     create_delete_local_store_test, save_local_store_test, update_local_store_test,
     get_local_store_test, exists_local_store_test,
@@ -76,18 +76,18 @@
 ]).
 
 -define(TEST_CASES, [
-    create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
-    create_delete_global_store_test, no_transactions_create_delete_global_store_test,
-    save_global_store_test, no_transactions_save_global_store_test, update_global_store_test,
-    no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
-    create_delete_local_store_test, save_local_store_test, update_local_store_test,
-    get_local_store_test, exists_local_store_test,
-    create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
-    create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
-    get_global_cache_test, exists_global_cache_test,
-    create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
-    create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
-    get_local_cache_test, exists_local_cache_test
+	create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
+	create_delete_global_store_test, no_transactions_create_delete_global_store_test,
+	save_global_store_test, update_global_store_test,
+	no_transactions_update_global_store_test, get_global_store_test, exists_global_store_test,
+	create_delete_local_store_test, save_local_store_test, update_local_store_test,
+	get_local_store_test, exists_local_store_test,
+	create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
+	create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
+	get_global_cache_test, exists_global_cache_test,
+	create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
+	create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
+	get_local_cache_test, exists_local_cache_test
 ]).
 
 all() ->
@@ -137,11 +137,6 @@ no_transactions_create_delete_global_store_test_base(Config) ->
 save_global_store_test(Config) ->
 	?PERFORMANCE(Config, ?save_test_def).
 save_global_store_test_base(Config) ->
-	datastore_basic_ops_utils:save_test(Config, global_only).
-
-no_transactions_save_global_store_test(Config) ->
-	?PERFORMANCE(Config, ?no_transactions_save_test_def).
-no_transactions_save_global_store_test_base(Config) ->
 	datastore_basic_ops_utils:save_test(Config, global_only).
 
 update_global_store_test(Config) ->
@@ -314,11 +309,10 @@ end_per_suite(Config) ->
 
 init_per_testcase(Case, Config) when
     Case =:= no_transactions_create_delete_global_store_test;
-    Case =:= no_transactions_save_global_store_test;
     Case =:= no_transactions_update_global_store_test ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, some_record),
-    test_utils:mock_expect(Workers, some_record, model_init, fun() ->
+    test_utils:mock_new([node() | Workers], some_record),
+    test_utils:mock_expect([node() | Workers], some_record, model_init, fun() ->
         #model_config{name = some_record,
             size = record_info(size, some_record),
             fields = record_info(fields, some_record),
@@ -337,10 +331,9 @@ init_per_testcase(Case, Config) ->
 
 end_per_testcase(Case, Config) when
     Case =:= no_transactions_create_delete_global_store_test;
-    Case =:= no_transactions_save_global_store_test;
     Case =:= no_transactions_update_global_store_test ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_validate_and_unload(Workers, some_record),
+    test_utils:mock_validate_and_unload([node() | Workers], some_record),
     datastore_basic_ops_utils:unset_hooks(Case, Config);
 
 end_per_testcase(Case, Config) ->
