@@ -162,6 +162,7 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
 list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
+    % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
     error(not_supported).
 
 %%--------------------------------------------------------------------

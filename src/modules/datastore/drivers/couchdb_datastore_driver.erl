@@ -192,6 +192,7 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
 list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
+    % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
     error(not_supported).
 
 %%--------------------------------------------------------------------
@@ -502,8 +503,11 @@ from_json_term(Term) when is_binary(Term) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec links_doc_key(Bucket :: atom(), Key :: datastore:key()) -> BinKey :: binary().
+links_doc_key(_Bucket, Key) when is_binary(Key) ->
+    <<Key/binary, ?LINKS_KEY_SUFFIX>>;
 links_doc_key(_Bucket, Key) ->
-    <<Key/binary, ?LINKS_KEY_SUFFIX>>.
+    BinKey = term_to_binary(Key),
+    <<BinKey/binary, ?LINKS_KEY_SUFFIX>>.
 
 %%--------------------------------------------------------------------
 %% @private

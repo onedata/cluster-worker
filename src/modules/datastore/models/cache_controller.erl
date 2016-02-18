@@ -22,7 +22,8 @@
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
-    create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4, list_docs_to_be_dumped/1]).
+    create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
+    list_docs_to_be_dumped/1, choose_action/5]).
 
 -define(DISK_OP_TIMEOUT, timer:minutes(1)).
 
@@ -189,6 +190,8 @@ list_docs_to_be_dumped(Level) ->
         ('$end_of_table', Acc) ->
             {abort, Acc};
         (#document{value = #cache_controller{last_user = non}}, Acc) ->
+            {next, Acc};
+        (#document{value = #cache_controller{action = cleared}}, Acc) ->
             {next, Acc};
         (#document{key = Uuid}, Acc) ->
             {next, [Uuid | Acc]}
@@ -459,6 +462,7 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
             Value = Doc#document.value,
             case Value#cache_controller.action of
                 non -> ok;
+                cleared -> ok;
                 _ -> ErrorAns
             end;
         {error, {not_found, _}} ->
@@ -531,7 +535,7 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
             {error, ending_disk_op_failed}
     end.
 
-choose_action(Op, Level, ModelName, {Key, Link}) ->
+choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
     % check for create/delete race
     case Op of
         delete_links ->
@@ -548,12 +552,25 @@ choose_action(Op, Level, ModelName, {Key, Link}) ->
                 {ok, SavedValue} ->
                     {ok, add_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
-                    {ok, delete_links, [Key, [Link]]};
+                    case get(Level, Uuid) of
+                        {ok, Doc} ->
+                            Value = Doc#document.value,
+                            case Value#cache_controller.action of
+                                cleared ->
+                                    {ok, non};
+                                non ->
+                                    {ok, non};
+                                _ ->
+                                    {ok, delete_links, [Key, [Link]]}
+                            end;
+                        {error, {not_found, _}} ->
+                            {ok, delete_links, [Key, [Link]]}
+                    end;
                 FetchError ->
                     {fetch_error, FetchError}
             end
     end;
-choose_action(Op, Level, ModelName, Key) ->
+choose_action(Op, Level, ModelName, Key, Uuid) ->
     % check for create/delete race
     case Op of
         delete ->
@@ -570,7 +587,20 @@ choose_action(Op, Level, ModelName, Key) ->
                 {ok, SavedValue} ->
                     {ok, save, [SavedValue]};
                 {error, {not_found, _}} ->
-                    {ok, delete, [Key, ?PRED_ALWAYS]};
+                    case get(Level, Uuid) of
+                        {ok, Doc} ->
+                            Value = Doc#document.value,
+                            case Value#cache_controller.action of
+                                cleared ->
+                                    {ok, non};
+                                non ->
+                                    {ok, non};
+                                _ ->
+                                    {ok, delete, [Key, ?PRED_ALWAYS]}
+                            end;
+                        {error, {not_found, _}} ->
+                            {ok, delete, [Key, ?PRED_ALWAYS]}
+                    end;
                 GetError ->
                     {get_error, GetError}
             end
@@ -620,7 +650,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                               end,
             ToDo = case LastUser of
                        ToUpdate when ToUpdate =:= Pid; ToUpdate =:= non ->
-                           choose_action(Op, Level, ModelName, Key);
+                           choose_action(Op, Level, ModelName, Key, Uuid);
                        _ ->
                            {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
                            case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
@@ -629,7 +659,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                                        {ok, Record#cache_controller{last_action_time = os:timestamp()}}
                                    end,
                                    update(Level, Uuid, UpdateFun2),
-                                   choose_action(Op, Level, ModelName, Key);
+                                   choose_action(Op, Level, ModelName, Key, Uuid);
                                _ ->
                                    {error, not_last_user}
                            end
@@ -639,13 +669,13 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
             Ans = case ToDo of
                       {ok, NewMethod, NewArgs} ->
                           FullArgs = [ModelConfig | NewArgs],
-                          CallAns = worker_proxy:call(datastore_worker, {driver_call,
-                              datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs}, ?DISK_OP_TIMEOUT),
+                          CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs),
                           {op_change, NewMethod, CallAns};
                       ok ->
                           FullArgs = [ModelConfig | Args],
-                          worker_proxy:call(datastore_worker, {driver_call,
-                              datastore:driver_to_module(?PERSISTENCE_DRIVER), Op, FullArgs}, ?DISK_OP_TIMEOUT);
+                          erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), Op, FullArgs);
+                      {ok, non} ->
+                          ok;
                       Other ->
                           Other
                   end,

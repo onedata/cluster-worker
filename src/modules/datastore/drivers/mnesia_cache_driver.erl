@@ -22,7 +22,7 @@
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
 %% TODO Add non_transactional updates (each update creates tmp ets!)
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([add_links/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_synchronized/3]).
 
 %% Batch size for list operation
@@ -254,25 +254,38 @@ add_links(#model_config{} = ModelConfig, Key, LinkSpec) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
-delete_links(#model_config{} = ModelConfig, Key, all) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
-        ok = mnesia:delete(links_table_name(ModelConfig), Key, write)
-    end);
 delete_links(#model_config{} = ModelConfig, Key, LinkNames) ->
+    delete_links(#model_config{} = ModelConfig, Key, LinkNames, ?PRED_ALWAYS).
+
+delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
-        Links = #links{} =
-            case mnesia:read(links_table_name(ModelConfig), Key, write) of
-                [] ->
-                    #links{key = Key};
-                [Value] ->
-                    Value
-            end,
-        LinksMap =
-            lists:foldl(fun(LinkName, Map) ->
-                maps:remove(LinkName, Map)
-            end, Links#links.link_map, LinkNames),
-        Links1 = Links#links{link_map = LinksMap},
-        ok = mnesia:write(links_table_name(ModelConfig), Links1, write)
+        case Pred() of
+            true ->
+                ok = mnesia:delete(links_table_name(ModelConfig), Key, write);
+            false ->
+                ok
+        end
+    end);
+delete_links(#model_config{} = ModelConfig, Key, LinkNames, Pred) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+        case Pred() of
+            true ->
+                Links = #links{} =
+                    case mnesia:read(links_table_name(ModelConfig), Key, write) of
+                        [] ->
+                            #links{key = Key};
+                        [Value] ->
+                            Value
+                    end,
+                LinksMap =
+                    lists:foldl(fun(LinkName, Map) ->
+                        maps:remove(LinkName, Map)
+                    end, Links#links.link_map, LinkNames),
+                Links1 = Links#links{link_map = LinksMap},
+                ok = mnesia:write(links_table_name(ModelConfig), Links1, write);
+            false ->
+                ok
+        end
     end).
 
 %%--------------------------------------------------------------------

@@ -367,7 +367,27 @@ foreach_link(Level, #document{key = Key} = Doc, Fun, AccIn) ->
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(Level, Key, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, level_to_driver(Level), foreach_link, [Key, Fun, AccIn]).
+    foreach_link(Level, level_to_driver(Level), Key, ModelName, Fun, AccIn).
+
+foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
+    FlushFun = fun(LinkName, _, _) ->
+        caches_controller:flush(driver_to_level(Driver1), ModelName, Key, LinkName),
+        []
+    end,
+    exec_driver(ModelName, Driver1, foreach_link, [Key, FlushFun, []]),
+
+    NewFun = fun(LinkName, LinkTarget, Acc) ->
+        case fetch_link(Level, Key, ModelName, LinkName) of
+            {ok, _} ->
+                Fun(LinkName, LinkTarget, Acc);
+            _ ->
+                Acc
+        end
+    end,
+    exec_driver(ModelName, Driver2, foreach_link, [Key, NewFun, AccIn]);
+
+foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
+    exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
 
 
 %%--------------------------------------------------------------------
