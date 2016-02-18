@@ -14,7 +14,7 @@ DOCKER_BINDIR_PATH = '/root/build'
 
 def up(image, bindir, dns_server, uid, config_path, logdir=None, dnsconfig_path=None):
     if dnsconfig_path is None:
-        config = common.parse_json_file(config_path)
+        config = common.parse_json_config_file(config_path)
         input_dir = config['dirs_config']['globalregistry']['input_dir']
         dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'resources', 'dns.config')
 

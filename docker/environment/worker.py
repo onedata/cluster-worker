@@ -254,7 +254,14 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None):
             common.merge(current_output, node_out)
             ip = common.get_docker_ip(worker)
             worker_ips.append(ip)
-            cfg['nodes']['node']['sys.config'][configurator.app_name()]['external_ip'] = ip
+
+            sys_config = cfg['nodes']['node']['sys.config']
+            if 'cluster_worker' not in sys_config:
+                sys_config['cluster_worker'] = dict()
+
+            # todo: external_ip in cluster_worker should be obtained via plugin
+            sys_config['cluster_worker']['external_ip'] = ip
+            sys_config[configurator.app_name()]['external_ip'] = ip
 
         domain = cluster_domain(instance, uid)
         for id in worker_configs:

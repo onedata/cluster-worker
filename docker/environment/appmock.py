@@ -12,7 +12,7 @@ import os
 import random
 import string
 
-from . import common, docker, dns, cluster_manager, worker, zone
+from . import common, docker, dns, cluster_manager, worker
 
 APPMOCK_WAIT_FOR_NAGIOS_SECONDS = 60 * 2
 
@@ -54,7 +54,7 @@ def _tweak_config(config, appmock_node, appmock_instance, uid):
         'op_worker': worker.worker_erl_node_name(appmock_node,
                                                  appmock_instance,
                                                  uid),
-        'oz_worker': zone.oz_erl_node_name(appmock_node, appmock_instance, uid)
+        'oz_worker': worker.worker_erl_node_name(appmock_node, appmock_instance, uid)
     }.get(mocked_app, appmock_erl_node_name(appmock_node, uid))
 
     if 'vm.args' not in cfg['nodes']['node']:

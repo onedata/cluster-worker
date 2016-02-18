@@ -103,7 +103,7 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
         # as multiple GRs are not supported yet.
         env_configurator_input['oz_cookie'] = \
             config['zone_domains'].values()[0][
-                'zone'].values()[0]['vm.args']['setcookie']
+                'oz_worker'].values()[0]['vm.args']['setcookie']
         env_configurator_input['oz_node'] = output['oz_worker_nodes'][0]
 
         env_configurator_dir = '{0}/../../env_configurator'.format(
