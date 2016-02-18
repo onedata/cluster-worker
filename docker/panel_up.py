@@ -22,11 +22,11 @@ parser.add_argument(
     '--gr-ip',
     action='store',
     default=socket.gethostbyname('onedata.org'),
-    help='Global Registry IP address',
-    dest='gr_ip')
+    help='onezone IP address',
+    dest='oz_ip')
 
 args = parser.parse_args()
 output = panel.up(args.image, args.bin, args.dns, args.uid, args.config_path,
-                  args.gr_ip)
+                  args.oz_ip)
 
 print(json.dumps(output))

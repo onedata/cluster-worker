@@ -12,7 +12,7 @@ import os
 import random
 import string
 
-from . import common, docker, dns, cluster_manager, worker, globalregistry
+from . import common, docker, dns, cluster_manager, worker, zone
 
 APPMOCK_WAIT_FOR_NAGIOS_SECONDS = 60 * 2
 
@@ -49,12 +49,12 @@ def _tweak_config(config, appmock_node, appmock_instance, uid):
     # default appmock_erl_node_name will be used.
     node_name = {
         'cluster_manager': cluster_manager.cm_erl_node_name(appmock_node,
-                                                 appmock_instance, uid),
+                                                            appmock_instance,
+                                                            uid),
         'op_worker': worker.worker_erl_node_name(appmock_node,
                                                  appmock_instance,
                                                  uid),
-        'globalregistry': globalregistry.gr_erl_node_name(appmock_node,
-                                                          appmock_instance, uid)
+        'oz_worker': zone.oz_erl_node_name(appmock_node, appmock_instance, uid)
     }.get(mocked_app, appmock_erl_node_name(appmock_node, uid))
 
     if 'vm.args' not in cfg['nodes']['node']:
@@ -154,7 +154,7 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None):
             appmocks.append(appmock_id)
             if 'mocked_app' in cfg['nodes']['node']:
                 mocked_app = cfg['nodes']['node']['mocked_app']
-                if mocked_app == 'op_worker' or mocked_app == 'globalregistry':
+                if mocked_app == 'op_worker' or mocked_app == 'oz_worker':
                     include_domain = True
                     appmock_ips.append(common.get_docker_ip(appmock_id))
             common.merge(output, node_out)
