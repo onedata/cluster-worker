@@ -18,8 +18,8 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
+-include_lib("ctool/include/test/performance.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
--include_lib("annotations/include/annotations.hrl").
 
 -define(DICT_KEY, transactions_list).
 
@@ -30,11 +30,12 @@
     multi_transaction_test/1, transaction_retry_test/1, transaction_error_test/1]).
 -export([transaction_retry_test_base/0, transaction_error_test_base/0]).
 
--performance({test_cases, []}).
 all() ->
-    [cm_and_worker_test, task_pool_test, task_manager_repeats_test, task_manager_rerun_test,
-        transaction_test, transaction_rollback_test, transaction_rollback_stop_test,
-        multi_transaction_test, transaction_retry_test, transaction_error_test].
+    ?ALL([
+        cm_and_worker_test, task_pool_test, task_manager_repeats_test,
+        task_manager_rerun_test, transaction_test, transaction_rollback_test,
+        transaction_rollback_stop_test, multi_transaction_test,
+        transaction_retry_test, transaction_error_test]).
 
 %%%===================================================================
 %%% Test functions
