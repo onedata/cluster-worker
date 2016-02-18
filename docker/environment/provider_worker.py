@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 
-from . import common, docker, worker, zone, gui_livereload
+from . import common, docker, worker, gui_livereload
 
 DOCKER_BINDIR_PATH = '/root/build'
 
@@ -23,7 +23,7 @@ class ProviderWorkerConfigurator:
     def tweak_config(self, cfg, instance, uid):
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         if 'zone_domain' in sys_config:
-            oz_hostname = zone.oz_domain(sys_config['zone_domain'], uid)
+            oz_hostname = worker.cluster_domain(sys_config['zone_domain'], uid)
             sys_config['zone_domain'] = oz_hostname
         return cfg
 

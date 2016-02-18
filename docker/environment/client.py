@@ -10,7 +10,7 @@ to start.
 import copy
 import os
 
-from . import common, docker, dns, zone, worker
+from . import common, docker, dns, worker
 
 
 def client_hostname(node_name, uid):
@@ -34,7 +34,7 @@ def _tweak_config(config, os_config, name, uid):
         client_config = {'name': client['name'],
                          'op_domain': worker.cluster_domain(client['op_domain'],
                                                             uid),
-                         'oz_domain': zone.oz_domain(client['oz_domain'], uid),
+                         'oz_domain': worker.cluster_domain(client['oz_domain'], uid),
                          'user_key': client['user_key'],
                          'user_cert': client['user_cert'],
                          'mounting_path': client['mounting_path'],

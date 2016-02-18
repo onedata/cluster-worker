@@ -13,6 +13,7 @@ Run the script with -h flag to learn about script's running options.
 from __future__ import print_function
 
 import json
+import os
 
 from environment import common, dns, env, cluster_manager, zone_worker
 
@@ -26,7 +27,7 @@ parser.add_argument(
 parser.add_argument(
     '-boz', '--bin-oz',
     action='store',
-    default=env.default('bin_oz'),
+    default=os.getcwd(),
     help='the path to oz_worker repository (precompiled)',
     dest='bin_oz')
 parser.add_argument(
