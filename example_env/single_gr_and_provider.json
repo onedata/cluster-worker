@@ -84,10 +84,12 @@
                         "setcookie": "cookie3"
                     },
                     "sys.config": {
-                        "cm_nodes": [
-                            "cm"
-                        ],
-                        "worker_num": 1
+                        "cluster_manager": {
+                            "cm_nodes": [
+                                "cm"
+                            ],
+                            "worker_num": 1
+                        }
                     }
                 }
             },

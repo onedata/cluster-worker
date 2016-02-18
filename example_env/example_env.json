@@ -211,10 +211,12 @@
                         "setcookie": "cookie3"
                     },
                     "sys.config": {
-                        "cm_nodes": [
-                            "cm"
-                        ],
-                        "worker_num": 1
+                        "cluster_manager": {
+                            "cm_nodes": [
+                                "cm"
+                            ],
+                            "worker_num": 1
+                        }
                     }
                 }
             },
@@ -386,10 +388,12 @@
                     "setcookie": "cookie7"
                 },
                 "sys.config": {
-                    "multicast_address": {
-                        "string": "239.255.0.1"
-                    },
-                    "verify_oz_cert": false
+                    "onepanel": {
+                        "multicast_address": {
+                            "string": "239.255.0.1"
+                        },
+                        "verify_oz_cert": false
+                    }
                 },
                 "packages": [
                     "cluster_manager",
@@ -405,10 +409,12 @@
                     "setcookie": "cookie7"
                 },
                 "sys.config": {
-                    "multicast_address": {
-                        "string": "239.255.0.1"
-                    },
-                    "verify_oz_cert": false
+                    "onepanel": {
+                        "multicast_address": {
+                            "string": "239.255.0.1"
+                        },
+                        "verify_oz_cert": false
+                    }
                 },
                 "packages": [
                     "cluster_manager",
