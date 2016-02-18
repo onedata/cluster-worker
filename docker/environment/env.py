@@ -99,8 +99,8 @@ def up(config_path, image=default('image'), bin_am=default('bin_am'),
         env_configurator_input = copy.deepcopy(config['global_setup'])
         env_configurator_input['provider_domains'] = providers_map
 
-        # For now, take only the first node of the first GR
-        # as multiple GRs are not supported yet.
+        # For now, take only the first node of the first OZ
+        # as multiple OZs are not supported yet.
         env_configurator_input['oz_cookie'] = \
             config['zone_domains'].values()[0][
                 'oz_worker'].values()[0]['vm.args']['setcookie']

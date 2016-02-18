@@ -19,7 +19,7 @@ from environment import common, panel
 parser = common.standard_arg_parser('Bring up onepanel nodes.')
 
 parser.add_argument(
-    '--gr-ip',
+    '--oz-ip',
     action='store',
     default=socket.gethostbyname('onedata.org'),
     help='onezone IP address',

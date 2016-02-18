@@ -95,7 +95,7 @@ EOF
 
 
 def _docker_up(image, bindir, config, dns_servers, db_node_mappings, logdir, configurator):
-    """Starts the docker but does not start GR
+    """Starts the docker but does not start OZ
     as dns.config update is needed first
     """
     app_name = configurator.app_name()
