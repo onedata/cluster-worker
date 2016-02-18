@@ -95,7 +95,7 @@ EOF
 
 
 def _docker_up(image, bindir, config, dns_servers, db_node_mappings, logdir, configurator):
-    """Starts the docker but does not start GR
+    """Starts the docker but does not start OZ
     as dns.config update is needed first
     """
     app_name = configurator.app_name()
@@ -254,7 +254,14 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None):
             common.merge(current_output, node_out)
             ip = common.get_docker_ip(worker)
             worker_ips.append(ip)
-            cfg['nodes']['node']['sys.config'][configurator.app_name()]['external_ip'] = ip
+
+            sys_config = cfg['nodes']['node']['sys.config']
+            if 'cluster_worker' not in sys_config:
+                sys_config['cluster_worker'] = dict()
+
+            # todo: external_ip in cluster_worker should be obtained via plugin
+            sys_config['cluster_worker']['external_ip'] = ip
+            sys_config[configurator.app_name()]['external_ip'] = ip
 
         domain = cluster_domain(instance, uid)
         for id in worker_configs:

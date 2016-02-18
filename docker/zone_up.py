@@ -33,7 +33,7 @@ parser.add_argument(
 parser.add_argument(
     '-bcm', '--bin-cm',
     action='store',
-    default=env.default('bin_cluster_manager'),
+    default=os.getcwd() + '/cluster_manager',
     help='the path to cluster_manager repository (precompiled)',
     dest='bin_cluster_manager')
 

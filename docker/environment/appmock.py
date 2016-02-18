@@ -19,7 +19,7 @@ APPMOCK_WAIT_FOR_NAGIOS_SECONDS = 60 * 2
 
 def domain(appmock_instance, uid):
     """Formats domain for an appmock instance.
-    It is intended to fake OP or GR domain.
+    It is intended to fake OP or OZ domain.
     """
     return common.format_hostname(appmock_instance, uid)
 
