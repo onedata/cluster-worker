@@ -69,7 +69,7 @@
         "p1": {
             "db_driver": "couchbase",
             "os_config": "cfg1",
-            "gui_livereload": true,
+            "gui_livereload": "watch",
             "cluster_manager": {
                 "cm1": {
                     "vm.args": {
@@ -109,7 +109,7 @@
         "p2.oz": {
             "db_driver": "riak",
             "os_config": "cfg2",
-            "gui_livereload": false,
+            "gui_livereload": "none",
             "cluster_manager": {
                 "cm1": {
                     "vm.args": {
@@ -204,7 +204,7 @@
     },
     "zone_domains": {
         "oz": {
-            "gui_livereload": true,
+            "gui_livereload": "poll",
             "db_driver": "couchbase",
             "cluster_manager": {
                 "cm": {

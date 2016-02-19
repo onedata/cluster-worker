@@ -7,18 +7,20 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 
 import os
 import re
-from . import worker, common
+from . import worker, common, gui_livereload
 
 DOCKER_BINDIR_PATH = '/root/build'
 
 
-def up(image, bindir, dns_server, uid, config_path, logdir=None, dnsconfig_path=None):
+def up(image, bindir, dns_server, uid, config_path, logdir=None,
+       dnsconfig_path=None):
     if dnsconfig_path is None:
         config = common.parse_json_config_file(config_path)
         input_dir = config['dirs_config']['oz_worker']['input_dir']
 
         # todo: fix as it does not work with env up
-        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir, 'data', 'dns.config')
+        dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir,
+                                      'data', 'dns.config')
 
     return worker.up(image, bindir, dns_server, uid, config_path,
                      OZWorkerConfigurator(dnsconfig_path), logdir)
@@ -34,8 +36,25 @@ class OZWorkerConfigurator:
             sys_config['http_domain'] = {'string': domain}
         return cfg
 
-    def configure_started_instance(self, bindir, instance, config, container_ids, output):
-        pass
+    def configure_started_instance(self, bindir, instance, config,
+                                   container_ids, output):
+        this_config = config[self.domains_attribute()][instance]
+        # Check if gui_livereload is enabled in env and turn it on
+        if 'gui_livereload' in this_config:
+            mode = this_config['gui_livereload']
+            if mode == 'watch' or mode == 'poll':
+                print '''\
+Starting GUI livereload
+    zone: {0}
+    mode: {1}'''.format(
+                    instance, mode)
+                for container_id in container_ids:
+                    gui_livereload.run(
+                        container_id,
+                        os.path.join(bindir, 'rel/gui.config'),
+                        DOCKER_BINDIR_PATH,
+                        '/root/bin/node',
+                        mode=mode)
 
     def additional_commands(self, bindir, config, domain, worker_ips):
         dnsconfig_path = self.dnsconfig_path
@@ -102,7 +121,15 @@ class OZWorkerConfigurator:
         return dns_config
 
     def extra_volumes(self, config, bindir):
-        return []
+        extra_volumes = []
+        # Check if gui_livereload is enabled in env and add required volumes
+        if 'gui_livereload' in config:
+            if config['gui_livereload']:
+                extra_volumes += gui_livereload.required_volumes(
+                    os.path.join(bindir, 'rel/gui.config'),
+                    bindir,
+                    DOCKER_BINDIR_PATH)
+        return extra_volumes
 
     def app_name(self):
         return "oz_worker"
