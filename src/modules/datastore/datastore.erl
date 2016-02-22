@@ -68,7 +68,7 @@
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1]).
--export([run_synchronized/3]).
+-export([run_synchronized/3, normalize_link_target/1]).
 
 %%%===================================================================
 %%% API
@@ -290,6 +290,7 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
+%% TODO - delete links should not leave any trash after delete of last link without all option
 -spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
     _ModelConfig = ModelName:model_init(),
@@ -366,7 +367,36 @@ foreach_link(Level, #document{key = Key} = Doc, Fun, AccIn) ->
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(Level, Key, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, level_to_driver(Level), foreach_link, [Key, Fun, AccIn]).
+    foreach_link(Level, level_to_driver(Level), Key, ModelName, Fun, AccIn).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given function for each link of the document given by key - similar to 'foldl'.
+%% @end
+%%--------------------------------------------------------------------
+-spec foreach_link(Level :: store_level(), Drivers :: atom() | [atom()], Key :: ext_key(),
+    ModelName :: model_behaviour:model_type(),
+    fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
+    {ok, Acc :: term()} | link_error().
+foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
+    FlushFun = fun(LinkName, _, _) ->
+        caches_controller:flush(driver_to_level(Driver1), ModelName, Key, LinkName),
+        []
+    end,
+    exec_driver(ModelName, Driver1, foreach_link, [Key, FlushFun, []]),
+
+    NewFun = fun(LinkName, LinkTarget, Acc) ->
+        case fetch_link(Level, Key, ModelName, LinkName) of
+            {ok, _} ->
+                Fun(LinkName, LinkTarget, Acc);
+            _ ->
+                Acc
+        end
+    end,
+    exec_driver(ModelName, Driver2, foreach_link, [Key, NewFun, AccIn]);
+
+foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
+    exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
 
 
 %%--------------------------------------------------------------------
@@ -494,7 +524,7 @@ model_name(Record) when is_tuple(Record) ->
 -spec run_prehooks(Config :: model_behaviour:model_config(),
     Method :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term()) ->
-    ok | {ok, term()} | {task, task_manager:task()}| {error, Reason :: term()}.
+    ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
 run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
     HooksRes =
@@ -744,6 +774,17 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs}, timer:minutes(5));
             {ok, Value} ->
                 {ok, Value};
+            {tasks, Tasks} ->
+                Level = case lists:member(ModelName, datastore_config:global_caches()) of
+                            true -> ?CLUSTER_LEVEL;
+                            _ -> ?NODE_LEVEL
+                        end,
+                lists:foreach(fun
+                    ({task, Task}) ->
+                        ok = task_manager:start_task(Task, Level);
+                    (_) ->
+                        ok % error already logged
+                 end, Tasks);
             {task, Task} ->
                 Level = case lists:member(ModelName, datastore_config:global_caches()) of
                              true -> ?CLUSTER_LEVEL;

@@ -97,4 +97,4 @@
 %%--------------------------------------------------------------------
 -callback before(ModelName :: model_type(), Method :: model_action(),
                     Level :: datastore:store_level(), Context :: term()) ->
-                    ok | {task, task_manager:task()} | datastore:generic_error().
+                    ok | {task, task_manager:task()} | {tasks, [task_manager:task()]} | datastore:generic_error().
