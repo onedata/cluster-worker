@@ -38,7 +38,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/4, force_save/2]).
+-export([start_gateway/4, force_save/2, db_run/4]).
 
 -export([changes_start_link/3]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -601,7 +601,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
 
-    BinPath = "/opt/couchbase-sync-gateway/bin/sync_gateway",
+    BinPath = code:priv_dir(cluster_worker) ++ "/sync_gateway",
     PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
         "-bucket", "default",
         "-url", "http://" ++ binary_to_list(Hostname) ++ ":" ++ integer_to_list(Port),
@@ -694,7 +694,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 -record(state, {
     callback,
     until,
-    last_seq
+    last_seq = 0
 }).
 
 -type gen_changes_state() :: #state{}.
