@@ -10,7 +10,6 @@
 %%% manages a DNS server module.
 %%% In addition, it implements {@link dns_handler_behaviour} -
 %%% DNS query handling logic.
-%%% TODO - migrate dns from ctool
 %%% @end
 %%%-------------------------------------------------------------------
 -module(dns_worker).
