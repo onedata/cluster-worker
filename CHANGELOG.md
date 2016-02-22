@@ -4,6 +4,13 @@
 CHANGELOG
 ---------
 
+### 2.0.1
+
+* VFS-1528 Use monotonic time instead of system time
+* VFS-1520 - all annotations deleted from ct_tests
+* VFS-1528 Remove deprecated use of erlang:now/0
+
+
 ### 2.0.0
 
 
