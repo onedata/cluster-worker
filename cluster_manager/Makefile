@@ -1,6 +1,6 @@
 REPO            ?= cluster-manager
 
-# distro for package building
+# distro for package building (oneof: wily, fedora-23-x86_64)
 DISTRIBUTION    ?= none
 export DISTRIBUTION
 
@@ -13,6 +13,11 @@ ERLANG_BIN       = $(shell dirname $(shell which erl))
 REBAR           ?= $(BASE_DIR)/rebar
 PKG_VARS_CONFIG  = pkg.vars.config
 OVERLAY_VARS    ?=
+
+GIT_URL := $(shell git config --get remote.origin.url | sed -e 's/\(\/[^/]*\)$$//g')
+GIT_URL := $(shell if [ "${GIT_URL}" = "file:/" ]; then echo 'ssh://git@git.plgrid.pl:7999/vfs'; else echo ${GIT_URL}; fi)
+ONEDATA_GIT_URL := $(shell if [ "${ONEDATA_GIT_URL}" = "" ]; then echo ${GIT_URL}; else echo ${ONEDATA_GIT_URL}; fi)
+export ONEDATA_GIT_URL
 
 .PHONY: deps test package
 
@@ -83,6 +88,14 @@ dialyzer: plt
 
 export PKG_VERSION PKG_ID PKG_BUILD BASE_DIR ERLANG_BIN REBAR OVERLAY_VARS RELEASE PKG_VARS_CONFIG
 
+check_distribution:
+ifeq ($(DISTRIBUTION), none)
+	@echo "Please provide package distribution. Oneof: 'wily', 'fedora-23-x86_64'"
+	@exit 1
+else
+	@echo "Building package for distribution $(DISTRIBUTION)"
+endif
+
 package/$(PKG_ID).tar.gz: deps
 	mkdir -p package
 	rm -rf package/$(PKG_ID)
@@ -101,7 +114,7 @@ package/$(PKG_ID).tar.gz: deps
 dist: package/$(PKG_ID).tar.gz
 	cp package/$(PKG_ID).tar.gz .
 
-package: package/$(PKG_ID).tar.gz
+package: check_distribution package/$(PKG_ID).tar.gz
 	${MAKE} -C package -f $(PKG_ID)/deps/node_package/Makefile
 
 pkgclean:
