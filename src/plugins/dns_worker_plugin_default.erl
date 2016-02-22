@@ -26,7 +26,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec resolve(Method :: atom(), Domain :: string(), LbAdvice :: term()) ->
-    refused | nx_domain | {ok, [{A :: byte(), B :: byte(), C :: byte(), D :: byte()}]}.
+    dns_handler_behaviour:handler_reply().
 
 resolve(handle_a, Domain, LBAdvice) ->
     Nodes = load_balancing:choose_nodes_for_dns(LBAdvice),
