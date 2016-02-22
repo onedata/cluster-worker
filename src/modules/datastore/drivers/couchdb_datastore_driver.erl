@@ -37,6 +37,7 @@
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([links_key_to_doc_key/1]).
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
@@ -494,8 +495,19 @@ from_json_term(Term) when is_binary(Term) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec links_doc_key(Bucket :: atom(), Key :: datastore:key()) -> BinKey :: binary().
-links_doc_key(_Bucket, Key) ->
-    <<Key/binary, ?LINKS_KEY_SUFFIX>>.
+links_doc_key(Bucket, Key) ->
+    base64:encode(term_to_binary({links, Bucket, Key})).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns key of document that owns links saved as document with given key.
+%% Reverses links_doc_key/2.
+%% @end
+%%--------------------------------------------------------------------
+-spec links_key_to_doc_key(Key :: datastore:key()) -> BinKey :: binary().
+links_key_to_doc_key(Key) ->
+    {links, _, DocKey} = binary_to_term(base64:decode(Key)),
+    DocKey.
 
 %%--------------------------------------------------------------------
 %% @private
