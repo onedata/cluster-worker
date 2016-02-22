@@ -157,7 +157,8 @@ get_hooks_config(Models) ->
 %% Generates uuid on the basis of key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cache_uuid(Key :: datastore:key(), ModelName :: model_behaviour:model_type()) -> binary().
+-spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()},
+    ModelName :: model_behaviour:model_type()) -> binary().
 get_cache_uuid(Key, ModelName) ->
   base64:encode(term_to_binary({ModelName, Key})).
 
@@ -248,12 +249,25 @@ cache_to_task_level(ModelName) ->
     _ -> ?NODE_LEVEL
   end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Flushes all documents from memory to disk.
+%% @end
+%%--------------------------------------------------------------------
+-spec flush_all(Level :: datastore:store_level(), ModelName :: atom()) -> ok.
 flush_all(Level, ModelName) ->
   {ok, Keys} = cache_controller:list_docs_to_be_dumped(Level),
   lists:foreach(fun(Key) ->
     flush(Level, ModelName, Key)
   end, Keys).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Flushes links from memory to disk.
+%% @end
+%%--------------------------------------------------------------------
+-spec flush(Level :: datastore:store_level(), ModelName :: atom(),
+  Key :: datastore:ext_key(), datastore:link_name() | all) -> ok | datastore:generic_error().
 flush(Level, ModelName, Key, all) ->
   ModelConfig = ModelName:model_init(),
   AccFun = fun(LinkName, _, Acc) ->
@@ -274,6 +288,14 @@ flush(Level, ModelName, Key, all) ->
 flush(Level, ModelName, Key, Link) ->
   flush(Level, ModelName, {Key, Link}).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Flushes document from memory to disk.
+%% @end
+%%--------------------------------------------------------------------
+-spec flush(Level :: datastore:store_level(), ModelName :: atom(),
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) ->
+  ok | datastore:generic_error().
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
@@ -295,6 +317,13 @@ flush(Level, ModelName, Key) ->
     OtherAns -> OtherAns
   end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears document from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear(Level :: datastore:store_level(), ModelName :: atom(),
+    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
@@ -309,6 +338,13 @@ clear(Level, ModelName, Key) ->
   end,
   erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred]).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears links from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear(Level :: datastore:store_level(), ModelName :: atom(),
+    Key :: datastore:ext_key(), datastore:link_name() | all) -> ok | datastore:generic_error().
 clear(Level, ModelName, Key, all) ->
   ModelConfig = ModelName:model_init(),
   AccFun = fun(LinkName, _, Acc) ->
@@ -330,7 +366,7 @@ clear(Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid({Key, Link}, ModelName),
 
-  Pred =fun() ->
+  Pred = fun() ->
     case save_clear_info(Level, Uuid) of
       {ok, _} ->
         true;
@@ -344,9 +380,23 @@ clear(Level, ModelName, Key, Link) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Translates datastore level to module name.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_driver_module(Level :: datastore:store_level()) -> atom().
 get_driver_module(Level) ->
   datastore:driver_to_module(datastore:level_to_driver(Level)).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves information about clearing doc from memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_clear_info(Level :: datastore:store_level(), Uuid :: binary()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
 save_clear_info(Level, Uuid) ->
   UpdateFun = fun(Record) ->
     {ok, Record#cache_controller{action = cleared}}

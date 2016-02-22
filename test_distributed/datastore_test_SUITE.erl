@@ -56,11 +56,8 @@ all() ->
 %%% Test functions
 %%%===================================================================
 
-% Testy
-% do performance dodajemy do create i save powtorke, zeby sprawdzic czy cos sie nie zacina po kasowaniu
-% Dodajemy testy w ktorych kasujemy zawartosc cache controllera zeby sprawdzic czy linki itp sa na to odporne
-% Dodajemy testy performance linkow
-% Sprawdzic odswiezanie czasu przy get, fetch link, sprawdzic get po cleared itp
+% TODO - add tests that clear cache_controller model and check if cache still works,
+% TODO - add tests that cerify time refreshing by get and fetch_link operations
 
 multilevel_foreach_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),

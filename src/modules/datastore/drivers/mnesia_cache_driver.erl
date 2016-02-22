@@ -257,6 +257,13 @@ add_links(#model_config{} = ModelConfig, Key, LinkSpec) ->
 delete_links(#model_config{} = ModelConfig, Key, LinkNames) ->
     delete_links(#model_config{} = ModelConfig, Key, LinkNames, ?PRED_ALWAYS).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Simmilar to {@link store_driver_behaviour} callback delete_links/3 witch delete predicate.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all,
+    datastore:delete_predicate()) -> ok | datastore:generic_error().
 delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of

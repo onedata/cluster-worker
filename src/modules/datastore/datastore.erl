@@ -369,6 +369,15 @@ foreach_link(Level, #document{key = Key} = Doc, Fun, AccIn) ->
 foreach_link(Level, Key, ModelName, Fun, AccIn) ->
     foreach_link(Level, level_to_driver(Level), Key, ModelName, Fun, AccIn).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given function for each link of the document given by key - similar to 'foldl'.
+%% @end
+%%--------------------------------------------------------------------
+-spec foreach_link(Level :: store_level(), Drivers :: atom() | [atom()], Key :: ext_key(),
+    ModelName :: model_behaviour:model_type(),
+    fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
+    {ok, Acc :: term()} | link_error().
 foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     FlushFun = fun(LinkName, _, _) ->
         caches_controller:flush(driver_to_level(Driver1), ModelName, Key, LinkName),
@@ -515,7 +524,7 @@ model_name(Record) when is_tuple(Record) ->
 -spec run_prehooks(Config :: model_behaviour:model_config(),
     Method :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term()) ->
-    ok | {ok, term()} | {task, task_manager:task()}| {error, Reason :: term()}.
+    ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
 run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
     HooksRes =
