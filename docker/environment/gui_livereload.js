@@ -73,4 +73,4 @@ function usage() {
         '       poll - poll for changes, slower but works everywhere\n' +
         '   server_cert - certificate used for https livereload server');
     process.exit(1);
-};
+}
