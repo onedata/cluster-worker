@@ -639,6 +639,36 @@ start_gateway(Parent, N, Hostname, Port) ->
     },
     monitor(process, Parent),
     proc_lib:init_ack(Parent, State),
+
+    BusyWaitInterval = 20,
+
+    WaitForStateFun = fun WaitForState(Timeout) ->
+        case datastore_worker:state_get(db_gateways) of
+            undefined when Timeout > BusyWaitInterval ->
+                timer:sleep(BusyWaitInterval),
+                WaitForState(Timeout - BusyWaitInterval);
+            undefined ->
+                exit(state_not_initialized);
+            Map when is_map(Map) ->
+                ok
+        end
+    end,
+
+    WaitForConnectionFun = fun WaitForConnection(Timeout) ->
+        try db_run(couchbeam, db_info, [], 0) of
+            {error, econnrefused} when Timeout > BusyWaitInterval ->
+                timer:sleep(BusyWaitInterval),
+                WaitForConnection(Timeout - BusyWaitInterval);
+            _ ->
+                ok %% Other errors will be handled in gateway_loop/1
+        catch
+            _:_ -> ok %% Other errors will be handled in gateway_loop/1
+        end
+    end,
+
+    WaitForStateFun(timer:seconds(2)),
+    WaitForConnectionFun(timer:seconds(2)),
+
     gateway_loop(State).
 
 
@@ -652,10 +682,15 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     start_time := ST, parent := Parent} = State) ->
     try port_command(PortFD, <<"ping">>) of
         true ->
-            case db_run(couchbeam, db_info, [], 0) of
+            try db_run(couchbeam, db_info, [], 0) of
                 {ok, _} -> ok;
                 {error, Reason00} ->
                     self() ! {port_comm_error, Reason00}
+            catch
+                _:{badmap, undefined} ->
+                    ok; %% State of the worker may not be initialised yet, so there is not way to check if connection is active
+                _:Reason01 ->
+                    self() ! {port_comm_error, Reason01}
             end
     catch
         _:Reason0 ->
