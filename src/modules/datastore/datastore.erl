@@ -532,7 +532,7 @@ run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
             fun({_, HookedModule}) ->
                 HookedModule:before(ModelName, Method, Level, Context)
             end, Hooked),
-    case HooksRes -- [ok] of
+    case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
         [] -> ok;
         [Interrupt | _] ->
             Interrupt
@@ -771,7 +771,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
             ok ->
                 FullArgs = [ModelConfig | Args],
-                worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs}, timer:minutes(5));
+                erlang:apply(driver_to_module(Driver), Method, FullArgs);
             {ok, Value} ->
                 {ok, Value};
             {tasks, Tasks} ->
