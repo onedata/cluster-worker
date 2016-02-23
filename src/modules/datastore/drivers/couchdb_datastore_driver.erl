@@ -37,6 +37,7 @@
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([links_doc_key/1, links_key_to_doc_key/1]).
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
@@ -271,11 +272,20 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
             end
         end
     ).
+add_links(#model_config{bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
+    case get(ModelConfig, links_doc_key(Key)) of
+        {ok, #document{value = #links{link_map = LinkMap}}} ->
+            add_links4(ModelConfig, Key, Links, LinkMap);
+        {error, {not_found, _}} ->
+            add_links4(ModelConfig, Key, Links, #{});
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -spec add_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()], InternalCtx :: term()) ->
     ok | datastore:generic_error().
-add_links4(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Bucket, Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
+add_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
+    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
         {ok, _} -> ok;
         {error, Reason} ->
             {error, Reason}
@@ -306,11 +316,22 @@ delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key
             end
         end
     ).
+delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
+    delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
+delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, Links) ->
+    case get(ModelConfig, links_doc_key(Key)) of
+        {ok, #document{value = #links{link_map = LinkMap}}} ->
+            delete_links4(ModelConfig, Key, Links, LinkMap);
+        {error, {not_found, _}} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -spec delete_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()] | all, InternalCtx :: term()) ->
     ok | datastore:generic_error().
-delete_links4(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Bucket, Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
+delete_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
+    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
         {ok, _} -> ok;
         {error, Reason} ->
             {error, Reason}
@@ -326,8 +347,8 @@ delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
 %%--------------------------------------------------------------------
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
-fetch_link(#model_config{bucket = Bucket} = ModelConfig, Key, LinkName) ->
-    case get(ModelConfig, links_doc_key(Bucket, Key)) of
+fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
+    case get(ModelConfig, links_doc_key(Key)) of
         {ok, #document{value = #links{link_map = LinkMap}}} ->
             case maps:get(LinkName, LinkMap, undefined) of
                 undefined ->
@@ -350,8 +371,8 @@ fetch_link(#model_config{bucket = Bucket} = ModelConfig, Key, LinkName) ->
 -spec foreach_link(model_behaviour:model_config(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
-foreach_link(#model_config{bucket = Bucket} = ModelConfig, Key, Fun, AccIn) ->
-    case get(ModelConfig, links_doc_key(Bucket, Key)) of
+foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
+    case get(ModelConfig, links_doc_key(Key)) of
         {ok, #document{value = #links{link_map = LinkMap}}} ->
             {ok, maps:fold(Fun, AccIn, LinkMap)};
         {error, {not_found, _}} ->
@@ -508,6 +529,20 @@ links_doc_key(_Bucket, Key) when is_binary(Key) ->
 links_doc_key(_Bucket, Key) ->
     BinKey = term_to_binary(Key),
     <<BinKey/binary, ?LINKS_KEY_SUFFIX>>.
+-spec links_doc_key(Key :: datastore:key()) -> BinKey :: binary().
+links_doc_key(Key) ->
+    base64:encode(term_to_binary({links, Key})).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns key of document that owns links saved as document with given key.
+%% Reverses links_doc_key/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec links_key_to_doc_key(Key :: datastore:key()) -> BinKey :: binary().
+links_key_to_doc_key(Key) ->
+    {links, DocKey} = binary_to_term(base64:decode(Key)),
+    DocKey.
 
 %%--------------------------------------------------------------------
 %% @private
