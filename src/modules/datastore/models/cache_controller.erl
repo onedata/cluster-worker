@@ -432,6 +432,7 @@ update_usage_info({Key, LinkName}, ModelName, Doc, Level) ->
     update_usage_info({Key, LinkName}, ModelName, Level),
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, [{LinkName, Doc}]],
+    %% TODO add function create link to prevent from get from disk/save new value race
     erlang:apply(datastore:level_to_driver(Level), add_links, FullArgs);
 update_usage_info(Key, ModelName, Doc, Level) ->
     update_usage_info(Key, ModelName, Level),
