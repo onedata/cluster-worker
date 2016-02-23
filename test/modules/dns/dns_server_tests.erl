@@ -55,8 +55,7 @@ dns_server_test_() ->
             {"generate_answer", fun generate_answer/0},
             {"set_reply_code", fun set_reply_code/0},
             {"encode_udp", fun encode_udp/0},
-            {"answer sections", fun answer_sections/0},
-            {"configuration", fun configuration/0}
+            {"answer sections", fun answer_sections/0}
         ]
     }.
 
@@ -89,17 +88,17 @@ validate_query() ->
 
 
 type_to_fun() ->
-    ?assertEqual(handle_a, dns_server:type_to_fun(?S_A)),
-    ?assertEqual(handle_ns, dns_server:type_to_fun(?S_NS)),
-    ?assertEqual(handle_cname, dns_server:type_to_fun(?S_CNAME)),
-    ?assertEqual(handle_soa, dns_server:type_to_fun(?S_SOA)),
-    ?assertEqual(handle_wks, dns_server:type_to_fun(?S_WKS)),
-    ?assertEqual(handle_ptr, dns_server:type_to_fun(?S_PTR)),
-    ?assertEqual(handle_hinfo, dns_server:type_to_fun(?S_HINFO)),
-    ?assertEqual(handle_minfo, dns_server:type_to_fun(?S_MINFO)),
-    ?assertEqual(handle_mx, dns_server:type_to_fun(?S_MX)),
-    ?assertEqual(handle_txt, dns_server:type_to_fun(?S_TXT)),
-    ?assertEqual(not_impl, dns_server:type_to_fun(?S_AXFR)).
+    ?assertEqual(handle_a, dns_server:type_to_method(?S_A)),
+    ?assertEqual(handle_ns, dns_server:type_to_method(?S_NS)),
+    ?assertEqual(handle_cname, dns_server:type_to_method(?S_CNAME)),
+    ?assertEqual(handle_soa, dns_server:type_to_method(?S_SOA)),
+    ?assertEqual(handle_wks, dns_server:type_to_method(?S_WKS)),
+    ?assertEqual(handle_ptr, dns_server:type_to_method(?S_PTR)),
+    ?assertEqual(handle_hinfo, dns_server:type_to_method(?S_HINFO)),
+    ?assertEqual(handle_minfo, dns_server:type_to_method(?S_MINFO)),
+    ?assertEqual(handle_mx, dns_server:type_to_method(?S_MX)),
+    ?assertEqual(handle_txt, dns_server:type_to_method(?S_TXT)),
+    ?assertEqual(not_impl, dns_server:type_to_method(?S_AXFR)).
 
 
 generate_answer() ->
@@ -203,14 +202,5 @@ answer_sections() ->
         dns_server:authority_record(Domain, TTL, Type, Data)),
     ?assertEqual({additional, Domain, TTL, Type, Data},
         dns_server:additional_record(Domain, TTL, Type, Data)).
-
-
-configuration() ->
-    HandlerModule = some_module,
-    MaxEdnsUdpSize = 123456,
-    dns_server:set_handler_module(HandlerModule),
-    ?assertEqual(HandlerModule, dns_server:get_handler_module()),
-    dns_server:set_max_edns_udp_size(MaxEdnsUdpSize),
-    ?assertEqual(MaxEdnsUdpSize, dns_server:get_max_edns_udp_size()).
 
 -endif.

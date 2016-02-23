@@ -25,8 +25,9 @@
 %% {@link dns_worker_plugin_behaviour} callback resolve/3.
 %% @end
 %%--------------------------------------------------------------------
--spec resolve(Method :: atom(), Domain :: string(), LbAdvice :: term()) ->
-    dns_handler_behaviour:handler_reply().
+-spec resolve(Method :: dns_worker_plugin_behaviour:handle_method(),
+    Domain :: string(), LbAdvice :: load_balancing:dns_lb_advice()) ->
+    dns_worker_plugin_behaviour:handler_reply().
 
 resolve(handle_a, Domain, LBAdvice) ->
     Nodes = load_balancing:choose_nodes_for_dns(LBAdvice),

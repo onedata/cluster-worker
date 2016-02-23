@@ -8,15 +8,15 @@
 %%% @doc
 %%% This module implements {@link worker_plugin_behaviour} and
 %%% manages a DNS server module.
-%%% In addition, it implements {@link dns_handler_behaviour} -
-%%% DNS query handling logic.
+%%% In addition, it implements part of DNS query handling logic.
+%%% This module relies on dns_worker_plugin_behaviour providing the
+%%% actual DNS answers.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(dns_worker).
 -author("Lukasz Opiola").
 
 -behaviour(worker_plugin_behaviour).
--behaviour(dns_handler_behaviour).
 
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -25,9 +25,8 @@
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
 
-%% dns_handler_behaviour callbacks
--export([handle_a/1, handle_ns/1, handle_cname/1, handle_soa/1, handle_wks/1,
-    handle_ptr/1, handle_hinfo/1, handle_minfo/1, handle_mx/1, handle_txt/1]).
+%% API
+-export([resolve/2]).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -98,120 +97,23 @@ handle(_Request) ->
 -spec cleanup() -> Result when
     Result :: ok.
 cleanup() ->
-    dns_server:stop(?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME).
+    dns_server:stop().
 
 
 %%%===================================================================
-%%% dns_handler_behaviour callbacks
+%%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Handles DNS queries of type A.
-%% See {@link dns_handler_behaviour} for reference.
+%% Handles DNS queries.
+%% See {@link dns_worker_plugin_behaviour} for reference.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_a(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_a(Domain) ->
-    worker_proxy:call(dns_worker, {handle_a, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type NS.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_ns(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_ns(Domain) ->
-    worker_proxy:call(dns_worker, {handle_ns, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type CNAME.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_cname(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_cname(Domain) ->
-    worker_proxy:call(dns_worker, {handle_cname, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type MX.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_mx(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_mx(Domain) ->
-    worker_proxy:call(dns_worker, {handle_mx, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type SOA.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_soa(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_soa(Domain) ->
-    worker_proxy:call(dns_worker, {handle_soa, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type WKS.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_wks(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_wks(Domain) ->
-    worker_proxy:call(dns_worker, {handle_wks, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type PTR.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_ptr(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_ptr(Domain) ->
-    worker_proxy:call(dns_worker, {handle_ptr, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type HINFO.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_hinfo(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_hinfo(Domain) ->
-    worker_proxy:call(dns_worker, {handle_hinfo, Domain}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type MINFO.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_minfo(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-%% ====================================================================
-handle_minfo(Domain) ->
-    worker_proxy:call(dns_worker, {handle_minfo, Domain}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type TXT.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_txt(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_txt(Domain) ->
-    worker_proxy:call(dns_worker, {handle_txt, Domain}).
+-spec resolve(Method :: dns_worker_plugin_behaviour:handle_method(), Domain :: string())
+        -> dns_worker_plugin_behaviour:handler_reply().
+resolve(Method, Domain) ->
+    worker_proxy:call(dns_worker, {Method, Domain}).
 
 %%%===================================================================
 %%% Internal functions

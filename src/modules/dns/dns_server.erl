@@ -13,6 +13,7 @@
 
 -include_lib("ctool/include/logging.hrl").
 -include_lib("kernel/src/inet_dns.hrl").
+-include("global_definitions.hrl").
 
 -ifdef(TEST).
 -compile(export_all).
@@ -31,36 +32,29 @@
 -define(NOEDNS_UDP_SIZE, 512).
 
 %% API
--export([start/7, stop/1, handle_query/2, start_listening/5]).
+-export([start/0, stop/0, handle_query/2, start_listening/0]).
 
 % Functions useful in qury handler modules
 -export([answer_record/4, authority_record/4, additional_record/4,
     authoritative_answer_flag/1, validate_query/1]).
 
 % Server configuration (in runtime)
--export([set_handler_module/1, get_handler_module/0, set_max_edns_udp_size/1,
-    get_max_edns_udp_size/0]).
+-export([set_max_edns_udp_size/1, get_max_edns_udp_size/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc Starts a DNS server. The server will listen on chosen port (UDP and TCP).
-%% QueryHandlerModule must conform to dns_handler_behaviour.
-%% The server is started in a new process.
-%% OnFailureFun is evalueated by the process if the server fails to start.
+%% @doc Starts a DNS server in a new process.
 %% @end
 %%--------------------------------------------------------------------
--spec start(SupervisorName :: atom(), DNSPort :: integer(), QueryHandlerModule :: atom(), EdnsMaxUdpSize :: integer(),
-    TCPNumAcceptors :: integer(), TCPTimeout :: integer(), OnFailureFun :: function()) -> ok | {error, Reason :: term()}.
-start(SupervisorName, DNSPort, QueryHandlerModule, EdnsMaxUdpSize, TCPNumAcceptors, TCPTimeout, OnFailureFun) ->
-    set_handler_module(QueryHandlerModule),
-    set_max_edns_udp_size(EdnsMaxUdpSize),
+-spec start() -> ok | {error, Reason :: term()}.
+start() ->
     % Listeners start is done in another process.
     % This is because this function is often called during the init of the supervisor process
     % that supervises the listeners - which causes a deadlock.
-    case proc_lib:start(?MODULE, start_listening, [SupervisorName, DNSPort, TCPNumAcceptors, TCPTimeout, OnFailureFun], ?LISTENERS_START_TIMEOUT) of
+    case proc_lib:start(?MODULE, start_listening, [], ?LISTENERS_START_TIMEOUT) of
         ok -> ok;
         {error, Reason} -> {error, Reason}
     end.
@@ -69,11 +63,11 @@ start(SupervisorName, DNSPort, QueryHandlerModule, EdnsMaxUdpSize, TCPNumAccepto
 %% @doc Stops the DNS server and cleans up.
 %% @end
 %%--------------------------------------------------------------------
--spec stop(SupervisorName :: atom()) -> ok.
-stop(SupervisorName) ->
+-spec stop() -> ok.
+stop() ->
     % Cleaning up must be done in another process. This is because this function is often called during the termination
     % of the supervisor process that supervises the listeners - which causes a deadlock.
-    spawn(fun() -> clear_children_and_listeners(SupervisorName) end),
+    spawn(fun() -> clear_children_and_listeners() end),
     ok.
 
 %%--------------------------------------------------------------------
@@ -88,14 +82,13 @@ handle_query(Packet, Transport) ->
             % Detach OPT RR from the DNS query record an proceed with processing it - the OPT RR will be added during answer generation
             DNSRec = DNSRecWithAdditionalSection#dns_rec{arlist = []},
             OPTRR = case ARList of
-                        [] -> undefined;
-                        [#dns_rr_opt{} = OptRR] -> OptRR
-                    end,
+                [] -> undefined;
+                [#dns_rr_opt{} = OptRR] -> OptRR
+            end,
             case validate_query(DNSRec) of
                 ok ->
-                    HandlerModule = get_handler_module(),
                     [#dns_query{domain = Domain, type = Type, class = Class}] = QDList,
-                    case call_handler_module(HandlerModule, string:to_lower(Domain), Type) of
+                    case call_worker(string:to_lower(Domain), Type) of
                         Reply when is_atom(Reply) -> % Reply :: reply_type()
                             generate_answer(set_reply_code(DNSRec, Reply), OPTRR, Transport);
                         {Reply, ResponseList} ->
@@ -156,37 +149,38 @@ validate_query(DNSRec) ->
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Calls the handler module to handle the query or returns not_impl if
+%% @doc Calls worker to handle the query or returns not_impl if
 %% this kind of query is not accepted by the server.
 %% @end
 %%--------------------------------------------------------------------
--spec call_handler_module(HandlerModule :: module(), Domain :: string(), Type :: atom()) ->
-    dns_handler_behaviour:handler_reply().
-call_handler_module(HandlerModule, Domain, Type) ->
-    case type_to_fun(Type) of
+-spec call_worker(Domain :: string(), Type :: atom()) ->
+    dns_worker_plugin_behaviour:handler_reply().
+call_worker(Domain, Type) ->
+    case type_to_method(Type) of
         not_impl ->
             not_impl;
-        Fun ->
-            erlang:apply(HandlerModule, Fun, [Domain])
+        Method ->
+            erlang:apply(dns_worker, resolve, [Method, Domain])
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Returns a function that should be called to handle a query of given type.
-%% Those functions are defined in dns_handler_behaviour.
+%% @doc Returns a method that should be passed to handle a query of given type.
+%% Those methods are used in dns_worker_plugin_behaviour
+%% and also are accepted by dns_worker API methods.
 %% @end
 %%--------------------------------------------------------------------
--spec type_to_fun(QueryType :: atom()) -> atom().
-type_to_fun(?S_A) -> handle_a;
-type_to_fun(?S_NS) -> handle_ns;
-type_to_fun(?S_CNAME) -> handle_cname;
-type_to_fun(?S_SOA) -> handle_soa;
-type_to_fun(?S_WKS) -> handle_wks;
-type_to_fun(?S_PTR) -> handle_ptr;
-type_to_fun(?S_HINFO) -> handle_hinfo;
-type_to_fun(?S_MINFO) -> handle_minfo;
-type_to_fun(?S_MX) -> handle_mx;
-type_to_fun(?S_TXT) -> handle_txt;
-type_to_fun(_) -> not_impl.
+-spec type_to_method(QueryType :: atom()) -> atom().
+type_to_method(?S_A) -> handle_a;
+type_to_method(?S_NS) -> handle_ns;
+type_to_method(?S_CNAME) -> handle_cname;
+type_to_method(?S_SOA) -> handle_soa;
+type_to_method(?S_WKS) -> handle_wks;
+type_to_method(?S_PTR) -> handle_ptr;
+type_to_method(?S_HINFO) -> handle_hinfo;
+type_to_method(?S_MINFO) -> handle_minfo;
+type_to_method(?S_MX) -> handle_mx;
+type_to_method(?S_TXT) -> handle_txt;
+type_to_method(_) -> not_impl.
 
 %%--------------------------------------------------------------------
 %% @doc Encodes a DNS record and returns a tuple accepted by dns_xxx_handler modules.
@@ -202,12 +196,12 @@ generate_answer(DNSRec, OPTRR, Transport) ->
     DNSRecUpdatedHeader = DNSRec#dns_rec{header = NewHeader},
     % Check if OPT RR is present. If so, retrieve client's max upd payload size and set the value to server's max udp.
     {NewDnsRec, ClientMaxUDP} = case OPTRR of
-                                    undefined ->
-                                        {DNSRecUpdatedHeader, undefined};
-                                    #dns_rr_opt{udp_payload_size = ClMaxUDP} = RROPT ->
-                                        NewRROPT = RROPT#dns_rr_opt{udp_payload_size = get_max_edns_udp_size()},
-                                        {DNSRecUpdatedHeader#dns_rec{arlist = DNSRecUpdatedHeader#dns_rec.arlist ++ [NewRROPT]}, ClMaxUDP}
-                                end,
+        undefined ->
+            {DNSRecUpdatedHeader, undefined};
+        #dns_rr_opt{udp_payload_size = ClMaxUDP} = RROPT ->
+            NewRROPT = RROPT#dns_rr_opt{udp_payload_size = get_max_edns_udp_size()},
+            {DNSRecUpdatedHeader#dns_rec{arlist = DNSRecUpdatedHeader#dns_rec.arlist ++ [NewRROPT]}, ClMaxUDP}
+    end,
     case Transport of
         udp -> {ok, encode_udp(NewDnsRec, ClientMaxUDP)};
         tcp -> {ok, inet_dns:encode(NewDnsRec)}
@@ -219,17 +213,17 @@ generate_answer(DNSRec, OPTRR, Transport) ->
 %% If there was an OPT RR record in request, it modifies it properly and concates to the ADDITIONAL section.
 %% @end
 %%--------------------------------------------------------------------
--spec set_reply_code(DNSRec :: #dns_rec{header :: #dns_header{}}, ReplyType :: dns_handler_behaviour:reply_code()) -> #dns_rec{}.
+-spec set_reply_code(DNSRec :: #dns_rec{header :: #dns_header{}}, ReplyType :: dns_worker_plugin_behaviour:reply_code()) -> #dns_rec{}.
 set_reply_code(#dns_rec{header = Header} = DNSRec, ReplyType) ->
     ReplyCode = case ReplyType of
-                    nx_domain -> ?NXDOMAIN;
-                    not_impl -> ?NOTIMP;
-                    refused -> ?REFUSED;
-                    form_error -> ?FORMERR;
-                    bad_version -> ?BADVERS;
-                    ok -> ?NOERROR;
-                    _ -> ?SERVFAIL
-                end,
+        nx_domain -> ?NXDOMAIN;
+        not_impl -> ?NOTIMP;
+        refused -> ?REFUSED;
+        form_error -> ?FORMERR;
+        bad_version -> ?BADVERS;
+        ok -> ?NOERROR;
+        _ -> ?SERVFAIL
+    end,
     DNSRec#dns_rec{header = inet_dns:make_header(Header, rcode, ReplyCode)}.
 
 %%--------------------------------------------------------------------
@@ -239,12 +233,12 @@ set_reply_code(#dns_rec{header = Header} = DNSRec, ReplyType) ->
 -spec encode_udp(DNSRec :: #dns_rec{}, ClientMaxUDP :: integer() | undefined) -> binary().
 encode_udp(#dns_rec{} = DNSRec, ClientMaxUDP) ->
     TruncationSize = case ClientMaxUDP of
-                         undefined ->
-                             ?NOEDNS_UDP_SIZE;
-                         Value ->
-                             % If the client advertised a value, accept it but don't exceed the range [512, MAX_UDP_SIZE]
-                             max(?NOEDNS_UDP_SIZE, min(get_max_edns_udp_size(), Value))
-                     end,
+        undefined ->
+            ?NOEDNS_UDP_SIZE;
+        Value ->
+            % If the client advertised a value, accept it but don't exceed the range [512, MAX_UDP_SIZE]
+            max(?NOEDNS_UDP_SIZE, min(get_max_edns_udp_size(), Value))
+    end,
     Packet = inet_dns:encode(DNSRec),
     case size(Packet) > TruncationSize of
         true ->
@@ -261,13 +255,18 @@ encode_udp(#dns_rec{} = DNSRec, ClientMaxUDP) ->
 
 %%--------------------------------------------------------------------
 %% @doc Starts dns listeners and terminates dns_worker process in case of error.
-%% OnFailureFun is evalueated if the server fails to start.
 %% @end
 %%--------------------------------------------------------------------
--spec start_listening(SupervisorName :: atom(), DNSPort :: integer(),
-    TCPNumAcceptors :: integer(), TCPTimeout :: integer(), OnFailureFun :: function()) -> ok.
-start_listening(SupervisorName, DNSPort, TCPNumAcceptors, TCPTimeout, OnFailureFun) ->
+-spec start_listening() -> ok.
+start_listening() ->
     try
+        SupervisorName = ?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME,
+        {ok, DNSPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_port),
+        {ok, TCPNumAcceptors} = application:get_env(
+            ?CLUSTER_WORKER_APP_NAME, dns_tcp_acceptor_pool_size),
+        {ok, TCPTimeout} = application:get_env(
+            ?CLUSTER_WORKER_APP_NAME, dns_tcp_timeout_seconds),
+
         proc_lib:init_ack(ok),
         UDPChild = {?DNS_UDP_LISTENER, {dns_udp_handler, start_link, [DNSPort]}, permanent, 5000, worker, [dns_udp_handler]},
         TCPOptions = [{packet, 2}, {dns_tcp_timeout, TCPTimeout}, {keepalive, true}],
@@ -288,8 +287,7 @@ start_listening(SupervisorName, DNSPort, TCPNumAcceptors, TCPTimeout, OnFailureF
         ?info("DNS server started successfully.")
     catch
         _:Reason ->
-            ?error("DNS Error during starting listeners, ~p", [Reason]),
-            OnFailureFun()
+            ?error("DNS Error during starting listeners, ~p", [Reason])
     end,
     ok.
 
@@ -314,7 +312,7 @@ authoritative_answer_flag(Flag) ->
     {answer, Domain, TTL, Type, Data} when
     Domain :: string(),
     TTL :: integer(),
-    Type :: dns_handler_behaviour:query_type(),
+    Type :: dns_worker_plugin_behaviour:query_type(),
     Data :: term().
 answer_record(Domain, TTL, Type, Data) ->
     {answer, Domain, TTL, Type, Data}.
@@ -329,7 +327,7 @@ answer_record(Domain, TTL, Type, Data) ->
     {authority, Domain, TTL, Type, Data} when
     Domain :: string(),
     TTL :: integer(),
-    Type :: dns_handler_behaviour:query_type(),
+    Type :: dns_worker_plugin_behaviour:query_type(),
     Data :: term().
 authority_record(Domain, TTL, Type, Data) ->
     {authority, Domain, TTL, Type, Data}.
@@ -344,27 +342,10 @@ authority_record(Domain, TTL, Type, Data) ->
     {additional, Domain, TTL, Type, Data} when
     Domain :: string(),
     TTL :: integer(),
-    Type :: dns_handler_behaviour:query_type(),
+    Type :: dns_worker_plugin_behaviour:query_type(),
     Data :: term().
 additional_record(Domain, TTL, Type, Data) ->
     {additional, Domain, TTL, Type, Data}.
-
-%%--------------------------------------------------------------------
-%% @doc Saves query handler module in application env.
-%% @end
-%%--------------------------------------------------------------------
--spec set_handler_module(Module :: atom()) -> ok.
-set_handler_module(Module) ->
-    ok = application:set_env(ctool, query_handler_module, Module).
-
-%%--------------------------------------------------------------------
-%% @doc Retrieves query handler module from application env.
-%% @end
-%%--------------------------------------------------------------------
--spec get_handler_module() -> module().
-get_handler_module() ->
-    {ok, Module} = application:get_env(ctool, query_handler_module),
-    Module.
 
 %%--------------------------------------------------------------------
 %% @doc Saves DNS response TTL in application env.
@@ -372,7 +353,7 @@ get_handler_module() ->
 %%--------------------------------------------------------------------
 -spec set_max_edns_udp_size(Size :: integer()) -> ok.
 set_max_edns_udp_size(Size) ->
-    ok = application:set_env(ctool, edns_max_udp_size, Size).
+    ok = application:set_env(?CLUSTER_WORKER_APP_NAME, edns_max_udp_size, Size).
 
 %%--------------------------------------------------------------------
 %% @doc Retrieves DNS response TTL from application env.
@@ -380,8 +361,8 @@ set_max_edns_udp_size(Size) ->
 %%--------------------------------------------------------------------
 -spec get_max_edns_udp_size() -> integer().
 get_max_edns_udp_size() ->
-    {ok, Size} = application:get_env(ctool, edns_max_udp_size),
-    Size.
+    {ok, EdnsMaxUdpSize} = application:get_env(?CLUSTER_WORKER_APP_NAME, edns_max_udp_size),
+    EdnsMaxUdpSize.
 
 %%--------------------------------------------------------------------
 %% Internal functions
@@ -390,9 +371,10 @@ get_max_edns_udp_size() ->
 %% @doc Terminates listeners and created children, if they exist.
 %% @end
 %%--------------------------------------------------------------------
--spec clear_children_and_listeners(SupervisorName :: atom()) -> ok.
-clear_children_and_listeners(SupervisorName) ->
+-spec clear_children_and_listeners() -> ok.
+clear_children_and_listeners() ->
     try
+        SupervisorName = ?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME,
         SupChildren = supervisor:which_children(SupervisorName),
         case lists:keyfind(?DNS_UDP_LISTENER, 1, SupChildren) of
             {?DNS_UDP_LISTENER, _, _, _} ->
