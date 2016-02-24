@@ -328,8 +328,10 @@ before(ModelName, delete_links, Level, [Key, all], Level) ->
         AccFun = fun(LinkName, _, Acc) ->
             [LinkName | Acc]
         end,
-        FullArgs = [ModelConfig, Key, AccFun, []],
-        {ok, Links} = erlang:apply(datastore:level_to_driver(Level), foreach_link, FullArgs),
+        {ok, Links1} = erlang:apply(datastore:level_to_driver(Level), foreach_link, [ModelConfig, Key, AccFun, []]),
+        {ok, Links2} = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), foreach_link,
+            [ModelConfig, Key, AccFun, [Links1]]),
+        Links = sets:to_list(sets:from_list(Links2)),
         lists:foldl(fun(Link, Acc) ->
             Ans = before_del({Key, Link}, ModelName, Level, delete_links),
             case Ans of
@@ -361,9 +363,11 @@ before(ModelName, delete_links, disk_only, [Key, all], Level2) ->
         AccFun = fun(LinkName, _, Acc) ->
             [LinkName | Acc]
         end,
-        FullArgs = [ModelConfig, Key, AccFun, []],
-        {ok, Links} = erlang:apply(
-            datastore:driver_to_module(datastore:level_to_driver(disk_only)), foreach_link, FullArgs),
+        % TODO - not list links twice (at cache and disk level)
+        {ok, Links1} = erlang:apply(datastore:level_to_driver(Level2), foreach_link, [ModelConfig, Key, AccFun, []]),
+        {ok, Links2} = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), foreach_link,
+            [ModelConfig, Key, AccFun, [Links1]]),
+        Links = sets:to_list(sets:from_list(Links2)),
         Tasks = lists:foldl(fun(Link, Acc) ->
             [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
         end, [], Links),
@@ -574,9 +578,11 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
 choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
     % check for create/delete race
+    ModelConfig = ModelName:model_init(),
     case Op of
         delete_links ->
-            case datastore:fetch_link(Level, Key, ModelName, Link) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                fetch_link, [ModelConfig, Key, Link]) of
                 {ok, SavedValue} ->
                     {ok, add_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
@@ -585,7 +591,8 @@ choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
                     {fetch_error, FetchError}
             end;
         _ ->
-            case datastore:fetch_link(Level, Key, ModelName, Link) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                fetch_link, [ModelConfig, Key, Link]) of
                 {ok, SavedValue} ->
                     {ok, add_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
@@ -609,9 +616,11 @@ choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
     end;
 choose_action(Op, Level, ModelName, Key, Uuid) ->
     % check for create/delete race
+    ModelConfig = ModelName:model_init(),
     case Op of
         delete ->
-            case datastore:get(Level, ModelName, Key) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                get, [ModelConfig, Key]) of
                 {ok, SavedValue} ->
                     {ok, save, [SavedValue]};
                 {error, {not_found, _}} ->
@@ -620,7 +629,8 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
                     {get_error, GetError}
             end;
         _ ->
-            case datastore:get(Level, ModelName, Key) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                get, [ModelConfig, Key]) of
                 {ok, SavedValue} ->
                     {ok, save, [SavedValue]};
                 {error, {not_found, _}} ->

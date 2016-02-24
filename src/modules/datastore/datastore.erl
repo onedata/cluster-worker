@@ -525,6 +525,7 @@ model_name(Record) when is_tuple(Record) ->
     Method :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term()) ->
     ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
+% TODO - check for errors before accepting task
 run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
     HooksRes =
@@ -784,12 +785,12 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                         ok = task_manager:start_task(Task, Level);
                     (_) ->
                         ok % error already logged
-                 end, Tasks);
+                end, Tasks);
             {task, Task} ->
                 Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                             true -> ?CLUSTER_LEVEL;
-                             _ -> ?NODE_LEVEL
-                         end,
+                            true -> ?CLUSTER_LEVEL;
+                            _ -> ?NODE_LEVEL
+                        end,
                 ok = task_manager:start_task(Task, Level);
             {error, Reason} ->
                 {error, Reason}
