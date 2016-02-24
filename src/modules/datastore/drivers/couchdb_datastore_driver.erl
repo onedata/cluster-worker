@@ -655,7 +655,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     end,
 
     WaitForConnectionFun = fun WaitForConnection(Timeout) ->
-        try couchbeam:server_info(couchbeam:server_connection("localhost", GWPort)) of
+        try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
             {error, econnrefused} when Timeout > BusyWaitInterval ->
                 timer:sleep(BusyWaitInterval),
                 WaitForConnection(Timeout - BusyWaitInterval);
@@ -682,7 +682,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     start_time := ST, parent := Parent} = State) ->
     try port_command(PortFD, <<"ping">>) of
         true ->
-            try couchbeam:server_info(couchbeam:server_connection("localhost", GWPort)) of
+            try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
                 {ok, _} -> ok;
                 {error, Reason00} ->
                     self() ! {port_comm_error, Reason00}
