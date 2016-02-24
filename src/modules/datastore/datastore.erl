@@ -186,8 +186,9 @@ list(Level, ModelName, Fun, AccIn) ->
 delete(Level, ModelName, Key, Pred) ->
     case exec_driver_async(ModelName, Level, delete, [Key, Pred]) of
         ok ->
-            spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-            ok;
+            % TODO - make link del asynch when tests will be able to handle it
+%%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
+            delete_links(Level, Key, ModelName, all);
         {error, Reason} ->
             {error, Reason}
     end.
