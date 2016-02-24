@@ -330,7 +330,7 @@ before(ModelName, delete_links, Level, [Key, all], Level) ->
         end,
         {ok, Links1} = erlang:apply(datastore:level_to_driver(Level), foreach_link, [ModelConfig, Key, AccFun, []]),
         {ok, Links2} = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), foreach_link,
-            [ModelConfig, Key, AccFun, [Links1]]),
+            [ModelConfig, Key, AccFun, Links1]),
         Links = sets:to_list(sets:from_list(Links2)),
         lists:foldl(fun(Link, Acc) ->
             Ans = before_del({Key, Link}, ModelName, Level, delete_links),
@@ -366,7 +366,7 @@ before(ModelName, delete_links, disk_only, [Key, all], Level2) ->
         % TODO - not list links twice (at cache and disk level)
         {ok, Links1} = erlang:apply(datastore:level_to_driver(Level2), foreach_link, [ModelConfig, Key, AccFun, []]),
         {ok, Links2} = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), foreach_link,
-            [ModelConfig, Key, AccFun, [Links1]]),
+            [ModelConfig, Key, AccFun, Links1]),
         Links = sets:to_list(sets:from_list(Links2)),
         Tasks = lists:foldl(fun(Link, Acc) ->
             [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
