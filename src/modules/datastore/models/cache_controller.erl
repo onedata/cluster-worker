@@ -322,31 +322,6 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
-before(ModelName, delete_links, Level, [Key, all], Level) ->
-    try
-        ModelConfig = ModelName:model_init(),
-        AccFun = fun(LinkName, _, Acc) ->
-            [LinkName | Acc]
-        end,
-        {ok, Links1} = erlang:apply(datastore:level_to_driver(Level), foreach_link, [ModelConfig, Key, AccFun, []]),
-        {ok, Links2} = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), foreach_link,
-            [ModelConfig, Key, AccFun, Links1]),
-        Links = sets:to_list(sets:from_list(Links2)),
-        lists:foldl(fun(Link, Acc) ->
-            Ans = before_del({Key, Link}, ModelName, Level, delete_links),
-            case Ans of
-                ok ->
-                    Acc;
-                _ ->
-                    Ans
-            end
-        end, ok, Links)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error in cache_controller before. Args: ~p. Error: ~p:~p.",
-                [{ModelName, delete_links, Level, [Key, all], Level}, E1, E2]),
-            {error, preparing_op_failed}
-    end;
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
     lists:foldl(fun(Link, Acc) ->
         Ans = before_del({Key, Link}, ModelName, Level, delete_links),
@@ -357,29 +332,6 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
                 Ans
         end
     end, ok, Links);
-before(ModelName, delete_links, disk_only, [Key, all], Level2) ->
-    try
-        ModelConfig = ModelName:model_init(),
-        AccFun = fun(LinkName, _, Acc) ->
-            [LinkName | Acc]
-        end,
-        % TODO - not list links twice (at cache and disk level)
-        {ok, Links1} = erlang:apply(datastore:level_to_driver(Level2), foreach_link, [ModelConfig, Key, AccFun, []]),
-        {ok, Links2} = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), foreach_link,
-            [ModelConfig, Key, AccFun, Links1]),
-        Links = sets:to_list(sets:from_list(Links2)),
-        Tasks = lists:foldl(fun(Link, Acc) ->
-            [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
-        end, [], Links),
-        {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
-        timer:sleep(SleepTime),
-        {tasks, Tasks}
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error in cache_controller before. Args: ~p. Error: ~p:~p.",
-                [{ModelName, delete_links, disk_only, [Key, all], Level2}, E1, E2]),
-            {error, preparing_disk_op_failed}
-    end;
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
         [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]

@@ -290,13 +290,36 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
-%% TODO - delete links should not leave any trash after delete of last link without all option
--spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name() | [link_name()] | all) -> ok | generic_error().
+-spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
+    link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
-    _ModelConfig = ModelName:model_init(),
-    exec_driver_async(ModelName, Level, delete_links, [Key, LinkNames]);
+    delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
 delete_links(Level, Key, ModelName, LinkName) ->
     delete_links(Level, Key, ModelName, [LinkName]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Removes links from the document with given key. There is special link name 'all' which removes all links.
+%% @end
+%%--------------------------------------------------------------------
+%% TODO - delete links should not leave any trash after delete of last link without all option
+-spec delete_links(Level :: store_level(), Drivers :: atom() | [atom()], ext_key(),
+    model_behaviour:model_type(), [link_name()] | all) -> ok | generic_error().
+delete_links(Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNames =:= all ->
+    ModelConfig = ModelName:model_init(),
+    AccFun = fun(LinkName, _, Acc) ->
+        [LinkName | Acc]
+    end,
+    {ok, Links1} = erlang:apply(driver_to_module(Driver1), foreach_link, [ModelConfig, Key, AccFun, []]),
+    {ok, Links2} = erlang:apply(driver_to_module(Driver2), foreach_link,
+        [ModelConfig, Key, AccFun, Links1]),
+    Links = sets:to_list(sets:from_list(Links2)),
+    delete_links(Level, [Driver1, Driver2], Key, ModelName, Links);
+delete_links(Level, [_Driver1, _Driver2], Key, ModelName, LinkNames) ->
+    exec_driver_async(ModelName, Level, delete_links, [Key, LinkNames]);
+delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
+    exec_driver(ModelName, Driver, delete_links, [Key, LinkNames]).
 
 
 %%--------------------------------------------------------------------
