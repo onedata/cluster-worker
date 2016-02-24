@@ -204,7 +204,7 @@
     },
     "zone_domains": {
         "oz": {
-            "gui_livereload": "poll",
+            "gui_livereload": "mount_output_poll",
             "db_driver": "couchbase",
             "cluster_manager": {
                 "cm": {

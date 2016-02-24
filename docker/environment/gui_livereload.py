@@ -23,6 +23,7 @@ It can work in following modes:
         on docker that will poll for changes in the mounted output dir and force
         a reload of the page (via websocket) whenever something changes.
 
+    'none' - doesn't start gui livereload.
 """
 
 import os
@@ -42,13 +43,17 @@ def assert_correct_mode(mode):
     """
     Makes sure that given livereload mode is correct.
     """
-    if mode not in ['poll', 'watch', 'mount_output', 'mount_output_poll']:
+    if mode not in [
+        'poll', 'watch', 'mount_output', 'mount_output_poll', 'none'
+    ]:
         sys.stderr.write('''\
-Unknown livereload mode, use one of the following:
+Unknown livereload mode: `{0}`. Use one of the following:
     watch
     poll
     mount_output
-    mount_output_poll''')
+    mount_output_poll
+    none
+'''.format(mode))
         sys.exit(1)
 
 
@@ -83,9 +88,14 @@ def required_volumes(gui_config_file,
                 'ro'
             )
         ]
+    else:
+        return []
 
 
-def run(container_id, gui_config_file, docker_src_dir, docker_bin_dir,
+def run(container_id,
+        gui_config_file,
+        project_target_dir,
+        docker_src_dir, docker_bin_dir,
         mode='watch'):
     """
     Runs automatic rebuilding of project and livereload of web pages when
@@ -94,25 +104,35 @@ def run(container_id, gui_config_file, docker_src_dir, docker_bin_dir,
     """
     assert_correct_mode(mode)
 
-    watch_changes(container_id, gui_config_file, docker_src_dir, docker_bin_dir,
-                  mode=mode)
-    start_livereload(container_id, gui_config_file, docker_bin_dir, mode=mode)
+    # Resolve full paths to gui sources
+    source_gui_dir = _parse_erl_config(gui_config_file, 'source_gui_dir')
+    source_gui_dir = os.path.join(docker_src_dir, source_gui_dir)
+    release_gui_dir = _parse_erl_config(gui_config_file, 'release_gui_dir')
+    release_gui_dir = os.path.join(docker_bin_dir, release_gui_dir)
+
+    if mode == 'watch' or mode == 'poll':
+        watch_changes(container_id, source_gui_dir, release_gui_dir, mode=mode)
+        start_livereload(container_id, release_gui_dir, mode=mode)
+
+    elif mode == 'mount_output_poll':
+        # print(container_id)
+        # print(get_output_mount_path())
+        # print(mode)
+        start_livereload(container_id, get_output_mount_path(), mode='poll')
 
 
-def watch_changes(container_id, gui_config_file, docker_src_dir,
-                  docker_bin_dir, mode='watch', detach=True):
+def watch_changes(container_id,
+                  source_gui_dir, release_gui_dir,
+                  mode='watch', detach=True):
     """
     Starts a process on given docker that monitors changes in GUI sources and
     rebuilds the project when something changes.
-    See file header for possible modes.
+    source_gui_dir and release_gui_dir are paths on docker.
+    Mode can be 'watch' or 'poll', see file header for more.
     """
     assert_correct_mode(mode)
 
-    source_gui_dir = _parse_erl_config(gui_config_file, 'source_gui_dir')
-    source_gui_dir = os.path.join(docker_src_dir, source_gui_dir)
     source_tmp_dir = os.path.join(source_gui_dir, 'tmp')
-    release_gui_dir = _parse_erl_config(gui_config_file, 'release_gui_dir')
-    release_gui_dir = os.path.join(docker_bin_dir, release_gui_dir)
 
     watch_option = '--watch'
     if mode == 'poll':
@@ -137,27 +157,25 @@ ember build {watch_option} --output-path={release_gui_dir} | tee /tmp/ember_buil
         watch_option=watch_option,
         release_gui_dir=release_gui_dir)
 
-    docker.exec_(
+    return docker.exec_(
         container=container_id,
         detach=detach,
         interactive=True,
         tty=True,
-        command=command)
+        command=command,
+        output=True)
 
 
-def start_livereload(container_id, gui_config_file,
-                     docker_bin_dir, mode='watch', detach=True):
+def start_livereload(container_id, release_gui_dir, mode='watch', detach=True):
     """
     Starts a process on given docker that monitors changes in GUI release and
     forces a page reload using websocket connection to client. The WS connection
     is created when livereload script is injected on the page - this must be
     done from the Ember client app.
-    See file header for possible modes.
+    source_gui_dir and release_gui_dir are paths on docker.
+    Mode can be 'watch' or 'poll', see file header for more.
     """
     assert_correct_mode(mode)
-
-    release_gui_dir = _parse_erl_config(gui_config_file, 'release_gui_dir')
-    release_gui_dir = os.path.join(docker_bin_dir, release_gui_dir)
 
     watch_option = 'watch'
     if mode == 'poll':
@@ -166,15 +184,16 @@ def start_livereload(container_id, gui_config_file,
     # Copy the js script that start livereload and a cert that will
     # allow to start a https server for livereload
     command = '''\
-cat <<"EOF" > /tmp/gui_livereload_cert.pem
+mkdir -p /tmp/gui_livereload
+cd /tmp/gui_livereload
+cat <<"EOF" > /tmp/gui_livereload/cert.pem
 {gui_livereload_cert}
 EOF
-cd {release_gui_dir}
 npm link livereload
 cat <<"EOF" > gui_livereload.js
 {gui_livereload}
 EOF
-node gui_livereload.js . {watch_option} /tmp/gui_livereload_cert.pem'''
+node gui_livereload.js {release_gui_dir} {watch_option} /tmp/gui_livereload/cert.pem'''
     js_path = os.path.join(common.get_script_dir(), 'gui_livereload.js')
     cert_path = os.path.join(common.get_script_dir(), 'gui_livereload_cert.pem')
     command = command.format(
@@ -183,7 +202,7 @@ node gui_livereload.js . {watch_option} /tmp/gui_livereload_cert.pem'''
         gui_livereload=open(js_path, 'r').read(),
         watch_option=watch_option)
 
-    docker.exec_(
+    return docker.exec_(
         container=container_id,
         detach=detach,
         interactive=True,
@@ -202,3 +221,5 @@ def _parse_erl_config(file, param_name):
     file.close()
     matches = re.findall("{" + param_name + ".*", file_content)
     return matches[0].split('"')[1]
+
+
