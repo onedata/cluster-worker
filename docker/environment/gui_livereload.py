@@ -5,28 +5,84 @@ This software is released under the MIT license cited in 'LICENSE.txt'
 
 Utility module to handle livereload of Ember GUI (for development purposes) on
 dockers.
+
+It can work in following modes:
+    'watch' - uses FS watcher, does not work on network filesystems.
+        Runs entirely on docker.
+
+    'poll' - polls for changes, very slow but works everywhere.
+        Runs entirely on docker.
+
+    'mount_output' - mounts GUI output path in docker so if any changes are made
+        on the host, they appear on docker. The dir is used by cowboy as static
+        files dir (proper changes are automatically made to sys.config),
+        so new files will be served on page reload.
+        This allows to run 'ember build --watch' on host machine.
+
+    'mount_output_poll' - like above, but it also starts a livereload server
+        on docker that will poll for changes in the mounted output dir and force
+        a reload of the page (via websocket) whenever something changes.
+
 """
 
 import os
 import re
+import sys
 from . import common, docker
 
 
-def required_volumes(gui_config_file, project_src_dir, docker_src_dir):
+def get_output_mount_path():
+    """
+    Indicates where on docker should gui output dir be mounted.
+    """
+    return '/root/gui_static'
+
+
+def assert_correct_mode(mode):
+    """
+    Makes sure that given livereload mode is correct.
+    """
+    if mode not in ['poll', 'watch', 'mount_output', 'mount_output_poll']:
+        sys.stderr.write('''\
+Unknown livereload mode, use one of the following:
+    watch
+    poll
+    mount_output
+    mount_output_poll''')
+        sys.exit(1)
+
+
+def required_volumes(gui_config_file,
+                     project_src_dir, project_target_dir,
+                     docker_src_dir,
+                     mode='watch'):
     """
     Returns volumes that are required for livereload to work based on:
+    gui_config_file - config file, source_gui_dir is resolved from it
     project_src_dir - path on host to project root
     docker_src_dir - path on docker to project root
-    gui_src_dir - path to gui sources relative to project root
+    See file header for possible modes.
     """
+    assert_correct_mode(mode)
+
     source_gui_dir = _parse_erl_config(gui_config_file, 'source_gui_dir')
-    return [
-        (
-            os.path.join(project_src_dir, source_gui_dir),
-            os.path.join(docker_src_dir, source_gui_dir),
-            'rw'
-        )
-    ]
+    release_gui_dir = _parse_erl_config(gui_config_file, 'release_gui_dir')
+    if mode == 'poll' or mode == 'watch':
+        return [
+            (
+                os.path.join(project_src_dir, source_gui_dir),
+                os.path.join(docker_src_dir, source_gui_dir),
+                'rw'
+            )
+        ]
+    elif mode == 'mount_output' or mode == 'mount_output_poll':
+        return [
+            (
+                os.path.join(project_target_dir, release_gui_dir),
+                os.path.join(get_output_mount_path()),
+                'ro'
+            )
+        ]
 
 
 def run(container_id, gui_config_file, docker_src_dir, docker_bin_dir,
@@ -34,10 +90,10 @@ def run(container_id, gui_config_file, docker_src_dir, docker_bin_dir,
     """
     Runs automatic rebuilding of project and livereload of web pages when
     their code changes.
-    mode can be:
-        'watch' - use FS watcher, does not work on network filesystems
-        'poll' - poll for changes, slower but works everywhere
+    See file header for possible modes.
     """
+    assert_correct_mode(mode)
+
     watch_changes(container_id, gui_config_file, docker_src_dir, docker_bin_dir,
                   mode=mode)
     start_livereload(container_id, gui_config_file, docker_bin_dir, mode=mode)
@@ -48,10 +104,10 @@ def watch_changes(container_id, gui_config_file, docker_src_dir,
     """
     Starts a process on given docker that monitors changes in GUI sources and
     rebuilds the project when something changes.
-    mode can be:
-        'watch' - use FS watcher, does not work on network filesystems
-        'poll' - poll for changes, slower but works everywhere
+    See file header for possible modes.
     """
+    assert_correct_mode(mode)
+
     source_gui_dir = _parse_erl_config(gui_config_file, 'source_gui_dir')
     source_gui_dir = os.path.join(docker_src_dir, source_gui_dir)
     source_tmp_dir = os.path.join(source_gui_dir, 'tmp')
@@ -96,10 +152,10 @@ def start_livereload(container_id, gui_config_file,
     forces a page reload using websocket connection to client. The WS connection
     is created when livereload script is injected on the page - this must be
     done from the Ember client app.
-    mode can be:
-        'watch' - use FS watcher, does not work on network filesystems
-        'poll' - poll for changes, slower but works everywhere
+    See file header for possible modes.
     """
+    assert_correct_mode(mode)
+
     release_gui_dir = _parse_erl_config(gui_config_file, 'release_gui_dir')
     release_gui_dir = os.path.join(docker_bin_dir, release_gui_dir)
 

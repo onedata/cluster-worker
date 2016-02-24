@@ -34,6 +34,7 @@ class OZWorkerConfigurator:
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         if 'http_domain' in sys_config:
             sys_config['http_domain'] = {'string': domain}
+        sys_config['gui_static_files_root'] = {'string': '/root/gui_static'}
         return cfg
 
     def configure_started_instance(self, bindir, instance, config,
@@ -42,19 +43,24 @@ class OZWorkerConfigurator:
         # Check if gui_livereload is enabled in env and turn it on
         if 'gui_livereload' in this_config:
             mode = this_config['gui_livereload']
-            if mode == 'watch' or mode == 'poll':
+            if mode == 'watch' or mode == 'poll' or mode == 'none':
                 print '''\
 Starting GUI livereload
     zone: {0}
     mode: {1}'''.format(
                     instance, mode)
                 for container_id in container_ids:
-                    gui_livereload.run(
+                    gui_livereload.start_livereload(
                         container_id,
                         os.path.join(bindir, 'rel/gui.config'),
                         DOCKER_BINDIR_PATH,
-                        '/root/bin/node',
                         mode=mode)
+                    # gui_livereload.run(
+                    #     container_id,
+                    #     os.path.join(bindir, 'rel/gui.config'),
+                    #     DOCKER_BINDIR_PATH,
+                    #     '/root/bin/node',
+                    #     mode=mode)
 
     def additional_commands(self, bindir, config, domain, worker_ips):
         dnsconfig_path = self.dnsconfig_path
@@ -121,14 +127,25 @@ Starting GUI livereload
         return dns_config
 
     def extra_volumes(self, config, bindir):
-        extra_volumes = []
-        # Check if gui_livereload is enabled in env and add required volumes
-        if 'gui_livereload' in config:
-            if config['gui_livereload']:
-                extra_volumes += gui_livereload.required_volumes(
-                    os.path.join(bindir, 'rel/gui.config'),
-                    bindir,
-                    DOCKER_BINDIR_PATH)
+        extra_volumes = [
+            (
+                os.path.join(bindir, 'rel/oz_worker/data/gui_static'),
+                os.path.join('/root/gui_static'),
+                'ro'
+            )
+        ]
+
+        # extra_volumes = []
+        # # Check if gui_livereload is enabled in env and add required volumes
+        # if 'gui_livereload' in config:
+        #     if config['gui_livereload']:
+        #         extra_volumes += gui_livereload.required_volumes(
+        #             os.path.join(bindir, 'rel/gui.config'),
+        #             bindir,
+        #             DOCKER_BINDIR_PATH)
+
+
+        print(extra_volumes)
         return extra_volumes
 
     def app_name(self):
