@@ -655,7 +655,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     end,
 
     WaitForConnectionFun = fun WaitForConnection(Timeout) ->
-        try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
+        try couchbeam:server_info(catch couchbeam:server_connection("localhost", maps:get(gw_port, State))) of
             {error, econnrefused} when Timeout > BusyWaitInterval ->
                 timer:sleep(BusyWaitInterval),
                 WaitForConnection(Timeout - BusyWaitInterval);
