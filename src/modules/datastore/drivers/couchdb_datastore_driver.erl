@@ -655,7 +655,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     end,
 
     WaitForConnectionFun = fun WaitForConnection(Timeout) ->
-        try db_run(couchbeam, db_info, [], 0) of
+        try couchbeam:server_info(couchbeam:server_connection("localhost", GWPort)) of
             {error, econnrefused} when Timeout > BusyWaitInterval ->
                 timer:sleep(BusyWaitInterval),
                 WaitForConnection(Timeout - BusyWaitInterval);
@@ -678,11 +678,11 @@ start_gateway(Parent, N, Hostname, Port) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
-gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port,
+gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, gw_port := GWPort,
     start_time := ST, parent := Parent} = State) ->
     try port_command(PortFD, <<"ping">>) of
         true ->
-            try db_run(couchbeam, db_info, [], 0) of
+            try couchbeam:server_info(couchbeam:server_connection("localhost", GWPort)) of
                 {ok, _} -> ok;
                 {error, Reason00} ->
                     self() ! {port_comm_error, Reason00}
