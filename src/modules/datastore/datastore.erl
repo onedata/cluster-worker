@@ -188,7 +188,8 @@ delete(Level, ModelName, Key, Pred) ->
         ok ->
             % TODO - make link del asynch when tests will be able to handle it
 %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-            delete_links(Level, Key, ModelName, all);
+            catch delete_links(Level, Key, ModelName, all),
+            ok;
         {error, Reason} ->
             {error, Reason}
     end.
