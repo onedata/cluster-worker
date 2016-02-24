@@ -82,7 +82,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key} = Doc) ->
+save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
             case get(ModelConfig, Key) of
@@ -92,6 +92,8 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
                     {error, Reason};
                 {ok, #document{rev = undefined}} ->
                     create(ModelConfig, Doc);
+                {ok, #document{rev = Rev, value = Value}} ->
+                    {ok, Key};
                 {ok, #document{rev = Rev}} ->
                     save(ModelConfig, Doc#document{rev = Rev})
             end
