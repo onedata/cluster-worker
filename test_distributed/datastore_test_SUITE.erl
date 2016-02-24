@@ -37,7 +37,8 @@
     cache_clearing_test/1, link_monitoring_test/1, create_after_delete_test/1,
     restoring_cache_from_disk_test/1, prevent_reading_from_disk_test/1,
     multiple_links_creation_disk_test/1, multiple_links_creation_global_test/1,
-    clear_and_flush_test/1, multilevel_foreach_test/1]).
+    clear_and_flush_test/1, multilevel_foreach_test/1, operations_sequence_test/1,
+    links_operations_sequence_test/1]).
 -export([utilize_memory/2]).
 
 all() ->
@@ -48,7 +49,7 @@ all() ->
         cache_monitoring_test, old_keys_cleaning_test, cache_clearing_test, link_monitoring_test,
         create_after_delete_test, restoring_cache_from_disk_test, prevent_reading_from_disk_test,
         multiple_links_creation_disk_test, multiple_links_creation_global_test, clear_and_flush_test,
-        multilevel_foreach_test
+        multilevel_foreach_test, operations_sequence_test, links_operations_sequence_test
     ]).
 
 
@@ -58,6 +59,83 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that cerify time refreshing by get and fetch_link operations
+
+operations_sequence_test(Config) ->
+    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    Key = <<"key_ost">>,
+    Doc =  #document{
+        key = Key,
+        value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+    },
+    UpdateFun = fun(Record) ->
+        {ok, Record#some_record{
+            field1 = 2
+        }}
+    end,
+
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, update, [Key, UpdateFun])),
+    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    ?assertMatch({error, {not_found, _}}, ?call(Worker1, some_record, get, [Key])),
+
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, update, [Key, UpdateFun])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
+    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    ?assertMatch({error, {not_found, _}}, ?call(Worker1, some_record, get, [Key])),
+
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, update, [Key, UpdateFun])),
+    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+    ?assertMatch({error, {not_found, _}}, ?call(Worker1, some_record, get, [Key])),
+    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    ?assertMatch({error, {not_found, _}}, ?call(Worker1, some_record, get, [Key])),
+
+    ok.
+
+links_operations_sequence_test(Config) ->
+    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    Key = <<"key_lost">>,
+    Doc =  #document{
+        key = Key,
+        value = #some_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+
+    LinkedKey = "linked_key_lost",
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = #some_record{field1 = 2, field2 = <<"efg">>, field3 = {test, tuple2}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [LinkedDoc])),
+
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
+    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
+
+    ok.
 
 multilevel_foreach_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),

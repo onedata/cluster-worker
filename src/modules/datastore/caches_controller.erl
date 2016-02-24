@@ -267,7 +267,7 @@ flush_all(Level, ModelName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec flush(Level :: datastore:store_level(), ModelName :: atom(),
-  Key :: datastore:ext_key(), datastore:link_name() | all) -> ok | datastore:generic_error().
+    Key :: datastore:ext_key(), datastore:link_name() | all) -> ok | datastore:generic_error().
 flush(Level, ModelName, Key, all) ->
   ModelConfig = ModelName:model_init(),
   AccFun = fun(LinkName, _, Acc) ->
@@ -302,14 +302,14 @@ flush(Level, ModelName, Key) ->
   ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid),
 
   Ans = case ToDo of
-    {ok, NewMethod, NewArgs} ->
-      FullArgs = [ModelConfig | NewArgs],
-      erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs);
-    {ok, non} ->
-      ok;
-    Other ->
-      Other
-  end,
+          {ok, NewMethod, NewArgs} ->
+            FullArgs = [ModelConfig | NewArgs],
+            erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs);
+          {ok, non} ->
+            ok;
+          Other ->
+            Other
+        end,
 
   case Ans of
     {ok, _} ->
@@ -418,15 +418,20 @@ delete_old_keys(Level, Caches, TimeWindow) ->
   {ok, Uuids} = cache_controller:list(Level, TimeWindow),
   lists:foreach(fun(Uuid) ->
     {ModelName, Key} = decode_uuid(Uuid),
-    safe_delete(Level, ModelName, Key),
-    FullArgs = [cache_controller:model_init(), Uuid, ?PRED_ALWAYS],
-    erlang:apply(get_driver_module(Level), delete, FullArgs)
+    case safe_delete(Level, ModelName, Key) of
+      ok ->
+        FullArgs = [cache_controller:model_init(), Uuid, ?PRED_ALWAYS],
+        erlang:apply(get_driver_module(Level), delete, FullArgs);
+      _ ->
+        ok
+    end
   end, Uuids),
   case TimeWindow of
     0 ->
       lists:foreach(fun(Cache) ->
         {ok, Docs} = datastore:list(Level, Cache, ?GET_ALL, []),
         lists:foreach(fun(Doc) ->
+          % TODO - the same for links
           safe_delete(Level, Cache, Doc#document.key)
         end, Docs)
       end, Caches);
@@ -441,9 +446,38 @@ delete_old_keys(Level, Caches, TimeWindow) ->
 %% Deletes info from memory when it is dumped to disk.
 %% @end
 %%--------------------------------------------------------------------
--spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(), Key :: datastore:key()) ->
+-spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
   ok | datastore:generic_error().
 % TODO - uwzglednic linki
+safe_delete(Level, ModelName, {Key, Link}) ->
+  try
+    ModelConfig = ModelName:model_init(),
+    FullArgs = [ModelConfig, Key, Link],
+    case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), fetch_link, FullArgs) of
+      {ok, Value} ->
+        Pred = fun() ->
+          case erlang:apply(get_driver_module(Level), fetch_link, FullArgs) of
+            {ok, Value} ->
+              true;
+            _ ->
+              false
+          end
+        end,
+        FullArgs2 = [ModelConfig, Key, [Link], Pred],
+        erlang:apply(get_driver_module(Level), delete_links, FullArgs2);
+      {error, link_not_found} -> ok;
+      {error, Reason} ->
+        ?error("Error in cache controller safe_delete. Args: ~p. Error: ~p.",
+          [{Level, ModelName, Key}, Reason]),
+        {error, Reason}
+    end
+  catch
+    E1:E2 ->
+      ?error_stacktrace("Error in cache controller safe_delete. "
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link}}, E1, E2]),
+      {error, safe_delete_failed}
+  end;
 safe_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),
@@ -516,8 +550,20 @@ delete_all_keys(Level, Caches) ->
 %% Deletes info from memory.
 %% @end
 %%--------------------------------------------------------------------
--spec value_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(), Key :: datastore:key()) ->
+-spec value_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
   ok | datastore:generic_error().
+value_delete(Level, ModelName, {Key, Link}) ->
+  try
+    ModelConfig = ModelName:model_init(),
+    FullArgs2 = [ModelConfig, Key, [Link]],
+    erlang:apply(get_driver_module(Level), delete_links, FullArgs2)
+  catch
+    E1:E2 ->
+      ?error_stacktrace("Error in cache controller value_delete. "
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link}}, E1, E2]),
+      {error, delete_failed}
+  end;
 value_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),

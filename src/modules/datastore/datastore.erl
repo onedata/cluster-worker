@@ -186,7 +186,9 @@ list(Level, ModelName, Fun, AccIn) ->
 delete(Level, ModelName, Key, Pred) ->
     case exec_driver_async(ModelName, Level, delete, [Key, Pred]) of
         ok ->
-            spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
+            % TODO - make link del asynch when tests will be able to handle it
+%%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
+            catch delete_links(Level, Key, ModelName, all),
             ok;
         {error, Reason} ->
             {error, Reason}
@@ -290,13 +292,36 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
-%% TODO - delete links should not leave any trash after delete of last link without all option
--spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name() | [link_name()] | all) -> ok | generic_error().
+-spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
+    link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
-    _ModelConfig = ModelName:model_init(),
-    exec_driver_async(ModelName, Level, delete_links, [Key, LinkNames]);
+    delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
 delete_links(Level, Key, ModelName, LinkName) ->
     delete_links(Level, Key, ModelName, [LinkName]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Removes links from the document with given key. There is special link name 'all' which removes all links.
+%% @end
+%%--------------------------------------------------------------------
+%% TODO - delete links should not leave any trash after delete of last link without all option
+-spec delete_links(Level :: store_level(), Drivers :: atom() | [atom()], ext_key(),
+    model_behaviour:model_type(), [link_name()] | all) -> ok | generic_error().
+delete_links(Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNames =:= all ->
+    ModelConfig = ModelName:model_init(),
+    AccFun = fun(LinkName, _, Acc) ->
+        [LinkName | Acc]
+    end,
+    {ok, Links1} = erlang:apply(driver_to_module(Driver1), foreach_link, [ModelConfig, Key, AccFun, []]),
+    {ok, Links2} = erlang:apply(driver_to_module(Driver2), foreach_link,
+        [ModelConfig, Key, AccFun, Links1]),
+    Links = sets:to_list(sets:from_list(Links2)),
+    delete_links(Level, [Driver1, Driver2], Key, ModelName, Links);
+delete_links(Level, [_Driver1, _Driver2], Key, ModelName, LinkNames) ->
+    exec_driver_async(ModelName, Level, delete_links, [Key, LinkNames]);
+delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
+    exec_driver(ModelName, Driver, delete_links, [Key, LinkNames]).
 
 
 %%--------------------------------------------------------------------
@@ -525,6 +550,7 @@ model_name(Record) when is_tuple(Record) ->
     Method :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term()) ->
     ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
+% TODO - check for errors before accepting task
 run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
     HooksRes =
@@ -532,7 +558,7 @@ run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
             fun({_, HookedModule}) ->
                 HookedModule:before(ModelName, Method, Level, Context)
             end, Hooked),
-    case HooksRes -- [ok] of
+    case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
         [] -> ok;
         [Interrupt | _] ->
             Interrupt
@@ -771,7 +797,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
             ok ->
                 FullArgs = [ModelConfig | Args],
-                worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs}, timer:minutes(5));
+                erlang:apply(driver_to_module(Driver), Method, FullArgs);
             {ok, Value} ->
                 {ok, Value};
             {tasks, Tasks} ->
@@ -784,12 +810,12 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                         ok = task_manager:start_task(Task, Level);
                     (_) ->
                         ok % error already logged
-                 end, Tasks);
+                end, Tasks);
             {task, Task} ->
                 Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                             true -> ?CLUSTER_LEVEL;
-                             _ -> ?NODE_LEVEL
-                         end,
+                            true -> ?CLUSTER_LEVEL;
+                            _ -> ?NODE_LEVEL
+                        end,
                 ok = task_manager:start_task(Task, Level);
             {error, Reason} ->
                 {error, Reason}

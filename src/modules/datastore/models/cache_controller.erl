@@ -322,29 +322,6 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
-before(ModelName, delete_links, Level, [Key, all], Level) ->
-    try
-        ModelConfig = ModelName:model_init(),
-        AccFun = fun(LinkName, _, Acc) ->
-            [LinkName | Acc]
-        end,
-        FullArgs = [ModelConfig, Key, AccFun, []],
-        {ok, Links} = erlang:apply(datastore:level_to_driver(Level), foreach_link, FullArgs),
-        lists:foldl(fun(Link, Acc) ->
-            Ans = before_del({Key, Link}, ModelName, Level, delete_links),
-            case Ans of
-                ok ->
-                    Acc;
-                _ ->
-                    Ans
-            end
-        end, ok, Links)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error in cache_controller before. Args: ~p. Error: ~p:~p.",
-                [{ModelName, delete_links, Level, [Key, all], Level}, E1, E2]),
-            {error, preparing_op_failed}
-    end;
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
     lists:foldl(fun(Link, Acc) ->
         Ans = before_del({Key, Link}, ModelName, Level, delete_links),
@@ -355,27 +332,6 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
                 Ans
         end
     end, ok, Links);
-before(ModelName, delete_links, disk_only, [Key, all], Level2) ->
-    try
-        ModelConfig = ModelName:model_init(),
-        AccFun = fun(LinkName, _, Acc) ->
-            [LinkName | Acc]
-        end,
-        FullArgs = [ModelConfig, Key, AccFun, []],
-        {ok, Links} = erlang:apply(
-            datastore:driver_to_module(datastore:level_to_driver(disk_only)), foreach_link, FullArgs),
-        Tasks = lists:foldl(fun(Link, Acc) ->
-            [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
-        end, [], Links),
-        {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
-        timer:sleep(SleepTime),
-        {tasks, Tasks}
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error in cache_controller before. Args: ~p. Error: ~p:~p.",
-                [{ModelName, delete_links, disk_only, [Key, all], Level2}, E1, E2]),
-            {error, preparing_disk_op_failed}
-    end;
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
         [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
@@ -432,6 +388,7 @@ update_usage_info({Key, LinkName}, ModelName, Doc, Level) ->
     update_usage_info({Key, LinkName}, ModelName, Level),
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, [{LinkName, Doc}]],
+    %% TODO add function create link to prevent from get from disk/save new value race
     erlang:apply(datastore:level_to_driver(Level), add_links, FullArgs);
 update_usage_info(Key, ModelName, Doc, Level) ->
     update_usage_info(Key, ModelName, Level),
@@ -573,9 +530,11 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
 choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
     % check for create/delete race
+    ModelConfig = ModelName:model_init(),
     case Op of
         delete_links ->
-            case datastore:fetch_link(Level, Key, ModelName, Link) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                fetch_link, [ModelConfig, Key, Link]) of
                 {ok, SavedValue} ->
                     {ok, add_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
@@ -584,7 +543,8 @@ choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
                     {fetch_error, FetchError}
             end;
         _ ->
-            case datastore:fetch_link(Level, Key, ModelName, Link) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                fetch_link, [ModelConfig, Key, Link]) of
                 {ok, SavedValue} ->
                     {ok, add_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
@@ -608,9 +568,11 @@ choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
     end;
 choose_action(Op, Level, ModelName, Key, Uuid) ->
     % check for create/delete race
+    ModelConfig = ModelName:model_init(),
     case Op of
         delete ->
-            case datastore:get(Level, ModelName, Key) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                get, [ModelConfig, Key]) of
                 {ok, SavedValue} ->
                     {ok, save, [SavedValue]};
                 {error, {not_found, _}} ->
@@ -619,7 +581,8 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
                     {get_error, GetError}
             end;
         _ ->
-            case datastore:get(Level, ModelName, Key) of
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                get, [ModelConfig, Key]) of
                 {ok, SavedValue} ->
                     {ok, save, [SavedValue]};
                 {error, {not_found, _}} ->
