@@ -214,15 +214,19 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
-add_links(#model_config{bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = LinkMap}} ->
-            add_links4(ModelConfig, Key, Links, LinkMap);
-        {error, {not_found, _}} ->
-            add_links4(ModelConfig, Key, Links, #{});
-        {error, Reason} ->
-            {error, Reason}
-    end.
+add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            case get(ModelConfig, links_doc_key(Key)) of
+                {ok, #document{value = LinkMap}} ->
+                    add_links4(ModelConfig, Key, Links, LinkMap);
+                {error, {not_found, _}} ->
+                    add_links4(ModelConfig, Key, Links, #{});
+                {error, Reason} ->
+                    {error, Reason}
+            end
+        end
+    ).
 
 -spec add_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()], InternalCtx :: term()) ->
     ok | datastore:generic_error().
@@ -245,15 +249,19 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkT
     ok | datastore:generic_error().
 delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
     delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
-delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, Links) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = LinkMap}} ->
-            delete_links4(ModelConfig, Key, Links, LinkMap);
-        {error, {not_found, _}} ->
-            ok;
-        {error, Reason} ->
-            {error, Reason}
-    end.
+delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            case get(ModelConfig, links_doc_key(Key)) of
+                {ok, #document{value = LinkMap}} ->
+                    delete_links4(ModelConfig, Key, Links, LinkMap);
+                {error, {not_found, _}} ->
+                    ok;
+                {error, Reason} ->
+                    {error, Reason}
+            end
+        end
+    ).
 
 -spec delete_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()] | all, InternalCtx :: term()) ->
     ok | datastore:generic_error().
