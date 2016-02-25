@@ -148,7 +148,7 @@ echo 'while ((1)); do chown -R {uid}:{gid} {source_tmp_dir}; sleep 1; done' > /r
 chmod +x /root/bin/chown_tmp_dir.sh
 nohup bash /root/bin/chown_tmp_dir.sh &
 cd {source_gui_dir}
-ember build {watch_option} --output-path={release_gui_dir} | tee /tmp/ember_build.log'''
+ember build {watch_option} --output-path={release_gui_dir} > /tmp/ember_build.log 2>&1'''
     command = command.format(
         uid=os.geteuid(),
         gid=os.getegid(),
