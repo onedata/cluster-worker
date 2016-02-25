@@ -6,10 +6,11 @@ This software is released under the MIT license cited in 'LICENSE.txt'
 Brings up dockers with full onedata environment.
 """
 
+import os
+import sys
 import copy
 import json
-import os
-import collections
+import time
 from . import appmock, client, common, zone_worker, cluster_manager, \
     worker, provider_worker, cluster_worker, docker, dns
 
@@ -137,6 +138,8 @@ echo $?'''
         print(command_output)
         # check of env configuration succeeded
         if command_res_code != '0':
+            # Let the command_output be flushed to console
+            time.sleep(2)
             sys.exit(1)
 
 
