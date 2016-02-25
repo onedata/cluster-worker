@@ -18,7 +18,6 @@ def up(image, bindir, dns_server, uid, config_path, logdir=None,
         config = common.parse_json_config_file(config_path)
         input_dir = config['dirs_config']['oz_worker']['input_dir']
 
-        # todo: fix as it does not work with env up
         dnsconfig_path = os.path.join(os.path.abspath(bindir), input_dir,
                                       'data', 'dns.config')
 
@@ -30,9 +29,10 @@ class OZWorkerConfigurator:
     def __init__(self, dnsconfig_path):
         self.dnsconfig_path = dnsconfig_path
 
-    def tweak_config(self, cfg, uid, domain):
+    def tweak_config(self, cfg, uid, instance):
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         if 'http_domain' in sys_config:
+            domain = worker.cluster_domain(instance, uid)
             sys_config['http_domain'] = {'string': domain}
         # If livereload bases on gui output dir mount, change the location
         # from where static files are served to that dir.
@@ -62,7 +62,7 @@ Starting GUI livereload
                         '/root/bin/node',
                         mode=mode)
 
-    def additional_commands(self, bindir, config, domain, worker_ips):
+    def pre_start_commands(self, bindir, config, domain, worker_ips):
         dnsconfig_path = self.dnsconfig_path
         dns_config = open(dnsconfig_path).read()
 
