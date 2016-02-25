@@ -635,7 +635,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     erlang:link(PortFD),
 
     State = #{
-        server => self(), port_fd => PortFD, status => running, id => {node(), N},
+        server => self(), port_fd => PortFD, status => init, id => {node(), N},
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
         start_time => erlang:system_time(milli_seconds), parent => Parent
     },
@@ -671,7 +671,7 @@ start_gateway(Parent, N, Hostname, Port) ->
     WaitForStateFun(timer:seconds(2)),
     WaitForConnectionFun(timer:seconds(2)),
 
-    gateway_loop(State).
+    gateway_loop(State#{status => running}).
 
 
 %%--------------------------------------------------------------------
@@ -682,6 +682,11 @@ start_gateway(Parent, N, Hostname, Port) ->
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
 gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, gw_port := GWPort,
     start_time := ST, parent := Parent} = State) ->
+
+    %% Update state
+    Gateways = datastore_worker:state_get(db_gateways),
+    datastore_worker:state_put(db_gateways, maps:update(N, State, Gateways)),
+
     try port_command(PortFD, <<"ping">>) of
         true ->
             try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
