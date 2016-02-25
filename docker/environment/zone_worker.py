@@ -34,7 +34,7 @@ class OZWorkerConfigurator:
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         if 'http_domain' in sys_config:
             sys_config['http_domain'] = {'string': domain}
-        sys_config['gui_static_files_root'] = {'string': '/root/gui_static'}
+        # sys_config['gui_static_files_root'] = {'string': '/root/gui_static'}
         return cfg
 
     def configure_started_instance(self, bindir, instance, config,
