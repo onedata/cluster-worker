@@ -34,7 +34,12 @@ class OZWorkerConfigurator:
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         if 'http_domain' in sys_config:
             sys_config['http_domain'] = {'string': domain}
-        # sys_config['gui_static_files_root'] = {'string': '/root/gui_static'}
+        # If livereload bases on gui output dir mount, change the location
+        # from where static files are served to that dir.
+        if 'gui_livereload' in cfg:
+            if cfg['gui_livereload'] in ['mount_output', 'mount_output_poll']:
+                sys_config['gui_static_files_root'] = {
+                    'string': '/root/gui_static'}
         return cfg
 
     def configure_started_instance(self, bindir, instance, config,
