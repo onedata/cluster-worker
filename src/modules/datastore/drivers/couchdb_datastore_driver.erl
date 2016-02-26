@@ -31,7 +31,8 @@
 -define(MAX_VALUE_SIZE, 512 * 1024).
 
 %% Base port for gateway endpoints
--define(GATEWAY_BASE_PORT, 5084).
+-define(GATEWAY_BASE_PORT_MIN, 12000).
+-define(GATEWAY_BASE_PORT_MAX, 12999).
 
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
@@ -81,7 +82,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key} = Doc) ->
+save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
             case get(ModelConfig, Key) of
@@ -91,6 +92,8 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
                     {error, Reason};
                 {ok, #document{rev = undefined}} ->
                     create(ModelConfig, Doc);
+                {ok, #document{rev = Rev, value = Value}} ->
+                    {ok, Key};
                 {ok, #document{rev = Rev}} ->
                     save(ModelConfig, Doc#document{rev = Rev})
             end
@@ -307,7 +310,6 @@ delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key
             end
         end
     ).
-
 
 -spec delete_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()] | all, InternalCtx :: term()) ->
     ok | datastore:generic_error().
@@ -575,10 +577,10 @@ db_run(Mod, Fun, Args, Retry) ->
         {error, econnrefused} when Retry > 0 ->
             ?info("Unable to connect to ~p", [DB]),
             ServerPid ! restart,
+            timer:sleep(crypto:rand_uniform(20, 50)),
             db_run(Mod, Fun, Args, Retry - 1);
         Other -> Other
     end.
-
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -619,7 +621,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 %%--------------------------------------------------------------------
 -spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
 start_gateway(Parent, N, Hostname, Port) ->
-    GWPort = ?GATEWAY_BASE_PORT + N,
+    GWPort = crypto:rand_uniform(?GATEWAY_BASE_PORT_MIN, ?GATEWAY_BASE_PORT_MAX),
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
 
@@ -633,13 +635,43 @@ start_gateway(Parent, N, Hostname, Port) ->
     erlang:link(PortFD),
 
     State = #{
-        server => self(), port_fd => PortFD, status => running, id => {node(), N},
+        server => self(), port_fd => PortFD, status => init, id => {node(), N},
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
         start_time => erlang:system_time(milli_seconds), parent => Parent
     },
     monitor(process, Parent),
     proc_lib:init_ack(Parent, State),
-    gateway_loop(State).
+
+    BusyWaitInterval = 20,
+
+    WaitForStateFun = fun WaitForState(Timeout) ->
+        case datastore_worker:state_get(db_gateways) of
+            undefined when Timeout > BusyWaitInterval ->
+                timer:sleep(BusyWaitInterval),
+                WaitForState(Timeout - BusyWaitInterval);
+            undefined ->
+                exit(state_not_initialized);
+            Map when is_map(Map) ->
+                ok
+        end
+    end,
+
+    WaitForConnectionFun = fun WaitForConnection(Timeout) ->
+        try couchbeam:server_info(catch couchbeam:server_connection("localhost", maps:get(gw_port, State))) of
+            {error, econnrefused} when Timeout > BusyWaitInterval ->
+                timer:sleep(BusyWaitInterval),
+                WaitForConnection(Timeout - BusyWaitInterval);
+            _ ->
+                ok %% Other errors will be handled in gateway_loop/1
+        catch
+            _:_ -> ok %% Other errors will be handled in gateway_loop/1
+        end
+    end,
+
+    WaitForStateFun(timer:seconds(2)),
+    WaitForConnectionFun(timer:seconds(2)),
+
+    gateway_loop(State#{status => running}).
 
 
 %%--------------------------------------------------------------------
@@ -648,10 +680,25 @@ start_gateway(Parent, N, Hostname, Port) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
-gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port,
+gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, gw_port := GWPort,
     start_time := ST, parent := Parent} = State) ->
+
+    %% Update state
+    Gateways = datastore_worker:state_get(db_gateways),
+    datastore_worker:state_put(db_gateways, maps:update(N, State, Gateways)),
+
     try port_command(PortFD, <<"ping">>) of
-        true -> ok
+        true ->
+            try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
+                {ok, _} -> ok;
+                {error, Reason00} ->
+                    self() ! {port_comm_error, Reason00}
+            catch
+                _:{badmap, undefined} ->
+                    ok; %% State of the worker may not be initialised yet, so there is not way to check if connection is active
+                _:Reason01 ->
+                    self() ! {port_comm_error, Reason01}
+            end
     catch
         _:Reason0 ->
             self() ! {port_comm_error, Reason0}
@@ -679,14 +726,15 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                 ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
                 State#{status => failed};
             restart when CT > MinRestartTime ->
+                ?info("[CouchBase Gateway ~p] Restart request...", [ID]),
                 State#{status => restarting};
             restart ->
                 State;
             {'DOWN', _, process, Parent, Reason} ->
-                catch port_close(PortFD),
+                    catch port_close(PortFD),
                 State#{status => closed};
             stop ->
-                catch port_close(PortFD),
+                    catch port_close(PortFD),
                 State#{status => closed};
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
@@ -766,7 +814,7 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             Seq = seq(Change),
             RawDocOnceAgian = jiffy:decode(jsx:encode(RawDoc)),
             Document = process_raw_doc(RawDocOnceAgian),
-            catch Callback(Seq, Document, model(Document)),
+                catch Callback(Seq, Document, model(Document)),
             State#state{last_seq = Seq}
         catch
             _:Reason ->
