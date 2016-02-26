@@ -144,4 +144,8 @@
     ?basic_test_def("Performs multipe exists operations using many threads.")
 ).
 
+-define(links_test_def,
+    ?basic_test_def("Performs multipe operations on links using many threads.")
+).
+
 -endif.
