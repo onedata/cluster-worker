@@ -57,7 +57,7 @@
 	mixed_global_cache_test_base/1, mixed_local_cache_test_base/1
 ]).
 
--define(PERFORMANCE_CASES, [
+-define(TEST_CASES, [
 	create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test, links_db_test,
 	create_delete_global_store_test, no_transactions_create_delete_global_store_test,
 	save_global_store_test, update_global_store_test, no_transactions_update_global_store_test,
@@ -76,29 +76,8 @@
     mixed_global_cache_test, mixed_local_cache_test
 ]).
 
-%% -define(TEST_CASES, [
-%% 	create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test, links_db_test,
-%% 	create_delete_global_store_test, no_transactions_create_delete_global_store_test,
-%% 	save_global_store_test, update_global_store_test, no_transactions_update_global_store_test,
-%% 	get_global_store_test, exists_global_store_test, links_global_store_test,
-%% 	create_delete_local_store_test, save_local_store_test, update_local_store_test,
-%% 	get_local_store_test, exists_local_store_test,
-%% 	create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
-%% 	create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
-%% 	get_global_cache_test, exists_global_cache_test, links_global_cache_test,
-%% 	create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
-%% 	create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
-%% 	get_local_cache_test, exists_local_cache_test
-%% 	% Uncomment when links at local level will be supported
-%% %	links_local_store_test, links_local_cache_test
-%% ]).
--define(TEST_CASES, [
-	mixed_db_test, mixed_global_store_test, mixed_local_store_test,
-	mixed_global_cache_test, mixed_local_cache_test
-]).
-
 all() ->
-    ?ALL(?TEST_CASES, ?PERFORMANCE_CASES).
+    ?ALL(?TEST_CASES, ?TEST_CASES).
 
 %%%===================================================================
 %%% Test functions
