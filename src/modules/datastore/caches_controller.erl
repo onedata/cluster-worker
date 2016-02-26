@@ -449,7 +449,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
 -spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
     Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
   ok | datastore:generic_error().
-% TODO - uwzglednic linki
+% TODO - update to protect from race with ongoing operations
 safe_delete(Level, ModelName, {Key, Link}) ->
   try
     ModelConfig = ModelName:model_init(),
@@ -485,9 +485,7 @@ safe_delete(Level, ModelName, Key) ->
     case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, FullArgs) of
       {ok, Doc} ->
         Value = Doc#document.value,
-        % TODO moze zmienic na sprawdzanie opisu cache (co jak wartosc bedzie taka sama po kilku zapisach z rzedu
-        % wtedy nastepny zrzut potraktuje to jako race z delete i wyczysci dysk
-        % moze trzeba korzystac z clear a potem czyscic info z cache
+        % TODO what if many saves have the same value?
         Pred = fun() ->
           case erlang:apply(get_driver_module(Level), get, FullArgs) of
             {ok, Doc2} ->

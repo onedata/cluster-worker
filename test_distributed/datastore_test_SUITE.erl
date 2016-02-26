@@ -331,7 +331,7 @@ create_after_delete_test(Config) ->
     LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, some_record),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 5),
+    ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
 
     ok.
 
@@ -527,7 +527,7 @@ link_monitoring_test(Config) ->
     ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
     ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]), 1),
     ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
-    ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid2])),
+    ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid2]), 1),
     ok.
 
 
@@ -588,8 +588,8 @@ restoring_cache_from_disk_test(Config) ->
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
 
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
-    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, LinkedKey])),
-    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, LinkedKey]), 1),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 1),
 
     ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
     ?assertMatch({ok, _}, ?call(Worker1, some_record, get, [Key])),
