@@ -110,7 +110,7 @@ handle({driver_call, Module, Method, Args}) ->
         {error, Reason} -> {error, Reason}
     catch
         _:Reason ->
-            ?error_stacktrace("datastore request failed due to ~p", [Reason]),
+            ?error_stacktrace("datastore request ~p failed due to ~p", [{Module, Method, Args}, Reason]),
             {error, Reason}
     end;
 

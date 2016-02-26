@@ -33,8 +33,7 @@
     timestamp = {0, 0, 0} :: erlang:timestamp(),
     action = non :: atom(),
     last_user = non :: string() | non,
-    last_action_time = {0, 0, 0} :: erlang:timestamp(),
-    deleted_links = [] :: list()
+    last_action_time = {0, 0, 0} :: erlang:timestamp()
 }).
 
 %% Description of task to be done

@@ -19,13 +19,15 @@
 -include_lib("ctool/include/test/assertions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
+-include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/test/performance.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
 -define(REQUEST_TIMEOUT, timer:seconds(30)).
 
 -export([create_delete_test/2, create_sync_delete_test/2, save_test/2, save_sync_test/2, update_test/2,
-    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, set_hooks/2, unset_hooks/2, clear_cache/1]).
+    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, links_test/2,
+    set_hooks/2, unset_hooks/2, clear_cache/1]).
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
@@ -34,6 +36,90 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+links_test(Config, Level) ->
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    ThreadsNum = ?config(threads_num, Config),
+    DocsPerThead = ?config(docs_per_thead, Config),
+    OpsPerDoc = ?config(ops_per_doc, Config),
+    ConflictedThreads = ?config(conflicted_threads, Config),
+
+    set_test_type(Workers),
+    Master = self(),
+    AnswerDesc = get(file_beg),
+
+    Key = list_to_binary("key_" ++ AnswerDesc),
+    Doc =  #document{
+        key = Key,
+        value = #some_record{field1 = 12345, field2 = <<"abcdef">>, field3 = {test, tuple111}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+
+    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+
+    Create = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store(add_links, Level, [Doc,
+                    [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
+                        {list_to_binary(DocsSet ++ integer_to_list(I)), some_record}}]]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Create),
+    OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
+    {OkNum, OkTime, _ErrorNum, _ErrorTime, _ErrorsList} = count_answers(OpsNum),
+    ?assertEqual(OpsNum, OkNum),
+
+    Fetch = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store(fetch_link, Level, [
+                    Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Fetch),
+    {OkNumF, OkTimeF, _ErrorNumF, _ErrorTimeF, _ErrorsListF} = count_answers(OpsNum),
+    ?assertEqual(OpsNum, OkNumF),
+
+    Delete = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store(delete_links, Level, [
+                    Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Delete),
+    {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList2),
+    ?assertEqual(OpsNum, OkNum2),
+
+    test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
+    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+
+    [
+        #parameter{name = add_time, value = OkTime / OkNum, unit = "us",
+            description = "Average time of add operation"},
+        #parameter{name = fetch_time, value = OkTimeF / OkNumF, unit = "us",
+            description = "Average time of fetch operation"},
+        #parameter{name = delete_time, value = OkTime2 / OkNum2, unit = "us",
+            description = "Average time of delete operation"}
+    ].
 
 create_delete_test(Config, Level) ->
     create_delete_test_base(Config, Level, create, delete).
@@ -69,15 +155,28 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, TestFun),
     OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
-    {OkNum, OkTime, ErrorNum, ErrorTime, ErrorsList} = count_answers(OpsNum),
+    {OkNum, OkTime, ErrorNum, ErrorTime, _ErrorsList} = count_answers(OpsNum),
     ?assertEqual(OpsNum, OkNum + ErrorNum),
-    % TODO change when datastore behavior will be coherent
-    ct:print("Create ok num: ~p, error num ~p:, level ~p", [OkNum, ErrorNum, Level]),
-    case ((ThreadsNum * DocsPerThead < OkNum) or (DocsPerThead * trunc(ThreadsNum / ConflictedThreads) > OkNum)) of
-        true -> ct:print("Create errors list: ~p", [ErrorsList]);
-        _ -> ok
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    NewTN= case {Level, Fun} of
+               {local_only, _} ->
+                   TmpTN * WLength;
+               {locally_cached, create} ->
+                   TmpTN * WLength;
+               _ ->
+                   TmpTN
+           end,
+    ModelConfig = some_record:model_init(),
+    case ModelConfig#model_config.transactional_global_cache of
+        true ->
+            CheckOpsNum = DocsPerThead * NewTN,
+            ?assertEqual(CheckOpsNum, OkNum);
+        _ ->
+            ?assert((ThreadsNum * DocsPerThead >= OkNum) and (DocsPerThead * trunc(ThreadsNum / ConflictedThreads) =< OkNum))
     end,
-    ?assert((ThreadsNum * DocsPerThead >= OkNum) and (DocsPerThead * trunc(ThreadsNum / ConflictedThreads) =< OkNum)),
+
+    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     TestFun2 = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -95,6 +194,8 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList2),
     ?assertEqual(OpsNum, OkNum2),
+
+    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
 
     CreateErrorTime = case ErrorNum of
                           0 ->
@@ -152,21 +253,8 @@ save_test_base(Config, Level, Fun, Fun2) ->
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum),
 
-    DelMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(Fun2, Level, [
-                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    spawn_at_nodes(Workers, ThreadsNum, 1, DelMany),
-    OpsNum2 = DocsPerThead * ThreadsNum,
-    {OkNum2, _OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList2),
-    ?assertEqual(OpsNum2, OkNum2),
+    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
 
     #parameter{name = save_time, value = OkTime / OkNum, unit = "us",
         description = "Average time of save operation"}.
@@ -205,57 +293,22 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, UpdateMany),
     OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
     {OkNum, _OkTime, ErrorNum, ErrorTime, _ErrorsList} = count_answers(OpsNum),
-    % TODO change when datastore behavior will be coherent
-    ct:print("Update ok num: ~p, error num ~p:, level ~p", [OkNum, ErrorNum, Level]),
-%%     ?assertEqual(0, OkNum),
-%%     ?assertEqual(OpsNum, ErrorNum),
+    ?assertEqual(0, OkNum),
+    ?assertEqual(OpsNum, ErrorNum),
     ?assertEqual(OpsNum, OkNum + ErrorNum),
 
-    SaveMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(Fun2, Level, [
-                #document{
-                    key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                    value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
-                }]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
+    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
 
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, SaveMany),
-    OpsNum2 = DocsPerThead * ThreadsNum,
-    {OkNum2, _OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList2),
-    ?assertEqual(OpsNum2, OkNum2),
+    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, UpdateMany),
     {OkNum3, OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList3),
     ?assertEqual(OpsNum, OkNum3),
 
-    ClearFun = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(Fun3, Level, [
-                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
+    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun3),
 
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ClearFun),
-    {OkNum4, _OkTime4, _ErrorNum4, _ErrorTime4, ErrorsList4} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList4),
-    ?assertEqual(OpsNum2, OkNum4),
-
-    UpdateErrorTime = case ErrorNum of
-                          0 ->
-                              0;
-                          _ ->
-                              ErrorTime / ErrorNum
-                      end,
+    UpdateErrorTime = ErrorTime / ErrorNum,
 
     [
         #parameter{name = update_ok_time, value = OkTime3 / OkNum3, unit = "us",
@@ -293,57 +346,20 @@ get_test(Config, Level) ->
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, GetMany),
     OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
     {OkNum, _OkTime, ErrorNum, ErrorTime, _ErrorsList} = count_answers(OpsNum),
-    % TODO change when datastore behavior will be coherent
-    ct:print("Get ok num: ~p, error num ~p:, level ~p", [OkNum, ErrorNum, Level]),
-%%     ?assertEqual(0, OkNum),
-%%     ?assertEqual(OpsNum, ErrorNum),
+    ?assertEqual(0, OkNum),
+    ?assertEqual(OpsNum, ErrorNum),
     ?assertEqual(OpsNum, OkNum + ErrorNum),
 
-    SaveMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(save, Level, [
-                #document{
-                    key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                    value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
-                }]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, SaveMany),
-    OpsNum2 = DocsPerThead * ThreadsNum,
-    {OkNum2, _OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList2),
-    ?assertEqual(OpsNum2, OkNum2),
+    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, GetMany),
     {OkNum3, OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList3),
     ?assertEqual(OpsNum, OkNum3),
 
-    ClearFun = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete, Level, [
-                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
+    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ClearFun),
-    {OkNum4, _OkTime4, _ErrorNum4, _ErrorTime4, ErrorsList4} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList4),
-    ?assertEqual(OpsNum2, OkNum4),
-
-    GetErrorTime = case ErrorNum of
-                       0 ->
-                           0;
-                       _ ->
-                           ErrorTime / ErrorNum
-                   end,
+    GetErrorTime = ErrorTime / ErrorNum,
 
     [
         #parameter{name = get_ok_time, value = OkTime3 / OkNum3, unit = "us",
@@ -384,44 +400,14 @@ exists_test(Config, Level) ->
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum),
 
-    SaveMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(save, Level, [
-                #document{
-                    key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                    value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
-                }]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, SaveMany),
-    OpsNum2 = DocsPerThead * ThreadsNum,
-    {OkNum2, _OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList2),
-    ?assertEqual(OpsNum2, OkNum2),
+    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ExistMultiCheck),
     {OkNum3, OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList3),
     ?assertEqual(OpsNum, OkNum3),
 
-    ClearFun = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete, Level, [
-                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ClearFun),
-    {OkNum4, _OkTime4, _ErrorNum4, _ErrorTime4, ErrorsList4} = count_answers(OpsNum2),
-    ?assertEqual([], ErrorsList4),
-    ?assertEqual(OpsNum2, OkNum4),
+    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     [
         #parameter{name = exists_true_time, value = OkTime3 / OkNum3, unit = "us",
@@ -431,7 +417,7 @@ exists_test(Config, Level) ->
     ].
 
 mixed_test(Config, Level) ->
-    Workers = ?config(cluster_worker_nodes, Config),
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
@@ -493,6 +479,37 @@ mixed_test(Config, Level) ->
     {OkNum, OkTime, ErrorNum, ErrorTime, _ErrorsList} = count_answers(3 * OpsNum),
     ?assertEqual(3 * OpsNum, OkNum + ErrorNum),
 
+    {Key, Doc} = case Level of
+        local_only ->
+            {ok, ok};
+        locally_cached ->
+            {ok, ok};
+        _ ->
+            K = list_to_binary("key_" ++ AnswerDesc),
+            D =  #document{
+                key = K,
+                value = #some_record{field1 = 12345, field2 = <<"abcdef">>, field3 = {test, tuple111}}
+            },
+            ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [D])),
+
+            CreateLinks = fun(DocsSet) ->
+                for(1, DocsPerThead, fun(I) ->
+                    for(OpsPerDoc, fun() ->
+                        BeforeProcessing = os:timestamp(),
+                        Ans = ?call_store(add_links, Level, [D,
+                            [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
+                                {list_to_binary(DocsSet ++ integer_to_list(I)), some_record}}]]),
+                        AfterProcessing = os:timestamp(),
+                        Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                    end)
+                end)
+            end,
+
+            spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, CreateLinks),
+            {OkNumCL, OkTimeCL, _ErrorNumCL, _ErrorTimeCL, _ErrorsListCL} = count_answers(OpsNum),
+            ?assertEqual(OpsNum, OkNumCL),
+            {K, D}
+    end,
 
     GetMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -520,29 +537,46 @@ mixed_test(Config, Level) ->
         end)
     end,
 
+    Fetch = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store(fetch_link, Level, [
+                    Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, GetMany),
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ExistMultiCheck),
-    {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(2 * OpsNum),
+    CheckMul = case Level of
+        local_only ->
+            2;
+        locally_cached ->
+            2;
+        _ ->
+            spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Fetch),
+            3
+    end,
+
+    {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(CheckMul * OpsNum),
     ?assertEqual([], ErrorsList2),
-    ?assertEqual(2 * OpsNum, OkNum2),
+    ?assertEqual(CheckMul * OpsNum, OkNum2),
 
     case performance:should_clear(Config) of
         true ->
-            ClearFun = fun(DocsSet) ->
-                for(1, DocsPerThead, fun(I) ->
-                    BeforeProcessing = os:timestamp(),
-                    Ans = ?call_store(delete, Level, [
-                        some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
-                    AfterProcessing = os:timestamp(),
-                    Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-                end)
-            end,
-
-            spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ClearFun),
-            OpsNum2 = DocsPerThead * ThreadsNum,
-            {OkNum3, _OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum2),
-            ?assertEqual([], ErrorsList3),
-            ?assertEqual(OpsNum2, OkNum3);
+            clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+            case Level of
+                local_only ->
+                    ok;
+                locally_cached ->
+                    ok;
+                _ ->
+                    clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+                    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key]))
+            end;
         false ->
             ok
     end,
@@ -558,7 +592,7 @@ set_hooks(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     ok = test_node_starter:load_modules(Workers, [?MODULE]),
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
     ModelConfig = lists:map(fun(Method) ->
         {some_record, Method}
     end, Methods),
@@ -599,7 +633,7 @@ unset_hooks(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     [W | _] = Workers,
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, delete_links],
+    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
     ModelConfig = lists:map(fun(Method) ->
         {some_record, Method}
     end, Methods),
@@ -736,3 +770,167 @@ set_test_type(Workers) ->
 %%         _ ->
 %%             disable_cache_control(Workers)
 %%     end.
+
+test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, true).
+
+test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Exists) ->
+    GetMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(get, Level, [
+                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
+            AfterProcessing = os:timestamp(),
+            FinalAns = case {Exists, Ans} of
+                           {false, {error, {not_found, _}}} ->
+                               ok;
+                           _ ->
+                               Ans
+                       end,
+            Master ! {store_ans, AnswerDesc, FinalAns, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    {NewTN, NewCT} = case Level of
+                local_only ->
+                    {TmpTN * WLength, WLength};
+                locally_cached ->
+                    {TmpTN * WLength, WLength};
+                _ ->
+                    {TmpTN, 1}
+            end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, GetMany),
+    OpsNum = DocsPerThead * NewTN,
+    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList),
+    ?assertEqual(OpsNum, OkNum).
+
+test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Exists) ->
+    FetchMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(fetch_link, Level, [
+                Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+            AfterProcessing = os:timestamp(),
+            FinalAns = case {Exists, Ans} of
+                           {false, {error,link_not_found}} ->
+                               ok;
+                           _ ->
+                               Ans
+                       end,
+            Master ! {store_ans, AnswerDesc, FinalAns, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    {NewTN, NewCT} = case Level of
+                         local_only ->
+                             {TmpTN * WLength, WLength};
+                         locally_cached ->
+                             {TmpTN * WLength, WLength};
+                         _ ->
+                             {TmpTN, 1}
+                     end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, FetchMany),
+    OpsNum = DocsPerThead * NewTN,
+    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList),
+    ?assertEqual(OpsNum, OkNum).
+
+clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, delete).
+
+clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, ClearFun) ->
+    GetMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(ClearFun, Level, [
+                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
+            AfterProcessing = os:timestamp(),
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    {NewTN, NewCT} = case Level of
+                         local_only ->
+                             {TmpTN * WLength, WLength};
+                         locally_cached ->
+                             {TmpTN * WLength, WLength};
+                         _ ->
+                             {TmpTN, 1}
+                     end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, GetMany),
+    OpsNum = DocsPerThead * NewTN,
+    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList),
+    ?assertEqual(OpsNum, OkNum).
+
+clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    GetMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(delete_links, Level, [
+                Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+            AfterProcessing = os:timestamp(),
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    {NewTN, NewCT} = case Level of
+                         local_only ->
+                             {TmpTN * WLength, WLength};
+                         locally_cached ->
+                             {TmpTN * WLength, WLength};
+                         _ ->
+                             {TmpTN, 1}
+                     end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, GetMany),
+    OpsNum = DocsPerThead * NewTN,
+    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList),
+    ?assertEqual(OpsNum, OkNum).
+
+save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, save).
+
+save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, SaveFun) ->
+    SaveMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(SaveFun, Level, [
+                #document{
+                    key = list_to_binary(DocsSet ++ integer_to_list(I)),
+                    value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
+                }]),
+            AfterProcessing = os:timestamp(),
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    {NewTN, NewCT} = case Level of
+                         local_only ->
+                             {TmpTN * WLength, WLength};
+                         locally_cached ->
+                             {TmpTN * WLength, WLength};
+                         _ ->
+                             {TmpTN, 1}
+                     end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, SaveMany),
+    OpsNum = DocsPerThead * NewTN,
+    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList),
+    ?assertEqual(OpsNum, OkNum).
