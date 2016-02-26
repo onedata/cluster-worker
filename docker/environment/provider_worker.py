@@ -24,6 +24,12 @@ class ProviderWorkerConfigurator:
         if 'zone_domain' in sys_config:
             oz_hostname = worker.cluster_domain(sys_config['zone_domain'], uid)
             sys_config['zone_domain'] = oz_hostname
+        # If livereload bases on gui output dir mount, change the location
+        # from where static files are served to that dir.
+        if 'gui_livereload' in cfg:
+            if cfg['gui_livereload'] in ['mount_output', 'mount_output_poll']:
+                sys_config['gui_static_files_root'] = {
+                    'string': '/root/gui_static'}
         return cfg
 
     def pre_start_commands(self, bindir, config, domain, worker_ips):
@@ -35,16 +41,16 @@ class ProviderWorkerConfigurator:
         # Check if gui_livereload is enabled in env and turn it on
         if 'gui_livereload' in this_config:
             mode = this_config['gui_livereload']
-            if mode == 'watch' or mode == 'poll':
+            if mode != 'none':
                 print '''\
 Starting GUI livereload
     provider: {0}
-    mode:     {1}'''.format(
-                    instance, mode)
+    mode: {1}'''.format(instance, mode)
                 for container_id in container_ids:
                     gui_livereload.run(
                         container_id,
                         os.path.join(bindir, 'rel/gui.config'),
+                        'rel/op_worker',
                         DOCKER_BINDIR_PATH,
                         '/root/bin/node',
                         mode=mode)
@@ -55,16 +61,17 @@ Starting GUI livereload
                             this_config[self.app_name()], bindir)
 
     def extra_volumes(self, config, bindir):
-        storage_volumes = [common.volume_for_storage(s) for s in config[
+        extra_volumes = [common.volume_for_storage(s) for s in config[
             'os_config']['storages']] if 'os_config' in config else []
         # Check if gui_livereload is enabled in env and add required volumes
         if 'gui_livereload' in config:
-            if config['gui_livereload']:
-                storage_volumes += gui_livereload.required_volumes(
-                    os.path.join(bindir, 'rel/gui.config'),
-                    bindir,
-                    DOCKER_BINDIR_PATH)
-        return storage_volumes
+            extra_volumes += gui_livereload.required_volumes(
+                os.path.join(bindir, 'rel/gui.config'),
+                bindir,
+                'rel/op_worker',
+                DOCKER_BINDIR_PATH,
+                mode=config['gui_livereload'])
+        return extra_volumes
 
     def app_name(self):
         return "op_worker"
