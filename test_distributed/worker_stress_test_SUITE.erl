@@ -158,7 +158,7 @@ init_per_testcase(Case, Config) when
     Case =:= datastore_mixed_local_store_test;
     Case =:= datastore_mixed_local_cache_test;
     Case =:= datastore_mixed_global_cache_test ->
-    datastore_basic_ops_utils:set_hooks(Case, Config);
+    datastore_basic_ops_utils:set_env(Case, Config);
 
 init_per_testcase(_Case, Config) ->
     Config.
@@ -169,7 +169,7 @@ end_per_testcase(Case, Config) when
     Case =:= datastore_mixed_local_store_test;
     Case =:= datastore_mixed_local_cache_test;
     Case =:= datastore_mixed_global_cache_test ->
-    datastore_basic_ops_utils:unset_hooks(Case, Config);
+    datastore_basic_ops_utils:clear_env(Config);
 
 end_per_testcase(_Case, _Config) ->
     ok.

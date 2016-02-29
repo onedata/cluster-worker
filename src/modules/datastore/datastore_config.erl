@@ -21,7 +21,13 @@
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
-  some_record,
+  globally_cached_record,
+  locally_cached_record,
+  global_only_record,
+  local_only_record,
+  disk_only_record,
+  globally_cached_sync_record,
+  locally_cached_sync_record,
   cache_controller,
   task_pool,
 
@@ -48,7 +54,7 @@ models() -> ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, [
 %%--------------------------------------------------------------------
 -spec global_caches() -> Models :: [model_behaviour:model_type()].
 global_caches() ->
-  filter_models_by_level(?GLOBALLY_CACHED_LEVEL, models_potentially_cached()).
+  filter_models_by_level(?GLOBALLY_CACHED_LEVEL, models_potentially_cached()) -- [globally_cached_sync_record].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -57,7 +63,7 @@ global_caches() ->
 %%--------------------------------------------------------------------
 -spec local_caches() -> Models :: [model_behaviour:model_type()].
 local_caches() ->
-  filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()).
+  filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()) -- [locally_cached_sync_record].
 
 
 %%%===================================================================

@@ -27,7 +27,7 @@
 
 -export([create_delete_test/2, create_sync_delete_test/2, save_test/2, save_sync_test/2, update_test/2,
     update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, links_test/2,
-    set_hooks/2, unset_hooks/2, clear_cache/1]).
+    set_env/2, clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
@@ -43,6 +43,7 @@ links_test(Config, Level) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -51,11 +52,11 @@ links_test(Config, Level) ->
     Key = list_to_binary("key_" ++ AnswerDesc),
     Doc =  #document{
         key = Key,
-        value = #some_record{field1 = 12345, field2 = <<"abcdef">>, field3 = {test, tuple111}}
+        value = get_record(TestRecord, 12345, <<"abcdef">>, {test, tuple111})
     },
-    ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [Doc])),
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
 
-    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     Create = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -63,7 +64,7 @@ links_test(Config, Level) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(add_links, Level, [Doc,
                     [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
-                        {list_to_binary(DocsSet ++ integer_to_list(I)), some_record}}]]),
+                        {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -109,8 +110,8 @@ links_test(Config, Level) ->
     ?assertEqual(OpsNum, OkNum2),
 
     test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
-    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
-    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key])),
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
 
     [
         #parameter{name = add_time, value = OkTime / OkNum, unit = "us",
@@ -133,6 +134,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -145,7 +147,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
                 Ans = ?call_store(Fun, Level, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                        value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
+                        value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
                     }]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -167,7 +169,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
                _ ->
                    TmpTN
            end,
-    ModelConfig = some_record:model_init(),
+    ModelConfig = TestRecord:model_init(),
     case ModelConfig#model_config.transactional_global_cache of
         true ->
             CheckOpsNum = DocsPerThead * NewTN,
@@ -176,14 +178,14 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
             ?assert((ThreadsNum * DocsPerThead >= OkNum) and (DocsPerThead * trunc(ThreadsNum / ConflictedThreads) =< OkNum))
     end,
 
-    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     TestFun2 = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(Fun2, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -195,7 +197,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     ?assertEqual([], ErrorsList2),
     ?assertEqual(OpsNum, OkNum2),
 
-    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
+    test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
 
     CreateErrorTime = case ErrorNum of
                           0 ->
@@ -227,6 +229,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -239,7 +242,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
                 Ans = ?call_store(Fun, Level, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                        value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
+                        value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
                     }]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -253,8 +256,8 @@ save_test_base(Config, Level, Fun, Fun2) ->
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum),
 
-    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
-    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
+    test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
 
     #parameter{name = save_time, value = OkTime / OkNum, unit = "us",
         description = "Average time of save operation"}.
@@ -271,6 +274,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -281,7 +285,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
             for(1, OpsPerDoc, fun(J) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(Fun, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I)),
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I)),
                     #{field1 => I + J}
                 ]),
                 AfterProcessing = os:timestamp(),
@@ -297,16 +301,16 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     ?assertEqual(OpsNum, ErrorNum),
     ?assertEqual(OpsNum, OkNum + ErrorNum),
 
-    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
+    test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
 
-    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
+    save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, UpdateMany),
     {OkNum3, OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList3),
     ?assertEqual(OpsNum, OkNum3),
 
-    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun3),
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun3),
 
     UpdateErrorTime = ErrorTime / ErrorNum,
 
@@ -325,6 +329,7 @@ get_test(Config, Level) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -335,7 +340,7 @@ get_test(Config, Level) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(get, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I))
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -350,14 +355,14 @@ get_test(Config, Level) ->
     ?assertEqual(OpsNum, ErrorNum),
     ?assertEqual(OpsNum, OkNum + ErrorNum),
 
-    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, GetMany),
     {OkNum3, OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList3),
     ?assertEqual(OpsNum, OkNum3),
 
-    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     GetErrorTime = ErrorTime / ErrorNum,
 
@@ -376,6 +381,7 @@ exists_test(Config, Level) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -386,7 +392,7 @@ exists_test(Config, Level) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(exists, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I))
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -400,14 +406,14 @@ exists_test(Config, Level) ->
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum),
 
-    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ExistMultiCheck),
     {OkNum3, OkTime3, _ErrorNum3, _ErrorTime3, ErrorsList3} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList3),
     ?assertEqual(OpsNum, OkNum3),
 
-    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     [
         #parameter{name = exists_true_time, value = OkTime3 / OkNum3, unit = "us",
@@ -422,6 +428,7 @@ mixed_test(Config, Level) ->
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
     ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
 
     set_test_type(Workers),
     Master = self(),
@@ -434,7 +441,7 @@ mixed_test(Config, Level) ->
                 Ans = ?call_store(create, Level, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                        value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
+                        value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
                     }]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -449,7 +456,7 @@ mixed_test(Config, Level) ->
                 Ans = ?call_store(save, Level, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                        value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
+                        value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
                     }]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -462,7 +469,7 @@ mixed_test(Config, Level) ->
             for(1, OpsPerDoc, fun(J) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(update, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I)),
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I)),
                     #{field1 => I + J}
                 ]),
                 AfterProcessing = os:timestamp(),
@@ -488,9 +495,9 @@ mixed_test(Config, Level) ->
             K = list_to_binary("key_" ++ AnswerDesc),
             D =  #document{
                 key = K,
-                value = #some_record{field1 = 12345, field2 = <<"abcdef">>, field3 = {test, tuple111}}
+                value = get_record(TestRecord, 12345, <<"abcdef">>, {test, tuple111})
             },
-            ?assertMatch({ok, _}, ?call(Worker1, some_record, create, [D])),
+            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [D])),
 
             CreateLinks = fun(DocsSet) ->
                 for(1, DocsPerThead, fun(I) ->
@@ -498,7 +505,7 @@ mixed_test(Config, Level) ->
                         BeforeProcessing = os:timestamp(),
                         Ans = ?call_store(add_links, Level, [D,
                             [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
-                                {list_to_binary(DocsSet ++ integer_to_list(I)), some_record}}]]),
+                                {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                         AfterProcessing = os:timestamp(),
                         Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
                     end)
@@ -516,7 +523,7 @@ mixed_test(Config, Level) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(get, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I))
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -529,7 +536,7 @@ mixed_test(Config, Level) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(exists, Level, [
-                    some_record, list_to_binary(DocsSet ++ integer_to_list(I))
+                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -567,7 +574,7 @@ mixed_test(Config, Level) ->
 
     case performance:should_clear(Config) of
         true ->
-            clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+            clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
             case Level of
                 local_only ->
                     ok;
@@ -575,7 +582,7 @@ mixed_test(Config, Level) ->
                     ok;
                 _ ->
                     clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
-                    ?assertMatch(ok, ?call(Worker1, some_record, delete, [Key]))
+                    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key]))
             end;
         false ->
             ok
@@ -588,78 +595,25 @@ mixed_test(Config, Level) ->
             description = "Average time of get/exist"}
     ].
 
-set_hooks(Case, Config) ->
+set_env(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     ok = test_node_starter:load_modules(Workers, [?MODULE]),
+    TestRecord = get_record_name(Case),
+    [{test_record, TestRecord} | Config].
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
-    ModelConfig = lists:map(fun(Method) ->
-        {some_record, Method}
-    end, Methods),
-
-    case check_config_name(Case) of
-        global ->
-            ok;
-        local ->
-            test_utils:mock_new(Workers, caches_controller),
-            test_utils:mock_expect(Workers, caches_controller, cache_to_datastore_level, fun(ModelName) ->
-                case lists:member(ModelName, datastore_config:global_caches() -- [some_record]) of
-                    true -> global_only;
-                    _ -> local_only
-                end
-            end),
-            test_utils:mock_expect(Workers, caches_controller, cache_to_task_level, fun(ModelName) ->
-                case lists:member(ModelName, datastore_config:global_caches() -- [some_record]) of
-                    true -> cluster;
-                    _ -> node
-                end
-            end);
-        _ ->
-            lists:foreach(fun(W) ->
-                lists:foreach(fun(MC) ->
-                    ?assert(?call(W, ets, delete_object, [datastore_local_state, {MC, cache_controller}]))
-                end, ModelConfig)
-            end, Workers)
-    end,
-
-    lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 250)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, 1000))
-    end, Workers),
-
-    Config.
-
-unset_hooks(Case, Config) ->
+clear_env(Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     [W | _] = Workers,
 
-    Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
-    ModelConfig = lists:map(fun(Method) ->
-        {some_record, Method}
-    end, Methods),
-
-    case check_config_name(Case) of
-        global ->
+    case ?config(test_record, Config) of
+        globally_cached_record ->
             clear_cache(W);
-        local ->
-            try
-                lists:foreach(fun(Wr) ->
-                    clear_cache(Wr)
-                end, Workers)
-            catch
-                _:_ ->
-                    % Warning showed, let unload mocks
-                    ok
-            end,
-            test_utils:mock_validate_and_unload(Workers, caches_controller);
-        _ ->
+        locally_cached_record ->
             lists:foreach(fun(Wr) ->
-                lists:foreach(fun(MC) ->
-                    ?assert(?call(Wr, ets, insert, [datastore_local_state, {MC, cache_controller}]))
-                end, ModelConfig),
-                % Clear docs that may be recognized as cached in further tests
-                gen_server:call({?NODE_MANAGER_NAME, Wr}, force_clear_node, 60000)
-            end, Workers)
+                clear_cache(Wr)
+            end, Workers);
+        _ ->
+            ok
     end.
 
 clear_cache(W) ->
@@ -744,18 +698,32 @@ disable_cache_control(Workers) ->
         ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
     end, Workers).
 
-check_config_name(Case) ->
+get_record_name(Case) ->
     CStr = atom_to_list(Case),
-    case (string:str(CStr, "cache") > 0) and (string:str(CStr, "sync") == 0) of
-        true ->
+    case {string:str(CStr, "cache") > 0, string:str(CStr, "sync") == 0} of
+        {true, true} ->
             case string:str(CStr, "global") > 0 of
                 true ->
-                    global;
+                    globally_cached_record;
                 _ ->
-                    local
+                    locally_cached_record
+            end;
+        {true, false} ->
+            case string:str(CStr, "global") > 0 of
+                true ->
+                    globally_cached_sync_record;
+                _ ->
+                    locally_cached_sync_record
             end;
         _ ->
-            no_hooks
+            case {string:str(CStr, "global") > 0, string:str(CStr, "local") > 0} of
+                {true, _} ->
+                    global_only_record;
+                {_, true} ->
+                    local_only_record;
+                _ ->
+                    disk_only_record
+            end
     end.
 
 set_test_type(Workers) ->
@@ -771,15 +739,15 @@ set_test_type(Workers) ->
 %%             disable_cache_control(Workers)
 %%     end.
 
-test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, true).
+test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, true).
 
-test_with_get(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Exists) ->
+test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Exists) ->
     GetMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(get, Level, [
-                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
+                TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             FinalAns = case {Exists, Ans} of
                            {false, {error, {not_found, _}}} ->
@@ -842,15 +810,15 @@ test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum).
 
-clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, delete).
+clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, delete).
 
-clear_with_del(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, ClearFun) ->
+clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, ClearFun) ->
     GetMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(ClearFun, Level, [
-                some_record, list_to_binary(DocsSet ++ integer_to_list(I))]),
+                TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
@@ -901,17 +869,17 @@ clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThr
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum).
 
-save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, save).
+save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
+    save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, save).
 
-save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, SaveFun) ->
+save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, SaveFun) ->
     SaveMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(SaveFun, Level, [
                 #document{
                     key = list_to_binary(DocsSet ++ integer_to_list(I)),
-                    value = #some_record{field1 = I, field2 = <<"abc">>, field3 = {test, tuple}}
+                    value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
                 }]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -934,3 +902,24 @@ save_many(Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, A
     {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum).
+
+get_record(TestRecord, Field1) ->
+    get_record(TestRecord, Field1, undefined).
+
+get_record(TestRecord, Field1, Field2) ->
+    get_record(TestRecord, Field1, Field2, undefined).
+
+get_record(globally_cached_record, Field1, Field2, Field3) ->
+    #globally_cached_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(locally_cached_record, Field1, Field2, Field3) ->
+    #locally_cached_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(global_only_record, Field1, Field2, Field3) ->
+    #global_only_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(local_only_record, Field1, Field2, Field3) ->
+    #local_only_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(disk_only_record, Field1, Field2, Field3) ->
+    #disk_only_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(globally_cached_sync_record, Field1, Field2, Field3) ->
+    #globally_cached_sync_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(locally_cached_sync_record, Field1, Field2, Field3) ->
+    #locally_cached_sync_record{field1 = Field1, field2 = Field2, field3 = Field3}.

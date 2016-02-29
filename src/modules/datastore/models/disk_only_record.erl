@@ -8,7 +8,7 @@
 %%% @doc Sample model.
 %%% @end
 %%%-------------------------------------------------------------------
--module(some_record).
+-module(disk_only_record).
 -author("Rafal Slota").
 -behaviour(model_behaviour).
 
@@ -86,7 +86,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{some_record, update}], ?GLOBALLY_CACHED_LEVEL).
+    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?DISK_ONLY_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -322,30 +322,30 @@ init_per_testcase(Case, Config) when
     Case =:= no_transactions_create_delete_global_store_test;
     Case =:= no_transactions_update_global_store_test ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new([node() | Workers], some_record),
-    test_utils:mock_expect([node() | Workers], some_record, model_init, fun() ->
-        #model_config{name = some_record,
-            size = record_info(size, some_record),
-            fields = record_info(fields, some_record),
-            defaults = #some_record{},
+    test_utils:mock_new([node() | Workers], global_only_record),
+    test_utils:mock_expect([node() | Workers], global_only_record, model_init, fun() ->
+        #model_config{name = global_only_record,
+            size = record_info(size, global_only_record),
+            fields = record_info(fields, global_only_record),
+            defaults = #global_only_record{},
             bucket = test_bucket,
-            hooks = [{some_record, update}],
-            store_level = globally_cached, % use of macro results in test errors
-            link_store_level = globally_cached,
+            hooks = [{global_only_record, update}],
+            store_level = global_only, % use of macro results in test errors
+            link_store_level = global_only,
             transactional_global_cache = false
         }
     end),
-    datastore_basic_ops_utils:set_hooks(Case, Config);
+    datastore_basic_ops_utils:set_env(Case, Config);
 
 init_per_testcase(Case, Config) ->
-    datastore_basic_ops_utils:set_hooks(Case, Config).
+    datastore_basic_ops_utils:set_env(Case, Config).
 
 end_per_testcase(Case, Config) when
     Case =:= no_transactions_create_delete_global_store_test;
     Case =:= no_transactions_update_global_store_test ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_validate_and_unload([node() | Workers], some_record),
-    datastore_basic_ops_utils:unset_hooks(Case, Config);
+    test_utils:mock_validate_and_unload([node() | Workers], global_only_record),
+    datastore_basic_ops_utils:clear_env(Config);
 
-end_per_testcase(Case, Config) ->
-    datastore_basic_ops_utils:unset_hooks(Case, Config).
+end_per_testcase(_Case, Config) ->
+    datastore_basic_ops_utils:clear_env(Config).
