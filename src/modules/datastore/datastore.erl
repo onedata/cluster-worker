@@ -611,7 +611,7 @@ run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Retu
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-    ets:new(?LOCAL_STATE, [named_table, public, bag]),
+    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),

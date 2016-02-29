@@ -72,7 +72,7 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()],
     NodeToSync :: node()) -> ok.
-init_bucket(_Bucket, _Models, _NodeToSync) ->
+init_bucket(_Bucket, Models, _NodeToSync) ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -371,9 +371,9 @@ foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
-healthcheck(_) ->
+healthcheck(_State) ->
     try
-        case get_db() of
+        case get_server() of
             {ok, _} -> ok;
             {error, Reason} ->
                 {error, Reason}
@@ -550,7 +550,35 @@ from_driver_key(RawKey) ->
 %%--------------------------------------------------------------------
 -spec get_db() -> {ok, {pid, term()}} | {error, term()}.
 get_db() ->
-    Gateways = maps:values(datastore_worker:state_get(db_gateways)),
+    case get_server() of
+        {error, Reason} ->
+            {error, Reason};
+        {ok, {ServerLoop, Server}} ->
+            {ok, DB} = couchbeam:open_db(Server, <<"default">>),
+            {ok, {ServerLoop, DB}}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns server handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_server() -> {ok, {pid, term()}} | {error, term()}.
+get_server() ->
+    get_server(datastore_worker:state_get(db_gateways)).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns server handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_server(State :: worker_host:plugin_state()) -> {ok, {pid, term()}} | {error, term()}.
+get_server(DBGateways) ->
+    Gateways = maps:values(DBGateways),
     ActiveGateways = [GW || #{status := running} = GW <- Gateways],
 
     case ActiveGateways of
@@ -559,16 +587,14 @@ get_db() ->
             {error, no_active_gateway};
         _ ->
             try
-                #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
+                #{gw_admin_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
                 Server = couchbeam:server_connection("localhost", Port),
-                {ok, DB} = couchbeam:open_db(Server, <<"default">>),
-                {ok, {ServerLoop, DB}}
+                {ok, {ServerLoop, Server}}
             catch
                 _:Reason ->
                     Reason %% Just to silence dialyzer since couchbeam methods supposedly have no return.
             end
     end.
-
 
 -spec db_run(atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Mod, Fun, Args, Retry) ->
@@ -640,6 +666,7 @@ start_gateway(Parent, N, Hostname, Port) ->
         start_time => erlang:system_time(milli_seconds), parent => Parent
     },
     monitor(process, Parent),
+
     proc_lib:init_ack(Parent, State),
 
     BusyWaitInterval = 20,
@@ -685,7 +712,13 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 
     %% Update state
     Gateways = datastore_worker:state_get(db_gateways),
-    datastore_worker:state_put(db_gateways, maps:update(N, State, Gateways)),
+    NewGateways = maps:update(N, State, Gateways),
+    case NewGateways of
+        Gateways -> ok;
+        _ ->
+            datastore_worker:state_put(db_gateways, NewGateways)
+    end,
+
 
     try port_command(PortFD, <<"ping">>) of
         true ->
