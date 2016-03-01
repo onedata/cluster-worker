@@ -45,7 +45,7 @@ links_test(Config, Level) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -136,7 +136,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -231,7 +231,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -276,7 +276,7 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -331,7 +331,7 @@ get_test(Config, Level) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -383,7 +383,7 @@ exists_test(Config, Level) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -444,7 +444,7 @@ mixed_test(Config, Level) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -689,7 +689,7 @@ links_number_test(Config, Level) ->
     ConflictedThreads = ?config(conflicted_threads, Config),
     TestRecord = ?config(test_record, Config),
 
-    set_test_type(Workers),
+    set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
 
@@ -912,18 +912,14 @@ get_record_name(Case) ->
             end
     end.
 
-set_test_type(Workers) ->
+set_test_type(Config, Workers) ->
     put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
-    disable_cache_control(Workers).
-%%     case {performance:is_stress_test(), performance:is_standard_test()} of
-%%         {true, _} ->
-%%             put(file_beg, binary_to_list(term_to_binary(os:timestamp())));
-%%         {false, false} ->
-%%             put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
-%%             disable_cache_control(Workers);
-%%         _ ->
-%%             disable_cache_control(Workers)
-%%     end.
+    case performance:should_clear(Config) of
+        true ->
+            disable_cache_control(Workers);
+        _ ->
+            ok
+    end.
 
 test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, true).
