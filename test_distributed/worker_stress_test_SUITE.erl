@@ -43,7 +43,7 @@
     ]).
 
 -define(STRESS_NO_CLEARING_CASES, [
-        datastore_mixed_global_cache_test, datastore_mixed_db_test
+        datastore_mixed_global_cache_test
     ]).
 
 all() ->
