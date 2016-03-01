@@ -57,6 +57,7 @@ all() ->
         multiple_links_creation_disk_test, multiple_links_creation_global_cache_test,
         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test
+    % TODO - chceck why multiple_links_creation_global_cache_test not clears everything from memory
     ]).
 
 
@@ -998,7 +999,7 @@ end_per_suite(Config) ->
 init_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:set_env(Case, Config).
 
-end_per_testcase(_, Config) ->
+end_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:clear_env(Config).
 
 %%%===================================================================

@@ -26,7 +26,7 @@
 -define(REQUEST_TIMEOUT, timer:seconds(30)).
 
 -export([create_delete_test/2, create_sync_delete_test/2, save_test/2, save_sync_test/2, update_test/2,
-    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, links_test/2,
+    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, links_test/2, links_number_test/2,
     set_env/2, clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
 
 -define(TIMEOUT, timer:seconds(60)).
@@ -423,6 +423,20 @@ exists_test(Config, Level) ->
     ].
 
 mixed_test(Config, Level) ->
+    case performance:is_stress_test() of
+        true ->
+            LastFails = ?config(last_fails, Config),
+            case LastFails of
+                0 ->
+                    ok;
+                _ ->
+                    ct:print("mixed_test: Sleep because of failures at level: ~p: ~p sek", [Level, 5 * LastFails]),
+                    timer:sleep(timer:seconds(5 * LastFails))
+            end;
+        _ ->
+            ok
+    end,
+
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
     DocsPerThead = ?config(docs_per_thead, Config),
@@ -485,12 +499,13 @@ mixed_test(Config, Level) ->
 
     {OkNum, OkTime, ErrorNum, ErrorTime, _ErrorsList} = count_answers(3 * OpsNum),
     ?assertEqual(3 * OpsNum, OkNum + ErrorNum),
+    ?assert(OkNum >= OpsNum),
 
-    {Key, Doc} = case Level of
+    {Key, Doc, AnsExt} = case Level of
         local_only ->
-            {ok, ok};
+            {ok, ok, []};
         locally_cached ->
-            {ok, ok};
+            {ok, ok, []};
         _ ->
             K = list_to_binary("key_" ++ AnswerDesc),
             D =  #document{
@@ -515,7 +530,9 @@ mixed_test(Config, Level) ->
             spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, CreateLinks),
             {OkNumCL, OkTimeCL, _ErrorNumCL, _ErrorTimeCL, _ErrorsListCL} = count_answers(OpsNum),
             ?assertEqual(OpsNum, OkNumCL),
-            {K, D}
+            {K, D,
+            [#parameter{name = add_links_time, value = OkTimeCL / OkNumCL, unit = "us",
+                description = "Average time of links adding"}]}
     end,
 
     GetMany = fun(DocsSet) ->
@@ -572,27 +589,192 @@ mixed_test(Config, Level) ->
     ?assertEqual([], ErrorsList2),
     ?assertEqual(CheckMul * OpsNum, OkNum2),
 
-    case performance:should_clear(Config) of
-        true ->
-            clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
-            case Level of
-                local_only ->
-                    ok;
-                locally_cached ->
-                    ok;
-                _ ->
-                    clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
-                    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key]))
-            end;
-        false ->
-            ok
+    ClearRatio = case performance:should_clear(Config) of
+                     true -> 1;
+                     _ -> 2
+                 end,
+
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    WLength = length(Workers),
+    {NewTN, NewCT} = case Level of
+                         local_only ->
+                             {round(TmpTN / ClearRatio) * WLength, WLength};
+                         locally_cached ->
+                             {round(TmpTN / ClearRatio) * WLength, WLength};
+                         _ ->
+                             {round(TmpTN / ClearRatio), 1}
+                     end,
+    DelOpsNum = DocsPerThead * NewTN,
+
+    AnsExt2 = case Level of
+        local_only ->
+            [];
+        locally_cached ->
+            [];
+        _ ->
+            ClearManyLinks = fun(DocsSet) ->
+                for(1, DocsPerThead, fun(I) ->
+                    BeforeProcessing = os:timestamp(),
+                    Ans = ?call_store(delete_links, Level, [
+                        Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+                    AfterProcessing = os:timestamp(),
+                    Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                end)
+            end,
+
+            spawn_at_nodes(Workers, NewTN, NewCT, ClearManyLinks),
+            {DelLinkOkNum, DelLinkTime, _DelLinkErrorNum, _DelLinkErrorTime, DelLinkErrorsList} =
+                count_answers(DelOpsNum),
+            ?assertEqual([], DelLinkErrorsList),
+            ?assertEqual(DelOpsNum, DelLinkOkNum),
+            ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+
+            AnsExt ++ [#parameter{name = del_links_time, value = DelLinkTime / DelOpsNum, unit = "us",
+                description = "Average time of delete links"}
+            ]
     end,
+
+    ClearMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(delete, Level, [
+                TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
+            AfterProcessing = os:timestamp(),
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, ClearMany),
+    {DelOkNum, DelOkTime, _DelErrorNum, _DelErrorTime, DelErrorsList} = count_answers(DelOpsNum),
+    ?assertEqual([], DelErrorsList),
+    ?assertEqual(DelOpsNum, DelOkNum),
+
+    AnsExt3 = case performance:should_clear(Config) of
+                  true -> AnsExt2;
+                  _ ->
+                      RepNum = ?config(rep_num, Config),
+                      FailedNum = ?config(failed_num, Config),
+                      DocsInDB = (TmpTN - NewTN) * DocsPerThead,
+                      ct:print("Docs in datastore at level ~p: ~p", [Level, DocsInDB * (RepNum - FailedNum)]),
+                      AnsExt2 ++ [#parameter{name = doc_in_db, value = DocsInDB, unit = "us",
+                          description = "Docs in datastore after test"},
+                          #parameter{name = links_in_db, value = DocsInDB, unit = "us",
+                          description = "Links in datastore after test"}
+                      ]
+              end,
 
     [
         #parameter{name = create_save_update_time, value = (OkTime + ErrorTime) / (OkNum + ErrorNum), unit = "us",
             description = "Average time of create/save/update"},
-        #parameter{name = get_exist_time, value = OkTime2 / OkNum2, unit = "us",
-            description = "Average time of get/exist"}
+        #parameter{name = get_exist_fetch_time, value = OkTime2 / OkNum2, unit = "us",
+            description = "Average time of get/exist/fetch"},
+        #parameter{name = del_time, value = DelOkTime / DelOpsNum, unit = "us",
+            description = "Average time of delete"}
+    ] ++ AnsExt3.
+
+links_number_test(Config, Level) ->
+    LastFails = ?config(last_fails, Config),
+    case LastFails of
+        0 ->
+            ok;
+        _ ->
+            ct:print("links_number_test: Sleep because of failures at level: ~p: ~p sek", [Level, 5 * LastFails]),
+            timer:sleep(timer:seconds(5 * LastFails))
+    end,
+
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    ThreadsNum = ?config(threads_num, Config),
+    DocsPerThead = ?config(docs_per_thead, Config),
+    OpsPerDoc = ?config(ops_per_doc, Config),
+    ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
+
+    set_test_type(Workers),
+    Master = self(),
+    AnswerDesc = get(file_beg),
+
+    save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+
+    Key = list_to_binary("key_with_links"),
+    Doc =  #document{
+        key = Key,
+        value = get_record(TestRecord, 12345, <<"abcdef">>, {test, tuple111})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, save, [Doc])),
+
+    CreateLinks = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store(add_links, Level, [Doc,
+                    [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
+                        {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, CreateLinks),
+    OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
+    {OkNumCL, OkTimeCL, _ErrorNumCL, _ErrorTimeCL, _ErrorsListCL} = count_answers(OpsNum),
+    ?assertEqual(OpsNum, OkNumCL),
+
+    Fetch = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store(fetch_link, Level, [
+                    Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Fetch),
+    {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList2),
+    ?assertEqual(OpsNum, OkNum2),
+
+    ClearRatio = 2,
+    TmpTN = trunc(ThreadsNum/ConflictedThreads),
+    NewTN = round(TmpTN / ClearRatio),
+    NewCT = 1,
+    DelOpsNum = DocsPerThead * NewTN,
+
+    ClearManyLinks = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            BeforeProcessing = os:timestamp(),
+            Ans = ?call_store(delete_links, Level, [
+                Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+            AfterProcessing = os:timestamp(),
+            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+        end)
+    end,
+
+    spawn_at_nodes(Workers, NewTN, NewCT, ClearManyLinks),
+    {DelLinkOkNum, DelLinkTime, _DelLinkErrorNum, _DelLinkErrorTime, DelLinkErrorsList} =
+        count_answers(DelOpsNum),
+    ?assertEqual([], DelLinkErrorsList),
+    ?assertEqual(DelOpsNum, DelLinkOkNum),
+
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, NewTN, NewCT, Master, AnswerDesc),
+
+    RepNum = ?config(rep_num, Config),
+    FailedNum = ?config(failed_num, Config),
+    DocsInDB = (TmpTN - NewTN) * DocsPerThead,
+    ct:print("Links linked to single doc at level ~p: ~p", [Level, DocsInDB * (RepNum - FailedNum)]),
+
+    [
+        #parameter{name = links_linked_to_doc, value = DocsInDB, unit = "us",
+            description = "Links linked to single doc after test"}
+        #parameter{name = add_links_time, value = OkTimeCL / OkNumCL, unit = "us",
+            description = "Average time of links adding"},
+        #parameter{name = fetch_time, value = OkTime2 / OkNum2, unit = "us",
+            description = "Average time of fetch"},
+        #parameter{name = del_links_time, value = DelLinkTime / DelOpsNum, unit = "us",
+            description = "Average time of delete links"}
     ].
 
 set_env(Case, Config) ->
@@ -602,18 +784,22 @@ set_env(Case, Config) ->
     [{test_record, TestRecord} | Config].
 
 clear_env(Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    [W | _] = Workers,
-
-    case ?config(test_record, Config) of
-        globally_cached_record ->
-            clear_cache(W);
-        locally_cached_record ->
-            lists:foreach(fun(Wr) ->
-                clear_cache(Wr)
-            end, Workers);
+    case performance:is_stress_test() of
+        true ->
+            ok;
         _ ->
-            ok
+            Workers = ?config(cluster_worker_nodes, Config),
+            [W | _] = Workers,
+            case ?config(test_record, Config) of
+                globally_cached_record ->
+                    clear_cache(W);
+                locally_cached_record ->
+                    lists:foreach(fun(Wr) ->
+                        clear_cache(Wr)
+                    end, Workers);
+                _ ->
+                    ok
+            end
     end.
 
 clear_cache(W) ->
@@ -814,7 +1000,7 @@ clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedT
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, delete).
 
 clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, ClearFun) ->
-    GetMany = fun(DocsSet) ->
+    ClearMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(ClearFun, Level, [
@@ -835,14 +1021,14 @@ clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedT
                              {TmpTN, 1}
                      end,
 
-    spawn_at_nodes(Workers, NewTN, NewCT, GetMany),
+    spawn_at_nodes(Workers, NewTN, NewCT, ClearMany),
     OpsNum = DocsPerThead * NewTN,
     {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum).
 
 clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    GetMany = fun(DocsSet) ->
+    ClearMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(delete_links, Level, [
@@ -863,7 +1049,7 @@ clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThr
                              {TmpTN, 1}
                      end,
 
-    spawn_at_nodes(Workers, NewTN, NewCT, GetMany),
+    spawn_at_nodes(Workers, NewTN, NewCT, ClearMany),
     OpsNum = DocsPerThead * NewTN,
     {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList),
