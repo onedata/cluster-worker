@@ -430,8 +430,8 @@ mixed_test(Config, Level) ->
                 0 ->
                     ok;
                 _ ->
-                    ct:print("mixed_test: Sleep because of failures at level: ~p: ~p sek", [Level, 5 * LastFails]),
-                    timer:sleep(timer:seconds(5 * LastFails))
+                    ct:print("mixed_test: Sleep because of failures at level: ~p: ~p sek", [Level, 2 * LastFails]),
+                    timer:sleep(timer:seconds(2 * LastFails))
             end;
         _ ->
             ok
@@ -678,8 +678,8 @@ links_number_test(Config, Level) ->
         0 ->
             ok;
         _ ->
-            ct:print("links_number_test: Sleep because of failures at level: ~p: ~p sek", [Level, 5 * LastFails]),
-            timer:sleep(timer:seconds(5 * LastFails))
+            ct:print("links_number_test: Sleep because of failures at level: ~p: ~p sek", [Level, 2 * LastFails]),
+            timer:sleep(timer:seconds(2 * LastFails))
     end,
 
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
