@@ -913,13 +913,25 @@ get_record_name(Case) ->
     end.
 
 set_test_type(Config, Workers) ->
-    put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
+    put(file_beg, get_random_string()),
+    % TODO - check why cauchdb driver does not work with such elements in link_name:
+%%     put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
     case performance:should_clear(Config) of
         true ->
             disable_cache_control(Workers);
         _ ->
             ok
     end.
+
+get_random_string() ->
+    get_random_string(10, "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ").
+
+get_random_string(Length, AllowedChars) ->
+    lists:foldl(fun(_, Acc) ->
+        [lists:nth(random:uniform(length(AllowedChars)),
+            AllowedChars)]
+        ++ Acc
+    end, [], lists:seq(1, Length)).
 
 test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, true).
