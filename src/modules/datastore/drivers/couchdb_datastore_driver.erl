@@ -72,7 +72,20 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()],
     NodeToSync :: node()) -> ok.
-init_bucket(_Bucket, Models, _NodeToSync) ->
+init_bucket(Bucket, Models, _NodeToSync) ->
+    BinBucket = atom_to_binary(Bucket, utf8),
+
+    Doc = to_json_term(#{
+        <<"_id">> => <<"_design/", BinBucket/binary>>,
+        <<"views">> => maps:from_list(lists:map(
+            fun(#model_config{name = ModelName}) ->
+                BinModelName = atom_to_binary(ModelName, utf8),
+                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['RECORD::'] == \"", BinModelName/binary, "\") emit(doc['RECORD::'], doc); }">>}}
+            end, Models))
+    }),
+    JsonDoc = couchbeam_ejson:encode(Doc),
+    ?info("Doc ~p", [JsonDoc]),
+    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
     ok.
 
 %%--------------------------------------------------------------------
@@ -119,8 +132,17 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
 %%--------------------------------------------------------------------
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
-update(#model_config{bucket = _Bucket} = _ModelConfig, _Key, Diff) when is_function(Diff) ->
-    erlang:error(not_implemented);
+update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    NewValue = Diff(Value),
+                    save(ModelConfig, Doc#document{value = NewValue})
+            end
+        end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
@@ -195,9 +217,45 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
-    % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
-    error(not_supported).
+list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn) ->
+    BinModelName = atom_to_binary(ModelName, utf8),
+    _BinBucket = atom_to_binary(Bucket, utf8),
+    case db_run(couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
+        {ok, Rows} ->
+            Ret =
+                try lists:foldl(
+                    fun({Row}, Acc) ->
+                        try
+                            {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
+                            {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
+                            Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
+                            Value2 = Value -- Value1,
+                            {_, Key} = from_driver_key(KeyBin),
+                            Doc = #document{key = Key, value = from_json_term({Value2})},
+                            case element(1, Doc#document.value) of
+                                 ModelName ->
+                                     case Fun(Doc, Acc) of
+                                         {next, NewAcc} ->
+                                             NewAcc;
+                                         {abort, LastAcc} ->
+                                             throw({abort, LastAcc})
+                                     end;
+                                _ ->
+                                    Acc
+                            end
+                        catch
+                            _:_ ->
+                                Acc
+                        end
+                    end, AccIn, Rows)
+                catch
+                    {abort, RetAcc} ->
+                        RetAcc
+                end,
+            {ok, Ret};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -458,10 +516,21 @@ to_json_term(Term) when is_list(Term) ->
 to_json_term(Term) when is_atom(Term) ->
     to_binary(Term);
 to_json_term(Term) when is_tuple(Term) ->
-    Elems = tuple_to_list(Term),
-    Proplist0 = [{<<"RECORD::">>, <<"unknown">>} | lists:zip(lists:seq(1, length(Elems)), Elems)],
-    Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
-    {Proplist1};
+    ModelName = element(1, Term),
+    try ModelName:model_init() of
+        #model_config{fields = Fields} ->
+            [_ | Values1] = tuple_to_list(Term),
+            Map = maps:from_list(lists:zip(Fields, Values1)),
+            to_json_term(Map#{<<"RECORD::">> => atom_to_binary(ModelName, utf8)})
+    catch
+        _:_ -> %% encode as tuple
+            Values = tuple_to_list(Term),
+            Keys = lists:seq(1, length(Values)),
+            KeyValue = lists:zip(Keys, Values),
+            Map = maps:from_list(KeyValue),
+            to_json_term(Map#{<<"RECORD::">> => atom_to_binary(undefined, utf8)})
+    end
+;
 to_json_term(Term) when is_map(Term) ->
     Proplist0 = maps:to_list(Term),
     Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
@@ -490,11 +559,11 @@ from_json_term({Term}) when is_list(Term) ->
         false ->
             Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
             maps:from_list(Proplist2);
-        {_, _RecordType} ->
+        {_, RecordType} ->
             Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<"RECORD::">>],
             Proplist1 = lists:sort(Proplist0),
             {_, Values} = lists:unzip(Proplist1),
-            list_to_tuple(Values)
+            list_to_tuple([binary_to_atom(RecordType, utf8) | Values])
     end;
 from_json_term(Term) when is_binary(Term) ->
     from_binary(Term).
