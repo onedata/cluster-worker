@@ -63,7 +63,7 @@ links_test(Config, Level) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(add_links, Level, [Doc,
-                    [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
+                    [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                         {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -81,7 +81,7 @@ links_test(Config, Level) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(fetch_link, Level, [
-                    Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                    Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -97,7 +97,7 @@ links_test(Config, Level) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(delete_links, Level, [
-                    Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+                    Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -519,7 +519,7 @@ mixed_test(Config, Level) ->
                     for(OpsPerDoc, fun() ->
                         BeforeProcessing = os:timestamp(),
                         Ans = ?call_store(add_links, Level, [D,
-                            [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
+                            [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                                 {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                         AfterProcessing = os:timestamp(),
                         Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -566,7 +566,7 @@ mixed_test(Config, Level) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(fetch_link, Level, [
-                    Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                    Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -616,7 +616,7 @@ mixed_test(Config, Level) ->
                 for(1, DocsPerThead, fun(I) ->
                     BeforeProcessing = os:timestamp(),
                     Ans = ?call_store(delete_links, Level, [
-                        Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+                        Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
                     AfterProcessing = os:timestamp(),
                     Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
                 end)
@@ -707,7 +707,7 @@ links_number_test(Config, Level) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(add_links, Level, [Doc,
-                    [{list_to_atom("link" ++ DocsSet ++ integer_to_list(I)),
+                    [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                         {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -725,7 +725,7 @@ links_number_test(Config, Level) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
                 Ans = ?call_store(fetch_link, Level, [
-                    Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                    Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -747,7 +747,7 @@ links_number_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(delete_links, Level, [
-                Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+                Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
@@ -963,7 +963,7 @@ test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(fetch_link, Level, [
-                Doc, list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]),
+                Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             FinalAns = case {Exists, Ans} of
                            {false, {error,link_not_found}} ->
@@ -1028,7 +1028,7 @@ clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThr
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(delete_links, Level, [
-                Doc, [list_to_atom("link" ++ DocsSet ++ integer_to_list(I))]]),
+                Doc, [list_to_binary§("link" ++ DocsSet ++ integer_to_list(I))]]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
