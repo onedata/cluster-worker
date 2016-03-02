@@ -67,7 +67,7 @@
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1]).
+-export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_synchronized/3, normalize_link_target/1]).
 
 %%%===================================================================
@@ -188,7 +188,7 @@ delete(Level, ModelName, Key, Pred) ->
         ok ->
             % TODO - make link del asynch when tests will be able to handle it
 %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-            catch delete_links(Level, Key, ModelName, all),
+                catch delete_links(Level, Key, ModelName, all),
             ok;
         {error, Reason} ->
             {error, Reason}
@@ -218,9 +218,9 @@ delete_sync(Level, ModelName, Key, Pred) ->
     case exec_driver(ModelName, level_to_driver(Level), delete, [Key, Pred]) of
         ok ->
             spawn(fun() ->
-                catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
             spawn(fun() ->
-                catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
             %% @todo: uncomment following line when local cache will support links
             % spawn(fun() -> catch delete_links(?LOCAL_ONLY_LEVEL, Key, ModelName, all) end),
             ok;
@@ -611,7 +611,7 @@ run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Retu
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
+        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
@@ -657,19 +657,31 @@ init_drivers(Configs, NodeToSync) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Loads local state, initializes datastore drivers and fetches active config
+%% If needed - loads local state, initializes datastore drivers and fetches active config
 %% from NodeToSync if needed.
 %% @end
 %%--------------------------------------------------------------------
 -spec ensure_state_loaded(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
 ensure_state_loaded(NodeToSync) ->
+    case ets:info(?LOCAL_STATE) of
+        undefined ->
+            initialize_state(NodeToSync);
+        _ -> ok
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Loads local state, initializes datastore drivers and fetches active config
+%% from NodeToSync if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec initialize_state(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
+initialize_state(NodeToSync) ->
     try
-        case ets:info(?LOCAL_STATE) of
-            undefined ->
-                Configs = load_local_state(datastore_config:models()),
-                init_drivers(Configs, NodeToSync);
-            _ -> ok
-        end
+        Configs = load_local_state(datastore_config:models()),
+        init_drivers(Configs, NodeToSync)
     catch
         Type:Reason ->
             ?error_stacktrace("Cannot initialize datastore local state due to"
@@ -802,9 +814,9 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 {ok, Value};
             {tasks, Tasks} ->
                 Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                            true -> ?CLUSTER_LEVEL;
-                            _ -> ?NODE_LEVEL
-                        end,
+                    true -> ?CLUSTER_LEVEL;
+                    _ -> ?NODE_LEVEL
+                end,
                 lists:foreach(fun
                     ({task, Task}) ->
                         ok = task_manager:start_task(Task, Level);
@@ -813,9 +825,9 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 end, Tasks);
             {task, Task} ->
                 Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                            true -> ?CLUSTER_LEVEL;
-                            _ -> ?NODE_LEVEL
-                        end,
+                    true -> ?CLUSTER_LEVEL;
+                    _ -> ?NODE_LEVEL
+                end,
                 ok = task_manager:start_task(Task, Level);
             {error, Reason} ->
                 {error, Reason}

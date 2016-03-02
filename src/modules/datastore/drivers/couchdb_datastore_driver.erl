@@ -25,6 +25,9 @@
 %% Encoded atom prefix
 -define(ATOM_PREFIX, "ATOM::").
 
+%% Encoded record name field
+-define(RECORD_MARKER, "RECORD::").
+
 -define(LINKS_KEY_SUFFIX, "$$").
 
 %% Maximum size of document's value.
@@ -74,13 +77,14 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
     NodeToSync :: node()) -> ok.
 init_bucket(Bucket, Models, _NodeToSync) ->
     BinBucket = atom_to_binary(Bucket, utf8),
+    DesignId = <<"_design/", BinBucket/binary>>,
 
     Doc = to_json_term(#{
-        <<"_id">> => <<"_design/", BinBucket/binary>>,
+        <<"_id">> => DesignId,
         <<"views">> => maps:from_list(lists:map(
             fun(#model_config{name = ModelName}) ->
                 BinModelName = atom_to_binary(ModelName, utf8),
-                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['RECORD::'] == \"", BinModelName/binary, "\") emit(doc['RECORD::'], doc); }">>}}
+                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER,"'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER,"'], doc); }">>}}
             end, Models))
     }),
     JsonDoc = couchbeam_ejson:encode(Doc),
@@ -233,24 +237,24 @@ list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn
                             {_, Key} = from_driver_key(KeyBin),
                             Doc = #document{key = Key, value = from_json_term({Value2})},
                             case element(1, Doc#document.value) of
-                                 ModelName ->
-                                     case Fun(Doc, Acc) of
-                                         {next, NewAcc} ->
-                                             NewAcc;
-                                         {abort, LastAcc} ->
-                                             throw({abort, LastAcc})
-                                     end;
+                                ModelName ->
+                                    case Fun(Doc, Acc) of
+                                        {next, NewAcc} ->
+                                            NewAcc;
+                                        {abort, LastAcc} ->
+                                            throw({abort, LastAcc})
+                                    end;
                                 _ ->
-                                    Acc
+                                    Acc %% Trash entry, skipping
                             end
                         catch
                             _:_ ->
-                                Acc
+                                Acc %% Invalid entry, skipping
                         end
                     end, AccIn, Rows)
                 catch
                     {abort, RetAcc} ->
-                        RetAcc
+                        RetAcc %% Provided function requested end of stream, exiting loop
                 end,
             {ok, Ret};
         {error, Reason} ->
@@ -521,14 +525,14 @@ to_json_term(Term) when is_tuple(Term) ->
         #model_config{fields = Fields} ->
             [_ | Values1] = tuple_to_list(Term),
             Map = maps:from_list(lists:zip(Fields, Values1)),
-            to_json_term(Map#{<<"RECORD::">> => atom_to_binary(ModelName, utf8)})
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(ModelName, utf8)})
     catch
         _:_ -> %% encode as tuple
             Values = tuple_to_list(Term),
             Keys = lists:seq(1, length(Values)),
             KeyValue = lists:zip(Keys, Values),
             Map = maps:from_list(KeyValue),
-            to_json_term(Map#{<<"RECORD::">> => atom_to_binary(undefined, utf8)})
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(undefined, utf8)})
     end
 ;
 to_json_term(Term) when is_map(Term) ->
@@ -555,12 +559,12 @@ from_json_term(Term) when is_float(Term) ->
 from_json_term(Term) when is_list(Term) ->
     [from_json_term(Elem) || Elem <- Term];
 from_json_term({Term}) when is_list(Term) ->
-    case lists:keyfind(<<"RECORD::">>, 1, Term) of
+    case lists:keyfind(<<?RECORD_MARKER>>, 1, Term) of
         false ->
             Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
             maps:from_list(Proplist2);
         {_, RecordType} ->
-            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<"RECORD::">>],
+            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
             Proplist1 = lists:sort(Proplist0),
             {_, Values} = lists:unzip(Proplist1),
             list_to_tuple([binary_to_atom(RecordType, utf8) | Values])

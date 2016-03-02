@@ -964,7 +964,10 @@ globally_cached_links_test(Config) ->
 %%%===================================================================
 
 init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]).
+    NewConfig = ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]),
+    Nodes = ?config(cluster_worker_nodes, NewConfig),
+    test_utils:enable_datastore_models(Nodes, [some_record, test_record_1, test_record_2]),
+    NewConfig.
 
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
