@@ -1028,7 +1028,7 @@ clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThr
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(delete_links, Level, [
-                Doc, [list_to_binary§("link" ++ DocsSet ++ integer_to_list(I))]]),
+                Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
