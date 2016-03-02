@@ -174,7 +174,24 @@ get(Level, ModelName, Key) ->
 -spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, level_to_driver(Level), list, [Fun, AccIn]).
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% @end
+%%--------------------------------------------------------------------
+-spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
+    FlushFun = fun(#document{key = Key}, _, _) ->
+        caches_controller:flush(driver_to_level(Driver1), ModelName, Key),
+        {next, []}
+    end,
+    exec_driver(ModelName, Driver1, list, [FlushFun, []]),
+    exec_driver(ModelName, Driver2, list, [Fun, AccIn]);
+list(_Level, Drivers, ModelName, Fun, AccIn) ->
+    exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
 
 
 %%--------------------------------------------------------------------

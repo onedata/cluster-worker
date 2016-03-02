@@ -916,7 +916,11 @@ global_list_test(Config) ->
 
 %% list operation on disk only driver (on several nodes)
 disk_list_test(Config) ->
-    generic_list_test(?config(cluster_worker_nodes, Config), ?DISK_ONLY_LEVEL).
+    generic_list_test(disk_only_record, ?config(cluster_worker_nodes, Config), ?DISK_ONLY_LEVEL).
+
+%% list operation on disk only driver (on several nodes)
+globally_cached_list_test(Config) ->
+    generic_list_test(globally_cached_record, ?config(cluster_worker_nodes, Config), ?DISK_ONLY_LEVEL).
 
 
 %% list operation on local cache driver (on several nodes)
@@ -997,7 +1001,9 @@ globally_cached_links_test(Config) ->
 init_per_suite(Config) ->
     NewConfig = ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]),
     Nodes = ?config(cluster_worker_nodes, NewConfig),
-    test_utils:enable_datastore_models(Nodes, [some_record, test_record_1, test_record_2]),
+    test_utils:enable_datastore_models(Nodes, [
+        globally_cached_record, locally_cached_record, global_only_record, local_only_record,
+        disk_only_record, globally_cached_sync_record, locally_cached_sync_record, test_record_1, test_record_2]),
     NewConfig.
 
 end_per_suite(Config) ->

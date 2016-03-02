@@ -87,8 +87,6 @@ init_bucket(Bucket, Models, _NodeToSync) ->
                 {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER,"'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER,"'], doc); }">>}}
             end, Models))
     }),
-    JsonDoc = couchbeam_ejson:encode(Doc),
-    ?info("Doc ~p", [JsonDoc]),
     {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
     ok.
 
@@ -627,8 +625,13 @@ get_db() ->
         {error, Reason} ->
             {error, Reason};
         {ok, {ServerLoop, Server}} ->
-            {ok, DB} = couchbeam:open_db(Server, <<"default">>),
-            {ok, {ServerLoop, DB}}
+            try
+                {ok, DB} = couchbeam:open_db(Server, <<"default">>),
+                {ok, {ServerLoop, DB}}
+            catch
+                _:Reason ->
+                    Reason %% Just to silence dialyzer since couchbeam methods supposedly have no return.
+            end
     end.
 
 
