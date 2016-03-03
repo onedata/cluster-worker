@@ -36,7 +36,7 @@
     },
     "provider_domains": {
         "p1": {
-            "db_driver": "couchbase",
+            "db_driver": "couchdb",
             "os_config": "cfg1",
             "gui_livereload": "watch",
             "cluster_manager": {

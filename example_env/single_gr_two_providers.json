@@ -67,7 +67,7 @@
     },
     "provider_domains": {
         "provider1": {
-            "db_driver": "couchbase",
+            "db_driver": "couchdb",
             "os_config": "cfg1",
             "gui_livereload": "none",
             "cluster_manager": {
@@ -106,7 +106,7 @@
             }
         },
         "provider2": {
-            "db_driver": "couchbase",
+            "db_driver": "couchdb",
             "os_config": "cfg1",
             "gui_livereload": "none",
             "cluster_manager": {
