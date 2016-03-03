@@ -252,6 +252,10 @@ handle_call(disable_cache_control, _From, State) ->
 handle_call(enable_cache_control, _From, State) ->
     {reply, ok, State#state{cache_control = true}};
 
+%% Generic function apply in node_manager's process
+handle_call({apply, M, F, A}, _From, State) ->
+    {reply, apply(M, F, A), State};
+
 handle_call(_Request, _From, State) ->
     plugins:apply(node_manager_plugin, handle_call_extension, [_Request, _From, State]).
 

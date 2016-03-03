@@ -561,6 +561,11 @@ from_json_term({Term}) when is_list(Term) ->
         false ->
             Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
             maps:from_list(Proplist2);
+        {_, <<"undefined">>} ->
+            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
+            Proplist1 = lists:sort(Proplist0),
+            {_, Values} = lists:unzip(Proplist1),
+            list_to_tuple(Values);
         {_, RecordType} ->
             Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
             Proplist1 = lists:sort(Proplist0),
