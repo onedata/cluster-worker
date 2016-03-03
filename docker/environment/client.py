@@ -46,7 +46,7 @@ def _tweak_config(config, os_config, name, uid):
     return cfg
 
 
-def _node_up(image, bindir, config, config_path, dns_servers):
+def _node_up(image, bindir, config, config_path, dns_servers, logdir):
     node = config['node']
     hostname = node['name']
     shortname = hostname.split(".")[0]
@@ -102,6 +102,12 @@ EOF
     volumes = [(bindir, '/root/build', 'ro')]
     volumes += [common.volume_for_storage(s) for s in os_config['storages']]
 
+    if logdir:
+        logdir = os.path.join(os.path.abspath(logdir), hostname)
+        os.makedirs(logdir)
+        os.chmod(logdir, 0757)
+        volumes.extend([(logdir, '/tmp', 'rw')])
+
     container = docker.run(
         image=image,
         name=hostname,
@@ -122,7 +128,7 @@ EOF
     return {'docker_ids': [container], 'client_nodes': [hostname], 'client_data': {shortname: client_data}}
 
 
-def up(image, bindir, dns_server, uid, config_path):
+def up(image, bindir, dns_server, uid, config_path, logdir=None):
     json_config = common.parse_json_config_file(config_path)
     config = json_config['oneclient']
     os_config = json_config['os_configs']
@@ -131,7 +137,7 @@ def up(image, bindir, dns_server, uid, config_path):
     dns_servers, output = dns.maybe_start(dns_server, uid)
 
     for cfg in configs:
-        node_out = _node_up(image, bindir, cfg, config_path, dns_servers)
+        node_out = _node_up(image, bindir, cfg, config_path, dns_servers, logdir)
         common.merge(output, node_out)
 
     return output
