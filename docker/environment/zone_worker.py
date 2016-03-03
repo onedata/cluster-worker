@@ -38,7 +38,7 @@ class OZWorkerConfigurator:
         # from where static files are served to that dir.
         if 'gui_livereload' in cfg:
             if cfg['gui_livereload'] in ['mount_output', 'mount_output_poll']:
-                sys_config['gui_static_files_root'] = {
+                sys_config['gui_custom_static_root'] = {
                     'string': '/root/gui_static'}
         return cfg
 
