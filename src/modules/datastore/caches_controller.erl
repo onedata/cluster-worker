@@ -392,16 +392,37 @@ get_driver_module(Level) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Saves information about clearing doc from memory
+%% Saves information about clearing doc from memory initialized by user
 %% @end
 %%--------------------------------------------------------------------
 -spec save_clear_info(Level :: datastore:store_level(), Uuid :: binary()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 save_clear_info(Level, Uuid) ->
-  UpdateFun = fun(Record) ->
-    {ok, Record#cache_controller{action = cleared}}
-  end,
   TS = os:timestamp(),
+  UpdateFun = fun(Record) ->
+    {ok, Record#cache_controller{action = cleared, last_action_time = TS}}
+  end,
+  V = #cache_controller{timestamp = TS, action = cleared, last_action_time = TS},
+  Doc = #document{key = Uuid, value = V},
+
+  cache_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves information about clearing doc from memory initialized by high mem usage
+%% @end
+%%--------------------------------------------------------------------
+-spec save_high_mem_clear_info(Level :: datastore:store_level(), Uuid :: binary()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+save_high_mem_clear_info(Level, Uuid) ->
+  TS = os:timestamp(),
+  UpdateFun = fun
+    (#cache_controller{last_user = non} = Record) ->
+      {ok, Record#cache_controller{action = cleared, last_action_time = TS}};
+    (Record) ->
+      {error, document_in_use}
+  end,
   V = #cache_controller{timestamp = TS, action = cleared, last_action_time = TS},
   Doc = #document{key = Uuid, value = V},
 
@@ -416,24 +437,53 @@ save_clear_info(Level, Uuid) ->
 -spec delete_old_keys(Level :: global_only | local_only, Caches :: list(), TimeWindow :: integer()) -> ok.
 delete_old_keys(Level, Caches, TimeWindow) ->
   {ok, Uuids} = cache_controller:list(Level, TimeWindow),
-  lists:foreach(fun(Uuid) ->
+  Uuids2 = lists:foldl(fun(Uuid, Acc) ->
     {ModelName, Key} = decode_uuid(Uuid),
     case safe_delete(Level, ModelName, Key) of
       ok ->
-        FullArgs = [cache_controller:model_init(), Uuid, ?PRED_ALWAYS],
-        erlang:apply(get_driver_module(Level), delete, FullArgs);
+        [Uuid | Acc];
       _ ->
-        ok
+        Acc
     end
-  end, Uuids),
+  end, [], Uuids),
+
+  timer:sleep(timer:seconds(2)), % allow async operations on disk start if there are any
+  lists:foreach(fun(Uuid) ->
+    Pred = fun() ->
+      LastUser = case cache_controller:get(Level, Uuid) of
+                   {ok, Doc} ->
+                     Value = Doc#document.value,
+                     Value#cache_controller.last_user;
+                   {error, {not_found, _}} ->
+                     ok
+                 end,
+
+      case LastUser of
+        non ->
+          true;
+        _ ->
+          false
+      end
+    end,
+
+    cache_controller:delete(Level, Uuid, Pred)
+  end, Uuids2),
+
   case TimeWindow of
     0 ->
+      ModelsUuids = lists:foldl(fun(Uuid, Acc) ->
+        {ModelName, Key} = decode_uuid(Uuid),
+        TmpAns = proplists:get_value(ModelName, Acc, []),
+        [{ModelName, [Key | TmpAns]} | proplists:delete(ModelName, Acc)]
+      end, [], Uuids),
+
       lists:foreach(fun(Cache) ->
         {ok, Docs} = datastore:list(Level, Cache, ?GET_ALL, []),
-        lists:foreach(fun(Doc) ->
+        DocsKeys = lists:map(fun(Doc) -> Doc#document.key end, Docs),
+        lists:foreach(fun(K) ->
           % TODO - the same for links
-          safe_delete(Level, Cache, Doc#document.key)
-        end, Docs)
+          safe_delete(Level, Cache, K)
+        end, DocsKeys -- proplists:get_value(Cache, ModelsUuids, []))
       end, Caches);
     _ ->
       ok
@@ -449,29 +499,21 @@ delete_old_keys(Level, Caches, TimeWindow) ->
 -spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
     Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
   ok | datastore:generic_error().
-% TODO - update to protect from race with ongoing operations
 safe_delete(Level, ModelName, {Key, Link}) ->
   try
     ModelConfig = ModelName:model_init(),
-    FullArgs = [ModelConfig, Key, Link],
-    case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), fetch_link, FullArgs) of
-      {ok, Value} ->
-        Pred = fun() ->
-          case erlang:apply(get_driver_module(Level), fetch_link, FullArgs) of
-            {ok, Value} ->
-              true;
-            _ ->
-              false
-          end
-        end,
-        FullArgs2 = [ModelConfig, Key, [Link], Pred],
-        erlang:apply(get_driver_module(Level), delete_links, FullArgs2);
-      {error, link_not_found} -> ok;
-      {error, Reason} ->
-        ?error("Error in cache controller safe_delete. Args: ~p. Error: ~p.",
-          [{Level, ModelName, Key}, Reason]),
-        {error, Reason}
-    end
+    Uuid = get_cache_uuid({Key, Link}, ModelName),
+
+    Pred = fun() ->
+      case save_high_mem_clear_info(Level, Uuid) of
+        {ok, _} ->
+          true;
+        _ ->
+          false
+      end
+    end,
+    Ans = erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred]),
+      Ans
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
@@ -481,27 +523,17 @@ safe_delete(Level, ModelName, {Key, Link}) ->
 safe_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),
-    FullArgs = [ModelConfig, Key],
-    case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, FullArgs) of
-      {ok, Doc} ->
-        Value = Doc#document.value,
-        % TODO what if many saves have the same value?
-        Pred = fun() ->
-          case erlang:apply(get_driver_module(Level), get, FullArgs) of
-            {ok, Doc2} ->
-              Doc2#document.value =:= Value;
-            _ ->
-              false
-          end
-        end,
-        FullArgs2 = [ModelConfig, Key, Pred],
-        erlang:apply(get_driver_module(Level), delete, FullArgs2);
-      {error, {not_found, _}} -> ok;
-      {error, Reason} ->
-        ?error("Error in cache controller safe_delete. Args: ~p. Error: ~p.",
-          [{Level, ModelName, Key}, Reason]),
-        {error, Reason}
-    end
+    Uuid = get_cache_uuid(Key, ModelName),
+
+    Pred =fun() ->
+      case save_high_mem_clear_info(Level, Uuid) of
+        {ok, _} ->
+          true;
+        _ ->
+          false
+      end
+    end,
+    erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
@@ -522,8 +554,7 @@ delete_all_keys(Level, Caches) ->
   lists:foreach(fun(Uuid) ->
     {ModelName, Key} = decode_uuid(Uuid),
     value_delete(Level, ModelName, Key),
-    FullArgs = [cache_controller:model_init(), Uuid, ?PRED_ALWAYS],
-    erlang:apply(get_driver_module(Level), delete, FullArgs)
+    cache_controller:delete(Level, Uuid, ?PRED_ALWAYS)
   end, Uuids),
 
   ClearedNum = lists:foldl(fun(Cache, Sum) ->

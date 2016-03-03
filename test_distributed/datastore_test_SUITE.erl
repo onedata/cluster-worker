@@ -41,9 +41,10 @@
     link_walk_test/1, monitoring_global_cache_test_test/1, old_keys_cleaning_global_cache_test/1,
     clearing_global_cache_test/1, link_monitoring_global_cache_test/1, create_after_delete_global_cache_test/1,
     restoring_cache_from_disk_global_cache_test/1, prevent_reading_from_disk_global_cache_test/1,
-    multiple_links_creation_disk_test/1, multiple_links_creation_global_cache_test/1,
+    multiple_links_creation_disk_test/1, multiple_links_creation_global_only_test/1,
     clear_and_flush_global_cache_test/1, multilevel_foreach_global_cache_test/1,
-    operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1]).
+    operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
+    interupt_global_cache_clearing_test/1]).
 -export([utilize_memory/3]).
 
 all() ->
@@ -54,10 +55,10 @@ all() ->
         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
         restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-        multiple_links_creation_disk_test, multiple_links_creation_global_cache_test,
+        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test
-    % TODO - chceck why multiple_links_creation_global_cache_test not clears everything from memory
+        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+        interupt_global_cache_clearing_test
     ]).
 
 
@@ -66,7 +67,75 @@ all() ->
 %%%===================================================================
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
-% TODO - add tests that cerify time refreshing by get and fetch_link operations
+% TODO - add tests that check time refreshing by get and fetch_link operations
+
+interupt_global_cache_clearing_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    ModelConfig = TestRecord:model_init(),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+
+    Key = <<"key_icct">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+
+    LinkedKey = "linked_key_icct",
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 2, <<"efg">>, {test, tuple2})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc])),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+
+    ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
+    Self = self(),
+    spawn_link(fun() ->
+        Ans = ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0]),
+        Self ! {del_old_key, Ans}
+    end),
+
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, save, [Doc])),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
+
+    SA = receive
+        {del_old_key, SpawnedAns} ->
+            SpawnedAns
+    after
+        timer:seconds(10) ->
+            timeout
+    end,
+    ?assertMatch(ok, SA),
+
+    Uuid = caches_controller:get_cache_uuid(Key, TestRecord),
+    Uuid2 = caches_controller:get_cache_uuid({Key, link}, TestRecord),
+    ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid])),
+    ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid2])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key])),
+    ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link])),
+
+
+    ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
+
+    ?assertMatch(false, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid])),
+    ?assertMatch(false, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid2])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key])),
+    ?assertMatch({error,link_not_found}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link])),
+
+    ok.
 
 operations_sequence_global_cache_test(Config) ->
     [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
@@ -354,7 +423,7 @@ multiple_links_creation_disk_test(Config) ->
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
     multiple_links_creation_test_base(Config, PModule).
 
-multiple_links_creation_global_cache_test(Config) ->
+multiple_links_creation_global_only_test(Config) ->
     [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
     PModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     multiple_links_creation_test_base(Config, PModule).
