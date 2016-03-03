@@ -63,6 +63,8 @@ def _node_up(image, bindir, config, config_path, dns_servers, logdir):
 [ -d /root/build/debug ] && cp /root/build/debug/oneclient /root/bin/oneclient
 mkdir /tmp/certs
 mkdir /tmp/keys
+echo 'while ((1)); do chown -R {uid}:{gid} /tmp; sleep 1; done' > /root/bin/chown_logs.sh
+bash /root/bin/chown_logs.sh &
 '''
 
     for client in node['clients']:
@@ -92,7 +94,9 @@ EOF
         command = command.format(
             client_name=client_name,
             cert_file=open(cert_file_path, 'r').read(),
-            key_file=open(key_file_path, 'r').read())
+            key_file=open(key_file_path, 'r').read(),
+            uid=os.geteuid(),
+            gid=os.getegid())
 
         client_data[client_name]['user_cert'] = os.path.join('/tmp', 'certs', client_name, 'cert')
         client_data[client_name]['user_key'] = os.path.join('/tmp', 'keys', client_name, 'key')
