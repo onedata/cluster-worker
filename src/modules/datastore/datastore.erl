@@ -629,7 +629,7 @@ run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Retu
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
+    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
@@ -831,10 +831,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             {ok, Value} ->
                 {ok, Value};
             {tasks, Tasks} ->
-                Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                    true -> ?CLUSTER_LEVEL;
-                    _ -> ?NODE_LEVEL
-                end,
+                Level = caches_controller:cache_to_task_level(ModelName),
                 lists:foreach(fun
                     ({task, Task}) ->
                         ok = task_manager:start_task(Task, Level);
@@ -842,10 +839,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                         ok % error already logged
                 end, Tasks);
             {task, Task} ->
-                Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                    true -> ?CLUSTER_LEVEL;
-                    _ -> ?NODE_LEVEL
-                end,
+                Level = caches_controller:cache_to_task_level(ModelName),
                 ok = task_manager:start_task(Task, Level);
             {error, Reason} ->
                 {error, Reason}
