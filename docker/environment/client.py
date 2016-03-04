@@ -61,6 +61,7 @@ def _node_up(image, bindir, config, config_path, dns_servers, logdir):
 [ -d /root/build/release ] && cp /root/build/release/oneclient /root/bin/oneclient
 [ -d /root/build/relwithdebinfo ] && cp /root/build/relwithdebinfo/oneclient /root/bin/oneclient
 [ -d /root/build/debug ] && cp /root/build/debug/oneclient /root/bin/oneclient
+chmod 777 /tmp
 mkdir /tmp/certs
 mkdir /tmp/keys
 echo 'while ((1)); do chown -R {uid}:{gid} /tmp; sleep 1; done' > /root/bin/chown_logs.sh
@@ -108,8 +109,6 @@ EOF
 
     if logdir:
         logdir = os.path.join(os.path.abspath(logdir), hostname)
-        os.makedirs(logdir)
-        os.chmod(logdir, 0757)
         volumes.extend([(logdir, '/tmp', 'rw')])
 
     container = docker.run(
