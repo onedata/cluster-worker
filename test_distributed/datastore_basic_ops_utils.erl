@@ -886,21 +886,23 @@ disable_cache_control(Workers) ->
 
 get_record_name(Case) ->
     CStr = atom_to_list(Case),
-    case {string:str(CStr, "cache") > 0, string:str(CStr, "sync") == 0} of
-        {true, true} ->
+    case {string:str(CStr, "cache") > 0, string:str(CStr, "sync") == 0, string:str(CStr, "no_transactions") > 0} of
+        {true, true, _} ->
             case string:str(CStr, "global") > 0 of
                 true ->
                     globally_cached_record;
                 _ ->
                     locally_cached_record
             end;
-        {true, false} ->
+        {true, false, _} ->
             case string:str(CStr, "global") > 0 of
                 true ->
                     globally_cached_sync_record;
                 _ ->
                     locally_cached_sync_record
             end;
+        {_, _, true} ->
+            global_only_no_transactions_record;
         _ ->
             case {string:str(CStr, "global") > 0, string:str(CStr, "local") > 0} of
                 {true, _} ->
@@ -1116,4 +1118,6 @@ get_record(disk_only_record, Field1, Field2, Field3) ->
 get_record(globally_cached_sync_record, Field1, Field2, Field3) ->
     #globally_cached_sync_record{field1 = Field1, field2 = Field2, field3 = Field3};
 get_record(locally_cached_sync_record, Field1, Field2, Field3) ->
-    #locally_cached_sync_record{field1 = Field1, field2 = Field2, field3 = Field3}.
+    #locally_cached_sync_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(global_only_no_transactions_record, Field1, Field2, Field3) ->
+    #global_only_no_transactions_record{field1 = Field1, field2 = Field2, field3 = Field3}.

@@ -8,7 +8,7 @@
 %%% @doc Sample model.
 %%% @end
 %%%-------------------------------------------------------------------
--module(locally_cached_sync_record).
+-module(global_only_no_transactions_record).
 -author("Rafal Slota").
 -behaviour(model_behaviour).
 
@@ -86,8 +86,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?LOCALLY_CACHED_LEVEL,
-        ?LOCALLY_CACHED_LEVEL, true, true).
+    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, false).
 
 %%--------------------------------------------------------------------
 %% @doc

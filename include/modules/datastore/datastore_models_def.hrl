@@ -43,6 +43,13 @@
 }).
 
 %% sample model with example fields
+-record(global_only_no_transactions_record, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
+%% sample model with example fields
 -record(local_only_record, {
     field1 :: term(),
     field2 :: term(),

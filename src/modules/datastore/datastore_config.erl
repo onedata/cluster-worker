@@ -24,6 +24,7 @@
   globally_cached_record,
   locally_cached_record,
   global_only_record,
+  global_only_no_transactions_record,
   local_only_record,
   disk_only_record,
   globally_cached_sync_record,
@@ -54,7 +55,7 @@ models() -> ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, [
 %%--------------------------------------------------------------------
 -spec global_caches() -> Models :: [model_behaviour:model_type()].
 global_caches() ->
-  filter_models_by_level(?GLOBALLY_CACHED_LEVEL, models_potentially_cached()) -- [globally_cached_sync_record].
+  filter_models_by_level(?GLOBALLY_CACHED_LEVEL, models_potentially_cached()).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -63,7 +64,7 @@ global_caches() ->
 %%--------------------------------------------------------------------
 -spec local_caches() -> Models :: [model_behaviour:model_type()].
 local_caches() ->
-  filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()) -- [locally_cached_sync_record].
+  filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()).
 
 
 %%%===================================================================
@@ -77,7 +78,10 @@ local_caches() ->
 %% @end
 %%--------------------------------------------------------------------
 filter_models_by_level(Level, Models) ->
-  lists:filter(fun(Model) -> (Model:model_init())#model_config.store_level == Level end, Models).
+  lists:filter(fun(Model) ->
+    MInit = Model:model_init(),
+    (MInit#model_config.store_level == Level) and (MInit#model_config.sync_cache == false)
+  end, Models).
 
 %%--------------------------------------------------------------------
 %% @private
