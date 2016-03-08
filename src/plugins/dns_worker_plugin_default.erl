@@ -12,17 +12,38 @@
 -module(dns_worker_plugin_default).
 -author("Michal Zmuda").
 
-- behavior(dns_worker_plugin_behaviour).
+-behavior(dns_worker_plugin_behaviour).
 
--export([parse_domain/1]).
+-include("global_definitions.hrl").
+-include_lib("ctool/include/logging.hrl").
+-include_lib("kernel/src/inet_dns.hrl").
+
+-export([resolve/3]).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
-%% {@link dns_worker_plugin_behaviour} callback parse_domain/0.
+%% {@link dns_worker_plugin_behaviour} callback resolve/3.
 %% @end
 %%--------------------------------------------------------------------
--spec parse_domain(Domain :: string()) -> ok | refused | nx_domain.
+-spec resolve(Method :: dns_worker_plugin_behaviour:handle_method(),
+    Domain :: string(), LbAdvice :: load_balancing:dns_lb_advice()) ->
+    dns_worker_plugin_behaviour:handler_reply().
 
-parse_domain(_) ->
-  ok.
+resolve(handle_a, Domain, LBAdvice) ->
+    Nodes = load_balancing:choose_nodes_for_dns(LBAdvice),
+    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_a_response_ttl),
+    {ok,
+            [dns_server:answer_record(Domain, TTL, ?S_A, IP) || IP <- Nodes] ++
+            [dns_server:authoritative_answer_flag(true)]
+    };
+
+resolve(handle_ns, Domain, LBAdvice) ->
+    Nodes = load_balancing:choose_ns_nodes_for_dns(LBAdvice),
+    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_ns_response_ttl),
+    {ok,
+            [dns_server:answer_record(Domain, TTL, ?S_NS, inet_parse:ntoa(IP)) || IP <- Nodes] ++
+            [dns_server:authoritative_answer_flag(true)]
+    };
+
+resolve(_, _, _) ->
+    serv_fail.
