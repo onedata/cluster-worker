@@ -31,7 +31,7 @@
         binary_to_integer(LastSeqInDb)
     end).
 
--define(TIMEOUT, timer:seconds(30)).
+-define(TIMEOUT, timer:seconds(10)).
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
@@ -176,23 +176,21 @@ force_save_test(Config) ->
 %% Test stream with finite until value
 finite_stream_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
-    FirstSeq = ?getFirstSeq(W, Config),
     Pid = self(),
 
     BaseVal = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
     BaseMod = test_record_1,
 
-    lists:map(
-        fun(Key) ->
-            Doc = #document{key = Key, value = BaseVal},
-            ?assertEqual({ok, Key}, rpc:call(W, BaseMod, save, [Doc])),
-            {Key, BaseVal, BaseMod}
-        end,
-        lists:seq(1, 10)
-    ),
+    save_docs(W, BaseVal, BaseMod, 1, 10),
+    receive_all(finite_stream_test, []),
 
-    Received = receive_all(finite_stream_test, []),
-    LastSeq = element(1, lists:last(Received)),
+    save_docs(W, BaseVal, BaseMod, 11, 20),
+    ReceivedFromInfinite = receive_all(finite_stream_test, []),
+    Since = element(1, lists:nth(1, ReceivedFromInfinite)) - 1,
+    Until = element(1, lists:last(ReceivedFromInfinite)),
+
+    save_docs(W, BaseVal, BaseMod, 21, 30),
+    receive_all(finite_stream_test, []),
 
     {_, DriverPid} = ?assertMatch(
         {ok, _},
@@ -201,19 +199,13 @@ finite_stream_test(Config) ->
                 fun(Seq, Doc, Mod) ->
                     Pid ! {finite, {Seq, Doc, Mod}}
                 end,
-                FirstSeq,
-                LastSeq
+                Since,
+                Until
             ]
         )
     ),
-
-    lists:map(
-        fun({Seq, #document{key = Key, value = Val}, Mod}) ->
-            ?assertReceivedMatch({finite,
-                {Seq, #document{key = Key, value = Val}, Mod}}, ?TIMEOUT)
-        end,
-        Received
-    ),
+    ReceivedFromFinite = receive_all(finite, []),
+    ?assertEqual(ReceivedFromInfinite, ReceivedFromFinite),
 
     ?assertEqual(ok, rpc:call(W, gen_changes, stop, [DriverPid])),
     ok.
@@ -257,9 +249,22 @@ end_per_testcase(_, Config) ->
 %%% Internal functions
 %%%===================================================================
 
-%% Receive all messages with given prefix
+%% Saves docs for given value, model and range of keys
+save_docs(Worker, Value, Model, FirstKey, LastKey) ->
+    lists:map(
+        fun(Key) ->
+            Doc = #document{key = Key, value = Value},
+            ?assertEqual({ok, Key}, rpc:call(Worker, Model, save, [Doc])),
+            {Key, Value, Model}
+        end,
+        lists:seq(FirstKey, LastKey)
+    ).
+
+%% Receives all messages with given prefix
 receive_all(Prefix, Received) ->
     receive
+        {Prefix, {_, stream_ended, _}} ->
+            lists:usort(Received);
         {Prefix, Data} ->
             receive_all(Prefix, [Data | Received])
     after
@@ -267,7 +272,7 @@ receive_all(Prefix, Received) ->
             lists:usort(Received)
     end.
 
-%% Clean mailbox
+%% Cleans mailbox
 flush() ->
     receive
         _ ->
