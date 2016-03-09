@@ -81,7 +81,7 @@ shallow_to_record(#{'$record' := ModelName} = Map) ->
 %%--------------------------------------------------------------------
 -spec gen_uuid() -> binary().
 gen_uuid() ->
-    base64:encode(crypto:rand_bytes(?KEY_LEN)).
+    http_utils:base64url_encode(crypto:rand_bytes(?KEY_LEN)).
 
 
 %%--------------------------------------------------------------------
@@ -91,7 +91,7 @@ gen_uuid() ->
 %%--------------------------------------------------------------------
 -spec gen_uuid(term()) -> binary().
 gen_uuid(Term) ->
-    base64:encode(term_to_binary(Term)).
+    http_utils:base64url_encode(term_to_binary(Term)).
 
 
 %%%===================================================================

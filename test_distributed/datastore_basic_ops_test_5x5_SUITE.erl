@@ -230,7 +230,7 @@ exists_global_cache_test_base(Config) ->
     datastore_basic_ops_utils:exists_test(Config, globally_cached).
 
 links_global_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?links_test_def).
+	?PERFORMANCE(Config, ?links_test_def).
 links_global_cache_test_base(Config) ->
     datastore_basic_ops_utils:links_test(Config, globally_cached).
 
@@ -318,42 +318,12 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
 
-init_per_testcase(Case, Config) when
-    Case =:= no_transactions_create_delete_global_store_test;
-    Case =:= no_transactions_update_global_store_test ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new([node() | Workers], global_only_record),
-    test_utils:mock_expect([node() | Workers], global_only_record, model_init, fun() ->
-        #model_config{name = global_only_record,
-            size = record_info(size, global_only_record),
-            fields = record_info(fields, global_only_record),
-            defaults = #global_only_record{},
-            bucket = test_bucket,
-            hooks = [{global_only_record, update}],
-            store_level = global_only, % use of macro results in test errors
-            link_store_level = global_only,
-            transactional_global_cache = false
-        }
-    end),
-    Nodes = ?config(cluster_worker_nodes, Config),
-    test_utils:enable_datastore_models(Nodes, [
-        globally_cached_record, locally_cached_record, global_only_record, local_only_record,
-        disk_only_record, globally_cached_sync_record, locally_cached_sync_record, test_record_1, test_record_2]),
-    datastore_basic_ops_utils:set_env(Case, Config);
-
 init_per_testcase(Case, Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
     test_utils:enable_datastore_models(Nodes, [
         globally_cached_record, locally_cached_record, global_only_record, local_only_record,
         disk_only_record, globally_cached_sync_record, locally_cached_sync_record, test_record_1, test_record_2]),
     datastore_basic_ops_utils:set_env(Case, Config).
-
-end_per_testcase(Case, Config) when
-    Case =:= no_transactions_create_delete_global_store_test;
-    Case =:= no_transactions_update_global_store_test ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_validate_and_unload([node() | Workers], global_only_record),
-    datastore_basic_ops_utils:clear_env(Config);
 
 end_per_testcase(_Case, Config) ->
     datastore_basic_ops_utils:clear_env(Config).
