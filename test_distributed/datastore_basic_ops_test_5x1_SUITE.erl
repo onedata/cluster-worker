@@ -149,6 +149,10 @@ end_per_suite(Config) ->
 	test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) ->
+	Nodes = ?config(cluster_worker_nodes, Config),
+	test_utils:enable_datastore_models(Nodes, [
+		globally_cached_record, locally_cached_record, global_only_record, local_only_record,
+		disk_only_record, globally_cached_sync_record, locally_cached_sync_record, test_record_1, test_record_2]),
 	datastore_basic_ops_utils:set_env(Case, Config).
 
 end_per_testcase(_Case, Config) ->
