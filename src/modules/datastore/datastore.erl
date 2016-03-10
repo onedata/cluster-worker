@@ -23,6 +23,7 @@
 
 %% #document types
 -type uuid() :: binary().
+% TODO - exclude atom (possible crash because of to large number of atoms usage) or make apropriate WARNING
 -type key() :: undefined | uuid() | atom() | integer().
 -type ext_key() :: key() | term().
 -type document() :: #document{}.

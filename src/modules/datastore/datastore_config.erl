@@ -21,7 +21,14 @@
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
-  some_record,
+  globally_cached_record,
+  locally_cached_record,
+  global_only_record,
+  global_only_no_transactions_record,
+  local_only_record,
+  disk_only_record,
+  globally_cached_sync_record,
+  locally_cached_sync_record,
   cache_controller,
   task_pool,
 
@@ -71,7 +78,10 @@ local_caches() ->
 %% @end
 %%--------------------------------------------------------------------
 filter_models_by_level(Level, Models) ->
-  lists:filter(fun(Model) -> (Model:model_init())#model_config.store_level == Level end, Models).
+  lists:filter(fun(Model) ->
+    MInit = Model:model_init(),
+    (MInit#model_config.store_level == Level) and (MInit#model_config.sync_cache == false)
+  end, Models).
 
 %%--------------------------------------------------------------------
 %% @private
