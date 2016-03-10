@@ -59,11 +59,15 @@
     sync_cache = SyncCache
 }).
 
+%% Max link map size in single links record
+-define(LINKS_MAP_MAX_SIZE, 100).
+
 %% Internal semi-model used by document that holds links between documents
 -record(links, {
     key,
     model,
-    link_map = #{}
+    link_map = #{},
+    next_key = <<"non">>
 }).
 
 -endif.

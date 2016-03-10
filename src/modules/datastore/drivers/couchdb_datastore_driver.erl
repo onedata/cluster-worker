@@ -218,24 +218,27 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                             ok;
                         {error, Reason} ->
                             {error, Reason};
-                        {ok, #document{value = Value, rev = Rev}} ->
-                            {Props} = to_json_term(Value),
-                            Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-                            case db_run(couchbeam, delete_doc, [Doc], 3) of
-                                ok ->
-                                    ok;
-                                {ok, _} ->
-                                    ok;
-                                {error, key_enoent} ->
-                                    ok;
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end
+                        {ok, Doc} ->
+                            delete_doc(Bucket, Doc)
                     end;
                 false ->
                     ok
             end
         end).
+
+delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
+    {Props} = to_json_term(Value),
+    Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
+    case db_run(couchbeam, delete_doc, [Doc], 3) of
+        ok ->
+            ok;
+        {ok, _} ->
+            ok;
+        {error, key_enoent} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -265,28 +268,58 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case get(ModelConfig, links_doc_key(Key)) of
-                {ok, #document{value = #links{link_map = LinkMap}}} ->
-                    add_links4(ModelConfig, Key, Links, LinkMap);
-                {error, {not_found, _}} ->
-                    add_links4(ModelConfig, Key, Links, #{});
-                {error, Reason} ->
-                    {error, Reason}
-            end
+            save_links_maps(ModelConfig, Key, Links)
         end
     ).
 
--spec add_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()], InternalCtx :: term()) ->
-    ok | datastore:generic_error().
-add_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
-        {ok, _} -> ok;
+
+save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, LinksList) ->
+    LDK = links_doc_key(Key),
+    case get(ModelConfig, LDK) of
+        {ok, LinksDoc} ->
+            save_links_maps(ModelConfig, Key, LinksDoc, LinksList, 1);
+        {error, {not_found, _}} ->
+            LinksDoc = #document{key = LDK, value = #links{key = Key, model = ModelName}},
+            save_links_maps(ModelConfig, Key, LinksDoc, LinksList, 1);
         {error, Reason} ->
             {error, Reason}
-    end;
-add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkTarget} | R], Ctx) ->
-    add_links4(ModelConfig, Key, R, maps:put(LinkName, LinkTarget, Ctx)).
+    end.
 
+save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key,
+    #document{value = #links{link_map = LinkMap, next_key = NK} = LinksRecord} = LinksDoc, LinksList, KeyNum) ->
+    MapSize = maps:size(LinkMap),
+    {FilledMap, NewLinksList} = fill_links_map(LinksList, LinkMap, MapSize),
+    case NewLinksList of
+        [] ->
+            case save(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
+                {ok, _} -> ok;
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        _ ->
+            {NewLinksDoc, NextLinksDoc} = case NK of
+                              <<"non">> ->
+                                  NewLDK = links_doc_key(Key, KeyNum),
+                                  {LinksDoc#document{value = LinksRecord#links{link_map = FilledMap, next_key = NewLDK}},
+                                      #document{key = NewLDK, value = #links{key = Key, model = ModelName}}};
+                              _ ->
+                                  {ok, NLD} = get(ModelConfig, NK),
+                                  {LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}, NLD}
+                          end,
+            case save(ModelConfig, NewLinksDoc) of
+                {ok, _} ->
+                    save_links_maps(ModelConfig, Key, NextLinksDoc, NewLinksList, KeyNum + 1);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.
+
+fill_links_map([], Map, _MapSize) ->
+    {Map, []};
+fill_links_map(Links, Map, MapSize) when MapSize >= ?LINKS_MAP_MAX_SIZE ->
+    {Map, Links};
+fill_links_map([{LinkName, LinkTarget} | R], Map, MapSize) ->
+    fill_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize + 1).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -295,33 +328,83 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkT
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
-delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
-    delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
+delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            delete_links_docs(ModelConfig, links_doc_key(Key))
+        end
+    );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case get(ModelConfig, links_doc_key(Key)) of
-                {ok, #document{value = #links{link_map = LinkMap}}} ->
-                    delete_links4(ModelConfig, Key, Links, LinkMap);
-                {error, {not_found, _}} ->
-                    ok;
-                {error, Reason} ->
-                    {error, Reason}
-            end
+            delete_links_from_maps(ModelConfig, links_doc_key(Key), Links, 0, [], Key)
         end
     ).
 
--spec delete_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()] | all, InternalCtx :: term()) ->
-    ok | datastore:generic_error().
-delete_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
-        {ok, _} -> ok;
+delete_links_docs(_ModelConfig, <<"non">>) ->
+    ok;
+delete_links_docs(#model_config{bucket = Bucket} = ModelConfig, Key) ->
+    case get(ModelConfig, Key) of
+        {error, {not_found, _}} ->
+            ok;
+        {error, not_found} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason};
+        {ok, #document{value = #links{next_key = NextKey}} = Doc} ->
+            case delete_doc(Bucket, Doc) of
+                ok ->
+                    delete_links_docs(ModelConfig, NextKey);
+                Error ->
+                    Error
+            end
+    end.
+
+delete_links_from_maps(_ModelConfig, <<"non">>, _Links, _FreeSpaces, [], _MainDocKey) ->
+    ok;
+delete_links_from_maps(#model_config{bucket = Bucket} = ModelConfig, <<"non">>, _Links, FreeSpaces,
+    #document{value = #links{link_map = LinkMap}} = Doc, MainDocKey) ->
+    case FreeSpaces - maps:size(LinkMap) >= ?LINKS_MAP_MAX_SIZE*3/2 of
+        true ->
+            case delete_doc(Bucket, Doc) of
+                ok ->
+                    save_links_maps(ModelConfig, MainDocKey, maps:to_list(LinkMap));
+                Error ->
+                    Error
+            end;
+        _ ->
+            ok
+    end;
+delete_links_from_maps(ModelConfig, Key, Links, FreeSpaces, _PrevDoc, MainDocKey) ->
+    case get(ModelConfig, Key) of
+        {ok, #document{value = #links{next_key = NextKey, link_map = LinkMap} = LinksRecord} = LinkDoc} ->
+            InitSize = maps:size(LinkMap),
+            NewLinkMap = remove_from_links_map(Links, LinkMap),
+            NewSize = maps:size(NewLinkMap),
+            {SaveAns, NewLinkDoc} = case NewSize of
+                          InitSize ->
+                              {{ok, ok}, LinkDoc};
+                          _ ->
+                              NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
+                              {save(ModelConfig, NLD), NLD}
+                      end,
+            case SaveAns of
+                {ok, _} ->
+                    delete_links_from_maps(ModelConfig, NextKey, Links,
+                        FreeSpaces + ?LINKS_MAP_MAX_SIZE - NewSize, NewLinkDoc, MainDocKey);
+                Error ->
+                    Error
+            end;
+        {error, {not_found, _}} ->
+            ok;
         {error, Reason} ->
             {error, Reason}
-    end;
-delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
-    delete_links4(ModelConfig, Key, R, maps:remove(Link, Ctx)).
+    end.
 
+remove_from_links_map([], Map) ->
+    Map;
+remove_from_links_map([Link | R], Map) ->
+    remove_from_links_map(R, maps:remove(Link, Map)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -331,11 +414,19 @@ delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = #links{link_map = LinkMap}}} ->
+    fetch_link_from_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkName, links_doc_key(Key)).
+
+fetch_link_from_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkName, LinkKey) ->
+    case get(ModelConfig, LinkKey) of
+        {ok, #document{value = #links{link_map = LinkMap, next_key = NextKey}}} ->
             case maps:get(LinkName, LinkMap, undefined) of
                 undefined ->
-                    {error, link_not_found};
+                    case NextKey of
+                        <<"non">> ->
+                            {error, link_not_found};
+                        _ ->
+                            fetch_link_from_docs(ModelConfig, LinkName, NextKey)
+                    end;
                 LinkTarget ->
                     {ok, LinkTarget}
             end;
@@ -355,9 +446,15 @@ fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = #links{link_map = LinkMap}}} ->
-            {ok, maps:fold(Fun, AccIn, LinkMap)};
+    foreach_link_in_docs(#model_config{bucket = _Bucket} = ModelConfig, links_doc_key(Key), Fun, AccIn).
+
+foreach_link_in_docs(_ModelConfig, <<"non">>, _Fun, AccIn) ->
+    {ok, AccIn};
+foreach_link_in_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkKey, Fun, AccIn) ->
+    case get(ModelConfig, LinkKey) of
+        {ok, #document{value = #links{link_map = LinkMap, next_key = NextKey}}} ->
+            NewAccIn = maps:fold(Fun, AccIn, LinkMap),
+            foreach_link_in_docs(ModelConfig, NextKey, Fun, NewAccIn) ;
         {error, {not_found, _}} ->
             {ok, AccIn};
         {error, Reason} ->
@@ -508,7 +605,19 @@ from_json_term(Term) when is_binary(Term) ->
 %%--------------------------------------------------------------------
 -spec links_doc_key(Key :: datastore:key()) -> BinKey :: binary().
 links_doc_key(Key) ->
-    base64:encode(term_to_binary({links, Key})).
+    links_doc_key(Key, 0).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns key for document holding links for given document.
+%% @end
+%%--------------------------------------------------------------------
+-spec links_doc_key(Key :: datastore:key(), Num :: integer()) -> BinKey :: binary().
+links_doc_key(Key, 0) ->
+    base64:encode(term_to_binary({"links", Key}));
+links_doc_key(Key, Num) ->
+    base64:encode(term_to_binary({"links" ++ integer_to_list(Num), Key})).
 
 %%--------------------------------------------------------------------
 %% @doc
