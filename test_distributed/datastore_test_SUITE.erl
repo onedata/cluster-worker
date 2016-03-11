@@ -21,6 +21,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_engine.hrl").
+-include("datastore_test_models_def.hrl").
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).

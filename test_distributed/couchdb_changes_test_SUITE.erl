@@ -21,6 +21,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("datastore_test_models_def.hrl").
 
 -define(getFirstSeq(W, Config),
     begin

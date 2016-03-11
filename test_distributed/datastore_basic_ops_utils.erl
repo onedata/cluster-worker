@@ -15,6 +15,7 @@
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
+-include("datastore_basic_ops_utils.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").

@@ -21,62 +21,6 @@
     links :: term()
 }).
 
-%% sample model with example fields
--record(globally_cached_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(locally_cached_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(global_only_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(global_only_no_transactions_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(local_only_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(disk_only_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(globally_cached_sync_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
-%% sample model with example fields
--record(locally_cached_sync_record, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
 %% Model that controls utilization of cache
 -record(cache_controller, {
     timestamp = {0, 0, 0} :: erlang:timestamp(),
@@ -90,20 +34,6 @@
     task :: task_manager:task(),
     owner :: pid(),
     node :: node()
-}).
-
-%% TODO: inject in tests, VFS-1630
-%% Test models
--record(test_record_1, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
-}).
-
--record(test_record_2, {
-    field1 :: term(),
-    field2 :: term(),
-    field3 :: term()
 }).
 
 -endif.

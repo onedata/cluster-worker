@@ -12,6 +12,7 @@
 -author("Mateusz Paciorek").
 -behaviour(model_behaviour).
 
+-include("datastore_test_models_def.hrl").
 -include("modules/datastore/datastore_internal_model.hrl").
 
 %% model_behaviour callbacks
