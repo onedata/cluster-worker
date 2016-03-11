@@ -841,7 +841,6 @@ handle_change({done, _LastSeq}, State) ->
 
 
 handle_change(Change, #state{callback = Callback, until = Until, last_seq = LastSeq} = State) when Until > LastSeq; Until =:= infinity ->
-    ?error("Handle ~p ~p ~p ~p", [self(), LastSeq, State, Change]),
     NewChanges =
         try
             RawDoc = doc(Change),
@@ -857,7 +856,6 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
         end,
     {noreply, NewChanges};
 handle_change(_Change, #state{callback = Callback, until = Until, last_seq = LastSeq} = State) ->
-    ?error("Handle2 ~p ~p ~p ~p", [self(), LastSeq, State, _Change]),
     ?info("Changes stream has ended: until ~p, LastSeq ~p", [Until, LastSeq]),
     Callback(LastSeq, stream_ended, undefined),
     {stop, normal, State}.
