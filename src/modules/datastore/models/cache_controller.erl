@@ -23,7 +23,7 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5]).
+    list_docs_to_be_dumped/1, choose_action/5, check_fetch/3]).
 
 -define(DISK_OP_TIMEOUT, timer:minutes(1)).
 

@@ -50,18 +50,17 @@
 
 all() ->
     ?ALL([
-%%         local_test, global_test, global_atomic_update_test,
-%%         global_list_test, persistance_test, local_list_test,
-%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-%%         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-%%         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-%%         restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-%%         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-%%         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-%%         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-%%         interupt_global_cache_clearing_test,
-%%         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test
-        globally_cached_many_links_test
+        local_test, global_test, global_atomic_update_test,
+        global_list_test, persistance_test, local_list_test,
+        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+        interupt_global_cache_clearing_test,
+        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test
     ]).
 
 
@@ -89,16 +88,7 @@ many_links_test_base(Config, Level) ->
     GetLinkKey2 = fun(LinkedDocKey, I) ->
         list_to_atom(LinkedDocKey ++ integer_to_list(I))
     end,
-    GetLinkKey3 = fun(LinkedDocKey, I) ->
-        list_to_binary(integer_to_list(I) ++ LinkedDocKey)
-    end,
-    GetLinkKey4 = fun(LinkedDocKey, I) ->
-        list_to_binary(integer_to_list(I) ++ LinkedDocKey ++ integer_to_list(I))
-    end,
-    GetLinkKey5 = fun(LinkedDocKey, I) ->
-        list_to_binary(LinkedDocKey ++ integer_to_list(I) ++ LinkedDocKey)
-    end,
-    KeyFuns = [GetLinkKey1, GetLinkKey2, GetLinkKey3, GetLinkKey4, GetLinkKey5],
+    KeyFuns = [GetLinkKey1, GetLinkKey2],
 
     GetLinkName1 = fun(_LinkedDocKey, I) ->
         integer_to_binary(I)
@@ -121,11 +111,10 @@ many_links_test_base(Config, Level) ->
     NameFuns = [GetLinkName1, GetLinkName2, GetLinkName3, GetLinkName4, GetLinkName5,
         GetLinkName6],
 
-    KeyFunsTuples = lists:zip(lists:seq(1,5), KeyFuns),
+    KeyFunsTuples = lists:zip(lists:seq(1,2), KeyFuns),
     NameFunsTuples = lists:zip(lists:seq(1,6), NameFuns),
 
     lists:foreach(fun({KNum, GLK}) ->
-        ct:print("bbbb ~p", [{Level, KNum}]),
         LinkedDocKey = "key_fun_" ++ integer_to_list(KNum) ++ "_key_mltb_link",
         GetLinkKey = fun(I) ->
             GLK(LinkedDocKey, I)
@@ -137,7 +126,6 @@ many_links_test_base(Config, Level) ->
     end, KeyFunsTuples),
 
     lists:foreach(fun({NNum, GLN}) ->
-        ct:print("aaaa ~p", [{Level, NNum}]),
         LinkedDocKey = "name_fun_" ++ integer_to_list(NNum) ++ "_key_mltb_link",
         GetLinkKey = fun(I) ->
             GetLinkKey1(LinkedDocKey, I)
@@ -197,6 +185,17 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     end,
     CheckLinks(1, 120, 120),
 
+    for(1, 120, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, add_links, [
+            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ]))
+    end),
+    CheckLinks(1, 120, 120),
+
     AddDocs(121, 180),
     ToAddList = fun(I) ->
         LinkedDoc =  #document{
@@ -206,6 +205,11 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
         {GetLinkName(I), LinkedDoc}
     end,
     AddList = lists:map(ToAddList, lists:seq(121, 180)),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList
+    ])),
+    CheckLinks(121, 180, 180),
+
     ?assertMatch(ok, ?call_store(Worker1, add_links, [
         Level, Doc, AddList
     ])),

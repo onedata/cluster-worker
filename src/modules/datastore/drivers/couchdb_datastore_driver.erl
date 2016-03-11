@@ -314,12 +314,12 @@ save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig,
 save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key,
     #document{key = LDK, value = #links{link_map = LinkMap, children = Children} = LinksRecord} = LinksDoc,
     LinksList, KeyNum) ->
-    MapSize = maps:size(LinkMap),
-    {FilledMap, NewLinksList} = fill_links_map(LinksList, LinkMap, MapSize),
+    {FilledMap, NewLinksList, AddedLinks} = fill_links_map(LinksList, LinkMap),
     case NewLinksList of
         [] ->
             case save(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
-                {ok, _} -> ok;
+                {ok, _} ->
+                    del_old_links(ModelConfig, AddedLinks, LinksDoc, KeyNum);
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -341,26 +341,87 @@ save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig,
                 children = NewChildren}},
             case save(ModelConfig, NewLinksDoc) of
                 {ok, _} ->
-                    maps:fold(fun(Num, SLs, FunAns) ->
-                        NDoc = maps:get(Num, ChildrenDocs),
-                        case FunAns of
-                            ok ->
-                                save_links_maps(ModelConfig, Key, NDoc, SLs, KeyNum + 1);
-                            OldError ->
-                                OldError
-                        end
-                    end, ok, SplitedLinks);
+                    case del_old_links(ModelConfig, AddedLinks, LinksDoc, KeyNum) of
+                        ok ->
+                            maps:fold(fun(Num, SLs, FunAns) ->
+                                NDoc = maps:get(Num, ChildrenDocs),
+                                case FunAns of
+                                    ok ->
+                                        save_links_maps(ModelConfig, Key, NDoc, SLs, KeyNum + 1);
+                                    OldError ->
+                                        OldError
+                                end
+                            end, ok, SplitedLinks);
+                        Other ->
+                            Other
+                    end;
                 {error, Reason} ->
                     {error, Reason}
             end
     end.
 
-fill_links_map([], Map, _MapSize) ->
-    {Map, []};
-fill_links_map(Links, Map, MapSize) when MapSize >= ?LINKS_MAP_MAX_SIZE ->
-    {Map, Links};
-fill_links_map([{LinkName, LinkTarget} | R], Map, MapSize) ->
-    fill_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize + 1).
+fill_links_map(LinksList, LinkMap) ->
+    MapSize = maps:size(LinkMap),
+    fill_links_map(LinksList, LinkMap, MapSize, [], []).
+
+fill_links_map([], Map, _MapSize, AddedLinks, LinksToAdd) ->
+    {Map, LinksToAdd, AddedLinks};
+fill_links_map([{LinkName, LinkTarget} = Link | R], Map, MapSize, AddedLinks, LinksToAdd) when MapSize >= ?LINKS_MAP_MAX_SIZE ->
+    case maps:is_key(LinkName, Map) of
+        true ->
+            fill_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize, AddedLinks, LinksToAdd);
+        _ ->
+            fill_links_map(R, Map, MapSize, AddedLinks, [Link | LinksToAdd])
+    end;
+fill_links_map([{LinkName, LinkTarget} | R], Map, MapSize, AddedLinks, LinksToAdd) ->
+    case maps:is_key(LinkName, Map) of
+        true ->
+            fill_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize, AddedLinks, LinksToAdd);
+        _ ->
+            fill_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize + 1, [LinkName | AddedLinks], LinksToAdd)
+    end.
+
+del_old_links(_ModelConfig, [], _Key, _KeyNum) ->
+    ok;
+del_old_links(#model_config{bucket = _Bucket} = _ModelConfig, _Links, <<"non">>, _KeyNum) ->
+    ok;
+del_old_links(#model_config{bucket = _Bucket} = ModelConfig, Links,
+    #document{value = #links{children = Children}}, KeyNum) ->
+    SplitedLinks = split_links_names_list(Links, KeyNum),
+    maps:fold(fun(Num, SLs, Acc) ->
+        case Acc of
+            ok ->
+                NextKey = maps:get(Num, Children, <<"non">>),
+                del_old_links(ModelConfig, SLs, NextKey, KeyNum + 1);
+            _ ->
+                Acc
+        end
+    end, ok, SplitedLinks);
+del_old_links(#model_config{bucket = _Bucket} = ModelConfig, Links, Key, KeyNum) ->
+    case get(ModelConfig, Key) of
+        {ok, #document{value = #links{link_map = LinkMap} = LinksRecord} = LinkDoc} ->
+            {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
+            SaveAns= case Deleted of
+                         0 ->
+                             {ok, ok};
+                         _ ->
+                             NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
+                             save(ModelConfig, NLD)
+                     end,
+
+            case {SaveAns, NewLinks} of
+                {{ok, _}, []} ->
+                    ok;
+                {{ok, _}, _} ->
+                    del_old_links(ModelConfig, NewLinks, LinkDoc, KeyNum);
+                Error ->
+                    Error
+            end;
+        {error, {not_found, _}} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
