@@ -272,6 +272,32 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
         end
     ).
 
+get_link_child_num(LinkName, KeyNum) when is_binary(LinkName) ->
+    get_link_child_num(LinkName, KeyNum, byte_size(LinkName));
+get_link_child_num(LinkName, KeyNum) ->
+    get_link_child_num(term_to_binary(LinkName), KeyNum).
+
+get_link_child_num(LinkName, KeyNum, ByteSize) when KeyNum > ByteSize ->
+    get_link_child_num(binary:at(LinkName, 0));
+get_link_child_num(LinkName, KeyNum, ByteSize) ->
+    get_link_child_num(binary:at(LinkName, ByteSize - KeyNum)).
+
+get_link_child_num(Byte) ->
+    Byte rem ?LINKS_TREE_BASE.
+
+split_links_list(LinksList, KeyNum) ->
+    lists:foldl(fun({LinkName, _} = Link, Acc) ->
+        LinkNum = get_link_child_num(LinkName, KeyNum),
+        TmpAns = maps:get(LinkNum, Acc, []),
+        maps:put(LinkNum, [Link | TmpAns], Acc)
+    end, #{}, LinksList).
+
+split_links_names_list(LinksList, KeyNum) ->
+    lists:foldl(fun(LinkName, Acc) ->
+        LinkNum = get_link_child_num(LinkName, KeyNum),
+        TmpAns = maps:get(LinkNum, Acc, []),
+        maps:put(LinkNum, [LinkName | TmpAns], Acc)
+    end, #{}, LinksList).
 
 save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, LinksList) ->
     LDK = links_doc_key(Key),
@@ -286,7 +312,8 @@ save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig,
     end.
 
 save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key,
-    #document{value = #links{link_map = LinkMap, next_key = NK} = LinksRecord} = LinksDoc, LinksList, KeyNum) ->
+    #document{key = LDK, value = #links{link_map = LinkMap, children = Children} = LinksRecord} = LinksDoc,
+    LinksList, KeyNum) ->
     MapSize = maps:size(LinkMap),
     {FilledMap, NewLinksList} = fill_links_map(LinksList, LinkMap, MapSize),
     case NewLinksList of
@@ -297,18 +324,32 @@ save_links_maps(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig,
                     {error, Reason}
             end;
         _ ->
-            {NewLinksDoc, NextLinksDoc} = case NK of
-                              <<"non">> ->
-                                  NewLDK = links_doc_key(Key, KeyNum),
-                                  {LinksDoc#document{value = LinksRecord#links{link_map = FilledMap, next_key = NewLDK}},
-                                      #document{key = NewLDK, value = #links{key = Key, model = ModelName}}};
-                              _ ->
-                                  {ok, NLD} = get(ModelConfig, NK),
-                                  {LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}, NLD}
-                          end,
+            SplitedLinks = split_links_list(NewLinksList, KeyNum),
+            {NewChildren, ChildrenDocs} = maps:fold(fun(Num, _SLs, {Acc1, Acc2}) ->
+                NK = maps:get(Num, Children, <<"non">>),
+                case NK of
+                    <<"non">> ->
+                        NewLDK = links_child_doc_key(LDK, Num),
+                        NLD = #document{key = NewLDK, value = #links{key = Key, model = ModelName}},
+                        {maps:put(Num, NewLDK, Acc1), maps:put(Num, NLD, Acc2)};
+                    _ ->
+                        {ok, NLD} = get(ModelConfig, NK),
+                        {Acc1, maps:put(Num, NLD, Acc2)}
+                end
+            end, {Children, #{}}, SplitedLinks),
+            NewLinksDoc = LinksDoc#document{value = LinksRecord#links{link_map = FilledMap,
+                children = NewChildren}},
             case save(ModelConfig, NewLinksDoc) of
                 {ok, _} ->
-                    save_links_maps(ModelConfig, Key, NextLinksDoc, NewLinksList, KeyNum + 1);
+                    maps:fold(fun(Num, SLs, FunAns) ->
+                        NDoc = maps:get(Num, ChildrenDocs),
+                        case FunAns of
+                            ok ->
+                                save_links_maps(ModelConfig, Key, NDoc, SLs, KeyNum + 1);
+                            OldError ->
+                                OldError
+                        end
+                    end, ok, SplitedLinks);
                 {error, Reason} ->
                     {error, Reason}
             end
@@ -337,7 +378,12 @@ delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            delete_links_from_maps(ModelConfig, links_doc_key(Key), Links, 0, [], Key)
+            case delete_links_from_maps(ModelConfig, links_doc_key(Key), Links, 0, Key, 1,  #document{}, 0) of
+                {ok, _} ->
+                    ok;
+                Other ->
+                    Other
+            end
         end
     ).
 
@@ -351,60 +397,139 @@ delete_links_docs(#model_config{bucket = Bucket} = ModelConfig, Key) ->
             ok;
         {error, Reason} ->
             {error, Reason};
-        {ok, #document{value = #links{next_key = NextKey}} = Doc} ->
+        {ok, #document{value = #links{children = Children}} = Doc} ->
             case delete_doc(Bucket, Doc) of
                 ok ->
-                    delete_links_docs(ModelConfig, NextKey);
+                    maps:fold(fun(_Num, ChildKey, FunAns) ->
+                        case FunAns of
+                            ok ->
+                                delete_links_docs(ModelConfig, ChildKey);
+                            OldError ->
+                                OldError
+                        end
+                    end, ok, Children);
                 Error ->
                     Error
             end
     end.
 
-delete_links_from_maps(_ModelConfig, <<"non">>, _Links, _FreeSpaces, [], _MainDocKey) ->
-    ok;
-delete_links_from_maps(#model_config{bucket = Bucket} = ModelConfig, <<"non">>, _Links, FreeSpaces,
-    #document{value = #links{link_map = LinkMap}} = Doc, MainDocKey) ->
-    case FreeSpaces - maps:size(LinkMap) >= ?LINKS_MAP_MAX_SIZE*3/2 of
-        true ->
-            case delete_doc(Bucket, Doc) of
-                ok ->
-                    save_links_maps(ModelConfig, MainDocKey, maps:to_list(LinkMap));
-                Error ->
-                    Error
-            end;
-        _ ->
-            ok
-    end;
-delete_links_from_maps(ModelConfig, Key, Links, FreeSpaces, _PrevDoc, MainDocKey) ->
+delete_links_from_maps(_ModelConfig, <<"non">>, _Links, _FreeSpaces, _MainDocKey, _KeyNum, _Parent, _ParentNum) ->
+    {ok, 0};
+delete_links_from_maps(ModelConfig, Key, Links, FreeSpaces, MainDocKey, KeyNum, Parent, ParentNum) ->
     case get(ModelConfig, Key) of
-        {ok, #document{value = #links{next_key = NextKey, link_map = LinkMap} = LinksRecord} = LinkDoc} ->
-            InitSize = maps:size(LinkMap),
-            NewLinkMap = remove_from_links_map(Links, LinkMap),
+        {ok, #document{value = #links{children = Children, link_map = LinkMap} = LinksRecord} = LinkDoc} ->
+            {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
             NewSize = maps:size(NewLinkMap),
-            {SaveAns, NewLinkDoc} = case NewSize of
-                          InitSize ->
+            {SaveAns, NewLinkRef} = case Deleted of
+                          0 ->
                               {{ok, ok}, LinkDoc};
                           _ ->
                               NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
-                              {save(ModelConfig, NLD), NLD}
+                              {save(ModelConfig, NLD), NLD#document.key}
                       end,
-            case SaveAns of
-                {ok, _} ->
-                    delete_links_from_maps(ModelConfig, NextKey, Links,
-                        FreeSpaces + ?LINKS_MAP_MAX_SIZE - NewSize, NewLinkDoc, MainDocKey);
+
+            NewFreeSpaces = FreeSpaces + ?LINKS_MAP_MAX_SIZE - NewSize,
+            case {SaveAns, NewLinks} of
+                {{ok, _}, []} ->
+                    case NewFreeSpaces >= ?LINKS_MAP_MAX_SIZE of
+                        true ->
+                            rebuild_links_tree(ModelConfig, MainDocKey, NewLinkRef, Parent, ParentNum, Children);
+                        _ ->
+                            {ok, 0}
+                    end;
+                {{ok, _}, _} ->
+                    SplitedLinks = split_links_names_list(NewLinks, KeyNum),
+                    maps:fold(fun(Num, SLs, Acc) ->
+                        case Acc of
+                            {ok, UsedFreeSpaces} ->
+                                NextKey = maps:get(Num, Children, <<"non">>),
+                                case delete_links_from_maps(ModelConfig, NextKey, SLs,
+                                    NewFreeSpaces - UsedFreeSpaces, MainDocKey, KeyNum + 1, NewLinkRef, Num) of
+                                    {ok, UsedFreeSpaces2} ->
+                                        {ok, UsedFreeSpaces + UsedFreeSpaces2};
+                                    Other ->
+                                        Other
+                                end;
+                            _ ->
+                                Acc
+                        end
+                    end, {ok, 0}, SplitedLinks);
                 Error ->
                     Error
             end;
         {error, {not_found, _}} ->
-            ok;
+            {ok, 0};
         {error, Reason} ->
             {error, Reason}
     end.
 
-remove_from_links_map([], Map) ->
-    Map;
-remove_from_links_map([Link | R], Map) ->
-    remove_from_links_map(R, maps:remove(Link, Map)).
+rebuild_links_tree(ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, Children) ->
+    case maps:size(Children) of
+        0 ->
+            delete_leaf(ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum);
+        _ ->
+            [{FirstChildNum, FirstChild} | _] = maps:to_list(Children),
+            case get(ModelConfig, FirstChild) of
+                {ok, #document{value = #links{children = NewChildren}} = NewLinkDoc} ->
+                    rebuild_links_tree(ModelConfig, MainDocKey, NewLinkDoc, LinkDoc, FirstChildNum, NewChildren);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.
+
+delete_leaf(#model_config{bucket = Bucket} = ModelConfig, MainDocKey,
+    #document{value = #links{link_map = LinkMap}} = LinkDoc,
+    #document{key = ParentKey, value = #links{children = ParentChildren} = ParentLinks} = Parent, ParentNum) ->
+    case delete_doc(Bucket, LinkDoc) of
+        ok ->
+            case ParentKey of
+                undefined ->
+                    {ok, ok};
+                _ ->
+                    NewParent = Parent#document{
+                        value = ParentLinks#links{children = maps:remove(ParentNum, ParentChildren)}},
+                    case save(ModelConfig, NewParent) of
+                        {ok, _} ->
+                            case save_links_maps(ModelConfig, MainDocKey, maps:to_list(LinkMap)) of
+                                ok ->
+                                    {ok, maps:size(LinkMap)};
+                                Other ->
+                                    Other
+                            end;
+                        SaveParentError ->
+                            SaveParentError
+                    end
+            end;
+        DelError ->
+            DelError
+    end;
+delete_leaf(ModelConfig, MainDocKey, #document{} = LinkDoc, Parent, ParentNum) ->
+    case get(ModelConfig, Parent) of
+        {error, Reason} ->
+            {error, Reason};
+        {ok, Doc} ->
+            delete_leaf(ModelConfig, MainDocKey, LinkDoc, Doc, ParentNum)
+    end;
+delete_leaf(ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum) ->
+    case get(ModelConfig, LinkDoc) of
+        {error, Reason} ->
+            {error, Reason};
+        {ok, Doc} ->
+            delete_leaf(ModelConfig, MainDocKey, Doc, Parent, ParentNum)
+    end.
+
+remove_from_links_map(Links, Map) ->
+    remove_from_links_map(Links, Map, [], 0).
+
+remove_from_links_map([], Map, NewLinks, Deleted) ->
+    {Map, NewLinks, Deleted};
+remove_from_links_map([Link | R], Map, NewLinks, Deleted) ->
+    case maps:is_key(Link, Map) of
+        true ->
+            remove_from_links_map(R, maps:remove(Link, Map), NewLinks, Deleted + 1);
+        _ ->
+            remove_from_links_map(R, Map, [Link | NewLinks], Deleted)
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -414,18 +539,20 @@ remove_from_links_map([Link | R], Map) ->
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
-    fetch_link_from_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkName, links_doc_key(Key)).
+    fetch_link_from_docs(ModelConfig, LinkName, links_doc_key(Key), 1).
 
-fetch_link_from_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkName, LinkKey) ->
+fetch_link_from_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkName, LinkKey, KeyNum) ->
     case get(ModelConfig, LinkKey) of
-        {ok, #document{value = #links{link_map = LinkMap, next_key = NextKey}}} ->
+        {ok, #document{value = #links{link_map = LinkMap, children = Children}}} ->
             case maps:get(LinkName, LinkMap, undefined) of
                 undefined ->
+                    LinkNum = get_link_child_num(LinkName, KeyNum),
+                    NextKey = maps:get(LinkNum, Children, <<"non">>),
                     case NextKey of
                         <<"non">> ->
                             {error, link_not_found};
                         _ ->
-                            fetch_link_from_docs(ModelConfig, LinkName, NextKey)
+                            fetch_link_from_docs(ModelConfig, LinkName, NextKey, KeyNum + 1)
                     end;
                 LinkTarget ->
                     {ok, LinkTarget}
@@ -452,9 +579,16 @@ foreach_link_in_docs(_ModelConfig, <<"non">>, _Fun, AccIn) ->
     {ok, AccIn};
 foreach_link_in_docs(#model_config{bucket = _Bucket} = ModelConfig, LinkKey, Fun, AccIn) ->
     case get(ModelConfig, LinkKey) of
-        {ok, #document{value = #links{link_map = LinkMap, next_key = NextKey}}} ->
+        {ok, #document{value = #links{link_map = LinkMap, children = Children}}} ->
             NewAccIn = maps:fold(Fun, AccIn, LinkMap),
-            foreach_link_in_docs(ModelConfig, NextKey, Fun, NewAccIn) ;
+            maps:fold(fun(_Num, ChildKey, FunAns) ->
+                case FunAns of
+                    {ok, TmpAcc} ->
+                        foreach_link_in_docs(ModelConfig, ChildKey, Fun, TmpAcc);
+                    OldError ->
+                        OldError
+                end
+            end, {ok, NewAccIn}, Children);
         {error, {not_found, _}} ->
             {ok, AccIn};
         {error, Reason} ->
@@ -605,7 +739,7 @@ from_json_term(Term) when is_binary(Term) ->
 %%--------------------------------------------------------------------
 -spec links_doc_key(Key :: datastore:key()) -> BinKey :: binary().
 links_doc_key(Key) ->
-    links_doc_key(Key, 0).
+    base64:encode(term_to_binary({"links", Key})).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -613,11 +747,10 @@ links_doc_key(Key) ->
 %% Returns key for document holding links for given document.
 %% @end
 %%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key(), Num :: integer()) -> BinKey :: binary().
-links_doc_key(Key, 0) ->
-    base64:encode(term_to_binary({"links", Key}));
-links_doc_key(Key, Num) ->
-    base64:encode(term_to_binary({"links" ++ integer_to_list(Num), Key})).
+-spec links_child_doc_key(PrevKey :: datastore:key(), Num :: integer()) -> BinKey :: binary().
+links_child_doc_key(Key, Num) ->
+    BinNum = base64:encode(list_to_binary("_" ++ integer_to_list(Num))),
+    <<Key/binary, BinNum/binary>>.
 
 %%--------------------------------------------------------------------
 %% @doc
