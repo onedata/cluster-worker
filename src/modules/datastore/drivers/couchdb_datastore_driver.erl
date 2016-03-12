@@ -540,13 +540,14 @@ rebuild_links_tree(ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, Children
 
 delete_leaf(#model_config{bucket = Bucket} = ModelConfig, MainDocKey,
     #document{value = #links{link_map = LinkMap}} = LinkDoc,
-    #document{key = ParentKey, value = #links{children = ParentChildren} = ParentLinks} = Parent, ParentNum) ->
+    #document{key = ParentKey} = Parent, ParentNum) ->
     case delete_doc(Bucket, LinkDoc) of
         ok ->
             case ParentKey of
                 undefined ->
                     {ok, ok};
                 _ ->
+                    #document{value = #links{children = ParentChildren} = ParentLinks} = Parent,
                     NewParent = Parent#document{
                         value = ParentLinks#links{children = maps:remove(ParentNum, ParentChildren)}},
                     case save(ModelConfig, NewParent) of
