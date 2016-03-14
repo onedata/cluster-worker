@@ -1076,10 +1076,6 @@ end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) ->
-    Nodes = ?config(cluster_worker_nodes, Config),
-    test_utils:enable_datastore_models(Nodes, [
-        globally_cached_record, locally_cached_record, global_only_record, local_only_record, global_only_no_transactions_record,
-        disk_only_record, globally_cached_sync_record, locally_cached_sync_record, test_record_1, test_record_2]),
     datastore_basic_ops_utils:set_env(Case, Config).
 
 end_per_testcase(Case, Config) ->
@@ -1280,7 +1276,7 @@ generic_list_test(TestRecord, Nodes, Level) ->
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
 
-    ObjCount = 3424,
+    ObjCount = 424,
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
 
     CreateDocFun = fun(Key) ->
@@ -1289,6 +1285,10 @@ generic_list_test(TestRecord, Nodes, Level) ->
                 key = Key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
             }])
+    end,
+
+    RemoveDocFun = fun(Key) ->
+        ?call_store(rand_node(Nodes), delete, [Level, TestRecord, Key, ?PRED_ALWAYS])
     end,
 
     [?assertMatch({ok, _}, CreateDocFun(Key)) || Key <- Keys],
@@ -1302,6 +1302,15 @@ generic_list_test(TestRecord, Nodes, Level) ->
     ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
     ?assertMatch([], ReceivedKeys -- Keys),
 
+
+    [?assertMatch(ok, RemoveDocFun(Key)) || Key <- Keys],
+
+
+    Ret2 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+    ?assertMatch({ok, _}, Ret2),
+    {ok, Objects2} = Ret2,
+
+    ?assertMatch(0, erlang:length(Objects2) - erlang:length(Objects0)),
     ok.
 
 rand_key() ->

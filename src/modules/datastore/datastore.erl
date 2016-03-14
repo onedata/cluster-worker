@@ -183,13 +183,50 @@ list(Level, ModelName, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
-    FlushFun = fun(#document{key = Key}, _, _) ->
-        caches_controller:flush(driver_to_level(Driver1), ModelName, Key),
-        {next, []}
+list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
+    HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
+        case cache_controller:check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}) of
+            ok ->
+                {next, [Document | Acc]};
+            _ ->
+                {next, Acc}
+        end;
+        (_, Acc) ->
+            {abort, Acc}
     end,
-    exec_driver(ModelName, Driver1, list, [FlushFun, []]),
-    exec_driver(ModelName, Driver2, list, [Fun, AccIn]);
+    HelperFun2 = fun(#document{key = Key} = Document, Acc) ->
+        {next, [Document | Acc]};
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+    %% @todo - do not get keys from disk that are already in memory
+    case exec_driver(ModelName, Driver2, list, [HelperFun1, []]) of
+        {ok, Ans1} ->
+            case exec_driver(ModelName, Driver1, list, [HelperFun2, Ans1]) of
+                {ok, Ans2} ->
+                    try
+                        AccOut =
+                            lists:foldl(fun(Doc, OAcc) ->
+                                case Fun(Doc, OAcc) of
+                                    {next, NAcc} ->
+                                        NAcc;
+                                    {abort, NAcc} ->
+                                        throw({abort, NAcc})
+                                end
+                            end, AccIn, Ans2),
+                        {ok, AccOut}
+                    catch
+                        {abort, AccOut0} ->
+                            {ok, AccOut0};
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err2 ->
+                    Err2
+            end;
+        Err1 ->
+            Err1
+    end;
 list(_Level, Drivers, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
 
@@ -629,7 +666,7 @@ run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Retu
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
+        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
