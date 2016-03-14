@@ -847,7 +847,15 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             Seq = seq(Change),
             RawDocOnceAgian = jiffy:decode(jsx:encode(RawDoc)),
             Document = process_raw_doc(RawDocOnceAgian),
-                catch Callback(Seq, Document, model(Document)),
+
+            {change, {Props}} = Change,
+            case lists:keyfind(<<"deleted">>, 1, Props) of
+                {_, true} ->
+                    DeleteDoc = Document#document{rev = deleted},
+                    Callback(Seq, DeleteDoc, model(Document));
+                _ ->
+                    Callback(Seq, Document, model(Document))
+            end,
             State#state{last_seq = Seq}
         catch
             _:Reason ->
