@@ -540,10 +540,7 @@ init_net_connection([Node | Nodes]) ->
 %%--------------------------------------------------------------------
 -spec init_node() -> ok.
 init_node() ->
-    init_workers(),
-    {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
-    ok = datastore:ensure_state_loaded(NodeToSync),
-    ?info("Datastore synchronized").
+    init_workers().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -554,7 +551,15 @@ init_node() ->
 -spec init_workers() -> ok.
 init_workers() ->
     lists:foreach(fun({Module, Args}) ->
-        ok = start_worker(Module, Args) end, plugins:apply(node_manager_plugin, modules_with_args, [])),
+        ok = start_worker(Module, Args),
+        case Module of
+            datastore_worker ->
+                {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
+                ok = datastore:ensure_state_loaded(NodeToSync),
+                ?info("Datastore synchronized");
+            _ -> ok
+        end
+    end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.
 

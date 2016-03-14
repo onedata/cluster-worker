@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc @todo: Write me!
+%%% @doc Internal test models definitions.
 %%% @end
 %%%-------------------------------------------------------------------
 -author("Rafal Slota").

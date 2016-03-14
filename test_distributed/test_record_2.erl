@@ -87,7 +87,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{some_record, update}], ?DISK_ONLY_LEVEL).
+    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc

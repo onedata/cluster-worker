@@ -149,6 +149,14 @@ state_get(Key) ->
     worker_host:state_get(?MODULE, Key).
 
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits up to specified time until given function return 'ok'.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_for(fun(() -> ok | term()), Timeout :: non_neg_integer()) ->
+    ok | {error, wait_timeout}.
 wait_for(Fun, Timeout) when Timeout > 0 ->
     case catch Fun() of
         ok -> ok;
