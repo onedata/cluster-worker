@@ -15,6 +15,7 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
+-include_lib("ctool/include/test/performance.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 -include_lib("annotations/include/annotations.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -43,12 +44,12 @@
 
 -performance({test_cases, []}).
 all() ->
-    [
+    ?ALL([
         record_saving_test,
         revision_numbering_test,
         multiple_records_saving_test,
         force_save_test
-    ].
+    ]).
 
 %%%===================================================================
 %%% Test functions

@@ -149,7 +149,7 @@ end_per_suite(Config) ->
 	test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) ->
-	datastore_basic_ops_utils:set_hooks(Case, Config).
+	datastore_basic_ops_utils:set_env(Case, Config).
 
-end_per_testcase(Case, Config) ->
-	datastore_basic_ops_utils:unset_hooks(Case, Config).
+end_per_testcase(_Case, Config) ->
+	datastore_basic_ops_utils:clear_env(Config).

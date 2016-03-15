@@ -29,6 +29,7 @@ doc
 logs
 ebin
 priv
+vendor
 
 c_lib
 c_src/helpers_nif/*.o

@@ -1,15 +1,15 @@
 %%%-------------------------------------------------------------------
-%%% @author Mateusz Paciorek
-%%% @copyright (C) 2016 ACK CYFRONET AGH
+%%% @author Rafal Slota
+%%% @copyright (C) 2015 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Test model.
+%%% @doc Sample model.
 %%% @end
 %%%-------------------------------------------------------------------
--module(test_record_1).
--author("Mateusz Paciorek").
+-module(global_only_no_transactions_record).
+-author("Rafal Slota").
 -behaviour(model_behaviour).
 
 -include("modules/datastore/datastore_internal_model.hrl").
@@ -86,7 +86,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL).
+    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, false).
 
 %%--------------------------------------------------------------------
 %% @doc

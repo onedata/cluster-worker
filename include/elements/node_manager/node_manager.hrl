@@ -21,7 +21,7 @@
   monitoring_state = undefined :: monitoring:node_monitoring_state(),
   % TODO - enable after clearing update
 %%   cache_control = true,
-  cache_control = false,
+  cache_control = true,
   last_cache_cleaning = {0,0,0}
 }).
 
