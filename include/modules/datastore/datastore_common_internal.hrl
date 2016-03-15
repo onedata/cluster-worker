@@ -66,7 +66,7 @@
 
 %% Internal semi-model used by document that holds links between documents
 -record(links, {
-    key,
+    doc_key,
     model,
     link_map = #{},
     children = #{}

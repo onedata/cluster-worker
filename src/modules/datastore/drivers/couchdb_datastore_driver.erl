@@ -38,13 +38,12 @@
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
--export([links_doc_key/1, links_key_to_doc_key/1]).
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
 -export([changes_start_link/3]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
--export([save_doc/2, delete_doc/2, links_doc_key/1, links_child_doc_key/2]).
+-export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -98,6 +97,9 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
             end
         end);
 save(ModelConfig, Doc) ->
+    save_doc(ModelConfig, Doc).
+
+save_link_doc(ModelConfig, Doc) ->
     save_doc(ModelConfig, Doc).
 
 save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
@@ -191,6 +193,11 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
             {error, Reason}
     end.
 
+get_link_doc(ModelConfig, Key) ->
+    get(ModelConfig, Key).
+
+get_link_doc_inside_trans(ModelConfig, Key) ->
+    get(ModelConfig, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -229,6 +236,9 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                     ok
             end
         end).
+
+delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
+    delete_doc(Bucket, Doc).
 
 delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
     {Props} = to_json_term(Value),
@@ -286,18 +296,13 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            links_utils:delete_links_docs(?MODULE, ModelConfig, links_doc_key(Key))
+            links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case links_utils:delete_links_from_maps(?MODULE, ModelConfig, links_doc_key(Key), Links, Key) of
-                {ok, _} ->
-                    ok;
-                Other ->
-                    Other
-            end
+            links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
     ).
 
@@ -309,7 +314,7 @@ delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
-    links_utils:fetch_link_from_docs(?MODULE, ModelConfig, LinkName, links_doc_key(Key), 1).
+    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -320,7 +325,7 @@ fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
-    links_utils:foreach_link_in_docs(?MODULE, ModelConfig, links_doc_key(Key), Fun, AccIn).
+    links_utils:foreach_link(?MODULE, ModelConfig, Key, Fun, AccIn).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -455,39 +460,6 @@ from_json_term({Term}) when is_list(Term) ->
     end;
 from_json_term(Term) when is_binary(Term) ->
     from_binary(Term).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns key for document holding links for given document.
-%% @end
-%%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key()) -> BinKey :: binary().
-links_doc_key(Key) ->
-    base64:encode(term_to_binary({"links", Key})).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns key for document holding links for given document.
-%% @end
-%%--------------------------------------------------------------------
--spec links_child_doc_key(PrevKey :: datastore:key(), Num :: integer()) -> BinKey :: binary().
-links_child_doc_key(Key, Num) ->
-    BinNum = base64:encode(list_to_binary("_" ++ integer_to_list(Num))),
-    <<Key/binary, BinNum/binary>>.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns key of document that owns links saved as document with given key.
-%% Reverses links_doc_key/1.
-%% @end
-%%--------------------------------------------------------------------
--spec links_key_to_doc_key(Key :: datastore:key()) -> BinKey :: binary().
-links_key_to_doc_key(Key) ->
-    {links, DocKey} = binary_to_term(base64:decode(Key)),
-    DocKey.
 
 %%--------------------------------------------------------------------
 %% @private
