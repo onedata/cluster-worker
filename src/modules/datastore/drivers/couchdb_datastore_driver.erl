@@ -18,6 +18,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% Encoded object prefix
 -define(OBJ_PREFIX, "OBJ::").
@@ -668,8 +669,8 @@ start_gateway(Parent, N, Hostname, Port) ->
         end
     end,
 
-    WaitForStateFun(timer:seconds(2)),
-    WaitForConnectionFun(timer:seconds(2)),
+    WaitForStateFun(?WAIT_FOR_STATE_TIMEOUT),
+    WaitForConnectionFun(?WAIT_FOR_CONNECTION_TIMEOUT),
 
     gateway_loop(State#{status => running}).
 
@@ -705,7 +706,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     end,
 
     CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + timer:seconds(5),
+    MinRestartTime = ST + timer:seconds(10),
 
     NewState =
         receive
@@ -739,7 +740,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
                 State
-        after timer:seconds(1) ->
+        after timer:seconds(2) ->
             State
         end,
     case NewState of

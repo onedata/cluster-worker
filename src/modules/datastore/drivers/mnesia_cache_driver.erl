@@ -17,6 +17,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
@@ -28,7 +29,6 @@
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
 
--define(MNESIA_WAIT_TIMEOUT, timer:seconds(20)).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks

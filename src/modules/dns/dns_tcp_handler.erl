@@ -40,7 +40,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 init(Ref, Socket, Transport, Opts) ->
     TransportOpts = ranch:filter_options(Opts, [packet, keepalive], []),
 
-    TCPIdleTimeInSecs = proplists:get_value(dns_tcp_timeout, Opts, 30),
+    TCPIdleTimeInSecs = proplists:get_value(dns_tcp_timeout, Opts, 60),
     TCPIdleTime = timer:seconds(TCPIdleTimeInSecs),
 
     Transport:setopts(Socket, TransportOpts),

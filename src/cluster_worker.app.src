@@ -49,7 +49,7 @@
             %% Memory usage level above which caches will be cleared
             {mem_to_clear_cache, 80},
             %% How long task should wait between function calls (when function execution ends with error)
-            {task_fail_sleep_time_ms, 1000},
+            {task_fail_sleep_time_ms, 2000},
             %% The memory will be cleared once a period defined in this variable, even when usage level is acceptable
             {clear_cache_max_period_ms, 86400}, % 1 day
             %% How often node manager checks if caches cleaning is needed
@@ -90,7 +90,7 @@
             %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
             {http_max_keepalive, 30},
             %% Socket timeout in sek
-            {http_socket_timeout_seconds, 60},
+            {http_socket_timeout_seconds, 120},
 
             %% ===================================================================
             %% NAGIOS
@@ -98,9 +98,9 @@
 
             %% Answers from nagios will be cached for maximum of this time (in ms) and served from cache.
             %% The reason is that a healthcheck can generate a considerable traffic.
-            {nagios_caching_time, 500},
+            {nagios_caching_time, 1000},
             %% Time in ms after healthcheck is considered failed
-            {nagios_healthcheck_timeout, 5000},
+            {nagios_healthcheck_timeout, 10000},
 
 
             %% ===================================================================
@@ -109,7 +109,7 @@
 
             %% Time in ms that must have passed since last update of dispatcher
             %% or DNS to assume they are out of sync.
-            {dns_disp_out_of_sync_threshold, 10000},
+            {dns_disp_out_of_sync_threshold, 20000},
 
             %% ===================================================================
             %% DNS
@@ -127,7 +127,7 @@
             %% Number of dns tcp acceptors
             {dns_tcp_acceptor_pool_size, 20},
             %% Time (in sec) after which dns closes idle connection
-            {dns_tcp_timeout_seconds, 20},
+            {dns_tcp_timeout_seconds, 40},
 
             %% ===================================================================
             %% DATASTORE
