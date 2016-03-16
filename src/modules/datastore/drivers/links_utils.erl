@@ -211,13 +211,10 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links) ->
     end.
 
 delete_links_from_maps(_Driver, _ModelConfig, <<"non">>, _Links, _FreeSpaces, _MainDocKey, _KeyNum, _Parent, _ParentNum) ->
-    ?error("eeee ~p", [{_Links, _KeyNum, _Parent, _ParentNum}]),
     {ok, 0};
 delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, KeyNum, Parent, ParentNum) ->
-    ?error("aaaa ~p", [{Links, Key, KeyNum, Parent, ParentNum}]),
     case Driver:get_link_doc_inside_trans(ModelConfig, Key) of
         {ok, #document{value = #links{children = Children, link_map = LinkMap} = LinksRecord} = LinkDoc} ->
-            ?error("bbbb ~p", [{Links, Key, KeyNum, Parent, ParentNum, LinkDoc}]),
             {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
             NewSize = maps:size(NewLinkMap),
             {SaveAns, NewLinkRef} = case Deleted of
@@ -227,15 +224,13 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, 
                                             NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
                                             {Driver:save_link_doc(ModelConfig, NLD), NLD#document.key}
                                     end,
-            ?error("cccc ~p", [{Links, Key, KeyNum, Parent, ParentNum, Deleted, SaveAns, NewLinkRef, NewLinkMap}]),
+
             NewFreeSpaces = FreeSpaces + ?LINKS_MAP_MAX_SIZE - NewSize,
             case {SaveAns, NewLinks} of
                 {{ok, _}, []} ->
                     case NewFreeSpaces >= ?LINKS_MAP_MAX_SIZE of
                         true ->
-                            ?error("dddd ~p", [{Links, Key, KeyNum, Parent, ParentNum}]),
-%%                             rebuild_links_tree(Driver, ModelConfig, MainDocKey, NewLinkRef, Parent, ParentNum, Children);
-                            {ok, 0};
+                            rebuild_links_tree(Driver, ModelConfig, MainDocKey, NewLinkRef, Parent, ParentNum, Children);
                         _ ->
                             {ok, 0}
                     end;
@@ -266,7 +261,6 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, 
     end.
 
 rebuild_links_tree(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, Children) ->
-    ?error("xxxx1 ~p", [{Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, Children}]),
     case maps:size(Children) of
         0 ->
             delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum);
@@ -283,7 +277,6 @@ rebuild_links_tree(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, 
 delete_leaf(Driver, #model_config{} = ModelConfig, MainDocKey,
     #document{value = #links{link_map = LinkMap}} = LinkDoc,
     #document{key = ParentKey} = Parent, ParentNum) ->
-    ?error("xxxx2 ~p", [{Driver, MainDocKey, LinkDoc, Parent, ParentNum}]),
     case Driver:delete_link_doc(ModelConfig, LinkDoc) of
         ok ->
             case ParentKey of
@@ -309,7 +302,6 @@ delete_leaf(Driver, #model_config{} = ModelConfig, MainDocKey,
             DelError
     end;
 delete_leaf(Driver, ModelConfig, MainDocKey, #document{} = LinkDoc, Parent, ParentNum) ->
-    ?error("xxxx3 ~p", [{Driver, MainDocKey, LinkDoc, Parent, ParentNum}]),
     case Driver:get_link_doc_inside_trans(ModelConfig, Parent) of
         {error, Reason} ->
             {error, Reason};
@@ -317,7 +309,6 @@ delete_leaf(Driver, ModelConfig, MainDocKey, #document{} = LinkDoc, Parent, Pare
             delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Doc, ParentNum)
     end;
 delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum) ->
-    ?error("xxxx4 ~p", [{Driver, MainDocKey, LinkDoc, Parent, ParentNum}]),
     case Driver:get_link_doc_inside_trans(ModelConfig, LinkDoc) of
         {error, Reason} ->
             {error, Reason};
