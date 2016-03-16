@@ -234,7 +234,8 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, 
                     case NewFreeSpaces >= ?LINKS_MAP_MAX_SIZE of
                         true ->
                             ?error("dddd ~p", [{Links, Key, KeyNum, Parent, ParentNum}]),
-                            rebuild_links_tree(Driver, ModelConfig, MainDocKey, NewLinkRef, Parent, ParentNum, Children);
+%%                             rebuild_links_tree(Driver, ModelConfig, MainDocKey, NewLinkRef, Parent, ParentNum, Children);
+                            {ok, 0};
                         _ ->
                             {ok, 0}
                     end;
