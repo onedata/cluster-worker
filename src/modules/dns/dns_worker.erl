@@ -8,16 +8,15 @@
 %%% @doc
 %%% This module implements {@link worker_plugin_behaviour} and
 %%% manages a DNS server module.
-%%% In addition, it implements {@link dns_handler_behaviour} -
-%%% DNS query handling logic.
-%%% TODO - migrate dns from ctool
+%%% In addition, it implements part of DNS query handling logic.
+%%% This module relies on dns_worker_plugin_behaviour providing the
+%%% actual DNS answers.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(dns_worker).
 -author("Lukasz Opiola").
 
 -behaviour(worker_plugin_behaviour).
--behaviour(dns_handler_behaviour).
 
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -26,14 +25,8 @@
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
 
-%% dns_handler_behaviour callbacks
--export([handle_a/1, handle_ns/1, handle_cname/1, handle_soa/1, handle_wks/1,
-    handle_ptr/1, handle_hinfo/1, handle_minfo/1, handle_mx/1, handle_txt/1]).
-
-%% export for unit tests
--ifdef(TEST).
--export([parse_domain/1]).
--endif.
+%% API
+-export([resolve/2]).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -81,7 +74,7 @@ handle({update_lb_advice, LBAdvice}) ->
     ok = worker_host:state_put(?MODULE, last_update, erlang:monotonic_time(milli_seconds)),
     ok = worker_host:state_put(?MODULE, lb_advice, LBAdvice);
 
-handle({handle_a, Domain}) ->
+handle({Method, Domain}) ->
     LBAdvice = worker_host:state_get(?MODULE, lb_advice),
     ?debug("DNS A request: ~s, current advice: ~p", [Domain, LBAdvice]),
     case LBAdvice of
@@ -89,42 +82,7 @@ handle({handle_a, Domain}) ->
             % The DNS server is still out of sync, return serv fail
             serv_fail;
         _ ->
-            case parse_domain(Domain) of
-                ok ->
-                    % Prefix OK, return nodes to connect to
-                    Nodes = load_balancing:choose_nodes_for_dns(LBAdvice),
-                    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_a_response_ttl),
-                    {ok,
-                            [dns_server:answer_record(Domain, TTL, ?S_A, IP) || IP <- Nodes] ++
-                            [dns_server:authoritative_answer_flag(true)]
-                    };
-                Other ->
-                    % Return whatever parse_domain returned (nx_domain | refused)
-                    Other
-            end
-    end;
-
-handle({handle_ns, Domain}) ->
-    LBAdvice = worker_host:state_get(?MODULE, lb_advice),
-    ?debug("DNS NS request: ~s, current advice: ~p", [Domain, LBAdvice]),
-    case LBAdvice of
-        undefined ->
-            % The DNS server is still out of sync, return serv fail
-            serv_fail;
-        _ ->
-            case parse_domain(Domain) of
-                ok ->
-                    % Prefix OK, return NS nodes of the cluster
-                    Nodes = load_balancing:choose_ns_nodes_for_dns(LBAdvice),
-                    {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_ns_response_ttl),
-                    {ok,
-                            [dns_server:answer_record(Domain, TTL, ?S_NS, inet_parse:ntoa(IP)) || IP <- Nodes] ++
-                            [dns_server:authoritative_answer_flag(true)]
-                    };
-                Other ->
-                    % Return whatever parse_domain returned (nx_domain | refused)
-                    Other
-            end
+            plugins:apply(dns_worker_plugin, resolve, [Method, Domain, LBAdvice])
     end;
 
 handle(_Request) ->
@@ -139,139 +97,27 @@ handle(_Request) ->
 -spec cleanup() -> Result when
     Result :: ok.
 cleanup() ->
-    dns_server:stop(?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME).
+    dns_server:stop().
 
 
 %%%===================================================================
-%%% dns_handler_behaviour callbacks
+%%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Handles DNS queries of type A.
-%% See {@link dns_handler_behaviour} for reference.
+%% Handles DNS queries.
+%% See {@link dns_worker_plugin_behaviour} for reference.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_a(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_a(Domain) ->
-    worker_proxy:call(dns_worker, {handle_a, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type NS.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_ns(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_ns(Domain) ->
-    worker_proxy:call(dns_worker, {handle_ns, Domain}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type CNAME.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_cname(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_cname(_Domain) ->
-    not_impl.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type MX.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_mx(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_mx(_Domain) ->
-    not_impl.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type SOA.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_soa(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_soa(_Domain) ->
-    not_impl.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type WKS.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_wks(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_wks(_Domain) ->
-    not_impl.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type PTR.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_ptr(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_ptr(_Domain) ->
-    not_impl.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type HINFO.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_hinfo(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_hinfo(_Domain) ->
-    not_impl.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type MINFO.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_minfo(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-%% ====================================================================
-handle_minfo(_Domain) ->
-    not_impl.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles DNS queries of type TXT.
-%% See {@link dns_handler_behaviour} for reference.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_txt(Domain :: string()) -> dns_handler_behaviour:handler_reply().
-handle_txt(_Domain) ->
-    not_impl.
+-spec resolve(Method :: dns_worker_plugin_behaviour:handle_method(), Domain :: string())
+        -> dns_worker_plugin_behaviour:handler_reply().
+resolve(Method, Domain) ->
+    worker_proxy:call(dns_worker, {Method, Domain}).
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Parses the DNS query domain and check if it ends with provider domain.
-%% Accepts only domains that fulfill above condition and have a
-%% maximum of one part subdomain.
-%% Returns NXDOMAIN when the query domain has more parts.
-%% Returns REFUSED when query domain is not the same as provider's.
-%% @end
-%%--------------------------------------------------------------------
--spec parse_domain(Domain :: string()) -> ok | refused | nx_domain.
-parse_domain(DomainArg) ->
-    plugins:apply(dns_worker_plugin, parse_domain, [DomainArg]).
-
 
 %%--------------------------------------------------------------------
 %% @doc

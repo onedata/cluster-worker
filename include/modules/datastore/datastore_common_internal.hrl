@@ -32,7 +32,8 @@
     bucket :: datastore:bucket(),
     store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
-    transactional_global_cache = true :: boolean()
+    transactional_global_cache = true :: boolean(),
+    sync_cache = false :: boolean()
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -44,7 +45,9 @@
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel), ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, StoreLevel)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, true)).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions), #model_config{name = ?MODULE,
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, false)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache), #model_config{name = ?MODULE,
     size = record_info(size, ?MODULE),
     fields = record_info(fields, ?MODULE),
     defaults = #?MODULE{},
@@ -52,7 +55,8 @@
     hooks = Hooks,
     store_level = StoreLevel,
     link_store_level = LinkStoreLevel,
-    transactional_global_cache = Transactions
+    transactional_global_cache = Transactions,
+    sync_cache = SyncCache
 }).
 
 %% Internal semi-model used by document that holds links between documents

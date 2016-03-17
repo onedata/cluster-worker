@@ -4,6 +4,17 @@
 CHANGELOG
 ---------
 
+### 3.0.0-alpha2
+
+
+* VFS-1581,  Minor cache update
+* VFS-1234 Wait for CouchDB connection on datastore start
+* VFS-1234 Ignore save's of documents that are up-to-date in couchdb_datastore_driver
+* VFS-1581, Delete all links update.
+* VFS-1234 Improve sync gateway restarter
+* VFS-1234 Add links_key_to_doc_key/1 function to couchdb driver
+
+
 ### 2.0.1
 
 * VFS-1528 Use monotonic time instead of system time
