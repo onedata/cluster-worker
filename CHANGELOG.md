@@ -4,6 +4,17 @@
 CHANGELOG
 ---------
 
+### 3.0.0-alpha3
+
+* VFS-1598, update of datastore update on cache
+* VFS-1741 Split sync-gateway fetching and compilation.
+* VFS-1670, Better support for synch cache in tests
+* VFS-1670, Update cache cleaning
+* VFS-1552 Adding finite stream test
+* VFS-1670, Stress tests added
+* VFS-1670, Use multiple records instead some_record during datastore tests
+
+
 ### 3.0.0-alpha2
 
 
