@@ -29,7 +29,7 @@
 -export([save_pid/3, update_pid/3]).
 
 -define(TASK_SAVE_TIMEOUT, timer:seconds(10)).
--define(TASK_REPEATS, 20).
+-define(TASK_REPEATS, 10).
 
 %%%===================================================================
 %%% API
@@ -51,9 +51,27 @@ start_task(Task, Level) ->
 %%--------------------------------------------------------------------
 -spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level(), PersistFun :: save_pid | update_pid) -> ok.
 start_task(Task, Level, PersistFun) ->
+    start_task(Task, Level, PersistFun, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts task.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level(),
+    PersistFun :: save_pid | update_pid, Sleep :: boolean()) -> ok.
+start_task(Task, Level, PersistFun, Sleep) ->
     Pid = spawn(fun() ->
         receive
             {start, Uuid} ->
+                case Sleep of
+                    true ->
+                        {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
+                        {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
+                        timer:sleep(crypto:rand_uniform(Interval1, Interval2 + 1));
+                    _ ->
+                        ok
+                end,
                 case do_task(Task, ?TASK_REPEATS) of
                     ok ->
                         ok = delete_task(Uuid, Task, Level);
@@ -172,8 +190,9 @@ do_task(Task, Num) ->
     catch
         E1:E2 ->
             ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
-            {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_sleep_time_ms),
-            timer:sleep(Interval),
+            {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
+            {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
+            timer:sleep(crypto:rand_uniform(Interval1, Interval2 + 1)),
             do_task(Task, Num - 1)
     end.
 
@@ -186,7 +205,7 @@ do_task(Task, Num) ->
 check_and_rerun_all(Level) ->
     {ok, Tasks} = task_pool:list_failed(Level),
     lists:foreach(fun(Task) ->
-        start_task(Task, Level, update_pid)
+        start_task(Task, Level, update_pid, true)
     end, Tasks).
 
 %%--------------------------------------------------------------------

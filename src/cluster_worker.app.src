@@ -49,7 +49,8 @@
             %% Memory usage level above which caches will be cleared
             {mem_to_clear_cache, 80},
             %% How long task should wait between function calls (when function execution ends with error)
-            {task_fail_sleep_time_ms, 1000},
+            {task_fail_min_sleep_time_ms, 3000},
+            {task_fail_max_sleep_time_ms, 30000},
             %% The memory will be cleared once a period defined in this variable, even when usage level is acceptable
             {clear_cache_max_period_ms, 86400}, % 1 day
             %% How often node manager checks if caches cleaning is needed
@@ -63,7 +64,7 @@
             %% Maximal delay in cache dumping to disk
             {cache_to_disk_force_delay_ms, 30000},
             %% Period between checkings of tasks lists (to find tasks without owner)
-            {task_checking_period_minutes, 5},
+            {task_checking_period_minutes, 30},
 
 
             %% ===================================================================

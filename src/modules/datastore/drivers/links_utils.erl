@@ -79,9 +79,14 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                         NewLDK = links_child_doc_key(LDK, Num),
                         NLD = #document{key = NewLDK, value = #links{doc_key = Key, model = ModelName}},
                         {maps:put(Num, NewLDK, Acc1), maps:put(Num, NLD, Acc2)};
-                    _ ->
-                        {ok, NLD} = Driver:get_link_doc_inside_trans(ModelConfig, NK),
-                        {Acc1, maps:put(Num, NLD, Acc2)}
+                    NewLDK2 ->
+                        case Driver:get_link_doc_inside_trans(ModelConfig, NK) of
+                            {ok, NLD} ->
+                                {Acc1, maps:put(Num, NLD, Acc2)};
+                            {error, {not_found, _}} ->
+                                NLD = #document{key = NewLDK2, value = #links{doc_key = Key, model = ModelName}},
+                                {maps:put(Num, NewLDK2, Acc1), maps:put(Num, NLD, Acc2)}
+                        end
                 end
             end, {Children, #{}}, SplitedLinks),
             NewLinksDoc = LinksDoc#document{value = LinksRecord#links{link_map = FilledMap,
