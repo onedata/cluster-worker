@@ -184,10 +184,6 @@ end_per_suite(Config) ->
 
 init_per_testcase(CaseName, Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
-    tracer:start(W),
-    tracer:trace_calls(couchdb_datastore_driver, db_run),
-    tracer:trace_calls(couchbeam, save_doc),
-    tracer:trace_calls(couchbeam, delete_doc),
     FirstSeq = ?getFirstSeq(W, Config),
     Pid = self(),
     {_, DriverPid} = ?assertMatch(
@@ -209,7 +205,6 @@ end_per_testcase(_, Config) ->
     DriverPid = ?config(driver_pid, Config),
     ?assertEqual(ok, rpc:call(W, gen_changes, stop, [DriverPid])),
     flush(),
-    tracer:stop(),
     ok.
 
 %%%===================================================================
