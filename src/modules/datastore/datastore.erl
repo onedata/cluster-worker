@@ -785,6 +785,8 @@ exec_driver_async(ModelName, Level, Method, Args) ->
     ok | {ok, term()} | {error, term()}.
 exec_cache_async(ModelName, [Driver1, Driver2], Method, Args) ->
     case exec_driver(ModelName, Driver1, Method, Args) of
+        {error, {not_found, _}} when Method =:= update ->
+            exec_driver(ModelName, Driver2, Method, Args);
         {error, Reason} ->
             {error, Reason};
         Result ->
