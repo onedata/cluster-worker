@@ -49,16 +49,17 @@
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test,
-        global_list_test, persistance_test, local_list_test,
-        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-        interupt_global_cache_clearing_test
+%%         local_test, global_test, global_atomic_update_test,
+%%         global_list_test, persistance_test, local_list_test,
+%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+%%         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+%%         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+%%         restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+%%         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+%%         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+%%         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+%%         interupt_global_cache_clearing_test
+        restoring_cache_from_disk_global_cache_test
     ]).
 
 
@@ -681,6 +682,10 @@ restoring_cache_from_disk_global_cache_test(Config) ->
     ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, get, [Key])),
     ?assertMatch({ok, true}, ?call(Worker2, CModule, exists, [ModelConfig, Key]), 1),
+
+    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, update, [Key, #{field1 => 2}])),
+    ?assertMatch({ok, true}, ?call(Worker2, CModule, exists, [ModelConfig, Key])),
 
     ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [link]])),
     ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
