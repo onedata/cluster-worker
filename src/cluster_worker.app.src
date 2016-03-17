@@ -49,7 +49,7 @@
             %% Memory usage level above which caches will be cleared
             {mem_to_clear_cache, 80},
             %% How long task should wait between function calls (when function execution ends with error)
-            {task_fail_sleep_time_ms, 2000},
+            {task_fail_sleep_time_ms, 5000},
             %% The memory will be cleared once a period defined in this variable, even when usage level is acceptable
             {clear_cache_max_period_ms, 86400}, % 1 day
             %% How often node manager checks if caches cleaning is needed
@@ -90,7 +90,7 @@
             %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
             {http_max_keepalive, 30},
             %% Socket timeout in sek
-            {http_socket_timeout_seconds, 120},
+            {http_socket_timeout_seconds, 300},
 
             %% ===================================================================
             %% NAGIOS
@@ -100,7 +100,7 @@
             %% The reason is that a healthcheck can generate a considerable traffic.
             {nagios_caching_time, 1000},
             %% Time in ms after healthcheck is considered failed
-            {nagios_healthcheck_timeout, 10000},
+            {nagios_healthcheck_timeout, 30000},
 
 
             %% ===================================================================
@@ -109,7 +109,7 @@
 
             %% Time in ms that must have passed since last update of dispatcher
             %% or DNS to assume they are out of sync.
-            {dns_disp_out_of_sync_threshold, 20000},
+            {dns_disp_out_of_sync_threshold, 60000},
 
             %% ===================================================================
             %% DNS
@@ -127,7 +127,7 @@
             %% Number of dns tcp acceptors
             {dns_tcp_acceptor_pool_size, 20},
             %% Time (in sec) after which dns closes idle connection
-            {dns_tcp_timeout_seconds, 40},
+            {dns_tcp_timeout_seconds, 300},
 
             %% ===================================================================
             %% DATASTORE

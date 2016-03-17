@@ -102,8 +102,12 @@ task_manager_repeats_test(Config) ->
 %%     task_manager_repeats_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
-    [W1, W2] = ?config(cluster_worker_nodes, Config),
+    [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
     Workers = [W1, W2, W1, W2, W1],
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_sleep_time_ms, 1000))
+    end, WorkersList),
 
     ControllerPid = start_tasks(Level, Workers, 5),
     {A1, A2} = rpc:call(W1, task_pool, list, [Level]),

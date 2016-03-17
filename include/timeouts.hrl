@@ -10,24 +10,20 @@
 
 % Timeout to wait for DNS listeners to start.
 % After it, they are assumed to have failed to start.
--define(LISTENERS_START_TIMEOUT, 20000).
-
-%%release_configurator
-% oneprovider specific config
--define(SYNC_NODES_TIMEOUT, timer:minutes(2)).
+-define(LISTENERS_START_TIMEOUT, timer:minutes(1)).
 
 %%task_manager
--define(TASK_SAVE_TIMEOUT, timer:seconds(20)).
+-define(TASK_SAVE_TIMEOUT, timer:seconds(30)).
 
 %%worker_proxy
--define(DEFAULT_REQUEST_TIMEOUT, timer:seconds(20)).
+-define(DEFAULT_REQUEST_TIMEOUT, timer:minutes(5)).
 
 %%couchdb_datastore_driver
--define(WAIT_FOR_STATE_TIMEOUT, timer:seconds(4)).
--define(WAIT_FOR_CONNECTION_TIMEOUT, timer:seconds(4)).
+-define(WAIT_FOR_STATE_TIMEOUT, timer:seconds(5)).
+-define(WAIT_FOR_CONNECTION_TIMEOUT, timer:seconds(5)).
 
 %%mnesia cache driver
--define(MNESIA_WAIT_TIMEOUT, timer:seconds(40)).
+-define(MNESIA_WAIT_TIMEOUT, timer:seconds(60)).
 
-%%cache controller
--define(DISK_OP_TIMEOUT, timer:minutes(2)).
+%%timeout for request to couchdb in form of hackney option
+-define(DEFAULT_DB_REQUEST_TIMEOUT_OPT, [{recv_timeout, timer:minutes(3)}]).

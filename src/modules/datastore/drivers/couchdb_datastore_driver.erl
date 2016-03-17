@@ -104,7 +104,7 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc], 3) of
+    case db_run(couchbeam, save_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -146,7 +146,7 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc], 3) of
+    case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -222,7 +222,7 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                         {ok, #document{value = Value, rev = Rev}} ->
                             {Props} = to_json_term(Value),
                             Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-                            case db_run(couchbeam, delete_doc, [Doc], 3) of
+                            case db_run(couchbeam, delete_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
                                 ok ->
                                     ok;
                                 {ok, _} ->
@@ -603,7 +603,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
+    case db_run(couchbeam, save_doc, [Doc,[{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
