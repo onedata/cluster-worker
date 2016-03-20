@@ -19,26 +19,26 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %%tests
--export([create_delete_db_test/1, save_db_test/1, update_db_test/1, get_db_test/1, exists_db_test/1,
+-export([create_delete_db_test/1, save_db_test/1, update_db_test/1, get_db_test/1, exists_db_test/1, links_db_test/1,
     create_delete_global_store_test/1, save_global_store_test/1,
-    update_global_store_test/1, get_global_store_test/1, exists_global_store_test/1,
+    update_global_store_test/1, get_global_store_test/1, exists_global_store_test/1, links_global_store_test/1,
     create_delete_local_store_test/1, save_local_store_test/1, update_local_store_test/1,
     get_local_store_test/1, exists_local_store_test/1,
     create_delete_global_cache_test/1, save_global_cache_test/1, update_global_cache_test/1,
-    get_global_cache_test/1, exists_global_cache_test/1,
+    get_global_cache_test/1, exists_global_cache_test/1, links_global_cache_test/1,
     create_delete_local_cache_test/1, save_local_cache_test/1, update_local_cache_test/1,
     get_local_cache_test/1, exists_local_cache_test/1
 ]).
 %%test_bases
 -export([create_delete_db_test_base/1, save_db_test_base/1, update_db_test_base/1, 
-	get_db_test_base/1, exists_db_test_base/1, create_delete_global_store_test_base/1,
+	get_db_test_base/1, exists_db_test_base/1, links_db_test_base/1, create_delete_global_store_test_base/1,
 	save_global_store_test_base/1, update_global_store_test_base/1,
-	get_global_store_test_base/1, exists_global_store_test_base/1,
+	get_global_store_test_base/1, exists_global_store_test_base/1, links_global_store_test_base/1,
 	create_delete_local_store_test_base/1, save_local_store_test_base/1, 
 	update_local_store_test_base/1, get_local_store_test_base/1,
 	exists_local_store_test_base/1, create_delete_global_cache_test_base/1,
 	save_global_cache_test_base/1, update_global_cache_test_base/1,
-	get_global_cache_test_base/1, exists_global_cache_test_base/1,
+	get_global_cache_test_base/1, exists_global_cache_test_base/1, links_global_cache_test_base/1,
 	create_delete_local_cache_test_base/1, save_local_cache_test_base/1,
 	update_local_cache_test_base/1, get_local_cache_test_base/1,
 	exists_local_cache_test_base/1
@@ -46,13 +46,13 @@
 
 all() ->
     ?ALL([], [
-        create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test,
+        create_delete_db_test, save_db_test, update_db_test, get_db_test, exists_db_test, links_db_test,
         create_delete_global_store_test, save_global_store_test,
-        update_global_store_test, get_global_store_test, exists_global_store_test,
+        update_global_store_test, get_global_store_test, exists_global_store_test, links_global_store_test,
         create_delete_local_store_test, save_local_store_test, update_local_store_test,
         get_local_store_test, exists_local_store_test,
         create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
-        get_global_cache_test, exists_global_cache_test,
+        get_global_cache_test, exists_global_cache_test, links_global_cache_test,
         create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
         get_local_cache_test, exists_local_cache_test
     ]).
@@ -87,6 +87,11 @@ exists_db_test(Config) ->
 exists_db_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, disk_only).
 
+links_db_test(Config) ->
+	?PERFORMANCE(Config, ?links_test_def).
+links_db_test_base(Config) ->
+	datastore_basic_ops_utils:links_test(Config, disk_only).
+
 %% ====================================================================
 
 create_delete_global_store_test(Config) ->
@@ -113,6 +118,11 @@ exists_global_store_test(Config) ->
 	?PERFORMANCE(Config, ?exists_test_def).
 exists_global_store_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, global_only).
+
+links_global_store_test(Config) ->
+	?PERFORMANCE(Config, ?links_test_def).
+links_global_store_test_base(Config) ->
+	datastore_basic_ops_utils:links_test(Config, global_only).
 
 %% ====================================================================
 
@@ -168,6 +178,11 @@ exists_global_cache_test(Config) ->
 exists_global_cache_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, globally_cached).
 
+links_global_cache_test(Config) ->
+	?PERFORMANCE(Config, ?links_test_def).
+links_global_cache_test_base(Config) ->
+	datastore_basic_ops_utils:links_test(Config, globally_cached).
+
 %% ====================================================================
 
 create_delete_local_cache_test(Config) ->
@@ -206,7 +221,7 @@ end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) ->
-    datastore_basic_ops_utils:set_hooks(Case, Config).
+    datastore_basic_ops_utils:set_env(Case, Config).
 
-end_per_testcase(Case, Config) ->
-    datastore_basic_ops_utils:unset_hooks(Case, Config).
+end_per_testcase(_Case, Config) ->
+    datastore_basic_ops_utils:clear_env(Config).

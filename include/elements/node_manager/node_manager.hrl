@@ -19,6 +19,8 @@
   node_ip = {127, 0, 0, 1} :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()},
   cm_con_status = not_connected :: not_connected | connected | registered,
   monitoring_state = undefined :: monitoring:node_monitoring_state(),
+  % TODO - enable after clearing update
+%%   cache_control = true,
   cache_control = true,
   last_cache_cleaning = {0,0,0}
 }).
