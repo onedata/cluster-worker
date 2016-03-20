@@ -845,17 +845,12 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
         try
             RawDoc = doc(Change),
             Seq = seq(Change),
-            RawDocOnceAgian = jiffy:decode(jsx:encode(RawDoc)),
-            Document = process_raw_doc(RawDocOnceAgian),
+            Deleted = deleted(Change),
 
-            {change, {Props}} = Change,
-            case lists:keyfind(<<"deleted">>, 1, Props) of
-                {_, true} ->
-                    DeleteDoc = Document#document{rev = deleted},
-                    Callback(Seq, DeleteDoc, model(Document));
-                _ ->
-                    Callback(Seq, Document, model(Document))
-            end,
+            RawDocOnceAgain = jiffy:decode(jsx:encode(RawDoc)),
+            Document = process_raw_doc(RawDocOnceAgain),
+
+            Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
             State#state{last_seq = Seq}
         catch
             _:Reason ->
@@ -957,6 +952,19 @@ doc({change, {Props}}) ->
 seq({change, {Props}}) ->
     {_, LastSeq} = lists:keyfind(<<"seq">>, 1, Props),
     LastSeq.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Extracts info about document deletion
+%% @end
+%%--------------------------------------------------------------------
+-spec deleted(term()) -> boolean().
+deleted({change, {Props}}) ->
+    case lists:keyfind(<<"deleted">>, 1, Props) of
+        {_, true} -> true;
+        _ -> false
+    end.
 
 
 %%--------------------------------------------------------------------
