@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Utility functions for links managemnt at driver level.
+%%% @doc Utility functions for links' management at driver level.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(links_utils).
@@ -198,7 +198,7 @@ fetch_link(Driver, ModelConfig, LinkName, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes function at each link connected with key.
+%% Executes function for each link connected with key.
 %% @end
 %%--------------------------------------------------------------------
 -spec foreach_link(Driver :: atom(), model_behaviour:model_config(), Key :: datastore:ext_key(),
@@ -211,11 +211,10 @@ foreach_link(Driver, ModelConfig, Key, Fun, AccIn) ->
 %%% Internal functions
 %%%===================================================================
 
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets number of chiled to which link should be mapped.
+%% Gets number of child to which link should be mapped.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_child_num(datastore:link_name(), KeyNum :: integer()) -> integer().
@@ -227,7 +226,7 @@ get_link_child_num(LinkName, KeyNum) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets number of chiled to which link should be mapped.
+%% Gets number of child to which link should be mapped.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_child_num(datastore:link_name(), KeyNum :: integer(), ByteSize :: integer()) -> integer().
@@ -239,7 +238,7 @@ get_link_child_num(LinkName, KeyNum, ByteSize) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets number of chiled to which link should be mapped.
+%% Gets number of child to which link should be mapped.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_child_num(byte()) -> integer().
@@ -249,7 +248,7 @@ get_link_child_num(Byte) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Splits links list to several lists connected with particular child.
+%% Splits links' list to several lists connected with particular key.
 %% @end
 %%--------------------------------------------------------------------
 -spec split_links_list([datastore:normalized_link_spec()], KeyNum :: integer()) -> map().
@@ -263,7 +262,7 @@ split_links_list(LinksList, KeyNum) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Splits links list to several lists connected with particular child.
+%% Splits links' list to several lists connected with particular key.
 %% @end
 %%--------------------------------------------------------------------
 -spec split_links_names_list([datastore:link_name()], KeyNum :: integer()) -> map().
@@ -422,7 +421,7 @@ rebuild_links_tree(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Deletes leaf from tree of documents that store links connected with key.
+%% Deletes leaf from documents' tree that stores links connected with key.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_leaf(Driver :: atom(), model_behaviour:model_config(), MainDocKey :: datastore:ext_key(),
@@ -474,7 +473,7 @@ delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Remove links from links map.
+%% Removes links from links' map.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_from_links_map([datastore:link_name()], map()) ->
@@ -485,7 +484,7 @@ remove_from_links_map(Links, Map) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Remove links from links map.
+%% Removes links from links' map.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_from_links_map([datastore:link_name()], map(), TmpNewLinks :: list(), TmpDeleted :: integer()) ->

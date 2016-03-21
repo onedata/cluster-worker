@@ -209,7 +209,7 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Gets document that describes links, not using transactions (used by links utils).
+%% Gets document that describes links (used by links utils).
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
