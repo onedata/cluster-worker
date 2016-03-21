@@ -808,8 +808,20 @@ exec_driver_async(ModelName, Level, Method, Args) ->
 -spec exec_cache_async(model_behaviour:model_type(), [atom()] | atom(),
     Method :: store_driver_behaviour:driver_action(), [term()]) ->
     ok | {ok, term()} | {error, term()}.
-exec_cache_async(ModelName, [Driver1, Driver2], Method, Args) ->
+exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
     case exec_driver(ModelName, Driver1, Method, Args) of
+        {error, {not_found, MN}} when Method =:= update ->
+            ModelConfig = ModelName:model_init(),
+            [Key | _] = Args,
+            FullArgs1 = [ModelConfig, Key],
+            case erlang:apply(driver_to_module(Driver2), get, FullArgs1) of
+                {ok, Doc} ->
+                    FullArgs2 = [ModelConfig, Doc],
+                    erlang:apply(driver_to_module(Driver1), create, FullArgs2),
+                    exec_cache_async(ModelName, Drivers, Method, Args);
+                _ ->
+                    {error, {not_found, MN}}
+            end;
         {error, Reason} ->
             {error, Reason};
         Result ->

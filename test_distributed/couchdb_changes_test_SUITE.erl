@@ -32,7 +32,7 @@
         binary_to_integer(LastSeqInDb)
     end).
 
--define(TIMEOUT, 30000).
+-define(TIMEOUT, timer:seconds(10)).
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
@@ -40,15 +40,19 @@
     record_saving_test/1,
     revision_numbering_test/1,
     multiple_records_saving_test/1,
-    force_save_test/1]).
+    force_save_test/1,
+    finite_stream_test/1,
+    record_deletion_test/1]).
 
 -performance({test_cases, []}).
 all() ->
     ?ALL([
+        record_deletion_test,
         record_saving_test,
         revision_numbering_test,
         multiple_records_saving_test,
-        force_save_test
+        force_save_test,
+        finite_stream_test
     ]).
 
 %%%===================================================================
@@ -63,8 +67,8 @@ record_saving_test(Config) ->
     Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
     Doc1 = #document{key = Doc1Key, value = Doc1Val},
     ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1])),
-    {_, _, DocR1, ModR1} = ?assertReceivedMatch({record_saving_test, _,
-        #document{}, _}, ?TIMEOUT),
+    {_, {_, DocR1, ModR1}} = ?assertReceivedMatch({record_saving_test,
+        {_, #document{}, _}}, ?TIMEOUT),
     #document{key = KeyR1, value = ValR1} = DocR1,
     ?assertEqual({Doc1Key, Doc1Val, test_record_1}, {KeyR1, ValR1, ModR1}),
 
@@ -72,12 +76,41 @@ record_saving_test(Config) ->
     Doc2Val = #test_record_2{field1 = 4, field2 = 5, field3 = 6},
     Doc2 = #document{key = Doc2Key, value = Doc2Val},
     ?assertEqual({ok, Doc2Key}, rpc:call(W, test_record_2, save, [Doc2])),
-    {_, _, DocR2, ModR2} = ?assertReceivedMatch({record_saving_test, _,
-        #document{}, _}, ?TIMEOUT),
+    {_, {_, DocR2, ModR2}} = ?assertReceivedMatch({record_saving_test,
+        {_, #document{}, _}}, ?TIMEOUT),
     #document{key = KeyR2, value = ValR2} = DocR2,
     ?assertEqual({Doc2Key, Doc2Val, test_record_2}, {KeyR2, ValR2, ModR2}),
 
     ok.
+
+%% Test contents of 'deleted' field
+record_deletion_test(Config) ->
+    [W | _] = ?config(cluster_worker_nodes, Config),
+
+    %% given
+    Doc1Key = <<"doc1_key">>,
+    Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
+    Doc1 = #document{key = Doc1Key, value = Doc1Val},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1])),
+    {_, {_, DocR1, ModR1}} = ?assertReceivedMatch({record_deletion_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1, value = ValR1, deleted = DeletedR1} = DocR1,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val, test_record_1},
+        {DeletedR1, KeyR1, ValR1, ModR1}
+    ),
+
+    %% when
+    ?assertEqual(ok, rpc:call(W, test_record_1, delete, [Doc1Key])),
+
+    %% then
+    {_, {_, DocR2, ModR2}} = ?assertReceivedMatch({record_deletion_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR2, value = ValR2, deleted = DeletedR2} = DocR2,
+    ?assertEqual(
+        {true, Doc1Key, Doc1Val, test_record_1},
+        {DeletedR2, KeyR2, ValR2, ModR2}
+    ).
 
 %% Test incrementing number of subsequent revisions
 revision_numbering_test(Config) ->
@@ -89,8 +122,8 @@ revision_numbering_test(Config) ->
             Val = #test_record_1{field1 = N, field2 = N, field3 = N},
             Doc = #document{key = Key, value = Val},
             ?assertEqual({ok, Key}, rpc:call(W, test_record_1, save, [Doc])),
-            {_, _, DocR, ModR} = ?assertReceivedMatch({revision_numbering_test,
-                _, #document{}, _}, ?TIMEOUT),
+            {_, {_, DocR, ModR}} = ?assertReceivedMatch({revision_numbering_test,
+                {_, #document{}, _}}, ?TIMEOUT),
             #document{key = KeyR, rev = RevR, value = ValR} = DocR,
             ?assertEqual({Key, Val, test_record_1}, {KeyR, ValR, ModR}),
             RevR
@@ -113,8 +146,10 @@ multiple_records_saving_test(Config) ->
             Vals = lists:map(
                 fun(N) ->
                     Val = case Mod of
-                        test_record_1 -> #test_record_1{field1 = N, field2 = N, field3 = N};
-                        test_record_2 -> #test_record_2{field1 = N, field2 = N, field3 = N}
+                        test_record_1 ->
+                            #test_record_1{field1 = N, field2 = N, field3 = N};
+                        test_record_2 ->
+                            #test_record_2{field1 = N, field2 = N, field3 = N}
                     end,
                     Doc = #document{key = Key, value = Val},
                     ?assertEqual({ok, Key}, rpc:call(W, Mod, save, [Doc])),
@@ -130,8 +165,8 @@ multiple_records_saving_test(Config) ->
 
     lists:map(
         fun({Key, Val, Mod}) ->
-            ?assertReceivedMatch({multiple_records_saving_test, _,
-                #document{key = Key, value = Val}, Mod}, ?TIMEOUT)
+            ?assertReceivedMatch({multiple_records_saving_test,
+                {_, #document{key = Key, value = Val}, Mod}}, ?TIMEOUT)
         end,
         Docs
     ),
@@ -147,8 +182,8 @@ force_save_test(Config) ->
             Val = #test_record_1{field1 = N, field2 = N, field3 = N},
             Doc = #document{key = Key, value = Val},
             ?assertEqual({ok, Key}, rpc:call(W1, test_record_1, save, [Doc])),
-            {_, _, DocR, _} = ?assertReceivedMatch({force_save_test, _,
-                #document{key = Key, value = Val}, test_record_1}, ?TIMEOUT),
+            {_, {_, DocR, _}} = ?assertReceivedMatch({force_save_test,
+                {_, #document{key = Key, value = Val}, test_record_1}}, ?TIMEOUT),
             DocR
         end,
         lists:seq(1, 10)
@@ -172,6 +207,43 @@ force_save_test(Config) ->
     ),
     ok.
 
+%% Test stream with finite until value
+finite_stream_test(Config) ->
+    [W | _] = ?config(cluster_worker_nodes, Config),
+    Pid = self(),
+
+    BaseVal = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
+    BaseMod = test_record_1,
+
+    save_docs(W, BaseVal, BaseMod, 1, 10),
+    receive_all(finite_stream_test, []),
+
+    save_docs(W, BaseVal, BaseMod, 11, 20),
+    ReceivedFromInfinite = receive_all(finite_stream_test, []),
+    Since = element(1, lists:nth(1, ReceivedFromInfinite)) - 1,
+    Until = element(1, lists:last(ReceivedFromInfinite)),
+
+    save_docs(W, BaseVal, BaseMod, 21, 30),
+    receive_all(finite_stream_test, []),
+
+    {_, DriverPid} = ?assertMatch(
+        {ok, _},
+        rpc:call(W, couchdb_datastore_driver, changes_start_link,
+            [
+                fun(Seq, Doc, Mod) ->
+                    Pid ! {finite, {Seq, Doc, Mod}}
+                end,
+                Since,
+                Until
+            ]
+        )
+    ),
+    ReceivedFromFinite = receive_all(finite, []),
+    ?assertEqual(ReceivedFromInfinite, ReceivedFromFinite),
+
+    ?assertEqual(ok, rpc:call(W, gen_changes, stop, [DriverPid])),
+    ok.
+
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
@@ -191,7 +263,7 @@ init_per_testcase(CaseName, Config) ->
         rpc:call(W, couchdb_datastore_driver, changes_start_link,
             [
                 fun(Seq, Doc, Mod) ->
-                    Pid ! {CaseName, Seq, Doc, Mod}
+                    Pid ! {CaseName, {Seq, Doc, Mod}}
                 end,
                 FirstSeq,
                 infinity
@@ -211,7 +283,30 @@ end_per_testcase(_, Config) ->
 %%% Internal functions
 %%%===================================================================
 
-%% Clean mailbox
+%% Saves docs for given value, model and range of keys
+save_docs(Worker, Value, Model, FirstKey, LastKey) ->
+    lists:map(
+        fun(Key) ->
+            Doc = #document{key = Key, value = Value},
+            ?assertEqual({ok, Key}, rpc:call(Worker, Model, save, [Doc])),
+            {Key, Value, Model}
+        end,
+        lists:seq(FirstKey, LastKey)
+    ).
+
+%% Receives all messages with given prefix
+receive_all(Prefix, Received) ->
+    receive
+        {Prefix, {_, stream_ended, _}} ->
+            lists:usort(Received);
+        {Prefix, Data} ->
+            receive_all(Prefix, [Data | Received])
+    after
+        timer:seconds(5) ->
+            lists:usort(Received)
+    end.
+
+%% Cleans mailbox
 flush() ->
     receive
         _ ->
