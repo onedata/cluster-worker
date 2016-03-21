@@ -45,22 +45,23 @@
     clear_and_flush_global_cache_test/1, multilevel_foreach_global_cache_test/1,
     operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
-    globally_cached_many_links_test/1]).
+    globally_cached_many_links_test/1, create_globally_cached_test/1]).
 -export([utilize_memory/3]).
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test,
-        global_list_test, persistance_test, local_list_test,
-        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-        interupt_global_cache_clearing_test,
-        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test
+%%         local_test, global_test, global_atomic_update_test,
+%%         global_list_test, persistance_test, local_list_test,
+%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+%%         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+%%         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+%%         restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+%%         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+%%         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+%%         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+%%         interupt_global_cache_clearing_test,
+%%         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
+        create_globally_cached_test
     ]).
 
 
@@ -71,6 +72,36 @@ all() ->
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
 
+create_globally_cached_test(Config) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    ModelConfig = TestRecord:model_init(),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    Key = <<"key_cgct">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+
+    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch({error, already_exists}, ?call(Worker1, TestRecord, create, [Doc])),
+
+    ?assertMatch(ok, ?call(Worker2, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+    ok.
 
 disk_only_many_links_test(Config) ->
     many_links_test_base(Config, ?DISK_ONLY_LEVEL).

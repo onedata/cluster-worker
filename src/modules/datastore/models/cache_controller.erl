@@ -302,8 +302,17 @@ before(ModelName, save, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, save, Args, Level2);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
+before(ModelName, create, Level, [Doc], Level) ->
+    case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+        exists, [ModelName:model_init(), Doc#document.key]) of
+        {ok, false} ->
+            ok;
+        {ok, true} ->
+            {error, already_exists};
+        Other ->
+            Other
+    end;
 before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
-    % TODO add checking if doc exists on disk
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);
 before(ModelName, delete, Level, [Key, _Pred], Level) ->
     before_del(Key, ModelName, Level, delete);
