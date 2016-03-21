@@ -120,6 +120,13 @@ save(#model_config{} = ModelConfig, #document{key = Key, value = Value} = _Docum
         {ok, Key}
     end).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
 save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
     ok = mnesia:write(links_table_name(ModelConfig), inject_key(Key, Value), write),
     {ok, Key}.
@@ -212,12 +219,26 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
         [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links. To be used inside transaction (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
 get_link_doc_inside_trans(#model_config{name = ModelName} = ModelConfig, Key) ->
     case mnesia:read(links_table_name(ModelConfig), Key, read) of
         [] -> {error, {not_found, ModelName}};
         [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
 get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
     case mnesia:dirty_read(links_table_name(ModelConfig), Key) of
         [] -> {error, {not_found, ModelName}};
@@ -362,6 +383,13 @@ delete(#model_config{} = ModelConfig, Key, Pred) ->
         end
     end).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
 delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document) ->
     mnesia:delete(links_table_name(ModelConfig), Key, write).
 

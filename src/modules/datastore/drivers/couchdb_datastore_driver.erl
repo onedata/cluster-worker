@@ -90,7 +90,7 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
                     create(ModelConfig, Doc);
                 {error, Reason} ->
                     {error, Reason};
-                {ok, #document{rev = Rev, value = Value}} ->
+                {ok, #document{rev = _Rev, value = Value}} ->
                     {ok, Key};
                 {ok, #document{rev = Rev}} ->
                     save_doc(ModelConfig, Doc#document{rev = Rev})
@@ -99,9 +99,23 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
 save(ModelConfig, Doc) ->
     save_doc(ModelConfig, Doc).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
 save_link_doc(ModelConfig, Doc) ->
     save_doc(ModelConfig, Doc).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document not using transactions (to be used inside transaction).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
     create(ModelConfig, Doc);
 save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
@@ -193,9 +207,23 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
             {error, Reason}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
 get_link_doc(ModelConfig, Key) ->
     get(ModelConfig, Key).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links. To be used inside transaction (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
 get_link_doc_inside_trans(ModelConfig, Key) ->
     get(ModelConfig, Key).
 
@@ -237,9 +265,23 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
             end
         end).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
 delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
     delete_doc(Bucket, Doc).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document not using transactions.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_doc(datastore:bucket(), datastore:ext_key()) ->
+    ok | datastore:generic_error().
 delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
@@ -670,7 +712,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                 State#{status => restarting};
             restart ->
                 State;
-            {'DOWN', _, process, Parent, Reason} ->
+            {'DOWN', _, process, Parent, _Reason} ->
                     catch port_close(PortFD),
                 State#{status => closed};
             stop ->
