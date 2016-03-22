@@ -240,6 +240,13 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
         for(Start, End, fun(I) ->
             ?assert(lists:member(GetLinkName(I), ListedLinks))
         end),
+
+        case length(ListedLinks) of
+            Sum ->
+                ok;
+            _ ->
+                ct:print("Check params ~p", [{Start, End, Sum, ListedLinks}])
+        end,
         ?assertMatch(Sum, length(ListedLinks))
     end,
     CheckLinks(1, 120, 120),
