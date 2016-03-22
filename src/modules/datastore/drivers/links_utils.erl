@@ -16,11 +16,54 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5]).
+-export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates link. Before creation it checks if it exists in several documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link_in_map(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
+    datastore:normalized_link_spec()) -> ok | datastore:generic_error().
+create_link_in_map(Driver, ModelConfig, Key, Link) ->
+    create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key), 1).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates link. Before creation it checks if it exists in several documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link_in_map(Driver :: atom(), model_behaviour:model_config(),
+    datastore:normalized_link_spec(), Key :: datastore:ext_key(), LinkKey :: datastore:ext_key(),
+    KeyNum :: integer()) -> ok | datastore:generic_error().
+create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkName, _} = Link, Key, LinkKey, KeyNum) ->
+    case Driver:get_link_doc_inside_trans(ModelConfig, LinkKey) of
+        {ok, #document{value = #links{link_map = LinkMap, children = Children}} = Doc} ->
+            case maps:get(LinkName, LinkMap, undefined) of
+                undefined ->
+                    LinkNum = get_link_child_num(LinkName, KeyNum),
+                    NextKey = maps:get(LinkNum, Children, <<"non">>),
+                    case NextKey of
+                        <<"non">> ->
+                            add_non_existing_to_map(Driver, ModelConfig, Key, LinkKey, Doc, Link, KeyNum);
+                        _ ->
+                            case create_link_in_map(Driver, ModelConfig, Link, Key, NextKey, KeyNum + 1) of
+                                ok ->
+                                    add_non_existing_to_map(Driver, ModelConfig, Key, LinkKey, Doc, Link, KeyNum);
+                                Other2 ->
+                                    Other2
+                            end
+                    end;
+                _ ->
+                    {error, already_exists}
+            end;
+        Other ->
+            add_non_existing_to_map(Driver, ModelConfig, Key, LinkKey, Other, Link, KeyNum)
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -33,10 +76,10 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
     LDK = links_doc_key(Key),
     case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
         {ok, LinksDoc} ->
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1);
+            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, true);
         {error, {not_found, _}} ->
             LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1);
+            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, true);
         {error, Reason} ->
             {error, Reason}
     end.
@@ -47,16 +90,21 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
 %% @end
 %%--------------------------------------------------------------------
 -spec save_links_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(), datastore:document(),
-    [datastore:normalized_link_spec()], KeyNum :: integer()) -> ok | datastore:generic_error().
+    [datastore:normalized_link_spec()], KeyNum :: integer(), CheckForOld :: boolean()) -> ok | datastore:generic_error().
 save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key,
     #document{key = LDK, value = #links{link_map = LinkMap, children = Children} = LinksRecord} = LinksDoc,
-    LinksList, KeyNum) ->
+    LinksList, KeyNum, CheckForOld) ->
     {FilledMap, NewLinksList, AddedLinks} = fill_links_map(LinksList, LinkMap),
     case NewLinksList of
         [] ->
             case Driver:save_link_doc(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
                 {ok, _} ->
-                    del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
+                    case CheckForOld of
+                        true ->
+                            del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
+                        _ ->
+                            ok
+                    end;
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -83,13 +131,19 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                 children = NewChildren}},
             case Driver:save_link_doc(ModelConfig, NewLinksDoc) of
                 {ok, _} ->
-                    case del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum) of
+                    DelOldAns = case CheckForOld of
+                        true ->
+                            del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
+                        _ ->
+                            ok
+                    end,
+                    case DelOldAns of
                         ok ->
                             maps:fold(fun(Num, SLs, FunAns) ->
                                 NDoc = maps:get(Num, ChildrenDocs),
                                 case FunAns of
                                     ok ->
-                                        save_links_maps(Driver, ModelConfig, Key, NDoc, SLs, KeyNum + 1);
+                                        save_links_maps(Driver, ModelConfig, Key, NDoc, SLs, KeyNum + 1, CheckForOld);
                                     OldError ->
                                         OldError
                                 end
@@ -576,3 +630,26 @@ links_doc_key(Key) ->
 links_child_doc_key(Key, Num) ->
     BinNum = base64:encode(list_to_binary("_" ++ integer_to_list(Num))),
     <<Key/binary, BinNum/binary>>.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Adds link to map. Assumes that link does not exist.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_non_existing_to_map(Driver :: atom(), model_behaviour:model_config(),
+    Key :: datastore:ext_key(), LinkKey :: datastore:ext_key(),
+    GetAns :: datastore:document() | datastore:generic_error(), datastore:normalized_link_spec(),
+    KeyNum :: integer()) -> ok | datastore:generic_error().
+add_non_existing_to_map(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, LDK, GetAns, Link, 1) ->
+    case GetAns of
+        #document{} = Doc ->
+            save_links_maps(Driver, ModelConfig, Key, Doc, [Link], 1, false);
+        {error, {not_found, _}} ->
+            LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
+            save_links_maps(Driver, ModelConfig, Key, LinksDoc, [Link], 1, false);
+        {error, Reason} ->
+            {error, Reason}
+    end;
+add_non_existing_to_map(_Driver, _ModelConfig, _Key, _LDK, _GetAns, _Link, _KeyNum) ->
+    ok.

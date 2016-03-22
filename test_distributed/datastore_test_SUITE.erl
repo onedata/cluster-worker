@@ -50,17 +50,17 @@
 
 all() ->
     ?ALL([
-%%         local_test, global_test, global_atomic_update_test,
-%%         global_list_test, persistance_test, local_list_test,
-%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-%%         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-%%         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-%%         restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-%%         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-%%         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-%%         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-%%         interupt_global_cache_clearing_test,
-%%         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
+        local_test, global_test, global_atomic_update_test,
+        global_list_test, persistance_test, local_list_test,
+        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+        interupt_global_cache_clearing_test,
+        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
         create_globally_cached_test
     ]).
 
@@ -101,6 +101,33 @@ create_globally_cached_test(Config) ->
     ?assertMatch(ok, ?call(Worker2, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+
+    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    timer:sleep(timer:seconds(6)), % wait to check if any async action hasn't destroyed value at disk
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+
+    LinkedKey = "linked_key_cgct",
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 2, <<"efg">>, {test, tuple2})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc])),
+    ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
+
+    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+
+    ?assertMatch(ok, ?call(Worker2, PModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
+    ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+    timer:sleep(timer:seconds(6)), % wait to check if any async action hasn't destroyed value at disk
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
+
     ok.
 
 disk_only_many_links_test(Config) ->
@@ -246,6 +273,16 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ])),
     CheckLinks(121, 180, 180),
 
+    for(1, 180, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [
+            Level, Doc, {GetLinkName(I), LinkedDoc}
+        ]))
+    end),
+
     for(91, 110, fun(I) ->
         ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
     end),
@@ -292,8 +329,18 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     CheckLinks(151, 160, 40),
     CheckLinks(181, 210, 40),
 
-    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+    for(1, 150, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, create_link, [
+            Level, Doc, {GetLinkName(I), LinkedDoc}
+        ]))
+    end),
+    CheckLinks(1, 150, 190),
 
+    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
     ok.
 
 interupt_global_cache_clearing_test(Config) ->
