@@ -246,7 +246,7 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkT
 %% @end
 %%--------------------------------------------------------------------
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
-    ok | datastore:generic_error().
+    no_return().
 create_link(_ModelConfig, _Key, _Link) ->
     error(not_supported).
 
