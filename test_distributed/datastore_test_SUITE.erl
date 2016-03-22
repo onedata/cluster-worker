@@ -50,18 +50,18 @@
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test,
-        global_list_test, persistance_test, local_list_test,
-        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-        interupt_global_cache_clearing_test,
-        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
-        create_globally_cached_test
+%%         local_test, global_test, global_atomic_update_test,
+%%         global_list_test, persistance_test, local_list_test,
+%%         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+%%         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+%%         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+%%         restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+%%         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+%%         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+%%         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+%%         interupt_global_cache_clearing_test,
+        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test
+%%         create_globally_cached_test
     ]).
 
 
@@ -172,8 +172,9 @@ many_links_test_base(Config, Level) ->
     KeyFunsTuples = lists:zip(lists:seq(1,2), KeyFuns),
     NameFunsTuples = lists:zip(lists:seq(1,6), NameFuns),
 
+    LevelString = atom_to_list(Level),
     lists:foreach(fun({KNum, GLK}) ->
-        LinkedDocKey = "key_fun_" ++ integer_to_list(KNum) ++ "_key_mltb_link",
+        LinkedDocKey = "key_fun_" ++ integer_to_list(KNum) ++ "_level_" ++ LevelString ++ "_key_mltb_link",
         GetLinkKey = fun(I) ->
             GLK(LinkedDocKey, I)
         end,
@@ -184,7 +185,7 @@ many_links_test_base(Config, Level) ->
     end, KeyFunsTuples),
 
     lists:foreach(fun({NNum, GLN}) ->
-        LinkedDocKey = "name_fun_" ++ integer_to_list(NNum) ++ "_key_mltb_link",
+        LinkedDocKey = "name_fun_" ++ integer_to_list(NNum) ++ "_level_" ++ LevelString ++ "_key_mltb_link",
         GetLinkKey = fun(I) ->
             GetLinkKey1(LinkedDocKey, I)
         end,
