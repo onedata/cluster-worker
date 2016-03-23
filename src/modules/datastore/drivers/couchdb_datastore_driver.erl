@@ -43,7 +43,7 @@
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
--export([changes_start_link/3]).
+-export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 
 %%%===================================================================
@@ -774,6 +774,39 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Fetches latest revision of document with given key. As in changes stream,
+%% revision field is populated with structure describing all the revisions
+%% of the document.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_with_revs(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_with_revs(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
+    Args = [to_driver_key(Bucket, Key), [{<<"revs">>, <<"true">>}]],
+    case db_run(couchbeam, open_doc, Args, 3) of
+        {ok, {Proplist} = _Doc} ->
+            Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+            Proplist2 = Proplist -- Proplist1,
+
+            {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, Proplist),
+            {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
+            {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
+
+            {ok, #document{
+                key = Key,
+                value = from_json_term({Proplist2}),
+                rev = {Start, Revs}}
+            };
+        {error, {not_found, _}} ->
+            {error, {not_found, ModelName}};
+        {error, not_found} ->
+            {error, {not_found, ModelName}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Starts changes stream with given callback function that is called on every change received from DB.
 %% @end
 %%--------------------------------------------------------------------
@@ -813,9 +846,12 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
         try
             RawDoc = doc(Change),
             Seq = seq(Change),
-            RawDocOnceAgian = jiffy:decode(jsx:encode(RawDoc)),
-            Document = process_raw_doc(RawDocOnceAgian),
-                catch Callback(Seq, Document, model(Document)),
+            Deleted = deleted(Change),
+
+            RawDocOnceAgain = jiffy:decode(jsx:encode(RawDoc)),
+            Document = process_raw_doc(RawDocOnceAgain),
+
+            Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
             State#state{last_seq = Seq}
         catch
             _:Reason ->
@@ -917,6 +953,19 @@ doc({change, {Props}}) ->
 seq({change, {Props}}) ->
     {_, LastSeq} = lists:keyfind(<<"seq">>, 1, Props),
     LastSeq.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Extracts info about document deletion
+%% @end
+%%--------------------------------------------------------------------
+-spec deleted(term()) -> boolean().
+deleted({change, {Props}}) ->
+    case lists:keyfind(<<"deleted">>, 1, Props) of
+        {_, true} -> true;
+        _ -> false
+    end.
 
 
 %%--------------------------------------------------------------------
