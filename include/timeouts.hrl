@@ -1,11 +1,13 @@
 %%%-------------------------------------------------------------------
 %%% @author Jakub Kudzia
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%% This file contains timeout definitions
+%%% @copyright (C) 2016 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
 %%% @end
-%%% Created : 16. Mar 2016 6:16 PM
-%%%-------------------------------------------------------------------
+%%%--------------------------------------------------------------------
+%%% @doc dns listener starting & stopping
+%%% @end
+%%%--------------------------------------------------------------------
 -author("Jakub Kudzia").
 
 % Timeout to wait for DNS listeners to start.
