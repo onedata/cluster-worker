@@ -26,8 +26,6 @@
 %%timeout for request to couchdb in form of hackney option
 -define(DEFAULT_DB_REQUEST_TIMEOUT_OPT, [{recv_timeout, timer:minutes(3)}]).
 
--define().
-
 %%mnesia cache driver
 -define(MNESIA_WAIT_TIMEOUT, timer:seconds(60)).
 
