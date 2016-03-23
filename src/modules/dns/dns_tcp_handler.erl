@@ -12,6 +12,7 @@
 -behaviour(ranch_protocol).
 
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% API
 -export([start_link/4, loop/3]).
@@ -40,7 +41,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 init(Ref, Socket, Transport, Opts) ->
     TransportOpts = ranch:filter_options(Opts, [packet, keepalive], []),
 
-    TCPIdleTimeInSecs = proplists:get_value(dns_tcp_timeout, Opts, 60),
+    TCPIdleTimeInSecs = proplists:get_value(dns_tcp_timeout, Opts, ?DEFAULT_DNS_TCP_TIMEOUT),
     TCPIdleTime = timer:seconds(TCPIdleTimeInSecs),
 
     Transport:setopts(Socket, TransportOpts),

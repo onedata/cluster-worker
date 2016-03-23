@@ -706,7 +706,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     end,
 
     CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + timer:seconds(10),
+    MinRestartTime = ST + ?TIME_FOR_RESTART,
 
     NewState =
         receive
