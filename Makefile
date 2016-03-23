@@ -1,17 +1,8 @@
-REPO            ?= cluster-manager
+REPO	        ?= cluster-worker
 
-# distro for package building (oneof: wily, fedora-23-x86_64)
-DISTRIBUTION    ?= none
-export DISTRIBUTION
-
-PKG_REVISION    ?= $(shell git describe --tags --always)
-PKG_VERSION	    ?= $(shell git describe --tags --always | tr - .)
-PKG_ID           = cluster-manager-$(PKG_VERSION)
-PKG_BUILD        = 1
-BASE_DIR         = $(shell pwd)
+BASE_DIR	     = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
-REBAR           ?= $(BASE_DIR)/rebar
-PKG_VARS_CONFIG  = pkg.vars.config
+REBAR	        ?= $(BASE_DIR)/rebar
 OVERLAY_VARS    ?=
 
 GIT_URL := $(shell git config --get remote.origin.url | sed -e 's/\(\/[^/]*\)$$//g')
@@ -21,11 +12,14 @@ export ONEDATA_GIT_URL
 
 .PHONY: deps test package
 
-all: rel
+all: test_rel
 
 ##
 ## Rebar targets
 ##
+
+recompile:
+	./rebar compile skip_deps=true
 
 compile:
 	./rebar compile
@@ -36,7 +30,7 @@ deps:
 generate: deps compile
 	./rebar generate $(OVERLAY_VARS)
 
-clean: relclean pkgclean
+clean: relclean
 	./rebar clean
 
 distclean:
@@ -48,9 +42,15 @@ distclean:
 
 rel: generate
 
+test_rel: generate cm_rel
+
+cm_rel:
+	make -C cluster_manager/ rel
+
 relclean:
 	rm -rf rel/test_cluster
-	rm -rf rel/cluster_manager
+	rm -rf rel/cluster_worker
+	rm -rf cluster_manager/rel/cluster_manager
 
 ##
 ## Testing targets
@@ -60,6 +60,9 @@ eunit:
 	./rebar eunit skip_deps=true suites=${SUITES}
 ## Rename all tests in order to remove duplicated names (add _(++i) suffix to each test)
 	@for tout in `find test -name "TEST-*.xml"`; do awk '/testcase/{gsub("_[0-9]+\"", "_" ++i "\"")}1' $$tout > $$tout.tmp; mv $$tout.tmp $$tout; done
+
+coverage:
+	$(BASE_DIR)/bamboos/docker/coverage.escript $(BASE_DIR)
 
 ##
 ## Dialyzer targets local
@@ -73,49 +76,11 @@ plt:
 	dialyzer --check_plt --plt ${PLT}; \
 	if [ $$? != 0 ]; then \
 	    dialyzer --build_plt --output_plt ${PLT} --apps kernel stdlib sasl erts \
-	        ssl tools runtime_tools crypto inets xmerl snmp public_key eunit \
-	        mnesia common_test test_server syntax_tools compiler ./deps/*/ebin; \
+		ssl tools runtime_tools crypto inets xmerl snmp public_key eunit \
+		mnesia edoc common_test test_server syntax_tools compiler ./deps/*/ebin; \
 	fi; exit 0
 
 
 # Dialyzes the project.
 dialyzer: plt
 	dialyzer ./ebin --plt ${PLT} -Werror_handling -Wrace_conditions --fullpath
-
-##
-## Packaging targets
-##
-
-export PKG_VERSION PKG_ID PKG_BUILD BASE_DIR ERLANG_BIN REBAR OVERLAY_VARS RELEASE PKG_VARS_CONFIG
-
-check_distribution:
-ifeq ($(DISTRIBUTION), none)
-	@echo "Please provide package distribution. Oneof: 'wily', 'fedora-23-x86_64'"
-	@exit 1
-else
-	@echo "Building package for distribution $(DISTRIBUTION)"
-endif
-
-package/$(PKG_ID).tar.gz: deps
-	mkdir -p package
-	rm -rf package/$(PKG_ID)
-	git archive --format=tar --prefix=$(PKG_ID)/ $(PKG_REVISION) | (cd package && tar -xf -)
-	${MAKE} -C package/$(PKG_ID) deps
-	for dep in package/$(PKG_ID) package/$(PKG_ID)/deps/*; do \
-	     echo "Processing dependency: `basename $${dep}`"; \
-	     vsn=`git --git-dir=$${dep}/.git describe --tags 2>/dev/null`; \
-	     mkdir -p $${dep}/priv; \
-	     echo "$${vsn}" > $${dep}/priv/vsn.git; \
-	     sed -i'' "s/{vsn,\\s*git}/{vsn, \"$${vsn}\"}/" $${dep}/src/*.app.src 2>/dev/null || true; \
-	done
-	find package/$(PKG_ID) -depth -name ".git" -exec rm -rf {} \;
-	tar -C package -czf package/$(PKG_ID).tar.gz $(PKG_ID)
-
-dist: package/$(PKG_ID).tar.gz
-	cp package/$(PKG_ID).tar.gz .
-
-package: check_distribution package/$(PKG_ID).tar.gz
-	${MAKE} -C package -f $(PKG_ID)/deps/node_package/Makefile
-
-pkgclean:
-	rm -rf package
