@@ -4,6 +4,13 @@
 CHANGELOG
 ---------
 
+### 1.0.1
+
+* VFS-1528 Use monotonic time instead of system time
+* VFS-1603 Add distribution check to package rule in Makefile.
+* VFS-1528 Remove deprecated use of erlang:now/0
+
+
 ### 1.0.0
 
 * Dependencies management update
