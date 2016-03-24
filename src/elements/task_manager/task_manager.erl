@@ -16,6 +16,7 @@
 -include("global_definitions.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("timeouts.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
