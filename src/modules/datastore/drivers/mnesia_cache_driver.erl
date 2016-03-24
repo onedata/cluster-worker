@@ -298,7 +298,7 @@ delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
-                links_utils:delete_links(?MODULE, ModelConfig, Key);
+                ok = links_utils:delete_links(?MODULE, ModelConfig, Key);
             false ->
                 ok
         end
@@ -307,7 +307,7 @@ delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
-                links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
+                ok = links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
             false ->
                 ok
         end

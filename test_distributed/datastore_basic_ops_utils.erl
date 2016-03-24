@@ -37,7 +37,7 @@
 %%% API
 %%%===================================================================
 
-% TODO test foreach performance
+% TODO test foreach performance (VFS-1817)
 links_test(Config, Level) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
