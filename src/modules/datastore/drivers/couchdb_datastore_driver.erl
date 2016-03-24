@@ -286,7 +286,7 @@ delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
 delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-    case db_run(couchbeam, delete_doc, [Doc], 3) of
+    case db_run(couchbeam, delete_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         ok ->
             ok;
         {ok, _} ->
