@@ -16,7 +16,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5]).
+-export([save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5,
+    links_doc_key/1]).
 
 %%%===================================================================
 %%% API
