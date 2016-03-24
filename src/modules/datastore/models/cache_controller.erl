@@ -18,6 +18,7 @@
 -include("modules/datastore/datastore_engine.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
@@ -25,7 +26,6 @@
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
     list_docs_to_be_dumped/1, choose_action/5]).
 
--define(DISK_OP_TIMEOUT, timer:minutes(1)).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -33,7 +33,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback save/1. 
+%% {@link model_behaviour} callback save/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec save(datastore:document()) ->
@@ -54,7 +54,7 @@ save(Level, Document) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback update/2. 
+%% {@link model_behaviour} callback update/2.
 %% @end
 %%--------------------------------------------------------------------
 -spec update(datastore:ext_key(), Diff :: datastore:document_diff()) ->
@@ -75,7 +75,7 @@ update(Level, Key, Diff) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback create/1. 
+%% {@link model_behaviour} callback create/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec create(datastore:document()) ->
@@ -230,7 +230,7 @@ delete(Level, Key, Pred) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback exists/1. 
+%% {@link model_behaviour} callback exists/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec exists(datastore:ext_key()) -> datastore:exists_return().
@@ -249,7 +249,7 @@ exists(Level, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback model_init/0. 
+%% {@link model_behaviour} callback model_init/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
@@ -261,7 +261,7 @@ model_init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback 'after'/5. 
+%% {@link model_behaviour} callback 'after'/5.
 %% @end
 %%--------------------------------------------------------------------
 -spec 'after'(ModelName :: model_behaviour:model_type(),
@@ -288,7 +288,7 @@ model_init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback before/4. 
+%% {@link model_behaviour} callback before/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec before(ModelName :: model_behaviour:model_type(),

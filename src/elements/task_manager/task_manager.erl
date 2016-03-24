@@ -16,6 +16,7 @@
 -include("global_definitions.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("timeouts.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
@@ -28,7 +29,7 @@
 -export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0]).
 -export([save_pid/3, update_pid/3]).
 
--define(TASK_SAVE_TIMEOUT, timer:seconds(10)).
+
 -define(TASK_REPEATS, 20).
 
 %%%===================================================================

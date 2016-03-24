@@ -18,6 +18,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% Encoded object prefix
 -define(OBJ_PREFIX, "OBJ::").
@@ -103,7 +104,7 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc], 3) of
+    case db_run(couchbeam, save_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -145,7 +146,7 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc], 3) of
+    case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -221,7 +222,7 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                         {ok, #document{value = Value, rev = Rev}} ->
                             {Props} = to_json_term(Value),
                             Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-                            case db_run(couchbeam, delete_doc, [Doc], 3) of
+                            case db_run(couchbeam, delete_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
                                 ok ->
                                     ok;
                                 {ok, _} ->
@@ -602,7 +603,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
+    case db_run(couchbeam, save_doc, [Doc,[{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -668,8 +669,8 @@ start_gateway(Parent, N, Hostname, Port) ->
         end
     end,
 
-    WaitForStateFun(timer:seconds(2)),
-    WaitForConnectionFun(timer:seconds(2)),
+    WaitForStateFun(?WAIT_FOR_STATE_TIMEOUT),
+    WaitForConnectionFun(?WAIT_FOR_CONNECTION_TIMEOUT),
 
     gateway_loop(State#{status => running}).
 
@@ -705,7 +706,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     end,
 
     CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + timer:seconds(5),
+    MinRestartTime = ST + ?TIME_FOR_RESTART,
 
     NewState =
         receive
@@ -739,7 +740,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
                 State
-        after timer:seconds(1) ->
+        after timer:seconds(2) ->
             State
         end,
     case NewState of
