@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
-%%% @doc redirector listener starting & stopping
+%%% @doc This module is responsible for redirector listener starting and stopping.
 %%% @end
 %%%--------------------------------------------------------------------
 -module(redirector_listener).
@@ -27,12 +27,12 @@
 -export([port/0, start/0, stop/0, healthcheck/0]).
 
 %%%===================================================================
-%%% listener_starter_behaviour callbacks
+%%% listener_behaviour callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback port/0.
+%% {@link listener_behaviour} callback port/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec port() -> integer().
@@ -44,7 +44,7 @@ port() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback start/1.
+%% {@link listener_behaviour} callback start/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
@@ -77,7 +77,7 @@ start() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback stop/1.
+%% {@link listener_behaviour} callback stop/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
@@ -94,17 +94,13 @@ stop() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the status of a listener.
+%% {@link listener_behaviour} callback healthcheck/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
-    {ok, RedirectorPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_redirect_port),
-    case http_client:get("http://127.0.0.1:" ++ integer_to_list(RedirectorPort),
-        [], <<>>, [insecure]) of
-        {ok, _, _, _} ->
-            ok;
-        _ ->
-            {error, server_not_responding}
+    Endpoint = "http://127.0.0.1:" ++ integer_to_list(port()),
+    case http_client:get(Endpoint, [], <<>>, [insecure]) of
+        {ok, _, _, _} -> ok;
+        _ -> {error, server_not_responding}
     end.

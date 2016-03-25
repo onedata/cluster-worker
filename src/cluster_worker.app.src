@@ -38,8 +38,6 @@
             %% GENERAL
             %% ===================================================================
 
-            %% List of absolute paths to storages used by workers.
-            {storage_paths, []},
             %% How long (in ms) should worker wait between heartbeats (when connected to cm)
             {heartbeat_interval, 500},
             %% How long (in ms) should worker wait between next connection try (when not registered in cm)
@@ -64,7 +62,6 @@
             {cache_to_disk_force_delay_ms, 30000},
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 5},
-
 
             %% ===================================================================
             %% PLUGINS
