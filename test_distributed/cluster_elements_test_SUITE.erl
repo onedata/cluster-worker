@@ -106,7 +106,8 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     Workers = [W1, W2, W1, W2, W1],
 
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_sleep_time_ms, 1000))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 1000)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 1000))
     end, WorkersList),
 
     ControllerPid = start_tasks(Level, Workers, 5),
@@ -134,10 +135,11 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
     Workers = [W1, W2, W1, W2, W1],
 
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_sleep_time_ms, 100))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 100)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 100))
     end, WorkersList),
 
-    ControllerPid = start_tasks(Level, Workers, 25),
+    ControllerPid = start_tasks(Level, Workers, 15),
     {A1, A2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1, A2}),
     ?assertEqual(FirstCheckNum, length(A2)),

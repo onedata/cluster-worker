@@ -39,12 +39,12 @@
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
--export([links_doc_key/1, links_key_to_doc_key/1]).
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
 -export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
+-export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -91,15 +91,35 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
                     create(ModelConfig, Doc);
                 {error, Reason} ->
                     {error, Reason};
-                {ok, #document{rev = undefined}} ->
-                    create(ModelConfig, Doc);
-                {ok, #document{rev = Rev, value = Value}} ->
+                {ok, #document{rev = _Rev, value = Value}} ->
                     {ok, Key};
                 {ok, #document{rev = Rev}} ->
-                    save(ModelConfig, Doc#document{rev = Rev})
+                    save_doc(ModelConfig, Doc#document{rev = Rev})
             end
         end);
-save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
+save(ModelConfig, Doc) ->
+    save_doc(ModelConfig, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_link_doc(ModelConfig, Doc) ->
+    save_doc(ModelConfig, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document not using transactions (to be used inside transaction).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
+    create(ModelConfig, Doc);
+save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
     ok = assert_value_size(Value),
 
     {Props} = to_json_term(Value),
@@ -188,6 +208,25 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
             {error, Reason}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc(ModelConfig, Key) ->
+    get(ModelConfig, Key).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links. To be used inside transaction (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc_inside_trans(ModelConfig, Key) ->
+    get(ModelConfig, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -219,24 +258,44 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                             ok;
                         {error, Reason} ->
                             {error, Reason};
-                        {ok, #document{value = Value, rev = Rev}} ->
-                            {Props} = to_json_term(Value),
-                            Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-                            case db_run(couchbeam, delete_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-                                ok ->
-                                    ok;
-                                {ok, _} ->
-                                    ok;
-                                {error, key_enoent} ->
-                                    ok;
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end
+                        {ok, Doc} ->
+                            delete_doc(Bucket, Doc)
                     end;
                 false ->
                     ok
             end
         end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
+delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
+    delete_doc(Bucket, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document not using transactions.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_doc(datastore:bucket(), datastore:ext_key()) ->
+    ok | datastore:generic_error().
+delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
+    {Props} = to_json_term(Value),
+    Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
+    case db_run(couchbeam, delete_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+        ok ->
+            ok;
+        {ok, _} ->
+            ok;
+        {error, key_enoent} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -266,28 +325,9 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case get(ModelConfig, links_doc_key(Key)) of
-                {ok, #document{value = #links{link_map = LinkMap}}} ->
-                    add_links4(ModelConfig, Key, Links, LinkMap);
-                {error, {not_found, _}} ->
-                    add_links4(ModelConfig, Key, Links, #{});
-                {error, Reason} ->
-                    {error, Reason}
-            end
+            links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
         end
     ).
-
--spec add_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()], InternalCtx :: term()) ->
-    ok | datastore:generic_error().
-add_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
-        {ok, _} -> ok;
-        {error, Reason} ->
-            {error, Reason}
-    end;
-add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkTarget} | R], Ctx) ->
-    add_links4(ModelConfig, Key, R, maps:put(LinkName, LinkTarget, Ctx)).
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -296,33 +336,18 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkT
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
-delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
-    delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
+delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            links_utils:delete_links(?MODULE, ModelConfig, Key)
+        end
+    );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case get(ModelConfig, links_doc_key(Key)) of
-                {ok, #document{value = #links{link_map = LinkMap}}} ->
-                    delete_links4(ModelConfig, Key, Links, LinkMap);
-                {error, {not_found, _}} ->
-                    ok;
-                {error, Reason} ->
-                    {error, Reason}
-            end
+            links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
     ).
-
--spec delete_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()] | all, InternalCtx :: term()) ->
-    ok | datastore:generic_error().
-delete_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
-        {ok, _} -> ok;
-        {error, Reason} ->
-            {error, Reason}
-    end;
-delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
-    delete_links4(ModelConfig, Key, R, maps:remove(Link, Ctx)).
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -332,20 +357,7 @@ delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = #links{link_map = LinkMap}}} ->
-            case maps:get(LinkName, LinkMap, undefined) of
-                undefined ->
-                    {error, link_not_found};
-                LinkTarget ->
-                    {ok, LinkTarget}
-            end;
-        {error, {not_found, _}} ->
-            {error, link_not_found};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
+    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -356,15 +368,7 @@ fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = #links{link_map = LinkMap}}} ->
-            {ok, maps:fold(Fun, AccIn, LinkMap)};
-        {error, {not_found, _}} ->
-            {ok, AccIn};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
+    links_utils:foreach_link(?MODULE, ModelConfig, Key, Fun, AccIn).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -499,28 +503,6 @@ from_json_term({Term}) when is_list(Term) ->
     end;
 from_json_term(Term) when is_binary(Term) ->
     from_binary(Term).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns key for document holding links for given document.
-%% @end
-%%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key()) -> BinKey :: binary().
-links_doc_key(Key) ->
-    base64:encode(term_to_binary({links, Key})).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns key of document that owns links saved as document with given key.
-%% Reverses links_doc_key/1.
-%% @end
-%%--------------------------------------------------------------------
--spec links_key_to_doc_key(Key :: datastore:key()) -> BinKey :: binary().
-links_key_to_doc_key(Key) ->
-    {links, DocKey} = binary_to_term(base64:decode(Key)),
-    DocKey.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -731,7 +713,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                 State#{status => restarting};
             restart ->
                 State;
-            {'DOWN', _, process, Parent, Reason} ->
+            {'DOWN', _, process, Parent, _Reason} ->
                     catch port_close(PortFD),
                 State#{status => closed};
             stop ->

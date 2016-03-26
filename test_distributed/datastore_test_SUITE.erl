@@ -44,7 +44,8 @@
     multiple_links_creation_disk_test/1, multiple_links_creation_global_only_test/1,
     clear_and_flush_global_cache_test/1, multilevel_foreach_global_cache_test/1,
     operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
-    interupt_global_cache_clearing_test/1]).
+    interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
+    globally_cached_many_links_test/1]).
 -export([utilize_memory/3]).
 
 all() ->
@@ -58,7 +59,8 @@ all() ->
         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-        interupt_global_cache_clearing_test
+        interupt_global_cache_clearing_test,
+        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test
     ]).
 
 
@@ -68,6 +70,200 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+
+disk_only_many_links_test(Config) ->
+    many_links_test_base(Config, ?DISK_ONLY_LEVEL).
+
+global_only_many_links_test(Config) ->
+    many_links_test_base(Config, ?GLOBAL_ONLY_LEVEL).
+
+globally_cached_many_links_test(Config) ->
+    many_links_test_base(Config, ?GLOBALLY_CACHED_LEVEL).
+
+many_links_test_base(Config, Level) ->
+    GetLinkKey1 = fun(LinkedDocKey, I) ->
+        list_to_binary(LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkKey2 = fun(LinkedDocKey, I) ->
+        list_to_atom(LinkedDocKey ++ integer_to_list(I))
+    end,
+    KeyFuns = [GetLinkKey1, GetLinkKey2],
+
+    GetLinkName1 = fun(_LinkedDocKey, I) ->
+        integer_to_binary(I)
+    end,
+    GetLinkName2 = fun(LinkedDocKey, I) ->
+        list_to_binary(LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkName3 = fun(LinkedDocKey, I) ->
+        list_to_atom(LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkName4 = fun(LinkedDocKey, I) ->
+        list_to_binary(integer_to_list(I) ++ LinkedDocKey)
+    end,
+    GetLinkName5 = fun(LinkedDocKey, I) ->
+        list_to_binary(integer_to_list(I) ++ LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkName6 = fun(LinkedDocKey, I) ->
+        list_to_binary(LinkedDocKey ++ integer_to_list(I) ++ LinkedDocKey)
+    end,
+    NameFuns = [GetLinkName1, GetLinkName2, GetLinkName3, GetLinkName4, GetLinkName5,
+        GetLinkName6],
+
+    KeyFunsTuples = lists:zip(lists:seq(1,2), KeyFuns),
+    NameFunsTuples = lists:zip(lists:seq(1,6), NameFuns),
+
+    lists:foreach(fun({KNum, GLK}) ->
+        LinkedDocKey = "key_fun_" ++ integer_to_list(KNum) ++ "_key_mltb_link",
+        GetLinkKey = fun(I) ->
+            GLK(LinkedDocKey, I)
+        end,
+        GetLinkName = fun(I) ->
+            GetLinkName1(LinkedDocKey, I)
+        end,
+        many_links_test_base(Config, Level, GetLinkKey, GetLinkName)
+    end, KeyFunsTuples),
+
+    lists:foreach(fun({NNum, GLN}) ->
+        LinkedDocKey = "name_fun_" ++ integer_to_list(NNum) ++ "_key_mltb_link",
+        GetLinkKey = fun(I) ->
+            GetLinkKey1(LinkedDocKey, I)
+        end,
+        GetLinkName = fun(I) ->
+            GLN(LinkedDocKey, I)
+        end,
+        many_links_test_base(Config, Level, GetLinkKey, GetLinkName)
+    end, NameFunsTuples).
+
+many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    Key = <<"key_mltb">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+
+    AddDocs = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            LinkedDoc =  #document{
+                key = GetLinkKey(I),
+                value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+            },
+            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc]))
+        end)
+    end,
+    AddDocs(1, 120),
+    for(1, 120, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, add_links, [
+            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ]))
+    end),
+
+    CheckLinks = fun(Start, End, Sum) ->
+        for(Start, End, fun(I) ->
+            ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)])
+        end),
+
+        AccFun = fun(LinkName, _, Acc) ->
+            [LinkName | Acc]
+        end,
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [Level, Doc, AccFun, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        for(Start, End, fun(I) ->
+            ?assert(lists:member(GetLinkName(I), ListedLinks))
+        end),
+        ?assertMatch(Sum, length(ListedLinks))
+    end,
+    CheckLinks(1, 120, 120),
+
+    for(1, 120, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, add_links, [
+            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ]))
+    end),
+    CheckLinks(1, 120, 120),
+
+    AddDocs(121, 180),
+    ToAddList = fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        {GetLinkName(I), LinkedDoc}
+    end,
+    AddList = lists:map(ToAddList, lists:seq(121, 180)),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList
+    ])),
+    CheckLinks(121, 180, 180),
+
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList
+    ])),
+    CheckLinks(121, 180, 180),
+
+    for(91, 110, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+    end),
+
+    DelList = lists:map(fun(I) ->
+        GetLinkName(I)
+    end, lists:seq(131, 150)),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
+        Level, Doc, DelList
+    ])),
+    CheckLinks(1, 90, 140),
+    CheckLinks(111, 130, 140),
+    CheckLinks(151, 180, 140),
+
+    AddDocs(181, 300),
+    AddList2 = lists:map(ToAddList, lists:seq(181, 300)),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList2
+    ])),
+    CheckLinks(181, 300, 260),
+
+    DelList2 = lists:map(fun(I) ->
+        GetLinkName(I)
+    end, lists:seq(1, 150)),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
+        Level, Doc, DelList2
+    ])),
+    CheckLinks(151, 300, 150),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
+        Level, Doc, DelList2
+    ])),
+    CheckLinks(151, 300, 150),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, []])),
+    CheckLinks(151, 300, 150),
+
+    for(161, 180, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+    end),
+    for(211, 300, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+    end),
+    CheckLinks(151, 160, 40),
+    CheckLinks(181, 210, 40),
+
+    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+
+    ok.
 
 interupt_global_cache_clearing_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
@@ -1072,7 +1268,7 @@ end_per_suite(Config) ->
 init_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:set_env(Case, Config).
 
-end_per_testcase(Case, Config) ->
+end_per_testcase(_Case, Config) ->
     datastore_basic_ops_utils:clear_env(Config).
 
 %%%===================================================================

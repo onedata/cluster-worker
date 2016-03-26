@@ -59,11 +59,17 @@
     sync_cache = SyncCache
 }).
 
+%% Max link map size in single links record
+-define(LINKS_MAP_MAX_SIZE, 32).
+%% Number of children owned by each link record
+-define(LINKS_TREE_BASE, 128).
+
 %% Internal semi-model used by document that holds links between documents
 -record(links, {
-    key,
+    doc_key,
     model,
-    link_map = #{}
+    link_map = #{},
+    children = #{}
 }).
 
 -endif.
