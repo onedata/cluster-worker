@@ -26,6 +26,8 @@
 -export([add_links/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_synchronized/3]).
 
+-export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
+
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
 
@@ -73,7 +75,7 @@ init_bucket(_BucketName, Models, NodeToSync) ->
                     end,
                     {
                         MakeTable(Table, ModelName, [key | Fields]),
-                        MakeTable(LinkTable, links, record_info(fields, links)),
+                        MakeTable(LinkTable, links, [key | record_info(fields, links)]),
                         MakeTable(TransactionTable, ModelName, [key | Fields])
                     };
                 _ -> %% there is at least one mnesia node -> join cluster
@@ -117,6 +119,17 @@ save(#model_config{} = ModelConfig, #document{key = Key, value = Value} = _Docum
         ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
         {ok, Key}
     end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
+    ok = mnesia:write(links_table_name(ModelConfig), inject_key(Key, Value), write),
+    {ok, Key}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -206,6 +219,31 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
         [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links. To be used inside transaction (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc_inside_trans(#model_config{name = ModelName} = ModelConfig, Key) ->
+    case mnesia:read(links_table_name(ModelConfig), Key, read) of
+        [] -> {error, {not_found, ModelName}};
+        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
+    case mnesia:dirty_read(links_table_name(ModelConfig), Key) of
+        [] -> {error, {not_found, ModelName}};
+        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -234,17 +272,9 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
-add_links(#model_config{} = ModelConfig, Key, LinkSpec) ->
+add_links(#model_config{} = ModelConfig, Key, Links) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
-        Links = #links{} =
-            case mnesia:read(links_table_name(ModelConfig), Key, write) of
-                [] ->
-                    #links{key = Key};
-                [Value] ->
-                    Value
-            end,
-        Links1 = Links#links{link_map = maps:merge(Links#links.link_map, maps:from_list(LinkSpec))},
-        ok = mnesia:write(links_table_name(ModelConfig), Links1, write)
+        links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
     end).
 
 %%--------------------------------------------------------------------
@@ -268,28 +298,16 @@ delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
-                ok = mnesia:delete(links_table_name(ModelConfig), Key, write);
+                ok = links_utils:delete_links(?MODULE, ModelConfig, Key);
             false ->
                 ok
         end
     end);
-delete_links(#model_config{} = ModelConfig, Key, LinkNames, Pred) ->
+delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
-                Links = #links{} =
-                    case mnesia:read(links_table_name(ModelConfig), Key, write) of
-                        [] ->
-                            #links{key = Key};
-                        [Value] ->
-                            Value
-                    end,
-                LinksMap =
-                    lists:foldl(fun(LinkName, Map) ->
-                        maps:remove(LinkName, Map)
-                    end, Links#links.link_map, LinkNames),
-                Links1 = Links#links{link_map = LinksMap},
-                ok = mnesia:write(links_table_name(ModelConfig), Links1, write);
+                ok = links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
             false ->
                 ok
         end
@@ -303,17 +321,7 @@ delete_links(#model_config{} = ModelConfig, Key, LinkNames, Pred) ->
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{} = ModelConfig, Key, LinkName) ->
-    case mnesia:dirty_read(links_table_name(ModelConfig), Key) of
-        [] -> {error, link_not_found};
-        [Value] ->
-            Map = Value#links.link_map,
-            case maps:get(LinkName, Map, undefined) of
-                undefined ->
-                    {error, link_not_found};
-                {_TargetKey, _TargetModel} = Target ->
-                    {ok, Target}
-            end
-    end.
+    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -324,17 +332,7 @@ fetch_link(#model_config{} = ModelConfig, Key, LinkName) ->
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 foreach_link(#model_config{} = ModelConfig, Key, Fun, AccIn) ->
-    case mnesia:dirty_read(links_table_name(ModelConfig), Key) of
-        [] -> {ok, AccIn};
-        [Value] ->
-            Map = Value#links.link_map,
-            try maps:fold(Fun, AccIn, Map) of
-                AccOut -> {ok, AccOut}
-            catch
-                _:Reason ->
-                    {error, Reason}
-            end
-    end.
+    links_utils:foreach_link(?MODULE, ModelConfig, Key, Fun, AccIn).
 
 
 %%--------------------------------------------------------------------
@@ -384,6 +382,16 @@ delete(#model_config{} = ModelConfig, Key, Pred) ->
                 ok
         end
     end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
+delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document) ->
+    mnesia:delete(links_table_name(ModelConfig), Key, write).
 
 
 %%--------------------------------------------------------------------
