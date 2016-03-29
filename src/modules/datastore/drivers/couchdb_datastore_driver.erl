@@ -604,6 +604,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 %%--------------------------------------------------------------------
 -spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
 start_gateway(Parent, N, Hostname, Port) ->
+    process_flag(trap_exit, true),
     GWPort = crypto:rand_uniform(?GATEWAY_BASE_PORT_MIN, ?GATEWAY_BASE_PORT_MAX),
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
@@ -622,7 +623,6 @@ start_gateway(Parent, N, Hostname, Port) ->
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
         start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1
     },
-    monitor(process, Parent),
     proc_lib:init_ack(Parent, State),
 
     BusyWaitInterval = 20,
@@ -744,9 +744,11 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 %%--------------------------------------------------------------------
 -spec stop_gateway(PortFD :: port()) -> ok.
 stop_gateway(PortFD) ->
-    {os_pid, OsPid} = erlang:port_info(PortFD, os_pid),
+    ForcePortCloseCmd = case erlang:port_info(PortFD, os_pid) of
+        {os_pid, OsPid} -> lists:flatten(io_lib:format("kill -9 ~p", [OsPid]));
+        _ -> ""
+    end,
         catch port_close(PortFD),
-    ForcePortCloseCmd = lists:flatten(io_lib:format("kill -9 ~p", [OsPid])),
     os:cmd(ForcePortCloseCmd),
     ok.
 
