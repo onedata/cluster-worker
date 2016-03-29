@@ -14,9 +14,15 @@
 -define(DATASTORE_MODELS_HRL, 1).
 
 %% Wrapper for all models' records
+%% Also contains info from couchdb changes stream
+%% todo: consider introducing separate record for couchdb stream updates
 -record(document, {
     key :: datastore:ext_key(),
+    %% holds revision
+    %% or revision history (in changes stream)
     rev :: term(),
+    %% if record has been deleted  (in changes stream)
+    deleted = false :: boolean(),
     value :: datastore:value(),
     links :: term()
 }).
