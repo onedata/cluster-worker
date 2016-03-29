@@ -26,6 +26,9 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
+%% Note: Workers start with order specified below. For this reason
+%% all workers that need datastore_worker shall be after datastore_worker on
+%% the list below.
 -define(CLUSTER_WORKER_MODULES, [
     {datastore_worker, []},
     {dns_worker, []}
