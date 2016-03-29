@@ -154,12 +154,13 @@ init([]) ->
         ?info("Checking if all ports are free..."),
         lists:foreach(
             fun(Module) ->
-                case erlang:apply(Module, healthcheck, []) of
-                    {error, server_not_responding} ->
+                Port = erlang:apply(Module, port, []),
+                case check_port(Port) of
+                    ok ->
                         ok;
-                    _ ->
-                        ?error("The port ~B for ~p is not free. Terminating.",
-                            [erlang:apply(Module, port, []), Module]),
+                    {error, Reason} ->
+                        ?error("The port ~B for ~p is not free: ~p. Terminating.",
+                            [Port, Module, Reason]),
                         throw(ports_are_not_free)
                 end
             end, node_manager:listeners()),
@@ -656,4 +657,20 @@ next_task_check() ->
     {ok, IntervalMin} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_checking_period_minutes),
     Interval = timer:minutes(IntervalMin),
     erlang:send_after(Interval, self(), {timer, check_tasks}).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks whether port is free on localhost.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_port(Port :: integer()) -> ok | {error, Reason :: term()}.
+check_port(Port) ->
+    case gen_tcp:listen(Port, [{reuseaddr, true}]) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket);
+        {error, Reason} ->
+            {error, Reason}
+    end.
 

@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
-%%% @doc gui listener starting & stopping
+%%% @doc This module is responsible for nagios listener starting and stopping.
 %%% @end
 %%%--------------------------------------------------------------------
 -module(nagios_listener).
@@ -23,34 +23,36 @@
 -export([port/0, start/0, stop/0, healthcheck/0]).
 
 %%%===================================================================
-%%% listener_starter_behaviour callbacks
+%%% listener_behaviour callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback port/0.
+%% {@link listener_behaviour} callback port/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec port() -> integer().
 port() ->
-    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_nagios_port),
+    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_nagios_port),
     Port.
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback start/1.
+%% {@link listener_behaviour} callback start/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME, http_nagios_port),
-    {ok, NbAcceptors} =
-        application:get_env(?CLUSTER_WORKER_APP_NAME, http_number_of_acceptors),
-    {ok, MaxKeepAlive} =
-        application:get_env(?CLUSTER_WORKER_APP_NAME, http_max_keepalive),
-    {ok, Timeout} =
-        application:get_env(?CLUSTER_WORKER_APP_NAME, http_socket_timeout_seconds),
+    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_nagios_port),
+    {ok, NbAcceptors} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_number_of_acceptors),
+    {ok, MaxKeepAlive} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_max_keepalive),
+    {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        http_socket_timeout_seconds),
 
     Dispatch = [
         {'_', [
@@ -76,7 +78,7 @@ start() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback stop/1.
+%% {@link listener_behaviour} callback stop/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
@@ -85,24 +87,21 @@ stop() ->
         (ok) ->
             ok;
         (Error) ->
-            ?error("Error on stopping listener ~p: ~p", [?NAGIOS_LISTENER, Error]),
+            ?error("Error on stopping listener ~p: ~p",
+                [?NAGIOS_LISTENER, Error]),
             {error, nagios_stop_error}
     end.
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the status of a listener.
+%% {@link listener_behaviour} callback healthcheck/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
-    {ok, NagiosPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_nagios_port),
-    case http_client:get("http://127.0.0.1:" ++ integer_to_list(NagiosPort),
-        [], <<>>, [insecure]) of
-        {ok, _, _, _} ->
-            ok;
-        _ ->
-            {error, server_not_responding}
+    Endpoint = "http://127.0.0.1:" ++ integer_to_list(port()),
+    case http_client:get(Endpoint, [], <<>>, [insecure]) of
+        {ok, _, _, _} -> ok;
+        _ -> {error, server_not_responding}
     end.

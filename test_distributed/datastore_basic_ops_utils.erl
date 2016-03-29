@@ -1038,34 +1038,6 @@ clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedT
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum).
 
-clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    ClearMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete_links, Level, [
-                Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    TmpTN = trunc(ThreadsNum/ConflictedThreads),
-    WLength = length(Workers),
-    {NewTN, NewCT} = case Level of
-                         local_only ->
-                             {TmpTN * WLength, WLength};
-                         locally_cached ->
-                             {TmpTN * WLength, WLength};
-                         _ ->
-                             {TmpTN, 1}
-                     end,
-
-    spawn_at_nodes(Workers, NewTN, NewCT, ClearMany),
-    OpsNum = DocsPerThead * NewTN,
-    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
-    ?assertEqual([], ErrorsList),
-    ?assertEqual(OpsNum, OkNum).
-
 save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
     save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, save).
 

@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
-%%% @doc dns listener starting & stopping
+%%% @doc This module is responsible for DNS listener starting and stopping.
 %%% @end
 %%%--------------------------------------------------------------------
 -module(dns_listener).
@@ -22,12 +22,12 @@
 -export([port/0, start/0, stop/0, healthcheck/0]).
 
 %%%===================================================================
-%%% listener_starter_behaviour callbacks
+%%% listener_behaviour callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback port/0.
+%% {@link listener_behaviour} callback port/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec port() -> integer().
@@ -38,7 +38,7 @@ port() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback start/1.
+%% {@link listener_behaviour} callback start/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
@@ -48,7 +48,7 @@ start() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link listener_starter_behaviour} callback stop/1.
+%% {@link listener_behaviour} callback stop/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
@@ -58,13 +58,14 @@ stop() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the status of a listener.
+%% {@link listener_behaviour} callback healthcheck/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
     % @todo check TCP listener too
-    {ok, HealthcheckTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
+    {ok, HealthcheckTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        nagios_healthcheck_timeout),
     {ok, DNSPort} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_port),
     Query = inet_dns:encode(
         #dns_rec{

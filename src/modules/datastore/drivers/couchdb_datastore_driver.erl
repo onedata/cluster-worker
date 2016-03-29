@@ -604,6 +604,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 %%--------------------------------------------------------------------
 -spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
 start_gateway(Parent, N, Hostname, Port) ->
+    process_flag(trap_exit, true),
     GWPort = crypto:rand_uniform(?GATEWAY_BASE_PORT_MIN, ?GATEWAY_BASE_PORT_MAX),
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
@@ -620,9 +621,8 @@ start_gateway(Parent, N, Hostname, Port) ->
     State = #{
         server => self(), port_fd => PortFD, status => init, id => {node(), N},
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds), parent => Parent
+        start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1
     },
-    monitor(process, Parent),
     proc_lib:init_ack(Parent, State),
 
     BusyWaitInterval = 20,
@@ -664,27 +664,27 @@ start_gateway(Parent, N, Hostname, Port) ->
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
 gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, gw_port := GWPort,
-    start_time := ST, parent := Parent} = State) ->
+    start_time := ST, parent := Parent, last_ping_time := LPT} = State) ->
 
     %% Update state
     Gateways = datastore_worker:state_get(db_gateways),
     datastore_worker:state_put(db_gateways, maps:update(N, State, Gateways)),
 
-    try port_command(PortFD, <<"ping">>) of
+    UpdatedState = case erlang:system_time(milli_seconds) - LPT > timer:seconds(1) of
         true ->
-            try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
-                {ok, _} -> ok;
-                {error, Reason00} ->
-                    self() ! {port_comm_error, Reason00}
+            try
+                true = port_command(PortFD, <<"ping">>, [nosuspend]),
+                {ok, _} = couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)),
+                State#{last_ping_time => erlang:system_time(milli_seconds)}
             catch
                 _:{badmap, undefined} ->
-                    ok; %% State of the worker may not be initialised yet, so there is not way to check if connection is active
-                _:Reason01 ->
-                    self() ! {port_comm_error, Reason01}
-            end
-    catch
-        _:Reason0 ->
-            self() ! {port_comm_error, Reason0}
+                    State; %% State of the worker may not be initialised yet, so there is not way to check if connection is active
+                _:Reason0 ->
+                    self() ! {port_comm_error, Reason0},
+                    State
+            end;
+        false ->
+            State
     end,
 
     CT = erlang:system_time(milli_seconds),
@@ -694,36 +694,35 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         receive
             {PortFD, {data, {_, Data}}} ->
                 case binary:matches(Data, <<"HTTP:">>) of
-                    [] ->
-                        ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    [] -> ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
                     _ -> ok
                 end,
-                State;
+                UpdatedState;
             {PortFD, closed} ->
-                State#{status => closed};
-
+                UpdatedState#{status => closed};
             {'EXIT', PortFD, Reason} ->
-                ?error("CouchBase gateway's port ~p exited with reason: ~p", [State, Reason]),
-                State#{status => failed};
+                ?error("CouchBase gateway's port ~p exited with reason: ~p", [UpdatedState, Reason]),
+                UpdatedState#{status => failed};
+            {'EXIT', Parent, Reason} ->
+                ?info("Parent: ~p down due to: ~p", [Parent, Reason]),
+                stop_gateway(PortFD),
+                UpdatedState#{status => closed};
             {port_comm_error, Reason} ->
                 ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
-                State#{status => failed};
+                UpdatedState#{status => failed};
             restart when CT > MinRestartTime ->
                 ?info("[CouchBase Gateway ~p] Restart request...", [ID]),
-                State#{status => restarting};
+                UpdatedState#{status => restarting};
             restart ->
-                State;
-            {'DOWN', _, process, Parent, _Reason} ->
-                    catch port_close(PortFD),
-                State#{status => closed};
+                UpdatedState;
             stop ->
-                    catch port_close(PortFD),
-                State#{status => closed};
+                stop_gateway(PortFD),
+                UpdatedState#{status => closed};
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
-                State
+                UpdatedState
         after timer:seconds(2) ->
-            State
+            UpdatedState
         end,
     case NewState of
         #{status := running} ->
@@ -731,13 +730,27 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         #{status := closed} ->
             ok;
         #{status := restarting} ->
-                catch port_close(PortFD),
+            stop_gateway(PortFD),
             start_gateway(self(), N, Hostname, Port);
         #{status := failed} ->
-                catch port_close(PortFD),
+            stop_gateway(PortFD),
             start_gateway(self(), N, Hostname, Port)
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Closes port and forces exit of couchbase-sync-gateway executable.
+%% @end
+%%--------------------------------------------------------------------
+-spec stop_gateway(PortFD :: port()) -> ok.
+stop_gateway(PortFD) ->
+    ForcePortCloseCmd = case erlang:port_info(PortFD, os_pid) of
+        {os_pid, OsPid} -> lists:flatten(io_lib:format("kill -9 ~p", [OsPid]));
+        _ -> ""
+    end,
+        catch port_close(PortFD),
+    os:cmd(ForcePortCloseCmd),
+    ok.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
