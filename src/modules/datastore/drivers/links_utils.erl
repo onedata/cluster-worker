@@ -16,9 +16,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5,
-    links_doc_key/1]).
--export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5]).
+-export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4,
+    fetch_link/4, foreach_link/5, links_doc_key/1]).
 
 %%%===================================================================
 %%% API
@@ -26,8 +25,6 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves link maps into several documents. Gets first link document from DB or creates new
-%% (if does not exists) to call recursive save_links_maps/5.
 %% Creates link. Before creation it checks if it exists in several documents.
 %% @end
 %%--------------------------------------------------------------------
@@ -71,7 +68,8 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves link maps into several documents.
+%% Saves link maps into several documents. Gets first link document from DB or creates new
+%% (if does not exists) to call recursive save_links_maps/5.
 %% @end
 %%--------------------------------------------------------------------
 -spec save_links_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
