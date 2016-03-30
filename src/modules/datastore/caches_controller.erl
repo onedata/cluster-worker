@@ -420,7 +420,7 @@ save_high_mem_clear_info(Level, Uuid) ->
   UpdateFun = fun
     (#cache_controller{last_user = non} = Record) ->
       {ok, Record#cache_controller{action = cleared, last_action_time = TS}};
-    (Record) ->
+    (_) ->
       {error, document_in_use}
   end,
   V = #cache_controller{timestamp = TS, action = cleared, last_action_time = TS},
