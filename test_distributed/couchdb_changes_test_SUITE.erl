@@ -21,6 +21,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("datastore_test_models_def.hrl").
 
 -define(getFirstSeq(W, Config),
     begin
@@ -256,6 +257,12 @@ end_per_suite(Config) ->
 
 init_per_testcase(CaseName, Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
+    [P1, P2] = ?config(cluster_worker_nodes, Config),
+    Models = [test_record_1, test_record_2],
+
+    test_utils:enable_datastore_models([P1], Models),
+    test_utils:enable_datastore_models([P2], Models),
+
     FirstSeq = ?getFirstSeq(W, Config),
     Pid = self(),
     {_, DriverPid} = ?assertMatch(
@@ -270,6 +277,7 @@ init_per_testcase(CaseName, Config) ->
             ]
         )
     ),
+
     [{driver_pid, DriverPid} | Config].
 
 end_per_testcase(_, Config) ->

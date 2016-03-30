@@ -21,20 +21,8 @@
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
-  globally_cached_record,
-  locally_cached_record,
-  global_only_record,
-  global_only_no_transactions_record,
-  local_only_record,
-  disk_only_record,
-  globally_cached_sync_record,
-  locally_cached_sync_record,
   cache_controller,
-  task_pool,
-
-  %% TODO: inject in tests, VFS-1630
-  test_record_1,
-  test_record_2
+  task_pool
 ]).
 
 %% datastore_config_behaviour callbacks

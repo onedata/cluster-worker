@@ -1,17 +1,18 @@
 %%%-------------------------------------------------------------------
-%%% @author Rafal Slota
-%%% @copyright (C) 2015 ACK CYFRONET AGH
+%%% @author Mateusz Paciorek
+%%% @copyright (C) 2016 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Sample model.
+%%% @doc Test model.
 %%% @end
 %%%-------------------------------------------------------------------
--module(globally_cached_record).
--author("Rafal Slota").
+-module(test_record_2).
+-author("Mateusz Paciorek").
 -behaviour(model_behaviour).
 
+-include("datastore_test_models_def.hrl").
 -include("modules/datastore/datastore_internal_model.hrl").
 
 %% model_behaviour callbacks
@@ -86,7 +87,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBALLY_CACHED_LEVEL).
+    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -8,10 +8,11 @@
 %%% @doc Sample model.
 %%% @end
 %%%-------------------------------------------------------------------
--module(globally_cached_sync_record).
+-module(locally_cached_record).
 -author("Rafal Slota").
 -behaviour(model_behaviour).
 
+-include("datastore_test_models_def.hrl").
 -include("modules/datastore/datastore_internal_model.hrl").
 
 %% model_behaviour callbacks
@@ -86,8 +87,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBALLY_CACHED_LEVEL,
-        ?GLOBALLY_CACHED_LEVEL, true, true).
+    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?LOCALLY_CACHED_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc

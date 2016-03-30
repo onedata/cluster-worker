@@ -12,6 +12,8 @@
 -ifndef(DATASTORE_BASIC_OPS_UTILS_HRL).
 -define(DATASTORE_BASIC_OPS_UTILS_HRL, 1).
 
+-include("datastore_test_models_def.hrl").
+
 -define(basic_test_def(Desc),
     [
         {repeats, 5},

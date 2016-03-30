@@ -26,6 +26,9 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
+%% Note: Workers start with order specified below. For this reason
+%% all workers that need datastore_worker shall be after datastore_worker on
+%% the list below.
 -define(CLUSTER_WORKER_MODULES, [
     {datastore_worker, []},
     {dns_worker, []}
@@ -251,6 +254,10 @@ handle_call(disable_cache_control, _From, State) ->
 
 handle_call(enable_cache_control, _From, State) ->
     {reply, ok, State#state{cache_control = true}};
+
+%% Generic function apply in node_manager's process
+handle_call({apply, M, F, A}, _From, State) ->
+    {reply, apply(M, F, A), State};
 
 handle_call(_Request, _From, State) ->
     plugins:apply(node_manager_plugin, handle_call_extension, [_Request, _From, State]).
@@ -536,9 +543,6 @@ init_net_connection([Node | Nodes]) ->
 %%--------------------------------------------------------------------
 -spec init_node() -> ok.
 init_node() ->
-    {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
-    ok = datastore:ensure_state_loaded(NodeToSync),
-    ?info("Datastore synchronized"),
     init_workers().
 
 %%--------------------------------------------------------------------
@@ -550,7 +554,15 @@ init_node() ->
 -spec init_workers() -> ok.
 init_workers() ->
     lists:foreach(fun({Module, Args}) ->
-        ok = start_worker(Module, Args) end, plugins:apply(node_manager_plugin, modules_with_args, [])),
+        ok = start_worker(Module, Args),
+        case Module of
+            datastore_worker ->
+                {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
+                ok = datastore:ensure_state_loaded(NodeToSync),
+                ?info("Datastore synchronized");
+            _ -> ok
+        end
+    end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.
 
