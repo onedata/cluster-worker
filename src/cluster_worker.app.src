@@ -38,8 +38,6 @@
             %% GENERAL
             %% ===================================================================
 
-            %% List of absolute paths to storages used by workers.
-            {storage_paths, []},
             %% How long (in ms) should worker wait between heartbeats (when connected to cm)
             {heartbeat_interval, 500},
             %% How long (in ms) should worker wait between next connection try (when not registered in cm)
@@ -68,7 +66,6 @@
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 30},
 
-
             %% ===================================================================
             %% PLUGINS
             %% ===================================================================
@@ -93,7 +90,7 @@
             %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
             {http_max_keepalive, 30},
             %% Socket timeout in sek
-            {http_socket_timeout_seconds, 60},
+            {http_socket_timeout_seconds, 300},
 
             %% ===================================================================
             %% NAGIOS
@@ -101,9 +98,9 @@
 
             %% Answers from nagios will be cached for maximum of this time (in ms) and served from cache.
             %% The reason is that a healthcheck can generate a considerable traffic.
-            {nagios_caching_time, 500},
+            {nagios_caching_time, 1000},
             %% Time in ms after healthcheck is considered failed
-            {nagios_healthcheck_timeout, 5000},
+            {nagios_healthcheck_timeout, 30000},
 
 
             %% ===================================================================
@@ -112,7 +109,7 @@
 
             %% Time in ms that must have passed since last update of dispatcher
             %% or DNS to assume they are out of sync.
-            {dns_disp_out_of_sync_threshold, 10000},
+            {dns_disp_out_of_sync_threshold, 60000},
 
             %% ===================================================================
             %% DNS
@@ -130,7 +127,7 @@
             %% Number of dns tcp acceptors
             {dns_tcp_acceptor_pool_size, 20},
             %% Time (in sec) after which dns closes idle connection
-            {dns_tcp_timeout_seconds, 20},
+            {dns_tcp_timeout_seconds, 300},
 
             %% ===================================================================
             %% DATASTORE

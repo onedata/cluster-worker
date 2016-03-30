@@ -16,6 +16,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
+-export([save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5,
+    links_doc_key/1]).
 -export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4, fetch_link/4, foreach_link/5]).
 
 %%%===================================================================
@@ -24,6 +26,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Saves link maps into several documents. Gets first link document from DB or creates new
+%% (if does not exists) to call recursive save_links_maps/5.
 %% Creates link. Before creation it checks if it exists in several documents.
 %% @end
 %%--------------------------------------------------------------------
@@ -168,7 +172,8 @@ delete_links(Driver, ModelConfig, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes links from all documents connected with key.
+%% Deletes links from all documents connected with key. Calls recursive delete_links_from_maps/9 setting
+%% arguments to their initial values.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_links_from_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
@@ -269,6 +274,8 @@ foreach_link(Driver, ModelConfig, Key, Fun, AccIn) ->
 %% @private
 %% @doc
 %% Gets number of child to which link should be mapped.
+%% Converts LinkName to binary if needed.
+%% @equiv get_link_child_num(LinkName, KeyNum, byte_size(LinkName))
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_child_num(datastore:link_name(), KeyNum :: integer()) -> integer().
@@ -292,7 +299,7 @@ get_link_child_num(LinkName, KeyNum, ByteSize) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets number of child to which link should be mapped.
+%% Gets number of child using give byte from link name.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_child_num(byte()) -> integer().

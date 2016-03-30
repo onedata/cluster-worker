@@ -14,6 +14,7 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("kernel/src/inet_dns.hrl").
 -include("global_definitions.hrl").
+-include("timeouts.hrl").
 
 -ifdef(TEST).
 -compile(export_all).
@@ -24,9 +25,6 @@
 
 % Module name of dns tcp ranch listener
 -define(DNS_TCP_LISTENER, dns_tcp).
-
-% Timeout to wait for DNS listeners to start. After it, they are assumed to have failed to start.
--define(LISTENERS_START_TIMEOUT, 10000).
 
 % Maximum size of UDP DNS reply (without EDNS) as in RFC1035.
 -define(NOEDNS_UDP_SIZE, 512).

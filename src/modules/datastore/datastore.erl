@@ -453,20 +453,6 @@ foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         Err1 ->
             Err1
     end;
-    % Other possible implementation
-%%     caches_controller:flush(driver_to_level(Driver1), ModelName, Key, all),
-%%
-%%     NewFun = fun(LinkName, LinkTarget, Acc) ->
-%%         % TODO direct check in cache instead fetch to memory
-%%         case fetch_link(Level, Key, ModelName, LinkName) of
-%%             {ok, _} ->
-%%                 Fun(LinkName, LinkTarget, Acc);
-%%             _ ->
-%%                 Acc
-%%         end
-%%     end,
-%%     exec_driver(ModelName, Driver2, foreach_link, [Key, NewFun, AccIn]);
-
 foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
 

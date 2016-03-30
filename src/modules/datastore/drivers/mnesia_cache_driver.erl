@@ -17,6 +17,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
@@ -30,7 +31,6 @@
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
 
--define(MNESIA_WAIT_TIMEOUT, timer:seconds(20)).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -310,7 +310,7 @@ delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
-                links_utils:delete_links(?MODULE, ModelConfig, Key);
+                ok = links_utils:delete_links(?MODULE, ModelConfig, Key);
             false ->
                 ok
         end
@@ -319,7 +319,7 @@ delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
-                links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
+                ok = links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
             false ->
                 ok
         end

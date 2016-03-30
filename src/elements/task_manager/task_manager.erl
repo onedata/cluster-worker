@@ -16,6 +16,7 @@
 -include("global_definitions.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("timeouts.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
@@ -28,7 +29,6 @@
 -export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0]).
 -export([save_pid/3, update_pid/3]).
 
--define(TASK_SAVE_TIMEOUT, timer:seconds(10)).
 -define(TASK_REPEATS, 10).
 
 %%%===================================================================
@@ -66,9 +66,7 @@ start_task(Task, Level, PersistFun, Sleep) ->
             {start, Uuid} ->
                 case Sleep of
                     true ->
-                        {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
-                        {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
-                        timer:sleep(crypto:rand_uniform(Interval1, Interval2 + 1));
+                        sleep_random_interval();
                     _ ->
                         ok
                 end,
@@ -190,9 +188,7 @@ do_task(Task, Num) ->
     catch
         E1:E2 ->
             ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
-            {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
-            {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
-            timer:sleep(crypto:rand_uniform(Interval1, Interval2 + 1)),
+            sleep_random_interval(),
             do_task(Task, Num - 1)
     end.
 
@@ -221,3 +217,15 @@ kill_all(Level) ->
         Value = Task#document.value,
         exit(Value#task_pool.owner, stopped_by_manager)
     end, Tasks).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sleeps random interval specified in task_fail_min_sleep_time_ms and task_fail_max_sleep_time_ms
+%% variables.
+%% @end
+%%--------------------------------------------------------------------
+-spec sleep_random_interval() -> ok.
+sleep_random_interval() ->
+    {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
+    {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
+    timer:sleep(crypto:rand_uniform(Interval1, Interval2 + 1)).

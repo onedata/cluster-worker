@@ -37,7 +37,7 @@
 %%% API
 %%%===================================================================
 
-% TODO test foreach performance
+% TODO test foreach performance (VFS-1817)
 links_test(Config, Level) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
@@ -1016,34 +1016,6 @@ clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedT
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(ClearFun, Level, [
                 TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    TmpTN = trunc(ThreadsNum/ConflictedThreads),
-    WLength = length(Workers),
-    {NewTN, NewCT} = case Level of
-                         local_only ->
-                             {TmpTN * WLength, WLength};
-                         locally_cached ->
-                             {TmpTN * WLength, WLength};
-                         _ ->
-                             {TmpTN, 1}
-                     end,
-
-    spawn_at_nodes(Workers, NewTN, NewCT, ClearMany),
-    OpsNum = DocsPerThead * NewTN,
-    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
-    ?assertEqual([], ErrorsList),
-    ?assertEqual(OpsNum, OkNum).
-
-clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    ClearMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete_links, Level, [
-                Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
