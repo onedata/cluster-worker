@@ -59,9 +59,9 @@
             %% List of modules to be excluded during cover analysis
             {covered_excluded_modules, []},
             %% Minimal delay in cache dumping to disk (changes done before this time causes cancelation of dump)
-            {cache_to_disk_delay_ms, 1000},
+            {cache_to_disk_delay_ms, 5000},
             %% Maximal delay in cache dumping to disk
-            {cache_to_disk_force_delay_ms, 5000},
+            {cache_to_disk_force_delay_ms, 30000},
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 30},
 
