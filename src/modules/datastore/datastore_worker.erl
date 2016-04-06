@@ -48,10 +48,12 @@ init(_Args) ->
         end,
 
     State0 = #{db_nodes => DBNodes},
-    State1 = lists:foldl(
-        fun(Driver, StateAcc0) ->
+    lists:foldl(
+        fun(Driver, _) ->
             DriverMod = datastore:driver_to_module(Driver),
-            {ok, NState} = DriverMod:init_driver(StateAcc0),
+            {ok, NState} = DriverMod:init_driver(State0),
+            [state_put(Key, Value) || {Key, Value} <- maps:to_list(NState)],
+            ok = wait_for(fun() -> DriverMod:healthcheck(NState) end, timer:seconds(10)),
             NState
         end, State0, [?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER, ?PERSISTENCE_DRIVER]),
 
@@ -59,7 +61,7 @@ init(_Args) ->
         fun(Model, StateAcc) ->
             #model_config{name = RecordName} = ModelConfig = Model:model_init(),
             maps:put(RecordName, ModelConfig, StateAcc)
-        end, State1, datastore_config:models()),
+        end, State0, datastore_config:models()),
 
     {ok, State2}.
 
@@ -145,3 +147,23 @@ state_put(Key, Value) ->
 -spec state_get(Key :: term()) -> Value :: term().
 state_get(Key) ->
     worker_host:state_get(?MODULE, Key).
+
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits up to specified time until given function return 'ok'.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_for(fun(() -> ok | term()), Timeout :: non_neg_integer()) ->
+    ok | {error, wait_timeout}.
+wait_for(Fun, Timeout) when Timeout > 0 ->
+    case catch Fun() of
+        ok -> ok;
+        Error ->
+            ?error("Error ~p", [Error]),
+            timer:sleep(timer:seconds(1)),
+            wait_for(Fun, Timeout - timer:seconds(1))
+    end;
+wait_for(_Fun, _Timeout) ->
+    {error, wait_timeout}.

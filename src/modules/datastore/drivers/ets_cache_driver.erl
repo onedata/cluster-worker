@@ -49,8 +49,12 @@ init_driver(State) ->
 init_bucket(_Bucket, Models, _NodeToSync) ->
     lists:foreach(
         fun(#model_config{} = ModelConfig) ->
-            Ans = (catch ets:new(table_name(ModelConfig), [named_table, public, set])),
-            ?info("Creating ets table: ~p, result: ~p", [table_name(ModelConfig), Ans])
+            case ets:info(table_name(ModelConfig)) of
+                undefined ->
+                    Ans = (catch ets:new(table_name(ModelConfig), [named_table, public, set])),
+                    ?info("Creating ets table: ~p, result: ~p", [table_name(ModelConfig), Ans]);
+                _ -> ok
+            end
         end, Models).
 
 %%--------------------------------------------------------------------
