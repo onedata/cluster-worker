@@ -21,6 +21,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_engine.hrl").
+-include("datastore_test_models_def.hrl").
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).
@@ -35,8 +36,8 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %%tests
--export([local_test/1, global_test/1, global_atomic_update_test/1,
-    global_list_test/1, persistance_test/1, local_list_test/1,
+-export([local_test/1, global_test/1, global_atomic_update_test/1, disk_list_test/1,
+    global_list_test/1, persistance_test/1, local_list_test/1, globally_cached_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
     link_walk_test/1, monitoring_global_cache_test_test/1, old_keys_cleaning_global_cache_test/1,
     clearing_global_cache_test/1, link_monitoring_global_cache_test/1, create_after_delete_global_cache_test/1,
@@ -50,8 +51,8 @@
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test,
-        global_list_test, persistance_test, local_list_test,
+        local_test, global_test, global_atomic_update_test, disk_list_test,
+        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
@@ -1183,6 +1184,14 @@ global_list_test(Config) ->
     TestRecord = ?config(test_record, Config),
     generic_list_test(TestRecord, ?config(cluster_worker_nodes, Config), ?GLOBAL_ONLY_LEVEL).
 
+%% list operation on disk only driver (on several nodes)
+disk_list_test(Config) ->
+    generic_list_test(disk_only_record, ?config(cluster_worker_nodes, Config), ?DISK_ONLY_LEVEL).
+
+%% list operation on disk only driver (on several nodes)
+globally_cached_list_test(Config) ->
+    generic_list_test(globally_cached_record, ?config(cluster_worker_nodes, Config), ?GLOBALLY_CACHED_LEVEL).
+
 
 %% list operation on local cache driver (on several nodes)
 local_list_test(Config) ->
@@ -1260,7 +1269,8 @@ globally_cached_links_test(Config) ->
 %%%===================================================================
 
 init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]).
+    NewConfig = ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]),
+    NewConfig.
 
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
@@ -1466,7 +1476,7 @@ generic_list_test(TestRecord, Nodes, Level) ->
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
 
-    ObjCount = 3424,
+    ObjCount = 424,
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
 
     CreateDocFun = fun(Key) ->
@@ -1475,6 +1485,10 @@ generic_list_test(TestRecord, Nodes, Level) ->
                 key = Key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
             }])
+    end,
+
+    RemoveDocFun = fun(Key) ->
+        ?call_store(rand_node(Nodes), delete, [Level, TestRecord, Key, ?PRED_ALWAYS])
     end,
 
     [?assertMatch({ok, _}, CreateDocFun(Key)) || Key <- Keys],
@@ -1488,6 +1502,15 @@ generic_list_test(TestRecord, Nodes, Level) ->
     ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
     ?assertMatch([], ReceivedKeys -- Keys),
 
+
+    [?assertMatch(ok, RemoveDocFun(Key)) || Key <- Keys],
+
+
+    Ret2 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+    ?assertMatch({ok, _}, Ret2),
+    {ok, Objects2} = Ret2,
+
+    ?assertMatch(0, erlang:length(Objects2) - erlang:length(Objects0)),
     ok.
 
 rand_key() ->

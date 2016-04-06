@@ -15,6 +15,7 @@
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
+-include("datastore_basic_ops_utils.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -784,6 +785,7 @@ set_env(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     ok = test_node_starter:load_modules(Workers, [?MODULE]),
     TestRecord = get_record_name(Case),
+    test_utils:enable_datastore_models(Workers, [TestRecord]),
     [{test_record, TestRecord} | Config].
 
 clear_env(Config) ->
