@@ -24,13 +24,13 @@
 -include_lib("ctool/include/test/performance.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
--define(REQUEST_TIMEOUT, timer:seconds(30)).
+-define(REQUEST_TIMEOUT, timer:minutes(5)).
 
 -export([create_delete_test/2, create_sync_delete_test/2, save_test/2, save_sync_test/2, update_test/2,
     update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, links_test/2, links_number_test/2,
     set_env/2, clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
 
--define(TIMEOUT, timer:seconds(60)).
+-define(TIMEOUT, timer:minutes(5)).
 -define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
 -define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
 
@@ -38,6 +38,7 @@
 %%% API
 %%%===================================================================
 
+% TODO test foreach performance (VFS-1817)
 links_test(Config, Level) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
@@ -162,14 +163,15 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
     ?assertEqual(OpsNum, OkNum + ErrorNum),
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
-    NewTN= case {Level, Fun} of
-               {local_only, _} ->
-                   TmpTN * WLength;
-               {locally_cached, create} ->
-                   TmpTN * WLength;
-               _ ->
-                   TmpTN
-           end,
+    Multip = min(WLength, min(ThreadsNum, ConflictedThreads)),
+    NewTN = case {Level, Fun} of
+                {local_only, _} ->
+                    TmpTN * Multip;
+                {locally_cached, create} ->
+                    TmpTN * Multip;
+                _ ->
+                    TmpTN
+            end,
     ModelConfig = TestRecord:model_init(),
     case ModelConfig#model_config.transactional_global_cache of
         true ->
@@ -503,38 +505,38 @@ mixed_test(Config, Level) ->
     ?assert(OkNum >= OpsNum),
 
     {Key, Doc, AnsExt} = case Level of
-        local_only ->
-            {ok, ok, []};
-        locally_cached ->
-            {ok, ok, []};
-        _ ->
-            K = list_to_binary("key_" ++ AnswerDesc),
-            D =  #document{
-                key = K,
-                value = get_record(TestRecord, 12345, <<"abcdef">>, {test, tuple111})
-            },
-            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [D])),
+                             local_only ->
+                                 {ok, ok, []};
+                             locally_cached ->
+                                 {ok, ok, []};
+                             _ ->
+                                 K = list_to_binary("key_" ++ AnswerDesc),
+                                 D =  #document{
+                                     key = K,
+                                     value = get_record(TestRecord, 12345, <<"abcdef">>, {test, tuple111})
+                                 },
+                                 ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [D])),
 
-            CreateLinks = fun(DocsSet) ->
-                for(1, DocsPerThead, fun(I) ->
-                    for(OpsPerDoc, fun() ->
-                        BeforeProcessing = os:timestamp(),
-                        Ans = ?call_store(add_links, Level, [D,
-                            [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
-                                {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
-                        AfterProcessing = os:timestamp(),
-                        Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-                    end)
-                end)
-            end,
+                                 CreateLinks = fun(DocsSet) ->
+                                     for(1, DocsPerThead, fun(I) ->
+                                         for(OpsPerDoc, fun() ->
+                                             BeforeProcessing = os:timestamp(),
+                                             Ans = ?call_store(add_links, Level, [D,
+                                                 [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
+                                                     {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
+                                             AfterProcessing = os:timestamp(),
+                                             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                                         end)
+                                     end)
+                                 end,
 
-            spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, CreateLinks),
-            {OkNumCL, OkTimeCL, _ErrorNumCL, _ErrorTimeCL, _ErrorsListCL} = count_answers(OpsNum),
-            ?assertEqual(OpsNum, OkNumCL),
-            {K, D,
-            [#parameter{name = add_links_time, value = OkTimeCL / OkNumCL, unit = "us",
-                description = "Average time of links adding"}]}
-    end,
+                                 spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, CreateLinks),
+                                 {OkNumCL, OkTimeCL, _ErrorNumCL, _ErrorTimeCL, _ErrorsListCL} = count_answers(OpsNum),
+                                 ?assertEqual(OpsNum, OkNumCL),
+                                 {K, D,
+                                     [#parameter{name = add_links_time, value = OkTimeCL / OkNumCL, unit = "us",
+                                         description = "Average time of links adding"}]}
+                         end,
 
     GetMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -577,14 +579,14 @@ mixed_test(Config, Level) ->
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, GetMany),
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, ExistMultiCheck),
     CheckMul = case Level of
-        local_only ->
-            2;
-        locally_cached ->
-            2;
-        _ ->
-            spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Fetch),
-            3
-    end,
+                   local_only ->
+                       2;
+                   locally_cached ->
+                       2;
+                   _ ->
+                       spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Fetch),
+                       3
+               end,
 
     {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(CheckMul * OpsNum),
     ?assertEqual([], ErrorsList2),
@@ -597,43 +599,44 @@ mixed_test(Config, Level) ->
 
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
+    Multip = min(WLength, min(ThreadsNum, ConflictedThreads)),
     {NewTN, NewCT} = case Level of
                          local_only ->
-                             {round(TmpTN / ClearRatio) * WLength, WLength};
+                             {round(TmpTN / ClearRatio) * Multip, Multip};
                          locally_cached ->
-                             {round(TmpTN / ClearRatio) * WLength, WLength};
+                             {round(TmpTN / ClearRatio) * Multip, Multip};
                          _ ->
                              {round(TmpTN / ClearRatio), 1}
                      end,
     DelOpsNum = DocsPerThead * NewTN,
 
     AnsExt2 = case Level of
-        local_only ->
-            [];
-        locally_cached ->
-            [];
-        _ ->
-            ClearManyLinks = fun(DocsSet) ->
-                for(1, DocsPerThead, fun(I) ->
-                    BeforeProcessing = os:timestamp(),
-                    Ans = ?call_store(delete_links, Level, [
-                        Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
-                    AfterProcessing = os:timestamp(),
-                    Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-                end)
-            end,
+                  local_only ->
+                      [];
+                  locally_cached ->
+                      [];
+                  _ ->
+                      ClearManyLinks = fun(DocsSet) ->
+                          for(1, DocsPerThead, fun(I) ->
+                              BeforeProcessing = os:timestamp(),
+                              Ans = ?call_store(delete_links, Level, [
+                                  Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
+                              AfterProcessing = os:timestamp(),
+                              Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                          end)
+                      end,
 
-            spawn_at_nodes(Workers, NewTN, NewCT, ClearManyLinks),
-            {DelLinkOkNum, DelLinkTime, _DelLinkErrorNum, _DelLinkErrorTime, DelLinkErrorsList} =
-                count_answers(DelOpsNum),
-            ?assertEqual([], DelLinkErrorsList),
-            ?assertEqual(DelOpsNum, DelLinkOkNum),
-            ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+                      spawn_at_nodes(Workers, NewTN, NewCT, ClearManyLinks),
+                      {DelLinkOkNum, DelLinkTime, _DelLinkErrorNum, _DelLinkErrorTime, DelLinkErrorsList} =
+                          count_answers(DelOpsNum),
+                      ?assertEqual([], DelLinkErrorsList),
+                      ?assertEqual(DelOpsNum, DelLinkOkNum),
+                      ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
 
-            AnsExt ++ [#parameter{name = del_links_time, value = DelLinkTime / DelOpsNum, unit = "us",
-                description = "Average time of delete links"}
-            ]
-    end,
+                      AnsExt ++ [#parameter{name = del_links_time, value = DelLinkTime / DelOpsNum, unit = "us",
+                          description = "Average time of delete links"}
+                      ]
+              end,
 
     ClearMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
@@ -660,7 +663,7 @@ mixed_test(Config, Level) ->
                       AnsExt2 ++ [#parameter{name = doc_in_db, value = DocsInDB, unit = "us",
                           description = "Docs in datastore after test"},
                           #parameter{name = links_in_db, value = DocsInDB, unit = "us",
-                          description = "Links in datastore after test"}
+                              description = "Links in datastore after test"}
                       ]
               end,
 
@@ -959,14 +962,15 @@ test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedTh
 
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
+    Multip = min(WLength, min(ThreadsNum, ConflictedThreads)),
     {NewTN, NewCT} = case Level of
-                local_only ->
-                    {TmpTN * WLength, WLength};
-                locally_cached ->
-                    {TmpTN * WLength, WLength};
-                _ ->
-                    {TmpTN, 1}
-            end,
+                         local_only ->
+                             {TmpTN * Multip, Multip};
+                         locally_cached ->
+                             {TmpTN * Multip, Multip};
+                         _ ->
+                             {TmpTN, 1}
+                     end,
 
     spawn_at_nodes(Workers, NewTN, NewCT, GetMany),
     OpsNum = DocsPerThead * NewTN,
@@ -993,11 +997,12 @@ test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads
 
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
+    Multip = min(WLength, min(ThreadsNum, ConflictedThreads)),
     {NewTN, NewCT} = case Level of
                          local_only ->
-                             {TmpTN * WLength, WLength};
+                             {TmpTN * Multip, Multip};
                          locally_cached ->
-                             {TmpTN * WLength, WLength};
+                             {TmpTN * Multip, Multip};
                          _ ->
                              {TmpTN, 1}
                      end,
@@ -1024,39 +1029,12 @@ clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedT
 
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
+    Multip = min(WLength, min(ThreadsNum, ConflictedThreads)),
     {NewTN, NewCT} = case Level of
                          local_only ->
-                             {TmpTN * WLength, WLength};
+                             {TmpTN * Multip, Multip};
                          locally_cached ->
-                             {TmpTN * WLength, WLength};
-                         _ ->
-                             {TmpTN, 1}
-                     end,
-
-    spawn_at_nodes(Workers, NewTN, NewCT, ClearMany),
-    OpsNum = DocsPerThead * NewTN,
-    {OkNum, _OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
-    ?assertEqual([], ErrorsList),
-    ?assertEqual(OpsNum, OkNum).
-
-clear_with_del_link(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc) ->
-    ClearMany = fun(DocsSet) ->
-        for(1, DocsPerThead, fun(I) ->
-            BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete_links, Level, [
-                Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
-            AfterProcessing = os:timestamp(),
-            Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
-        end)
-    end,
-
-    TmpTN = trunc(ThreadsNum/ConflictedThreads),
-    WLength = length(Workers),
-    {NewTN, NewCT} = case Level of
-                         local_only ->
-                             {TmpTN * WLength, WLength};
-                         locally_cached ->
-                             {TmpTN * WLength, WLength};
+                             {TmpTN * Multip, Multip};
                          _ ->
                              {TmpTN, 1}
                      end,
@@ -1086,11 +1064,12 @@ save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThread
 
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
+    Multip = min(WLength, min(ThreadsNum, ConflictedThreads)),
     {NewTN, NewCT} = case Level of
                          local_only ->
-                             {TmpTN * WLength, WLength};
+                             {TmpTN * Multip, Multip};
                          locally_cached ->
-                             {TmpTN * WLength, WLength};
+                             {TmpTN * Multip, Multip};
                          _ ->
                              {TmpTN, 1}
                      end,

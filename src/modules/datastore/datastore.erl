@@ -459,22 +459,34 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
-    FlushFun = fun(LinkName, _, _) ->
-        caches_controller:flush(driver_to_level(Driver1), ModelName, Key, LinkName),
-        []
-    end,
-    exec_driver(ModelName, Driver1, foreach_link, [Key, FlushFun, []]),
-
-    NewFun = fun(LinkName, LinkTarget, Acc) ->
-        case fetch_link(Level, Key, ModelName, LinkName) of
-            {ok, _} ->
-                Fun(LinkName, LinkTarget, Acc);
+    HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
+        case cache_controller:check_fetch({Key, LinkName}, ModelName, Level) of
+            ok ->
+                maps:put(LinkName, LinkTarget, Acc);
             _ ->
                 Acc
         end
     end,
-    exec_driver(ModelName, Driver2, foreach_link, [Key, NewFun, AccIn]);
-
+    HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
+        maps:put(LinkName, LinkTarget, Acc)
+    end,
+    % TODO - update not to get from disk keys that are already in memory
+    case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun1, #{}]) of
+        {ok, Ans1} ->
+            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun2, Ans1]) of
+                {ok, Ans2} ->
+                    try maps:fold(Fun, AccIn, Ans2) of
+                        AccOut -> {ok, AccOut}
+                    catch
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err2 ->
+                    Err2
+            end;
+        Err1 ->
+            Err1
+    end;
 foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
 
@@ -788,7 +800,6 @@ driver_to_level(?DISTRIBUTED_CACHE_DRIVER) ->
 exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
     exec_driver(ModelName, Driver, Method, Args);
 exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
-    % TODO - foreach_link metchod may not have all links in memory nor at disk!!!
     case exec_driver(ModelName, Driver, Method, Args) of
         {error, {not_found, _}} when Method =:= get ->
             exec_driver(ModelName, Rest, Method, Args);

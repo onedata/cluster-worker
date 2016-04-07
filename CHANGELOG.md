@@ -4,6 +4,21 @@
 CHANGELOG
 ---------
 
+### 3.0.0-beta1
+
+* VFS-1757 Trapping exit in couchdb gateway process.
+* VFS-1757 Change application ports availability checking procedure.
+* VFS-1757 Fix couchbase-sync-gateway port loop by reducing ping frequency and forcing its restart on error.
+* VFS-1728 - use timeouts in couchdb_datastore_driver
+* VFS-1746,  task manager tuning
+* VFS-1728 - increased timeouts defined as macros, definition of these macros was moved to timeouts.hrl
+* VFS-1728 - increased env_up timeouts, timeouts defined in separate file
+* VFS-1739, links refactoring
+* VFS-1629 new user push fetches data directly from couchdb
+* VFS-1739, links in cauchdb driver update
+
+
+
 ### 3.0.0-alpha3
 
 * VFS-1598, update of datastore update on cache

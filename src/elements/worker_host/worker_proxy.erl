@@ -18,8 +18,7 @@
 
 -include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
-
--define(DEFAULT_REQUEST_TIMEOUT, timer:seconds(10)).
+-include("timeouts.hrl").
 
 %% API
 -export([call/2, call/3, multicall/2, multicall/3,
