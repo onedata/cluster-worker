@@ -209,12 +209,18 @@ elif args.cover:
                     configs_to_change.append(
                         ('oz_worker', data['zone_domains'][zone]['oz_worker'].values())
                     )
+                    configs_to_change.append(
+                        ('oz_worker', data['zone_domains'][zone]['cluster_manager'].values())
+                    )
 
             for (app_name, configs) in configs_to_change:
                 for config in configs:
                     if app_name in config['sys.config']:
                         config['sys.config'][app_name]['covered_dirs'] = docker_dirs
                         config['sys.config'][app_name]['covered_excluded_modules'] = excl_mods
+                    elif 'cluster_manager' in config['sys.config']:
+                        config['sys.config']['cluster_manager']['covered_dirs'] = docker_dirs
+                        config['sys.config']['cluster_manager']['covered_excluded_modules'] = excl_mods
                     else:
                         config['sys.config']['covered_dirs'] = docker_dirs
                         config['sys.config']['covered_excluded_modules'] = excl_mods
