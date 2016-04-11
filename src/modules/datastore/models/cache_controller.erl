@@ -24,7 +24,7 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5, check_fetch/3]).
+    list_docs_to_be_dumped/1, choose_action/5, check_fetch/3, check_disk_read/4]).
 
 
 %%%===================================================================
@@ -612,6 +612,48 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Checks if action should proceed (clearing memory was done).
+%% @end
+%%--------------------------------------------------------------------
+-spec check_action_after_clear(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) -> ok | no_return().
+check_action_after_clear(Op, Level, ModelName, {Key, Link}) ->
+    case Op of
+        delete_links ->
+            ok;
+        _ ->
+            ModelConfig = ModelName:model_init(),
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                fetch_link, [ModelConfig, Key, Link]) of
+                {ok, _} ->
+                    ok;
+                {error, link_not_found} ->
+                    throw(cleared);
+                FetchError ->
+                    throw({fetch_error, FetchError})
+            end
+    end;
+check_action_after_clear(Op, Level, ModelName, Key) ->
+    % check for create/delete race
+    ModelConfig = ModelName:model_init(),
+    case Op of
+        delete ->
+            ok;
+        _ ->
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                get, [ModelConfig, Key]) of
+                {ok, _} ->
+                    ok;
+                {error, {not_found, _}} ->
+                    throw(cleared);
+                GetError ->
+                    throw({get_error, GetError})
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Saves dump information about disk operation and decides if it should be done.
 %% @end
 %%--------------------------------------------------------------------
@@ -638,7 +680,13 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         Pid = pid_to_list(self()),
 
         UpdateFun = fun(Record) ->
-            {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
+            case Record#cache_controller.action of
+                cleared ->
+                    ok = check_action_after_clear(Op, Level, ModelName, Key),
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}};
+                _ ->
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
+            end
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
         TS = os:timestamp(),
@@ -655,15 +703,18 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         end,
 
         Task = fun() ->
-            {LastUser, LAT} = case get(Level, Uuid) of
+            {LastUser, LAT, LACT} = case get(Level, Uuid) of
                                   {ok, Doc2} ->
                                       Value = Doc2#document.value,
-                                      {Value#cache_controller.last_user, Value#cache_controller.last_action_time};
+                                      {Value#cache_controller.last_user, Value#cache_controller.last_action_time,
+                                          Value#cache_controller.action};
                                   {error, {not_found, _}} ->
-                                      {Pid, 0}
+                                      {Pid, 0, non}
                               end,
-            ToDo = case LastUser of
-                       ToUpdate when ToUpdate =:= Pid; ToUpdate =:= non ->
+            ToDo = case {LACT, LastUser} of
+                       {cleared, _} ->
+                           {ok, non};
+                       {_, ToUpdate} when ToUpdate =:= Pid; ToUpdate =:= non ->
                            choose_action(Op, Level, ModelName, Key, Uuid);
                        _ ->
                            {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
@@ -709,6 +760,9 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         end,
         {task, Task}
     catch
+        throw:cleared ->
+            % Do not log - such race may happen and it ends disk operation
+            {error, cleared};
         E1:E2 ->
             ?error_stacktrace("Error in cache_controller start_disk_op. Args: ~p. Error: ~p:~p.",
                 [{Key, ModelName, Op, Level}, E1, E2]),

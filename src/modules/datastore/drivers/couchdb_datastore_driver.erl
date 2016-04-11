@@ -26,6 +26,9 @@
 %% Encoded atom prefix
 -define(ATOM_PREFIX, "ATOM::").
 
+%% Encoded record name field
+-define(RECORD_MARKER, "RECORD::").
+
 -define(LINKS_KEY_SUFFIX, "$$").
 
 %% Maximum size of document's value.
@@ -73,7 +76,19 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()],
     NodeToSync :: node()) -> ok.
-init_bucket(_Bucket, _Models, _NodeToSync) ->
+init_bucket(Bucket, Models, _NodeToSync) ->
+    BinBucket = atom_to_binary(Bucket, utf8),
+    DesignId = <<"_design/", BinBucket/binary>>,
+
+    Doc = to_json_term(#{
+        <<"_id">> => DesignId,
+        <<"views">> => maps:from_list(lists:map(
+            fun(#model_config{name = ModelName}) ->
+                BinModelName = atom_to_binary(ModelName, utf8),
+                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER,"'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER,"'], doc); }">>}}
+            end, Models))
+    }),
+    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
     ok.
 
 %%--------------------------------------------------------------------
@@ -140,8 +155,17 @@ save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev
 %%--------------------------------------------------------------------
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
-update(#model_config{bucket = _Bucket} = _ModelConfig, _Key, Diff) when is_function(Diff) ->
-    erlang:error(not_implemented);
+update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    NewValue = Diff(Value),
+                    save(ModelConfig, Doc#document{value = NewValue})
+            end
+        end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
@@ -235,9 +259,45 @@ get_link_doc_inside_trans(ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
-    % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
-    error(not_supported).
+list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn) ->
+    BinModelName = atom_to_binary(ModelName, utf8),
+    _BinBucket = atom_to_binary(Bucket, utf8),
+    case db_run(couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
+        {ok, Rows} ->
+            Ret =
+                try lists:foldl(
+                    fun({Row}, Acc) ->
+                        try
+                            {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
+                            {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
+                            Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
+                            Value2 = Value -- Value1,
+                            {_, Key} = from_driver_key(KeyBin),
+                            Doc = #document{key = Key, value = from_json_term({Value2})},
+                            case element(1, Doc#document.value) of
+                                ModelName ->
+                                    case Fun(Doc, Acc) of
+                                        {next, NewAcc} ->
+                                            NewAcc;
+                                        {abort, LastAcc} ->
+                                            throw({abort, LastAcc})
+                                    end;
+                                _ ->
+                                    Acc %% Trash entry, skipping
+                            end
+                        catch
+                            _:_ ->
+                                Acc %% Invalid entry, skipping
+                        end
+                    end, AccIn, Rows)
+                catch
+                    {abort, RetAcc} ->
+                        RetAcc %% Provided function requested end of stream, exiting loop
+                end,
+            {ok, Ret};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -390,9 +450,9 @@ foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
-healthcheck(_) ->
+healthcheck(_State) ->
     try
-        case get_db() of
+        case get_server() of
             {ok, _} -> ok;
             {error, Reason} ->
                 {error, Reason}
@@ -477,10 +537,21 @@ to_json_term(Term) when is_list(Term) ->
 to_json_term(Term) when is_atom(Term) ->
     to_binary(Term);
 to_json_term(Term) when is_tuple(Term) ->
-    Elems = tuple_to_list(Term),
-    Proplist0 = [{<<"RECORD::">>, <<"unknown">>} | lists:zip(lists:seq(1, length(Elems)), Elems)],
-    Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
-    {Proplist1};
+    ModelName = element(1, Term),
+    try ModelName:model_init() of
+        #model_config{fields = Fields} ->
+            [_ | Values1] = tuple_to_list(Term),
+            Map = maps:from_list(lists:zip(Fields, Values1)),
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(ModelName, utf8)})
+    catch
+        _:_ -> %% encode as tuple
+            Values = tuple_to_list(Term),
+            Keys = lists:seq(1, length(Values)),
+            KeyValue = lists:zip(Keys, Values),
+            Map = maps:from_list(KeyValue),
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(undefined, utf8)})
+    end
+;
 to_json_term(Term) when is_map(Term) ->
     Proplist0 = maps:to_list(Term),
     Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
@@ -505,15 +576,21 @@ from_json_term(Term) when is_float(Term) ->
 from_json_term(Term) when is_list(Term) ->
     [from_json_term(Elem) || Elem <- Term];
 from_json_term({Term}) when is_list(Term) ->
-    case lists:keyfind(<<"RECORD::">>, 1, Term) of
+    case lists:keyfind(<<?RECORD_MARKER>>, 1, Term) of
         false ->
             Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
             maps:from_list(Proplist2);
-        {_, _RecordType} ->
-            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<"RECORD::">>],
+        {_, <<"undefined">>} ->
+            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
             Proplist1 = lists:sort(Proplist0),
             {_, Values} = lists:unzip(Proplist1),
-            list_to_tuple(Values)
+            list_to_tuple(Values);
+        {_, RecordType} ->
+            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
+            ModelName = binary_to_atom(RecordType, utf8),
+            #model_config{fields = Fields} = ModelName:model_init(),
+            Values = [proplists:get_value(Key, Proplist0, undefined) || Key <- Fields],
+            list_to_tuple([binary_to_atom(RecordType, utf8) | Values])
     end;
 from_json_term(Term) when is_binary(Term) ->
     from_binary(Term).
@@ -547,17 +624,11 @@ from_driver_key(RawKey) ->
 %%--------------------------------------------------------------------
 -spec get_db() -> {ok, {pid, term()}} | {error, term()}.
 get_db() ->
-    Gateways = maps:values(datastore_worker:state_get(db_gateways)),
-    ActiveGateways = [GW || #{status := running} = GW <- Gateways],
-
-    case ActiveGateways of
-        [] ->
-            ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
-            {error, no_active_gateway};
-        _ ->
+    case get_server() of
+        {error, Reason} ->
+            {error, Reason};
+        {ok, {ServerLoop, Server}} ->
             try
-                #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
-                Server = couchbeam:server_connection("localhost", Port),
                 {ok, DB} = couchbeam:open_db(Server, <<"default">>),
                 {ok, {ServerLoop, DB}}
             catch
@@ -566,6 +637,43 @@ get_db() ->
             end
     end.
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns server handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_server() -> {ok, {pid, term()}} | {error, term()}.
+get_server() ->
+    get_server(datastore_worker:state_get(db_gateways)).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns server handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_server(State :: worker_host:plugin_state()) -> {ok, {pid, term()}} | {error, term()}.
+get_server(DBGateways) ->
+    Gateways = maps:values(DBGateways),
+    ActiveGateways = [GW || #{status := running} = GW <- Gateways],
+
+    case ActiveGateways of
+        [] ->
+            ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
+            {error, no_active_gateway};
+        _ ->
+            try
+                #{gw_admin_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
+                Server = couchbeam:server_connection("localhost", Port),
+                {ok, {ServerLoop, Server}}
+            catch
+                _:Reason ->
+                    Reason %% Just to silence dialyzer since couchbeam methods supposedly have no return.
+            end
+    end.
 
 -spec db_run(atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Mod, Fun, Args, Retry) ->
@@ -682,7 +790,13 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 
     %% Update state
     Gateways = datastore_worker:state_get(db_gateways),
-    datastore_worker:state_put(db_gateways, maps:update(N, State, Gateways)),
+    NewGateways = maps:update(N, State, Gateways),
+    case NewGateways of
+        Gateways -> ok;
+        _ ->
+            datastore_worker:state_put(db_gateways, NewGateways)
+    end,
+
 
     UpdatedState = case erlang:system_time(milli_seconds) - LPT > timer:seconds(1) of
         true ->

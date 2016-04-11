@@ -68,7 +68,7 @@
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1]).
+-export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_synchronized/3, normalize_link_target/1]).
 
 %%%===================================================================
@@ -174,7 +174,61 @@ get(Level, ModelName, Key) ->
 -spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, level_to_driver(Level), list, [Fun, AccIn]).
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% @end
+%%--------------------------------------------------------------------
+-spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
+    HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
+        case cache_controller:check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}) of
+            ok ->
+                {next, [Document | Acc]};
+            _ ->
+                {next, Acc}
+        end;
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+    HelperFun2 = fun(#document{key = Key} = Document, Acc) ->
+        {next, [Document | Acc]};
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+    %% @todo - do not get keys from disk that are already in memory
+    case exec_driver(ModelName, Driver2, list, [HelperFun1, []]) of
+        {ok, Ans1} ->
+            case exec_driver(ModelName, Driver1, list, [HelperFun2, Ans1]) of
+                {ok, Ans2} ->
+                    try
+                        AccOut =
+                            lists:foldl(fun(Doc, OAcc) ->
+                                case Fun(Doc, OAcc) of
+                                    {next, NAcc} ->
+                                        NAcc;
+                                    {abort, NAcc} ->
+                                        throw({abort, NAcc})
+                                end
+                            end, AccIn, Ans2),
+                        {ok, AccOut}
+                    catch
+                        {abort, AccOut0} ->
+                            {ok, AccOut0};
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err2 ->
+                    Err2
+            end;
+        Err1 ->
+            Err1
+    end;
+list(_Level, Drivers, ModelName, Fun, AccIn) ->
+    exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
 
 
 %%--------------------------------------------------------------------
@@ -189,7 +243,7 @@ delete(Level, ModelName, Key, Pred) ->
         ok ->
             % TODO - make link del asynch when tests will be able to handle it
 %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-            catch delete_links(Level, Key, ModelName, all),
+                catch delete_links(Level, Key, ModelName, all),
             ok;
         {error, Reason} ->
             {error, Reason}
@@ -219,9 +273,9 @@ delete_sync(Level, ModelName, Key, Pred) ->
     case exec_driver(ModelName, level_to_driver(Level), delete, [Key, Pred]) of
         ok ->
             spawn(fun() ->
-                catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
             spawn(fun() ->
-                catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
             %% @todo: uncomment following line when local cache will support links
             % spawn(fun() -> catch delete_links(?LOCAL_ONLY_LEVEL, Key, ModelName, all) end),
             ok;
@@ -644,7 +698,7 @@ run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Retu
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-    ets:new(?LOCAL_STATE, [named_table, public, bag]),
+        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
@@ -690,19 +744,31 @@ init_drivers(Configs, NodeToSync) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Loads local state, initializes datastore drivers and fetches active config
+%% If needed - loads local state, initializes datastore drivers and fetches active config
 %% from NodeToSync if needed.
 %% @end
 %%--------------------------------------------------------------------
 -spec ensure_state_loaded(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
 ensure_state_loaded(NodeToSync) ->
+    case ets:info(?LOCAL_STATE) of
+        undefined ->
+            initialize_state(NodeToSync);
+        _ -> ok
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Loads local state, initializes datastore drivers and fetches active config
+%% from NodeToSync if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec initialize_state(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
+initialize_state(NodeToSync) ->
     try
-        case ets:info(?LOCAL_STATE) of
-            undefined ->
-                Configs = load_local_state(datastore_config:models()),
-                init_drivers(Configs, NodeToSync);
-            _ -> ok
-        end
+        Configs = load_local_state(datastore_config:models()),
+        init_drivers(Configs, NodeToSync)
     catch
         Type:Reason ->
             ?error_stacktrace("Cannot initialize datastore local state due to"
@@ -845,10 +911,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             {ok, Value} ->
                 {ok, Value};
             {tasks, Tasks} ->
-                Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                            true -> ?CLUSTER_LEVEL;
-                            _ -> ?NODE_LEVEL
-                        end,
+                Level = caches_controller:cache_to_task_level(ModelName),
                 lists:foreach(fun
                     ({task, Task}) ->
                         ok = task_manager:start_task(Task, Level);
@@ -856,10 +919,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                         ok % error already logged
                 end, Tasks);
             {task, Task} ->
-                Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                            true -> ?CLUSTER_LEVEL;
-                            _ -> ?NODE_LEVEL
-                        end,
+                Level = caches_controller:cache_to_task_level(ModelName),
                 ok = task_manager:start_task(Task, Level);
             {error, Reason} ->
                 {error, Reason}
