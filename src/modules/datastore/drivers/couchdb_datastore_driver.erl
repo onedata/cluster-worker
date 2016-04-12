@@ -573,8 +573,9 @@ from_json_term({Term}) when is_list(Term) ->
             list_to_tuple(Values);
         {_, RecordType} ->
             Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
-            Proplist1 = lists:sort(Proplist0),
-            {_, Values} = lists:unzip(Proplist1),
+            ModelName = binary_to_atom(RecordType, utf8),
+            #model_config{fields = Fields} = ModelName:model_init(),
+            Values = [proplists:get_value(Key, Proplist0, undefined) || Key <- Fields],
             list_to_tuple([binary_to_atom(RecordType, utf8) | Values])
     end;
 from_json_term(Term) when is_binary(Term) ->
