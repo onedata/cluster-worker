@@ -300,6 +300,8 @@ before(ModelName, Method, Level, Context) ->
     before(ModelName, Method, Level, Context, Level2).
 before(ModelName, save, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, save, Args, Level2);
+before(ModelName, create_or_update, disk_only, [Doc, _Diff] = Args, Level2) ->
+    start_disk_op(Doc#document.key, ModelName, create_or_update, Args, Level2);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
 before(ModelName, create, Level, [Doc], Level) ->

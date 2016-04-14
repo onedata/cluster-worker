@@ -205,10 +205,35 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
-    %%     {ok, datastore:ext_key()} | datastore:create_error().
-    no_return().
-create_or_update(#model_config{} = _ModelConfig, #document{key = _Key, value = _Value}, _Diff) ->
-    erlang:error(not_implemented).
+    {ok, datastore:ext_key()} | datastore:create_error().
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = NewDoc, Diff)
+    when is_function(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, ModelName}} ->
+                    create(ModelConfig, NewDoc);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    NewValue = Diff(Value),
+                    save(ModelConfig, Doc#document{value = NewValue})
+            end
+        end);
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = NewDoc, Diff)
+    when is_map(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, ModelName}} ->
+                    create(ModelConfig, NewDoc);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    NewValue = maps:merge(datastore_utils:shallow_to_map(Value), Diff),
+                    save(ModelConfig, Doc#document{value = datastore_utils:shallow_to_record(NewValue)})
+            end
+        end).
 
 %%--------------------------------------------------------------------
 %% @doc
