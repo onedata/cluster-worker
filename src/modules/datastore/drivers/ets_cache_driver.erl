@@ -244,7 +244,7 @@ add_links(_, _, _) ->
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     no_return().
 create_link(_ModelConfig, _Key, _Link) ->
-    error(not_supported).
+    erlang:error(not_implemented).
 
 
 %%--------------------------------------------------------------------

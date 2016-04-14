@@ -29,7 +29,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec create_link_in_map(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
-    datastore:normalized_link_spec()) -> ok | datastore:generic_error().
+    datastore:normalized_link_spec()) -> ok | datastore:create_error().
 create_link_in_map(Driver, ModelConfig, Key, Link) ->
     create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key), 1).
 
@@ -40,7 +40,7 @@ create_link_in_map(Driver, ModelConfig, Key, Link) ->
 %%--------------------------------------------------------------------
 -spec create_link_in_map(Driver :: atom(), model_behaviour:model_config(),
     datastore:normalized_link_spec(), Key :: datastore:ext_key(), LinkKey :: datastore:ext_key(),
-    KeyNum :: integer()) -> ok | datastore:generic_error().
+    KeyNum :: integer()) -> ok | datastore:create_error().
 create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkName, _} = Link, Key, LinkKey, KeyNum) ->
     case Driver:get_link_doc_inside_trans(ModelConfig, LinkKey) of
         {ok, #document{value = #links{link_map = LinkMap, children = Children}} = Doc} ->
@@ -49,6 +49,7 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
                     LinkNum = get_link_child_num(LinkName, KeyNum),
                     NextKey = maps:get(LinkNum, Children, <<"non">>),
                     case NextKey of
+                        % TODO use atom instead of binary (performance reasons)
                         <<"non">> ->
                             add_non_existing_to_map(Driver, ModelConfig, Key, LinkKey, Doc, Link, KeyNum);
                         _ ->

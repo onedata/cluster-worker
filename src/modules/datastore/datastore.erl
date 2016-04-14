@@ -336,7 +336,7 @@ add_links(Level, Key, ModelName, Links) when is_list(Links) ->
 %% Creates links to given document if link does not exist.
 %% @end
 %%--------------------------------------------------------------------
--spec create_link(Level :: store_level(), document(), link_spec()) -> ok | generic_error().
+-spec create_link(Level :: store_level(), document(), link_spec()) -> ok | create_error().
 create_link(Level, #document{key = Key} = Doc, Link) ->
     create_link(Level, Key, model_name(Doc), Link).
 
@@ -347,7 +347,7 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
-    ok | generic_error().
+    ok | create_error().
 create_link(Level, Key, ModelName, Link) ->
     exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(Link)]).
 

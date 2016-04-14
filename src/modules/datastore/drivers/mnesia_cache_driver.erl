@@ -283,7 +283,7 @@ add_links(#model_config{} = ModelConfig, Key, Links) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
-    ok | datastore:generic_error().
+    ok | datastore:create_error().
 create_link(#model_config{} = ModelConfig, Key, Link) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)

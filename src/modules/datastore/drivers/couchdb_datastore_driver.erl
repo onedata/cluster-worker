@@ -395,7 +395,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 %% @end
 %%--------------------------------------------------------------------
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
-    ok | datastore:generic_error().
+    ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->

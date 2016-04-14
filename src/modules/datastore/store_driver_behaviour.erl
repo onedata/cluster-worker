@@ -122,7 +122,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
-    ok | datastore:generic_error() | no_return().
+    ok | datastore:create_error() | no_return().
 
 
 %%--------------------------------------------------------------------
