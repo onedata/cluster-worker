@@ -37,7 +37,7 @@
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -244,6 +244,17 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [Link | R], Ctx) 
         {to_binary(LinkName), riakc_register:type()},
         fun(_) -> to_riak_obj(to_binary(Target)) end, Ctx),
     add_links4(ModelConfig, Key, R, NewCtx).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback create_link/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
+    no_return().
+create_link(_ModelConfig, _Key, _Link) ->
+    erlang:error(not_implemented).
 
 
 %%--------------------------------------------------------------------

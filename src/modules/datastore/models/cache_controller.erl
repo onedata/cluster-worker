@@ -302,8 +302,9 @@ before(ModelName, save, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, save, Args, Level2);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
+before(ModelName, create, Level, [Doc], Level) ->
+    check_create(Doc#document.key, ModelName, Level);
 before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
-    % TODO add checking if doc exists on disk
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);
 before(ModelName, delete, Level, [Key, _Pred], Level) ->
     before_del(Key, ModelName, Level, delete);
@@ -322,6 +323,10 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
+before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
+    check_link_create(Key, LinkName, ModelName, Level);
+before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->
+    start_disk_op({Key, LinkName}, ModelName, create_link, Args, Level2);
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
     lists:foldl(fun(Link, Acc) ->
         Ans = before_del({Key, Link}, ModelName, Level, delete_links),
@@ -387,9 +392,8 @@ update_usage_info(Key, ModelName, Level) ->
 update_usage_info({Key, LinkName}, ModelName, Doc, Level) ->
     update_usage_info({Key, LinkName}, ModelName, Level),
     ModelConfig = ModelName:model_init(),
-    FullArgs = [ModelConfig, Key, [{LinkName, Doc}]],
-    %% TODO add function create link to prevent from get from disk/save new value race
-    erlang:apply(datastore:level_to_driver(Level), add_links, FullArgs);
+    FullArgs = [ModelConfig, Key, {LinkName, Doc}],
+    erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs);
 update_usage_info(Key, ModelName, Doc, Level) ->
     update_usage_info(Key, ModelName, Level),
     ModelConfig = ModelName:model_init(),
@@ -791,4 +795,69 @@ before_del(Key, ModelName, Level, Op) ->
             ?error_stacktrace("Error in cache_controller before_del. Args: ~p. Error: ~p:~p.",
                 [{Key, ModelName, Level}, E1, E2]),
             {error, preparing_op_failed}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if document may be created.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_create(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
+    Level :: datastore:store_level()) -> ok | datastore:generic_error().
+check_create(Key, ModelName, Level) ->
+    Uuid = caches_controller:get_cache_uuid(Key, ModelName),
+    Check = case get(Level, Uuid) of
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    Value#cache_controller.action =/= delete;
+                {error, {not_found, _}} ->
+                    true
+            end,
+    case Check of
+        true ->
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                exists, [ModelName:model_init(), Key]) of
+                {ok, false} ->
+                    ok;
+                {ok, true} ->
+                    {error, already_exists};
+                Other ->
+                    Other
+            end;
+        _ ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if link may be created.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_link_create(Key :: datastore:ext_key(), LinkName :: datastore:link_name(),
+    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
+    ok | datastore:generic_error().
+check_link_create(Key, LinkName, ModelName, Level) ->
+    Uuid = caches_controller:get_cache_uuid({Key, LinkName}, ModelName),
+    Check = case get(Level, Uuid) of
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    Value#cache_controller.action =/= delete_links;
+                {error, {not_found, _}} ->
+                    true
+            end,
+    case Check of
+        true ->
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                fetch_link, [ModelName:model_init(), Key, LinkName]) of
+                {error, link_not_found} ->
+                    ok;
+                {ok, _} ->
+                    {error, already_exists};
+                Other ->
+                    Other
+            end;
+        _ ->
+            ok
     end.

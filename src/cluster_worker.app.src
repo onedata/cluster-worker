@@ -59,6 +59,7 @@
             %% List of modules to be excluded during cover analysis
             {covered_excluded_modules, []},
             %% Minimal delay in cache dumping to disk (changes done before this time causes cancelation of dump)
+            %% Warning - too small delay may result in cache inconsistency
             {cache_to_disk_delay_ms, 5000},
             %% Maximal delay in cache dumping to disk
             {cache_to_disk_force_delay_ms, 30000},
