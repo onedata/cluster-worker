@@ -23,7 +23,7 @@
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
 %% TODO Add non_transactional updates (each update creates tmp ets!)
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
+-export([add_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_synchronized/3]).
 
 -export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
@@ -275,6 +275,18 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
 add_links(#model_config{} = ModelConfig, Key, Links) ->
     mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
+    end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback create_link/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
+    ok | datastore:create_error().
+create_link(#model_config{} = ModelConfig, Key, Link) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+        links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
     end).
 
 %%--------------------------------------------------------------------
