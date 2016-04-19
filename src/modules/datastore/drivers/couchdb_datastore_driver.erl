@@ -162,8 +162,12 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
                 {error, Reason} ->
                     {error, Reason};
                 {ok, #document{value = Value} = Doc} ->
-                    NewValue = Diff(Value),
-                    save(ModelConfig, Doc#document{value = NewValue})
+                    case Diff(Value) of
+                        {ok, NewValue} ->
+                            save(ModelConfig, Doc#document{value = NewValue});
+                        {error, Reason2} ->
+                            {error, Reason2}
+                    end
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
@@ -216,8 +220,12 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
                 {error, Reason} ->
                     {error, Reason};
                 {ok, #document{value = Value} = Doc} ->
-                    NewValue = Diff(Value),
-                    save(ModelConfig, Doc#document{value = NewValue})
+                    case Diff(Value) of
+                        {ok, NewValue} ->
+                            save(ModelConfig, Doc#document{value = NewValue});
+                        {error, Reason2} ->
+                            {error, Reason2}
+                    end
             end
         end);
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = NewDoc, Diff)
