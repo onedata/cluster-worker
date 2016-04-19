@@ -260,7 +260,7 @@ init_per_testcase(CaseName, Config) ->
     [P1, P2] = ?config(cluster_worker_nodes, Config),
     Models = [test_record_1, test_record_2],
 
-    timer:sleep(3000), % tmp solution until mocking is repaired
+    timer:sleep(3000), % tmp solution until mocking is repaired (VFS-1851)
     test_utils:enable_datastore_models([P1], Models),
     test_utils:enable_datastore_models([P2], Models),
 

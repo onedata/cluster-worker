@@ -782,7 +782,7 @@ links_number_test(Config, Level) ->
     ].
 
 set_env(Case, Config) ->
-    timer:sleep(3000), % tmp solution until mocking is repaired
+    timer:sleep(3000), % tmp solution until mocking is repaired (VFS-1851)
     Workers = ?config(cluster_worker_nodes, Config),
     ok = test_node_starter:load_modules(Workers, [?MODULE]),
     TestRecord = get_record_name(Case),
