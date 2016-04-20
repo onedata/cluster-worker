@@ -210,7 +210,7 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = NewDoc, Diff)
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_function(Diff) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
@@ -228,7 +228,7 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
                     end
             end
         end);
-create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = NewDoc, Diff)
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_map(Diff) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->

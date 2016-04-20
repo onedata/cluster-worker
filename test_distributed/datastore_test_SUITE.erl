@@ -101,6 +101,10 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, KeyExt) ->
         key = Key,
         value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
     },
+    Doc2 =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
+    },
 
     ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
@@ -109,7 +113,7 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, KeyExt) ->
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
@@ -134,13 +138,17 @@ create_or_update_test_base(Config, Level, UpdateEntity, KeyExt) ->
         key = Key,
         value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
     },
+    Doc2 =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
+    },
 
     ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
