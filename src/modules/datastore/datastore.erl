@@ -151,6 +151,7 @@ create_sync(Level, #document{} = Document) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(Level :: store_level(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
+% TODO - support for cache simmilar to create and update (VFS-1830)
 create_or_update(Level, #document{} = Document, Diff) ->
     ModelName = model_name(Document),
     exec_driver_async(ModelName, Level, create_or_update, [Document, Diff]).

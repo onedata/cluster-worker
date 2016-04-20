@@ -46,7 +46,8 @@
     clear_and_flush_global_cache_test/1, multilevel_foreach_global_cache_test/1,
     operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
-    globally_cached_many_links_test/1, create_globally_cached_test/1]).
+    globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
+    global_only_create_or_update_test/1, globally_cached_create_or_update_test/1]).
 -export([utilize_memory/3]).
 
 all() ->
@@ -62,7 +63,8 @@ all() ->
         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
         interupt_global_cache_clearing_test,
         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
-        create_globally_cached_test
+        create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
+        globally_cached_create_or_update_test
     ]).
 
 
@@ -72,6 +74,85 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+disk_only_create_or_update_test(Config) ->
+    create_or_update_test_base(Config, ?DISK_ONLY_LEVEL).
+
+global_only_create_or_update_test(Config) ->
+    create_or_update_test_base(Config, ?GLOBAL_ONLY_LEVEL).
+
+globally_cached_create_or_update_test(Config) ->
+    UpdateMap = #{field1 => 2},
+    UpdateFun = fun({R, _F1, F2, F3}) ->
+        {ok, {R, 2, F2, F3}}
+    end,
+    globally_cached_create_or_update_test_base(Config, UpdateMap, "map"),
+    globally_cached_create_or_update_test_base(Config, UpdateFun, "fun").
+
+globally_cached_create_or_update_test_base(Config, UpdateEntity, KeyExt) ->
+    Level = ?GLOBALLY_CACHED_LEVEL,
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    ModelConfig = TestRecord:model_init(),
+
+    Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    Doc2 =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
+    },
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+    ok.
+
+create_or_update_test_base(Config, Level) ->
+    UpdateMap = #{field1 => 2},
+    UpdateFun = fun({R, _F1, F2, F3}) ->
+        {ok, {R, 2, F2, F3}}
+    end,
+    create_or_update_test_base(Config, Level, UpdateMap, "map"),
+    create_or_update_test_base(Config, Level, UpdateFun, "fun").
+
+create_or_update_test_base(Config, Level, UpdateEntity, KeyExt) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    Doc2 =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
+    },
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ok.
 
 create_globally_cached_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
