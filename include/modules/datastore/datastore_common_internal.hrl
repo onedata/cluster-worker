@@ -21,6 +21,18 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
+-define(MOTHER_SCOPE_DEF_FUN,
+    fun() ->
+        links
+    end
+).
+
+-define(OTHER_SCOPES_DEF_FUN,
+    fun() ->
+        []
+    end
+).
+
 %% This record shall not be used outside datastore engine and shall not be instantiated
 %% directly. Use MODEL_CONFIG macro instead.
 -record(model_config, {
@@ -33,7 +45,9 @@
     store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     transactional_global_cache = true :: boolean(),
-    sync_cache = false :: boolean()
+    sync_cache = false :: boolean(),
+    mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope_fun(),
+    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes_fun()
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -58,6 +72,22 @@
     transactional_global_cache = Transactions,
     sync_cache = SyncCache
 }).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2),
+    #model_config{
+        name = ?MODULE,
+        size = record_info(size, ?MODULE),
+        fields = record_info(fields, ?MODULE),
+        defaults = #?MODULE{},
+        bucket = Bucket,
+        hooks = Hooks,
+        store_level = StoreLevel,
+        link_store_level = LinkStoreLevel,
+        transactional_global_cache = Transactions,
+        sync_cache = SyncCache,
+        mother_link_scope = ScopeFun1,
+        other_link_scopes = ScopeFun2
+    }
+).
 
 %% Max link map size in single links record
 -define(LINKS_MAP_MAX_SIZE, 32).

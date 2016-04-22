@@ -33,6 +33,8 @@
 -define(test_record_f3(F), {_, _, _, F}).
 -define(test_record_f1_3(F1, F3), {_, F1, _, F3}).
 
+-define(SCOPE_MASTER_PROC_NAME, sm_proc).
+
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %%tests
@@ -47,24 +49,25 @@
     operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
-    global_only_create_or_update_test/1, globally_cached_create_or_update_test/1]).
+    global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1]).
 -export([utilize_memory/3]).
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test, disk_list_test,
-        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
-        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-        interupt_global_cache_clearing_test,
-        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
-        create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
-        globally_cached_create_or_update_test
+%%        local_test, global_test, global_atomic_update_test, disk_list_test,
+%%        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
+%%        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+%%        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+%%        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+%%        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+%%        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+%%        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+%%        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+%%        interupt_global_cache_clearing_test,
+%%        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
+%%        create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
+%%        globally_cached_create_or_update_test, links_scope_test
+        links_scope_test
     ]).
 
 
@@ -74,6 +77,178 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+links_scope_test(Config) ->
+    MasterLoop = spawn_link(fun() -> scope_master_loop() end),
+    global:register_name(?SCOPE_MASTER_PROC_NAME, MasterLoop),
+    global:sync(),
+
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    Key = <<"key_lst">>,
+    Doc =  #document{
+        key = Key,
+        value = #link_scopes_test_record{field1 = 1, field2 = <<"abc">>, field3 = {test, tuple}}
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, link_scopes_test_record, create, [Doc])),
+
+    GetLinkName = fun(I) ->
+        list_to_atom("linked_key_lst" ++ integer_to_list(I))
+    end,
+    GetDocKey = fun(I) ->
+        list_to_binary("linked_key_lst" ++ integer_to_list(I))
+    end,
+    GetDoc = fun(I) ->
+        #document{
+            key = GetDocKey(I),
+            value = #link_scopes_test_record{field1 = I, field2 = <<"efg">>, field3 = {test, tuple2}}
+        }
+    end,
+    AddLink = fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBAL_ONLY_LEVEL, Doc, [{GetLinkName(I), GetDoc(I)}]]))
+    end,
+    AddLinkWithDoc = fun(I) ->
+        ?assertMatch({ok, _}, ?call(Worker2, link_scopes_test_record, create, [GetDoc(I)])),
+        AddLink(I)
+    end,
+    CreateLink = fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]))
+    end,
+    CreateExistingLink = fun(I) ->
+        ?assertMatch({error, already_exists}, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]))
+    end,
+    CreateLinkWithDoc = fun(I) ->
+        ?assertMatch({ok, _}, ?call(Worker1, link_scopes_test_record, create, [GetDoc(I)])),
+        CreateLink(I)
+    end,
+    FetchLink = fun(I) ->
+        ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(I)]))
+    end,
+    GetAllLinks = fun(Links) ->
+        AccFun = fun(LinkName, _, Acc) ->
+            [LinkName | Acc]
+                 end,
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [?GLOBAL_ONLY_LEVEL, Doc, AccFun, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        lists:foreach(fun(I) ->
+            ?assert(lists:member(GetLinkName(I), ListedLinks))
+        end, Links),
+        LinksLength = length(Links),
+        ?assertMatch(LinksLength, length(ListedLinks))
+    end,
+    DeleteLink = fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker2, delete_links, [?GLOBAL_ONLY_LEVEL, Doc, [GetLinkName(I)]]))
+    end,
+    DeleteLinks = fun(Links) ->
+        ?assertMatch(ok, ?call_store(Worker2, delete_links, [?GLOBAL_ONLY_LEVEL, Doc,
+            lists:map(fun(I) -> GetLinkName(I) end, Links)]))
+    end,
+
+    AddLinkWithDoc(1),
+    AddLinkWithDoc(2),
+    FetchLink(1),
+    FetchLink(2),
+    GetAllLinks([1,2]),
+    CreateExistingLink(2),
+    CreateLinkWithDoc(3),
+    FetchLink(3),
+    CreateLinkWithDoc(4),
+    FetchLink(4),
+    CreateLinkWithDoc(5),
+    FetchLink(5),
+    GetAllLinks([1,2,3,4,5]),
+    DeleteLinks([1,5]),
+    GetAllLinks([2,3,4]),
+    DeleteLink(100),
+    GetAllLinks([2,3,4]),
+
+    set_mother_scope(scope2),
+    GetAllLinks([]),
+    set_other_scopes([scope1]),
+    GetAllLinks([2,3,4]),
+    FetchLink(2),
+    FetchLink(3),
+    AddLink(2),
+    AddLink(5),
+    AddLinkWithDoc(6),
+    FetchLink(5),
+    FetchLink(6),
+    CreateExistingLink(3),
+    CreateLinkWithDoc(7),
+    FetchLink(7),
+    GetAllLinks([2,3,4,5,6,7]),
+    DeleteLinks([3, 7, 100]),
+    GetAllLinks([2,4,5,6]),
+
+    set_other_scopes([]),
+    GetAllLinks([2,5,6]),
+    set_mother_scope(scope1),
+    GetAllLinks([4]),
+    ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(2), GetDoc(1)}])),
+    AddLinkWithDoc(8),
+    GetAllLinks([2,4,8]),
+    set_other_scopes([scope2]),
+    GetAllLinks([2,2,4,5,6,8]),
+    DK1 = GetDocKey(1),
+    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(2)])),
+
+    set_mother_scope(scope2),
+    set_other_scopes([scope1]),
+    GetAllLinks([2,2,4,5,6,8]),
+    DK2 = GetDocKey(2),
+    ?assertMatch({ok, {DK2, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(2)])),
+    DeleteLink(2),
+    GetAllLinks([2,4,5,6,8]),
+    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(2)])),
+    DeleteLink(2),
+    GetAllLinks([4,5,6,8]),
+    DeleteLinks([4,5,6,8]),
+    GetAllLinks([]),
+    set_mother_scope(scope1),
+    set_other_scopes([scope2]),
+    GetAllLinks([]),
+
+    MasterLoop ! stop,
+    ok.
+
+set_mother_scope(MotherScope) ->
+    global:send(?SCOPE_MASTER_PROC_NAME, {set_mother_scope, self(), MotherScope}),
+    receive
+        scope_changed -> ok
+    end.
+
+set_other_scopes(OtherScopes) ->
+    global:send(?SCOPE_MASTER_PROC_NAME, {set_other_scopes, self(), OtherScopes}),
+    receive
+        scope_changed -> ok
+    end.
+
+scope_master_loop() ->
+    scope_master_loop(scope1, []).
+
+scope_master_loop(MotherScope, OtherScopes) ->
+    Todo = receive
+               {get_mother_scope, Sender} ->
+                   Sender ! {mother_scope, MotherScope};
+               {get_other_scopes, Sender2} ->
+                   Sender2 ! {other_scopes, OtherScopes};
+               {set_mother_scope, Sender3, MotherScope2} ->
+                   Sender3 ! scope_changed,
+                   {change_scopes, MotherScope2, OtherScopes};
+               {set_other_scopes, Sender4, OtherScopes2} ->
+                   Sender4 ! scope_changed,
+                   {change_scopes, MotherScope, OtherScopes2};
+               stop ->
+                   stop
+           end,
+    case Todo of
+        stop ->
+            ok;
+        {change_scopes, MotherScope3, OtherScopes3} ->
+            scope_master_loop(MotherScope3, OtherScopes3);
+        _ ->
+            scope_master_loop(MotherScope, OtherScopes)
+    end.
 
 disk_only_create_or_update_test(Config) ->
     create_or_update_test_base(Config, ?DISK_ONLY_LEVEL).
@@ -1442,6 +1617,10 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
 
+init_per_testcase(links_scope_test, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:enable_datastore_models(Workers, [link_scopes_test_record]),
+    Config;
 init_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:set_env(Case, Config).
 
