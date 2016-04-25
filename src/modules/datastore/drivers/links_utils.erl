@@ -739,10 +739,10 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
 %% @end
 %%--------------------------------------------------------------------
 -spec links_doc_key(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
-links_doc_key(Key, Scope) when is_atom(Scope) ->
-    base64:encode(term_to_binary({Scope, Key}));
-links_doc_key(Key, ScopeFun) ->
-    base64:encode(term_to_binary({ScopeFun(), Key})).
+links_doc_key(Key, ScopeFun) when is_function(ScopeFun) ->
+    base64:encode(term_to_binary({ScopeFun(), Key}));
+links_doc_key(Key, Scope) ->
+    base64:encode(term_to_binary({Scope, Key})).
 
 %%--------------------------------------------------------------------
 %% @private
