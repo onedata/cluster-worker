@@ -54,20 +54,19 @@
 
 all() ->
     ?ALL([
-%%        local_test, global_test, global_atomic_update_test, disk_list_test,
-%%        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
-%%        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
-%%        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
-%%        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
-%%        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
-%%        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-%%        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
-%%        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-%%        interupt_global_cache_clearing_test,
-%%        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
-%%        create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
-%%        globally_cached_create_or_update_test, links_scope_test
-        links_scope_test
+        local_test, global_test, global_atomic_update_test, disk_list_test,
+        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
+        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+        monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
+        link_monitoring_global_cache_test, create_after_delete_global_cache_test,
+        restoring_cache_from_disk_global_cache_test, prevent_reading_from_disk_global_cache_test,
+        multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
+        clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
+        operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
+        interupt_global_cache_clearing_test,
+        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
+        create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
+        globally_cached_create_or_update_test, links_scope_test
     ]).
 
 
