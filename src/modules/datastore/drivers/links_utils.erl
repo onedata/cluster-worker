@@ -378,6 +378,21 @@ foreach_link(Driver, ModelConfig, Key, Fun, {ok, AccIn}, [Scope | Scopes]) ->
 foreach_link(_Driver, _ModelConfig, _Key, _Fun, AccIn, _Scopes) ->
     AccIn.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns key for document holding links for given document.
+%% @end
+%%--------------------------------------------------------------------
+-spec links_doc_key(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
+links_doc_key(Key, Scope) ->
+    Base = links_doc_key_from_scope(Key, Scope),
+    case byte_size(Base) > 120 of
+        true ->
+            binary:part(Base, {0,120});
+        _ ->
+            Base
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -735,14 +750,16 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns key for document holding links for given document.
+%% Create base for links document key (base must be cut if too long).
 %% @end
 %%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
-links_doc_key(Key, ScopeFun) when is_function(ScopeFun) ->
-    base64:encode(term_to_binary({ScopeFun(), Key}));
-links_doc_key(Key, Scope) ->
-    base64:encode(term_to_binary({Scope, Key})).
+-spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
+links_doc_key_from_scope(Key, ScopeFun) when is_function(ScopeFun) ->
+    links_doc_key_from_scope(Key, ScopeFun());
+links_doc_key_from_scope(Key, Scope) when is_binary(Key), is_binary(Scope) ->
+    <<Key/binary, Scope/binary>>;
+links_doc_key_from_scope(Key, Scope) ->
+    base64:encode(term_to_binary({Key, Scope})).
 
 %%--------------------------------------------------------------------
 %% @private
