@@ -307,8 +307,8 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, 
                                 Acc
                         end
                     end, {ok, 0, []}, SplitedLinks);
-                Error ->
-                    Error
+                _ ->
+                    SaveAns
             end;
         {error, {not_found, _}} ->
             {ok, 0, Links};
