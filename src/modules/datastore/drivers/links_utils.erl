@@ -90,23 +90,78 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
 save_links_maps(Driver,
     #model_config{bucket = _Bucket, name = ModelName, mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig,
     Key, LinksList) ->
-    LDK = links_doc_key(Key, ScopeFun1),
-    SaveAns = case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+
+    case ScopeFun2() of
+        [] ->
+            LDK = links_doc_key(Key, ScopeFun1),
+            SaveAns = case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+                          {ok, LinksDoc} ->
+                              save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, norm);
+                          {error, {not_found, _}} ->
+                              LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
+                              save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, norm);
+                          {error, Reason} ->
+                              {error, Reason}
+                      end,
+            case SaveAns of
+                {ok, []} ->
+                    ok;
+                _ ->
+                    SaveAns
+            end;
+        OtherScopes ->
+            SaveAns = update_link_maps(Driver, ModelConfig, Key, LinksList, [ScopeFun1() | OtherScopes]),
+            case SaveAns of
+                {ok, []} ->
+                    ok;
+                {ok, LinksToAdd} ->
+                    LDK = links_doc_key(Key, ScopeFun1),
+                    SaveAns2 = case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+                                  {ok, LinksDoc} ->
+                                      save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
+                                  {error, Reason} ->
+                                      {error, Reason}
+                              end,
+                    case SaveAns2 of
+                        {ok, []} ->
+                            ok;
+                        _ ->
+                            SaveAns2
+                    end;
+                _ ->
+                    SaveAns
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Update links in maps from several documents (no new elements are added).
+%% @end
+%%--------------------------------------------------------------------
+-spec update_link_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
+    [datastore:normalized_link_spec()], Scopes :: atom() | [atom()]) ->
+    {ok, [datastore:normalized_link_spec()]} | datastore:generic_error().
+update_link_maps(_Driver, _ModelConfig, _Key, Links, []) ->
+    {ok, Links};
+update_link_maps(Driver, ModelConfig, Key, Links, [Scope | Scopes]) ->
+    case update_link_maps(Driver, ModelConfig, Key, Links, Scope) of
+        {ok, []} ->
+            {ok, []};
+        {ok, LinksLeft} ->
+            update_link_maps(Driver, ModelConfig, Key, LinksLeft, Scopes);
+        Ans ->
+            Ans
+    end;
+update_link_maps(Driver, #model_config{name = ModelName} = ModelConfig, Key, LinksList, Scope) ->
+    LDK = links_doc_key(Key, Scope),
+    case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
         {ok, LinksDoc} ->
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, true);
+            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
         {error, {not_found, _}} ->
             LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, true);
+            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
         {error, Reason} ->
             {error, Reason}
-    end,
-    case SaveAns of
-        {ok, []} ->
-            ok;
-        {ok, LinksToDel} ->
-            delete_links_from_maps(Driver, ModelConfig, Key, LinksToDel, ScopeFun2());
-        _ ->
-            SaveAns
     end.
 
 %%--------------------------------------------------------------------
@@ -115,21 +170,33 @@ save_links_maps(Driver,
 %% @end
 %%--------------------------------------------------------------------
 -spec save_links_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(), datastore:document(),
-    [datastore:normalized_link_spec()], KeyNum :: integer(), CheckForOld :: boolean()) ->
-    {ok, [datastore:link_name()]} | datastore:generic_error().
+    [datastore:normalized_link_spec()], KeyNum :: integer(), Mode :: norm | update | no_old_checking) ->
+    {ok, [datastore:normalized_link_spec()]} | datastore:generic_error().
 save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key,
     #document{key = LDK, value = #links{link_map = LinkMap, children = Children} = LinksRecord} = LinksDoc,
-    LinksList, KeyNum, CheckForOld) ->
-    {FilledMap, NewLinksList, AddedLinks} = fill_links_map(LinksList, LinkMap),
+    LinksList, KeyNum, Mode) ->
+    {FilledMap, NewLinksList, AddedLinks} = case Mode of
+                                                update ->
+                                                    {Map, LinksToUpdate} = update_links_map(LinksList, LinkMap),
+                                                    {Map, LinksToUpdate, []};
+                                                _ ->
+                                                    fill_links_map(LinksList, LinkMap)
+    end,
+
     case NewLinksList of
         [] ->
             case Driver:save_link_doc(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
                 {ok, _} ->
-                    case CheckForOld of
-                        true ->
-                            del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
+                    case Mode of
+                        norm ->
+                            case del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum) of
+                                ok ->
+                                    {ok, []};
+                                DelErr ->
+                                    DelErr
+                            end;
                         _ ->
-                            {ok, AddedLinks}
+                            {ok, []}
                     end;
                 {error, Reason} ->
                     {error, Reason}
@@ -138,51 +205,64 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
             SplitedLinks = split_links_list(NewLinksList, KeyNum),
             {NewChildren, ChildrenDocs} = maps:fold(fun(Num, _SLs, {Acc1, Acc2}) ->
                 NK = maps:get(Num, Children, <<"non">>),
-                case NK of
-                    <<"non">> ->
+                case {NK, Mode} of
+                    {<<"non">>, update} ->
+                        {Acc1, maps:put(Num, <<"non">>, Acc2)};
+                    {<<"non">>, _} ->
                         NewLDK = links_child_doc_key(LDK, Num),
                         NLD = #document{key = NewLDK, value = #links{doc_key = Key, model = ModelName}},
                         {maps:put(Num, NewLDK, Acc1), maps:put(Num, NLD, Acc2)};
-                    NewLDK2 ->
+                    {_, update} ->
                         case Driver:get_link_doc_inside_trans(ModelConfig, NK) of
                             {ok, NLD} ->
                                 {Acc1, maps:put(Num, NLD, Acc2)};
                             {error, {not_found, _}} ->
-                                NLD = #document{key = NewLDK2, value = #links{doc_key = Key, model = ModelName}},
-                                {maps:put(Num, NewLDK2, Acc1), maps:put(Num, NLD, Acc2)}
+                                {Acc1, maps:put(Num, <<"non">>, Acc2)}
+                        end;
+                    _ ->
+                        case Driver:get_link_doc_inside_trans(ModelConfig, NK) of
+                            {ok, NLD} ->
+                                {Acc1, maps:put(Num, NLD, Acc2)};
+                            {error, {not_found, _}} ->
+                                NLD = #document{key = NK, value = #links{doc_key = Key, model = ModelName}},
+                                {maps:put(Num, NK, Acc1), maps:put(Num, NLD, Acc2)}
                         end
                 end
             end, {Children, #{}}, SplitedLinks),
             NewLinksDoc = LinksDoc#document{value = LinksRecord#links{link_map = FilledMap,
                 children = NewChildren}},
+            % TODO do not save if there were no changes
             case Driver:save_link_doc(ModelConfig, NewLinksDoc) of
                 {ok, _} ->
-                    DelOldAns = case CheckForOld of
-                        true ->
+                    DelOldAns = case Mode of
+                        norm ->
                             del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
                         _ ->
-                            {ok, []}
+                            ok
                     end,
                     case DelOldAns of
-                        {ok, AnsExt} ->
-                            FoldAns = maps:fold(fun(Num, SLs, FunAns) ->
-                                NDoc = maps:get(Num, ChildrenDocs),
-                                case {FunAns,
-                                    save_links_maps(Driver, ModelConfig, Key, NDoc, SLs, KeyNum + 1, CheckForOld)} of
-                                    {{ok, AddedAcc}, {ok, NewlyAdded}} ->
-                                        {ok, AddedAcc ++ NewlyAdded};
-                                    {{ok, _}, NewError} ->
-                                        NewError;
-                                    {OldError, _} ->
-                                        OldError
+                        ok ->
+                            maps:fold(fun(Num, SLs, FunAns) ->
+                                case maps:get(Num, ChildrenDocs) of
+                                    <<"non">> ->
+                                        case FunAns of
+                                            {ok, NotUpdated} ->
+                                                {ok, NotUpdated ++ SLs};
+                                            {OldError, _} ->
+                                                OldError
+                                        end;
+                                    NDoc ->
+                                        case {FunAns,
+                                            save_links_maps(Driver, ModelConfig, Key, NDoc, SLs, KeyNum + 1, Mode)} of
+                                            {{ok, NotUpdatedAcc}, {ok, NewNotUpdated}} ->
+                                                {ok, NotUpdatedAcc ++ NewNotUpdated};
+                                            {{ok, _}, NewError} ->
+                                                NewError;
+                                            {OldError, _} ->
+                                                OldError
+                                        end
                                 end
-                            end, {ok, []}, SplitedLinks),
-                            case FoldAns of
-                                {ok, FoldlAddedLinks} ->
-                                    {ok, FoldlAddedLinks ++ AnsExt};
-                                _ ->
-                                    FoldAns
-                            end;
+                            end, {ok, []}, SplitedLinks);
                         Other ->
                             Other
                     end;
@@ -501,35 +581,61 @@ fill_links_map([{LinkName, LinkTarget} | R], Map, MapSize, AddedLinks, LinksToAd
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Updates map with links replacing link if exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_links_map([datastore:normalized_link_spec()], map()) -> {map(), LinksToUpdate :: list()}.
+update_links_map(LinksList, LinkMap) ->
+    MapSize = maps:size(LinkMap),
+    update_links_map(LinksList, LinkMap, MapSize, []).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Updates map with links replacing link if exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_links_map([datastore:normalized_link_spec()], map(), MapSize :: integer(),
+    LinksToUpdate :: list()) -> {map(), FinalLinksToUpdate :: list()}.
+update_links_map([], Map, _MapSize, LinksToUpdate) ->
+    {Map, LinksToUpdate};
+update_links_map([{LinkName, LinkTarget} = Link | R], Map, MapSize, LinksToUpdate) ->
+    case maps:is_key(LinkName, Map) of
+        true ->
+            update_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize, LinksToUpdate);
+        _ ->
+            update_links_map(R, Map, MapSize, [Link | LinksToUpdate])
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Deletes links updated at higher level of links tree.
 %% @end
 %%--------------------------------------------------------------------
 -spec del_old_links(Driver :: atom(), model_behaviour:model_config(), [datastore:normalized_link_spec()],
-    datastore:ext_key() | datastore:document(), KeyNum :: integer()) ->
-    {ok, [datastore:normalized_link_spec()]} | datastore:generic_error().
+    datastore:ext_key() | datastore:document(), KeyNum :: integer()) -> ok | datastore:generic_error().
 del_old_links(_Driver, _ModelConfig, [], _Key, _KeyNum) ->
-    {ok, []};
-del_old_links(_Driver, #model_config{bucket = _Bucket} = _ModelConfig, Links, <<"non">>, _KeyNum) ->
-    {ok, Links};
+    ok;
+del_old_links(_Driver, #model_config{bucket = _Bucket} = _ModelConfig, _Links, <<"non">>, _KeyNum) ->
+    ok;
 del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links,
     #document{value = #links{children = Children}}, KeyNum) ->
     SplitedLinks = split_links_names_list(Links, KeyNum),
     maps:fold(fun(Num, SLs, Acc) ->
-        NextKey = maps:get(Num, Children, <<"non">>),
-        case {Acc, del_old_links(Driver, ModelConfig, SLs, NextKey, KeyNum + 1)} of
-            {{ok, NotDelAcc}, {ok, NotDel2}} ->
-                {ok, NotDelAcc ++ NotDel2};
-            {{ok, _}, NewError} ->
-                NewError;
-            {OldError, _} ->
-                OldError
+        case Acc of
+            ok ->
+                NextKey = maps:get(Num, Children, <<"non">>),
+                del_old_links(Driver, ModelConfig, SLs, NextKey, KeyNum + 1);
+            _ ->
+                Acc
         end
-    end, {ok, []}, SplitedLinks);
+              end, ok, SplitedLinks);
 del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links, Key, KeyNum) ->
     case Driver:get_link_doc_inside_trans(ModelConfig, Key) of
         {ok, #document{value = #links{link_map = LinkMap} = LinksRecord} = LinkDoc} ->
             {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
-            SaveAns= case Deleted of
+            SaveAns = case Deleted of
                          0 ->
                              {ok, ok};
                          _ ->
@@ -539,14 +645,14 @@ del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links, Key,
 
             case {SaveAns, NewLinks} of
                 {{ok, _}, []} ->
-                    {ok, []};
+                    ok;
                 {{ok, _}, _} ->
                     del_old_links(Driver, ModelConfig, NewLinks, LinkDoc, KeyNum);
                 Error ->
                     Error
             end;
         {error, {not_found, _}} ->
-            {ok, Links};
+            ok;
         {error, Reason} ->
             {error, Reason}
     end.
@@ -785,10 +891,10 @@ links_child_doc_key(Key, Num) ->
 add_non_existing_to_map(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, LDK, GetAns, Link, 1) ->
     TmpAns = case GetAns of
         #document{} = Doc ->
-            save_links_maps(Driver, ModelConfig, Key, Doc, [Link], 1, false);
+            save_links_maps(Driver, ModelConfig, Key, Doc, [Link], 1, no_old_checking);
         {error, {not_found, _}} ->
             LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, [Link], 1, false);
+            save_links_maps(Driver, ModelConfig, Key, LinksDoc, [Link], 1, no_old_checking);
         {error, Reason} ->
             {error, Reason}
     end,
