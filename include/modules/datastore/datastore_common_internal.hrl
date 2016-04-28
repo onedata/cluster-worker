@@ -61,17 +61,9 @@
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, true)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, false)).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache), #model_config{name = ?MODULE,
-    size = record_info(size, ?MODULE),
-    fields = record_info(fields, ?MODULE),
-    defaults = #?MODULE{},
-    bucket = Bucket,
-    hooks = Hooks,
-    store_level = StoreLevel,
-    link_store_level = LinkStoreLevel,
-    transactional_global_cache = Transactions,
-    sync_cache = SyncCache
-}).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache,
+        ?MOTHER_SCOPE_DEF_FUN, ?OTHER_SCOPES_DEF_FUN)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2),
     #model_config{
         name = ?MODULE,
