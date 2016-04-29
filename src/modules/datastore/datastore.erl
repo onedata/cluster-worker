@@ -65,7 +65,7 @@
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
     get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
--export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, delete_links/3, delete_links/4,
+-export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
@@ -151,6 +151,7 @@ create_sync(Level, #document{} = Document) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(Level :: store_level(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
+% TODO - support for cache simmilar to create and update (VFS-1830)
 create_or_update(Level, #document{} = Document, Diff) ->
     ModelName = model_name(Document),
     exec_driver_async(ModelName, Level, create_or_update, [Document, Diff]).
@@ -328,8 +329,28 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
     add_links(Level, Key, ModelName, [LinkSpec]);
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
-    _ModelConfig = ModelName:model_init(),
     exec_driver_async(ModelName, Level, add_links, [Key, normalize_link_target(Links)]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates links to given document if link does not exist.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(Level :: store_level(), document(), link_spec()) -> ok | create_error().
+create_link(Level, #document{key = Key} = Doc, Link) ->
+    create_link(Level, Key, model_name(Doc), Link).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Adds given links to the document with given key if link does not exist.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
+    ok | create_error().
+create_link(Level, Key, ModelName, Link) ->
+    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(Link)]).
 
 
 %%--------------------------------------------------------------------

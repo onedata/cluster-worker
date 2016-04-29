@@ -4,6 +4,22 @@
 CHANGELOG
 ---------
 
+### 3.0.0-beta3
+
+* VFS-1798, Improve formatting
+* VFS-1818, update of create_or_update fun in cauchdb driver
+* VFS-1818, update of update fun in cauchdb driver
+* VFS-1798, update cover.spec
+* VFS-1818, create_or_update for cauchDB driver
+* VFS-1797, create link operation
+* VFS-1794, update of create on cache
+* VFS-1630 Fix list implementation
+* VFS-1630 Add support for globally_cached list
+* VFS-1630 Allow injecting models
+* VFS-1630 Implement list in couchdb driver
+* VFS-1630 Improve datastore startup
+
+
 ### 3.0.0-beta1
 
 * VFS-1757 Trapping exit in couchdb gateway process.

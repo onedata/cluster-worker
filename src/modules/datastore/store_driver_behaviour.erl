@@ -118,6 +118,15 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Adds given links to the document with given key if this link does not exist.
+%% @end
+%%--------------------------------------------------------------------
+-callback create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
+    ok | datastore:create_error() | no_return().
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------

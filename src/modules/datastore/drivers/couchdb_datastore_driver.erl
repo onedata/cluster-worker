@@ -41,7 +41,7 @@
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
@@ -85,7 +85,7 @@ init_bucket(Bucket, Models, _NodeToSync) ->
         <<"views">> => maps:from_list(lists:map(
             fun(#model_config{name = ModelName}) ->
                 BinModelName = atom_to_binary(ModelName, utf8),
-                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER,"'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER,"'], doc); }">>}}
+                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER, "'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER, "'], doc); }">>}}
             end, Models))
     }),
     {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
@@ -139,7 +139,7 @@ save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+    case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -162,8 +162,12 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
                 {error, Reason} ->
                     {error, Reason};
                 {ok, #document{value = Value} = Doc} ->
-                    NewValue = Diff(Value),
-                    save(ModelConfig, Doc#document{value = NewValue})
+                    case Diff(Value) of
+                        {ok, NewValue} ->
+                            save(ModelConfig, Doc#document{value = NewValue});
+                        {error, Reason2} ->
+                            {error, Reason2}
+                    end
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
@@ -205,10 +209,39 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
-    %%     {ok, datastore:ext_key()} | datastore:create_error().
-    no_return().
-create_or_update(#model_config{} = _ModelConfig, #document{key = _Key, value = _Value}, _Diff) ->
-    erlang:error(not_implemented).
+    {ok, datastore:ext_key()} | datastore:create_error().
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
+    when is_function(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, ModelName}} ->
+                    create(ModelConfig, NewDoc);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    case Diff(Value) of
+                        {ok, NewValue} ->
+                            save(ModelConfig, Doc#document{value = NewValue});
+                        {error, Reason2} ->
+                            {error, Reason2}
+                    end
+            end
+        end);
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
+    when is_map(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, ModelName}} ->
+                    create(ModelConfig, NewDoc);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    NewValue = maps:merge(datastore_utils:shallow_to_map(Value), Diff),
+                    save(ModelConfig, Doc#document{value = datastore_utils:shallow_to_record(NewValue)})
+            end
+        end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -265,7 +298,7 @@ list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn
     case db_run(couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
         {ok, Rows} ->
             Ret =
-                try lists:foldl(
+                lists:foldl(
                     fun({Row}, Acc) ->
                         try
                             {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
@@ -286,14 +319,12 @@ list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn
                                     Acc %% Trash entry, skipping
                             end
                         catch
+                            {abort, RetAcc} ->
+                                RetAcc; %% Provided function requested end of stream, exiting loop
                             _:_ ->
                                 Acc %% Invalid entry, skipping
                         end
-                    end, AccIn, Rows)
-                catch
-                    {abort, RetAcc} ->
-                        RetAcc %% Provided function requested end of stream, exiting loop
-                end,
+                    end, AccIn, Rows),
             {ok, Ret};
         {error, Reason} ->
             {error, Reason}
@@ -346,7 +377,7 @@ delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
 delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-    case db_run(couchbeam, delete_doc, [Doc,  ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+    case db_run(couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         ok ->
             ok;
         {ok, _} ->
@@ -386,6 +417,20 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
+        end
+    ).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback create_link/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
+    ok | datastore:create_error().
+create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
     ).
 
@@ -693,7 +738,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc,[{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
