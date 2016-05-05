@@ -65,10 +65,10 @@
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
     get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
--export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, delete_links/3, delete_links/4,
+-export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1]).
+-export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_synchronized/3, normalize_link_target/1]).
 
 %%%===================================================================
@@ -151,6 +151,7 @@ create_sync(Level, #document{} = Document) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(Level :: store_level(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
+% TODO - support for cache simmilar to create and update (VFS-1830)
 create_or_update(Level, #document{} = Document, Diff) ->
     ModelName = model_name(Document),
     exec_driver_async(ModelName, Level, create_or_update, [Document, Diff]).
@@ -174,7 +175,61 @@ get(Level, ModelName, Key) ->
 -spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, level_to_driver(Level), list, [Fun, AccIn]).
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% @end
+%%--------------------------------------------------------------------
+-spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
+    HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
+        case cache_controller:check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}) of
+            ok ->
+                {next, [Document | Acc]};
+            _ ->
+                {next, Acc}
+        end;
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+    HelperFun2 = fun(#document{key = Key} = Document, Acc) ->
+        {next, [Document | Acc]};
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+    %% @todo - do not get keys from disk that are already in memory
+    case exec_driver(ModelName, Driver2, list, [HelperFun1, []]) of
+        {ok, Ans1} ->
+            case exec_driver(ModelName, Driver1, list, [HelperFun2, Ans1]) of
+                {ok, Ans2} ->
+                    try
+                        AccOut =
+                            lists:foldl(fun(Doc, OAcc) ->
+                                case Fun(Doc, OAcc) of
+                                    {next, NAcc} ->
+                                        NAcc;
+                                    {abort, NAcc} ->
+                                        throw({abort, NAcc})
+                                end
+                            end, AccIn, Ans2),
+                        {ok, AccOut}
+                    catch
+                        {abort, AccOut0} ->
+                            {ok, AccOut0};
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err2 ->
+                    Err2
+            end;
+        Err1 ->
+            Err1
+    end;
+list(_Level, Drivers, ModelName, Fun, AccIn) ->
+    exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
 
 
 %%--------------------------------------------------------------------
@@ -189,7 +244,7 @@ delete(Level, ModelName, Key, Pred) ->
         ok ->
             % TODO - make link del asynch when tests will be able to handle it
 %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-            catch delete_links(Level, Key, ModelName, all),
+                catch delete_links(Level, Key, ModelName, all),
             ok;
         {error, Reason} ->
             {error, Reason}
@@ -219,9 +274,9 @@ delete_sync(Level, ModelName, Key, Pred) ->
     case exec_driver(ModelName, level_to_driver(Level), delete, [Key, Pred]) of
         ok ->
             spawn(fun() ->
-                catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
             spawn(fun() ->
-                catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
             %% @todo: uncomment following line when local cache will support links
             % spawn(fun() -> catch delete_links(?LOCAL_ONLY_LEVEL, Key, ModelName, all) end),
             ok;
@@ -274,8 +329,28 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
     add_links(Level, Key, ModelName, [LinkSpec]);
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
-    _ModelConfig = ModelName:model_init(),
     exec_driver_async(ModelName, Level, add_links, [Key, normalize_link_target(Links)]).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates links to given document if link does not exist.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(Level :: store_level(), document(), link_spec()) -> ok | create_error().
+create_link(Level, #document{key = Key} = Doc, Link) ->
+    create_link(Level, Key, model_name(Doc), Link).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Adds given links to the document with given key if link does not exist.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
+    ok | create_error().
+create_link(Level, Key, ModelName, Link) ->
+    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(Link)]).
 
 
 %%--------------------------------------------------------------------
@@ -405,22 +480,34 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
-    FlushFun = fun(LinkName, _, _) ->
-        caches_controller:flush(driver_to_level(Driver1), ModelName, Key, LinkName),
-        []
-    end,
-    exec_driver(ModelName, Driver1, foreach_link, [Key, FlushFun, []]),
-
-    NewFun = fun(LinkName, LinkTarget, Acc) ->
-        case fetch_link(Level, Key, ModelName, LinkName) of
-            {ok, _} ->
-                Fun(LinkName, LinkTarget, Acc);
+    HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
+        case cache_controller:check_fetch({Key, LinkName}, ModelName, Level) of
+            ok ->
+                maps:put(LinkName, LinkTarget, Acc);
             _ ->
                 Acc
         end
     end,
-    exec_driver(ModelName, Driver2, foreach_link, [Key, NewFun, AccIn]);
-
+    HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
+        maps:put(LinkName, LinkTarget, Acc)
+    end,
+    % TODO - update not to get from disk keys that are already in memory
+    case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun1, #{}]) of
+        {ok, Ans1} ->
+            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun2, Ans1]) of
+                {ok, Ans2} ->
+                    try maps:fold(Fun, AccIn, Ans2) of
+                        AccOut -> {ok, AccOut}
+                    catch
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err2 ->
+                    Err2
+            end;
+        Err1 ->
+            Err1
+    end;
 foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
 
@@ -612,7 +699,7 @@ run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Retu
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-    ets:new(?LOCAL_STATE, [named_table, public, bag]),
+        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
@@ -658,19 +745,31 @@ init_drivers(Configs, NodeToSync) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Loads local state, initializes datastore drivers and fetches active config
+%% If needed - loads local state, initializes datastore drivers and fetches active config
 %% from NodeToSync if needed.
 %% @end
 %%--------------------------------------------------------------------
 -spec ensure_state_loaded(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
 ensure_state_loaded(NodeToSync) ->
+    case ets:info(?LOCAL_STATE) of
+        undefined ->
+            initialize_state(NodeToSync);
+        _ -> ok
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Loads local state, initializes datastore drivers and fetches active config
+%% from NodeToSync if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec initialize_state(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
+initialize_state(NodeToSync) ->
     try
-        case ets:info(?LOCAL_STATE) of
-            undefined ->
-                Configs = load_local_state(datastore_config:models()),
-                init_drivers(Configs, NodeToSync);
-            _ -> ok
-        end
+        Configs = load_local_state(datastore_config:models()),
+        init_drivers(Configs, NodeToSync)
     catch
         Type:Reason ->
             ?error_stacktrace("Cannot initialize datastore local state due to"
@@ -722,7 +821,6 @@ driver_to_level(?DISTRIBUTED_CACHE_DRIVER) ->
 exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
     exec_driver(ModelName, Driver, Method, Args);
 exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
-    % TODO - foreach_link metchod may not have all links in memory nor at disk!!!
     case exec_driver(ModelName, Driver, Method, Args) of
         {error, {not_found, _}} when Method =:= get ->
             exec_driver(ModelName, Rest, Method, Args);
@@ -814,10 +912,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             {ok, Value} ->
                 {ok, Value};
             {tasks, Tasks} ->
-                Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                            true -> ?CLUSTER_LEVEL;
-                            _ -> ?NODE_LEVEL
-                        end,
+                Level = caches_controller:cache_to_task_level(ModelName),
                 lists:foreach(fun
                     ({task, Task}) ->
                         ok = task_manager:start_task(Task, Level);
@@ -825,10 +920,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                         ok % error already logged
                 end, Tasks);
             {task, Task} ->
-                Level = case lists:member(ModelName, datastore_config:global_caches()) of
-                            true -> ?CLUSTER_LEVEL;
-                            _ -> ?NODE_LEVEL
-                        end,
+                Level = caches_controller:cache_to_task_level(ModelName),
                 ok = task_manager:start_task(Task, Level);
             {error, Reason} ->
                 {error, Reason}

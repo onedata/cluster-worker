@@ -144,7 +144,8 @@ clear_cache(_MemUsage, TargetMemUse, StoreType, [TimeWindow | Windows]) ->
 %%--------------------------------------------------------------------
 -spec get_hooks_config(Models :: list()) -> list().
 get_hooks_config(Models) ->
-  Methods = [save, get, exists, delete, update, create, fetch_link, add_links, delete_links],
+  Methods = [save, get, exists, delete, update, create, create_or_update,
+    fetch_link, add_links, create_link, delete_links],
   lists:foldl(fun(Model, Ans) ->
     ModelConfig = lists:map(fun(Method) ->
       {Model, Method}
@@ -420,7 +421,7 @@ save_high_mem_clear_info(Level, Uuid) ->
   UpdateFun = fun
     (#cache_controller{last_user = non} = Record) ->
       {ok, Record#cache_controller{action = cleared, last_action_time = TS}};
-    (Record) ->
+    (_) ->
       {error, document_in_use}
   end,
   V = #cache_controller{timestamp = TS, action = cleared, last_action_time = TS},

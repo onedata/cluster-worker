@@ -18,14 +18,14 @@
 -include("modules/datastore/datastore_engine.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5]).
+    list_docs_to_be_dumped/1, choose_action/5, check_fetch/3, check_disk_read/4]).
 
--define(DISK_OP_TIMEOUT, timer:minutes(1)).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -33,7 +33,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback save/1. 
+%% {@link model_behaviour} callback save/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec save(datastore:document()) ->
@@ -54,7 +54,7 @@ save(Level, Document) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback update/2. 
+%% {@link model_behaviour} callback update/2.
 %% @end
 %%--------------------------------------------------------------------
 -spec update(datastore:ext_key(), Diff :: datastore:document_diff()) ->
@@ -75,7 +75,7 @@ update(Level, Key, Diff) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback create/1. 
+%% {@link model_behaviour} callback create/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec create(datastore:document()) ->
@@ -230,7 +230,7 @@ delete(Level, Key, Pred) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback exists/1. 
+%% {@link model_behaviour} callback exists/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec exists(datastore:ext_key()) -> datastore:exists_return().
@@ -249,7 +249,7 @@ exists(Level, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback model_init/0. 
+%% {@link model_behaviour} callback model_init/0.
 %% @end
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
@@ -261,7 +261,7 @@ model_init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback 'after'/5. 
+%% {@link model_behaviour} callback 'after'/5.
 %% @end
 %%--------------------------------------------------------------------
 -spec 'after'(ModelName :: model_behaviour:model_type(),
@@ -288,7 +288,7 @@ model_init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback before/4. 
+%% {@link model_behaviour} callback before/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec before(ModelName :: model_behaviour:model_type(),
@@ -300,10 +300,13 @@ before(ModelName, Method, Level, Context) ->
     before(ModelName, Method, Level, Context, Level2).
 before(ModelName, save, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, save, Args, Level2);
+before(ModelName, create_or_update, disk_only, [Doc, _Diff] = Args, Level2) ->
+    start_disk_op(Doc#document.key, ModelName, create_or_update, Args, Level2);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
+before(ModelName, create, Level, [Doc], Level) ->
+    check_create(Doc#document.key, ModelName, Level);
 before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
-    % TODO add checking if doc exists on disk
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);
 before(ModelName, delete, Level, [Key, _Pred], Level) ->
     before_del(Key, ModelName, Level, delete);
@@ -322,6 +325,10 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
+before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
+    check_link_create(Key, LinkName, ModelName, Level);
+before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->
+    start_disk_op({Key, LinkName}, ModelName, create_link, Args, Level2);
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
     lists:foldl(fun(Link, Acc) ->
         Ans = before_del({Key, Link}, ModelName, Level, delete_links),
@@ -387,9 +394,8 @@ update_usage_info(Key, ModelName, Level) ->
 update_usage_info({Key, LinkName}, ModelName, Doc, Level) ->
     update_usage_info({Key, LinkName}, ModelName, Level),
     ModelConfig = ModelName:model_init(),
-    FullArgs = [ModelConfig, Key, [{LinkName, Doc}]],
-    %% TODO add function create link to prevent from get from disk/save new value race
-    erlang:apply(datastore:level_to_driver(Level), add_links, FullArgs);
+    FullArgs = [ModelConfig, Key, {LinkName, Doc}],
+    erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs);
 update_usage_info(Key, ModelName, Doc, Level) ->
     update_usage_info(Key, ModelName, Level),
     ModelConfig = ModelName:model_init(),
@@ -608,6 +614,48 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Checks if action should proceed (clearing memory was done).
+%% @end
+%%--------------------------------------------------------------------
+-spec check_action_after_clear(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) -> ok | no_return().
+check_action_after_clear(Op, Level, ModelName, {Key, Link}) ->
+    case Op of
+        delete_links ->
+            ok;
+        _ ->
+            ModelConfig = ModelName:model_init(),
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                fetch_link, [ModelConfig, Key, Link]) of
+                {ok, _} ->
+                    ok;
+                {error, link_not_found} ->
+                    throw(cleared);
+                FetchError ->
+                    throw({fetch_error, FetchError})
+            end
+    end;
+check_action_after_clear(Op, Level, ModelName, Key) ->
+    % check for create/delete race
+    ModelConfig = ModelName:model_init(),
+    case Op of
+        delete ->
+            ok;
+        _ ->
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
+                get, [ModelConfig, Key]) of
+                {ok, _} ->
+                    ok;
+                {error, {not_found, _}} ->
+                    throw(cleared);
+                GetError ->
+                    throw({get_error, GetError})
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Saves dump information about disk operation and decides if it should be done.
 %% @end
 %%--------------------------------------------------------------------
@@ -634,7 +682,13 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         Pid = pid_to_list(self()),
 
         UpdateFun = fun(Record) ->
-            {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
+            case Record#cache_controller.action of
+                cleared ->
+                    ok = check_action_after_clear(Op, Level, ModelName, Key),
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}};
+                _ ->
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
+            end
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
         TS = os:timestamp(),
@@ -651,15 +705,18 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         end,
 
         Task = fun() ->
-            {LastUser, LAT} = case get(Level, Uuid) of
+            {LastUser, LAT, LACT} = case get(Level, Uuid) of
                                   {ok, Doc2} ->
                                       Value = Doc2#document.value,
-                                      {Value#cache_controller.last_user, Value#cache_controller.last_action_time};
+                                      {Value#cache_controller.last_user, Value#cache_controller.last_action_time,
+                                          Value#cache_controller.action};
                                   {error, {not_found, _}} ->
-                                      {Pid, 0}
+                                      {Pid, 0, non}
                               end,
-            ToDo = case LastUser of
-                       ToUpdate when ToUpdate =:= Pid; ToUpdate =:= non ->
+            ToDo = case {LACT, LastUser} of
+                       {cleared, _} ->
+                           {ok, non};
+                       {_, ToUpdate} when ToUpdate =:= Pid; ToUpdate =:= non ->
                            choose_action(Op, Level, ModelName, Key, Uuid);
                        _ ->
                            {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
@@ -705,6 +762,9 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         end,
         {task, Task}
     catch
+        throw:cleared ->
+            % Do not log - such race may happen and it ends disk operation
+            {error, cleared};
         E1:E2 ->
             ?error_stacktrace("Error in cache_controller start_disk_op. Args: ~p. Error: ~p:~p.",
                 [{Key, ModelName, Op, Level}, E1, E2]),
@@ -737,4 +797,69 @@ before_del(Key, ModelName, Level, Op) ->
             ?error_stacktrace("Error in cache_controller before_del. Args: ~p. Error: ~p:~p.",
                 [{Key, ModelName, Level}, E1, E2]),
             {error, preparing_op_failed}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if document may be created.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_create(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
+    Level :: datastore:store_level()) -> ok | datastore:generic_error().
+check_create(Key, ModelName, Level) ->
+    Uuid = caches_controller:get_cache_uuid(Key, ModelName),
+    Check = case get(Level, Uuid) of
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    Value#cache_controller.action =/= delete;
+                {error, {not_found, _}} ->
+                    true
+            end,
+    case Check of
+        true ->
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                exists, [ModelName:model_init(), Key]) of
+                {ok, false} ->
+                    ok;
+                {ok, true} ->
+                    {error, already_exists};
+                Other ->
+                    Other
+            end;
+        _ ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if link may be created.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_link_create(Key :: datastore:ext_key(), LinkName :: datastore:link_name(),
+    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
+    ok | datastore:generic_error().
+check_link_create(Key, LinkName, ModelName, Level) ->
+    Uuid = caches_controller:get_cache_uuid({Key, LinkName}, ModelName),
+    Check = case get(Level, Uuid) of
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    Value#cache_controller.action =/= delete_links;
+                {error, {not_found, _}} ->
+                    true
+            end,
+    case Check of
+        true ->
+            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                fetch_link, [ModelName:model_init(), Key, LinkName]) of
+                {error, link_not_found} ->
+                    ok;
+                {ok, _} ->
+                    {error, already_exists};
+                Other ->
+                    Other
+            end;
+        _ ->
+            ok
     end.

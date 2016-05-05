@@ -18,12 +18,16 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("timeouts.hrl").
 
 %% Encoded object prefix
 -define(OBJ_PREFIX, "OBJ::").
 
 %% Encoded atom prefix
 -define(ATOM_PREFIX, "ATOM::").
+
+%% Encoded record name field
+-define(RECORD_MARKER, "RECORD::").
 
 -define(LINKS_KEY_SUFFIX, "$$").
 
@@ -37,13 +41,13 @@
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, delete_links/3, fetch_link/3, foreach_link/4]).
--export([links_doc_key/1, links_key_to_doc_key/1]).
+-export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([start_gateway/4, force_save/2, db_run/4]).
 
--export([changes_start_link/3]).
+-export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
+-export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -72,7 +76,19 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()],
     NodeToSync :: node()) -> ok.
-init_bucket(_Bucket, _Models, _NodeToSync) ->
+init_bucket(Bucket, Models, _NodeToSync) ->
+    BinBucket = atom_to_binary(Bucket, utf8),
+    DesignId = <<"_design/", BinBucket/binary>>,
+
+    Doc = to_json_term(#{
+        <<"_id">> => DesignId,
+        <<"views">> => maps:from_list(lists:map(
+            fun(#model_config{name = ModelName}) ->
+                BinModelName = atom_to_binary(ModelName, utf8),
+                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER, "'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER, "'], doc); }">>}}
+            end, Models))
+    }),
+    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
     ok.
 
 %%--------------------------------------------------------------------
@@ -90,20 +106,40 @@ save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, k
                     create(ModelConfig, Doc);
                 {error, Reason} ->
                     {error, Reason};
-                {ok, #document{rev = undefined}} ->
-                    create(ModelConfig, Doc);
-                {ok, #document{rev = Rev, value = Value}} ->
+                {ok, #document{rev = _Rev, value = Value}} ->
                     {ok, Key};
                 {ok, #document{rev = Rev}} ->
-                    save(ModelConfig, Doc#document{rev = Rev})
+                    save_doc(ModelConfig, Doc#document{rev = Rev})
             end
         end);
-save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
+save(ModelConfig, Doc) ->
+    save_doc(ModelConfig, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_link_doc(ModelConfig, Doc) ->
+    save_doc(ModelConfig, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document not using transactions (to be used inside transaction).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
+    create(ModelConfig, Doc);
+save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
     ok = assert_value_size(Value),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc], 3) of
+    case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -119,8 +155,21 @@ save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = R
 %%--------------------------------------------------------------------
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
-update(#model_config{bucket = _Bucket} = _ModelConfig, _Key, Diff) when is_function(Diff) ->
-    erlang:error(not_implemented);
+update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    case Diff(Value) of
+                        {ok, NewValue} ->
+                            save(ModelConfig, Doc#document{value = NewValue});
+                        {error, Reason2} ->
+                            {error, Reason2}
+                    end
+            end
+        end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
         fun() ->
@@ -145,7 +194,7 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc], 3) of
+    case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -160,10 +209,39 @@ create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
-    %%     {ok, datastore:ext_key()} | datastore:create_error().
-    no_return().
-create_or_update(#model_config{} = _ModelConfig, #document{key = _Key, value = _Value}, _Diff) ->
-    erlang:error(not_implemented).
+    {ok, datastore:ext_key()} | datastore:create_error().
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
+    when is_function(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, ModelName}} ->
+                    create(ModelConfig, NewDoc);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    case Diff(Value) of
+                        {ok, NewValue} ->
+                            save(ModelConfig, Doc#document{value = NewValue});
+                        {error, Reason2} ->
+                            {error, Reason2}
+                    end
+            end
+        end);
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
+    when is_map(Diff) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Key}),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, ModelName}} ->
+                    create(ModelConfig, NewDoc);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{value = Value} = Doc} ->
+                    NewValue = maps:merge(datastore_utils:shallow_to_map(Value), Diff),
+                    save(ModelConfig, Doc#document{value = datastore_utils:shallow_to_record(NewValue)})
+            end
+        end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -187,6 +265,25 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
             {error, Reason}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc(ModelConfig, Key) ->
+    get(ModelConfig, Key).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links. To be used inside transaction (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc_inside_trans(ModelConfig, Key) ->
+    get(ModelConfig, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -195,9 +292,43 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
-    % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
-    error(not_supported).
+list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn) ->
+    BinModelName = atom_to_binary(ModelName, utf8),
+    _BinBucket = atom_to_binary(Bucket, utf8),
+    case db_run(couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
+        {ok, Rows} ->
+            Ret =
+                lists:foldl(
+                    fun({Row}, Acc) ->
+                        try
+                            {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
+                            {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
+                            Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
+                            Value2 = Value -- Value1,
+                            {_, Key} = from_driver_key(KeyBin),
+                            Doc = #document{key = Key, value = from_json_term({Value2})},
+                            case element(1, Doc#document.value) of
+                                ModelName ->
+                                    case Fun(Doc, Acc) of
+                                        {next, NewAcc} ->
+                                            NewAcc;
+                                        {abort, LastAcc} ->
+                                            throw({abort, LastAcc})
+                                    end;
+                                _ ->
+                                    Acc %% Trash entry, skipping
+                            end
+                        catch
+                            {abort, RetAcc} ->
+                                RetAcc; %% Provided function requested end of stream, exiting loop
+                            _:_ ->
+                                Acc %% Invalid entry, skipping
+                        end
+                    end, AccIn, Rows),
+            {ok, Ret};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -218,24 +349,44 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                             ok;
                         {error, Reason} ->
                             {error, Reason};
-                        {ok, #document{value = Value, rev = Rev}} ->
-                            {Props} = to_json_term(Value),
-                            Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-                            case db_run(couchbeam, delete_doc, [Doc], 3) of
-                                ok ->
-                                    ok;
-                                {ok, _} ->
-                                    ok;
-                                {error, key_enoent} ->
-                                    ok;
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end
+                        {ok, Doc} ->
+                            delete_doc(Bucket, Doc)
                     end;
                 false ->
                     ok
             end
         end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
+delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
+    delete_doc(Bucket, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document not using transactions.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_doc(datastore:bucket(), datastore:ext_key()) ->
+    ok | datastore:generic_error().
+delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
+    {Props} = to_json_term(Value),
+    Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
+    case db_run(couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+        ok ->
+            ok;
+        {ok, _} ->
+            ok;
+        {error, key_enoent} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -265,28 +416,23 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case get(ModelConfig, links_doc_key(Key)) of
-                {ok, #document{value = #links{link_map = LinkMap}}} ->
-                    add_links4(ModelConfig, Key, Links, LinkMap);
-                {error, {not_found, _}} ->
-                    add_links4(ModelConfig, Key, Links, #{});
-                {error, Reason} ->
-                    {error, Reason}
-            end
+            links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
         end
     ).
 
--spec add_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()], InternalCtx :: term()) ->
-    ok | datastore:generic_error().
-add_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
-        {ok, _} -> ok;
-        {error, Reason} ->
-            {error, Reason}
-    end;
-add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkTarget} | R], Ctx) ->
-    add_links4(ModelConfig, Key, R, maps:put(LinkName, LinkTarget, Ctx)).
-
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback create_link/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
+    ok | datastore:create_error().
+create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
+        end
+    ).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -295,33 +441,18 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [{LinkName, LinkT
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
-delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
-    delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
+delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
+    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+        fun() ->
+            links_utils:delete_links(?MODULE, ModelConfig, Key)
+        end
+    );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
     datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
-            case get(ModelConfig, links_doc_key(Key)) of
-                {ok, #document{value = #links{link_map = LinkMap}}} ->
-                    delete_links4(ModelConfig, Key, Links, LinkMap);
-                {error, {not_found, _}} ->
-                    ok;
-                {error, Reason} ->
-                    {error, Reason}
-            end
+            links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
     ).
-
--spec delete_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()] | all, InternalCtx :: term()) ->
-    ok | datastore:generic_error().
-delete_links4(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, [], Ctx) ->
-    case save(ModelConfig, #document{key = links_doc_key(Key), value = #links{key = Key, model = ModelName, link_map = Ctx}}) of
-        {ok, _} -> ok;
-        {error, Reason} ->
-            {error, Reason}
-    end;
-delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
-    delete_links4(ModelConfig, Key, R, maps:remove(Link, Ctx)).
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -331,20 +462,7 @@ delete_links4(#model_config{} = ModelConfig, Key, [Link | R], Ctx) ->
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = #links{link_map = LinkMap}}} ->
-            case maps:get(LinkName, LinkMap, undefined) of
-                undefined ->
-                    {error, link_not_found};
-                LinkTarget ->
-                    {ok, LinkTarget}
-            end;
-        {error, {not_found, _}} ->
-            {error, link_not_found};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
+    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -355,15 +473,7 @@ fetch_link(#model_config{bucket = _Bucket} = ModelConfig, Key, LinkName) ->
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
-    case get(ModelConfig, links_doc_key(Key)) of
-        {ok, #document{value = #links{link_map = LinkMap}}} ->
-            {ok, maps:fold(Fun, AccIn, LinkMap)};
-        {error, {not_found, _}} ->
-            {ok, AccIn};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
+    links_utils:foreach_link(?MODULE, ModelConfig, Key, Fun, AccIn).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -371,9 +481,9 @@ foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
-healthcheck(_) ->
+healthcheck(_State) ->
     try
-        case get_db() of
+        case get_server() of
             {ok, _} -> ok;
             {error, Reason} ->
                 {error, Reason}
@@ -458,10 +568,21 @@ to_json_term(Term) when is_list(Term) ->
 to_json_term(Term) when is_atom(Term) ->
     to_binary(Term);
 to_json_term(Term) when is_tuple(Term) ->
-    Elems = tuple_to_list(Term),
-    Proplist0 = [{<<"RECORD::">>, <<"unknown">>} | lists:zip(lists:seq(1, length(Elems)), Elems)],
-    Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
-    {Proplist1};
+    ModelName = element(1, Term),
+    try ModelName:model_init() of
+        #model_config{fields = Fields} ->
+            [_ | Values1] = tuple_to_list(Term),
+            Map = maps:from_list(lists:zip(Fields, Values1)),
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(ModelName, utf8)})
+    catch
+        _:_ -> %% encode as tuple
+            Values = tuple_to_list(Term),
+            Keys = lists:seq(1, length(Values)),
+            KeyValue = lists:zip(Keys, Values),
+            Map = maps:from_list(KeyValue),
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(undefined, utf8)})
+    end
+;
 to_json_term(Term) when is_map(Term) ->
     Proplist0 = maps:to_list(Term),
     Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
@@ -486,40 +607,24 @@ from_json_term(Term) when is_float(Term) ->
 from_json_term(Term) when is_list(Term) ->
     [from_json_term(Elem) || Elem <- Term];
 from_json_term({Term}) when is_list(Term) ->
-    case lists:keyfind(<<"RECORD::">>, 1, Term) of
+    case lists:keyfind(<<?RECORD_MARKER>>, 1, Term) of
         false ->
             Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
             maps:from_list(Proplist2);
-        {_, _RecordType} ->
-            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<"RECORD::">>],
+        {_, <<"undefined">>} ->
+            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
             Proplist1 = lists:sort(Proplist0),
             {_, Values} = lists:unzip(Proplist1),
-            list_to_tuple(Values)
+            list_to_tuple(Values);
+        {_, RecordType} ->
+            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
+            ModelName = binary_to_atom(RecordType, utf8),
+            #model_config{fields = Fields} = ModelName:model_init(),
+            Values = [proplists:get_value(Key, Proplist0, undefined) || Key <- Fields],
+            list_to_tuple([binary_to_atom(RecordType, utf8) | Values])
     end;
 from_json_term(Term) when is_binary(Term) ->
     from_binary(Term).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns key for document holding links for given document.
-%% @end
-%%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key()) -> BinKey :: binary().
-links_doc_key(Key) ->
-    base64:encode(term_to_binary({links, Key})).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns key of document that owns links saved as document with given key.
-%% Reverses links_doc_key/1.
-%% @end
-%%--------------------------------------------------------------------
--spec links_key_to_doc_key(Key :: datastore:key()) -> BinKey :: binary().
-links_key_to_doc_key(Key) ->
-    {links, DocKey} = binary_to_term(base64:decode(Key)),
-    DocKey.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -550,17 +655,11 @@ from_driver_key(RawKey) ->
 %%--------------------------------------------------------------------
 -spec get_db() -> {ok, {pid, term()}} | {error, term()}.
 get_db() ->
-    Gateways = maps:values(datastore_worker:state_get(db_gateways)),
-    ActiveGateways = [GW || #{status := running} = GW <- Gateways],
-
-    case ActiveGateways of
-        [] ->
-            ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
-            {error, no_active_gateway};
-        _ ->
+    case get_server() of
+        {error, Reason} ->
+            {error, Reason};
+        {ok, {ServerLoop, Server}} ->
             try
-                #{gw_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
-                Server = couchbeam:server_connection("localhost", Port),
                 {ok, DB} = couchbeam:open_db(Server, <<"default">>),
                 {ok, {ServerLoop, DB}}
             catch
@@ -569,6 +668,43 @@ get_db() ->
             end
     end.
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns server handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_server() -> {ok, {pid, term()}} | {error, term()}.
+get_server() ->
+    get_server(datastore_worker:state_get(db_gateways)).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns server handle used by couchbeam library to connect to couchdb-based DB.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_server(State :: worker_host:plugin_state()) -> {ok, {pid, term()}} | {error, term()}.
+get_server(DBGateways) ->
+    Gateways = maps:values(DBGateways),
+    ActiveGateways = [GW || #{status := running} = GW <- Gateways],
+
+    case ActiveGateways of
+        [] ->
+            ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
+            {error, no_active_gateway};
+        _ ->
+            try
+                #{gw_admin_port := Port, server := ServerLoop} = lists:nth(crypto:rand_uniform(1, length(ActiveGateways) + 1), ActiveGateways),
+                Server = couchbeam:server_connection("localhost", Port),
+                {ok, {ServerLoop, Server}}
+            catch
+                _:Reason ->
+                    Reason %% Just to silence dialyzer since couchbeam methods supposedly have no return.
+            end
+    end.
 
 -spec db_run(atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Mod, Fun, Args, Retry) ->
@@ -602,7 +738,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}]], 3) of
+    case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {_}} ->
             {ok, Key};
         {error, conflict} ->
@@ -621,6 +757,7 @@ force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, r
 %%--------------------------------------------------------------------
 -spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer()) -> no_return().
 start_gateway(Parent, N, Hostname, Port) ->
+    process_flag(trap_exit, true),
     GWPort = crypto:rand_uniform(?GATEWAY_BASE_PORT_MIN, ?GATEWAY_BASE_PORT_MAX),
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
@@ -637,9 +774,8 @@ start_gateway(Parent, N, Hostname, Port) ->
     State = #{
         server => self(), port_fd => PortFD, status => init, id => {node(), N},
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds), parent => Parent
+        start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1
     },
-    monitor(process, Parent),
     proc_lib:init_ack(Parent, State),
 
     BusyWaitInterval = 20,
@@ -668,8 +804,8 @@ start_gateway(Parent, N, Hostname, Port) ->
         end
     end,
 
-    WaitForStateFun(timer:seconds(2)),
-    WaitForConnectionFun(timer:seconds(2)),
+    WaitForStateFun(?WAIT_FOR_STATE_TIMEOUT),
+    WaitForConnectionFun(?WAIT_FOR_CONNECTION_TIMEOUT),
 
     gateway_loop(State#{status => running}).
 
@@ -681,66 +817,71 @@ start_gateway(Parent, N, Hostname, Port) ->
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
 gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, gw_port := GWPort,
-    start_time := ST, parent := Parent} = State) ->
+    start_time := ST, parent := Parent, last_ping_time := LPT} = State) ->
 
     %% Update state
     Gateways = datastore_worker:state_get(db_gateways),
-    datastore_worker:state_put(db_gateways, maps:update(N, State, Gateways)),
+    NewGateways = maps:update(N, State, Gateways),
+    case NewGateways of
+        Gateways -> ok;
+        _ ->
+            datastore_worker:state_put(db_gateways, NewGateways)
+    end,
 
-    try port_command(PortFD, <<"ping">>) of
+
+    UpdatedState = case erlang:system_time(milli_seconds) - LPT > timer:seconds(1) of
         true ->
-            try couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)) of
-                {ok, _} -> ok;
-                {error, Reason00} ->
-                    self() ! {port_comm_error, Reason00}
+            try
+                true = port_command(PortFD, <<"ping">>, [nosuspend]),
+                {ok, _} = couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)),
+                State#{last_ping_time => erlang:system_time(milli_seconds)}
             catch
                 _:{badmap, undefined} ->
-                    ok; %% State of the worker may not be initialised yet, so there is not way to check if connection is active
-                _:Reason01 ->
-                    self() ! {port_comm_error, Reason01}
-            end
-    catch
-        _:Reason0 ->
-            self() ! {port_comm_error, Reason0}
+                    State; %% State of the worker may not be initialised yet, so there is not way to check if connection is active
+                _:Reason0 ->
+                    self() ! {port_comm_error, Reason0},
+                    State
+            end;
+        false ->
+            State
     end,
 
     CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + timer:seconds(5),
+    MinRestartTime = ST + ?TIME_FOR_RESTART,
 
     NewState =
         receive
             {PortFD, {data, {_, Data}}} ->
                 case binary:matches(Data, <<"HTTP:">>) of
-                    [] ->
-                        ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    [] -> ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
                     _ -> ok
                 end,
-                State;
+                UpdatedState;
             {PortFD, closed} ->
-                State#{status => closed};
-
+                UpdatedState#{status => closed};
             {'EXIT', PortFD, Reason} ->
-                ?error("CouchBase gateway's port ~p exited with reason: ~p", [State, Reason]),
-                State#{status => failed};
+                ?error("CouchBase gateway's port ~p exited with reason: ~p", [UpdatedState, Reason]),
+                UpdatedState#{status => failed};
+            {'EXIT', Parent, Reason} ->
+                ?info("Parent: ~p down due to: ~p", [Parent, Reason]),
+                stop_gateway(PortFD),
+                UpdatedState#{status => closed};
             {port_comm_error, Reason} ->
                 ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
-                State#{status => failed};
+                UpdatedState#{status => failed};
             restart when CT > MinRestartTime ->
                 ?info("[CouchBase Gateway ~p] Restart request...", [ID]),
-                State#{status => restarting};
+                UpdatedState#{status => restarting};
             restart ->
-                State;
-            {'DOWN', _, process, Parent, Reason} ->
-                    catch port_close(PortFD),
-                State#{status => closed};
+                UpdatedState;
             stop ->
-                    catch port_close(PortFD),
-                State#{status => closed};
+                stop_gateway(PortFD),
+                UpdatedState#{status => closed};
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
-                State
-        after timer:seconds(1) ->
-            State
+                UpdatedState
+        after timer:seconds(2) ->
+            UpdatedState
         end,
     case NewState of
         #{status := running} ->
@@ -748,13 +889,27 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         #{status := closed} ->
             ok;
         #{status := restarting} ->
-                catch port_close(PortFD),
+            stop_gateway(PortFD),
             start_gateway(self(), N, Hostname, Port);
         #{status := failed} ->
-                catch port_close(PortFD),
+            stop_gateway(PortFD),
             start_gateway(self(), N, Hostname, Port)
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Closes port and forces exit of couchbase-sync-gateway executable.
+%% @end
+%%--------------------------------------------------------------------
+-spec stop_gateway(PortFD :: port()) -> ok.
+stop_gateway(PortFD) ->
+    ForcePortCloseCmd = case erlang:port_info(PortFD, os_pid) of
+        {os_pid, OsPid} -> lists:flatten(io_lib:format("kill -9 ~p", [OsPid]));
+        _ -> ""
+    end,
+        catch port_close(PortFD),
+    os:cmd(ForcePortCloseCmd),
+    ok.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -770,6 +925,39 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 -type gen_changes_state() :: #state{}.
 
 %% API
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Fetches latest revision of document with given key. As in changes stream,
+%% revision field is populated with structure describing all the revisions
+%% of the document.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_with_revs(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_with_revs(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
+    Args = [to_driver_key(Bucket, Key), [{<<"revs">>, <<"true">>}]],
+    case db_run(couchbeam, open_doc, Args, 3) of
+        {ok, {Proplist} = _Doc} ->
+            Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+            Proplist2 = Proplist -- Proplist1,
+
+            {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, Proplist),
+            {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
+            {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
+
+            {ok, #document{
+                key = Key,
+                value = from_json_term({Proplist2}),
+                rev = {Start, Revs}}
+            };
+        {error, {not_found, _}} ->
+            {error, {not_found, ModelName}};
+        {error, not_found} ->
+            {error, {not_found, ModelName}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -812,9 +1000,12 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
         try
             RawDoc = doc(Change),
             Seq = seq(Change),
-            RawDocOnceAgian = jiffy:decode(jsx:encode(RawDoc)),
-            Document = process_raw_doc(RawDocOnceAgian),
-                catch Callback(Seq, Document, model(Document)),
+            Deleted = deleted(Change),
+
+            RawDocOnceAgain = jiffy:decode(jsx:encode(RawDoc)),
+            Document = process_raw_doc(RawDocOnceAgain),
+
+            Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
             State#state{last_seq = Seq}
         catch
             _:Reason ->
@@ -916,6 +1107,19 @@ doc({change, {Props}}) ->
 seq({change, {Props}}) ->
     {_, LastSeq} = lists:keyfind(<<"seq">>, 1, Props),
     LastSeq.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Extracts info about document deletion
+%% @end
+%%--------------------------------------------------------------------
+-spec deleted(term()) -> boolean().
+deleted({change, {Props}}) ->
+    case lists:keyfind(<<"deleted">>, 1, Props) of
+        {_, true} -> true;
+        _ -> false
+    end.
 
 
 %%--------------------------------------------------------------------

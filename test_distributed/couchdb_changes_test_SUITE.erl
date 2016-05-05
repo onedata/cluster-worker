@@ -21,6 +21,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("datastore_test_models_def.hrl").
 
 -define(getFirstSeq(W, Config),
     begin
@@ -32,7 +33,7 @@
         binary_to_integer(LastSeqInDb)
     end).
 
--define(TIMEOUT, timer:seconds(10)).
+-define(TIMEOUT, timer:seconds(30)).
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
@@ -41,11 +42,13 @@
     revision_numbering_test/1,
     multiple_records_saving_test/1,
     force_save_test/1,
-    finite_stream_test/1]).
+    finite_stream_test/1,
+    record_deletion_test/1]).
 
 -performance({test_cases, []}).
 all() ->
     ?ALL([
+        record_deletion_test,
         record_saving_test,
         revision_numbering_test,
         multiple_records_saving_test,
@@ -81,6 +84,35 @@ record_saving_test(Config) ->
 
     ok.
 
+%% Test contents of 'deleted' field
+record_deletion_test(Config) ->
+    [W | _] = ?config(cluster_worker_nodes, Config),
+
+    %% given
+    Doc1Key = <<"doc1_key">>,
+    Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
+    Doc1 = #document{key = Doc1Key, value = Doc1Val},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1])),
+    {_, {_, DocR1, ModR1}} = ?assertReceivedMatch({record_deletion_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1, value = ValR1, deleted = DeletedR1} = DocR1,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val, test_record_1},
+        {DeletedR1, KeyR1, ValR1, ModR1}
+    ),
+
+    %% when
+    ?assertEqual(ok, rpc:call(W, test_record_1, delete, [Doc1Key])),
+
+    %% then
+    {_, {_, DocR2, ModR2}} = ?assertReceivedMatch({record_deletion_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR2, value = ValR2, deleted = DeletedR2} = DocR2,
+    ?assertEqual(
+        {true, Doc1Key, Doc1Val, test_record_1},
+        {DeletedR2, KeyR2, ValR2, ModR2}
+    ).
+
 %% Test incrementing number of subsequent revisions
 revision_numbering_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
@@ -115,8 +147,10 @@ multiple_records_saving_test(Config) ->
             Vals = lists:map(
                 fun(N) ->
                     Val = case Mod of
-                        test_record_1 -> #test_record_1{field1 = N, field2 = N, field3 = N};
-                        test_record_2 -> #test_record_2{field1 = N, field2 = N, field3 = N}
+                        test_record_1 ->
+                            #test_record_1{field1 = N, field2 = N, field3 = N};
+                        test_record_2 ->
+                            #test_record_2{field1 = N, field2 = N, field3 = N}
                     end,
                     Doc = #document{key = Key, value = Val},
                     ?assertEqual({ok, Key}, rpc:call(W, Mod, save, [Doc])),
@@ -223,6 +257,13 @@ end_per_suite(Config) ->
 
 init_per_testcase(CaseName, Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
+    [P1, P2] = ?config(cluster_worker_nodes, Config),
+    Models = [test_record_1, test_record_2],
+
+    timer:sleep(3000), % tmp solution until mocking is repaired (VFS-1851)
+    test_utils:enable_datastore_models([P1], Models),
+    test_utils:enable_datastore_models([P2], Models),
+
     FirstSeq = ?getFirstSeq(W, Config),
     Pid = self(),
     {_, DriverPid} = ?assertMatch(
@@ -237,6 +278,7 @@ init_per_testcase(CaseName, Config) ->
             ]
         )
     ),
+
     [{driver_pid, DriverPid} | Config].
 
 end_per_testcase(_, Config) ->

@@ -21,6 +21,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_engine.hrl").
+-include("datastore_test_models_def.hrl").
 
 -define(TIMEOUT, timer:seconds(60)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).
@@ -35,8 +36,8 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %%tests
--export([local_test/1, global_test/1, global_atomic_update_test/1,
-    global_list_test/1, persistance_test/1, local_list_test/1,
+-export([local_test/1, global_test/1, global_atomic_update_test/1, disk_list_test/1,
+    global_list_test/1, persistance_test/1, local_list_test/1, globally_cached_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
     link_walk_test/1, monitoring_global_cache_test_test/1, old_keys_cleaning_global_cache_test/1,
     clearing_global_cache_test/1, link_monitoring_global_cache_test/1, create_after_delete_global_cache_test/1,
@@ -44,13 +45,15 @@
     multiple_links_creation_disk_test/1, multiple_links_creation_global_only_test/1,
     clear_and_flush_global_cache_test/1, multilevel_foreach_global_cache_test/1,
     operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
-    interupt_global_cache_clearing_test/1]).
+    interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
+    globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
+    global_only_create_or_update_test/1, globally_cached_create_or_update_test/1]).
 -export([utilize_memory/3]).
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test,
-        global_list_test, persistance_test, local_list_test,
+        local_test, global_test, global_atomic_update_test, disk_list_test,
+        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
         link_monitoring_global_cache_test, create_after_delete_global_cache_test,
@@ -58,7 +61,10 @@ all() ->
         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
         clear_and_flush_global_cache_test, multilevel_foreach_global_cache_test,
         operations_sequence_global_cache_test, links_operations_sequence_global_cache_test,
-        interupt_global_cache_clearing_test
+        interupt_global_cache_clearing_test,
+        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
+        create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
+        globally_cached_create_or_update_test
     ]).
 
 
@@ -68,6 +74,364 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+disk_only_create_or_update_test(Config) ->
+    create_or_update_test_base(Config, ?DISK_ONLY_LEVEL).
+
+global_only_create_or_update_test(Config) ->
+    create_or_update_test_base(Config, ?GLOBAL_ONLY_LEVEL).
+
+globally_cached_create_or_update_test(Config) ->
+    UpdateMap = #{field1 => 2},
+    UpdateFun = fun({R, _F1, F2, F3}) ->
+        {ok, {R, 2, F2, F3}}
+    end,
+    globally_cached_create_or_update_test_base(Config, UpdateMap, "map"),
+    globally_cached_create_or_update_test_base(Config, UpdateFun, "fun").
+
+globally_cached_create_or_update_test_base(Config, UpdateEntity, KeyExt) ->
+    Level = ?GLOBALLY_CACHED_LEVEL,
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    ModelConfig = TestRecord:model_init(),
+
+    Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    Doc2 =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
+    },
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+    ok.
+
+create_or_update_test_base(Config, Level) ->
+    UpdateMap = #{field1 => 2},
+    UpdateFun = fun({R, _F1, F2, F3}) ->
+        {ok, {R, 2, F2, F3}}
+    end,
+    create_or_update_test_base(Config, Level, UpdateMap, "map"),
+    create_or_update_test_base(Config, Level, UpdateFun, "fun").
+
+create_or_update_test_base(Config, Level, UpdateEntity, KeyExt) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    Doc2 =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
+    },
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ok.
+
+create_globally_cached_test(Config) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
+    end, Workers),
+
+    ModelConfig = TestRecord:model_init(),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    Key = <<"key_cgct">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+
+    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch({error, already_exists}, ?call(Worker1, TestRecord, create, [Doc])),
+
+    ?assertMatch(ok, ?call(Worker2, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+
+    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    timer:sleep(timer:seconds(6)), % wait to check if any async action hasn't destroyed value at disk
+    ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
+
+    LinkedKey = "linked_key_cgct",
+    LinkedDoc = #document{
+        key = LinkedKey,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 2, <<"efg">>, {test, tuple2})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc])),
+    ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
+
+    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+
+    ?assertMatch(ok, ?call(Worker2, PModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [link]])),
+    ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
+    timer:sleep(timer:seconds(6)), % wait to check if any async action hasn't destroyed value at disk
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
+
+    ok.
+
+disk_only_many_links_test(Config) ->
+    many_links_test_base(Config, ?DISK_ONLY_LEVEL).
+
+global_only_many_links_test(Config) ->
+    many_links_test_base(Config, ?GLOBAL_ONLY_LEVEL).
+
+globally_cached_many_links_test(Config) ->
+    many_links_test_base(Config, ?GLOBALLY_CACHED_LEVEL).
+
+many_links_test_base(Config, Level) ->
+    GetLinkKey1 = fun(LinkedDocKey, I) ->
+        list_to_binary(LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkKey2 = fun(LinkedDocKey, I) ->
+        list_to_atom(LinkedDocKey ++ integer_to_list(I))
+    end,
+    KeyFuns = [GetLinkKey1, GetLinkKey2],
+
+    GetLinkName1 = fun(_LinkedDocKey, I) ->
+        integer_to_binary(I)
+    end,
+    GetLinkName2 = fun(LinkedDocKey, I) ->
+        list_to_binary(LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkName3 = fun(LinkedDocKey, I) ->
+        list_to_atom(LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkName4 = fun(LinkedDocKey, I) ->
+        list_to_binary(integer_to_list(I) ++ LinkedDocKey)
+    end,
+    GetLinkName5 = fun(LinkedDocKey, I) ->
+        list_to_binary(integer_to_list(I) ++ LinkedDocKey ++ integer_to_list(I))
+    end,
+    GetLinkName6 = fun(LinkedDocKey, I) ->
+        list_to_binary(LinkedDocKey ++ integer_to_list(I) ++ LinkedDocKey)
+    end,
+    NameFuns = [GetLinkName1, GetLinkName2, GetLinkName3, GetLinkName4, GetLinkName5,
+        GetLinkName6],
+
+    KeyFunsTuples = lists:zip(lists:seq(1,2), KeyFuns),
+    NameFunsTuples = lists:zip(lists:seq(1,6), NameFuns),
+
+    LevelString = atom_to_list(Level),
+    lists:foreach(fun({KNum, GLK}) ->
+        LinkedDocKey = "key_fun_" ++ integer_to_list(KNum) ++ "_level_" ++ LevelString ++ "_key_mltb_link",
+        GetLinkKey = fun(I) ->
+            GLK(LinkedDocKey, I)
+        end,
+        GetLinkName = fun(I) ->
+            GetLinkName1(LinkedDocKey, I)
+        end,
+        many_links_test_base(Config, Level, GetLinkKey, GetLinkName)
+    end, KeyFunsTuples),
+
+    lists:foreach(fun({NNum, GLN}) ->
+        LinkedDocKey = "name_fun_" ++ integer_to_list(NNum) ++ "_level_" ++ LevelString ++ "_key_mltb_link",
+        GetLinkKey = fun(I) ->
+            GetLinkKey1(LinkedDocKey, I)
+        end,
+        GetLinkName = fun(I) ->
+            GLN(LinkedDocKey, I)
+        end,
+        many_links_test_base(Config, Level, GetLinkKey, GetLinkName)
+    end, NameFunsTuples).
+
+many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    Key = <<"key_mltb">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+
+    AddDocs = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            LinkedDoc =  #document{
+                key = GetLinkKey(I),
+                value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+            },
+            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc]))
+        end)
+    end,
+    AddDocs(1, 120),
+    for(1, 120, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, add_links, [
+            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ]))
+    end),
+
+    CheckLinks = fun(Start, End, Sum) ->
+        for(Start, End, fun(I) ->
+            ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)])
+        end),
+
+        AccFun = fun(LinkName, _, Acc) ->
+            [LinkName | Acc]
+        end,
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [Level, Doc, AccFun, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        for(Start, End, fun(I) ->
+            ?assert(lists:member(GetLinkName(I), ListedLinks))
+        end),
+
+        case length(ListedLinks) of
+            Sum ->
+                ok;
+            _ ->
+                ct:print("Check params ~p", [{Start, End, Sum, ListedLinks}])
+        end,
+        ?assertMatch(Sum, length(ListedLinks))
+    end,
+    CheckLinks(1, 120, 120),
+
+    for(1, 120, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, add_links, [
+            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ]))
+    end),
+    CheckLinks(1, 120, 120),
+
+    AddDocs(121, 180),
+    ToAddList = fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        {GetLinkName(I), LinkedDoc}
+    end,
+    AddList = lists:map(ToAddList, lists:seq(121, 180)),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList
+    ])),
+    CheckLinks(121, 180, 180),
+
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList
+    ])),
+    CheckLinks(121, 180, 180),
+
+    for(1, 180, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [
+            Level, Doc, {GetLinkName(I), LinkedDoc}
+        ]))
+    end),
+
+    for(91, 110, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+    end),
+
+    DelList = lists:map(fun(I) ->
+        GetLinkName(I)
+    end, lists:seq(131, 150)),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
+        Level, Doc, DelList
+    ])),
+    CheckLinks(1, 90, 140),
+    CheckLinks(111, 130, 140),
+    CheckLinks(151, 180, 140),
+
+    AddDocs(181, 300),
+    AddList2 = lists:map(ToAddList, lists:seq(181, 300)),
+    ?assertMatch(ok, ?call_store(Worker1, add_links, [
+        Level, Doc, AddList2
+    ])),
+    CheckLinks(181, 300, 260),
+
+    DelList2 = lists:map(fun(I) ->
+        GetLinkName(I)
+    end, lists:seq(1, 150)),
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
+        Level, Doc, DelList2
+    ])),
+    CheckLinks(151, 300, 150),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
+        Level, Doc, DelList2
+    ])),
+    CheckLinks(151, 300, 150),
+
+    ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, []])),
+    CheckLinks(151, 300, 150),
+
+    for(161, 180, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+    end),
+    for(211, 300, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+    end),
+    CheckLinks(151, 160, 40),
+    CheckLinks(181, 210, 40),
+
+    for(1, 150, fun(I) ->
+        LinkedDoc =  #document{
+            key = GetLinkKey(I),
+            value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+        },
+        ?assertMatch(ok, ?call_store(Worker1, create_link, [
+            Level, Doc, {GetLinkName(I), LinkedDoc}
+        ]))
+    end),
+    CheckLinks(1, 150, 190),
+
+    ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
+    ok.
 
 interupt_global_cache_clearing_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
@@ -987,6 +1351,14 @@ global_list_test(Config) ->
     TestRecord = ?config(test_record, Config),
     generic_list_test(TestRecord, ?config(cluster_worker_nodes, Config), ?GLOBAL_ONLY_LEVEL).
 
+%% list operation on disk only driver (on several nodes)
+disk_list_test(Config) ->
+    generic_list_test(disk_only_record, ?config(cluster_worker_nodes, Config), ?DISK_ONLY_LEVEL).
+
+%% list operation on disk only driver (on several nodes)
+globally_cached_list_test(Config) ->
+    generic_list_test(globally_cached_record, ?config(cluster_worker_nodes, Config), ?GLOBALLY_CACHED_LEVEL).
+
 
 %% list operation on local cache driver (on several nodes)
 local_list_test(Config) ->
@@ -1064,7 +1436,8 @@ globally_cached_links_test(Config) ->
 %%%===================================================================
 
 init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]).
+    NewConfig = ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]),
+    NewConfig.
 
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
@@ -1072,7 +1445,7 @@ end_per_suite(Config) ->
 init_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:set_env(Case, Config).
 
-end_per_testcase(Case, Config) ->
+end_per_testcase(_Case, Config) ->
     datastore_basic_ops_utils:clear_env(Config).
 
 %%%===================================================================
@@ -1270,7 +1643,7 @@ generic_list_test(TestRecord, Nodes, Level) ->
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
 
-    ObjCount = 3424,
+    ObjCount = 424,
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
 
     CreateDocFun = fun(Key) ->
@@ -1279,6 +1652,10 @@ generic_list_test(TestRecord, Nodes, Level) ->
                 key = Key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
             }])
+    end,
+
+    RemoveDocFun = fun(Key) ->
+        ?call_store(rand_node(Nodes), delete, [Level, TestRecord, Key, ?PRED_ALWAYS])
     end,
 
     [?assertMatch({ok, _}, CreateDocFun(Key)) || Key <- Keys],
@@ -1292,6 +1669,15 @@ generic_list_test(TestRecord, Nodes, Level) ->
     ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
     ?assertMatch([], ReceivedKeys -- Keys),
 
+
+    [?assertMatch(ok, RemoveDocFun(Key)) || Key <- Keys],
+
+
+    Ret2 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+    ?assertMatch({ok, _}, Ret2),
+    {ok, Objects2} = Ret2,
+
+    ?assertMatch(0, erlang:length(Objects2) - erlang:length(Objects0)),
     ok.
 
 rand_key() ->
