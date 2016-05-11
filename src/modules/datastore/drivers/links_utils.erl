@@ -110,7 +110,7 @@ save_links_maps(Driver,
                     SaveAns
             end;
         OtherScopes ->
-            SaveAns = update_link_maps(Driver, ModelConfig, Key, LinksList, [ScopeFun1() | OtherScopes]),
+            SaveAns = update_link_maps(Driver, ModelConfig, Key, LinksList, [ScopeFun1() | OtherScopes], true),
             case SaveAns of
                 {ok, []} ->
                     ok;
@@ -139,26 +139,32 @@ save_links_maps(Driver,
 %% @end
 %%--------------------------------------------------------------------
 -spec update_link_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
-    [datastore:normalized_link_spec()], Scopes :: atom() | [atom()]) ->
+    [datastore:normalized_link_spec()], Scopes :: atom() | [atom()], MotherScope :: boolean()) ->
     {ok, [datastore:normalized_link_spec()]} | datastore:generic_error().
-update_link_maps(_Driver, _ModelConfig, _Key, Links, []) ->
+update_link_maps(_Driver, _ModelConfig, _Key, Links, [], _) ->
     {ok, Links};
-update_link_maps(Driver, ModelConfig, Key, Links, [Scope | Scopes]) ->
-    case update_link_maps(Driver, ModelConfig, Key, Links, Scope) of
+update_link_maps(Driver, ModelConfig, Key, Links, [Scope | Scopes], MotherScope) ->
+    case update_link_maps(Driver, ModelConfig, Key, Links, Scope, MotherScope) of
         {ok, []} ->
             {ok, []};
         {ok, LinksLeft} ->
-            update_link_maps(Driver, ModelConfig, Key, LinksLeft, Scopes);
+            update_link_maps(Driver, ModelConfig, Key, LinksLeft, Scopes, false);
         Ans ->
             Ans
     end;
-update_link_maps(Driver, #model_config{name = ModelName} = ModelConfig, Key, LinksList, Scope) ->
+update_link_maps(Driver, #model_config{name = ModelName} = ModelConfig, Key, LinksList, Scope, MotherScope) ->
     LDK = links_doc_key(Key, Scope),
     case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
         {ok, LinksDoc} ->
             save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
         {error, {not_found, _}} ->
-            {ok, LinksList};
+            case MotherScope of
+                true ->
+                    LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
+                    save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
+                _ ->
+                    {ok, LinksList}
+            end;
         {error, Reason} ->
             {error, Reason}
     end.
