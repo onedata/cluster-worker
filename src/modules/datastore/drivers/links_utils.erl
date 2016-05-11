@@ -158,8 +158,7 @@ update_link_maps(Driver, #model_config{name = ModelName} = ModelConfig, Key, Lin
         {ok, LinksDoc} ->
             save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
         {error, {not_found, _}} ->
-            LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName}},
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
+            {ok, LinksList};
         {error, Reason} ->
             {error, Reason}
     end.
