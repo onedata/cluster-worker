@@ -21,17 +21,9 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
--define(MOTHER_SCOPE_DEF_FUN,
-    fun() ->
-        links
-    end
-).
+-define(MOTHER_SCOPE_DEF_FUN, fun() -> links end).
 
--define(OTHER_SCOPES_DEF_FUN,
-    fun() ->
-        []
-    end
-).
+-define(OTHER_SCOPES_DEF_FUN, fun() -> [] end).
 
 %% This record shall not be used outside datastore engine and shall not be instantiated
 %% directly. Use MODEL_CONFIG macro instead.
@@ -76,8 +68,10 @@
         link_store_level = LinkStoreLevel,
         transactional_global_cache = Transactions,
         sync_cache = SyncCache,
-        mother_link_scope = ScopeFun1,
-        other_link_scopes = ScopeFun2
+        % Function that returns scope for local operations on links
+        mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
+        % Function that returns all scopes for links' operations
+        other_link_scopes = ScopeFun2 % link_utils:other_scopes_fun()
     }
 ).
 

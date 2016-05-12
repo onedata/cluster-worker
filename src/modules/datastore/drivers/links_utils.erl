@@ -116,12 +116,13 @@ save_links_maps(Driver,
                     ok;
                 {ok, LinksToAdd} ->
                     LDK = links_doc_key(Key, ScopeFun1),
-                    SaveAns2 = case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
-                                  {ok, LinksDoc} ->
-                                      save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
-                                  {error, Reason} ->
-                                      {error, Reason}
-                              end,
+                    SaveAns2 =
+                        case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+                            {ok, LinksDoc} ->
+                                save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
+                            {error, Reason} ->
+                                {error, Reason}
+                        end,
                     case SaveAns2 of
                         {ok, []} ->
                             ok;
@@ -180,16 +181,19 @@ update_link_maps(Driver, #model_config{name = ModelName} = ModelConfig, Key, Lin
 save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key,
     #document{key = LDK, value = #links{link_map = LinkMap, children = Children} = LinksRecord} = LinksDoc,
     LinksList, KeyNum, Mode) ->
-    {FilledMap, NewLinksList, AddedLinks} = case Mode of
-                                                update ->
-                                                    {Map, LinksToUpdate} = update_links_map(LinksList, LinkMap),
-                                                    {Map, LinksToUpdate, []};
-                                                _ ->
-                                                    fill_links_map(LinksList, LinkMap)
+    % update and add links to this document
+    {FilledMap, NewLinksList, AddedLinks} =
+        case Mode of
+            update ->
+                {Map, LinksToUpdate} = update_links_map(LinksList, LinkMap),
+                {Map, LinksToUpdate, []};
+            _ ->
+                fill_links_map(LinksList, LinkMap)
     end,
 
     case NewLinksList of
         [] ->
+            % save changes and delete links from other documents if added here
             case Driver:save_link_doc(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
                 {ok, _} ->
                     case Mode of
@@ -207,6 +211,9 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                     {error, Reason}
             end;
         _ ->
+            % Update other documents if needed
+
+            % Find documents to be updated
             SplitedLinks = split_links_list(NewLinksList, KeyNum),
             {NewChildren, ChildrenDocs} = maps:fold(fun(Num, _SLs, {Acc1, Acc2}) ->
                 NK = maps:get(Num, Children, <<"non">>),
@@ -234,6 +241,8 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                         end
                 end
             end, {Children, #{}}, SplitedLinks),
+
+            % save modified doc
             NewLinksDoc = LinksDoc#document{value = LinksRecord#links{link_map = FilledMap,
                 children = NewChildren}},
             % TODO do not save if there were no changes
@@ -247,6 +256,7 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                     end,
                     case DelOldAns of
                         ok ->
+                            % update other docs recursive
                             maps:fold(fun(Num, SLs, FunAns) ->
                                 case maps:get(Num, ChildrenDocs) of
                                     <<"non">> ->
