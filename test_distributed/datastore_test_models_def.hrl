@@ -69,6 +69,13 @@
     field3 :: term()
 }).
 
+%% sample model with example fields
+-record(link_scopes_test_record, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
 %% Test models
 -record(test_record_1, {
     field1 :: term(),
