@@ -94,7 +94,11 @@ handle(Req, State) ->
                                 StatusList = case Status of
                                                  {error, Desc} ->
                                                      "error: " ++ atom_to_list(Desc);
-                                                 _ -> atom_to_list(Status)
+                                                 A when is_atom(A) -> atom_to_list(A);
+                                                 _ ->
+                                                     ?error("Wrong nagios status: {~p, ~p} at node ~p",
+                                                         [Component, Status, Node]),
+                                                     "error: wrong_status"
                                              end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),

@@ -31,6 +31,7 @@
 -define(test_record_f1(F), {_, F, _, _}).
 -define(test_record_f2(F), {_, _, F, _}).
 -define(test_record_f3(F), {_, _, _, F}).
+-define(test_record_f1_2(F1, F2), {_, F1, F2, _}).
 -define(test_record_f1_3(F1, F3), {_, F1, _, F3}).
 
 -define(SCOPE_MASTER_PROC_NAME, sm_proc).
@@ -38,8 +39,8 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %%tests
--export([local_test/1, global_test/1, global_atomic_update_test/1, disk_list_test/1,
-    global_list_test/1, persistance_test/1, local_list_test/1, globally_cached_list_test/1,
+-export([local_test/1, global_test/1, global_atomic_update_test/1, globally_cached_atomic_update_test/1,
+    disk_list_test/1, global_list_test/1, persistance_test/1, local_list_test/1, globally_cached_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
     link_walk_test/1, monitoring_global_cache_test_test/1, old_keys_cleaning_global_cache_test/1,
     clearing_global_cache_test/1, link_monitoring_global_cache_test/1, create_after_delete_global_cache_test/1,
@@ -50,11 +51,11 @@
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
     global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1]).
--export([utilize_memory/3]).
+-export([utilize_memory/3, update_and_check/4]).
 
 all() ->
     ?ALL([
-        local_test, global_test, global_atomic_update_test, disk_list_test,
+        local_test, global_test, global_atomic_update_test, globally_cached_atomic_update_test, disk_list_test,
         global_list_test, persistance_test, local_list_test, globally_cached_list_test,
         disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
         monitoring_global_cache_test_test, old_keys_cleaning_global_cache_test, clearing_global_cache_test,
@@ -1481,12 +1482,40 @@ persistance_test(Config) ->
     ok.
 
 
+%% Atomic update on globally cached level (on several nodes)
+globally_cached_atomic_update_test(Config) ->
+    Level = ?GLOBALLY_CACHED_LEVEL,
+
+    Pid = self(),
+    UpdateFun1 = fun(#globally_cached_record{field1 = 0} = Record) ->
+        {ok, Record#globally_cached_record{field2 = Pid}}
+                 end,
+
+    UpdateFun2 = fun(#globally_cached_record{field1 = Value} = Record) ->
+        {ok, Record#globally_cached_record{field1 = Value + 1}}
+    end,
+
+    atomic_update_test_base(Config, Level, UpdateFun1, UpdateFun2).
+
 %% Atomic update on global cache driver (on several nodes)
 global_atomic_update_test(Config) ->
+    Level = ?GLOBAL_ONLY_LEVEL,
+
+    Pid = self(),
+    UpdateFun1 = fun(#global_only_record{field1 = 0} = Record) ->
+        {ok, Record#global_only_record{field2 = Pid}}
+    end,
+
+    UpdateFun2 = fun(#global_only_record{field1 = Value} = Record) ->
+        {ok, Record#global_only_record{field1 = Value + 1}}
+    end,
+
+    atomic_update_test_base(Config, Level, UpdateFun1, UpdateFun2).
+
+atomic_update_test_base(Config, Level, UpdateFun1, UpdateFun2) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
-    Level = ?GLOBAL_ONLY_LEVEL,
     Key = rand_key(),
 
     ?assertMatch({ok, _},
@@ -1497,25 +1526,16 @@ global_atomic_update_test(Config) ->
             }])),
 
     Pid = self(),
-    ?assertMatch({ok, Key},
-        ?call_store(Worker2, update, [Level,
-            TestRecord, Key,
-            fun(#global_only_record{field1 = 0} = Record) ->
-                {ok, Record#global_only_record{field2 = Pid}}
-            end])),
+    AggregatedAns = ?call(Worker2, ?MODULE, update_and_check, [Level, TestRecord, Key, UpdateFun1]),
+    ?assertMatch({{ok, Key}, {ok, #document{value = ?test_record_f1_2(0, Pid)}}}, AggregatedAns),
 
-    ?assertMatch({ok, #document{value = #global_only_record{field1 = 0, field2 = Pid}}},
-        ?call_store(Worker1, get, [Level,
-            TestRecord, Key])),
-
-    UpdateFun = fun(#global_only_record{field1 = Value} = Record) ->
-        {ok, Record#global_only_record{field1 = Value + 1}}
-    end,
+    ?assertMatch({ok, #document{value = ?test_record_f1_2(0, Pid)}},
+        ?call_store(Worker1, get, [Level, TestRecord, Key])),
 
     Self = self(),
     Timeout = timer:seconds(30),
     utils:pforeach(fun(Node) ->
-        ?call_store(Node, update, [Level, TestRecord, Key, UpdateFun]),
+        ?call_store(Node, update, [Level, TestRecord, Key, UpdateFun2]),
         Self ! done
     end, lists:duplicate(100, Worker1) ++ lists:duplicate(100, Worker2)),
     [receive done -> ok after Timeout -> ok end || _ <- lists:seq(1, 200)],
@@ -1526,6 +1546,10 @@ global_atomic_update_test(Config) ->
 
     ok.
 
+update_and_check(Level, TestRecord, Key, UpdateFun) ->
+    UpdateAns = datastore:update(Level, TestRecord, Key, UpdateFun),
+    GetAns = datastore:get(Level, TestRecord, Key),
+    {UpdateAns, GetAns}.
 
 %% list operation on global cache driver (on several nodes)
 global_list_test(Config) ->
@@ -1538,7 +1562,32 @@ disk_list_test(Config) ->
 
 %% list operation on disk only driver (on several nodes)
 globally_cached_list_test(Config) ->
-    generic_list_test(globally_cached_record, ?config(cluster_worker_nodes, Config), ?GLOBALLY_CACHED_LEVEL).
+    [Node1 | _] = Nodes = ?config(cluster_worker_nodes, Config),
+    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
+        0, non, timer:seconds(10)),
+    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
+        timer:seconds(10), non, timer:seconds(10)),
+
+    TestRecord = ?config(test_record, Config),
+    PModule = ?call_store(Node1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    CModule = ?call_store(Node1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    ModelConfig = TestRecord:model_init(),
+
+    BeforeRetryFun = fun(Keys) ->
+        lists:map(fun(Key) ->
+            ?assertMatch(ok, ?call(Node1, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS]))
+        end, Keys)
+    end,
+    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
+        timer:seconds(10), BeforeRetryFun, timer:seconds(10)),
+
+    BeforeRetryFun2 = fun(Docs) ->
+        lists:map(fun(Key) ->
+            ?assertMatch(ok, ?call(Node1, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS]))
+        end, Docs)
+    end,
+    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
+        timer:seconds(10), BeforeRetryFun2, timer:seconds(10)).
 
 
 %% list operation on local cache driver (on several nodes)
@@ -1824,6 +1873,9 @@ generic_links_test(Config, Level) ->
 
 %% generic list operation (on several nodes)
 generic_list_test(TestRecord, Nodes, Level) ->
+    generic_list_test(TestRecord, Nodes, Level, 0, non, 0).
+
+generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelSecondCheckAfter) ->
     Ret0 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
@@ -1845,24 +1897,49 @@ generic_list_test(TestRecord, Nodes, Level) ->
 
     [?assertMatch({ok, _}, CreateDocFun(Key)) || Key <- Keys],
 
-    Ret1 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
-    ?assertMatch({ok, _}, Ret1),
-    {ok, Objects1} = Ret1,
-    ReceivedKeys = lists:map(fun(#document{key = Key}) ->
-        Key end, Objects1 -- Objects0),
+    ListFun = fun() ->
+        Ret1 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+        ?assertMatch({ok, _}, Ret1),
+        {ok, Objects1} = Ret1,
+        ReceivedKeys = lists:map(fun(#document{key = Key}) ->
+            Key end, Objects1 -- Objects0),
 
-    ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
-    ?assertMatch([], ReceivedKeys -- Keys),
-
+        ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
+        ?assertMatch([], ReceivedKeys -- Keys),
+        ReceivedKeys
+    end,
+    List1Ans = ListFun(),
+    case ListRetryAfter of
+        0 ->
+            ok;
+        _ ->
+            timer:sleep(ListRetryAfter),
+            case is_function(BeforeRetryFun) of
+                true ->
+                    BeforeRetryFun(List1Ans);
+                _ ->
+                    ok
+            end,
+            ListFun()
+    end,
 
     [?assertMatch(ok, RemoveDocFun(Key)) || Key <- Keys],
 
+    CheckDelFun = fun() ->
+        Ret2 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+        ?assertMatch({ok, _}, Ret2),
+        {ok, Objects2} = Ret2,
 
-    Ret2 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
-    ?assertMatch({ok, _}, Ret2),
-    {ok, Objects2} = Ret2,
-
-    ?assertMatch(0, erlang:length(Objects2) - erlang:length(Objects0)),
+        ?assertMatch(0, erlang:length(Objects2) - erlang:length(Objects0))
+    end,
+    CheckDelFun(),
+    case DelSecondCheckAfter of
+        0 ->
+            ok;
+        _ ->
+            timer:sleep(DelSecondCheckAfter),
+            CheckDelFun()
+    end,
     ok.
 
 rand_key() ->

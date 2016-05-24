@@ -186,9 +186,9 @@ list(Level, ModelName, Fun, AccIn) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
-        case cache_controller:check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}) of
+        case cache_controller:check_disk_read(Key, ModelName, Level, in_use) of
             ok ->
-                {next, [Document | Acc]};
+                {next, maps:put(Key, Document, Acc)};
             _ ->
                 {next, Acc}
         end;
@@ -196,18 +196,18 @@ list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             {abort, Acc}
     end,
     HelperFun2 = fun(#document{key = Key} = Document, Acc) ->
-        {next, [Document | Acc]};
+        {next, maps:put(Key, Document, Acc)};
         (_, Acc) ->
             {abort, Acc}
     end,
     %% @todo - do not get keys from disk that are already in memory
-    case exec_driver(ModelName, Driver2, list, [HelperFun1, []]) of
+    case exec_driver(ModelName, Driver2, list, [HelperFun1, #{}]) of
         {ok, Ans1} ->
             case exec_driver(ModelName, Driver1, list, [HelperFun2, Ans1]) of
                 {ok, Ans2} ->
                     try
                         AccOut =
-                            lists:foldl(fun(Doc, OAcc) ->
+                            maps:fold(fun(_, Doc, OAcc) ->
                                 case Fun(Doc, OAcc) of
                                     {next, NAcc} ->
                                         NAcc;
