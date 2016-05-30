@@ -78,11 +78,12 @@ all() ->
 % TODO - add tests that check time refreshing by get and fetch_link operations
 
 links_scope_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     MasterLoop = spawn_link(fun() -> scope_master_loop() end),
-    global:register_name(?SCOPE_MASTER_PROC_NAME, MasterLoop),
-    global:sync(),
+    put(?SCOPE_MASTER_PROC_NAME, MasterLoop),
+    rpc:call(Worker1, global, register_name, [?SCOPE_MASTER_PROC_NAME, MasterLoop]),
+    rpc:call(Worker1, global, sync, []),
 
-    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     Key = <<"key_lst">>,
     Doc =  #document{
         key = Key,
@@ -218,13 +219,15 @@ links_scope_test(Config) ->
     ok.
 
 set_mother_scope(MotherScope) ->
-    global:send(?SCOPE_MASTER_PROC_NAME, {set_mother_scope, self(), MotherScope}),
+    Pid = get(?SCOPE_MASTER_PROC_NAME),
+    Pid ! {set_mother_scope, self(), MotherScope},
     receive
         scope_changed -> ok
     end.
 
 set_other_scopes(OtherScopes) ->
-    global:send(?SCOPE_MASTER_PROC_NAME, {set_other_scopes, self(), OtherScopes}),
+    Pid = get(?SCOPE_MASTER_PROC_NAME),
+    Pid ! {set_other_scopes, self(), OtherScopes},
     receive
         scope_changed -> ok
     end.
