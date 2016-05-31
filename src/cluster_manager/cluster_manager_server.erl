@@ -353,7 +353,7 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
 %% @end
 %%--------------------------------------------------------------------
 -spec check_start_module(Module :: atom(), Node :: node(), State :: #state{}) ->
-    {{ok, already_started}, #state{}}.
+    {{ok | already_started}, #state{}}.
 check_start_module(Module, Node, #state{singleton_modules = Singletons} = State) ->
     UsedNode = proplists:get_value(Module, Singletons),
     case UsedNode of
