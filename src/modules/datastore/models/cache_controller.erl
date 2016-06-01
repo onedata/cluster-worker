@@ -505,10 +505,7 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
                 UpdateFun = fun
                     (#cache_controller{last_user = LastUser, action = A} = Record) ->
                         case {LastUser, A} of
-                            {Owner, delete} ->
-                                {ok, Record#cache_controller{last_user = non,
-                                    last_action_time = os:timestamp()}};
-                            {Owner, delete_links} ->
+                            {Owner, to_be_del} ->
                                 {ok, Record#cache_controller{last_user = non,
                                     last_action_time = os:timestamp()}};
                             {Owner, _} ->
@@ -786,15 +783,15 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
 -spec before_del(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(), Op :: atom()) ->
     ok | {error, preparing_op_failed}.
-before_del(Key, ModelName, Level, Op) ->
+before_del(Key, ModelName, Level, _Op) ->
     try
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
 
         UpdateFun = fun(Record) ->
-            {ok, Record#cache_controller{action = Op}}
+            {ok, Record#cache_controller{action = to_be_del}}
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
-        V = #cache_controller{action = Op},
+        V = #cache_controller{action = to_be_del},
         Doc = #document{key = Uuid, value = V},
         {ok, _} = create_or_update(Level, Doc, UpdateFun),
         ok
