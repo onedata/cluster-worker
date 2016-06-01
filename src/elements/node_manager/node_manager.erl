@@ -79,8 +79,10 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
-    lists:map(fun({Module, _}) ->
-        Module end, plugins:apply(node_manager_plugin, modules_with_args, [])).
+    lists:map(fun
+        ({Module, _}) -> Module;
+        ({singleton, Module, _}) -> Module
+    end, plugins:apply(node_manager_plugin, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
 %% @doc
