@@ -414,11 +414,13 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    Ans = datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
         end
-    ).
+    ),
+    ?info("aaaaa2 ~p", [{Key, Links, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -428,11 +430,13 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    Ans = datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
-    ).
+    ),
+    ?info("aaaaa3 ~p", [{Key, Link, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -442,17 +446,21 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    Ans = datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
-    );
+    ),
+    ?info("aaaaa4 ~p", [{Key, all, Ans}]),
+    Ans;
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    Ans = datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
-    ).
+    ),
+    ?info("aaaaa5 ~p", [{Key, Links, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc

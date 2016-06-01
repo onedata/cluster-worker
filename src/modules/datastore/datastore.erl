@@ -497,7 +497,9 @@ foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
             case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun2, Ans1]) of
                 {ok, Ans2} ->
                     try maps:fold(Fun, AccIn, Ans2) of
-                        AccOut -> {ok, AccOut}
+                        AccOut ->
+                            ?info("aaaaa1 ~p ~p ~p ~p", [Key, Ans1, Ans2, AccOut]),
+                            {ok, AccOut}
                     catch
                         _:Reason ->
                             {error, Reason}

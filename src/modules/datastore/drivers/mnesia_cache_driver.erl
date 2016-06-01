@@ -273,9 +273,11 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{} = ModelConfig, Key, Links) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+    Ans = mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
-    end).
+    end),
+    ?info("aaaaa11 ~p", [{Key, Links, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -285,9 +287,11 @@ add_links(#model_config{} = ModelConfig, Key, Links) ->
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{} = ModelConfig, Key, Link) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+    Ans = mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
-    end).
+    end),
+    ?info("aaaaa12 ~p", [{Key, Link, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -307,23 +311,27 @@ delete_links(#model_config{} = ModelConfig, Key, LinkNames) ->
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all,
     datastore:delete_predicate()) -> ok | datastore:generic_error().
 delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+    Ans = mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
                 ok = links_utils:delete_links(?MODULE, ModelConfig, Key);
             false ->
                 ok
         end
-    end);
+    end),
+    ?info("aaaaa13 ~p", [{Key, all, Ans}]),
+    Ans;
 delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+    Ans = mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
         case Pred() of
             true ->
                 ok = links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
             false ->
                 ok
         end
-    end).
+    end),
+    ?info("aaaaa14 ~p", [{Key, Links, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
