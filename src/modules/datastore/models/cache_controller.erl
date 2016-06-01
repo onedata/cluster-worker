@@ -505,11 +505,14 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
                 UpdateFun = fun
                     (#cache_controller{last_user = LastUser, action = A} = Record) ->
                         case {LastUser, A} of
-                            {Owner, Op} ->
-                                {ok, Record#cache_controller{last_user = non, action = non,
+                            {Owner, delete} ->
+                                {ok, Record#cache_controller{last_user = non,
+                                    last_action_time = os:timestamp()}};
+                            {Owner, delete_links} ->
+                                {ok, Record#cache_controller{last_user = non,
                                     last_action_time = os:timestamp()}};
                             {Owner, _} ->
-                                {ok, Record#cache_controller{last_user = non,
+                                {ok, Record#cache_controller{last_user = non, action = non,
                                     last_action_time = os:timestamp()}};
                             _ ->
                                 throw(user_changed)
