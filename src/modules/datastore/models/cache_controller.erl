@@ -503,10 +503,13 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
                 delete_dump_info(Uuid, Owner, Level);
             _ ->
                 UpdateFun = fun
-                    (#cache_controller{last_user = LastUser} = Record) ->
-                        case LastUser of
-                            Owner ->
+                    (#cache_controller{last_user = LastUser, action = A} = Record) ->
+                        case {LastUser, A} of
+                            {Owner, Op} ->
                                 {ok, Record#cache_controller{last_user = non, action = non,
+                                    last_action_time = os:timestamp()}};
+                            {Owner, _} ->
+                                {ok, Record#cache_controller{last_user = non,
                                     last_action_time = os:timestamp()}};
                             _ ->
                                 throw(user_changed)
