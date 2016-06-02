@@ -815,7 +815,8 @@ check_create(Key, ModelName, Level) ->
     Check = case get(Level, Uuid) of
                 {ok, Doc2} ->
                     Value = Doc2#document.value,
-                    Value#cache_controller.action =/= delete;
+                    Action = Value#cache_controller.action,
+                    not ((Action =:= delete) orelse (Action =:= to_be_del));
                 {error, {not_found, _}} ->
                     true
             end,
@@ -848,7 +849,8 @@ check_link_create(Key, LinkName, ModelName, Level) ->
     Check = case get(Level, Uuid) of
                 {ok, Doc2} ->
                     Value = Doc2#document.value,
-                    Value#cache_controller.action =/= delete_links;
+                    Action = Value#cache_controller.action,
+                    not ((Action =:= delete_links) orelse (Action =:= to_be_del));
                 {error, {not_found, _}} ->
                     true
             end,
