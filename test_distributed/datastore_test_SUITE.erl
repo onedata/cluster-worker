@@ -268,17 +268,22 @@ global_only_create_or_update_test(Config) ->
 
 globally_cached_create_or_update_test(Config) ->
     UpdateMap = #{field1 => 2},
+    UpdateMap2 = #{field1 => 3},
     UpdateFun = fun({R, _F1, F2, F3}) ->
         {ok, {R, 2, F2, F3}}
+                end,
+    UpdateFun2 = fun({R, _F1, F2, F3}) ->
+        {ok, {R, 3, F2, F3}}
     end,
-    globally_cached_create_or_update_test_base(Config, UpdateMap, "map"),
-    globally_cached_create_or_update_test_base(Config, UpdateFun, "fun").
+    globally_cached_create_or_update_test_base(Config, UpdateMap, UpdateMap2, "map"),
+    globally_cached_create_or_update_test_base(Config, UpdateFun, UpdateFun2, "fun").
 
-globally_cached_create_or_update_test_base(Config, UpdateEntity, KeyExt) ->
+globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, KeyExt) ->
     Level = ?GLOBALLY_CACHED_LEVEL,
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     ModelConfig = TestRecord:model_init(),
 
     Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
@@ -303,6 +308,14 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, KeyExt) ->
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+
+    ?assertMatch(ok, ?call(Worker1, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity2])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
+        ?call_store(Worker2, get, [Level,
+            TestRecord, Key])),
+    ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
     ok.
 
