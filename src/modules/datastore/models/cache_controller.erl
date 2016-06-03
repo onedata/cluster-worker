@@ -193,10 +193,12 @@ list_docs_to_be_dumped(Level) ->
             {next, Acc};
         (#document{value = #cache_controller{action = cleared}}, Acc) ->
             {next, Acc};
-        (#document{key = Uuid}, Acc) ->
-            {next, [Uuid | Acc]}
+        (#document{key = Uuid} = Doc, Acc) ->
+            {next, [Doc | Acc]}
     end,
-    datastore:list(Level, ?MODEL_NAME, Filter, []).
+    {ok, L} = Ans = datastore:list(Level, ?MODEL_NAME, Filter, []),
+    ?info("bbbb ~p", [length(L)]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -468,18 +470,19 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
     ok | datastore:generic_error().
 delete_dump_info(Uuid, Owner, Level) ->
     Pred = fun() ->
-        LastUser = case get(Level, Uuid) of
-                       {ok, Doc} ->
-                           Value = Doc#document.value,
-                           Value#cache_controller.last_user;
+        {LastUser, Action} = case get(Level, Uuid) of
+                       {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                           {LU, A};
                        {error, {not_found, _}} ->
-                           non
+                           {non, non}
                    end,
 
-        case LastUser of
-            Owner ->
+        case {LastUser, Action} of
+            {_, to_be_del} ->
+                false;
+            {Owner, _} ->
                 true;
-            non ->
+            {non, _} ->
                 true;
             _ ->
                 false
@@ -495,6 +498,7 @@ delete_dump_info(Uuid, Owner, Level) ->
 -spec end_disk_op(Uuid :: binary(), Owner :: list(), ModelName :: model_behaviour:model_type(),
     Op :: atom(), Level :: datastore:store_level()) -> ok | {error, ending_disk_op_failed}.
 end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
+    ?info("bbbbb2 ~p", [{Uuid, Op, Owner}]),
     try
         case Op of
             delete ->
@@ -520,11 +524,12 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
         ok
     catch
         throw:user_changed ->
-            ok;
-        E1:E2 ->
-            ?error_stacktrace("Error in cache_controller end_disk_op. Args: ~p. Error: ~p:~p.",
-                [{Uuid, Owner, ModelName, Op, Level}, E1, E2]),
-            {error, ending_disk_op_failed}
+            ok
+%%        ;
+%%        E1:E2 ->
+%%            ?error_stacktrace("Error in cache_controller end_disk_op. Args: ~p. Error: ~p:~p.",
+%%                [{Uuid, Owner, ModelName, Op, Level}, E1, E2]),
+%%            {error, ending_disk_op_failed}
     end.
 
 %%--------------------------------------------------------------------
@@ -547,7 +552,20 @@ choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
                 {ok, SavedValue} ->
                     {ok, add_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
-                    ok;
+                    case get(Level, Uuid) of
+                        {ok, Doc} ->
+                            Value = Doc#document.value,
+                            case Value#cache_controller.action of
+                                cleared ->
+                                    {ok, non};
+                                non ->
+                                    {ok, non};
+                                _ ->
+                                    ok
+                            end;
+                        {error, {not_found, _}} ->
+                            ok
+                    end;
                 FetchError ->
                     {fetch_error, FetchError}
             end;
@@ -684,6 +702,8 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
         Pid = pid_to_list(self()),
 
+        ?info("bbbbb3 ~p", [{Uuid, Op, Pid}]),
+
         UpdateFun = fun(Record) ->
             case Record#cache_controller.action of
                 cleared ->
@@ -709,59 +729,67 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
 
         Task = fun() ->
             {LastUser, LAT, LACT} = case get(Level, Uuid) of
-                                  {ok, Doc2} ->
-                                      Value = Doc2#document.value,
-                                      {Value#cache_controller.last_user, Value#cache_controller.last_action_time,
-                                          Value#cache_controller.action};
-                                  {error, {not_found, _}} ->
-                                      {Pid, 0, non}
-                              end,
-            ToDo = case {LACT, LastUser} of
-                       {cleared, _} ->
-                           {ok, non};
-                       {_, ToUpdate} when ToUpdate =:= Pid; ToUpdate =:= non ->
-                           choose_action(Op, Level, ModelName, Key, Uuid);
-                       _ ->
-                           {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-                           case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
-                               true ->
-                                   UpdateFun2 = fun(Record) ->
-                                       {ok, Record#cache_controller{last_action_time = os:timestamp()}}
-                                   end,
-                                   update(Level, Uuid, UpdateFun2),
-                                   choose_action(Op, Level, ModelName, Key, Uuid);
-                               _ ->
-                                   {error, not_last_user}
-                           end
-                   end,
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    {Value#cache_controller.last_user, Value#cache_controller.last_action_time,
+                        Value#cache_controller.action};
+                {error, {not_found, _}} ->
+                    {Pid, 0, non}
+            end,
+            ToDo0 = case {LACT, LastUser} of
+                {cleared, _} ->
+                    {ok, non};
+                {_, ToUpdate} when ToUpdate =:= Pid; ToUpdate =:= non ->
+                    ok;
+                _ ->
+                    {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
+                    case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
+                        true ->
+                            UpdateFun2 = fun(Record) ->
+                                {ok, Record#cache_controller{last_action_time = os:timestamp()}}
+                                         end,
+                            update(Level, Uuid, UpdateFun2),
+                            ok;
+                        _ ->
+                            {error, not_last_user}
+                    end
+            end,
+            Ans = datastore:run_synchronized(?MODULE, couchdb_datastore_driver:to_binary({?MODULE, start_disk_op, Uuid}),
+                fun() ->
+                    ToDo = case ToDo0 of
+                        ok -> choose_action(Op, Level, ModelName, Key, Uuid);
+                        _ -> ToDo0
+                    end,
 
-            ModelConfig = ModelName:model_init(),
-            Ans = case ToDo of
-                      {ok, NewMethod, NewArgs} ->
-                          FullArgs = [ModelConfig | NewArgs],
-                          CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs),
-                          {op_change, NewMethod, CallAns};
-                      ok ->
-                          FullArgs = [ModelConfig | Args],
-                          erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), Op, FullArgs);
-                      {ok, non} ->
-                          ok;
-                      Other ->
-                          Other
-                  end,
+                    ModelConfig = ModelName:model_init(),
+                    case ToDo of
+                        {ok, NewMethod, NewArgs} ->
+                            FullArgs = [ModelConfig | NewArgs],
+                            CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs),
+                            {op_change, NewMethod, CallAns};
+                        ok ->
+                            FullArgs = [ModelConfig | Args],
+                            erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), Op, FullArgs);
+                        {ok, non} ->
+                            ok;
+                        Other ->
+                            Other
+                    end
+                end
+            ),
 
             ok = case Ans of
-                     ok ->
-                         end_disk_op(Uuid, Pid, ModelName, Op, Level);
-                     {ok, _} ->
-                         end_disk_op(Uuid, Pid, ModelName, Op, Level);
-                     {error, not_last_user} -> ok;
-                     {op_change, NewOp, ok} ->
-                         end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
-                     {op_change, NewOp, {ok, _}} ->
-                         end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
-                     WrongAns -> WrongAns
-                 end
+                ok ->
+                    end_disk_op(Uuid, Pid, ModelName, Op, Level);
+                {ok, _} ->
+                    end_disk_op(Uuid, Pid, ModelName, Op, Level);
+                {error, not_last_user} -> ok;
+                {op_change, NewOp, ok} ->
+                    end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
+                {op_change, NewOp, {ok, _}} ->
+                    end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
+                WrongAns -> WrongAns
+            end
         end,
         {task, Task}
     catch

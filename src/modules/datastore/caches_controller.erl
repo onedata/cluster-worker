@@ -205,25 +205,36 @@ delete_all_keys(locally_cached) ->
   ok | dump_error.
 wait_for_cache_dump() ->
   {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
-  wait_for_cache_dump(round(Delay/1000) + 10).
+  wait_for_cache_dump(round(Delay/1000) + 10, {0, 0}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Waits for dumping cache to disk
 %% @end
 %%--------------------------------------------------------------------
--spec wait_for_cache_dump(N :: integer()) ->
+-spec wait_for_cache_dump(N :: integer(), {GSize :: integer(), LSize :: integer()}) ->
   ok | dump_error.
-wait_for_cache_dump(0) ->
-  dump_error;
-wait_for_cache_dump(N) ->
+wait_for_cache_dump(0, _) ->
+  {dump_error, {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
+    cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)}};
+wait_for_cache_dump(N, {GSize, LSize}) ->
   case {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
     cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)} of
     {{ok, []}, {ok, []}} ->
       ok;
+    {{ok, L1}, {ok, L2}} ->
+      ?info("qqqqq ~p", [N, {length(L1), length(L2)}]),
+      case {length(L1), length(L2)} of
+        {GSize, LSize} ->
+          timer:sleep(timer:seconds(1)),
+          wait_for_cache_dump(N-1, {GSize, LSize});
+        {GSize2, LSize2} ->
+          timer:sleep(timer:seconds(1)),
+          wait_for_cache_dump(N, {GSize2, LSize2})
+      end;
     _ ->
       timer:sleep(timer:seconds(1)),
-      wait_for_cache_dump(N-1)
+      wait_for_cache_dump(N-1, {GSize, LSize})
   end.
 
 %%--------------------------------------------------------------------

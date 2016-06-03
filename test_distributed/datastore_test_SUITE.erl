@@ -23,7 +23,7 @@
 -include("modules/datastore/datastore_engine.hrl").
 -include("datastore_test_models_def.hrl").
 
--define(TIMEOUT, timer:seconds(60)).
+-define(TIMEOUT, timer:minutes(5)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).
 -define(call(N, M, F, A), ?call(N, M, F, A, ?TIMEOUT)).
 -define(call(N, M, F, A, T), rpc:call(N, M, F, A, T)).
@@ -50,7 +50,8 @@
     operations_sequence_global_cache_test/1, links_operations_sequence_global_cache_test/1,
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
-    global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1]).
+    global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1,
+    globally_cached_foreach_link_test/1]).
 -export([utilize_memory/3, update_and_check/4]).
 
 all() ->
@@ -67,7 +68,7 @@ all() ->
         interupt_global_cache_clearing_test,
         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
         create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
-        globally_cached_create_or_update_test, links_scope_test
+        globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test
     ]).
 
 
@@ -78,8 +79,57 @@ all() ->
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
 
-links_scope_test(Config) ->
+globally_cached_foreach_link_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+
+    ModelConfig = TestRecord:model_init(),
+    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
+
+    Key = <<"key_gcflt">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+
+    AddDocs = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            LinkName = list_to_binary("key_gcflt" ++ integer_to_list(I)),
+            LinkedDoc =  #document{
+                key = LinkName,
+                value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+            },
+            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc])),
+            ?assertMatch(ok, ?call_store(Worker1, add_links, [
+                ?GLOBALLY_CACHED_LEVEL, Doc, [{LinkName, LinkedDoc}]
+            ]))
+        end)
+    end,
+    AddDocs(1, 2),
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, <<"key_gcflt1">>]), 6),
+    ?call_store(Worker2, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [<<"key_gcflt1">>]]),
+
+    AccFun = fun(LinkName, _, Acc) ->
+        [LinkName | Acc]
+    end,
+
+    ?assertMatch({ok, [<<"key_gcflt2">>]},
+        ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []])),
+
+    ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, <<"key_gcflt2">>]), 6),
+    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [<<"key_gcflt2">>]])),
+
+    ?assertMatch({ok, [<<"key_gcflt2">>]},
+        ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []])),
+
+    ok.
+
+links_scope_test(Config) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     MasterLoop = spawn_link(fun() -> scope_master_loop() end),
     put(?SCOPE_MASTER_PROC_NAME, MasterLoop),
     rpc:call(Worker1, global, register_name, [?SCOPE_MASTER_PROC_NAME, MasterLoop]),

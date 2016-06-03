@@ -330,7 +330,7 @@ delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
                 ok
         end
     end),
-    ?info("aaaaa14 ~p", [{Key, Links, Ans}]),
+    ?info("aaaaa14 ~p", [{Key, Links, Ans, Pred()}]),
     Ans.
 
 %%--------------------------------------------------------------------
@@ -341,7 +341,9 @@ delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(#model_config{} = ModelConfig, Key, LinkName) ->
-    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
+    Ans = links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key),
+    ?info("aaaaa15 ~p", [{Key, LinkName, Ans}]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc

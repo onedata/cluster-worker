@@ -184,9 +184,9 @@ list(Level, ModelName, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
+list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
-        case cache_controller:check_disk_read(Key, ModelName, Level, in_use) of
+        case cache_controller:check_disk_read(Key, ModelName, driver_to_level(Driver1), in_use) of
             ok ->
                 {next, maps:put(Key, Document, Acc)};
             _ ->
@@ -384,7 +384,7 @@ delete_links(Level, Key, ModelName, LinkName) ->
 %% TODO - delete links should not leave any trash after delete of last link without all option
 -spec delete_links(Level :: store_level(), Drivers :: atom() | [atom()], ext_key(),
     model_behaviour:model_type(), [link_name()] | all) -> ok | generic_error().
-delete_links(Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNames =:= all ->
+delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNames =:= all ->
     ModelConfig = ModelName:model_init(),
     AccFun = fun(LinkName, _, Acc) ->
         [LinkName | Acc]
@@ -393,9 +393,9 @@ delete_links(Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkName
     {ok, Links2} = erlang:apply(driver_to_module(Driver2), foreach_link,
         [ModelConfig, Key, AccFun, Links1]),
     Links = sets:to_list(sets:from_list(Links2)),
-    delete_links(Level, [Driver1, Driver2], Key, ModelName, Links);
-delete_links(Level, [_Driver1, _Driver2], Key, ModelName, LinkNames) ->
-    exec_driver_async(ModelName, Level, delete_links, [Key, LinkNames]);
+    exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, Links]);
+delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) ->
+    exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
 delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
     exec_driver(ModelName, Driver, delete_links, [Key, LinkNames]).
 
@@ -479,9 +479,9 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
     ModelName :: model_behaviour:model_type(),
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
-foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
+foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
-        case cache_controller:check_fetch({Key, LinkName}, ModelName, Level) of
+        case cache_controller:check_fetch({Key, LinkName}, ModelName, driver_to_level(Driver1)) of
             ok ->
                 maps:put(LinkName, LinkTarget, Acc);
             _ ->
@@ -492,10 +492,13 @@ foreach_link(Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
     % TODO - update not to get from disk keys that are already in memory
+    ?info("aaaaa01 ~p", [Key]),
     case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun1, #{}]) of
         {ok, Ans1} ->
+            ?info("aaaaa02 ~p ~p", [Key, Ans1]),
             case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun2, Ans1]) of
                 {ok, Ans2} ->
+                    ?info("aaaaa03 ~p ~p ~p", [Key, Ans1, Ans2]),
                     try maps:fold(Fun, AccIn, Ans2) of
                         AccOut ->
                             ?info("aaaaa1 ~p ~p ~p ~p", [Key, Ans1, Ans2, AccOut]),
