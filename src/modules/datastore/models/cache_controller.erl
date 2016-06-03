@@ -193,12 +193,10 @@ list_docs_to_be_dumped(Level) ->
             {next, Acc};
         (#document{value = #cache_controller{action = cleared}}, Acc) ->
             {next, Acc};
-        (#document{key = Uuid} = Doc, Acc) ->
-            {next, [Doc | Acc]}
+        (#document{key = Uuid}, Acc) ->
+            {next, [Uuid | Acc]}
     end,
-    {ok, L} = Ans = datastore:list(Level, ?MODEL_NAME, Filter, []),
-    ?info("bbbb ~p", [length(L)]),
-    Ans.
+    datastore:list(Level, ?MODEL_NAME, Filter, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -498,7 +496,6 @@ delete_dump_info(Uuid, Owner, Level) ->
 -spec end_disk_op(Uuid :: binary(), Owner :: list(), ModelName :: model_behaviour:model_type(),
     Op :: atom(), Level :: datastore:store_level()) -> ok | {error, ending_disk_op_failed}.
 end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
-    ?info("bbbbb2 ~p", [{Uuid, Op, Owner}]),
     try
         case Op of
             delete ->
@@ -525,11 +522,6 @@ end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
     catch
         throw:user_changed ->
             ok
-%%        ;
-%%        E1:E2 ->
-%%            ?error_stacktrace("Error in cache_controller end_disk_op. Args: ~p. Error: ~p:~p.",
-%%                [{Uuid, Owner, ModelName, Op, Level}, E1, E2]),
-%%            {error, ending_disk_op_failed}
     end.
 
 %%--------------------------------------------------------------------
@@ -701,8 +693,6 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
     try
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
         Pid = pid_to_list(self()),
-
-        ?info("bbbbb3 ~p", [{Uuid, Op, Pid}]),
 
         UpdateFun = fun(Record) ->
             case Record#cache_controller.action of

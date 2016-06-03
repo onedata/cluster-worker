@@ -513,7 +513,6 @@ many_links_test_base(Config, Level) ->
     end, NameFunsTuples).
 
 many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
-    ct:print("aaaa ~p", [{GetLinkKey, GetLinkName}]),
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
@@ -619,7 +618,6 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [
         Level, Doc, DelList
     ])),
-    timer:sleep(timer:seconds(10)),
     CheckLinks(1, 90, 140),
     CheckLinks(111, 130, 140),
     CheckLinks(151, 180, 140),

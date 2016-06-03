@@ -492,17 +492,12 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
     % TODO - update not to get from disk keys that are already in memory
-    ?info("aaaaa01 ~p", [Key]),
     case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun1, #{}]) of
         {ok, Ans1} ->
-            ?info("aaaaa02 ~p ~p", [Key, Ans1]),
             case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun2, Ans1]) of
                 {ok, Ans2} ->
-                    ?info("aaaaa03 ~p ~p ~p", [Key, Ans1, Ans2]),
                     try maps:fold(Fun, AccIn, Ans2) of
-                        AccOut ->
-                            ?info("aaaaa1 ~p ~p ~p ~p", [Key, Ans1, Ans2, AccOut]),
-                            {ok, AccOut}
+                        AccOut -> {ok, AccOut}
                     catch
                         _:Reason ->
                             {error, Reason}

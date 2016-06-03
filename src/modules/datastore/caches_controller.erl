@@ -215,15 +215,13 @@ wait_for_cache_dump() ->
 -spec wait_for_cache_dump(N :: integer(), {GSize :: integer(), LSize :: integer()}) ->
   ok | dump_error.
 wait_for_cache_dump(0, _) ->
-  {dump_error, {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
-    cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)}};
+  dump_error;
 wait_for_cache_dump(N, {GSize, LSize}) ->
   case {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
     cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)} of
     {{ok, []}, {ok, []}} ->
       ok;
     {{ok, L1}, {ok, L2}} ->
-      ?info("qqqqq ~p", [N, {length(L1), length(L2)}]),
       case {length(L1), length(L2)} of
         {GSize, LSize} ->
           timer:sleep(timer:seconds(1)),
