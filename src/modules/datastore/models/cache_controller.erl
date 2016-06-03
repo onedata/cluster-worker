@@ -495,7 +495,7 @@ delete_dump_info(Uuid, Owner, Level) ->
 %%--------------------------------------------------------------------
 -spec end_disk_op(Uuid :: binary(), Owner :: list(), ModelName :: model_behaviour:model_type(),
     Op :: atom(), Level :: datastore:store_level()) -> ok.
-end_disk_op(Uuid, Owner, ModelName, Op, Level) ->
+end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
     try
         case Op of
             delete ->
