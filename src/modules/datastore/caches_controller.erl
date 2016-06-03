@@ -223,7 +223,7 @@ wait_for_cache_dump(N, {GSize, LSize}) ->
     {{ok, []}, {ok, []}} ->
       ok;
     {{ok, L1}, {ok, L2}} ->
-      ?info("qqqqq ~p", [N, {length(L1), length(L2)}]),
+      ?info("qqqqq ~p", [{N, {length(L1), length(L2)}}]),
       case {length(L1), length(L2)} of
         {GSize, LSize} ->
           timer:sleep(timer:seconds(1)),

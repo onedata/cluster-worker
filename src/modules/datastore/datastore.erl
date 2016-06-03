@@ -822,7 +822,7 @@ driver_to_level(?DISTRIBUTED_CACHE_DRIVER) ->
 %%--------------------------------------------------------------------
 -spec exec_driver(model_behaviour:model_type(), [Driver] | Driver,
     Method :: store_driver_behaviour:driver_action(), [term()]) ->
-    ok | {ok, term()} | {error, term()} when Driver :: atom().
+    ok | {ok, term()} | {error, term()} | term() when Driver :: atom().
 exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
     exec_driver(ModelName, Driver, Method, Args);
 exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
@@ -860,7 +860,9 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             {task, _Task} ->
                 {error, prehook_ans_not_supported};
             {error, Reason} ->
-                {error, Reason}
+                {error, Reason};
+            Other -> % for run_synchronized
+                Other
         end,
     run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, Return).
 
