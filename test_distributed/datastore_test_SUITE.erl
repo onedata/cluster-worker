@@ -516,7 +516,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
-    Key = <<"key_mltb">>,
+    Key = list_to_binary("key_mltb_" ++ atom_to_list(Level)),
     Doc =  #document{
         key = Key,
         value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
@@ -1188,7 +1188,7 @@ link_monitoring_global_cache_test(Config) ->
     ?assertMatch({error,link_not_found}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
     {ok, CC} = ?call(Worker1, cache_controller, get, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]),
     CCD = CC#document.value,
-    ?assertEqual(delete_links, CCD#cache_controller.action),
+    ?assert((CCD#cache_controller.action =:= to_be_del) orelse (CCD#cache_controller.action =:= delete_links)),
     ?assertMatch({error,link_not_found}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
     ?assertMatch(false, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
 
