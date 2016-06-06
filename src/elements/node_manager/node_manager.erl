@@ -150,7 +150,7 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit, true),
     try
-        ok = plugins:apply(node_manager_plugin, on_init, [[]]),
+        ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
         ?info("Plugin initailised"),
 
@@ -214,9 +214,9 @@ init([]) ->
 
 handle_call(healthcheck, _From, State = #state{cm_con_status = ConnStatus}) ->
     Reply = case ConnStatus of
-                registered -> ok;
-                _ -> out_of_sync
-            end,
+        registered -> ok;
+        _ -> out_of_sync
+    end,
     {reply, Reply, State};
 
 handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
@@ -225,16 +225,16 @@ handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
 % only for tests
 handle_call(check_mem_synch, _From, State) ->
     Ans = case monitoring:get_memory_stats() of
-              [{<<"mem">>, MemUsage}] ->
-                  case caches_controller:should_clear_cache(MemUsage) of
-                      true ->
-                          free_memory(MemUsage);
-                      _ ->
-                          ok
-                  end;
-              _ ->
-                  cannot_check_mem_usage
-          end,
+        [{<<"mem">>, MemUsage}] ->
+            case caches_controller:should_clear_cache(MemUsage) of
+                true ->
+                    free_memory(MemUsage);
+                _ ->
+                    ok
+            end;
+        _ ->
+            cannot_check_mem_usage
+    end,
     {reply, Ans, State};
 
 % only for tests
@@ -290,20 +290,20 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
     % Check if memory cleaning of oldest docs should be started
     % even when memory utilization is low (e.g. once a day)
     NewState = case caches_controller:should_clear_cache(MemUsage) of
-                   true ->
-                       spawn(fun() -> free_memory(MemUsage) end),
-                       State#state{last_cache_cleaning = os:timestamp()};
-                   _ ->
-                       Now = os:timestamp(),
-                       {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
-                       case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
-                           true ->
-                               spawn(fun() -> free_memory() end),
-                               State#state{last_cache_cleaning = Now};
-                           _ ->
-                               State
-                       end
-               end,
+        true ->
+            spawn(fun() -> free_memory(MemUsage) end),
+            State#state{last_cache_cleaning = os:timestamp()};
+        _ ->
+            Now = os:timestamp(),
+            {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
+            case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
+                true ->
+                    spawn(fun() -> free_memory() end),
+                    State#state{last_cache_cleaning = Now};
+                _ ->
+                    State
+            end
+    end,
     next_mem_check(),
     {noreply, NewState};
 
@@ -319,6 +319,21 @@ handle_cast(check_tasks, State) ->
 handle_cast(do_heartbeat, State) ->
     NewState = do_heartbeat(State),
     {noreply, NewState};
+
+handle_cast(after_init, State) ->
+    % Check if cluster is initialized
+    case nagios_handler:get_cluster_status(5000) of
+        {ok, {_AppName, ok, _NodeStatuses}} ->
+            % Cluster initialized, run after_init callback
+            % of node_manager_plugin.
+            ?info("Cluster initialized. Running 'after_init' procedures."),
+            ok = plugins:apply(node_manager_plugin, after_init, [[]]);
+        _ ->
+            % Cluster not yet initialized, try in a second.
+            ?debug("Cluster not initialized. Next check in a second."),
+            erlang:send_after(1000, self(), {timer, after_init})
+    end,
+    {noreply, State};
 
 handle_cast({update_lb_advices, Advices}, State) ->
     NewState = update_lb_advices(State, Advices),
@@ -360,8 +375,8 @@ handle_info({nodedown, Node}, State) ->
             ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
         true ->
             ok
-    % TODO maybe node_manager should be restarted along with all workers to
-    % avoid desynchronization of modules between nodes.
+        % TODO maybe node_manager should be restarted along with all workers to
+        % avoid desynchronization of modules between nodes.
 %%             ?error("Connection to cluster manager lost, restarting node"),
 %%             throw(connection_to_cm_lost)
     end,
@@ -463,6 +478,7 @@ cm_conn_ack(State = #state{cm_con_status = connected}) ->
     gen_server:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
+    self() ! {timer, after_init},
     State#state{cm_con_status = registered};
 cm_conn_ack(State) ->
     % Already registered or not connected, do nothing
@@ -606,11 +622,11 @@ free_memory(NodeMem) ->
     try
         AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
         ClearingOrder = case NodeMem >= AvgMem of
-                            true ->
-                                [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
-                            _ ->
-                                [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
-                        end,
+            true ->
+                [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
+            _ ->
+                [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
+        end,
         ?info("Clearing memory in order: ~p", [ClearingOrder]),
         lists:foldl(fun
             ({_Aggressive, _StoreType}, ok) ->
