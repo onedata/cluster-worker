@@ -18,6 +18,7 @@
 -record(state, {
   node_ip = {127, 0, 0, 1} :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()},
   cm_con_status = not_connected :: not_connected | connected | registered,
+  initialized = false :: boolean(),
   monitoring_state = undefined :: monitoring:node_monitoring_state(),
   % TODO - enable after clearing update
 %%   cache_control = true,

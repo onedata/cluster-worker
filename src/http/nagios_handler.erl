@@ -55,32 +55,32 @@ handle(Req, State) ->
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
     {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
     CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
-                         {ok, {LastCheck, LastValue}} ->
-                             case (erlang:monotonic_time(milli_seconds) - LastCheck) < CachingTime of
-                                 true ->
-                                     ?debug("Serving nagios response from cache"),
-                                     {true, LastValue};
-                                 false ->
-                                     false
-                             end;
-                         _ ->
-                             false
-                     end,
+        {ok, {LastCheck, LastValue}} ->
+            case (erlang:monotonic_time(milli_seconds) - LastCheck) < CachingTime of
+                true ->
+                    ?debug("Serving nagios response from cache"),
+                    {true, LastValue};
+                false ->
+                    false
+            end;
+        _ ->
+            false
+    end,
     ClusterStatus = case CachedResponse of
-                        {true, Value} ->
-                            Value;
-                        false ->
-                            Status = get_cluster_status(Timeout),
-                            % Save cluster state in cache, but only if there was no error
-                            case Status of
-                                {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
-                                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache,
-                                        {erlang:monotonic_time(milli_seconds), Status});
-                                _ ->
-                                    skip
-                            end,
-                            Status
-                    end,
+        {true, Value} ->
+            Value;
+        false ->
+            Status = get_cluster_status(Timeout),
+            % Save cluster state in cache, but only if there was no error
+            case Status of
+                {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
+                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache,
+                        {erlang:monotonic_time(milli_seconds), Status});
+                _ ->
+                    skip
+            end,
+            Status
+    end,
     NewReq =
         case ClusterStatus of
             error ->
@@ -92,10 +92,10 @@ handle(Req, State) ->
                         NodeDetails = lists:map(
                             fun({Component, Status}) ->
                                 StatusList = case Status of
-                                                 {error, Desc} ->
-                                                     "error: " ++ atom_to_list(Desc);
-                                                 _ -> atom_to_list(Status)
-                                             end,
+                                    {error, Desc} ->
+                                        "error: " ++ atom_to_list(Desc);
+                                    _ -> atom_to_list(Status)
+                                end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),
                         {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
@@ -106,8 +106,8 @@ handle(Req, State) ->
                 DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
 
                 % Create the reply
-                Healthdata = {healthdata, [{date, DateString}, {status, atom_to_list(AppStatus)}], MappedClusterState},
-                Content = lists:flatten([Healthdata]),
+                HealthData = {healthdata, [{date, DateString}, {status, atom_to_list(AppStatus)}], MappedClusterState},
+                Content = lists:flatten([HealthData]),
                 Export = xmerl:export_simple(Content, xmerl_xml),
                 Reply = io_lib:format("~s", [lists:flatten(Export)]),
 
@@ -159,9 +159,9 @@ terminate(_Reason, _Req, _State) ->
 -spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
     Status :: healthcheck_response(),
     ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
-    {node(), Status, [
-    {ModuleName :: module(), Status}
-    ]}
+        {node(), Status, [
+            {ModuleName :: module(), Status}
+        ]}
     ]}.
 get_cluster_status(Timeout) ->
     case check_cm(Timeout) of
@@ -170,12 +170,12 @@ get_cluster_status(Timeout) ->
         Nodes ->
             try
                 NodeManagerStatuses = check_node_managers(Nodes, Timeout),
-                DistpatcherStatuses = check_dispatchers(Nodes, Timeout),
+                DispatcherStatuses = check_dispatchers(Nodes, Timeout),
                 Workers = [{Node, Name} || Node <- Nodes, Name <- node_manager:modules()],
                 WorkerStatuses = check_workers(Nodes, Workers, Timeout),
                 Listeners = [{Node, Name} || Node <- Nodes, Name <- node_manager:listeners()],
                 ListenerStatuses = check_listeners(Nodes, Listeners, Timeout),
-                {ok, _} = calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses, ListenerStatuses)
+                {ok, _} = calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerStatuses, ListenerStatuses)
             catch
                 Type:Error ->
                     ?error_stacktrace("Unexpected error during healthcheck: ~p:~p", [Type, Error]),
@@ -190,11 +190,11 @@ get_cluster_status(Timeout) ->
 %% constructing it from statuses of all components.
 %% @end
 %%--------------------------------------------------------------------
--spec calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses, ListenerStatuses) ->
+-spec calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerStatuses, ListenerStatuses) ->
     {ok, ClusterStatus} when
     Nodes :: [Node],
     NodeManagerStatuses :: [{Node, Status}],
-    DistpatcherStatuses :: [{Node, Status}],
+    DispatcherStatuses :: [{Node, Status}],
     WorkerStatuses :: [{Node, [{Worker :: atom(), Status}]}],
     ListenerStatuses :: [{Node, [{Listener :: atom(), Status}]}],
     Node :: node(),
@@ -204,7 +204,7 @@ get_cluster_status(Timeout) ->
     {ModuleName :: module(), Status}
     ]}
     ]}.
-calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, WorkerStatuses, ListenerStatuses) ->
+calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerStatuses, ListenerStatuses) ->
     NodeStatuses =
         lists:map(
             fun(Node) ->
@@ -213,7 +213,7 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DistpatcherStatuses, Worker
                 % {ModuleName, ok | out_of_sync | {error, atom()}}
                 AllStatuses = lists:flatten([
                     {?NODE_MANAGER_NAME, proplists:get_value(Node, NodeManagerStatuses)},
-                    {?DISPATCHER_NAME, proplists:get_value(Node, DistpatcherStatuses)},
+                    {?DISPATCHER_NAME, proplists:get_value(Node, DispatcherStatuses)},
                     lists:usort(proplists:get_value(Node, WorkerStatuses)),
                     lists:usort(proplists:get_value(Node, ListenerStatuses))
                 ]),

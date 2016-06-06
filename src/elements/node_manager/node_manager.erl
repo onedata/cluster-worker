@@ -320,20 +320,44 @@ handle_cast(do_heartbeat, State) ->
     NewState = do_heartbeat(State),
     {noreply, NewState};
 
-handle_cast(after_init, State) ->
-    % Check if cluster is initialized
-    case nagios_handler:get_cluster_status(5000) of
-        {ok, {_AppName, ok, _NodeStatuses}} ->
+handle_cast(check_cluster_status, State) ->
+    % Check if cluster is initialized - this must be done in different process
+    % as healthcheck performs a gen_server call to node_manager and
+    % calling it from node_manager would cause a deadlock.
+    spawn(fun() ->
+        {ok, Timeout} = application:get_env(
+            ?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
+        Status = case nagios_handler:get_cluster_status(Timeout) of
+            {ok, {_AppName, ok, _NodeStatuses}} ->
+                ok;
+            _ ->
+                error
+        end,
+        % Cast cluster status back to node manager
+        gen_server:cast(?NODE_MANAGER_NAME, {cluster_status, Status})
+    end),
+    {noreply, State};
+
+
+handle_cast({cluster_status, _}, #state{initialized = true} = State) ->
+    % Already initialized, do nothing
+    {noreply, State};
+
+handle_cast({cluster_status, CStatus}, #state{initialized = false} = State) ->
+    % Not yet initialized, run after_init if cluster health is ok.
+    case CStatus of
+        ok ->
             % Cluster initialized, run after_init callback
             % of node_manager_plugin.
             ?info("Cluster initialized. Running 'after_init' procedures."),
-            ok = plugins:apply(node_manager_plugin, after_init, [[]]);
-        _ ->
+            ok = plugins:apply(node_manager_plugin, after_init, [[]]),
+            {noreply, State#state{initialized = true}};
+        error ->
             % Cluster not yet initialized, try in a second.
             ?debug("Cluster not initialized. Next check in a second."),
-            erlang:send_after(1000, self(), {timer, after_init})
-    end,
-    {noreply, State};
+            erlang:send_after(1000, self(), {timer, check_cluster_status}),
+            {noreply, State}
+    end;
 
 handle_cast({update_lb_advices, Advices}, State) ->
     NewState = update_lb_advices(State, Advices),
@@ -478,7 +502,7 @@ cm_conn_ack(State = #state{cm_con_status = connected}) ->
     gen_server:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
-    self() ! {timer, after_init},
+    self() ! {timer, check_cluster_status},
     State#state{cm_con_status = registered};
 cm_conn_ack(State) ->
     % Already registered or not connected, do nothing
