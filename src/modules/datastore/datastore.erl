@@ -186,9 +186,9 @@ list(Level, ModelName, Fun, AccIn) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
-        case cache_controller:check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}) of
+        case cache_controller:check_disk_read(Key, ModelName, Level, in_use) of
             ok ->
-                {next, [Document | Acc]};
+                {next, maps:put(Key, Document, Acc)};
             _ ->
                 {next, Acc}
         end;
@@ -196,18 +196,18 @@ list(Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             {abort, Acc}
     end,
     HelperFun2 = fun(#document{key = Key} = Document, Acc) ->
-        {next, [Document | Acc]};
+        {next, maps:put(Key, Document, Acc)};
         (_, Acc) ->
             {abort, Acc}
     end,
     %% @todo - do not get keys from disk that are already in memory
-    case exec_driver(ModelName, Driver2, list, [HelperFun1, []]) of
+    case exec_driver(ModelName, Driver2, list, [HelperFun1, #{}]) of
         {ok, Ans1} ->
             case exec_driver(ModelName, Driver1, list, [HelperFun2, Ans1]) of
                 {ok, Ans2} ->
                     try
                         AccOut =
-                            lists:foldl(fun(Doc, OAcc) ->
+                            maps:fold(fun(_, Doc, OAcc) ->
                                 case Fun(Doc, OAcc) of
                                     {next, NAcc} ->
                                         NAcc;
@@ -841,12 +841,15 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
             ok ->
                 FullArgs = [ModelConfig | Args],
-                case Driver of
-                    ?PERSISTENCE_DRIVER ->
-                        worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs});
-                    _ ->
-                        erlang:apply(Driver, Method, FullArgs)
-                end;
+                % TODO consider which method is better when file_meta will be able to handle proxy calls in datastore
+                % TODO VFS-2025
+%%                case Driver of
+%%                    ?PERSISTENCE_DRIVER ->
+%%                        worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs});
+%%                    _ ->
+%%                        erlang:apply(Driver, Method, FullArgs)
+%%                end;
+                erlang:apply(driver_to_module(Driver), Method, FullArgs);
             {ok, Value} ->
                 {ok, Value};
             {task, _Task} ->
@@ -926,4 +929,3 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 {error, Reason}
         end,
     run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, Return).
-

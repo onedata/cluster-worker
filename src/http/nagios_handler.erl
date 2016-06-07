@@ -92,10 +92,14 @@ handle(Req, State) ->
                         NodeDetails = lists:map(
                             fun({Component, Status}) ->
                                 StatusList = case Status of
-                                    {error, Desc} ->
-                                        "error: " ++ atom_to_list(Desc);
-                                    _ -> atom_to_list(Status)
-                                end,
+                                                 {error, Desc} ->
+                                                     "error: " ++ atom_to_list(Desc);
+                                                 A when is_atom(A) -> atom_to_list(A);
+                                                 _ ->
+                                                     ?error("Wrong nagios status: {~p, ~p} at node ~p",
+                                                         [Component, Status, Node]),
+                                                     "error: wrong_status"
+                                             end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),
                         {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),

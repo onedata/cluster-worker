@@ -183,6 +183,11 @@ handle_info({timer, Msg}, State) ->
     gen_server:cast(self(), #worker_request{req = Msg}),
     {noreply, State};
 
+handle_info({sync_timer, Msg}, State = #host_state{plugin = Plugin}) ->
+    Req = #worker_request{req = Msg},
+    proc_request(Plugin, Req),
+    {noreply, State};
+
 handle_info(Msg, State) ->
     gen_server:cast(self(), Msg),
     {noreply, State}.
