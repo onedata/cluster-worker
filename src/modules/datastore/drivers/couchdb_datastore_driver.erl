@@ -1028,7 +1028,7 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             Document = process_raw_doc(RawDocOnceAgain),
 
             Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
-            State#state{last_seq = normalize_seq(Seq)}
+            State#state{last_seq = max(normalize_seq(Seq), LastSeq)}
         catch
             _:Reason ->
                 ?error_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
