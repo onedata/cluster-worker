@@ -34,6 +34,7 @@
 -record(state, {
     nodes = [] :: [Node :: node()],
     uninitialized_nodes = [] :: [Node :: node()],
+    singleton_modules = [] :: [{Module :: atom(), Node :: node() | undefined}],
     node_states = [] :: [{Node :: node(), NodeState :: #node_state{}}],
     last_heartbeat = [] :: [{Node :: node(), Timestamp :: integer()}],
     lb_state = undefined :: load_balancing:load_balancing_state() | undefined
@@ -135,6 +136,10 @@ handle_call(get_avg_mem_usage, _From, #state{node_states = NodeStates} = State) 
 handle_call(healthcheck, _From, State) ->
     Ans = healthcheck(State),
     {reply, Ans, State};
+
+handle_call({register_singleton_module, Module, Node}, _From, State) ->
+    {Ans, NewState} = register_singleton_module(Module, Node, State),
+    {reply, Ans, NewState};
 
 handle_call(_Request, _From, State) ->
     ?log_bad_request(_Request),
@@ -304,7 +309,8 @@ heartbeat(#state{node_states = NodeStates, last_heartbeat = LastHeartbeat} = Sta
 %% @end
 %%--------------------------------------------------------------------
 -spec update_advices(State :: #state{}) -> #state{}.
-update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbeats, lb_state = LBState} = State) ->
+update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbeats, lb_state = LBState,
+    singleton_modules = Singletons} = State) ->
     ?debug("Updating load balancing advices"),
     {ok, Interval} = application:get_env(?APP_NAME, lb_advices_update_interval),
     erlang:send_after(Interval, self(), {timer, update_advices}),
@@ -326,7 +332,8 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
                     end
                 end, NodeStates),
             {AdvicesForDNSes, LBState2} = load_balancing:advices_for_dnses(PrecheckedNodeStates, LBState),
-            {AdvicesForDispatchers, NewState} = load_balancing:advices_for_dispatchers(PrecheckedNodeStates, LBState2),
+            {AdvicesForDispatchers, NewState} =
+                load_balancing:advices_for_dispatchers(PrecheckedNodeStates, LBState2, Singletons),
             LBAdvices = lists:zipwith(
                 fun({Node, DNSAdvice}, {Node, DispAdvice}) ->
                     {Node, {DNSAdvice, DispAdvice}}
@@ -339,6 +346,25 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
             State#state{lb_state = NewState}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if singleton module can be started.
+%% @end
+%%--------------------------------------------------------------------
+-spec register_singleton_module(Module :: atom(), Node :: node(), State :: #state{}) ->
+    {ok | already_started, #state{}}.
+register_singleton_module(Module, Node, #state{singleton_modules = Singletons} = State) ->
+    UsedNode = proplists:get_value(Module, Singletons),
+    case UsedNode of
+        Node ->
+            {ok, State};
+        undefined ->
+            NewSingletons = [{Module, Node} | proplists:delete(Module, Singletons)],
+            {ok, State#state{singleton_modules = NewSingletons}};
+        _ ->
+            {already_started, State}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -350,15 +376,23 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
 node_down(Node, State) ->
     #state{nodes = Nodes,
         uninitialized_nodes = InitNodes,
-        node_states = NodeStates
+        node_states = NodeStates,
+        singleton_modules = Singletons
     } = State,
     ?error("Node down: ~p", [Node]),
     NewNodes = Nodes -- [Node],
     NewInitNodes = InitNodes -- [Node],
     NewNodeStates = proplists:delete(Node, NodeStates),
+    NewSingletons = lists:map(fun({M, N}) ->
+        case N of
+            Node -> {M, undefined};
+            _ -> {M, N}
+        end
+    end, Singletons),
     State#state{nodes = NewNodes,
         uninitialized_nodes = NewInitNodes,
-        node_states = NewNodeStates
+        node_states = NewNodeStates,
+        singleton_modules = NewSingletons
     }.
 
 
