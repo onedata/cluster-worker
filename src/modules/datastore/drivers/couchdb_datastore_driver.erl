@@ -48,6 +48,7 @@
 -export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
+-export([to_binary/1]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
