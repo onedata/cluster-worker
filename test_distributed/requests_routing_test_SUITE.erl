@@ -19,19 +19,25 @@
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/performance.hrl").
+-include_lib("ctool/include/global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 -export([simple_call_test/1, direct_cast_test/1, redirect_cast_test/1, mixed_cast_test/1]).
 -export([mixed_cast_test_core/1]).
--export([simple_call_test_base/1, direct_cast_test_base/1, redirect_cast_test_base/1, mixed_cast_test_base/1]).
+-export([singleton_module_test/1, simple_call_test_base/1,
+  direct_cast_test_base/1, redirect_cast_test_base/1, mixed_cast_test_base/1]).
 
 -define(TEST_CASES, [
-    simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test
+  singleton_module_test, simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test
+]).
+
+-define(PERFORMANCE_TEST_CASES, [
+  simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test
 ]).
 
 all() ->
-    ?ALL(?TEST_CASES, ?TEST_CASES).
+    ?ALL(?TEST_CASES, ?PERFORMANCE_TEST_CASES).
 
 -define(REQUEST_TIMEOUT, timer:seconds(10)).
 -define(REPEATS, 100).
@@ -40,6 +46,22 @@ all() ->
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
+
+%%%===================================================================
+
+singleton_module_test(Config) ->
+  [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+  lists:foreach(fun(W) ->
+    ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, {apply, node_manager, init_workers, []}))
+  end, Workers),
+
+  ?assertMatch({ok, _}, rpc:call(Worker1, supervisor, get_childspec, [?MAIN_WORKER_SUPERVISOR_NAME, sample_module])),
+  ?assertEqual({error,not_found}, rpc:call(Worker2, supervisor, get_childspec, [?MAIN_WORKER_SUPERVISOR_NAME, sample_module])),
+
+  ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [sample_module, ping, ?REQUEST_TIMEOUT])),
+  ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [sample_module, ping, ?REQUEST_TIMEOUT])),
+
+  ok.
 
 simple_call_test(Config) ->
     ?PERFORMANCE(Config, [
@@ -231,6 +253,25 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
+
+init_per_testcase(singleton_module_test, Config) ->
+  Workers = ?config(cluster_worker_nodes, Config),
+  ok = test_node_starter:load_modules(Workers, [sample_module]),
+  test_utils:mock_new(Workers, node_manager_plugin_default),
+  test_utils:mock_expect(
+    Workers, node_manager_plugin_default, modules_with_args,
+    fun () -> [{singleton, sample_module, []}] end),
+  Config;
+
+init_per_testcase(_Case, Config) ->
+  Config.
+
+end_per_testcase(singleton_module_test, Config) ->
+  Workers = ?config(cluster_worker_nodes, Config),
+  test_utils:mock_unload(Workers, node_manager_plugin_default);
+
+end_per_testcase(_Case, _Config) ->
+  ok.
 
 %%%===================================================================
 %%% Internal functions

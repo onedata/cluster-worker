@@ -175,7 +175,10 @@ get_cluster_status(Timeout) ->
             try
                 NodeManagerStatuses = check_node_managers(Nodes, Timeout),
                 DistpatcherStatuses = check_dispatchers(Nodes, Timeout),
-                Workers = [{Node, Name} || Node <- Nodes, Name <- node_manager:modules()],
+                Workers = lists:foldl(fun(Name, Acc) ->
+                    {ok, ModuleNodes} = request_dispatcher:get_worker_nodes(Name),
+                    lists:map(fun(Node) -> {Node, Name} end, ModuleNodes) ++ Acc
+                end, [], node_manager:modules()),
                 WorkerStatuses = check_workers(Nodes, Workers, Timeout),
                 Listeners = [{Node, Name} || Node <- Nodes, Name <- node_manager:listeners()],
                 ListenerStatuses = check_listeners(Nodes, Listeners, Timeout),

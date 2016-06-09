@@ -246,11 +246,11 @@ get_worker_node(WorkerName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker_nodes(WorkerName :: worker_name()) -> {ok, [node()]} | {error, dispatcher_out_of_sync}.
-get_worker_nodes(_WorkerName) ->
+get_worker_nodes(WorkerName) ->
     case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
         [{?LB_ADVICE_KEY, undefined}] ->
             {error, dispatcher_out_of_sync};
         [{?LB_ADVICE_KEY, LBAdvice}] ->
-            Nodes = load_balancing:all_nodes_for_dispatcher(LBAdvice),
+            Nodes = load_balancing:all_nodes_for_dispatcher(LBAdvice, WorkerName),
             {ok, Nodes}
     end.

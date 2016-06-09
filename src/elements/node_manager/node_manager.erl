@@ -46,6 +46,9 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
+%% for tests
+-export([init_workers/0]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -76,8 +79,10 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
-    lists:map(fun({Module, _}) ->
-        Module end, plugins:apply(node_manager_plugin, modules_with_args, [])).
+    lists:map(fun
+        ({Module, _}) -> Module;
+        ({singleton, Module, _}) -> Module
+    end, plugins:apply(node_manager_plugin, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -554,15 +559,24 @@ init_node() ->
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    lists:foreach(fun({Module, Args}) ->
-        ok = start_worker(Module, Args),
-        case Module of
-            datastore_worker ->
-                {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
-                ok = datastore:ensure_state_loaded(NodeToSync),
-                ?info("Datastore synchronized");
-            _ -> ok
-        end
+    lists:foreach(fun
+        ({Module, Args}) ->
+            ok = start_worker(Module, Args),
+            case Module of
+                datastore_worker ->
+                    {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
+                    ok = datastore:ensure_state_loaded(NodeToSync),
+                    ?info("Datastore synchronized");
+                _ -> ok
+            end;
+        ({singleton, Module, Args}) ->
+            case gen_server:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
+                ok ->
+                    ok = start_worker(Module, Args),
+                    ?info("Singleton module ~p started", [Module]);
+                already_started ->
+                    ok
+            end
     end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.

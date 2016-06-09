@@ -97,7 +97,7 @@
 %% List of modules (accompanied by their configs) to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
--callback modules_with_args() -> Models :: [{atom(), [any()]}].
+-callback modules_with_args() -> Models :: [{atom(), [any()]} | {singleton, atom(), [any()]}].
 
 %%--------------------------------------------------------------------
 %% @doc
