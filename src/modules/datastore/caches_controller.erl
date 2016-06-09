@@ -209,7 +209,8 @@ wait_for_cache_dump() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Waits for dumping cache to disk
+%% Waits for dumping cache to disk. Arguments are number of repeats left and number of
+%% docs left in caches {global, local} (to check if documents are being dumped at the moment).
 %% @end
 %%--------------------------------------------------------------------
 -spec wait_for_cache_dump(N :: integer(), {GSize :: integer(), LSize :: integer()}) ->
