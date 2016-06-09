@@ -43,7 +43,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/4, force_save/2, db_run/4]).
+-export([start_gateway/4, force_save/2, db_run/4, normalize_seq/1]).
 
 -export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -490,6 +490,28 @@ healthcheck(_State) ->
         end
     catch
         _:R -> {error, R}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Normalizes given sequence number to non negative integer.
+%% @end
+%%--------------------------------------------------------------------
+-spec normalize_seq(Seq :: non_neg_integer() | binary()) -> non_neg_integer().
+normalize_seq(Seq) when is_integer(Seq) ->
+    Seq;
+normalize_seq(SeqBin) when is_binary(SeqBin) ->
+    try binary_to_integer(SeqBin, 10) of
+        Seq -> Seq
+    catch
+        _:_ ->
+            try
+                [SeqStable, _SeqCurrent] = binary:split(SeqBin, <<"::">>),
+                normalize_seq(SeqStable)
+            catch
+                _:_ ->
+                    throw({invalid_seq_format, SeqBin})
+            end
     end.
 
 %%%===================================================================
@@ -1006,7 +1028,7 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             Document = process_raw_doc(RawDocOnceAgain),
 
             Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
-            State#state{last_seq = Seq}
+            State#state{last_seq = normalize_seq(Seq)}
         catch
             _:Reason ->
                 ?error_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
