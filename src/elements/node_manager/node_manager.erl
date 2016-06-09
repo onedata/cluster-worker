@@ -355,7 +355,7 @@ handle_cast({cluster_status, CStatus}, #state{initialized = false} = State) ->
         error ->
             % Cluster not yet initialized, try in a second.
             ?debug("Cluster not initialized. Next check in a second."),
-            erlang:send_after(1000, self(), {timer, check_cluster_status}),
+            erlang:send_after(timer:seconds(1), self(), {timer, check_cluster_status}),
             {noreply, State}
     end;
 
