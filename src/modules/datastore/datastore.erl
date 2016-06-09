@@ -151,10 +151,33 @@ create_sync(Level, #document{} = Document) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(Level :: store_level(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
-% TODO - support for cache simmilar to create and update (VFS-1830)
+create_or_update(?LOCALLY_CACHED_LEVEL, Document, Diff) ->
+    create_or_update_cache(?LOCALLY_CACHED_LEVEL, Document, Diff);
+create_or_update(?GLOBALLY_CACHED_LEVEL, #document{} = Document, Diff) ->
+    create_or_update_cache(?GLOBALLY_CACHED_LEVEL, Document, Diff);
 create_or_update(Level, #document{} = Document, Diff) ->
     ModelName = model_name(Document),
-    exec_driver_async(ModelName, Level, create_or_update, [Document, Diff]).
+    exec_driver(ModelName, level_to_driver(Level), create_or_update, [Document, Diff]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Updates given document by replacing given fields with new values or
+%% creates new one if not exists. Operation works for cached levels.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_or_update_cache(Level :: store_level(), Document :: datastore:document(),
+    Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
+create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
+    ModelName = model_name(Document),
+    Drivers = level_to_driver(Level),
+    % Do update to check disk if document is not in memory
+    case exec_cache_async(ModelName, Drivers, update, [Key, Diff]) of
+        {error, {not_found, _}} ->
+            % Document not found - proceed with operation in memory
+            exec_cache_async(ModelName, Drivers, create_or_update, [Document, Diff]);
+        Ans ->
+            Ans
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
