@@ -137,8 +137,8 @@ handle_call(healthcheck, _From, State) ->
     Ans = healthcheck(State),
     {reply, Ans, State};
 
-handle_call({check_start_module, Module, Node}, _From, State) ->
-    {Ans, NewState} = check_start_module(Module, Node, State),
+handle_call({register_singleton_module, Module, Node}, _From, State) ->
+    {Ans, NewState} = register_singleton_module(Module, Node, State),
     {reply, Ans, NewState};
 
 handle_call(_Request, _From, State) ->
@@ -352,9 +352,9 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
 %% Checks if module can be started on node.
 %% @end
 %%--------------------------------------------------------------------
--spec check_start_module(Module :: atom(), Node :: node(), State :: #state{}) ->
+-spec register_singleton_module(Module :: atom(), Node :: node(), State :: #state{}) ->
     {ok | already_started, #state{}}.
-check_start_module(Module, Node, #state{singleton_modules = Singletons} = State) ->
+register_singleton_module(Module, Node, #state{singleton_modules = Singletons} = State) ->
     UsedNode = proplists:get_value(Module, Singletons),
     case UsedNode of
         Node ->

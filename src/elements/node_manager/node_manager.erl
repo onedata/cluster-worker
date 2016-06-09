@@ -570,7 +570,7 @@ init_workers() ->
                 _ -> ok
             end;
         ({singleton, Module, Args}) ->
-            case gen_server:call({global, ?CLUSTER_MANAGER}, {check_start_module, Module, node()}) of
+            case gen_server:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
                 ok ->
                     ok = start_worker(Module, Args),
                     ?info("Singleton module ~p started", [Module]);
