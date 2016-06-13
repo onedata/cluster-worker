@@ -6,7 +6,7 @@ export DISTRIBUTION
 
 PKG_REVISION    ?= $(shell git describe --tags --always)
 PKG_VERSION	    ?= $(shell git describe --tags --always | tr - .)
-PKG_ID           = oneprovider-cm-$(PKG_VERSION)
+PKG_ID           = cluster-manager-$(PKG_VERSION)
 PKG_BUILD        = 1
 BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
