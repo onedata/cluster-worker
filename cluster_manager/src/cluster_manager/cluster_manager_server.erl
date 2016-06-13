@@ -349,7 +349,7 @@ update_advices(#state{node_states = NodeStatesMap, last_heartbeat = LastHeartbea
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Checks if module can be started on node.
+%% Checks if singleton module can be started.
 %% @end
 %%--------------------------------------------------------------------
 -spec register_singleton_module(Module :: atom(), Node :: node(), State :: #state{}) ->
