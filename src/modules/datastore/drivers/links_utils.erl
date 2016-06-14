@@ -501,12 +501,12 @@ links_doc_key(Key, Scope) ->
     {{ok | skip, scope() | skip}, {ok | skip, [scope()] | skip}}.
 get_context_to_propagate(#model_config{mother_link_scope = MS, other_link_scopes = OS}) ->
     A1 = case is_atom(MS) of
-        true -> {ok, get(MS)};
-        _ -> {skip, skip}
+        true -> {ok, MS, get(MS)};
+        _ -> {skip, skip, skip}
     end,
     A2 = case is_atom(OS) of
-        true -> {ok, get(OS)};
-        _ -> {skip, skip}
+        true -> {ok, OS, get(OS)};
+        _ -> {skip, skip, skip}
     end,
     {A1, A2}.
 
@@ -515,14 +515,15 @@ get_context_to_propagate(#model_config{mother_link_scope = MS, other_link_scopes
 %% Sets link context from another process.
 %% @end
 %%--------------------------------------------------------------------
--spec apply_context({{ok | skip, scope() | skip}, {ok | skip, [scope()] | skip}}) -> ok.
+-spec apply_context({{ok | skip, mother_scope() | skip, scope() | skip},
+    {ok | skip, other_scopes() | skip, [scope()] | skip}}) -> ok.
 apply_context({MS, OS}) ->
     case MS of
-        {ok, MSV} -> put(MS, MSV);
+        {ok, MSK, MSV} -> put(MSK, MSV);
         _ -> ok
     end,
     case OS of
-        {ok, OSV} -> put(OS, OSV);
+        {ok, OSK, OSV} -> put(OSK, OSV);
         _ -> ok
     end,
     ok.
