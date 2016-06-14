@@ -717,6 +717,9 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                 ok
         end,
 
+        ModelConfig = ModelName:model_init(),
+        LinksContext = links_utils:get_context_to_propagate(ModelConfig),
+
         Task = fun() ->
             {LastUser, LAT, LACT} = case get(Level, Uuid) of
                 {ok, Doc2} ->
@@ -744,29 +747,31 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                             {error, not_last_user}
                     end
             end,
-            Ans = datastore:run_synchronized(?MODULE, couchdb_datastore_driver:to_binary({?MODULE, start_disk_op, Uuid}),
-                fun() ->
-                    ToDo = case ToDo0 of
-                        ok -> choose_action(Op, Level, ModelName, Key, Uuid);
-                        _ -> ToDo0
-                    end,
+            Ans = case ToDo0 of
+                      ok ->
+                          links_utils:apply_context(LinksContext),
+                          datastore:run_synchronized(?MODULE, couchdb_datastore_driver:to_binary({?MODULE, start_disk_op, Uuid}),
+                              fun() ->
+                                  ToDo = choose_action(Op, Level, ModelName, Key, Uuid),
 
-                    ModelConfig = ModelName:model_init(),
-                    case ToDo of
-                        {ok, NewMethod, NewArgs} ->
-                            FullArgs = [ModelConfig | NewArgs],
-                            CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs),
-                            {op_change, NewMethod, CallAns};
-                        ok ->
-                            FullArgs = [ModelConfig | Args],
-                            erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), Op, FullArgs);
-                        {ok, non} ->
-                            ok;
-                        Other ->
-                            Other
-                    end
-                end
-            ),
+                                  case ToDo of
+                                      {ok, NewMethod, NewArgs} ->
+                                          FullArgs = [ModelConfig | NewArgs],
+                                          CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs),
+                                          {op_change, NewMethod, CallAns};
+                                      ok ->
+                                          FullArgs = [ModelConfig | Args],
+                                          erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), Op, FullArgs);
+                                      {ok, non} ->
+                                          ok;
+                                      Other ->
+                                          Other
+                                  end
+                              end
+                          );
+                      _ ->
+                          ToDo0
+            end,
 
             ok = case Ans of
                 ok ->

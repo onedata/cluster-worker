@@ -90,7 +90,7 @@ exists(Key) ->
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
     ScopeFun1 =
-        fun() ->
+        fun(_) ->
             global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),
             receive
                 {mother_scope, Scope} ->
@@ -98,7 +98,7 @@ model_init() ->
             end
         end,
     ScopeFun2 =
-        fun() ->
+        fun(_) ->
             global:send(?SCOPE_MASTER_PROC_NAME, {get_other_scopes, self()}),
             receive
                 {other_scopes, Scopes} ->

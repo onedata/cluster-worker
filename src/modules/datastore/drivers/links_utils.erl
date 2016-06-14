@@ -15,13 +15,16 @@
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
 
--type mother_scope_fun() :: fun(() -> atom()).
--type other_scopes_fun() :: fun(() -> [atom()]).
--export_type([mother_scope_fun/0, other_scopes_fun/0]).
+-type scope() :: atom() | binary().
+% mapping to mother scope - function or key in process dict
+-type mother_scope() :: fun((datastore:uuid()) -> scope()) | atom().
+% mapping to other scopes - function or key in process dict
+-type other_scopes() :: fun((datastore:uuid()) -> [scope()]) | atom().
+-export_type([mother_scope/0, other_scopes/0]).
 
 %% API
 -export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4,
-    fetch_link/4, foreach_link/5, links_doc_key/2]).
+    fetch_link/4, foreach_link/5, links_doc_key/2, get_context_to_propagate/1, apply_context/1]).
 
 %%%===================================================================
 %%% API
@@ -34,11 +37,11 @@
 %%--------------------------------------------------------------------
 -spec create_link_in_map(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
     datastore:normalized_link_spec()) -> ok | datastore:create_error().
-create_link_in_map(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig,
+create_link_in_map(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
     Key, {LinkName, _} = Link) ->
-    case fetch_link(Driver, ModelConfig, LinkName, Key, ScopeFun2()) of
+    case fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope2, Key)) of
         {error, link_not_found} ->
-            create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, ScopeFun1), 1);
+            create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, get_scopes(Scope1, Key)), 1);
         {ok, _} ->
             {error, already_exists};
         Other ->
@@ -88,12 +91,12 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
 -spec save_links_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
     [datastore:normalized_link_spec()]) -> ok | datastore:generic_error().
 save_links_maps(Driver,
-    #model_config{bucket = _Bucket, name = ModelName, mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig,
+    #model_config{bucket = _Bucket, name = ModelName, mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
     Key, LinksList) ->
 
-    case ScopeFun2() of
+    case get_scopes(Scope2, Key) of
         [] ->
-            LDK = links_doc_key(Key, ScopeFun1),
+            LDK = links_doc_key(Key, get_scopes(Scope1, Key)),
             SaveAns = case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
                           {ok, LinksDoc} ->
                               save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, norm);
@@ -110,12 +113,13 @@ save_links_maps(Driver,
                     SaveAns
             end;
         OtherScopes ->
-            SaveAns = update_link_maps(Driver, ModelConfig, Key, LinksList, [ScopeFun1() | OtherScopes], true),
+            S1 = get_scopes(Scope1, Key),
+            SaveAns = update_link_maps(Driver, ModelConfig, Key, LinksList, [S1 | OtherScopes], true),
             case SaveAns of
                 {ok, []} ->
                     ok;
                 {ok, LinksToAdd} ->
-                    LDK = links_doc_key(Key, ScopeFun1),
+                    LDK = links_doc_key(Key, S1),
                     SaveAns2 =
                         case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
                             {ok, LinksDoc} ->
@@ -140,7 +144,7 @@ save_links_maps(Driver,
 %% @end
 %%--------------------------------------------------------------------
 -spec update_link_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
-    [datastore:normalized_link_spec()], Scopes :: atom() | [atom()], MotherScope :: boolean()) ->
+    [datastore:normalized_link_spec()], Scopes :: scope() | [scope()], MotherScope :: boolean()) ->
     {ok, [datastore:normalized_link_spec()]} | datastore:generic_error().
 update_link_maps(_Driver, _ModelConfig, _Key, Links, [], _) ->
     {ok, Links};
@@ -293,8 +297,8 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
 %%--------------------------------------------------------------------
 -spec delete_links(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key()) ->
     ok | datastore:generic_error().
-delete_links(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig, Key) ->
-    Scopes = [ScopeFun1() | ScopeFun2()],
+delete_links(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig, Key) ->
+    Scopes = [get_scopes(Scope1, Key) | get_scopes(Scope2, Key)],
     lists:foldl(fun(Scope, Acc) ->
         case delete_links_docs(Driver, ModelConfig, links_doc_key(Key, Scope)) of
             ok ->
@@ -312,14 +316,14 @@ delete_links(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_sco
 %%--------------------------------------------------------------------
 -spec delete_links_from_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
     [datastore:link_name()]) -> ok | datastore:generic_error().
-delete_links_from_maps(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig,
+delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
     Key, Links) ->
     % Try mother scope first for performance reasons
-    case delete_links_from_maps(Driver, ModelConfig, Key, Links, ScopeFun1) of
+    case delete_links_from_maps(Driver, ModelConfig, Key, Links, get_scopes(Scope1, Key)) of
         {ok, _, []} ->
             ok;
         {ok, _, LinksLeft} ->
-            delete_links_from_maps(Driver, ModelConfig, Key, LinksLeft, ScopeFun2());
+            delete_links_from_maps(Driver, ModelConfig, Key, LinksLeft, get_scopes(Scope2, Key));
         Ans ->
             Ans
     end.
@@ -331,7 +335,7 @@ delete_links_from_maps(Driver, #model_config{mother_link_scope = ScopeFun1, othe
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_links_from_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
-    [datastore:link_name()], Scopes :: atom() | [atom()] | links_utils:mother_scope_fun()) ->
+    [datastore:link_name()], Scopes :: atom() | [atom()] | links_utils:mother_scope()) ->
     ok | {ok, integer(), [datastore:link_name()]} | datastore:generic_error().
 delete_links_from_maps(_Driver, _ModelConfig, _Key, _Links, []) ->
     ok;
@@ -416,14 +420,14 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, 
 %% Fetches link from set of documents connected with key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
+-spec fetch_link(Driver :: atom(), model_behaviour:model_config(), datastore:link_name(), datastore:ext_key()) ->
     {ok, datastore:link_target()} | datastore:link_error().
-fetch_link(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig,
+fetch_link(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
     LinkName, Key) ->
     % Try mother scope first for performance reasons
-    case fetch_link(Driver, ModelConfig, LinkName, Key, ScopeFun1) of
+    case fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope1, Key)) of
         {error, link_not_found} ->
-            fetch_link(Driver, ModelConfig, LinkName, Key, ScopeFun2());
+            fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope2, Key));
         Ans ->
             Ans
     end.
@@ -434,7 +438,7 @@ fetch_link(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scope
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_link(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(), datastore:link_name(),
-    Scopes :: atom() | [atom()] | links_utils:mother_scope_fun()) ->
+    Scopes :: atom() | [atom()] | links_utils:mother_scope()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(_Driver, _ModelConfig, _LinkName, _Key, []) ->
     {error, link_not_found};
@@ -456,9 +460,9 @@ fetch_link(Driver, ModelConfig, LinkName, Key, Scope) ->
 -spec foreach_link(Driver :: atom(), model_behaviour:model_config(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
-foreach_link(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scopes = ScopeFun2} = ModelConfig,
+foreach_link(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
     Key, Fun, AccIn) ->
-    Scopes = [ScopeFun1() | ScopeFun2()],
+    Scopes = [get_scopes(Scope1, Key) | get_scopes(Scope2, Key)],
     foreach_link(Driver, ModelConfig, Key, Fun, {ok, AccIn}, Scopes).
 
 -spec foreach_link(Driver :: atom(), model_behaviour:model_config(), Key :: datastore:ext_key(),
@@ -478,7 +482,7 @@ foreach_link(_Driver, _ModelConfig, _Key, _Fun, AccIn, _Scopes) ->
 %% Returns key for document holding links for given document.
 %% @end
 %%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
+-spec links_doc_key(Key :: datastore:key(), Scope :: scope()) -> BinKey :: binary().
 links_doc_key(Key, Scope) ->
     Base = links_doc_key_from_scope(Key, Scope),
     case byte_size(Base) > 120 of
@@ -487,6 +491,41 @@ links_doc_key(Key, Scope) ->
         _ ->
             Base
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets link context to be applied in another process.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_context_to_propagate(model_behaviour:model_config()) ->
+    {{ok | skip, scope() | skip}, {ok | skip, [scope()] | skip}}.
+get_context_to_propagate(#model_config{mother_link_scope = MS, other_link_scopes = OS}) ->
+    A1 = case is_atom(MS) of
+        true -> {ok, get(MS)};
+        _ -> {skip, skip}
+    end,
+    A2 = case is_atom(OS) of
+        true -> {ok, get(OS)};
+        _ -> {skip, skip}
+    end,
+    {A1, A2}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets link context from another process.
+%% @end
+%%--------------------------------------------------------------------
+-spec apply_context({{ok | skip, scope() | skip}, {ok | skip, [scope()] | skip}}) -> ok.
+apply_context({MS, OS}) ->
+    case MS of
+        {ok, MSV} -> put(MS, MSV);
+        _ -> ok
+    end,
+    case OS of
+        {ok, OSV} -> put(OS, OSV);
+        _ -> ok
+    end,
+    ok.
 
 %%%===================================================================
 %%% Internal functions
@@ -874,9 +913,7 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
 %% Create base for links document key (base must be cut if too long).
 %% @end
 %%--------------------------------------------------------------------
--spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
-links_doc_key_from_scope(Key, ScopeFun) when is_function(ScopeFun) ->
-    links_doc_key_from_scope(Key, ScopeFun());
+-spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: scope()) -> BinKey :: binary().
 links_doc_key_from_scope(Key, Scope) when is_binary(Key), is_binary(Scope) ->
     <<Key/binary, Scope/binary>>;
 links_doc_key_from_scope(Key, Scope) ->
@@ -921,3 +958,15 @@ add_non_existing_to_map(Driver, #model_config{bucket = _Bucket, name = ModelName
     end;
 add_non_existing_to_map(_Driver, _ModelConfig, _Key, _LDK, _GetAns, _Link, _KeyNum) ->
     ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Get scopes.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_scopes(ScopesGetter :: mother_scope() | other_scopes(), datastore:key()) -> scope() | [scope()].
+get_scopes(ScopesGetter, _) when is_atom(ScopesGetter) ->
+    get(ScopesGetter);
+get_scopes(ScopesGetter, Key) ->
+    ScopesGetter(Key).
