@@ -501,7 +501,7 @@ links_doc_key(Key, Scope) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_context_to_propagate(model_behaviour:model_config()) ->
-    {{ok | skip, scope() | skip}, {ok | skip, [scope()] | skip}}.
+    {{ok | skip, mother_scope() | skip, scope() | skip}, {ok | skip, other_scopes() | skip, [scope()] | skip}}.
 get_context_to_propagate(#model_config{mother_link_scope = MS, other_link_scopes = OS}) ->
     A1 = case is_atom(MS) of
         true -> {ok, MS, get(MS)};
