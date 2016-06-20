@@ -64,7 +64,7 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
     DBNodes = [lists:nth(crypto:rand_uniform(1, length(DBNodes0) + 1), DBNodes0)],
     Gateways = lists:map(
         fun({N, {Hostname, _Port}}) ->
-            GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, 8091], timer:seconds(5)),
+            GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, 8091], ?DATASTORE_GATEWAY_SPAWN_TIMEOUT),
             {N, GWState}
         end, lists:zip(lists:seq(1, length(DBNodes)), DBNodes)),
     {ok, State#{db_gateways => maps:from_list(Gateways)}}.
@@ -507,8 +507,9 @@ normalize_seq(SeqBin) when is_binary(SeqBin) ->
     catch
         _:_ ->
             try
-                [SeqStable, _SeqCurrent] = binary:split(SeqBin, <<"::">>),
-                normalize_seq(SeqStable)
+                ?info("Changes loss: ~p", [SeqBin]),
+                [_SeqStable, SeqCurrent] = binary:split(SeqBin, <<"::">>),
+                normalize_seq(SeqCurrent)
             catch
                 _:_ ->
                     throw({invalid_seq_format, SeqBin})
@@ -870,7 +871,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
     end,
 
     CT = erlang:system_time(milli_seconds),
-    MinRestartTime = ST + ?TIME_FOR_RESTART,
+    MinRestartTime = ST + ?DATASTORE_GATEWAY_SPAWN_TIMEOUT,
 
     NewState =
         receive
