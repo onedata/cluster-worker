@@ -665,7 +665,7 @@ free_memory(NodeMem) ->
             _ ->
                 [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
         end,
-        ?info("Clearing memory in order: ~p", [ClearingOrder]),
+        ?info("Clearing memory in order: ~p~nMemory info: ~p", [ClearingOrder, erlang:memory()]),
         lists:foldl(fun
             ({_Aggressive, _StoreType}, ok) ->
                 ok;
