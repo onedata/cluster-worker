@@ -507,8 +507,9 @@ normalize_seq(SeqBin) when is_binary(SeqBin) ->
     catch
         _:_ ->
             try
-                [SeqStable, _SeqCurrent] = binary:split(SeqBin, <<"::">>),
-                normalize_seq(SeqStable)
+                ?warning("Changes loss: ~p", [SeqBin]),
+                [_SeqStable, SeqCurrent] = binary:split(SeqBin, <<"::">>),
+                normalize_seq(SeqCurrent)
             catch
                 _:_ ->
                     throw({invalid_seq_format, SeqBin})
