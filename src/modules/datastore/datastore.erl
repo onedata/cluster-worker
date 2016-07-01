@@ -866,7 +866,13 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 FullArgs = [ModelConfig | Args],
                 case Driver of
                     ?PERSISTENCE_DRIVER ->
-                        worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs});
+                        case worker_proxy:call(datastore_worker,
+                            {driver_call, driver_to_module(Driver), Method, FullArgs}) of
+                            {error, dispatcher_out_of_sync} ->
+                                erlang:apply(driver_to_module(Driver), Method, FullArgs);
+                            ProxyAns ->
+                                ProxyAns
+                        end;
                     _ ->
                         erlang:apply(Driver, Method, FullArgs)
                 end;
