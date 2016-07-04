@@ -864,18 +864,21 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
             ok ->
                 FullArgs = [ModelConfig | Args],
-                case Driver of
-                    ?PERSISTENCE_DRIVER ->
-                        case worker_proxy:call(datastore_worker,
-                            {driver_call, driver_to_module(Driver), Method, FullArgs}) of
-                            {error, dispatcher_out_of_sync} ->
-                                erlang:apply(driver_to_module(Driver), Method, FullArgs);
-                            ProxyAns ->
-                                ProxyAns
-                        end;
-                    _ ->
-                        erlang:apply(Driver, Method, FullArgs)
-                end;
+                % TODO consider which method is better when file_meta will be able to handle proxy calls in datastore
+                % TODO VFS-2025
+%%                case Driver of
+%%                    ?PERSISTENCE_DRIVER ->
+%%                        case worker_proxy:call(datastore_worker,
+%%                            {driver_call, driver_to_module(Driver), Method, FullArgs}) of
+%%                            {error, dispatcher_out_of_sync} ->
+%%                                erlang:apply(driver_to_module(Driver), Method, FullArgs);
+%%                            ProxyAns ->
+%%                                ProxyAns
+%%                        end;
+%%                    _ ->
+%%                        erlang:apply(Driver, Method, FullArgs)
+%%                end;
+                erlang:apply(driver_to_module(Driver), Method, FullArgs);
             {ok, Value} ->
                 {ok, Value};
             {task, _Task} ->
