@@ -47,7 +47,7 @@
 
 -export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
--export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
+-export([save_link_doc/2, get_link_doc/2, delete_link_doc/2]).
 -export([to_binary/1]).
 
 %%%===================================================================
@@ -274,16 +274,6 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 -spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get_link_doc(ModelConfig, Key) ->
-    get(ModelConfig, Key).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Gets document that describes links. To be used inside transaction (used by links utils).
-%% @end
-%%--------------------------------------------------------------------
--spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
-    {ok, datastore:document()} | datastore:get_error().
-get_link_doc_inside_trans(ModelConfig, Key) ->
     get(ModelConfig, Key).
 
 %%--------------------------------------------------------------------

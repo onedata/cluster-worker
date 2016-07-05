@@ -57,7 +57,7 @@ create_link_in_map(Driver, #model_config{mother_link_scope = Scope1, other_link_
     datastore:normalized_link_spec(), Key :: datastore:ext_key(), LinkKey :: datastore:ext_key(),
     KeyNum :: integer()) -> ok | datastore:create_error().
 create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkName, _} = Link, Key, LinkKey, KeyNum) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, LinkKey) of
+    case Driver:get_link_doc(ModelConfig, LinkKey) of
         {ok, #document{value = #links{link_map = LinkMap, children = Children}} = Doc} ->
             case maps:get(LinkName, LinkMap, undefined) of
                 undefined ->
@@ -97,7 +97,7 @@ save_links_maps(Driver,
     case get_scopes(Scope2, Key) of
         [] ->
             LDK = links_doc_key(Key, get_scopes(Scope1, Key)),
-            SaveAns = case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+            SaveAns = case Driver:get_link_doc(ModelConfig, LDK) of
                           {ok, LinksDoc} ->
                               save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, norm);
                           {error, {not_found, _}} ->
@@ -121,7 +121,7 @@ save_links_maps(Driver,
                 {ok, LinksToAdd} ->
                     LDK = links_doc_key(Key, S1),
                     SaveAns2 =
-                        case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+                        case Driver:get_link_doc(ModelConfig, LDK) of
                             {ok, LinksDoc} ->
                                 save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
                             {error, {not_found, _}} ->
@@ -162,7 +162,7 @@ update_link_maps(Driver, ModelConfig, Key, Links, [Scope | Scopes]) ->
     end;
 update_link_maps(Driver, ModelConfig, Key, LinksList, Scope) ->
     LDK = links_doc_key(Key, Scope),
-    case Driver:get_link_doc_inside_trans(ModelConfig, LDK) of
+    case Driver:get_link_doc(ModelConfig, LDK) of
         {ok, LinksDoc} ->
             save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
         {error, {not_found, _}} ->
@@ -226,14 +226,14 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                         NLD = #document{key = NewLDK, value = #links{doc_key = Key, model = ModelName}},
                         {maps:put(Num, NewLDK, Acc1), maps:put(Num, NLD, Acc2), true};
                     {_, update} ->
-                        case Driver:get_link_doc_inside_trans(ModelConfig, NK) of
+                        case Driver:get_link_doc(ModelConfig, NK) of
                             {ok, NLD} ->
                                 {Acc1, maps:put(Num, NLD, Acc2), Acc3};
                             {error, {not_found, _}} ->
                                 {Acc1, maps:put(Num, <<"non">>, Acc2), Acc3}
                         end;
                     _ ->
-                        case Driver:get_link_doc_inside_trans(ModelConfig, NK) of
+                        case Driver:get_link_doc(ModelConfig, NK) of
                             {ok, NLD} ->
                                 {Acc1, maps:put(Num, NLD, Acc2), Acc3};
                             {error, {not_found, _}} ->
@@ -366,7 +366,7 @@ delete_links_from_maps(Driver, ModelConfig, Key, Links, Scope) ->
 delete_links_from_maps(_Driver, _ModelConfig, <<"non">>, Links, _FreeSpaces, _MainDocKey, _KeyNum, _Parent, _ParentNum) ->
     {ok, 0, Links};
 delete_links_from_maps(Driver, ModelConfig, Key, Links, FreeSpaces, MainDocKey, KeyNum, Parent, ParentNum) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, Key) of
+    case Driver:get_link_doc(ModelConfig, Key) of
         {ok, #document{value = #links{children = Children, link_map = LinkMap} = LinksRecord} = LinkDoc} ->
             {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
             NewSize = maps:size(NewLinkMap),
@@ -690,7 +690,7 @@ del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links,
         end
               end, ok, SplitedLinks);
 del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links, Key, KeyNum) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, Key) of
+    case Driver:get_link_doc(ModelConfig, Key) of
         {ok, #document{value = #links{link_map = LinkMap} = LinksRecord} = LinkDoc} ->
             {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
             SaveAns = case Deleted of
@@ -726,7 +726,7 @@ del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links, Key,
 delete_links_docs(_Driver, _ModelConfig, <<"non">>) ->
     ok;
 delete_links_docs(Driver, #model_config{} = ModelConfig, Key) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, Key) of
+    case Driver:get_link_doc(ModelConfig, Key) of
         {error, {not_found, _}} ->
             ok;
         {error, not_found} ->
@@ -765,7 +765,7 @@ rebuild_links_tree(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, 
             delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum);
         _ ->
             [{FirstChildNum, FirstChild} | _] = maps:to_list(Children),
-            case Driver:get_link_doc_inside_trans(ModelConfig, FirstChild) of
+            case Driver:get_link_doc(ModelConfig, FirstChild) of
                 {ok, #document{value = #links{children = NewChildren}} = NewLinkDoc} ->
                     rebuild_links_tree(Driver, ModelConfig, MainDocKey, NewLinkDoc, LinkDoc, FirstChildNum, NewChildren);
                 {error, Reason} ->
@@ -811,14 +811,14 @@ delete_leaf(Driver, #model_config{} = ModelConfig, MainDocKey,
             DelError
     end;
 delete_leaf(Driver, ModelConfig, MainDocKey, #document{} = LinkDoc, Parent, ParentNum) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, Parent) of
+    case Driver:get_link_doc(ModelConfig, Parent) of
         {error, Reason} ->
             {error, Reason};
         {ok, Doc} ->
             delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Doc, ParentNum)
     end;
 delete_leaf(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, LinkDoc) of
+    case Driver:get_link_doc(ModelConfig, LinkDoc) of
         {error, Reason} ->
             {error, Reason};
         {ok, Doc} ->

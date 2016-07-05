@@ -26,7 +26,7 @@
 -export([add_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_synchronized/3]).
 
--export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
+-export([save_link_doc/2, get_link_doc/2, delete_link_doc/2]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -214,20 +214,13 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
 -spec get(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get(#model_config{name = ModelName} = ModelConfig, Key) ->
-    case mnesia:dirty_read(table_name(ModelConfig), Key) of
-        [] -> {error, {not_found, ModelName}};
-        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Gets document that describes links. To be used inside transaction (used by links utils).
-%% @end
-%%--------------------------------------------------------------------
--spec get_link_doc_inside_trans(model_behaviour:model_config(), datastore:ext_key()) ->
-    {ok, datastore:document()} | datastore:get_error().
-get_link_doc_inside_trans(#model_config{name = ModelName} = ModelConfig, Key) ->
-    case mnesia:read(links_table_name(ModelConfig), Key, read) of
+    TmpAns = case mnesia:is_transaction() of
+        true ->
+            mnesia:read(table_name(ModelConfig), Key);
+        _ ->
+            mnesia:dirty_read(table_name(ModelConfig), Key)
+    end,
+    case TmpAns of
         [] -> {error, {not_found, ModelName}};
         [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
     end.
@@ -240,7 +233,13 @@ get_link_doc_inside_trans(#model_config{name = ModelName} = ModelConfig, Key) ->
 -spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
-    case mnesia:dirty_read(links_table_name(ModelConfig), Key) of
+    TmpAns = case mnesia:is_transaction() of
+        true ->
+            mnesia:read(links_table_name(ModelConfig), Key);
+        _ ->
+            mnesia:dirty_read(links_table_name(ModelConfig), Key)
+    end,
+    case TmpAns of
         [] -> {error, {not_found, ModelName}};
         [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
     end.
@@ -255,14 +254,29 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(#model_config{} = ModelConfig, Fun, AccIn) ->
     SelectAll = [{'_', [], ['$_']}],
-    mnesia_run(async_dirty, fun() ->
-        case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
-            {Obj, Handle} ->
-                list_next(Obj, Handle, Fun, AccIn);
-            '$end_of_table' ->
-                list_next('$end_of_table', undefined, Fun, AccIn)
-        end
-    end).
+    case mnesia:is_transaction() of
+        true ->
+            mnesia_run(async_dirty, fun() ->
+                case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
+                    {Obj, Handle} ->
+                        list_next(Obj, Handle, Fun, AccIn);
+                    '$end_of_table' ->
+                        list_next('$end_of_table', undefined, Fun, AccIn)
+                end
+            end);
+        _ ->
+            try
+                case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
+                    {Obj, Handle} ->
+                        list_next(Obj, Handle, Fun, AccIn);
+                    '$end_of_table' ->
+                        list_next('$end_of_table', undefined, Fun, AccIn)
+                end
+            catch
+                _:Reason ->
+                    {error, Reason}
+            end
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -414,7 +428,13 @@ delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document)
 -spec exists(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, boolean()} | datastore:generic_error().
 exists(#model_config{} = ModelConfig, Key) ->
-    case mnesia:dirty_read(table_name(ModelConfig), Key) of
+    TmpAns = case mnesia:is_transaction() of
+        true ->
+            mnesia:read(table_name(ModelConfig), Key);
+        _ ->
+            mnesia:dirty_read(table_name(ModelConfig), Key)
+    end,
+    case TmpAns of
         [] -> {ok, false};
         [_Record] -> {ok, true}
     end.
