@@ -256,15 +256,6 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
     SelectAll = [{'_', [], ['$_']}],
     case mnesia:is_transaction() of
         true ->
-            mnesia_run(async_dirty, fun() ->
-                case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
-                    {Obj, Handle} ->
-                        list_next(Obj, Handle, Fun, AccIn);
-                    '$end_of_table' ->
-                        list_next('$end_of_table', undefined, Fun, AccIn)
-                end
-            end);
-        _ ->
             try
                 case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
                     {Obj, Handle} ->
@@ -275,7 +266,16 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
             catch
                 _:Reason ->
                     {error, Reason}
-            end
+            end;
+        _ ->
+            mnesia_run(async_dirty, fun() ->
+                case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
+                    {Obj, Handle} ->
+                        list_next(Obj, Handle, Fun, AccIn);
+                    '$end_of_table' ->
+                        list_next('$end_of_table', undefined, Fun, AccIn)
+                end
+            end)
     end.
 
 
