@@ -530,7 +530,7 @@ do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState} = S
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
     NodeState = monitoring:get_node_state(NewMonState),
-    ?debug("Sending heartbeat to cluster manager"),
+    ?info("Sending heartbeat to cluster manager, mon_state: ~p", [NewMonState]),
     gen_server:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     State#state{monitoring_state = NewMonState};
 
