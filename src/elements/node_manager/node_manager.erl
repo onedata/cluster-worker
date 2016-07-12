@@ -309,7 +309,14 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                     State
             end
     end,
+
     spawn(fun() ->
+        ?info("Monitoring state: ~p", [MonState]),
+
+        ?info("Erlang CPU and Mem ~p~n~p~n~p", [cpu_sup:util(), erlang:memory(),
+            lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
+        ]),
+
         Procs = erlang:processes(),
         SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
         MergedStacksMap = lists:foldl(fun(P, Map) ->
@@ -320,7 +327,7 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                 _ ->
                     Map
             end
-                                      end, #{}, Procs),
+        end, #{}, Procs),
         MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
 
         GetName = fun(P) ->
@@ -332,14 +339,15 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                     _ ->
                         Acc
                 end
-                        end, non, All)
-                  end,
+            end, non, All)
+        end,
 
-        ?info("LoadExtended ~p~n~p~n~p", [length(Procs),
+        ?info("Erlang Procs ~p~n~p~n~p", [length(Procs),
             lists:map(fun({M, P}) -> {M, erlang:process_info(P, current_stacktrace), P, GetName(P)} end, lists:sublist(SortedProcs, 5)),
             MergedStacks
         ])
     end),
+
     next_mem_check(),
     {noreply, NewState};
 
@@ -561,7 +569,7 @@ do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState} = S
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
     NodeState = monitoring:get_node_state(NewMonState),
-    ?info("Sending heartbeat to cluster manager, mon_state: ~p", [NewMonState]),
+    ?debug("Sending heartbeat to cluster manager"),
     gen_server:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     State#state{monitoring_state = NewMonState};
 
