@@ -323,7 +323,7 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                                       end, #{}, Procs),
         MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
         ?info("LoadExtended ~p~n~p~n~p", [length(Procs),
-            lists:map(fun(M, P) -> {M, erlang:process_info(P, current_stacktrace)} end, lists:sublist(SortedProcs, 5)),
+            lists:map(fun({M, P}) -> {M, erlang:process_info(P, current_stacktrace)} end, lists:sublist(SortedProcs, 5)),
             MergedStacks
         ])
     end),
