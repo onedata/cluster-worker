@@ -309,6 +309,24 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                     State
             end
     end,
+    spawn(fun() ->
+        Procs = erlang:processes(),
+        SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
+        MergersStacksMap = lists:foldl(fun(P, Map) ->
+            case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
+                {{current_stacktrace, K}, {memory, M}} ->
+                    {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
+                    maps:put(K, {M+M2, Num +1, K}, Map);
+                _ ->
+                    Map
+            end
+                                       end, #{}, Procs),
+        MergersStacksMap = lists:sublist(lists:reverse(lists:sort(maps:values(MergersStacksMap))), 5),
+        ?info("LoadExtended ~p~n~p~n~p", [length(Procs),
+            lists:map(fun(M, P) -> {M, erlang:process_info(P, current_stacktrace)} end, lists:sublist(SortedProcs, 5)),
+            MergersStacksMap
+        ])
+          end),
     next_mem_check(),
     {noreply, NewState};
 
