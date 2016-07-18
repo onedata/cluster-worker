@@ -215,7 +215,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    critical_section:run([ModelName, Bucket, Key],
         fun() ->
             case get(ModelConfig, links_doc_key(Key)) of
                 {ok, #document{value = LinkMap}} ->
@@ -261,7 +261,7 @@ create_link(_ModelConfig, _Key, _Link) ->
 delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
     delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    critical_section:run([ModelName, Bucket, Key],
         fun() ->
             case get(ModelConfig, links_doc_key(Key)) of
                 {ok, #document{value = LinkMap}} ->

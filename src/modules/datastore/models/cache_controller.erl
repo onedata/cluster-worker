@@ -744,7 +744,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                             {error, not_last_user}
                     end
             end,
-            Ans = datastore:run_synchronized(?MODULE, couchdb_datastore_driver:to_binary({?MODULE, start_disk_op, Uuid}),
+            Ans = critical_section:run([?MODULE, start_disk_op, Uuid],
                 fun() ->
                     ToDo = case ToDo0 of
                         ok -> choose_action(Op, Level, ModelName, Key, Uuid);
