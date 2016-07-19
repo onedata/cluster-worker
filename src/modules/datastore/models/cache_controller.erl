@@ -758,7 +758,14 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                                   case ToDo of
                                       {ok, NewMethod, NewArgs} ->
                                           FullArgs = [ModelConfig | NewArgs],
-                                          CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs),
+                                          CallAns = try
+                                                        erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), NewMethod, FullArgs)
+                                                    catch
+                                                        _:term_to_big  ->
+                                                            ?alert_stacktrace("Term_to_big: key ~p, model ~p, method ~p, args ~p",
+                                                                [Key, ModelName, NewMethod, NewArgs]),
+                                                            ok
+                                                    end,
                                           {op_change, NewMethod, CallAns};
                                       ok ->
                                           FullArgs = [ModelConfig | Args],
