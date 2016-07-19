@@ -16,9 +16,11 @@
         {applications, [
             kernel,
             stdlib,
+            os_mon,
             sasl,
             public_key,
             crypto,
+            locks,
             % Meck is needed only for development purposes, should be removed before release.
             meck,
             % ctool already requires those apps below, but they are here

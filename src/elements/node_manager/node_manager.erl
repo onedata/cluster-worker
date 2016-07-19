@@ -309,6 +309,45 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                     State
             end
     end,
+
+    spawn(fun() ->
+        ?info("Monitoring state: ~p", [MonState]),
+
+        ?info("Erlang CPU and Mem ~p~n~p~n~p", [cpu_sup:util(), erlang:memory(),
+            lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
+        ]),
+
+        Procs = erlang:processes(),
+        SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
+        MergedStacksMap = lists:foldl(fun(P, Map) ->
+            case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
+                {{current_stacktrace, K}, {memory, M}} ->
+                    {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
+                    maps:put(K, {M+M2, Num +1, K}, Map);
+                _ ->
+                    Map
+            end
+        end, #{}, Procs),
+        MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
+
+        GetName = fun(P) ->
+            All = erlang:registered(),
+            lists:foldl(fun(Name, Acc) ->
+                case whereis(Name) of
+                    P ->
+                        Name;
+                    _ ->
+                        Acc
+                end
+            end, non, All)
+        end,
+
+        ?info("Erlang Procs ~p~n~p~n~p", [length(Procs),
+            lists:map(fun({M, P}) -> {M, erlang:process_info(P, current_stacktrace), P, GetName(P)} end, lists:sublist(SortedProcs, 5)),
+            MergedStacks
+        ])
+    end),
+
     next_mem_check(),
     {noreply, NewState};
 

@@ -69,7 +69,7 @@
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_synchronized/3, normalize_link_target/1]).
+-export([run_transaction/3, normalize_link_target/1]).
 
 %%%===================================================================
 %%% API
@@ -566,10 +566,10 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 %% run at the same time.
 %% @end
 %%--------------------------------------------------------------------
--spec run_synchronized(ModelName :: model_behaviour:model_type(), ResourceId :: binary(), fun(() -> Result)) -> Result
+-spec run_transaction(ModelName :: model_behaviour:model_type(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
-run_synchronized(ModelName, ResourceId, Fun) ->
-    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_synchronized, [ResourceId, Fun]).
+run_transaction(ModelName, ResourceId, Fun) ->
+    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_sync_transation, [ResourceId, Fun]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -885,7 +885,7 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 {error, prehook_ans_not_supported};
             {error, Reason} ->
                 {error, Reason};
-            Other -> % for run_synchronized
+            Other -> % for run_transaction
                 Other
         end,
     run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, Return).
