@@ -21,7 +21,9 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
--define(MOTHER_SCOPE_DEF_FUN, fun() -> links end).
+-define(DEFAULT_LINK_SCOPE, links).
+
+-define(MOTHER_SCOPE_DEF_FUN, fun() -> ?DEFAULT_LINK_SCOPE end).
 
 -define(OTHER_SCOPES_DEF_FUN, fun() -> [] end).
 
@@ -39,7 +41,8 @@
     transactional_global_cache = true :: boolean(),
     sync_cache = false :: boolean(),
     mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope_fun(),
-    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes_fun()
+    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes_fun(),
+    link_duplication = false
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -57,6 +60,8 @@
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache,
         ?MOTHER_SCOPE_DEF_FUN, ?OTHER_SCOPES_DEF_FUN)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, false)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication),
     #model_config{
         name = ?MODULE,
         size = record_info(size, ?MODULE),
@@ -71,7 +76,8 @@
         % Function that returns scope for local operations on links
         mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
         % Function that returns all scopes for links' operations
-        other_link_scopes = ScopeFun2 % link_utils:other_scopes_fun()
+        other_link_scopes = ScopeFun2, % link_utils:other_scopes_fun()
+        link_duplication = LinkDuplication
     }
 ).
 
@@ -85,7 +91,11 @@
     doc_key,
     model,
     link_map = #{},
-    children = #{}
+    children = #{},
+    origin = ?DEFAULT_LINK_SCOPE %% Scope that is an origin to this link record
 }).
+
+%% Separator for link name and its scope
+-define(LINK_NAME_SCOPE_SEPARATOR, "#:#").
 
 -endif.

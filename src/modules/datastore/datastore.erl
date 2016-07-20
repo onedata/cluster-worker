@@ -53,14 +53,18 @@
 -export_type([store_level/0, delete_predicate/0, list_fun/0, exists_return/0]).
 
 %% Links' types
--type normalized_link_target() :: {ext_key(), model_behaviour:model_type()}.
--type link_target() :: #document{} | normalized_link_target().
+-type link_version() :: non_neg_integer().
+-type link_final_target() :: {ext_key(), model_behaviour:model_type(), links_utils:scope()}.
+-type normalized_link_target() :: {link_version(), [link_final_target()]}.
+-type simple_link_target() :: {ext_key(), model_behaviour:model_type()}.
+-type link_target() :: #document{} | normalized_link_target() | link_final_target() | simple_link_target().
 -type link_name() :: atom() | binary().
 -type link_spec() :: {link_name(), link_target()}.
 -type normalized_link_spec() :: {link_name(), normalized_link_target()}.
 
 
--export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0]).
+-export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0,
+    link_final_target/0, link_version/0]).
 
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
@@ -68,6 +72,7 @@
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5]).
+-export([fetch_full_link/3, fetch_full_link/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_synchronized/3, normalize_link_target/1]).
 
@@ -352,7 +357,48 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
     add_links(Level, Key, ModelName, [LinkSpec]);
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
-    exec_driver_async(ModelName, Level, add_links, [Key, normalize_link_target(Links)]).
+    ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
+    NormalizedLinks = normalize_link_target(ModelConfig, Links),
+    datastore:run_synchronized(ModelName, term_to_binary({links, Key}), fun() ->
+        case LinkDuplication of
+            false ->
+                exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
+            true ->
+                lists:foldl(
+                    fun
+                        ({LinkName, {_V, [LinkTarget]}}, ok) ->
+                            case fetch_full_link(Level, Key, ModelName, LinkName) of
+                                {ok, {Version, LinkTargets}} ->
+                                    exec_driver_async(ModelName, Level, add_links, [Key, [{LinkName,
+                                        {Version + 1, deduplicate_targets(lists:usort([LinkTarget | LinkTargets]))}}]]);
+                                {error, link_not_found} ->
+                                    exec_driver_async(ModelName, Level, add_links, [Key, [{LinkName, {1, [LinkTarget]}}]]);
+                                Other0 ->
+                                    Other0
+                            end ;
+                        (_, Other) ->
+                            Other
+                    end, ok, NormalizedLinks)
+        end
+    end).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Removes duplicated links from given targets list.
+%% @end
+%%--------------------------------------------------------------------
+-spec deduplicate_targets([link_final_target()]) ->
+    [link_final_target()].
+deduplicate_targets([T]) ->
+    [T];
+deduplicate_targets([]) ->
+    [];
+deduplicate_targets([{M, K, _}, {M, K, _} = T | R]) ->
+    deduplicate_targets([T | R]);
+deduplicate_targets([T | R]) ->
+    [T | deduplicate_targets(R)].
+
 
 
 %%--------------------------------------------------------------------
@@ -441,6 +487,36 @@ fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
 -spec fetch_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
     {ok, normalized_link_target()} | generic_error().
 fetch_link(Level, Key, ModelName, LinkName) ->
+    {RawLinkName, RequestedScope} = links_utils:unpack_link_scope(ModelName, LinkName),
+    case fetch_full_link(Level, Key, ModelName, RawLinkName) of
+        {ok, {_Version, [{TargetKey, TargetModel, _}]}} ->
+            {ok, {TargetKey, TargetModel}};
+        {ok, {_Version, Targets}} when is_list(Targets) ->
+            {TargetKey, TargetModel, _} = links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets),
+            {ok, {TargetKey, TargetModel}};
+        Other ->
+            Other
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets specified link from given document.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_full_link(Level :: store_level(), document(), link_name()) -> {ok, normalized_link_target()} | link_error().
+fetch_full_link(Level, #document{key = Key} = Doc, LinkName) ->
+    fetch_full_link(Level, Key, model_name(Doc), LinkName).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets specified link from the document given by key.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_full_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
+    {ok, normalized_link_target()} | generic_error().
+fetch_full_link(Level, Key, ModelName, LinkName) ->
     _ModelConfig = ModelName:model_init(),
     exec_driver(ModelName, level_to_driver(Level), fetch_link, [Key, LinkName]).
 
@@ -617,14 +693,34 @@ link_walk7(Level, Key, ModelName, [NextLink | R], Acc, get_leaf) ->
             {error, Reason}
     end.
 
+normalize_link_target(_, {_LinkName, {_Version, [{_TargetKey, ModelName, _ScopeId} | _]}} = ValidLink) when is_atom(ModelName) ->
+    ValidLink;
+normalize_link_target(_ModelConfig, []) ->
+    [];
+normalize_link_target(ModelConfig, [Link | R]) ->
+    [normalize_link_target(ModelConfig, Link) | normalize_link_target(ModelConfig, R)];
+normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, #document{key = TargetKey} = Doc}) ->
+    normalize_link_target(ModelConfig, {LinkName, {TargetKey, model_name(Doc), MScope()}});
+normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, {TargetKey, ModelName}}) ->
+    normalize_link_target(ModelConfig, {LinkName, {TargetKey, ModelName, MScope()}});
+normalize_link_target(ModelConfig, {LinkName, {_TargetKey, _ModelName, _ScopeId} = Target}) ->
+    normalize_link_target(ModelConfig, {LinkName, {1, [Target]}}).
+
+
+normalize_link_target({_LinkName, {1, [{_TargetKey, ModelName, _ScopeId} | _]}} = ValidLink) when is_atom(ModelName) ->
+    ValidLink;
 normalize_link_target([]) ->
     [];
 normalize_link_target([Link | R]) ->
     [normalize_link_target(Link) | normalize_link_target(R)];
 normalize_link_target({LinkName, #document{key = TargetKey} = Doc}) ->
-    normalize_link_target({LinkName, {TargetKey, model_name(Doc)}});
-normalize_link_target({_LinkName, {_TargetKey, ModelName}} = ValidLink) when is_atom(ModelName) ->
-    ValidLink.
+    normalize_link_target({LinkName, {TargetKey, model_name(Doc), undefined}});
+normalize_link_target({LinkName, {_TargetKey, _ModelName, _ScopeId} = Target}) ->
+    normalize_link_target({LinkName, {1, [Target]}});
+normalize_link_target({LinkName, {TargetKey, ModelName}}) ->
+    normalize_link_target({LinkName, {TargetKey, ModelName, undefined}}).
+
+
 
 
 %%--------------------------------------------------------------------
@@ -954,3 +1050,4 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 {error, Reason}
         end,
     run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, Return).
+
