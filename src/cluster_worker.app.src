@@ -62,9 +62,9 @@
             {covered_excluded_modules, []},
             %% Minimal delay in cache dumping to disk (changes done before this time causes cancelation of dump)
             %% Warning - too small delay may result in cache inconsistency
-            {cache_to_disk_delay_ms, 5000},
+            {cache_to_disk_delay_ms, 3000},
             %% Maximal delay in cache dumping to disk
-            {cache_to_disk_force_delay_ms, 30000},
+            {cache_to_disk_force_delay_ms, 5000},
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 30},
 
