@@ -158,7 +158,7 @@ get_hooks_config(Models) ->
 %% Generates uuid on the basis of key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()},
+-spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cc_link_key},
     ModelName :: model_behaviour:model_type()) -> binary().
 get_cache_uuid(Key, ModelName) ->
   base64:encode(term_to_binary({ModelName, Key})).
@@ -305,7 +305,7 @@ flush(Level, ModelName, Key, Link) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec flush(Level :: datastore:store_level(), ModelName :: atom(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cc_link_key}) ->
   ok | datastore:generic_error().
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
@@ -508,7 +508,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cc_link_key}) ->
   ok | datastore:generic_error().
 safe_delete(Level, ModelName, {Key, Link, cc_link_key}) ->
   try
@@ -591,7 +591,7 @@ delete_all_keys(Level, Caches) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec value_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cc_link_key}) ->
   ok | datastore:generic_error().
 value_delete(Level, ModelName, {Key, Link, cc_link_key}) ->
   try

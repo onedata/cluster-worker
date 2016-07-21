@@ -369,7 +369,7 @@ get_hooks_config() ->
 %% Updates information about usage of a document.
 %% @end
 %%--------------------------------------------------------------------
--spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cc_link_key},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 update_usage_info(Key, ModelName, Level) ->
@@ -388,7 +388,7 @@ update_usage_info(Key, ModelName, Level) ->
 %% Updates information about usage of a document and saves doc to memory.
 %% @end
 %%--------------------------------------------------------------------
--spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cc_link_key},
     ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 update_usage_info({Key, LinkName, cc_link_key}, ModelName, Doc, Level) ->
@@ -430,8 +430,8 @@ check_exists(Key, ModelName, Level) ->
 %% Checks if fetch operation should be performed.
 %% @end
 %%--------------------------------------------------------------------
--spec check_fetch(Key :: {datastore:ext_key(), datastore:link_name()}, ModelName :: model_behaviour:model_type(),
-    Level :: datastore:store_level()) -> ok | {error, link_not_found}.
+-spec check_fetch(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
+    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) -> ok | {error, link_not_found}.
 check_fetch(Key, ModelName, Level) ->
     check_disk_read(Key, ModelName, Level, {error, link_not_found}).
 
@@ -441,7 +441,7 @@ check_fetch(Key, ModelName, Level) ->
 %% Checks if operation on disk should be performed.
 %% @end
 %%--------------------------------------------------------------------
--spec check_disk_read(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec check_disk_read(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(),
     ErrorAns :: term()) -> term().
 check_disk_read(Key, ModelName, Level, ErrorAns) ->
@@ -531,7 +531,7 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec choose_action(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}, Uuid :: binary()) ->
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cc_link_key}, Uuid :: binary()) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
 choose_action(Op, Level, ModelName, {Key, Link, cc_link_key}, Uuid) ->
@@ -631,7 +631,7 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_action_after_clear(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) -> ok | no_return().
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cc_link_key}) -> ok | no_return().
 check_action_after_clear(Op, Level, ModelName, {Key, Link, cc_link_key}) ->
     case Op of
         delete_links ->
@@ -672,7 +672,7 @@ check_action_after_clear(Op, Level, ModelName, Key) ->
 %% Saves dump information about disk operation and decides if it should be done.
 %% @end
 %%--------------------------------------------------------------------
--spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Op :: atom(), Args :: list(), Level :: datastore:store_level()) ->
     ok | {task, task_manager:task()} | {error, Error} when
     Error :: not_last_user | preparing_disk_op_failed.
@@ -685,7 +685,7 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
 %% Saves dump information about disk operation and decides if it should be done.
 %% @end
 %%--------------------------------------------------------------------
--spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Op :: atom(), Args :: list(),
     Level :: datastore:store_level(), Sleep :: boolean()) -> ok | {task, task_manager:task()} | {error, Error} when
     Error :: not_last_user | preparing_disk_op_failed.
@@ -798,7 +798,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
 %% Marks document before delete operation.
 %% @end
 %%--------------------------------------------------------------------
--spec before_del(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec before_del(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(), Op :: atom()) ->
     ok | {error, preparing_op_failed}.
 before_del(Key, ModelName, Level, _Op) ->
