@@ -569,7 +569,7 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 -spec run_transaction(ModelName :: model_behaviour:model_type(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
 run_transaction(ModelName, ResourceId, Fun) ->
-    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_sync_transation, [ResourceId, Fun]).
+    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_transation, [ResourceId, Fun]).
 
 %%--------------------------------------------------------------------
 %% @doc
