@@ -1451,7 +1451,7 @@ clearing_global_cache_test(Config) ->
     MemUsage = Mem0 + ToAdd,
 
     ?assertMatch(ok, ?call(Worker1, ?MODULE, utilize_memory, [TestRecord, MemUsage, MemTarget], timer:minutes(10))),
-    ?assertMatch(ok, test_utils:set_env(Worker2, ?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache, MemTarget)),
+    ?assertMatch(ok, test_utils:set_env(Worker2, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, MemTarget)),
     [{_, Mem1}] = monitoring:get_memory_stats(),
     Mem1Node = ?call(Worker2, erlang, memory, [total]),
     ct:print("Mem1 ~p xxx ~p", [Mem1, Mem1Node]),
@@ -1472,7 +1472,7 @@ clearing_global_cache_test(Config) ->
 
 % helper fun used by clearing_global_cache_test
 utilize_memory(TestRecord, MemUsage, MemTarget) ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache, MemTarget),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, MemTarget),
 
     OneDoc = list_to_binary(prepare_list(256 * 1024)),
 

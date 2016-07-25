@@ -24,7 +24,7 @@
 
 %% API
 -export([clear_local_cache/1, clear_global_cache/1, clear_local_cache/2, clear_global_cache/2]).
--export([clear_cache/2, clear_cache/3, should_clear_cache/1, get_hooks_config/1, wait_for_cache_dump/0]).
+-export([clear_cache/2, clear_cache/3, should_clear_cache/2, get_hooks_config/1, wait_for_cache_dump/0]).
 -export([delete_old_keys/2, delete_all_keys/1]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
@@ -38,10 +38,11 @@
 %% Checks if memory should be cleared.
 %% @end
 %%--------------------------------------------------------------------
--spec should_clear_cache(MemUsage :: number()) -> boolean().
-should_clear_cache(MemUsage) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache),
-  MemUsage >= TargetMemUse.
+-spec should_clear_cache(MemUsage :: non_neg_integer(), EtsMemUsage :: non_neg_integer()) -> boolean().
+should_clear_cache(MemUsage, EtsMemUsage) ->
+  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+  {ok, TargetEtsMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, ets_mem_to_clear_cache_mb),
+  (MemUsage >= TargetMemUse) and (EtsMemUsage >= TargetEtsMemUse).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -105,11 +106,11 @@ clear_cache(Aggressive, StoreType) ->
 -spec clear_cache(MemUsage :: number(), Aggressive :: boolean(), StoreType :: globally_cached | locally_cached) ->
   ok | mem_usage_too_high | cannot_check_mem_usage.
 clear_cache(MemUsage, true, StoreType) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache),
+  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   clear_cache(MemUsage, TargetMemUse, StoreType, [timer:minutes(10), 0]);
 
 clear_cache(MemUsage, _, StoreType) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache),
+  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   clear_cache(MemUsage, TargetMemUse, StoreType, [timer:hours(7*24), timer:hours(24), timer:hours(1)]).
 
 %%--------------------------------------------------------------------
