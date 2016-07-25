@@ -135,8 +135,8 @@ save_link_doc(ModelConfig, Doc) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
     create(ModelConfig, Doc);
-save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
-    ok = assert_value_size(Value),
+save_doc(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -190,8 +190,8 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value = Value}) ->
-    ok = assert_value_size(Value),
+create(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -747,8 +747,8 @@ db_run(Mod, Fun, Args, Retry) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
-    ok = assert_value_size(Value),
+force_save(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -1169,9 +1169,12 @@ rev_info_to_rev({NumBin, [Hash | _]}) when is_binary(NumBin) ->
 %% Ensure that given term does not exceed maximum document's value size.
 %% @end
 %%--------------------------------------------------------------------
--spec assert_value_size(Value :: term()) -> ok | no_return().
-assert_value_size(Value) ->
+-spec assert_value_size(Value :: term(), model_behaviour:model_config(), datastore:ext_key()) -> ok | no_return().
+assert_value_size(Value, ModelConfig, Key) ->
     case byte_size(term_to_binary(Value)) > ?MAX_VALUE_SIZE of
-        true -> error(term_to_big);
+        true ->
+            ?error_stacktrace("term_too_big: key ~p, model ~p, value ~p",
+                [Key, ModelConfig, Value]),
+            error(term_too_big);
         false -> ok
     end.

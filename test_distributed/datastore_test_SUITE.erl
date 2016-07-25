@@ -902,7 +902,7 @@ interupt_global_cache_clearing_test(Config) ->
     ?assertMatch(ok, SA),
 
     Uuid = caches_controller:get_cache_uuid(Key, TestRecord),
-    Uuid2 = caches_controller:get_cache_uuid({Key, link}, TestRecord),
+    Uuid2 = caches_controller:get_cache_uuid({Key, link, cache_controller_link_key}, TestRecord),
     ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid])),
     ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid2])),
     ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
@@ -1197,7 +1197,7 @@ create_after_delete_global_cache_test(Config) ->
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
 
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
-    LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, TestRecord),
+    LinkCacheUuid = caches_controller:get_cache_uuid({Key, link, cache_controller_link_key}, TestRecord),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
     ?assertMatch({ok, _}, ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]), 6),
@@ -1364,8 +1364,8 @@ link_monitoring_global_cache_test(Config) ->
     },
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc2])),
 
-    LinkCacheUuid = caches_controller:get_cache_uuid({Key, link}, TestRecord),
-    LinkCacheUuid2 = caches_controller:get_cache_uuid({Key, link2}, TestRecord),
+    LinkCacheUuid = caches_controller:get_cache_uuid({Key, link, cache_controller_link_key}, TestRecord),
+    LinkCacheUuid2 = caches_controller:get_cache_uuid({Key, link2, cache_controller_link_key}, TestRecord),
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{link, LinkedDoc}]])),
     ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
     ?assertMatch(true, ?call(Worker1, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, LinkCacheUuid]), 1),
