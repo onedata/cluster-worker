@@ -51,7 +51,7 @@
             {ets_mem_to_clear_cache_mb, 200},
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 300},
-            {procs_num_analysis_treshold, 1000},
+            {procs_num_analysis_treshold, 2000},
             {min_analysis_interval_min, 1},
             {max_analysis_interval_min, 720},
             %% How long task should wait between function calls (when function execution ends with error)

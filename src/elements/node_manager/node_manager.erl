@@ -801,8 +801,8 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
                     end, non, All)
                 end,
 
-                ?info("Erlang Procs stats:~n procs num~p~n single proc memory cosumption~p~n "
-                    ++ "aggregated memory consumption~p~n simmilar procs ~p", [length(Procs),
+                ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
+                    ++ "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
                     lists:map(fun({M, P}) -> {M, erlang:process_info(P, current_stacktrace), P, GetName(P)} end, lists:sublist(SortedProcs, 5)),
                     MergedStacks, MergedStacks2
                 ])
