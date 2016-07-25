@@ -158,7 +158,7 @@ get_hooks_config(Models) ->
 %% Generates uuid on the basis of key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()},
+-spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type()) -> binary().
 get_cache_uuid(Key, ModelName) ->
   base64:encode(term_to_binary({ModelName, Key})).
@@ -297,7 +297,7 @@ flush(Level, ModelName, Key, all) ->
   end, ok, Links);
 
 flush(Level, ModelName, Key, Link) ->
-  flush(Level, ModelName, {Key, Link}).
+  flush(Level, ModelName, {Key, Link, cache_controller_link_key}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -305,7 +305,7 @@ flush(Level, ModelName, Key, Link) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec flush(Level :: datastore:store_level(), ModelName :: atom(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) ->
   ok | datastore:generic_error().
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
@@ -375,7 +375,7 @@ clear(Level, ModelName, Key, all) ->
 
 clear(Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
-  Uuid = get_cache_uuid({Key, Link}, ModelName),
+  Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
 
   Pred = fun() ->
     case save_clear_info(Level, Uuid) of
@@ -508,12 +508,12 @@ delete_old_keys(Level, Caches, TimeWindow) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) ->
   ok | datastore:generic_error().
-safe_delete(Level, ModelName, {Key, Link}) ->
+safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
-    Uuid = get_cache_uuid({Key, Link}, ModelName),
+    Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
 
     Pred = fun() ->
       case save_high_mem_clear_info(Level, Uuid) of
@@ -528,7 +528,7 @@ safe_delete(Level, ModelName, {Key, Link}) ->
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
-      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link}}, E1, E2]),
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link, cache_controller_link_key}}, E1, E2]),
       {error, safe_delete_failed}
   end;
 safe_delete(Level, ModelName, Key) ->
@@ -591,9 +591,9 @@ delete_all_keys(Level, Caches) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec value_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) ->
   ok | datastore:generic_error().
-value_delete(Level, ModelName, {Key, Link}) ->
+value_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
     FullArgs2 = [ModelConfig, Key, [Link]],
@@ -601,7 +601,7 @@ value_delete(Level, ModelName, {Key, Link}) ->
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller value_delete. "
-      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link}}, E1, E2]),
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link, cache_controller_link_key}}, E1, E2]),
       {error, delete_failed}
   end;
 value_delete(Level, ModelName, Key) ->
