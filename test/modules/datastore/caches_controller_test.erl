@@ -32,6 +32,7 @@ mem_clearing_test_() ->
             MemUsage = Mem0 + ToAdd,
 
             application:set_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, MemTarget),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, ets_mem_to_clear_cache_mb, 1),
 
             OneMB = list_to_binary(prepare_list(1024*1024)),
             ets:new(test, [named_table, public, set]),
@@ -91,7 +92,7 @@ mem_clearing_test_() ->
             ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:hours(7*24)])),
             ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:hours(24)])),
             ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:hours(1)])),
-            ?assertEqual(0, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:minutes(10)])),
+            ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:minutes(10)])),
             ?assertEqual(0, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, 0])),
 
             ?assert(meck:validate(caches_controller)),

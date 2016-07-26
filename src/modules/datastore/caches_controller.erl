@@ -42,7 +42,7 @@
 should_clear_cache(MemUsage, EtsMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetEtsMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, ets_mem_to_clear_cache_mb),
-  (MemUsage >= TargetMemUse) and (EtsMemUsage >= TargetEtsMemUse).
+  (MemUsage >= TargetMemUse) and (EtsMemUsage >= TargetEtsMemUse * 1024 * 1024).
 
 %%--------------------------------------------------------------------
 %% @doc
