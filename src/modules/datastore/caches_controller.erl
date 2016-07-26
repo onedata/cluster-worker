@@ -38,11 +38,12 @@
 %% Checks if memory should be cleared.
 %% @end
 %%--------------------------------------------------------------------
--spec should_clear_cache(MemUsage :: float(), EtsMemUsage :: non_neg_integer()) -> boolean().
-should_clear_cache(MemUsage, EtsMemUsage) ->
+-spec should_clear_cache(MemUsage :: float(), ErlangMemUsage :: [{atom(), non_neg_integer()}]) -> boolean().
+should_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
-  {ok, TargetEtsMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, ets_mem_to_clear_cache_mb),
-  (MemUsage >= TargetMemUse) and (EtsMemUsage >= TargetEtsMemUse * 1024 * 1024).
+  {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
+  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  (MemUsage >= TargetMemUse) and (MemToCompare >= TargetErlangMemUse * 1024 * 1024).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -90,7 +91,7 @@ clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   timer:sleep(1000), % time for system for mem info update
   case monitoring:get_memory_stats() of
     [{<<"mem">>, MemUsage}] ->
-      ErlangMemUsage = proplists:get_value(ets, erlang:memory(), 0),
+      ErlangMemUsage = erlang:memory(),
       case should_clear_cache(MemUsage, ErlangMemUsage) of
         true ->
           clear_cache_by_time_windows(StoreType, Windows);

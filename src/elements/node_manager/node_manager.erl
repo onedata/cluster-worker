@@ -231,7 +231,7 @@ handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
 handle_call(check_mem_synch, _From, State) ->
     Ans = case monitoring:get_memory_stats() of
         [{<<"mem">>, MemUsage}] ->
-            case caches_controller:should_clear_cache(MemUsage, proplists:get_value(ets, erlang:memory(), 0)) of
+            case caches_controller:should_clear_cache(MemUsage, erlang:memory()) of
                 true ->
                     free_memory(MemUsage);
                 _ ->
@@ -295,7 +295,7 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
     {_, ErlangMemUsage, _} = monitoring:erlang_vm_stats(MonState),
     % Check if memory cleaning of oldest docs should be started
     % even when memory utilization is low (e.g. once a day)
-    NewState = case caches_controller:should_clear_cache(MemUsage, proplists:get_value(ets, ErlangMemUsage, 0)) of
+    NewState = case caches_controller:should_clear_cache(MemUsage, ErlangMemUsage) of
         true ->
             spawn(fun() -> free_memory(MemUsage) end),
             State#state{last_cache_cleaning = os:timestamp()};
