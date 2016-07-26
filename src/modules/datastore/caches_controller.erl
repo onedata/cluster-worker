@@ -23,8 +23,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([clear_local_cache/1, clear_global_cache/1, clear_local_cache/2, clear_global_cache/2]).
--export([clear_cache/2, clear_cache/3, should_clear_cache/2, get_hooks_config/1, wait_for_cache_dump/0]).
+-export([clear_local_cache/1, clear_global_cache/1]).
+-export([clear_cache/2, should_clear_cache/2, get_hooks_config/1, wait_for_cache_dump/0]).
 -export([delete_old_keys/2, delete_all_keys/1]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
@@ -38,7 +38,7 @@
 %% Checks if memory should be cleared.
 %% @end
 %%--------------------------------------------------------------------
--spec should_clear_cache(MemUsage :: non_neg_integer(), EtsMemUsage :: non_neg_integer()) -> boolean().
+-spec should_clear_cache(MemUsage :: float(), EtsMemUsage :: non_neg_integer()) -> boolean().
 should_clear_cache(MemUsage, EtsMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetEtsMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, ets_mem_to_clear_cache_mb),
@@ -55,16 +55,6 @@ clear_local_cache(Aggressive) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Clears local cache.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_local_cache(MemUsage :: number(), Aggressive :: boolean()) ->
-  ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_local_cache(MemUsage, Aggressive) ->
-  clear_cache(MemUsage, Aggressive, locally_cached).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Clears global cache.
 %% @end
 %%--------------------------------------------------------------------
@@ -74,65 +64,39 @@ clear_global_cache(Aggressive) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Clears global cache.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_global_cache(MemUsage :: number(), Aggressive :: boolean()) ->
-  ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_global_cache(MemUsage, Aggressive) ->
-  clear_cache(MemUsage, Aggressive, globally_cached).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Clears cache.
 %% @end
 %%--------------------------------------------------------------------
 -spec clear_cache(Aggressive :: boolean(), StoreType :: globally_cached | locally_cached) ->
   ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_cache(Aggressive, StoreType) ->
-  case monitoring:get_memory_stats() of
-    [{<<"mem">>, MemUsage}] ->
-      clear_cache(MemUsage, Aggressive, StoreType);
-    _ ->
-      ?warning("Not able to check memory usage"),
-      cannot_check_mem_usage
-  end.
+clear_cache(true, StoreType) ->
+  clear_cache_by_time_windows(StoreType, [timer:minutes(10), 0]);
+
+clear_cache(_, StoreType) ->
+  clear_cache_by_time_windows(StoreType, [timer:hours(7*24), timer:hours(24), timer:hours(1)]).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Clears cache.
 %% @end
 %%--------------------------------------------------------------------
--spec clear_cache(MemUsage :: number(), Aggressive :: boolean(), StoreType :: globally_cached | locally_cached) ->
+-spec clear_cache_by_time_windows(StoreType :: globally_cached | locally_cached, TimeWindows :: list()) ->
   ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_cache(MemUsage, true, StoreType) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
-  clear_cache(MemUsage, TargetMemUse, StoreType, [timer:minutes(10), 0]);
-
-clear_cache(MemUsage, _, StoreType) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
-  clear_cache(MemUsage, TargetMemUse, StoreType, [timer:hours(7*24), timer:hours(24), timer:hours(1)]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Clears cache.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_cache(MemUsage :: number(), TargetMemUse :: number(),
-    StoreType :: globally_cached | locally_cached, TimeWindows :: list()) ->
-  ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_cache(MemUsage, TargetMemUse, _StoreType, _TimeWindows) when MemUsage < TargetMemUse ->
-  ok;
-
-clear_cache(_MemUsage, _TargetMemUse, _StoreType, []) ->
+clear_cache_by_time_windows(_StoreType, []) ->
   mem_usage_too_high;
 
-clear_cache(_MemUsage, TargetMemUse, StoreType, [TimeWindow | Windows]) ->
+clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   caches_controller:delete_old_keys(StoreType, TimeWindow),
   timer:sleep(1000), % time for system for mem info update
   case monitoring:get_memory_stats() of
-    [{<<"mem">>, NewMemUsage}] ->
-      clear_cache(NewMemUsage, TargetMemUse, StoreType, Windows);
+    [{<<"mem">>, MemUsage}] ->
+      ErlangMemUsage = proplists:get_value(ets, erlang:memory(), 0),
+      case should_clear_cache(MemUsage, ErlangMemUsage) of
+        true ->
+          clear_cache_by_time_windows(StoreType, Windows);
+        _ ->
+          ok
+      end;
     _ ->
       ?warning("Not able to check memory usage"),
       cannot_check_mem_usage

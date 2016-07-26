@@ -658,7 +658,7 @@ start_worker(Module, Args) ->
 %% Clears memory caches.
 %% @end
 %%--------------------------------------------------------------------
--spec free_memory(NodeMem :: number()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
+-spec free_memory(NodeMem :: float()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
 free_memory(NodeMem) ->
     try
         AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
@@ -673,7 +673,7 @@ free_memory(NodeMem) ->
             ({_Aggressive, _StoreType}, ok) ->
                 ok;
             ({Aggressive, StoreType}, _) ->
-                Ans = caches_controller:clear_cache(NodeMem, Aggressive, StoreType),
+                Ans = caches_controller:clear_cache(Aggressive, StoreType),
                 case Ans of
                     mem_usage_too_high ->
                         ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
@@ -693,7 +693,7 @@ free_memory() ->
         ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
         lists:foreach(fun
             ({Aggressive, StoreType}) ->
-                caches_controller:clear_cache(100, Aggressive, StoreType)
+                caches_controller:clear_cache(Aggressive, StoreType)
         end, ClearingOrder)
     catch
         E1:E2 ->

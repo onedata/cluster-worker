@@ -63,19 +63,19 @@ mem_clearing_test_() ->
                 end
             ),
 
-            ?assertEqual(mem_usage_too_high, caches_controller:clear_global_cache(MemUsage, false)),
+            ?assertEqual(mem_usage_too_high, caches_controller:clear_global_cache(false)),
             [{_, TmpMem}] = monitoring:get_memory_stats(),
             ?assert(TmpMem > MemTarget),
 
-            ?assertEqual(mem_usage_too_high, caches_controller:clear_local_cache(MemUsage, false)),
+            ?assertEqual(mem_usage_too_high, caches_controller:clear_local_cache(false)),
             [{_, TmpMem2}] = monitoring:get_memory_stats(),
             ?assert(TmpMem2 > MemTarget),
 
-            ?assertEqual(ok, caches_controller:clear_local_cache(MemUsage, true)),
+            ?assertEqual(ok, caches_controller:clear_local_cache(true)),
             [{_, FinalMem}] = monitoring:get_memory_stats(),
             ?assert(FinalMem < MemTarget),
 
-            ?assertEqual(ok, caches_controller:clear_global_cache(FinalMem, true)),
+            ?assertEqual(ok, caches_controller:clear_global_cache(true)),
 
             catch ets:delete(test),
 
