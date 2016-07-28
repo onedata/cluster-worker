@@ -250,12 +250,18 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
-    boolean().
-exists_link_doc(ModelConfig, Key, Scope) ->
-    DocKey = links_utils:links_doc_key(Key, Scope),
-    case get_link_doc(ModelConfig, DocKey) of
-        {ok, _} -> {ok, true};
-        _ -> {ok, false}
+    {ok, boolean()} | datastore:generic_error().
+exists_link_doc(ModelConfig, DocKey, Scope) ->
+    Key = links_utils:links_doc_key(DocKey, Scope),
+    TmpAns = case mnesia:is_transaction() of
+        true ->
+            mnesia:read(links_table_name(ModelConfig), Key);
+        _ ->
+            mnesia:dirty_read(links_table_name(ModelConfig), Key)
+    end,
+    case TmpAns of
+        [] -> {ok, false};
+        [_Record] -> {ok, true}
     end.
 
 %%--------------------------------------------------------------------

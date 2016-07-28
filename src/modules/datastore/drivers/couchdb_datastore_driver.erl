@@ -282,12 +282,15 @@ get_link_doc(ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
-    boolean().
+    {ok, boolean()} | datastore:generic_error().
 exists_link_doc(ModelConfig, Key, Scope) ->
     DocKey = links_utils:links_doc_key(Key, Scope),
     case get_link_doc(ModelConfig, DocKey) of
         {ok, _} -> {ok, true};
-        _ -> {ok, false}
+        {error, {not_found, _}} ->
+            {ok, false};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
