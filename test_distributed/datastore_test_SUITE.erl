@@ -186,7 +186,7 @@ links_scope_test(Config) ->
             ?assert(lists:member(GetLinkName(I), ListedLinks))
         end, Links),
         LinksLength = length(Links),
-        ct:print("aaaa ~p", [{ListedLinks, Links}]),
+%%        ct:print("aaaa ~p", [{ListedLinks, Links}]),
         ?assertMatch(LinksLength, length(ListedLinks))
     end,
     DeleteLink = fun(I) ->
@@ -196,6 +196,9 @@ links_scope_test(Config) ->
         ?assertMatch(ok, ?call_store(Worker2, delete_links, [?GLOBAL_ONLY_LEVEL, Doc,
             lists:map(fun(I) -> GetLinkName(I) end, Links)]))
     end,
+
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
     AddLinkWithDoc(1),
     AddLinkWithDoc(2),
@@ -215,6 +218,9 @@ links_scope_test(Config) ->
     DeleteLink(100),
     GetAllLinks([2,3,4]),
 
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
+
     set_mother_scope(scope2),
     GetAllLinks([]),
     set_other_scopes([scope1]),
@@ -232,6 +238,9 @@ links_scope_test(Config) ->
     GetAllLinks([2,3,4,5,6,7]),
     DeleteLinks([3, 7, 100]),
     GetAllLinks([2,4,5,6]),
+
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
     set_other_scopes([]),
     GetAllLinks([5,6]),

@@ -67,7 +67,7 @@
     get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
-    link_walk/4, link_walk/5]).
+    link_walk/4, link_walk/5, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_transaction/3, normalize_link_target/1]).
 
@@ -562,6 +562,26 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(store_level(), document(), links_utils:scope()) ->
+    boolean().
+exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
+    exists_link_doc(Level, Key, model_name(Doc),  Scope).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type(), links_utils:scope()) ->
+    boolean().
+exists_link_doc(Level, Key, ModelName,  Scope) ->
+    exec_driver(ModelName, level_to_driver(Level), exists_link_doc, [Key, Scope]).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
 %% run at the same time.
 %% @end
@@ -854,6 +874,8 @@ exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
         Result when Method =:= get; Method =:= fetch_link; Method =:= foreach_link ->
             Result;
         {ok, true} = Result when Method =:= exists ->
+            Result;
+        {ok, true} = Result when Method =:= exists_link_doc ->
             Result;
         _ ->
             exec_driver(ModelName, Rest, Method, Args)
