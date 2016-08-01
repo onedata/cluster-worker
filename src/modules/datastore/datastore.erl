@@ -68,7 +68,8 @@
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, exists_link_doc/3, exists_link_doc/4]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
+-export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_level/1,
+    driver_to_module/1, initialize_state/1]).
 -export([run_transaction/3, normalize_link_target/1, run_posthooks_sync/5]).
 
 %%%===================================================================
