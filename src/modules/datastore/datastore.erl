@@ -567,7 +567,7 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec exists_link_doc(store_level(), document(), links_utils:scope()) ->
-    boolean().
+    {ok, boolean()} | datastore:generic_error().
 exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
     exists_link_doc(Level, Key, model_name(Doc),  Scope).
 
@@ -577,7 +577,7 @@ exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type(), links_utils:scope()) ->
-    boolean().
+    {ok, boolean()} | datastore:generic_error().
 exists_link_doc(Level, Key, ModelName,  Scope) ->
     exec_driver(ModelName, level_to_driver(Level), exists_link_doc, [Key, Scope]).
 
