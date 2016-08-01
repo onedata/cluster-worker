@@ -69,7 +69,7 @@
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/1]).
+-export([run_transaction/3, normalize_link_target/1, run_posthooks_sync/5]).
 
 %%%===================================================================
 %%% API
@@ -963,25 +963,24 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
     end;
 exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
-    Return =
-        case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
-            ok ->
-                FullArgs = [ModelConfig | Args],
-                erlang:apply(driver_to_module(Driver), Method, FullArgs);
-            {ok, Value} ->
-                {ok, Value};
-            {tasks, Tasks} ->
-                Level = caches_controller:cache_to_task_level(ModelName),
-                lists:foreach(fun
-                    ({task, Task}) ->
-                        ok = task_manager:start_task(Task, Level);
-                    (_) ->
-                        ok % error already logged
-                end, Tasks);
-            {task, Task} ->
-                Level = caches_controller:cache_to_task_level(ModelName),
-                ok = task_manager:start_task(Task, Level);
-            {error, Reason} ->
-                {error, Reason}
-        end,
-    run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, Return).
+    case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
+        ok ->
+            FullArgs = [ModelConfig | Args],
+            Return = erlang:apply(driver_to_module(Driver), Method, FullArgs),
+            run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, Return);
+        {ok, Value} ->
+            run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, {ok, Value});
+        {tasks, Tasks} ->
+            Level = caches_controller:cache_to_task_level(ModelName),
+            lists:foreach(fun
+                              ({task, Task}) ->
+                                  ok = task_manager:start_task(Task, Level);
+                              (_) ->
+                                  ok % error already logged
+                          end, Tasks);
+        {task, Task} ->
+            Level = caches_controller:cache_to_task_level(ModelName),
+            ok = task_manager:start_task(Task, Level);
+        {error, Reason} ->
+            run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
+    end.
