@@ -309,8 +309,25 @@ flush(Level, ModelName, Key, Link) ->
   ok | datastore:generic_error().
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
+  DBValue = case Key of
+    {K, L, cache_controller_link_key} ->
+      case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), fetch_link, [ModelConfig, K, L]) of
+        {ok, SavedValue} ->
+          SavedValue;
+        {error, link_not_found} ->
+          link_not_found
+      end;
+    _ ->
+      case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, [ModelConfig, Key]) of
+        {ok, #document{value = SavedValue}} ->
+          SavedValue;
+        {error, {not_found, _}} ->
+          not_found
+      end
+  end,
+  ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
-  ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid),
+  ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid, DBValue, true),
 
   Ans = case ToDo of
           {ok, NewMethod, NewArgs} ->

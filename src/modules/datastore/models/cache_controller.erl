@@ -536,6 +536,20 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
 choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid) ->
+    choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, ignore, false).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Choose action that should be done.
+%% @end
+%%--------------------------------------------------------------------
+-spec choose_action(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
+    Uuid :: binary(), DB_Value :: term(), AbortWhenControlDataMissing :: boolean()) ->
+    ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
+    NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
+choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, DB_Value, AbortWhenControlDataMissing) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -566,7 +580,12 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
             case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
                 fetch_link, [ModelConfig, Key, Link]) of
                 {ok, SavedValue} ->
-                    {ok, add_links, [Key, [{Link, SavedValue}]]};
+                    case SavedValue of
+                        DB_Value ->
+                            {ok, non};
+                        _ ->
+                            {ok, add_links, [Key, [{Link, SavedValue}]]}
+                    end;
                 {error, link_not_found} ->
                     case get(Level, Uuid) of
                         {ok, Doc} ->
@@ -577,16 +596,26 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                 non ->
                                     {ok, non};
                                 _ ->
-                                    {ok, delete_links, [Key, [Link]]}
+                                    case DB_Value of
+                                        link_not_found ->
+                                            {ok, non};
+                                        _ ->
+                                            {ok, delete_links, [Key, [Link]]}
+                                    end
                             end;
                         {error, {not_found, _}} ->
-                            {ok, delete_links, [Key, [Link]]}
+                            case AbortWhenControlDataMissing of
+                                true ->
+                                    {ok, non};
+                                _ ->
+                                    {ok, delete_links, [Key, [Link]]}
+                            end
                     end;
                 FetchError ->
                     {fetch_error, FetchError}
             end
     end;
-choose_action(Op, Level, ModelName, Key, Uuid) ->
+choose_action(Op, Level, ModelName, Key, Uuid, DB_Value, AbortWhenControlDataMissing) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -603,8 +632,13 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
         _ ->
             case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
                 get, [ModelConfig, Key]) of
-                {ok, SavedValue} ->
-                    {ok, save, [SavedValue]};
+                {ok, #document{value = Value} = SavedValue} ->
+                    case Value of
+                        DB_Value ->
+                            {ok, non};
+                        _ ->
+                            {ok, save, [SavedValue]}
+                    end;
                 {error, {not_found, _}} ->
                     case get(Level, Uuid) of
                         {ok, Doc} ->
@@ -615,10 +649,20 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
                                 non ->
                                     {ok, non};
                                 _ ->
-                                    {ok, delete, [Key, ?PRED_ALWAYS]}
+                                    case DB_Value of
+                                        not_found ->
+                                            {ok, non};
+                                        _ ->
+                                            {ok, delete, [Key, ?PRED_ALWAYS]}
+                                    end
                             end;
                         {error, {not_found, _}} ->
-                            {ok, delete, [Key, ?PRED_ALWAYS]}
+                            case AbortWhenControlDataMissing of
+                                true ->
+                                    {ok, non};
+                                _ ->
+                                    {ok, delete, [Key, ?PRED_ALWAYS]}
+                            end
                     end;
                 GetError ->
                     {get_error, GetError}
