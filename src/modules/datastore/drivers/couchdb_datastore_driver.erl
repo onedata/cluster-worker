@@ -49,7 +49,7 @@
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 -export([to_binary/1]).
-
+-export([add_view/3, get_view/2, delete_view/1]).
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
@@ -1188,3 +1188,62 @@ assert_value_size(Value, ModelConfig, Key) ->
             error(term_too_big);
         false -> ok
     end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%                                 CUSTOM VIEWS                                       %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Add design doc with custom view under given Id. The ViewFunction will be
+%% invoked for each instance of given record stored in db, and should return null or key,
+%% that will be queried with get_view function later.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_view(binary(), binary(), binary()) -> ok.
+add_view(RecordName, Id, ViewFunction) ->
+    DesignId = <<"_design/", Id/binary>>,
+
+    Doc = to_json_term(#{
+        <<"_id">> => DesignId,
+        <<"views">> => maps:from_list(
+            [{Id, #{<<"map">> => <<"function (doc, meta) { if(doc['RECORD::'] == '", RecordName/binary, "') { var key = ",
+                ViewFunction/binary,
+                "; var key_to_emit = key(doc['ATOM::value']); if(key_to_emit) { emit(key_to_emit, null); } } }">>}}]
+        )
+    }),
+    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Get list of document ids for view with given id, matching given key.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_view(binary(), binary()) -> {ok, [binary()]}.
+get_view(Id, Key) ->
+    case db_run(couchbeam_view, fetch, [{Id, Id}, [{key, Key}]], 3) of
+        {ok, List} ->
+            Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
+                {_, DocUuid} = from_driver_key(DbDocId),
+                DocUuid
+            end, List),
+            {ok, Ids};
+        Error ->
+            Error
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Delete view and design doc with given Id
+%% @end
+%% @TODO TODO
+%%--------------------------------------------------------------------
+-spec delete_view(binary()) -> ok.
+delete_view(Id) ->
+%%    DesignId = <<"_design/", Id/binary>>,
+%%    {ok, _} = couchdb_datastore_driver:db_run(couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
+    ok.
