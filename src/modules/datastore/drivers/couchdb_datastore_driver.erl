@@ -49,7 +49,7 @@
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 -export([to_binary/1]).
--export([add_view/3, get_view/2, delete_view/1]).
+-export([add_view/2, get_view/2, delete_view/1]).
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
@@ -1202,16 +1202,14 @@ assert_value_size(Value, ModelConfig, Key) ->
 %% that will be queried with get_view function later.
 %% @end
 %%--------------------------------------------------------------------
--spec add_view(binary(), binary(), binary()) -> ok.
-add_view(RecordName, Id, ViewFunction) ->
+-spec add_view(binary(), binary()) -> ok.
+add_view(Id, ViewFunction) ->
     DesignId = <<"_design/", Id/binary>>,
 
     Doc = to_json_term(#{
         <<"_id">> => DesignId,
         <<"views">> => maps:from_list(
-            [{Id, #{<<"map">> => <<"function (doc, meta) { if(doc['RECORD::'] == '", RecordName/binary, "') { var key = ",
-                ViewFunction/binary,
-                "; var key_to_emit = key(doc['ATOM::value']); if(key_to_emit) { emit(key_to_emit, null); } } }">>}}]
+            [{Id, #{<<"map">> => ViewFunction}}]
         )
     }),
     {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
