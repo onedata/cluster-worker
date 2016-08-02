@@ -535,8 +535,8 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
     Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}, Uuid :: binary()) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
-choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid) ->
-    choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, ignore, false).
+choose_action(Op, Level, ModelName, Key, Uuid) ->
+    choose_action(Op, Level, ModelName, Key, Uuid, ignore, false).
 
 %%--------------------------------------------------------------------
 %% @private
