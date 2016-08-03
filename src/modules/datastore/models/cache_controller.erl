@@ -589,7 +589,15 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                         cleared ->
                                             {ok, non};
                                         non ->
-                                            {ok, non};
+                                            UpdateFun = fun(LinkValue) ->
+                                                case LinkValue of
+                                                    SavedValue ->
+                                                        {error, already_updated};
+                                                    _ ->
+                                                        {ok, SavedValue}
+                                                end
+                                            end,
+                                            {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]};
                                         _ ->
                                             {ok, add_links, [Key, [{Link, SavedValue}]]}
                                     end;
@@ -645,7 +653,7 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissin
         _ ->
             case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
                 get, [ModelConfig, Key]) of
-                {ok, SavedValue} ->
+                {ok, #document{value = SavedValue} = SavedDoc} ->
                     case Flush of
                         true ->
                             case get(Level, Uuid) of
@@ -655,20 +663,28 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissin
                                         cleared ->
                                             {ok, non};
                                         non ->
-                                            {ok, non};
+                                            UpdateFun = fun(Record) ->
+                                                case Record of
+                                                    SavedValue ->
+                                                        {error, already_updated};
+                                                    _ ->
+                                                        {ok, SavedValue}
+                                                end
+                                            end,
+                                            {ok, create_or_update, [SavedDoc, UpdateFun]};
                                         _ ->
-                                            {ok, save, [SavedValue]}
+                                            {ok, save, [SavedDoc]}
                                     end;
                                 {error, {not_found, _}} ->
                                     case AbortWhenControlDataMissing of
                                         true ->
                                             {ok, non};
                                         _ ->
-                                            {ok, save, [SavedValue]}
+                                            {ok, save, [SavedDoc]}
                                     end
                             end;
                         _ ->
-                            {ok, save, [SavedValue]}
+                            {ok, save, [SavedDoc]}
                     end;
                 {error, {not_found, _}} ->
                     case get(Level, Uuid) of

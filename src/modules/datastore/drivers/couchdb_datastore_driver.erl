@@ -41,7 +41,7 @@
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([add_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([start_gateway/4, force_save/2, db_run/4, normalize_seq/1]).
 
@@ -439,6 +439,34 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     critical_section:run([ModelName, Bucket, Key],
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
+        end
+    ).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates or updates link if does not exist
+%% @end
+%%--------------------------------------------------------------------
+-spec create_or_update_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec(),
+    fun((OldValue :: datastore:normalized_link_target()) -> {ok, NewValue :: datastore:normalized_link_target()}
+    | {error, Reason :: term()})) -> ok | datastore:generic_error().
+create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
+    Key, {LinkName, _} = Link, UpdateFun) ->
+    critical_section:run([ModelName, Bucket, Key],
+        fun() ->
+            case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
+                {error, link_not_found} ->
+                    links_utils:save_links_maps(?MODULE, ModelConfig, Key, [Link]);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, LinkTarget} ->
+                    case UpdateFun(LinkTarget) of
+                        {ok, NewLinkValue} ->
+                            links_utils:save_links_maps(?MODULE, ModelConfig, Key, [{LinkName, NewLinkValue}]);
+                        Other ->
+                            Other
+                    end
+            end
         end
     ).
 
