@@ -830,14 +830,14 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                                           FullArgs = [ModelConfig | NewArgs],
                                           CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
                                               NewMethod, FullArgs),
-                                          catch datastore:run_posthooks_sync(ModelConfig, NewMethod,
+                                          catch datastore:run_posthooks(ModelConfig, NewMethod,
                                               datastore:driver_to_level(?PERSISTENCE_DRIVER), NewArgs, CallAns),
                                           {op_change, NewMethod, CallAns};
                                       ok ->
                                           FullArgs = [ModelConfig | Args],
                                           CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
                                               Op, FullArgs),
-                                          catch datastore:run_posthooks_sync(ModelConfig, Op,
+                                          catch datastore:run_posthooks(ModelConfig, Op,
                                               datastore:driver_to_level(?PERSISTENCE_DRIVER), Args, CallAns),
                                           CallAns;
                                       {ok, non} ->
