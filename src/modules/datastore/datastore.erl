@@ -718,24 +718,6 @@ run_posthooks(#model_config{name = ModelName}, Method, Level, Context, Return) -
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Runs synchronously all post-hooks for given model, method, context and
-%% return value. Returns given return value.
-%% @end
-%%--------------------------------------------------------------------
--spec run_posthooks_sync(Config :: model_behaviour:model_config(),
-    Model :: model_behaviour:model_action(), Level :: store_level(),
-    Context :: term(), ReturnValue) -> ReturnValue when ReturnValue :: term().
-run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Return) ->
-    Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
-    lists:foreach(
-        fun({_, HookedModule}) ->
-            HookedModule:'after'(ModelName, Method, Level, Context, Return)
-        end, Hooked),
-    Return.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Initializes local (node scope) datastore state with given models.
 %% Returns initialized configuration.
 %% @end
@@ -968,9 +950,9 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         ok ->
             FullArgs = [ModelConfig | Args],
             Return = erlang:apply(driver_to_module(Driver), Method, FullArgs),
-            run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, Return);
+            run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, Return);
         {ok, Value} ->
-            run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, {ok, Value});
+            run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {ok, Value});
         {tasks, Tasks} ->
             Level = caches_controller:cache_to_task_level(ModelName),
             lists:foreach(fun
@@ -983,5 +965,5 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             Level = caches_controller:cache_to_task_level(ModelName),
             ok = task_manager:start_task(Task, Level);
         {error, Reason} ->
-            run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
+            run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
     end.
