@@ -315,7 +315,12 @@ flush(Level, ModelName, Key) ->
   Ans = case ToDo of
           {ok, NewMethod, NewArgs} ->
             FullArgs = [ModelConfig | NewArgs],
-            erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs);
+            case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs) of
+              {error, already_updated} ->
+                ok;
+              FlushAns ->
+                FlushAns
+            end;
           {ok, non} ->
             ok;
           Other ->
