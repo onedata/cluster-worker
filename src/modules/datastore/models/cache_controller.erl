@@ -585,18 +585,18 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
+                                    UpdateFun = fun(LinkValue) ->
+                                        case LinkValue of
+                                            SavedValue ->
+                                                {error, already_updated};
+                                            _ ->
+                                                {ok, SavedValue}
+                                        end
+                                    end,
                                     case Value#cache_controller.action of
                                         cleared ->
-                                            {ok, non};
+                                            {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]};
                                         non ->
-                                            UpdateFun = fun(LinkValue) ->
-                                                case LinkValue of
-                                                    SavedValue ->
-                                                        {error, already_updated};
-                                                    _ ->
-                                                        {ok, SavedValue}
-                                                end
-                                            end,
                                             {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]};
                                         _ ->
                                             {ok, add_links, [Key, [{Link, SavedValue}]]}
@@ -659,18 +659,18 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissin
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
+                                    UpdateFun = fun(Record) ->
+                                        case Record of
+                                            SavedValue ->
+                                                {error, already_updated};
+                                            _ ->
+                                                {ok, SavedValue}
+                                        end
+                                    end,
                                     case Value#cache_controller.action of
                                         cleared ->
-                                            {ok, non};
+                                            {ok, create_or_update, [SavedDoc, UpdateFun]};
                                         non ->
-                                            UpdateFun = fun(Record) ->
-                                                case Record of
-                                                    SavedValue ->
-                                                        {error, already_updated};
-                                                    _ ->
-                                                        {ok, SavedValue}
-                                                end
-                                            end,
                                             {ok, create_or_update, [SavedDoc, UpdateFun]};
                                         _ ->
                                             {ok, save, [SavedDoc]}
