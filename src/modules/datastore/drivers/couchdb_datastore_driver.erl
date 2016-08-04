@@ -49,7 +49,7 @@
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 -export([to_binary/1]).
--export([add_view/2, get_view/2, delete_view/1]).
+-export([add_view/2, query_view/2, delete_view/1]).
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
@@ -1218,11 +1218,53 @@ add_view(Id, ViewFunction) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Get list of document ids for view with given id, matching given key.
+%%
+%% Available options:
+%% Options :: view_options() [{key, binary()} | {start_docid, binary()}
+%%    | {end_docid, binary()} | {start_key, binary()}
+%%    | {end_key, binary()} | {limit, integer()}
+%%    | {stale, stale()}
+%%    | descending
+%%    | {skip, integer()}
+%%    | group | {group_level, integer()}
+%%    | {inclusive_end, boolean()} | {reduce, boolean()} | reduce | include_docs | conflicts
+%%    | {keys, list(binary())}
+%%    | `{stream_to, Pid}': the pid where the changes will be sent,
+%%      by default the current pid. Used for continuous and longpoll
+%%      connections
+%%
+%%      {key, Key}: key value
+%%      {start_docid, DocId}: document id to start with (to allow pagination
+%%          for duplicate start keys
+%%      {end_docid, DocId}: last document id to include in the result (to
+%%          allow pagination for duplicate endkeys)
+%%      {start_key, Key}: start result from key value
+%%      {end_key, Key}: end result from key value
+%%      {limit, Limit}: Limit the number of documents in the result
+%%      {stale, Stale}: If stale=ok is set, CouchDB will not refresh the view
+%%      even if it is stale, the benefit is a an improved query latency. If
+%%      stale=update_after is set, CouchDB will update the view after the stale
+%%      result is returned.
+%%      descending: reverse the result
+%%      {skip, N}: skip n number of documents
+%%      group: the reduce function reduces to a single result
+%%      row.
+%%      {group_level, Level}: the reduce function reduces to a set
+%%      of distinct keys.
+%%      {reduce, boolean()}: whether to use the reduce function of the view. It defaults to
+%%      true, if a reduce function is defined and to false otherwise.
+%%      include_docs: automatically fetch and include the document
+%%      which emitted each view entry
+%%      {inclusive_end, boolean()}: Controls whether the endkey is included in
+%%      the result. It defaults to true.
+%%      conflicts: include conflicts
+%%      {keys, [Keys]}: to pass multiple keys to the view query
+%%
 %% @end
 %%--------------------------------------------------------------------
--spec get_view(binary(), binary()) -> {ok, [binary()]}.
-get_view(Id, Key) ->
-    case db_run(couchbeam_view, fetch, [{Id, Id}, [{key, Key}]], 3) of
+-spec query_view(binary(), list()) -> {ok, [binary()]}.
+query_view(Id, Options) ->
+    case db_run(couchbeam_view, fetch, [{Id, Id}, Options], 3) of
         {ok, List} ->
             Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
                 {_, DocUuid} = from_driver_key(DbDocId),
