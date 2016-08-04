@@ -186,7 +186,6 @@ links_scope_test(Config) ->
             ?assert(lists:member(GetLinkName(I), ListedLinks))
         end, Links),
         LinksLength = length(Links),
-%%        ct:print("aaaa ~p", [{ListedLinks, Links}]),
         ?assertMatch(LinksLength, length(ListedLinks))
     end,
     DeleteLink = fun(I) ->

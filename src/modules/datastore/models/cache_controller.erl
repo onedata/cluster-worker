@@ -191,7 +191,7 @@ list_docs_to_be_dumped(Level) ->
             {abort, Acc};
         (#document{value = #cache_controller{last_user = non}}, Acc) ->
             {next, Acc};
-        % TODO spawdzic jak stare jest cleared i jak ma odpowieni wiek to mozna czyscic
+        % TODO check how old is clear and clear if possible
         (#document{value = #cache_controller{action = cleared}}, Acc) ->
             {next, Acc};
         (#document{key = Uuid}, Acc) ->
