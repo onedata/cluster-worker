@@ -706,11 +706,13 @@ run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
 -spec run_posthooks(Config :: model_behaviour:model_config(),
     Model :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term(), ReturnValue) -> ReturnValue when ReturnValue :: term().
-run_posthooks(#model_config{name = ModelName}, Method, Level, Context, Return) ->
+run_posthooks(#model_config{name = ModelName} = ModelConfig, Method, Level, Context, Return) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
+    LinksContext = links_utils:get_context_to_propagate(ModelConfig),
     lists:foreach(
         fun({_, HookedModule}) ->
             spawn(fun() ->
+                links_utils:apply_context(LinksContext),
                 HookedModule:'after'(ModelName, Method, Level, Context, Return) end)
         end, Hooked),
     Return.

@@ -24,7 +24,7 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5, choose_action/7, check_fetch/3, check_disk_read/4]).
+    list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_fetch/3, check_disk_read/4]).
 
 
 %%%===================================================================
@@ -536,7 +536,7 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
 choose_action(Op, Level, ModelName, Key, Uuid) ->
-    choose_action(Op, Level, ModelName, Key, Uuid, false, false).
+    choose_action(Op, Level, ModelName, Key, Uuid, false).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -546,10 +546,10 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
 %%--------------------------------------------------------------------
 -spec choose_action(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
     Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
-    Uuid :: binary(), Flush :: boolean(), AbortWhenControlDataMissing :: boolean()) ->
+    Uuid :: binary(), Flush :: boolean()) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
-choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, Flush, AbortWhenControlDataMissing) ->
+choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, Flush) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -582,17 +582,17 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                 {ok, SavedValue} ->
                     case Flush of
                         true ->
+                            UpdateFun = fun(LinkValue) ->
+                                case LinkValue of
+                                    SavedValue ->
+                                        {error, already_updated};
+                                    _ ->
+                                        {ok, SavedValue}
+                                end
+                                        end,
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
-                                    UpdateFun = fun(LinkValue) ->
-                                        case LinkValue of
-                                            SavedValue ->
-                                                {error, already_updated};
-                                            _ ->
-                                                {ok, SavedValue}
-                                        end
-                                    end,
                                     case Value#cache_controller.action of
                                         cleared ->
                                             {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]};
@@ -602,12 +602,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                             {ok, add_links, [Key, [{Link, SavedValue}]]}
                                     end;
                                 {error, {not_found, _}} ->
-                                    case AbortWhenControlDataMissing of
-                                        true ->
-                                            {ok, non};
-                                        _ ->
-                                            {ok, add_links, [Key, [{Link, SavedValue}]]}
-                                    end
+                                    {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]}
                             end;
                         _ ->
                             {ok, add_links, [Key, [{Link, SavedValue}]]}
@@ -625,7 +620,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                     {ok, delete_links, [Key, [Link]]}
                             end;
                         {error, {not_found, _}} ->
-                            case AbortWhenControlDataMissing of
+                            case Flush of
                                 true ->
                                     {ok, non};
                                 _ ->
@@ -636,7 +631,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                     {fetch_error, FetchError}
             end
     end;
-choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissing) ->
+choose_action(Op, Level, ModelName, Key, Uuid, Flush) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -656,17 +651,17 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissin
                 {ok, #document{value = SavedValue} = SavedDoc} ->
                     case Flush of
                         true ->
+                            UpdateFun = fun(Record) ->
+                                case Record of
+                                    SavedValue ->
+                                        {error, already_updated};
+                                    _ ->
+                                        {ok, SavedValue}
+                                end
+                                        end,
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
-                                    UpdateFun = fun(Record) ->
-                                        case Record of
-                                            SavedValue ->
-                                                {error, already_updated};
-                                            _ ->
-                                                {ok, SavedValue}
-                                        end
-                                    end,
                                     case Value#cache_controller.action of
                                         cleared ->
                                             {ok, create_or_update, [SavedDoc, UpdateFun]};
@@ -676,12 +671,7 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissin
                                             {ok, save, [SavedDoc]}
                                     end;
                                 {error, {not_found, _}} ->
-                                    case AbortWhenControlDataMissing of
-                                        true ->
-                                            {ok, non};
-                                        _ ->
-                                            {ok, save, [SavedDoc]}
-                                    end
+                                    {ok, create_or_update, [SavedDoc, UpdateFun]}
                             end;
                         _ ->
                             {ok, save, [SavedDoc]}
@@ -699,7 +689,7 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissin
                                     {ok, delete, [Key, ?PRED_ALWAYS]}
                             end;
                         {error, {not_found, _}} ->
-                            case AbortWhenControlDataMissing of
+                            case Flush of
                                 true ->
                                     {ok, non};
                                 _ ->
