@@ -20,7 +20,9 @@
 -type(public_key() :: term()).
 -type(certificate() :: #'OTPCertificate'{}).
 
--export([publish_to_dht/1, verify_with_dht/1, ssl_verify_fun_impl/3, get_public_key/1, get_id/1]).
+-export([publish_to_dht/1, verify_with_dht/1, ssl_verify_fun_impl/3,
+    get_public_key/1, get_id/1,
+    ensure_identity_cert_created/3, read_cert/1]).
 -export_type([id/0, public_key/0, certificate/0]).
 
 %%--------------------------------------------------------------------
@@ -77,6 +79,40 @@ ssl_verify_fun_impl(_, valid, UserState) ->
     {valid, UserState}.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Ensures that self-signed identity certificates are created on filesystem.
+%% @end
+%%--------------------------------------------------------------------
+-spec ensure_identity_cert_created(KeyFilePath :: string(), CertFilePath :: string(),
+    DomainForCN :: string()) -> ok.
+ensure_identity_cert_created(KeyFile, CertFile, DomainForCN) ->
+    case file:read_file_info(KeyFile) of
+        {ok, _} -> ok;
+        {error, enoent} ->
+            TmpDir = utils:mkdtemp(),
+            PassFile = TmpDir ++ "/pass",
+            CSRFile = TmpDir ++ "/csr",
+
+            os:cmd(["openssl genrsa", " -des3 ", " -passout ", " pass:x ", " -out ", PassFile, " 2048 "]),
+            os:cmd(["openssl rsa", " -passin ", " pass:x ", " -in ", PassFile, " -out ", KeyFile]),
+            os:cmd(["openssl req", " -new ", " -key ", KeyFile, " -out ", CSRFile, " -subj ", "\"/CN=" ++ DomainForCN ++ "\""]),
+            os:cmd(["openssl x509", " -req ", " -days ", " 365 ", " -in ", CSRFile, " -signkey ", KeyFile, " -out ", CertFile]),
+            utils:rmtempdir(TmpDir)
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Reads certificate pem & decodes it.
+%% @end
+%%--------------------------------------------------------------------
+-spec read_cert(CertFile :: file:name_all()) -> #'OTPCertificate'{}.
+read_cert(CertFile) ->
+    {ok, CertBin} = file:read_file(CertFile),
+    [Certificate] = public_key:pem_decode(CertBin),
+    {'Certificate', CertDer, not_encrypted} = Certificate,
+    public_key:pkix_decode_cert(CertDer, otp).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -101,6 +137,7 @@ get_public_key(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{
     | {fail, Reason :: term()}
     | {unknown, UserState :: term()}.
 verify_with_dht_as_ssl_callback(OtpCert, UserState) ->
+    ?emergency("~p",[OtpCert]),
     case identity:verify_with_dht(OtpCert) of
         ok -> {valid, UserState};
         {error, key_does_not_match} -> {fail, rejected_by_dht_verification};
