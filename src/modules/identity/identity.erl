@@ -13,12 +13,15 @@
 -module(identity).
 -author("Michal Zmuda").
 
+-include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
 -type(id() :: binary()).
 -type(public_key() :: term()).
 -type(certificate() :: #'OTPCertificate'{}).
+
+-define(CERT_DB_KEY, <<"identity_cert">>).
 
 -export([publish_to_dht/1, verify_with_dht/1, ssl_verify_fun_impl/3,
     get_public_key/1, get_id/1,
@@ -87,19 +90,9 @@ ssl_verify_fun_impl(_, valid, UserState) ->
 -spec ensure_identity_cert_created(KeyFilePath :: string(), CertFilePath :: string(),
     DomainForCN :: string()) -> ok.
 ensure_identity_cert_created(KeyFile, CertFile, DomainForCN) ->
-    case file:read_file_info(KeyFile) of
-        {ok, _} -> ok;
-        {error, enoent} ->
-            TmpDir = utils:mkdtemp(),
-            PassFile = TmpDir ++ "/pass",
-            CSRFile = TmpDir ++ "/csr",
-
-            os:cmd(["openssl genrsa", " -des3 ", " -passout ", " pass:x ", " -out ", PassFile, " 2048 "]),
-            os:cmd(["openssl rsa", " -passin ", " pass:x ", " -in ", PassFile, " -out ", KeyFile]),
-            os:cmd(["openssl req", " -new ", " -key ", KeyFile, " -out ", CSRFile, " -subj ", "\"/CN=" ++ DomainForCN ++ "\""]),
-            os:cmd(["openssl x509", " -req ", " -days ", " 365 ", " -in ", CSRFile, " -signkey ", KeyFile, " -out ", CertFile]),
-            utils:rmtempdir(TmpDir)
-    end.
+    recreate_cert_files(KeyFile, DomainForCN, CertFile),
+    try_creating_certs_doc(CertFile, KeyFile),
+    create_certs_form_doc(CertFile, KeyFile).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -137,9 +130,45 @@ get_public_key(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{
     | {fail, Reason :: term()}
     | {unknown, UserState :: term()}.
 verify_with_dht_as_ssl_callback(OtpCert, UserState) ->
-    ?emergency("~p",[OtpCert]),
+    ?emergency("~p", [OtpCert]),
     case identity:verify_with_dht(OtpCert) of
         ok -> {valid, UserState};
         {error, key_does_not_match} -> {fail, rejected_by_dht_verification};
         {error, DHTReason} -> {fail, {dht_verification_unexpectedly_failed, DHTReason}}
+    end.
+
+-spec create_certs_form_doc(KeyFilePath :: string(), CertFilePath :: string()) -> ok.
+create_certs_form_doc(CertFile, KeyFile) ->
+    case synced_cert:get(?CERT_DB_KEY) of
+        {ok, #document{value = #synced_cert{cert_file_content = DBCert, key_file_content = DBKey}}} ->
+            ok = file:write_file(CertFile, DBCert),
+            ok = file:write_file(KeyFile, DBKey);
+        {error, Reason} ->
+            ?error("Identity cert files not synced with DB due to ~p", [Reason])
+    end.
+
+-spec try_creating_certs_doc(KeyFilePath :: string(), CertFilePath :: string()) -> ok.
+try_creating_certs_doc(CertFile, KeyFile) ->
+    {ok, CertBin} = file:read_file(CertFile),
+    {ok, KeyBin} = file:read_file(KeyFile),
+    synced_cert:create(#document{key = ?CERT_DB_KEY, value = #synced_cert{
+        cert_file_content = CertBin, key_file_content = KeyBin
+    }}),
+    ok.
+
+-spec recreate_cert_files(KeyFilePath :: string(), CertFilePath :: string(),
+    DomainForCN :: string()) -> ok.
+recreate_cert_files(KeyFile, DomainForCN, CertFile) ->
+    case file:read_file_info(KeyFile) of
+        {ok, _} -> ok;
+        {error, enoent} ->
+            TmpDir = utils:mkdtemp(),
+            PassFile = TmpDir ++ "/pass",
+            CSRFile = TmpDir ++ "/csr",
+
+            os:cmd(["openssl genrsa", " -des3 ", " -passout ", " pass:x ", " -out ", PassFile, " 2048 "]),
+            os:cmd(["openssl rsa", " -passin ", " pass:x ", " -in ", PassFile, " -out ", KeyFile]),
+            os:cmd(["openssl req", " -new ", " -key ", KeyFile, " -out ", CSRFile, " -subj ", "\"/CN=" ++ DomainForCN ++ "\""]),
+            os:cmd(["openssl x509", " -req ", " -days ", " 365 ", " -in ", CSRFile, " -signkey ", KeyFile, " -out ", CertFile]),
+            utils:rmtempdir(TmpDir)
     end.

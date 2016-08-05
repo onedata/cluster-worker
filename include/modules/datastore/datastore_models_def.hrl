@@ -42,4 +42,10 @@
     node :: node()
 }).
 
+%% Contents of synced cert related files
+-record(synced_cert, {
+    cert_file_content :: binary(),
+    key_file_content :: binary()
+}).
+
 -endif.
