@@ -24,7 +24,7 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_fetch/3, check_disk_read/4]).
+    list_docs_to_be_dumped/1, choose_action/5, choose_action/7, check_fetch/3, check_disk_read/4]).
 
 
 %%%===================================================================
@@ -163,19 +163,19 @@ list(Level) ->
 list(Level, MinDocAge) ->
     Now = os:timestamp(),
     Filter = fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (#document{key = Uuid, value = V}, Acc) ->
-            T = V#cache_controller.timestamp,
-            U = V#cache_controller.last_user,
-            Age = timer:now_diff(Now, T),
-            case U of
-                non when Age >= 1000 * MinDocAge ->
-                    {next, [Uuid | Acc]};
-                _ ->
-                    {next, Acc}
-            end
-    end,
+                 ('$end_of_table', Acc) ->
+                     {abort, Acc};
+                 (#document{key = Uuid, value = V}, Acc) ->
+                     T = V#cache_controller.timestamp,
+                     U = V#cache_controller.last_user,
+                     Age = timer:now_diff(Now, T),
+                     case U of
+                         non when Age >= 1000 * MinDocAge ->
+                             {next, [Uuid | Acc]};
+                         _ ->
+                             {next, Acc}
+                     end
+             end,
     datastore:list(Level, ?MODEL_NAME, Filter, []).
 
 %%--------------------------------------------------------------------
@@ -187,16 +187,16 @@ list(Level, MinDocAge) ->
     {ok, [datastore:document()]} | datastore:generic_error() | no_return().
 list_docs_to_be_dumped(Level) ->
     Filter = fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (#document{value = #cache_controller{last_user = non}}, Acc) ->
-            {next, Acc};
-        % TODO check how old is clear and clear if possible
-        (#document{value = #cache_controller{action = cleared}}, Acc) ->
-            {next, Acc};
-        (#document{key = Uuid}, Acc) ->
-            {next, [Uuid | Acc]}
-    end,
+                 ('$end_of_table', Acc) ->
+                     {abort, Acc};
+                 (#document{value = #cache_controller{last_user = non}}, Acc) ->
+                     {next, Acc};
+                 % TODO spawdzic jak stare jest cleared i jak ma odpowieni wiek to mozna czyscic
+                 (#document{value = #cache_controller{action = cleared}}, Acc) ->
+                     {next, Acc};
+                 (#document{key = Uuid}, Acc) ->
+                     {next, [Uuid | Acc]}
+             end,
     datastore:list(Level, ?MODEL_NAME, Filter, []).
 
 %%--------------------------------------------------------------------
@@ -322,7 +322,7 @@ before(ModelName, fetch_link, disk_only, [Key, LinkName], Level2) ->
 before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun({LN, _}, Acc) ->
         [start_disk_op({Key, LN, cache_controller_link_key}, ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
-    end, [], Links),
+                        end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
@@ -339,11 +339,11 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
             _ ->
                 Ans
         end
-    end, ok, Links);
+                end, ok, Links);
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
         [start_disk_op({Key, Link, cache_controller_link_key}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
-    end, [], Links),
+                        end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
@@ -377,7 +377,7 @@ update_usage_info(Key, ModelName, Level) ->
     Uuid = caches_controller:get_cache_uuid(Key, ModelName),
     UpdateFun = fun(Record) ->
         {ok, Record#cache_controller{timestamp = os:timestamp()}}
-    end,
+                end,
     TS = os:timestamp(),
     V = #cache_controller{timestamp = TS, last_action_time = TS},
     Doc = #document{key = Uuid, value = V},
@@ -470,11 +470,11 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
 delete_dump_info(Uuid, Owner, Level) ->
     Pred = fun() ->
         {LastUser, Action} = case get(Level, Uuid) of
-                       {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                           {LU, A};
-                       {error, {not_found, _}} ->
-                           {non, non}
-                   end,
+                                 {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                                     {LU, A};
+                                 {error, {not_found, _}} ->
+                                     {non, non}
+                             end,
 
         case {LastUser, Action} of
             {_, to_be_del} ->
@@ -486,7 +486,7 @@ delete_dump_info(Uuid, Owner, Level) ->
             _ ->
                 false
         end
-    end,
+           end,
     delete(Level, Uuid, Pred).
 %%--------------------------------------------------------------------
 %% @private
@@ -505,18 +505,18 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
                 delete_dump_info(Uuid, Owner, Level);
             _ ->
                 UpdateFun = fun
-                    (#cache_controller{last_user = LastUser, action = A} = Record) ->
-                        case {LastUser, A} of
-                            {Owner, to_be_del} ->
-                                {ok, Record#cache_controller{last_user = non,
-                                    last_action_time = os:timestamp()}};
-                            {Owner, _} ->
-                                {ok, Record#cache_controller{last_user = non, action = non,
-                                    last_action_time = os:timestamp()}};
-                            _ ->
-                                throw(user_changed)
-                        end
-                end,
+                                (#cache_controller{last_user = LastUser, action = A} = Record) ->
+                                    case {LastUser, A} of
+                                        {Owner, to_be_del} ->
+                                            {ok, Record#cache_controller{last_user = non,
+                                                last_action_time = os:timestamp()}};
+                                        {Owner, _} ->
+                                            {ok, Record#cache_controller{last_user = non, action = non,
+                                                last_action_time = os:timestamp()}};
+                                        _ ->
+                                            throw(user_changed)
+                                    end
+                            end,
                 update(Level, Uuid, UpdateFun)
         end,
         ok
@@ -536,7 +536,7 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
 choose_action(Op, Level, ModelName, Key, Uuid) ->
-    choose_action(Op, Level, ModelName, Key, Uuid, false).
+    choose_action(Op, Level, ModelName, Key, Uuid, false, false).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -546,10 +546,10 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
 %%--------------------------------------------------------------------
 -spec choose_action(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
     Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
-    Uuid :: binary(), Flush :: boolean()) ->
+    Uuid :: binary(), Flush :: boolean(), AbortWhenControlDataMissing :: boolean()) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
-choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, Flush) ->
+choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid, Flush, AbortWhenControlDataMissing) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -582,17 +582,17 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                 {ok, SavedValue} ->
                     case Flush of
                         true ->
-                            UpdateFun = fun(LinkValue) ->
-                                case LinkValue of
-                                    SavedValue ->
-                                        {error, already_updated};
-                                    _ ->
-                                        {ok, SavedValue}
-                                end
-                                        end,
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
+                                    UpdateFun = fun(LinkValue) ->
+                                        case LinkValue of
+                                            SavedValue ->
+                                                {error, already_updated};
+                                            _ ->
+                                                {ok, SavedValue}
+                                        end
+                                                end,
                                     case Value#cache_controller.action of
                                         cleared ->
                                             {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]};
@@ -602,7 +602,12 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                             {ok, add_links, [Key, [{Link, SavedValue}]]}
                                     end;
                                 {error, {not_found, _}} ->
-                                    {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]}
+                                    case AbortWhenControlDataMissing of
+                                        true ->
+                                            {ok, non};
+                                        _ ->
+                                            {ok, add_links, [Key, [{Link, SavedValue}]]}
+                                    end
                             end;
                         _ ->
                             {ok, add_links, [Key, [{Link, SavedValue}]]}
@@ -620,7 +625,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                     {ok, delete_links, [Key, [Link]]}
                             end;
                         {error, {not_found, _}} ->
-                            case Flush of
+                            case AbortWhenControlDataMissing of
                                 true ->
                                     {ok, non};
                                 _ ->
@@ -631,7 +636,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                     {fetch_error, FetchError}
             end
     end;
-choose_action(Op, Level, ModelName, Key, Uuid, Flush) ->
+choose_action(Op, Level, ModelName, Key, Uuid, Flush, AbortWhenControlDataMissing) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -651,17 +656,17 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush) ->
                 {ok, #document{value = SavedValue} = SavedDoc} ->
                     case Flush of
                         true ->
-                            UpdateFun = fun(Record) ->
-                                case Record of
-                                    SavedValue ->
-                                        {error, already_updated};
-                                    _ ->
-                                        {ok, SavedValue}
-                                end
-                                        end,
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
+                                    UpdateFun = fun(Record) ->
+                                        case Record of
+                                            SavedValue ->
+                                                {error, already_updated};
+                                            _ ->
+                                                {ok, SavedValue}
+                                        end
+                                                end,
                                     case Value#cache_controller.action of
                                         cleared ->
                                             {ok, create_or_update, [SavedDoc, UpdateFun]};
@@ -671,7 +676,12 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush) ->
                                             {ok, save, [SavedDoc]}
                                     end;
                                 {error, {not_found, _}} ->
-                                    {ok, create_or_update, [SavedDoc, UpdateFun]}
+                                    case AbortWhenControlDataMissing of
+                                        true ->
+                                            {ok, non};
+                                        _ ->
+                                            {ok, save, [SavedDoc]}
+                                    end
                             end;
                         _ ->
                             {ok, save, [SavedDoc]}
@@ -689,7 +699,7 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush) ->
                                     {ok, delete, [Key, ?PRED_ALWAYS]}
                             end;
                         {error, {not_found, _}} ->
-                            case Flush of
+                            case AbortWhenControlDataMissing of
                                 true ->
                                     {ok, non};
                                 _ ->
@@ -779,7 +789,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                 _ ->
                     {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
             end
-        end,
+                    end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
         TS = os:timestamp(),
         V = #cache_controller{last_user = Pid, timestamp = TS, action = Op, last_action_time = TS},
@@ -799,31 +809,31 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
 
         Task = fun() ->
             {LastUser, LAT, LACT} = case get(Level, Uuid) of
-                {ok, Doc2} ->
-                    Value = Doc2#document.value,
-                    {Value#cache_controller.last_user, Value#cache_controller.last_action_time,
-                        Value#cache_controller.action};
-                {error, {not_found, _}} ->
-                    {Pid, 0, non}
-            end,
+                                        {ok, Doc2} ->
+                                            Value = Doc2#document.value,
+                                            {Value#cache_controller.last_user, Value#cache_controller.last_action_time,
+                                                Value#cache_controller.action};
+                                        {error, {not_found, _}} ->
+                                            {Pid, 0, non}
+                                    end,
             ToDo0 = case {LACT, LastUser} of
-                {cleared, _} ->
-                    {ok, non};
-                {_, ToUpdate} when ToUpdate =:= Pid; ToUpdate =:= non ->
-                    ok;
-                _ ->
-                    {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-                    case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
-                        true ->
-                            UpdateFun2 = fun(Record) ->
-                                {ok, Record#cache_controller{last_action_time = os:timestamp()}}
-                                         end,
-                            update(Level, Uuid, UpdateFun2),
+                        {cleared, _} ->
+                            {ok, non};
+                        {_, ToUpdate} when ToUpdate =:= Pid; ToUpdate =:= non ->
                             ok;
                         _ ->
-                            {error, not_last_user}
-                    end
-            end,
+                            {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
+                            case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
+                                true ->
+                                    UpdateFun2 = fun(Record) ->
+                                        {ok, Record#cache_controller{last_action_time = os:timestamp()}}
+                                                 end,
+                                    update(Level, Uuid, UpdateFun2),
+                                    ok;
+                                _ ->
+                                    {error, not_last_user}
+                            end
+                    end,
             Ans = case ToDo0 of
                       ok ->
                           links_utils:apply_context(LinksContext),
@@ -836,14 +846,14 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                                           FullArgs = [ModelConfig | NewArgs],
                                           CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
                                               NewMethod, FullArgs),
-                                          catch datastore:run_posthooks(ModelConfig, NewMethod,
+                                              catch datastore:run_posthooks(ModelConfig, NewMethod,
                                               datastore:driver_to_level(?PERSISTENCE_DRIVER), NewArgs, CallAns),
                                           {op_change, NewMethod, CallAns};
                                       ok ->
                                           FullArgs = [ModelConfig | Args],
                                           CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
                                               Op, FullArgs),
-                                          catch datastore:run_posthooks(ModelConfig, Op,
+                                              catch datastore:run_posthooks(ModelConfig, Op,
                                               datastore:driver_to_level(?PERSISTENCE_DRIVER), Args, CallAns),
                                           CallAns;
                                       {ok, non} ->
@@ -855,21 +865,21 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                           );
                       _ ->
                           ToDo0
-            end,
+                  end,
 
             ok = case Ans of
-                ok ->
-                    end_disk_op(Uuid, Pid, ModelName, Op, Level);
-                {ok, _} ->
-                    end_disk_op(Uuid, Pid, ModelName, Op, Level);
-                {error, not_last_user} -> ok;
-                {op_change, NewOp, ok} ->
-                    end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
-                {op_change, NewOp, {ok, _}} ->
-                    end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
-                WrongAns -> WrongAns
-            end
-        end,
+                     ok ->
+                         end_disk_op(Uuid, Pid, ModelName, Op, Level);
+                     {ok, _} ->
+                         end_disk_op(Uuid, Pid, ModelName, Op, Level);
+                     {error, not_last_user} -> ok;
+                     {op_change, NewOp, ok} ->
+                         end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
+                     {op_change, NewOp, {ok, _}} ->
+                         end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
+                     WrongAns -> WrongAns
+                 end
+               end,
         {task, Task}
     catch
         throw:cleared ->
@@ -896,7 +906,7 @@ before_del(Key, ModelName, Level, _Op) ->
 
         UpdateFun = fun(Record) ->
             {ok, Record#cache_controller{action = to_be_del}}
-        end,
+                    end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
         V = #cache_controller{action = to_be_del},
         Doc = #document{key = Uuid, value = V},
