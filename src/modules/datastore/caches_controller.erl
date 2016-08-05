@@ -310,7 +310,7 @@ flush(Level, ModelName, Key, Link) ->
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
-  ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid, true, true),
+  ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid, true),
 
   Ans = case ToDo of
           {ok, NewMethod, NewArgs} ->
