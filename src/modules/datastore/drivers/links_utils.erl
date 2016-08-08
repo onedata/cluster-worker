@@ -17,9 +17,9 @@
 
 -type scope() :: atom() | binary().
 % mapping to mother scope - function or key in process dict
--type mother_scope() :: fun((datastore:uuid()) -> scope()) | atom().
+-type mother_scope() :: fun((datastore:key()) -> scope()) | atom().
 % mapping to other scopes - function or key in process dict
--type other_scopes() :: fun((datastore:uuid()) -> [scope()]) | atom().
+-type other_scopes() :: fun((datastore:key()) -> [scope()]) | atom().
 -export_type([mother_scope/0, other_scopes/0]).
 
 %% API
