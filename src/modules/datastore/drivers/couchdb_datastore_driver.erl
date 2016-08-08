@@ -288,10 +288,8 @@ exists_link_doc(ModelConfig, Key, Scope) ->
     DocKey = links_utils:links_doc_key(Key, Scope),
     case get_link_doc(ModelConfig, DocKey) of
         {ok, _} -> {ok, true};
-        {error, {not_found, _}} ->
-            {ok, false};
-        {error, Reason} ->
-            {error, Reason}
+        {error, {not_found, _}} -> {ok, false};
+        {error, Reason} -> {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
