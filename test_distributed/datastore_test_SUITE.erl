@@ -1445,7 +1445,7 @@ clearing_global_cache_test(Config) ->
     [{_, Mem0}] = monitoring:get_memory_stats(),
     Mem0Node = node_mem(Worker2),
     Mem0Ets = ?call(Worker2, erlang, memory, [ets]),
-    ct:print("Mem0 ~p xxx ~p xxx ~p", [Mem0, Mem0Node, Mem0Ets]),
+    ct:print("Mem0 ~p, ~p, ~p", [Mem0, Mem0Node, Mem0Ets]),
     FreeMem = 100 - Mem0,
     ToAdd = min(10, FreeMem / 2),
     MemCheck1 = Mem0 + ToAdd / 2,
@@ -1460,7 +1460,7 @@ clearing_global_cache_test(Config) ->
     [{_, Mem1}] = monitoring:get_memory_stats(),
     Mem1Node = node_mem(Worker2),
     Mem1Ets = ?call(Worker2, erlang, memory, [ets]),
-    ct:print("Mem1 ~p xxx ~p xxx ~p", [Mem1, Mem1Node, Mem1Ets]),
+    ct:print("Mem1 ~p, ~p, ~p", [Mem1, Mem1Node, Mem1Ets]),
     ?assert(Mem1 > MemCheck1),
     ?assert(Mem1Node > 50 * 1024 * 1024),
 
@@ -1471,7 +1471,7 @@ clearing_global_cache_test(Config) ->
     [{_, Mem2}] = monitoring:get_memory_stats(),
     Mem2Node = node_mem(Worker2),
     Mem2Ets = ?call(Worker2, erlang, memory, [ets]),
-    ct:print("Mem2 ~p xxx ~p xxx ~p, check_mem: ~p", [Mem2, Mem2Node, Mem2Ets, CheckMemAns]),
+    ct:print("Mem2 ~p, ~p, ~p, check_mem: ~p", [Mem2, Mem2Node, Mem2Ets, CheckMemAns]),
     % TODO Change to node memory checking when DB nodes will be run at separate machine
     ?assertMatch(true, Mem2Node < (Mem0Node + Mem1Node) / 2),
 %%     ?assert(Mem2 < MemTarget),

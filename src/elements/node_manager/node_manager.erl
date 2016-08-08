@@ -764,8 +764,8 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
 
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000000,
-    case (TimeDiff >= timer:minutes(MaxInterval)) orelse ((TimeDiff >= timer:minutes(MinInterval)) andalso
-        ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
+    case (TimeDiff >= timer:minutes(MaxInterval)) orelse
+        ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
         true ->
             ?info("Monitoring state: ~p", [MonState]),
             spawn(fun() ->
@@ -801,10 +801,13 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
                     end, non, All)
                 end,
 
+                TopProcesses = lists:map(
+                    fun({M, P}) ->
+                        {M, erlang:process_info(P, current_stacktrace), P, GetName(P)}
+                    end, lists:sublist(SortedProcs, 5)),
                 ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
-                    ++ "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
-                    lists:map(fun({M, P}) -> {M, erlang:process_info(P, current_stacktrace), P, GetName(P)} end, lists:sublist(SortedProcs, 5)),
-                    MergedStacks, MergedStacks2
+                    "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
+                    TopProcesses, MergedStacks, MergedStacks2
                 ])
             end),
             Now;
