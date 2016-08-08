@@ -76,6 +76,8 @@
             {datastore_config_plugin, datastore_config_plugin_default},
             {node_manager_plugin, node_manager_plugin_default},
             {dns_worker_plugin, dns_worker_plugin_default},
+            {identity_repository, identity_repository_default},
+            {identity_cache, identity_cache_default},
 
             %% ===================================================================
             %% HTTP

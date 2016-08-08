@@ -6,8 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module publishes own certificate info to DHT
-%%% and verifies other certs with DHT.
+%%% This module publishes own certificate info to repository
+%%% and verifies other certs with repository.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(identity).
@@ -23,9 +23,8 @@
 
 -define(CERT_DB_KEY, <<"identity_cert">>).
 
--export([publish_to_dht/1, verify_with_dht/1, ssl_verify_fun_impl/3,
-    get_public_key/1, get_id/1,
-    ensure_identity_cert_created/3, read_cert/1]).
+-export([publish/1, verify/1, ssl_verify_fun_impl/3]).
+-export([get_public_key/1, get_id/1, ensure_identity_cert_created/3, read_cert/1]).
 -export_type([id/0, public_key/0, certificate/0]).
 
 %%--------------------------------------------------------------------
@@ -33,33 +32,49 @@
 %% Publishes public key from certificate under ID determined from certificate.
 %% @end
 %%--------------------------------------------------------------------
--spec publish_to_dht(#'OTPCertificate'{}) -> ok | {error, Reason :: term()}.
-publish_to_dht(#'OTPCertificate'{} = Certificate) ->
+-spec publish(#'OTPCertificate'{}) -> ok | {error, Reason :: term()}.
+publish(#'OTPCertificate'{} = Certificate) ->
     ID = get_id(Certificate),
     PublicKey = get_public_key(Certificate),
-    plugins:apply(identity_repository, publish, [ID, PublicKey]).
+    case plugins:apply(identity_repository, publish, [ID, PublicKey]) of
+        ok -> plugins:apply(identity_cache, put, [ID, PublicKey]);
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Uses certificate info to verify if certificate owner is present in DHT
-%% and if public key matches one present in DHT.
+%% Uses certificate info to verify if certificate owner is present in repository
+%% and if public key matches one present in repository.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_with_dht(#'OTPCertificate'{}) ->
+-spec verify(#'OTPCertificate'{}) ->
     ok | {error, key_does_not_match} | {error, Reason :: term()}.
-verify_with_dht(#'OTPCertificate'{} = Certificate) ->
+verify(#'OTPCertificate'{} = Certificate) ->
     ID = get_id(Certificate),
     PublicKeyToMatch = get_public_key(Certificate),
-    case plugins:apply(identity_repository, get, [ID]) of
-        {error, Reason} -> {error, Reason};
+    case plugins:apply(identity_cache, get, [ID]) of
         {ok, PublicKeyToMatch} -> ok;
-        {ok, _ActualPublicKey} -> {error, key_does_not_match}
+        _ ->
+            case plugins:apply(identity_repository, get, [ID]) of
+                {error, Reason} ->
+                    ?warning("Cached key does not match and unable to refetch key for ~p", [ID]),
+                    plugins:apply(identity_cache, invalidate, [ID]),
+                    {error, Reason};
+                {ok, PublicKeyToMatch} ->
+                    ?info("Key changed for ~p", [ID]),
+                    plugins:apply(identity_cache, put, [ID, PublicKeyToMatch]),
+                    ok;
+                {ok, _ActualPublicKey} ->
+                    ?warning("Attempt to connect with wrong public key from ~p", [ID]),
+                    plugins:apply(identity_cache, put, [ID, _ActualPublicKey]),
+                    {error, key_does_not_match}
+            end
     end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% This callback implements verify_fun specified in ssl options.
-%% This implementation overrides peer identity verification as it uses DHT
+%% This implementation overrides peer identity verification as it uses repository
 %% as source of truth.
 %% @end
 %%--------------------------------------------------------------------
@@ -73,11 +88,11 @@ verify_with_dht(#'OTPCertificate'{} = Certificate) ->
 ssl_verify_fun_impl(_, {bad_cert, unknown_ca}, _UserState) ->
     {fail, only_selfigned_certs_are_allowed_in_interoz_communication};
 ssl_verify_fun_impl(OtpCert, {bad_cert, _} = _Reason, UserState) ->
-    verify_with_dht_as_ssl_callback(OtpCert, UserState);
+    verify_as_ssl_callback(OtpCert, UserState);
 ssl_verify_fun_impl(OtpCert, {extension, _}, UserState) ->
-    verify_with_dht_as_ssl_callback(OtpCert, UserState);
+    verify_as_ssl_callback(OtpCert, UserState);
 ssl_verify_fun_impl(OtpCert, valid_peer, UserState) ->
-    verify_with_dht_as_ssl_callback(OtpCert, UserState);
+    verify_as_ssl_callback(OtpCert, UserState);
 ssl_verify_fun_impl(_, valid, UserState) ->
     {valid, UserState}.
 
@@ -137,17 +152,16 @@ get_public_key(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{
 %%% Internal functions
 %%%===================================================================
 
--spec verify_with_dht_as_ssl_callback(OtpCert :: #'OTPCertificate'{}, InitialUserState :: term()) ->
+-spec verify_as_ssl_callback(OtpCert :: #'OTPCertificate'{}, InitialUserState :: term()) ->
     {valid, UserState :: term()}
     | {valid_peer, UserState :: term()}
     | {fail, Reason :: term()}
     | {unknown, UserState :: term()}.
-verify_with_dht_as_ssl_callback(OtpCert, UserState) ->
-    ?emergency("~p", [OtpCert]),
-    case identity:verify_with_dht(OtpCert) of
+verify_as_ssl_callback(OtpCert, UserState) ->
+    case identity:verify(OtpCert) of
         ok -> {valid, UserState};
-        {error, key_does_not_match} -> {fail, rejected_by_dht_verification};
-        {error, DHTReason} -> {fail, {dht_verification_unexpectedly_failed, DHTReason}}
+        {error, key_does_not_match} -> {fail, rejected_by_repo_verification};
+        {error, Reason} -> {fail, {repo_verification_unexpectedly_failed, Reason}}
     end.
 
 -spec create_certs_form_doc(KeyFilePath :: string(), CertFilePath :: string()) -> ok.
