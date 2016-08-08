@@ -102,14 +102,18 @@ ensure_identity_cert_created(KeyFile, CertFile, DomainForCN) ->
 -spec read_cert(CertFile :: file:name_all()) -> #'OTPCertificate'{}.
 read_cert(CertFile) ->
     {ok, CertBin} = file:read_file(CertFile),
-    [Certificate] = public_key:pem_decode(CertBin),
-    {'Certificate', CertDer, not_encrypted} = Certificate,
+    Contents = public_key:pem_decode(CertBin),
+    [{'Certificate', CertDer, not_encrypted} | _] = lists:dropwhile(fun
+        ({'Certificate', _, not_encrypted}) -> false;
+        (_) -> true
+    end, Contents),
     public_key:pkix_decode_cert(CertDer, otp).
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Extract ID from certificate data.
+%% @end
+%%--------------------------------------------------------------------
 -spec get_id(#'OTPCertificate'{}) -> CommonName :: binary().
 get_id(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{subject = {rdnSequence, Subject}}}) ->
     case [Attribute#'AttributeTypeAndValue'.value || [Attribute] <- Subject,
@@ -119,10 +123,19 @@ get_id(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{subject = {rdnSeq
         [{utf8String, Bin}] -> Bin
     end.
 
--spec get_public_key(#'OTPCertificate'{}) -> PublicKey :: term().
+%%--------------------------------------------------------------------
+%% @doc
+%% Extract public key from certificate data.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_public_key(#'OTPCertificate'{}) -> PublicKey :: identity:public_key().
 get_public_key(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{
     subjectPublicKeyInfo = #'OTPSubjectPublicKeyInfo'{subjectPublicKey = Key}}}) ->
     Key.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 -spec verify_with_dht_as_ssl_callback(OtpCert :: #'OTPCertificate'{}, InitialUserState :: term()) ->
     {valid, UserState :: term()}
