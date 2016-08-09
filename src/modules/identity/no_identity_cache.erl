@@ -9,7 +9,7 @@
 %%% No identity data cache.
 %%% @end
 %%%-------------------------------------------------------------------
--module(identity_cache_default).
+-module(no_identity_cache).
 -author("Michal Zmuda").
 
 -behaviour(identity_cache_behaviour).

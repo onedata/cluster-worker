@@ -42,10 +42,17 @@
     node :: node()
 }).
 
-%% Contents of synced cert related files
+%% Contents of cert files synced between nodes
 -record(synced_cert, {
     cert_file_content :: binary(),
     key_file_content :: binary()
+}).
+
+% Cached info about identities
+-record(cached_identity, {
+    id :: identity:id(),
+    public_key :: identity:public_key(),
+    last_update_seconds :: integer()
 }).
 
 -endif.

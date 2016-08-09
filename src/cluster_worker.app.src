@@ -76,8 +76,17 @@
             {datastore_config_plugin, datastore_config_plugin_default},
             {node_manager_plugin, node_manager_plugin_default},
             {dns_worker_plugin, dns_worker_plugin_default},
+
+            %% ===================================================================
+            %% IDENTITY
+            %% ===================================================================
+
+            %% Module which implements identity repository
             {identity_repository, identity_repository_default},
-            {identity_cache, identity_cache_default},
+            %% Module which implements identity cache
+            {identity_cache, db_identity_cache},
+            %% Maximum number of seconds until identity cache entry is considered invalid
+            {identity_cache_ttl_seconds, 3600},
 
             %% ===================================================================
             %% HTTP
