@@ -23,7 +23,8 @@
   % TODO - enable after clearing update
 %%   cache_control = true,
   cache_control = true,
-  last_cache_cleaning = {0,0,0}
+  last_cache_cleaning = {0,0,0},
+  last_state_analysis = {0,0,0}
 }).
 
 -endif.
