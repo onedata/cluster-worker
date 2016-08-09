@@ -22,7 +22,8 @@
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
   cache_controller,
-  task_pool
+  task_pool,
+  cache_consistency_controller
 ]).
 
 %% datastore_config_behaviour callbacks

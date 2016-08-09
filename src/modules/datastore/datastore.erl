@@ -208,48 +208,62 @@ list(Level, ModelName, Fun, AccIn) ->
 -spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
-    HelperFun1 = fun(#document{key = Key} = Document, Acc) ->
-        case cache_controller:check_disk_read(Key, ModelName, driver_to_level(Driver1), in_use) of
-            ok ->
-                {next, maps:put(Key, Document, Acc)};
-            _ ->
-                {next, Acc}
-        end;
-        (_, Acc) ->
-            {abort, Acc}
-    end,
-    HelperFun2 = fun(#document{key = Key} = Document, Acc) ->
-        {next, maps:put(Key, Document, Acc)};
-        (_, Acc) ->
-            {abort, Acc}
-    end,
-    %% @todo - do not get keys from disk that are already in memory
-    case exec_driver(ModelName, Driver2, list, [HelperFun1, #{}]) of
-        {ok, Ans1} ->
-            case exec_driver(ModelName, Driver1, list, [HelperFun2, Ans1]) of
-                {ok, Ans2} ->
-                    try
-                        AccOut =
-                            maps:fold(fun(_, Doc, OAcc) ->
-                                case Fun(Doc, OAcc) of
-                                    {next, NAcc} ->
-                                        NAcc;
-                                    {abort, NAcc} ->
-                                        throw({abort, NAcc})
-                                end
-                            end, AccIn, Ans2),
-                        {ok, AccOut}
-                    catch
-                        {abort, AccOut0} ->
-                            {ok, AccOut0};
-                        _:Reason ->
-                            {error, Reason}
+    CLevel = driver_to_level(Driver1),
+    CCCUuid = ModelName,
+
+    case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+        true ->
+            exec_driver(ModelName, Driver1, list, [Fun, AccIn]);
+        _ ->
+            HelperFun1 = fun
+                (#document{key = Key} = Document, Acc) ->
+                    {next, maps:put(Key, Document, Acc)};
+                (_, Acc) ->
+                    {abort, Acc}
+            end,
+
+            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
+                {ok, Ans1} ->
+                    HelperFun2 = fun
+                        (#document{key = Key} = Document, Acc) ->
+                            case cache_controller:check_get(Key, ModelName, driver_to_level(Driver1)) of
+                                ok ->
+                                    cache_controller:update_usage_info(Key, ModelName, Document, CLevel),
+                                    {next, maps:update_with(Key, fun(V) -> V end, Document, Acc)};
+                                _ ->
+                                    {next, Acc}
+                            end;
+                        (_, Acc) ->
+                            {abort, Acc}
+                    end,
+
+                    caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
+                    case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans1]) of
+                        {ok, Ans2} ->
+                            caches_controller:end_consistency_restoring(CLevel, CCCUuid),
+                            try
+                                AccOut =
+                                    maps:fold(fun(_, Doc, OAcc) ->
+                                        case Fun(Doc, OAcc) of
+                                            {next, NAcc} ->
+                                                NAcc;
+                                            {abort, NAcc} ->
+                                                throw({abort, NAcc})
+                                        end
+                                    end, AccIn, Ans2),
+                                {ok, AccOut}
+                            catch
+                                {abort, AccOut0} ->
+                                    {ok, AccOut0};
+                                _:Reason ->
+                                    {error, Reason}
+                            end;
+                        Err2 ->
+                            Err2
                     end;
-                Err2 ->
-                    Err2
-            end;
-        Err1 ->
-            Err1
+                Err1 ->
+                    Err1
+            end
     end;
 list(_Level, Drivers, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
@@ -503,33 +517,46 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
-    HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
-        case cache_controller:check_fetch({Key, LinkName, cache_controller_link_key}, ModelName, driver_to_level(Driver1)) of
-            ok ->
-                maps:put(LinkName, LinkTarget, Acc);
-            _ ->
-                Acc
-        end
-    end,
-    HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
-        maps:put(LinkName, LinkTarget, Acc)
-    end,
-    % TODO - update not to get from disk keys that are already in memory
-    case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun1, #{}]) of
-        {ok, Ans1} ->
-            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun2, Ans1]) of
-                {ok, Ans2} ->
-                    try maps:fold(Fun, AccIn, Ans2) of
-                        AccOut -> {ok, AccOut}
-                    catch
-                        _:Reason ->
-                            {error, Reason}
+    CLevel = driver_to_level(Driver1),
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+
+    case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+        true ->
+            exec_driver(ModelName, Driver1, foreach_link, [Key, Fun, AccIn]);
+        _ ->
+            HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
+                maps:put(LinkName, LinkTarget, Acc)
+            end,
+
+            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+                {ok, Ans1} ->
+                    HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
+                        CacheKey = {Key, LinkName, cache_controller_link_key},
+                        case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
+                            ok ->
+                                cache_controller:update_usage_info(CacheKey, ModelName, LinkTarget, CLevel),
+                                maps:update_with(LinkName, fun(V) -> V end, LinkTarget, Acc);
+                            _ ->
+                                Acc
+                        end
+                    end,
+
+                    caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
+                    case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun2, Ans1]) of
+                        {ok, Ans2} ->
+                            caches_controller:end_consistency_restoring(CLevel, CCCUuid),
+                            try maps:fold(Fun, AccIn, Ans2) of
+                                AccOut -> {ok, AccOut}
+                            catch
+                                _:Reason ->
+                                    {error, Reason}
+                            end;
+                            Err2 ->
+                                Err2
                     end;
-                Err2 ->
-                    Err2
-            end;
-        Err1 ->
-            Err1
+                Err1 ->
+                    Err1
+            end
     end;
 foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).

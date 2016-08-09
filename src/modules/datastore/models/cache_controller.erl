@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Model that is used to controle memory utilization by caches.
+%%% @doc Model that is used to control memory utilization by caches.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(cache_controller).
@@ -24,7 +24,7 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5, check_fetch/3, check_disk_read/4]).
+    list_docs_to_be_dumped/1, choose_action/5, check_get/3, check_fetch/3, check_disk_read/4, update_usage_info/4]).
 
 
 %%%===================================================================
@@ -383,24 +383,38 @@ update_usage_info(Key, ModelName, Level) ->
     create_or_update(Level, Doc, UpdateFun).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Updates information about usage of a document and saves doc to memory.
 %% @end
 %%--------------------------------------------------------------------
 -spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
+    boolean() | datastore:generic_error().
 update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
     update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level),
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, {LinkName, Doc}],
-    erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs);
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    case erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs) of
+        ok ->
+            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+        {error, already_exists} ->
+            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+        Error ->
+            Error
+    end;
 update_usage_info(Key, ModelName, Doc, Level) ->
     update_usage_info(Key, ModelName, Level),
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Doc],
-    erlang:apply(datastore:level_to_driver(Level), create, FullArgs).
+    case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of
+        {ok, _} ->
+            caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+        {error, already_exists} ->
+            caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+        Error ->
+            Error
+    end.
 
 %%--------------------------------------------------------------------
 %% @private

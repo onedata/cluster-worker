@@ -28,6 +28,8 @@
 -export([delete_old_keys/2, delete_all_keys/1]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
+-export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
+  check_cache_consistency/2]).
 
 %%%===================================================================
 %%% API
@@ -342,7 +344,7 @@ clear(Level, ModelName, Key) ->
   Pred =fun() ->
     case save_clear_info(Level, Uuid) of
       {ok, _} ->
-        true;
+        save_consistency_info(Level, ModelName, Key);
       _ ->
         false
     end
@@ -380,7 +382,8 @@ clear(Level, ModelName, Key, Link) ->
   Pred = fun() ->
     case save_clear_info(Level, Uuid) of
       {ok, _} ->
-        true;
+        CCCUuid = get_cache_uuid(Key, ModelName),
+        save_consistency_info(Level, CCCUuid, Link);
       _ ->
         false
     end
@@ -438,6 +441,112 @@ save_high_mem_clear_info(Level, Uuid) ->
   Doc = #document{key = Uuid, value = V},
 
   cache_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves information about clearing doc from memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_consistency_info(Level :: datastore:store_level(), Key :: binary(),
+    ClearedName :: datastore:key() | datastore:link_name()) ->
+  boolean() | datastore:create_error().
+save_consistency_info(Level, Key, ClearedName) ->
+  UpdateFun = fun
+    (#cache_consistency_controller{status = not_monitored}) ->
+      {error, clearing_not_monitored};
+    (#cache_consistency_controller{cleared_list = CL} = Record) ->
+      case length(CL) >= ?CLEAR_MONITOR_MAX_SIZE of
+        true ->
+          Record#cache_consistency_controller{cleared_list = [], status = not_monitored};
+        _ ->
+          Record#cache_consistency_controller{cleared_list = [ClearedName | CL]}
+      end
+  end,
+  V = #cache_consistency_controller{cleared_list = [ClearedName]},
+  Doc = #document{key = Key, value = V},
+
+  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+    {ok, _} ->
+      true;
+    {error, clearing_not_monitored} ->
+      true;
+    Other ->
+      ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+      false
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves information about restoring doc to memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_consistency_restored_info(Level :: datastore:store_level(), Key :: binary(),
+    ClearedName :: datastore:key() | datastore:link_name()) ->
+  boolean() | datastore:create_error().
+save_consistency_restored_info(Level, Key, ClearedName) ->
+  UpdateFun = fun
+                (#cache_consistency_controller{status = not_monitored}) ->
+                  {error, clearing_not_monitored};
+                (#cache_consistency_controller{cleared_list = CL} = Record) ->
+                  Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL)}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+    {ok, _} ->
+      true;
+    {error, clearing_not_monitored} ->
+      true;
+    Other ->
+      ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+      false
+  end.
+
+begin_consistency_restoring(Level, Key) ->
+  Pid = self(),
+  UpdateFun = fun
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, _}}) ->
+                  {error, restoring_process_in_progress};
+                (#cache_consistency_controller{cleared_list = [], status = ok}) ->
+                  {error, consistency_ok};
+                (Record) ->
+                  Record#cache_consistency_controller{status = {restoring, Pid}}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid}}},
+
+  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+
+end_consistency_restoring(Level, Key) ->
+  Pid = self(),
+  UpdateFun = fun
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}}) ->
+                  case RPid of
+                    Pid ->
+                      #cache_consistency_controller{};
+                    _ ->
+                      {error, interupted}
+                  end;
+                (#cache_consistency_controller{status = {restoring, _}}) ->
+                  #cache_consistency_controller{cleared_list = [], status = not_monitored};
+                (_) ->
+                  {error, interupted}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+
+check_cache_consistency(Level, Key) ->
+  case cache_consistency_controller:get(Level, Key) of
+    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok}}} ->
+      true;
+    {ok, _} ->
+      false;
+    {error, {not_found, _}} ->
+      true
+  end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -518,7 +627,8 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
     Pred = fun() ->
       case save_high_mem_clear_info(Level, Uuid) of
         {ok, _} ->
-          true;
+          CCCUuid = get_cache_uuid(Key, ModelName),
+          save_consistency_info(Level, CCCUuid, Link);
         _ ->
           false
       end
@@ -539,7 +649,7 @@ safe_delete(Level, ModelName, Key) ->
     Pred =fun() ->
       case save_high_mem_clear_info(Level, Uuid) of
         {ok, _} ->
-          true;
+          save_consistency_info(Level, ModelName, Key);
         _ ->
           false
       end
