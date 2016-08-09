@@ -17,7 +17,7 @@
 
 %% model_behaviour callbacks
 -export([save/1, get/1, exists/1, delete/1, update/2, create/1,
-    model_init/0, 'after'/5, before/4, create_or_update/2]).
+    model_init/0, 'after'/5, before/4, create_or_update/2, list/0]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -85,7 +85,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(identity_cache_bucket, [], ?DISK_ONLY_LEVEL).
+    ?MODEL_CONFIG(identity_cache_bucket, [], ?LOCAL_ONLY_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -108,11 +108,14 @@ model_init() ->
 before(_ModelName, _Method, _Level, _Context) ->
     ok.
 
-
-%%%===================================================================
-%%% API callbacks
-%%%===================================================================
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns list of all records.
+%% @end
+%%--------------------------------------------------------------------
+-spec list() -> {ok, [datastore:document()]} | datastore:generic_error() | no_return().
+list() ->
+    datastore:list(?STORE_LEVEL, ?MODEL_NAME, ?GET_ALL, []).
 
 %%--------------------------------------------------------------------
 %% @doc

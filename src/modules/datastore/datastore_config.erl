@@ -22,6 +22,7 @@
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
   cache_controller,
+  cached_identity,
   synced_cert,
   task_pool
 ]).

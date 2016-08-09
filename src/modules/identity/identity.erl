@@ -178,10 +178,13 @@ create_certs_form_doc(CertFile, KeyFile) ->
 try_creating_certs_doc(CertFile, KeyFile) ->
     {ok, CertBin} = file:read_file(CertFile),
     {ok, KeyBin} = file:read_file(KeyFile),
-    synced_cert:create(#document{key = ?CERT_DB_KEY, value = #synced_cert{
+    Res = synced_cert:create(#document{key = ?CERT_DB_KEY, value = #synced_cert{
         cert_file_content = CertBin, key_file_content = KeyBin
     }}),
-    ok.
+    case Res of
+        {ok, _} -> ok;
+        {error, already_exists} -> ok
+    end.
 
 -spec recreate_cert_files(KeyFilePath :: string(), CertFilePath :: string(),
     DomainForCN :: string()) -> ok.
