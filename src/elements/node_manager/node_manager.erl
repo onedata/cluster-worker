@@ -231,7 +231,7 @@ handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
 handle_call(check_mem_synch, _From, State) ->
     Ans = case monitoring:get_memory_stats() of
         [{<<"mem">>, MemUsage}] ->
-            case caches_controller:should_clear_cache(MemUsage) of
+            case caches_controller:should_clear_cache(MemUsage, erlang:memory()) of
                 true ->
                     free_memory(MemUsage);
                 _ ->
@@ -292,9 +292,10 @@ handle_cast(cm_conn_ack, State) ->
 handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
     last_cache_cleaning = Last} = State) when CacheControl =:= true ->
     MemUsage = monitoring:mem_usage(MonState),
+    {_, ErlangMemUsage, _} = monitoring:erlang_vm_stats(MonState),
     % Check if memory cleaning of oldest docs should be started
     % even when memory utilization is low (e.g. once a day)
-    NewState = case caches_controller:should_clear_cache(MemUsage) of
+    NewState = case caches_controller:should_clear_cache(MemUsage, ErlangMemUsage) of
         true ->
             spawn(fun() -> free_memory(MemUsage) end),
             State#state{last_cache_cleaning = os:timestamp()};
@@ -309,44 +310,6 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
                     State
             end
     end,
-
-    spawn(fun() ->
-        ?info("Monitoring state: ~p", [MonState]),
-
-        ?info("Erlang CPU and Mem ~p~n~p~n~p", [cpu_sup:util(), erlang:memory(),
-            lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
-        ]),
-
-        Procs = erlang:processes(),
-        SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
-        MergedStacksMap = lists:foldl(fun(P, Map) ->
-            case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
-                {{current_stacktrace, K}, {memory, M}} ->
-                    {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
-                    maps:put(K, {M+M2, Num +1, K}, Map);
-                _ ->
-                    Map
-            end
-        end, #{}, Procs),
-        MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
-
-        GetName = fun(P) ->
-            All = erlang:registered(),
-            lists:foldl(fun(Name, Acc) ->
-                case whereis(Name) of
-                    P ->
-                        Name;
-                    _ ->
-                        Acc
-                end
-            end, non, All)
-        end,
-
-        ?info("Erlang Procs ~p~n~p~n~p", [length(Procs),
-            lists:map(fun({M, P}) -> {M, erlang:process_info(P, current_stacktrace), P, GetName(P)} end, lists:sublist(SortedProcs, 5)),
-            MergedStacks
-        ])
-    end),
 
     next_mem_check(),
     {noreply, NewState};
@@ -564,14 +527,15 @@ cm_conn_ack(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec do_heartbeat(State :: #state{}) -> #state{}.
-do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState} = State) ->
+do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA} = State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
+    NewLSA = analyse_monitoring_state(NewMonState, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
     ?debug("Sending heartbeat to cluster manager"),
     gen_server:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
-    State#state{monitoring_state = NewMonState};
+    State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA};
 
 % Stop heartbeat if node_manager is not registered in cluster manager
 do_heartbeat(State) ->
@@ -694,7 +658,7 @@ start_worker(Module, Args) ->
 %% Clears memory caches.
 %% @end
 %%--------------------------------------------------------------------
--spec free_memory(NodeMem :: number()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
+-spec free_memory(NodeMem :: float()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
 free_memory(NodeMem) ->
     try
         AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
@@ -709,7 +673,7 @@ free_memory(NodeMem) ->
             ({_Aggressive, _StoreType}, ok) ->
                 ok;
             ({Aggressive, StoreType}, _) ->
-                Ans = caches_controller:clear_cache(NodeMem, Aggressive, StoreType),
+                Ans = caches_controller:clear_cache(Aggressive, StoreType),
                 case Ans of
                     mem_usage_too_high ->
                         ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
@@ -729,7 +693,7 @@ free_memory() ->
         ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
         lists:foreach(fun
             ({Aggressive, StoreType}) ->
-                caches_controller:clear_cache(100, Aggressive, StoreType)
+                caches_controller:clear_cache(Aggressive, StoreType)
         end, ClearingOrder)
     catch
         E1:E2 ->
@@ -779,3 +743,74 @@ check_port(Port) ->
             {error, Reason}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Analyse monitoring state and log result.
+%% @end
+%%--------------------------------------------------------------------
+-spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
+    LastAnalysisTime :: erlang:timestamp()) -> erlang:timestamp().
+analyse_monitoring_state(MonState, LastAnalysisTime) ->
+    ?debug("Monitoring state: ~p", [MonState]),
+
+    {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
+    MemInt = proplists:get_value(total, Mem, 0),
+
+    {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_min),
+    {ok, MaxInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, max_analysis_interval_min),
+    {ok, MemThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_analysis_treshold),
+    {ok, ProcThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, procs_num_analysis_treshold),
+
+    Now = os:timestamp(),
+    TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000000,
+    case (TimeDiff >= timer:minutes(MaxInterval)) orelse
+        ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
+        true ->
+            ?info("Monitoring state: ~p", [MonState]),
+            spawn(fun() ->
+                ?info("Erlang ets mem usage: ~p", [
+                    lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
+                ]),
+
+                Procs = erlang:processes(),
+                SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
+                MergedStacksMap = lists:foldl(fun(P, Map) ->
+                    case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
+                        {{current_stacktrace, K}, {memory, M}} ->
+                            {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
+                            maps:put(K, {M+M2, Num +1, K}, Map);
+                        _ ->
+                            Map
+                    end
+                end, #{}, Procs),
+                MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
+
+                MergedStacksMap2 = maps:map(fun(K, {M, N, K}) -> {N, M, K} end, MergedStacksMap),
+                MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
+
+                GetName = fun(P) ->
+                    All = erlang:registered(),
+                    lists:foldl(fun(Name, Acc) ->
+                        case whereis(Name) of
+                            P ->
+                                Name;
+                            _ ->
+                                Acc
+                        end
+                    end, non, All)
+                end,
+
+                TopProcesses = lists:map(
+                    fun({M, P}) ->
+                        {M, erlang:process_info(P, current_stacktrace), P, GetName(P)}
+                    end, lists:sublist(SortedProcs, 5)),
+                ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
+                    "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
+                    TopProcesses, MergedStacks, MergedStacks2
+                ])
+            end),
+            Now;
+        _ ->
+            LastAnalysisTime
+    end.
