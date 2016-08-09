@@ -274,28 +274,19 @@ exists_link_doc(ModelConfig, DocKey, Scope) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(#model_config{} = ModelConfig, Fun, AccIn) ->
     SelectAll = [{'_', [], ['$_']}],
+    ToExec = fun() ->
+        case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
+            {Obj, Handle} ->
+                list_next(Obj, Handle, Fun, AccIn);
+            '$end_of_table' ->
+                list_next('$end_of_table', undefined, Fun, AccIn)
+        end
+    end,
     case mnesia:is_transaction() of
         true ->
-            try
-                case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
-                    {Obj, Handle} ->
-                        list_next(Obj, Handle, Fun, AccIn);
-                    '$end_of_table' ->
-                        list_next('$end_of_table', undefined, Fun, AccIn)
-                end
-            catch
-                _:Reason ->
-                    {error, Reason}
-            end;
+            ToExec();
         _ ->
-            mnesia_run(async_dirty, fun() ->
-                case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
-                    {Obj, Handle} ->
-                        list_next(Obj, Handle, Fun, AccIn);
-                    '$end_of_table' ->
-                        list_next('$end_of_table', undefined, Fun, AccIn)
-                end
-            end)
+            mnesia_run(async_dirty, ToExec)
     end.
 
 
