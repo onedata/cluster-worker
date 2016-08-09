@@ -49,7 +49,7 @@
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, get_link_doc_inside_trans/2, delete_link_doc/2]).
 -export([to_binary/1]).
-
+-export([add_view/2, query_view/2, delete_view/1]).
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
@@ -135,8 +135,8 @@ save_link_doc(ModelConfig, Doc) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
     create(ModelConfig, Doc);
-save_doc(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
-    ok = assert_value_size(Value),
+save_doc(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -190,8 +190,8 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, value = Value}) ->
-    ok = assert_value_size(Value),
+create(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -757,8 +757,8 @@ db_run(Mod, Fun, Args, Retry) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = _ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
-    ok = assert_value_size(Value),
+force_save(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
@@ -1179,9 +1179,111 @@ rev_info_to_rev({NumBin, [Hash | _]}) when is_binary(NumBin) ->
 %% Ensure that given term does not exceed maximum document's value size.
 %% @end
 %%--------------------------------------------------------------------
--spec assert_value_size(Value :: term()) -> ok | no_return().
-assert_value_size(Value) ->
+-spec assert_value_size(Value :: term(), model_behaviour:model_config(), datastore:ext_key()) -> ok | no_return().
+assert_value_size(Value, ModelConfig, Key) ->
     case byte_size(term_to_binary(Value)) > ?MAX_VALUE_SIZE of
-        true -> error(term_to_big);
+        true ->
+            ?error_stacktrace("term_too_big: key ~p, model ~p, value ~p",
+                [Key, ModelConfig, Value]),
+            error(term_too_big);
         false -> ok
     end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%                                 CUSTOM VIEWS                                       %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Add design doc with custom view under given Id. The ViewFunction will be
+%% invoked for each instance of given record stored in db, and should return null or key,
+%% that will be queried with get_view function later.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_view(binary(), binary()) -> ok.
+add_view(Id, ViewFunction) ->
+    DesignId = <<"_design/", Id/binary>>,
+
+    Doc = to_json_term(#{
+        <<"_id">> => DesignId,
+        <<"views">> => maps:from_list(
+            [{Id, #{<<"map">> => ViewFunction}}]
+        )
+    }),
+    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Get list of document ids for view with given id, matching given key.
+%%
+%% Available options:
+%% Options :: view_options() [{key, binary()} | {start_docid, binary()}
+%%    | {end_docid, binary()} | {start_key, binary()}
+%%    | {end_key, binary()} | {limit, integer()}
+%%    | {stale, stale()}
+%%    | descending
+%%    | {skip, integer()}
+%%    | group | {group_level, integer()}
+%%    | {inclusive_end, boolean()} | {reduce, boolean()} | reduce | include_docs | conflicts
+%%    | {keys, list(binary())}
+%%    | `{stream_to, Pid}': the pid where the changes will be sent,
+%%      by default the current pid. Used for continuous and longpoll
+%%      connections
+%%
+%%      {key, Key}: key value
+%%      {start_docid, DocId}: document id to start with (to allow pagination
+%%          for duplicate start keys
+%%      {end_docid, DocId}: last document id to include in the result (to
+%%          allow pagination for duplicate endkeys)
+%%      {start_key, Key}: start result from key value
+%%      {end_key, Key}: end result from key value
+%%      {limit, Limit}: Limit the number of documents in the result
+%%      {stale, Stale}: If stale=ok is set, CouchDB will not refresh the view
+%%      even if it is stale, the benefit is a an improved query latency. If
+%%      stale=update_after is set, CouchDB will update the view after the stale
+%%      result is returned.
+%%      descending: reverse the result
+%%      {skip, N}: skip n number of documents
+%%      group: the reduce function reduces to a single result
+%%      row.
+%%      {group_level, Level}: the reduce function reduces to a set
+%%      of distinct keys.
+%%      {reduce, boolean()}: whether to use the reduce function of the view. It defaults to
+%%      true, if a reduce function is defined and to false otherwise.
+%%      include_docs: automatically fetch and include the document
+%%      which emitted each view entry
+%%      {inclusive_end, boolean()}: Controls whether the endkey is included in
+%%      the result. It defaults to true.
+%%      conflicts: include conflicts
+%%      {keys, [Keys]}: to pass multiple keys to the view query
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec query_view(binary(), list()) -> {ok, [binary()]}.
+query_view(Id, Options) ->
+    case db_run(couchbeam_view, fetch, [{Id, Id}, Options], 3) of
+        {ok, List} ->
+            Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
+                {_, DocUuid} = from_driver_key(DbDocId),
+                DocUuid
+            end, List),
+            {ok, Ids};
+        Error ->
+            Error
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Delete view and design doc with given Id
+%% @end
+%% @TODO TODO
+%%--------------------------------------------------------------------
+-spec delete_view(binary()) -> ok.
+delete_view(Id) ->
+%%    DesignId = <<"_design/", Id/binary>>,
+%%    {ok, _} = couchdb_datastore_driver:db_run(couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
+    ok.

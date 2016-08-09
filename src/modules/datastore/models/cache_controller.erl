@@ -280,9 +280,9 @@ model_init() ->
     update_usage_info(Key, ModelName, Level);
 'after'(ModelName, fetch_link, disk_only, [Key, LinkName], {ok, Doc}) ->
     Level2 = caches_controller:cache_to_datastore_level(ModelName),
-    update_usage_info({Key, LinkName}, ModelName, Doc, Level2);
+    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level2);
 'after'(ModelName, fetch_link, Level, [Key, LinkName], {ok, _}) ->
-    update_usage_info({Key, LinkName}, ModelName, Level);
+    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
 'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
     ok.
 
@@ -317,10 +317,10 @@ before(ModelName, get, disk_only, [Key], Level2) ->
 before(ModelName, exists, disk_only, [Key], Level2) ->
     check_exists(Key, ModelName, Level2);
 before(ModelName, fetch_link, disk_only, [Key, LinkName], Level2) ->
-    check_fetch({Key, LinkName}, ModelName, Level2);
+    check_fetch({Key, LinkName, cache_controller_link_key}, ModelName, Level2);
 before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun({LN, _}, Acc) ->
-        [start_disk_op({Key, LN}, ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
+        [start_disk_op({Key, LN, cache_controller_link_key}, ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
     end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
@@ -328,10 +328,10 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
 before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
     check_link_create(Key, LinkName, ModelName, Level);
 before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->
-    start_disk_op({Key, LinkName}, ModelName, create_link, Args, Level2);
+    start_disk_op({Key, LinkName, cache_controller_link_key}, ModelName, create_link, Args, Level2);
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
     lists:foldl(fun(Link, Acc) ->
-        Ans = before_del({Key, Link}, ModelName, Level, delete_links),
+        Ans = before_del({Key, Link, cache_controller_link_key}, ModelName, Level, delete_links),
         case Ans of
             ok ->
                 Acc;
@@ -341,7 +341,7 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
     end, ok, Links);
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
-        [start_disk_op({Key, Link}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
+        [start_disk_op({Key, Link, cache_controller_link_key}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
     end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
@@ -369,7 +369,7 @@ get_hooks_config() ->
 %% Updates information about usage of a document.
 %% @end
 %%--------------------------------------------------------------------
--spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 update_usage_info(Key, ModelName, Level) ->
@@ -388,11 +388,11 @@ update_usage_info(Key, ModelName, Level) ->
 %% Updates information about usage of a document and saves doc to memory.
 %% @end
 %%--------------------------------------------------------------------
--spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-update_usage_info({Key, LinkName}, ModelName, Doc, Level) ->
-    update_usage_info({Key, LinkName}, ModelName, Level),
+update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
+    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level),
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, {LinkName, Doc}],
     erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs);
@@ -430,8 +430,8 @@ check_exists(Key, ModelName, Level) ->
 %% Checks if fetch operation should be performed.
 %% @end
 %%--------------------------------------------------------------------
--spec check_fetch(Key :: {datastore:ext_key(), datastore:link_name()}, ModelName :: model_behaviour:model_type(),
-    Level :: datastore:store_level()) -> ok | {error, link_not_found}.
+-spec check_fetch(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
+    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) -> ok | {error, link_not_found}.
 check_fetch(Key, ModelName, Level) ->
     check_disk_read(Key, ModelName, Level, {error, link_not_found}).
 
@@ -441,7 +441,7 @@ check_fetch(Key, ModelName, Level) ->
 %% Checks if operation on disk should be performed.
 %% @end
 %%--------------------------------------------------------------------
--spec check_disk_read(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec check_disk_read(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(),
     ErrorAns :: term()) -> term().
 check_disk_read(Key, ModelName, Level, ErrorAns) ->
@@ -531,10 +531,10 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec choose_action(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}, Uuid :: binary()) ->
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}, Uuid :: binary()) ->
     ok | {ok, non} | {ok, NewMethod, NewArgs} | {get_error, Error} | {fetch_error, Error} when
     NewMethod :: atom(), NewArgs :: term(), Error :: datastore:generic_error().
-choose_action(Op, Level, ModelName, {Key, Link}, Uuid) ->
+choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid) ->
     % check for create/delete race
     ModelConfig = ModelName:model_init(),
     case Op of
@@ -631,8 +631,8 @@ choose_action(Op, Level, ModelName, Key, Uuid) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_action_after_clear(Op :: atom(), Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) -> ok | no_return().
-check_action_after_clear(Op, Level, ModelName, {Key, Link}) ->
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) -> ok | no_return().
+check_action_after_clear(Op, Level, ModelName, {Key, Link, cache_controller_link_key}) ->
     case Op of
         delete_links ->
             ok;
@@ -672,7 +672,7 @@ check_action_after_clear(Op, Level, ModelName, Key) ->
 %% Saves dump information about disk operation and decides if it should be done.
 %% @end
 %%--------------------------------------------------------------------
--spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Op :: atom(), Args :: list(), Level :: datastore:store_level()) ->
     ok | {task, task_manager:task()} | {error, Error} when
     Error :: not_last_user | preparing_disk_op_failed.
@@ -685,7 +685,7 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
 %% Saves dump information about disk operation and decides if it should be done.
 %% @end
 %%--------------------------------------------------------------------
--spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec start_disk_op(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Op :: atom(), Args :: list(),
     Level :: datastore:store_level(), Sleep :: boolean()) -> ok | {task, task_manager:task()} | {error, Error} when
     Error :: not_last_user | preparing_disk_op_failed.
@@ -798,7 +798,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
 %% Marks document before delete operation.
 %% @end
 %%--------------------------------------------------------------------
--spec before_del(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()},
+-spec before_del(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(), Op :: atom()) ->
     ok | {error, preparing_op_failed}.
 before_del(Key, ModelName, Level, _Op) ->
@@ -863,7 +863,7 @@ check_create(Key, ModelName, Level) ->
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
     ok | datastore:generic_error().
 check_link_create(Key, LinkName, ModelName, Level) ->
-    Uuid = caches_controller:get_cache_uuid({Key, LinkName}, ModelName),
+    Uuid = caches_controller:get_cache_uuid({Key, LinkName, cache_controller_link_key}, ModelName),
     Check = case get(Level, Uuid) of
                 {ok, Doc2} ->
                     Value = Doc2#document.value,

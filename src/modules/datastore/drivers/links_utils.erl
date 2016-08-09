@@ -526,7 +526,7 @@ foreach_link(_Driver, _ModelConfig, _Key, _Fun, AccIn, _Scopes) ->
 %% Returns key for document holding links for given document.
 %% @end
 %%--------------------------------------------------------------------
--spec links_doc_key(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
+-spec links_doc_key(Key :: datastore:key(), Scope :: atom() | binary() | mother_scope_fun()) -> BinKey :: binary().
 links_doc_key(Key, Scope) ->
     Base = links_doc_key_from_scope(Key, Scope),
     case byte_size(Base) > 120 of
@@ -992,7 +992,7 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
 %% Create base for links document key (base must be cut if too long).
 %% @end
 %%--------------------------------------------------------------------
--spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: atom() | mother_scope_fun()) -> BinKey :: binary().
+-spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: atom() | binary() | mother_scope_fun()) -> BinKey :: binary().
 links_doc_key_from_scope(Key, ScopeFun) when is_function(ScopeFun) ->
     links_doc_key_from_scope(Key, ScopeFun());
 links_doc_key_from_scope(Key, Scope) when is_binary(Key), is_binary(Scope) ->

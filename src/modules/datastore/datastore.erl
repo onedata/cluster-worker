@@ -580,7 +580,7 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
-        case cache_controller:check_fetch({Key, LinkName}, ModelName, driver_to_level(Driver1)) of
+        case cache_controller:check_fetch({Key, LinkName, cache_controller_link_key}, ModelName, driver_to_level(Driver1)) of
             ok ->
                 maps:put(LinkName, LinkTarget, Acc);
             _ ->

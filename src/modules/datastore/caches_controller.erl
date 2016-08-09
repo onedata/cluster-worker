@@ -23,8 +23,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([clear_local_cache/1, clear_global_cache/1, clear_local_cache/2, clear_global_cache/2]).
--export([clear_cache/2, clear_cache/3, should_clear_cache/1, get_hooks_config/1, wait_for_cache_dump/0]).
+-export([clear_local_cache/1, clear_global_cache/1]).
+-export([clear_cache/2, should_clear_cache/2, get_hooks_config/1, wait_for_cache_dump/0]).
 -export([delete_old_keys/2, delete_all_keys/1]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
@@ -38,10 +38,12 @@
 %% Checks if memory should be cleared.
 %% @end
 %%--------------------------------------------------------------------
--spec should_clear_cache(MemUsage :: number()) -> boolean().
-should_clear_cache(MemUsage) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache),
-  MemUsage >= TargetMemUse.
+-spec should_clear_cache(MemUsage :: float(), ErlangMemUsage :: [{atom(), non_neg_integer()}]) -> boolean().
+should_clear_cache(MemUsage, ErlangMemUsage) ->
+  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+  {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
+  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  (MemUsage >= TargetMemUse) andalso (MemToCompare >= TargetErlangMemUse * 1024 * 1024).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,16 +56,6 @@ clear_local_cache(Aggressive) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Clears local cache.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_local_cache(MemUsage :: number(), Aggressive :: boolean()) ->
-  ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_local_cache(MemUsage, Aggressive) ->
-  clear_cache(MemUsage, Aggressive, locally_cached).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Clears global cache.
 %% @end
 %%--------------------------------------------------------------------
@@ -73,65 +65,39 @@ clear_global_cache(Aggressive) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Clears global cache.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_global_cache(MemUsage :: number(), Aggressive :: boolean()) ->
-  ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_global_cache(MemUsage, Aggressive) ->
-  clear_cache(MemUsage, Aggressive, globally_cached).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Clears cache.
 %% @end
 %%--------------------------------------------------------------------
 -spec clear_cache(Aggressive :: boolean(), StoreType :: globally_cached | locally_cached) ->
   ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_cache(Aggressive, StoreType) ->
-  case monitoring:get_memory_stats() of
-    [{<<"mem">>, MemUsage}] ->
-      clear_cache(MemUsage, Aggressive, StoreType);
-    _ ->
-      ?warning("Not able to check memory usage"),
-      cannot_check_mem_usage
-  end.
+clear_cache(true, StoreType) ->
+  clear_cache_by_time_windows(StoreType, [timer:minutes(10), 0]);
+
+clear_cache(_, StoreType) ->
+  clear_cache_by_time_windows(StoreType, [timer:hours(7*24), timer:hours(24), timer:hours(1)]).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Clears cache.
 %% @end
 %%--------------------------------------------------------------------
--spec clear_cache(MemUsage :: number(), Aggressive :: boolean(), StoreType :: globally_cached | locally_cached) ->
+-spec clear_cache_by_time_windows(StoreType :: globally_cached | locally_cached, TimeWindows :: list()) ->
   ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_cache(MemUsage, true, StoreType) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache),
-  clear_cache(MemUsage, TargetMemUse, StoreType, [timer:minutes(10), 0]);
-
-clear_cache(MemUsage, _, StoreType) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache),
-  clear_cache(MemUsage, TargetMemUse, StoreType, [timer:hours(7*24), timer:hours(24), timer:hours(1)]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Clears cache.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_cache(MemUsage :: number(), TargetMemUse :: number(),
-    StoreType :: globally_cached | locally_cached, TimeWindows :: list()) ->
-  ok | mem_usage_too_high | cannot_check_mem_usage.
-clear_cache(MemUsage, TargetMemUse, _StoreType, _TimeWindows) when MemUsage < TargetMemUse ->
-  ok;
-
-clear_cache(_MemUsage, _TargetMemUse, _StoreType, []) ->
+clear_cache_by_time_windows(_StoreType, []) ->
   mem_usage_too_high;
 
-clear_cache(_MemUsage, TargetMemUse, StoreType, [TimeWindow | Windows]) ->
+clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   caches_controller:delete_old_keys(StoreType, TimeWindow),
   timer:sleep(1000), % time for system for mem info update
   case monitoring:get_memory_stats() of
-    [{<<"mem">>, NewMemUsage}] ->
-      clear_cache(NewMemUsage, TargetMemUse, StoreType, Windows);
+    [{<<"mem">>, MemUsage}] ->
+      ErlangMemUsage = erlang:memory(),
+      case should_clear_cache(MemUsage, ErlangMemUsage) of
+        true ->
+          clear_cache_by_time_windows(StoreType, Windows);
+        _ ->
+          ok
+      end;
     _ ->
       ?warning("Not able to check memory usage"),
       cannot_check_mem_usage
@@ -158,7 +124,7 @@ get_hooks_config(Models) ->
 %% Generates uuid on the basis of key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()},
+-spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type()) -> binary().
 get_cache_uuid(Key, ModelName) ->
   base64:encode(term_to_binary({ModelName, Key})).
@@ -297,7 +263,7 @@ flush(Level, ModelName, Key, all) ->
   end, ok, Links);
 
 flush(Level, ModelName, Key, Link) ->
-  flush(Level, ModelName, {Key, Link}).
+  flush(Level, ModelName, {Key, Link, cache_controller_link_key}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -305,7 +271,7 @@ flush(Level, ModelName, Key, Link) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec flush(Level :: datastore:store_level(), ModelName :: atom(),
-    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) ->
   ok | datastore:generic_error().
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
@@ -375,7 +341,7 @@ clear(Level, ModelName, Key, all) ->
 
 clear(Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
-  Uuid = get_cache_uuid({Key, Link}, ModelName),
+  Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
 
   Pred = fun() ->
     case save_clear_info(Level, Uuid) of
@@ -508,12 +474,12 @@ delete_old_keys(Level, Caches, TimeWindow) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec safe_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) ->
   ok | datastore:generic_error().
-safe_delete(Level, ModelName, {Key, Link}) ->
+safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
-    Uuid = get_cache_uuid({Key, Link}, ModelName),
+    Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
 
     Pred = fun() ->
       case save_high_mem_clear_info(Level, Uuid) of
@@ -528,7 +494,7 @@ safe_delete(Level, ModelName, {Key, Link}) ->
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
-      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link}}, E1, E2]),
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link, cache_controller_link_key}}, E1, E2]),
       {error, safe_delete_failed}
   end;
 safe_delete(Level, ModelName, Key) ->
@@ -591,9 +557,9 @@ delete_all_keys(Level, Caches) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec value_delete(Level :: datastore:store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name()}) ->
+    Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}) ->
   ok | datastore:generic_error().
-value_delete(Level, ModelName, {Key, Link}) ->
+value_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
     FullArgs2 = [ModelConfig, Key, [Link]],
@@ -601,7 +567,7 @@ value_delete(Level, ModelName, {Key, Link}) ->
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller value_delete. "
-      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link}}, E1, E2]),
+      ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, {Key, Link, cache_controller_link_key}}, E1, E2]),
       {error, delete_failed}
   end;
 value_delete(Level, ModelName, Key) ->

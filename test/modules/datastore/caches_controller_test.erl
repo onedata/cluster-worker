@@ -31,7 +31,8 @@ mem_clearing_test_() ->
             MemTarget = Mem0 + ToAdd/2,
             MemUsage = Mem0 + ToAdd,
 
-            application:set_env(?CLUSTER_WORKER_APP_NAME, mem_to_clear_cache, MemTarget),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, MemTarget),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb, 1),
 
             OneMB = list_to_binary(prepare_list(1024*1024)),
             ets:new(test, [named_table, public, set]),
@@ -63,19 +64,19 @@ mem_clearing_test_() ->
                 end
             ),
 
-            ?assertEqual(mem_usage_too_high, caches_controller:clear_global_cache(MemUsage, false)),
+            ?assertEqual(mem_usage_too_high, caches_controller:clear_global_cache(false)),
             [{_, TmpMem}] = monitoring:get_memory_stats(),
             ?assert(TmpMem > MemTarget),
 
-            ?assertEqual(mem_usage_too_high, caches_controller:clear_local_cache(MemUsage, false)),
+            ?assertEqual(mem_usage_too_high, caches_controller:clear_local_cache(false)),
             [{_, TmpMem2}] = monitoring:get_memory_stats(),
             ?assert(TmpMem2 > MemTarget),
 
-            ?assertEqual(ok, caches_controller:clear_local_cache(MemUsage, true)),
+            ?assertEqual(ok, caches_controller:clear_local_cache(true)),
             [{_, FinalMem}] = monitoring:get_memory_stats(),
             ?assert(FinalMem < MemTarget),
 
-            ?assertEqual(ok, caches_controller:clear_global_cache(FinalMem, true)),
+            ?assertEqual(ok, caches_controller:clear_global_cache(true)),
 
             catch ets:delete(test),
 
@@ -91,7 +92,7 @@ mem_clearing_test_() ->
             ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:hours(7*24)])),
             ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:hours(24)])),
             ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:hours(1)])),
-            ?assertEqual(0, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:minutes(10)])),
+            ?assertEqual(1, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, timer:minutes(10)])),
             ?assertEqual(0, meck:num_calls(caches_controller, delete_old_keys, [globally_cached, 0])),
 
             ?assert(meck:validate(caches_controller)),
