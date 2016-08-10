@@ -9,6 +9,7 @@
 %%% This module allows constructing critical sections.
 %%% @end
 %%%-------------------------------------------------------------------
+% TODO VFS-2371 - problem with nested critical sections (change to critical sections in couchdb_datastore_driver to check error).
 -module(critical_section).
 -author("Mateusz Paciorek").
 

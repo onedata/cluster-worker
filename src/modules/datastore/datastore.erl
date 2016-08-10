@@ -67,9 +67,10 @@
     get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
-    link_walk/4, link_walk/5]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_synchronized/3, normalize_link_target/1]).
+    link_walk/4, link_walk/5, exists_link_doc/3, exists_link_doc/4]).
+-export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_level/1,
+    driver_to_module/1, initialize_state/1]).
+-export([run_transaction/3, normalize_link_target/1, run_posthooks/5]).
 
 %%%===================================================================
 %%% API
@@ -562,14 +563,34 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(store_level(), document(), links_utils:scope()) ->
+    {ok, boolean()} | datastore:generic_error().
+exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
+    exists_link_doc(Level, Key, model_name(Doc),  Scope).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type(), links_utils:scope()) ->
+    {ok, boolean()} | datastore:generic_error().
+exists_link_doc(Level, Key, ModelName,  Scope) ->
+    exec_driver(ModelName, level_to_driver(Level), exists_link_doc, [Key, Scope]).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
 %% run at the same time.
 %% @end
 %%--------------------------------------------------------------------
--spec run_synchronized(ModelName :: model_behaviour:model_type(), ResourceId :: binary(), fun(() -> Result)) -> Result
+-spec run_transaction(ModelName :: model_behaviour:model_type(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
-run_synchronized(ModelName, ResourceId, Fun) ->
-    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_synchronized, [ResourceId, Fun]).
+run_transaction(ModelName, ResourceId, Fun) ->
+    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_transation, [ResourceId, Fun]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -685,30 +706,15 @@ run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
 -spec run_posthooks(Config :: model_behaviour:model_config(),
     Model :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term(), ReturnValue) -> ReturnValue when ReturnValue :: term().
-run_posthooks(#model_config{name = ModelName}, Method, Level, Context, Return) ->
+run_posthooks(#model_config{name = ModelName} = _ModelConfig, Method, Level, Context, Return) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
+    % TODO - check why adding link context to hook results in errors of op_worker tests
+%%    LinksContext = links_utils:get_context_to_propagate(ModelConfig),
     lists:foreach(
         fun({_, HookedModule}) ->
             spawn(fun() ->
+%%                links_utils:apply_context(LinksContext),
                 HookedModule:'after'(ModelName, Method, Level, Context, Return) end)
-        end, Hooked),
-    Return.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Runs synchronously all post-hooks for given model, method, context and
-%% return value. Returns given return value.
-%% @end
-%%--------------------------------------------------------------------
--spec run_posthooks_sync(Config :: model_behaviour:model_config(),
-    Model :: model_behaviour:model_action(), Level :: store_level(),
-    Context :: term(), ReturnValue) -> ReturnValue when ReturnValue :: term().
-run_posthooks_sync(#model_config{name = ModelName}, Method, Level, Context, Return) ->
-    Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
-    lists:foreach(
-        fun({_, HookedModule}) ->
-            HookedModule:'after'(ModelName, Method, Level, Context, Return)
         end, Hooked),
     Return.
 
@@ -853,7 +859,7 @@ exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
             {error, Reason};
         Result when Method =:= get; Method =:= fetch_link; Method =:= foreach_link ->
             Result;
-        {ok, true} = Result when Method =:= exists ->
+        {ok, true} = Result when Method =:= exists; Method =:= exists_link_doc ->
             Result;
         _ ->
             exec_driver(ModelName, Rest, Method, Args)
@@ -868,7 +874,13 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 % TODO VFS-2025
 %%                case Driver of
 %%                    ?PERSISTENCE_DRIVER ->
-%%                        worker_proxy:call(datastore_worker, {driver_call, driver_to_module(Driver), Method, FullArgs});
+%%                        case worker_proxy:call(datastore_worker,
+%%                            {driver_call, driver_to_module(Driver), Method, FullArgs}) of
+%%                            {error, dispatcher_out_of_sync} ->
+%%                                erlang:apply(driver_to_module(Driver), Method, FullArgs);
+%%                            ProxyAns ->
+%%                                ProxyAns
+%%                        end;
 %%                    _ ->
 %%                        erlang:apply(Driver, Method, FullArgs)
 %%                end;
@@ -879,7 +891,7 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 {error, prehook_ans_not_supported};
             {error, Reason} ->
                 {error, Reason};
-            Other -> % for run_synchronized
+            Other -> % for run_transaction
                 Other
         end,
     run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, Return).
@@ -926,31 +938,33 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
         {error, Reason} ->
             {error, Reason};
         Result ->
+            ModelConfig = ModelName:model_init(),
+            LinksContext = links_utils:get_context_to_propagate(ModelConfig),
             spawn(fun() ->
+                links_utils:apply_context(LinksContext),
                 exec_cache_async(ModelName, Driver2, Method, Args) end),
             Result
     end;
 exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
-    Return =
-        case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
-            ok ->
-                FullArgs = [ModelConfig | Args],
-                erlang:apply(driver_to_module(Driver), Method, FullArgs);
-            {ok, Value} ->
-                {ok, Value};
-            {tasks, Tasks} ->
-                Level = caches_controller:cache_to_task_level(ModelName),
-                lists:foreach(fun
-                    ({task, Task}) ->
-                        ok = task_manager:start_task(Task, Level);
-                    (_) ->
-                        ok % error already logged
-                end, Tasks);
-            {task, Task} ->
-                Level = caches_controller:cache_to_task_level(ModelName),
-                ok = task_manager:start_task(Task, Level);
-            {error, Reason} ->
-                {error, Reason}
-        end,
-    run_posthooks_sync(ModelConfig, Method, driver_to_level(Driver), Args, Return).
+    case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
+        ok ->
+            FullArgs = [ModelConfig | Args],
+            Return = erlang:apply(driver_to_module(Driver), Method, FullArgs),
+            run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, Return);
+        {ok, Value} ->
+            run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {ok, Value});
+        {tasks, Tasks} ->
+            Level = caches_controller:cache_to_task_level(ModelName),
+            lists:foreach(fun
+                              ({task, Task}) ->
+                                  ok = task_manager:start_task(Task, Level);
+                              (_) ->
+                                  ok % error already logged
+                          end, Tasks);
+        {task, Task} ->
+            Level = caches_controller:cache_to_task_level(ModelName),
+            ok = task_manager:start_task(Task, Level);
+        {error, Reason} ->
+            run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
+    end.
