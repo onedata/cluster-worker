@@ -51,7 +51,7 @@
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
     global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1,
-    globally_cached_foreach_link_test/1]).
+    globally_cached_foreach_link_test/1, globally_cached_consistency_test/1]).
 -export([utilize_memory/3, update_and_check/4]).
 
 all() ->
@@ -68,7 +68,8 @@ all() ->
         interupt_global_cache_clearing_test,
         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
         create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
-        globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test
+        globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test,
+        globally_cached_consistency_test
     ]).
 
 
@@ -78,6 +79,189 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+globally_cached_consistency_test(Config) ->
+    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    Key = <<"key_gcct">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    CCCUuid = caches_controller:get_cache_uuid(Key, TestRecord),
+
+    GetLinkName = fun(I) ->
+        list_to_atom("linked_key_gcct" ++ integer_to_list(I))
+    end,
+    GetLinkKey = fun(I) ->
+        list_to_binary("linked_key_gcct" ++ integer_to_list(I))
+    end,
+
+    FlushAndClearLink = fun(I) ->
+        ?assertMatch(ok, ?call(Worker2, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, GetLinkName(I)])),
+        ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, GetLinkName(I)]))
+    end,
+
+    AddDocs = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            LinkedDoc =  #document{
+                key = GetLinkKey(I),
+                value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+            },
+            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc])),
+            ?assertMatch(ok, ?call_store(Worker1, add_links, [
+                ?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(I), LinkedDoc}]
+            ]))
+        end)
+    end,
+    AddDocs(1, 200),
+
+    CheckLinks = fun(Start, End, Sum) ->
+        AccFun = fun(LinkName, _, Acc) ->
+            [LinkName | Acc]
+        end,
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        for(Start, End, fun(I) ->
+            ?assert(lists:member(GetLinkName(I), ListedLinks))
+        end),
+        ?assertMatch(Sum, length(ListedLinks))
+    end,
+    CheckLinksByFetch = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]))
+        end)
+    end,
+%%    CheckLinks(1, 200, 200),
+%%    CheckLinksByFetch(1, 200),
+%%
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    for(10, 20, fun(I) ->
+%%        FlushAndClearLink(I)
+%%    end),
+%%
+%%    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    CheckLinks(10, 20, 200),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    for(30, 40, fun(I) ->
+%%        FlushAndClearLink(I)
+%%    end),
+%%
+%%    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    CheckLinksByFetch(30, 40),
+%%    timer:sleep(timer:seconds(5)), % for posthooks
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    for(50, 100, fun(I) ->
+%%        FlushAndClearLink(I)
+%%    end),
+%%
+%%    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    CheckLinksByFetch(50, 100),
+%%    timer:sleep(timer:seconds(5)), % for posthooks
+%%
+%%    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+%%
+%%    for(150, 200, fun(I) ->
+%%        FlushAndClearLink(I)
+%%    end),
+%%    CheckLinks(1, 200, 200),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+%%    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    FlushAndClearDoc = fun(I) ->
+        ?assertMatch(ok, ?call(Worker2, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, GetLinkKey(I)])),
+        ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, GetLinkKey(I)]))
+    end,
+
+    CheckDocs = fun(Start, End, Sum) ->
+        AccFun = fun
+            ('$end_of_table', Acc) ->
+                {abort, Acc};
+            (#document{key = Uuid}, Acc) ->
+                {next, [Uuid | Acc]}
+        end,
+        {_, Listed} = FLAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, AccFun, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        for(Start, End, fun(I) ->
+            ?assert(lists:member(GetLinkKey(I), Listed))
+        end),
+        ?assertMatch(Sum, length(Listed))
+                 end,
+    CheckDocsByGet = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            ?assertMatch({ok, _}, ?call_store(Worker2, get, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetLinkKey(I)]))
+        end)
+    end,
+    CheckDocs(1, 200, 201),
+    CheckDocsByGet(1, 200),
+
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    for(10, 20, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+
+    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    CheckDocs(10, 20, 201),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    for(30, 40, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+
+    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    CheckDocsByGet(30, 40),
+    timer:sleep(timer:seconds(5)), % for posthooks
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    for(50, 100, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+
+    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    CheckDocsByGet(50, 100),
+    timer:sleep(timer:seconds(5)), % for posthooks
+
+    ?assertEqual(false, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    for(150, 200, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+    CheckDocs(1, 200, 201),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assert(?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    ok.
 
 globally_cached_foreach_link_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
@@ -558,7 +742,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
 
     CheckLinks = fun(Start, End, Sum) ->
         for(Start, End, fun(I) ->
-            ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)])
+            ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)]))
         end),
 
         AccFun = fun(LinkName, _, Acc) ->

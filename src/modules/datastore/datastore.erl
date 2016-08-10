@@ -528,6 +528,8 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         true ->
             exec_driver(ModelName, Driver1, foreach_link, [Key, Fun, AccIn]);
         _ ->
+            % doczytsac z listy jak jest wypelniona
+
             HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
                 maps:put(LinkName, LinkTarget, Acc)
             end,
@@ -541,7 +543,7 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
                                 cache_controller:update_usage_info(CacheKey, ModelName, LinkTarget, CLevel),
                                 case maps:find(LinkName, Acc) of
                                     {ok, _} -> Acc;
-                                    error -> maps:put(Key, LinkTarget, Acc)
+                                    error -> maps:put(LinkName, LinkTarget, Acc)
                                 end;
                             _ ->
                                 Acc
@@ -558,8 +560,8 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
                                 _:Reason ->
                                     {error, Reason}
                             end;
-                            Err2 ->
-                                Err2
+                        Err2 ->
+                            Err2
                     end;
                 Err1 ->
                     Err1

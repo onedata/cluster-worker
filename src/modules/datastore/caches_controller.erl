@@ -458,9 +458,9 @@ save_consistency_info(Level, Key, ClearedName) ->
     (#cache_consistency_controller{cleared_list = CL} = Record) ->
       case length(CL) >= ?CLEAR_MONITOR_MAX_SIZE of
         true ->
-          Record#cache_consistency_controller{cleared_list = [], status = not_monitored};
+          {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
         _ ->
-          Record#cache_consistency_controller{cleared_list = [ClearedName | CL]}
+          {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL]}}
       end
   end,
   V = #cache_consistency_controller{cleared_list = [ClearedName]},
@@ -490,7 +490,7 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
                 (#cache_consistency_controller{status = not_monitored}) ->
                   {error, clearing_not_monitored};
                 (#cache_consistency_controller{cleared_list = CL} = Record) ->
-                  Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL)}
+                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL)}}
               end,
   Doc = #document{key = Key, value = #cache_consistency_controller{}},
 
@@ -512,7 +512,7 @@ begin_consistency_restoring(Level, Key) ->
                 (#cache_consistency_controller{cleared_list = [], status = ok}) ->
                   {error, consistency_ok};
                 (Record) ->
-                  Record#cache_consistency_controller{status = {restoring, Pid}}
+                  {ok, Record#cache_consistency_controller{status = {restoring, Pid}}}
               end,
   Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid}}},
 
@@ -524,12 +524,12 @@ end_consistency_restoring(Level, Key) ->
                 (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}}) ->
                   case RPid of
                     Pid ->
-                      #cache_consistency_controller{};
+                      {ok, #cache_consistency_controller{}};
                     _ ->
                       {error, interupted}
                   end;
                 (#cache_consistency_controller{status = {restoring, _}}) ->
-                  #cache_consistency_controller{cleared_list = [], status = not_monitored};
+                  {ok, #cache_consistency_controller{cleared_list = [], status = not_monitored}};
                 (_) ->
                   {error, interupted}
               end,
