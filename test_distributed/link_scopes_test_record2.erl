@@ -8,7 +8,7 @@
 %%% @doc Sample model.
 %%% @end
 %%%-------------------------------------------------------------------
--module(link_scopes_test_record).
+-module(link_scopes_test_record2).
 -author("Michał Wrzeszcz").
 -behaviour(model_behaviour).
 
@@ -89,25 +89,8 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ScopeFun1 =
-        fun(_) ->
-            global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),
-            receive
-                {mother_scope, Scope} ->
-                    Scope
-            end
-        end,
-    ScopeFun2 =
-        fun(_) ->
-            global:send(?SCOPE_MASTER_PROC_NAME, {get_other_scopes, self()}),
-            receive
-                {other_scopes, Scopes} ->
-                    Scopes
-            end
-        end,
-
-    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, true, false,
-        ScopeFun1, ScopeFun2).
+    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBALLY_CACHED_LEVEL, ?GLOBALLY_CACHED_LEVEL, true, false,
+        mother_scope, other_scopes).
 
 %%--------------------------------------------------------------------
 %% @doc

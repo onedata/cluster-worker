@@ -276,12 +276,17 @@ flush(Level, ModelName, Key, Link) ->
 flush(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
-  ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid),
+  ToDo = cache_controller:choose_action(save, Level, ModelName, Key, Uuid, true),
 
   Ans = case ToDo of
           {ok, NewMethod, NewArgs} ->
             FullArgs = [ModelConfig | NewArgs],
-            erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs);
+            case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs) of
+              {error, already_updated} ->
+                ok;
+              FlushAns ->
+                FlushAns
+            end;
           {ok, non} ->
             ok;
           Other ->
@@ -395,11 +400,13 @@ save_clear_info(Level, Uuid) ->
 save_high_mem_clear_info(Level, Uuid) ->
   TS = os:timestamp(),
   UpdateFun = fun
-    (#cache_controller{last_user = non} = Record) ->
-      {ok, Record#cache_controller{action = cleared, last_action_time = TS}};
-    (_) ->
-      {error, document_in_use}
-  end,
+                (#cache_controller{action = to_be_del}) ->
+                  {error, document_in_use};
+                (#cache_controller{last_user = non} = Record) ->
+                  {ok, Record#cache_controller{action = cleared, last_action_time = TS}};
+                (_) ->
+                  {error, document_in_use}
+              end,
   V = #cache_controller{timestamp = TS, action = cleared, last_action_time = TS},
   Doc = #document{key = Uuid, value = V},
 
@@ -427,16 +434,17 @@ delete_old_keys(Level, Caches, TimeWindow) ->
   timer:sleep(timer:seconds(2)), % allow async operations on disk start if there are any
   lists:foreach(fun(Uuid) ->
     Pred = fun() ->
-      LastUser = case cache_controller:get(Level, Uuid) of
-                   {ok, Doc} ->
-                     Value = Doc#document.value,
-                     Value#cache_controller.last_user;
+      CheckAns = case cache_controller:get(Level, Uuid) of
+                   {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                     {LU, A};
                    {error, {not_found, _}} ->
                      ok
                  end,
 
-      case LastUser of
-        non ->
+      case CheckAns of
+        {_, to_be_del} ->
+          false;
+        {non, _} ->
           true;
         _ ->
           false
@@ -489,8 +497,7 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
           false
       end
     end,
-    Ans = erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred]),
-      Ans
+    erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
