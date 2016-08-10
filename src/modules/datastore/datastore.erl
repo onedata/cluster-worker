@@ -485,13 +485,16 @@ fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
-    {ok, normalized_link_target()} | generic_error().
+    {ok, normalized_link_target()} | link_error().
 fetch_link(Level, Key, ModelName, LinkName) ->
     {RawLinkName, RequestedScope} = links_utils:unpack_link_scope(ModelName, LinkName),
     case fetch_full_link(Level, Key, ModelName, RawLinkName) of
         {ok, {_Version, [{TargetKey, TargetModel, _}]}} ->
             {ok, {TargetKey, TargetModel}};
+        {ok, {_Version, []}} ->
+            {error, link_not_found};
         {ok, {_Version, Targets}} when is_list(Targets) ->
+            ?info("WTF 0 ~p", [{RawLinkName, RequestedScope, Targets}]),
             {TargetKey, TargetModel, _} = links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets),
             {ok, {TargetKey, TargetModel}};
         Other ->
