@@ -229,7 +229,11 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
                             case cache_controller:check_get(Key, ModelName, driver_to_level(Driver1)) of
                                 ok ->
                                     cache_controller:update_usage_info(Key, ModelName, Document, CLevel),
-                                    {next, maps:update_with(Key, fun(V) -> V end, Document, Acc)};
+                                    NewAcc = case maps:find(Key, Acc) of
+                                        {ok, _} -> Acc;
+                                        error -> maps:put(Key, Document, Acc)
+                                    end,
+                                    {next, NewAcc};
                                 _ ->
                                     {next, Acc}
                             end;
@@ -535,7 +539,10 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
                         case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
                             ok ->
                                 cache_controller:update_usage_info(CacheKey, ModelName, LinkTarget, CLevel),
-                                maps:update_with(LinkName, fun(V) -> V end, LinkTarget, Acc);
+                                case maps:find(LinkName, Acc) of
+                                    {ok, _} -> Acc;
+                                    error -> maps:put(Key, LinkTarget, Acc)
+                                end;
                             _ ->
                                 Acc
                         end
