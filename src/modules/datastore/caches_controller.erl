@@ -540,11 +540,13 @@ end_consistency_restoring(Level, Key) ->
 check_cache_consistency(Level, Key) ->
   case cache_consistency_controller:get(Level, Key) of
     {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok}}} ->
-      true;
+      ok;
+    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok}}} ->
+      {monitored, CL};
     {ok, _} ->
-      false;
+      not_monitored;
     {error, {not_found, _}} ->
-      true
+      ok
   end.
 
 

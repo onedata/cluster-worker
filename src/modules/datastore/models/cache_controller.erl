@@ -24,7 +24,7 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5, check_get/3, check_fetch/3, check_disk_read/4, update_usage_info/4]).
+    list_docs_to_be_dumped/1, choose_action/5, check_get/3, check_fetch/3, check_disk_read/4, restore_from_disk/4]).
 
 
 %%%===================================================================
@@ -390,8 +390,19 @@ update_usage_info(Key, ModelName, Level) ->
 -spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
     boolean() | datastore:generic_error().
-update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
-    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level),
+update_usage_info(Key, ModelName, Doc, Level) ->
+    update_usage_info(Key, ModelName, Level),
+    restore_from_disk(Key, ModelName, Doc, Level).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Reads from disk and saves to memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec restore_from_disk(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
+    ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
+    boolean() | datastore:generic_error().
+restore_from_disk({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, {LinkName, Doc}],
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
@@ -403,8 +414,7 @@ update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Le
         Error ->
             Error
     end;
-update_usage_info(Key, ModelName, Doc, Level) ->
-    update_usage_info(Key, ModelName, Level),
+restore_from_disk(Key, ModelName, Doc, Level) ->
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Doc],
     case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of

@@ -211,27 +211,67 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     CLevel = driver_to_level(Driver1),
     CCCUuid = ModelName,
 
-    case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        true ->
-            exec_driver(ModelName, Driver1, list, [Fun, AccIn]);
-        _ ->
-            HelperFun1 = fun
-                (#document{key = Key} = Document, Acc) ->
-                    {next, maps:put(Key, Document, Acc)};
-                (_, Acc) ->
-                    {abort, Acc}
-            end,
+    HelperFun1 = fun
+        (#document{key = Key} = Document, Acc) ->
+            {next, maps:put(Key, Document, Acc)};
+        (_, Acc) ->
+            {abort, Acc}
+    end,
 
+    case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+        ok ->
+            exec_driver(ModelName, Driver1, list, [Fun, AccIn]);
+        {monitored, ClearedList} ->
+            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
+                {ok, Ans1} ->
+                    Ans2 = lists:foldl(fun(Key, Acc) ->
+                        case cache_controller:check_get(Key, ModelName, CLevel) of
+                            ok ->
+                                case exec_driver(ModelName, Driver2, get, [Key]) of
+                                    {ok, Document} ->
+                                        cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
+                                        maps:put(Key, Document, Acc);
+                                    GetErr ->
+                                        ?error("Cannot get doc from disk: ~p", GetErr),
+                                        Acc
+                                end;
+                            _ ->
+                                Acc
+                        end
+                    end, Ans1, ClearedList),
+
+                    try
+                        AccOut =
+                            maps:fold(fun(_, Doc, OAcc) ->
+                                case Fun(Doc, OAcc) of
+                                    {next, NAcc} ->
+                                        NAcc;
+                                    {abort, NAcc} ->
+                                        throw({abort, NAcc})
+                                end
+                            end, AccIn, Ans2),
+                        {ok, AccOut}
+                    catch
+                        {abort, AccOut0} ->
+                            {ok, AccOut0};
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err1 ->
+                    Err1
+            end;
+        _ ->
             case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
                 {ok, Ans1} ->
                     HelperFun2 = fun
                         (#document{key = Key} = Document, Acc) ->
-                            case cache_controller:check_get(Key, ModelName, driver_to_level(Driver1)) of
+                            case cache_controller:check_get(Key, ModelName, CLevel) of
                                 ok ->
-                                    cache_controller:update_usage_info(Key, ModelName, Document, CLevel),
                                     NewAcc = case maps:find(Key, Acc) of
                                         {ok, _} -> Acc;
-                                        error -> maps:put(Key, Document, Acc)
+                                        error ->
+                                            cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
+                                            maps:put(Key, Document, Acc)
                                     end,
                                     {next, NewAcc};
                                 _ ->
@@ -524,26 +564,54 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     CLevel = driver_to_level(Driver1),
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
 
+    HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
+        maps:put(LinkName, LinkTarget, Acc)
+    end,
+
     case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        true ->
+        ok ->
             exec_driver(ModelName, Driver1, foreach_link, [Key, Fun, AccIn]);
+        {monitored, ClearedList} ->
+            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+                {ok, Ans1} ->
+                    Ans2 = lists:foldl(fun(LinkName, Acc) ->
+                        CacheKey = {Key, LinkName, cache_controller_link_key},
+                        case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
+                            ok ->
+                                case exec_driver(ModelName, Driver2, fetch_link, [Key, LinkName]) of
+                                    {ok, LinkTarget} ->
+                                        cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                        maps:put(LinkName, LinkTarget, Acc);
+                                    GetErr ->
+                                        ?error("Cannot get doc from disk: ~p", GetErr),
+                                        Acc
+                                end;
+                            _ ->
+                                Acc
+                        end
+                    end, Ans1, ClearedList),
+
+                    try maps:fold(Fun, AccIn, Ans2) of
+                        AccOut -> {ok, AccOut}
+                    catch
+                        _:Reason ->
+                            {error, Reason}
+                    end;
+                Err1 ->
+                    Err1
+            end;
         _ ->
-            % doczytsac z listy jak jest wypelniona
-
-            HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
-                maps:put(LinkName, LinkTarget, Acc)
-            end,
-
             case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
                 {ok, Ans1} ->
                     HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
                         CacheKey = {Key, LinkName, cache_controller_link_key},
                         case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
                             ok ->
-                                cache_controller:update_usage_info(CacheKey, ModelName, LinkTarget, CLevel),
                                 case maps:find(LinkName, Acc) of
                                     {ok, _} -> Acc;
-                                    error -> maps:put(LinkName, LinkTarget, Acc)
+                                    error ->
+                                        cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                        maps:put(LinkName, LinkTarget, Acc)
                                 end;
                             _ ->
                                 Acc
