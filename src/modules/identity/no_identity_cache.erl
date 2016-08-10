@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% No identity data cache.
+%%% Dummy identity data cache.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(no_identity_cache).
@@ -18,7 +18,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Cached public key under given ID.
+%% {@link identity_cache_behaviour} callback put/2.
 %% @end
 %%--------------------------------------------------------------------
 -spec put(identity:id(), identity:public_key()) -> ok.
@@ -26,7 +26,7 @@ put(_, _) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Determines cached public key for given ID.
+%% {@link identity_cache_behaviour} callback get/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec get(identity:id()) -> {error, no_cache}.
@@ -34,7 +34,7 @@ get(_) -> {error, no_cache}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Ensures public key for given iD is not cached.
+%% {@link identity_cache_behaviour} callback invalidate/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec invalidate(identity:id()) -> ok | {error, Reason :: term()}.

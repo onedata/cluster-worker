@@ -6,7 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module manages identity data in DHT.
+%%% This module caches data about identities in datastore.
+%%% {@link cached_identity} provides state implementation for this cache.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(db_identity_cache).
@@ -17,13 +18,12 @@
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
--include_lib("public_key/include/public_key.hrl").
 
 -export([put/2, get/1, invalidate/1]).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Cached public key under given ID.
+%% {@link identity_cache_behaviour} callback put/2.
 %% @end
 %%--------------------------------------------------------------------
 -spec put(identity:id(), identity:public_key()) -> ok.
@@ -32,7 +32,7 @@ put(ID, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Determines cached public key for given ID.
+%% {@link identity_cache_behaviour} callback get/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec get(identity:id()) ->
@@ -42,8 +42,8 @@ get(ID) ->
     {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, identity_cache_ttl_seconds),
 
     case cached_identity:get(ID) of
-        {ok, #document{value = #cached_identity{last_update_seconds = Seconds}}}
-            when Seconds + TTL < Now ->
+        {ok, #document{value = #cached_identity{last_update_seconds = LastUpdate}}}
+            when LastUpdate + TTL < Now ->
             {error, expired};
         {ok, #document{value = #cached_identity{public_key = Key}}} ->
             {ok, Key};
@@ -56,7 +56,7 @@ get(ID) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Ensures public key for given iD is not cached.
+%% {@link identity_cache_behaviour} callback invalidate/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec invalidate(identity:id()) -> ok | {error, Reason :: term()}.

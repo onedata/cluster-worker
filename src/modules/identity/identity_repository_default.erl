@@ -6,7 +6,9 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
+%%% Dummy identity repository for test/debug purposes.
 %%% Stores identity data in env.
+%%% Does not guard ownership of published data (but proper repository should).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(identity_repository_default).
@@ -21,7 +23,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Publishes public key under given ID.
+%% {@link identity_repository_behaviour} callback publish/2.
 %% @end
 %%--------------------------------------------------------------------
 -spec publish(identity:id(), identity:public_key()) ->
@@ -33,7 +35,7 @@ publish(ID, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Determines public key for given ID.
+%% {@link identity_repository_behaviour} callback get/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec get(identity:id()) ->

@@ -6,8 +6,12 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Module implementing this behaviour provides access to identity repository,
-%%% which allows onedata components to verify their IDs using certificate data.
+%%% Module implementing this behaviour provides access to public key store.
+%%% Identity repository should allow to publish public key data under given ID.
+%%% Once published, that public key is obtainable using it's ID. The public key
+%%% can be updated by the original publisher by subsequent publish.
+%%% That store should guard ownership of the published data - only original
+%%% publisher should be able to update public key.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(identity_repository_behaviour).

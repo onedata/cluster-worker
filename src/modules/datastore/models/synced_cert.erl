@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Cache that maps credentials to users' identities
+%%% Contains data about cert files to be synced among nodes.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(synced_cert).

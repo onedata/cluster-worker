@@ -12,8 +12,6 @@
 -module(identity_cache_behaviour).
 -author("Michal Zmuda").
 
--include_lib("public_key/include/public_key.hrl").
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Cached public key under given ID.
@@ -31,7 +29,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Ensures public key for given iD is not cached.
+%% Ensures public key for given ID is not cached.
 %% @end
 %%--------------------------------------------------------------------
 -callback invalidate(identity:id()) -> ok | {error, Reason :: term()}.
