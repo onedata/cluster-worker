@@ -398,8 +398,13 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
 begin_consistency_restoring(Level, Key) ->
   Pid = self(),
   UpdateFun = fun
-                (#cache_consistency_controller{cleared_list = [], status = {restoring, _}}) ->
-                  {error, restoring_process_in_progress};
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}} = Record) ->
+                  case is_process_alive(RPid) of
+                    true ->
+                      {error, restoring_process_in_progress};
+                    _ ->
+                      {ok, Record#cache_consistency_controller{status = {restoring, Pid}}}
+                  end;
                 (#cache_consistency_controller{cleared_list = [], status = ok}) ->
                   {error, consistency_ok};
                 (Record) ->
@@ -426,8 +431,13 @@ end_consistency_restoring(Level, Key) ->
                     _ ->
                       {error, interupted}
                   end;
-                (#cache_consistency_controller{status = {restoring, _}}) ->
-                  {ok, #cache_consistency_controller{cleared_list = [], status = not_monitored}};
+                (#cache_consistency_controller{status = {restoring, RPid}}) ->
+                  case RPid of
+                    Pid ->
+                      {ok, #cache_consistency_controller{cleared_list = [], status = not_monitored}};
+                    _ ->
+                      {error, interupted}
+                  end;
                 (_) ->
                   {error, interupted}
               end,

@@ -85,6 +85,7 @@ globally_cached_consistency_test(Config) ->
     TestRecord = ?config(test_record, Config),
 
     disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+    ?assertEqual(ok, ?call(Worker2, cache_consistency_controller, delete, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     Key = <<"key_gcct">>,
     Doc =  #document{
