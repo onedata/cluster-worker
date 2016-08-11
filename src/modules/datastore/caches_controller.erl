@@ -366,7 +366,7 @@ clear(Level, ModelName, Key, Link) ->
 %% Saves information about restoring doc to memory
 %% @end
 %%--------------------------------------------------------------------
--spec save_consistency_restored_info(Level :: datastore:store_level(), Key :: binary(),
+-spec save_consistency_restored_info(Level :: datastore:store_level(), Key :: datastore:ext_key(),
     ClearedName :: datastore:key() | datastore:link_name()) ->
   boolean() | datastore:create_error().
 save_consistency_restored_info(Level, Key, ClearedName) ->
@@ -393,7 +393,7 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
 %% Marks that consistency will be restored
 %% @end
 %%--------------------------------------------------------------------
--spec begin_consistency_restoring(Level :: datastore:store_level(), Key :: binary()) ->
+-spec begin_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 begin_consistency_restoring(Level, Key) ->
   Pid = self(),
@@ -414,7 +414,7 @@ begin_consistency_restoring(Level, Key) ->
 %% Marks that consistency restoring has ended
 %% @end
 %%--------------------------------------------------------------------
--spec end_consistency_restoring(Level :: datastore:store_level(), Key :: binary()) ->
+-spec end_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 end_consistency_restoring(Level, Key) ->
   Pid = self(),
@@ -440,7 +440,7 @@ end_consistency_restoring(Level, Key) ->
 %% Checks consistency status of Key.
 %% @end
 %%--------------------------------------------------------------------
--spec check_cache_consistency(Level :: datastore:store_level(), Key :: binary()) ->
+-spec check_cache_consistency(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
   ok | {monitored, [datastore:key() | datastore:link_name()]} | not_monitored | no_return().
 check_cache_consistency(Level, Key) ->
   case cache_consistency_controller:get(Level, Key) of
@@ -514,7 +514,7 @@ save_high_mem_clear_info(Level, Uuid) ->
 %% Saves information about clearing doc from memory
 %% @end
 %%--------------------------------------------------------------------
--spec save_consistency_info(Level :: datastore:store_level(), Key :: binary(),
+-spec save_consistency_info(Level :: datastore:store_level(), Key :: datastore:ext_key(),
     ClearedName :: datastore:key() | datastore:link_name()) ->
   boolean() | datastore:create_error().
 save_consistency_info(Level, Key, ClearedName) ->
