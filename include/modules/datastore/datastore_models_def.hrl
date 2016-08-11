@@ -39,7 +39,7 @@
 -define(CLEAR_MONITOR_MAX_SIZE, 32).
 %% Model that controls consistency of cache
 -record(cache_consistency_controller, {
-    cleared_list = [] :: list(),
+    cleared_list = [] :: [datastore:key() | datastore:link_name()],
     status = ok :: ok | not_monitored | {restoring, pid()}
 }).
 

@@ -312,7 +312,7 @@ clear(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
 
-  Pred =fun() ->
+  Pred = fun() ->
     case save_clear_info(Level, Uuid) of
       {ok, _} ->
         save_consistency_info(Level, ModelName, Key);
@@ -360,6 +360,99 @@ clear(Level, ModelName, Key, Link) ->
     end
   end,
   erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves information about restoring doc to memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_consistency_restored_info(Level :: datastore:store_level(), Key :: binary(),
+    ClearedName :: datastore:key() | datastore:link_name()) ->
+  boolean() | datastore:create_error().
+save_consistency_restored_info(Level, Key, ClearedName) ->
+  UpdateFun = fun
+                (#cache_consistency_controller{status = not_monitored}) ->
+                  {error, clearing_not_monitored};
+                (#cache_consistency_controller{cleared_list = CL} = Record) ->
+                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL)}}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+    {ok, _} ->
+      true;
+    {error, clearing_not_monitored} ->
+      true;
+    Other ->
+      ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+      false
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency will be restored
+%% @end
+%%--------------------------------------------------------------------
+-spec begin_consistency_restoring(Level :: datastore:store_level(), Key :: binary()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+begin_consistency_restoring(Level, Key) ->
+  Pid = self(),
+  UpdateFun = fun
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, _}}) ->
+                  {error, restoring_process_in_progress};
+                (#cache_consistency_controller{cleared_list = [], status = ok}) ->
+                  {error, consistency_ok};
+                (Record) ->
+                  {ok, Record#cache_consistency_controller{status = {restoring, Pid}}}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid}}},
+
+  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency restoring has ended
+%% @end
+%%--------------------------------------------------------------------
+-spec end_consistency_restoring(Level :: datastore:store_level(), Key :: binary()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+end_consistency_restoring(Level, Key) ->
+  Pid = self(),
+  UpdateFun = fun
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}}) ->
+                  case RPid of
+                    Pid ->
+                      {ok, #cache_consistency_controller{}};
+                    _ ->
+                      {error, interupted}
+                  end;
+                (#cache_consistency_controller{status = {restoring, _}}) ->
+                  {ok, #cache_consistency_controller{cleared_list = [], status = not_monitored}};
+                (_) ->
+                  {error, interupted}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks consistency status of Key.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_cache_consistency(Level :: datastore:store_level(), Key :: binary()) ->
+  ok | {monitored, [datastore:key() | datastore:link_name()]} | not_monitored | no_return().
+check_cache_consistency(Level, Key) ->
+  case cache_consistency_controller:get(Level, Key) of
+    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok}}} ->
+      ok;
+    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok}}} ->
+      {monitored, CL};
+    {ok, _} ->
+      not_monitored;
+    {error, {not_found, _}} ->
+      ok
+  end.
 
 %%%===================================================================
 %%% Internal functions
@@ -448,80 +541,6 @@ save_consistency_info(Level, Key, ClearedName) ->
       ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
       false
   end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves information about restoring doc to memory
-%% @end
-%%--------------------------------------------------------------------
--spec save_consistency_restored_info(Level :: datastore:store_level(), Key :: binary(),
-    ClearedName :: datastore:key() | datastore:link_name()) ->
-  boolean() | datastore:create_error().
-save_consistency_restored_info(Level, Key, ClearedName) ->
-  UpdateFun = fun
-                (#cache_consistency_controller{status = not_monitored}) ->
-                  {error, clearing_not_monitored};
-                (#cache_consistency_controller{cleared_list = CL} = Record) ->
-                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL)}}
-              end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{}},
-
-  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
-    {ok, _} ->
-      true;
-    {error, clearing_not_monitored} ->
-      true;
-    Other ->
-      ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
-      false
-  end.
-
-begin_consistency_restoring(Level, Key) ->
-  Pid = self(),
-  UpdateFun = fun
-                (#cache_consistency_controller{cleared_list = [], status = {restoring, _}}) ->
-                  {error, restoring_process_in_progress};
-                (#cache_consistency_controller{cleared_list = [], status = ok}) ->
-                  {error, consistency_ok};
-                (Record) ->
-                  {ok, Record#cache_consistency_controller{status = {restoring, Pid}}}
-              end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid}}},
-
-  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
-
-end_consistency_restoring(Level, Key) ->
-  Pid = self(),
-  UpdateFun = fun
-                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}}) ->
-                  case RPid of
-                    Pid ->
-                      {ok, #cache_consistency_controller{}};
-                    _ ->
-                      {error, interupted}
-                  end;
-                (#cache_consistency_controller{status = {restoring, _}}) ->
-                  {ok, #cache_consistency_controller{cleared_list = [], status = not_monitored}};
-                (_) ->
-                  {error, interupted}
-              end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{}},
-
-  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
-
-check_cache_consistency(Level, Key) ->
-  case cache_consistency_controller:get(Level, Key) of
-    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok}}} ->
-      ok;
-    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok}}} ->
-      {monitored, CL};
-    {ok, _} ->
-      not_monitored;
-    {error, {not_found, _}} ->
-      ok
-  end.
-
 
 %%--------------------------------------------------------------------
 %% @private
