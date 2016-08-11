@@ -94,6 +94,9 @@ globally_cached_consistency_test(Config) ->
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
     CCCUuid = caches_controller:get_cache_uuid(Key, TestRecord),
 
+    ?assertEqual(ok, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertEqual(ok, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
     GetLinkName = fun(I) ->
         list_to_atom("linked_key_gcct" ++ integer_to_list(I))
     end,
