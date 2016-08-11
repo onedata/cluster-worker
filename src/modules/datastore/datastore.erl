@@ -232,6 +232,9 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
                                     {ok, Document} ->
                                         cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
                                         maps:put(Key, Document, Acc);
+                                    {error, {not_found, _}} ->
+                                        caches_controller:save_consistency_restored_info(CLevel, ModelName, Key),
+                                        Acc;
                                     GetErr ->
                                         ?error("Cannot get doc from disk: ~p", GetErr),
                                         Acc
@@ -583,6 +586,9 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
                                     {ok, LinkTarget} ->
                                         cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
                                         maps:put(LinkName, LinkTarget, Acc);
+                                    {error, link_not_found} ->
+                                        caches_controller:save_consistency_restored_info(CLevel, CCCUuid, LinkName),
+                                        Acc;
                                     GetErr ->
                                         ?error("Cannot get doc from disk: ~p", GetErr),
                                         Acc
