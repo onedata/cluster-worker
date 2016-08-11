@@ -81,8 +81,10 @@ all() ->
 % TODO - add tests that check time refreshing by get and fetch_link operations
 
 globally_cached_consistency_test(Config) ->
-    [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
 
     Key = <<"key_gcct">>,
     Doc =  #document{
@@ -305,7 +307,7 @@ globally_cached_foreach_link_test(Config) ->
         ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []])),
 
     ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, <<"key_gcflt2">>]), 6),
-    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [<<"key_gcflt2">>]])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, <<"key_gcflt2">>])),
 
     ?assertMatch({ok, [<<"key_gcflt2">>]},
         ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []])),
@@ -1820,7 +1822,6 @@ globally_cached_list_test(Config) ->
 
     TestRecord = ?config(test_record, Config),
     PModule = ?call_store(Node1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Node1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     ModelConfig = TestRecord:model_init(),
 
     BeforeRetryFun = fun(Keys) ->
@@ -1833,7 +1834,7 @@ globally_cached_list_test(Config) ->
 
     BeforeRetryFun2 = fun(Docs) ->
         lists:map(fun(Key) ->
-            ?assertMatch(ok, ?call(Node1, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS]))
+            ?assertMatch(ok, ?call(Node1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key]))
         end, Docs)
     end,
     generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
