@@ -71,7 +71,7 @@
     get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
-    link_walk/4, link_walk/5]).
+    link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_synchronized/3, normalize_link_target/1]).
@@ -380,6 +380,33 @@ add_links(Level, Key, ModelName, Links) when is_list(Links) ->
                             Other
                     end, ok, NormalizedLinks)
         end
+    end).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets links to given document.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(Level :: store_level(), document(), link_spec() | [link_spec()]) -> ok | generic_error().
+set_links(Level, #document{key = Key} = Doc, Links) ->
+    set_links(Level, Key, model_name(Doc), Links).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets given links to the document with given key.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec() | [link_spec()]) ->
+    ok | generic_error().
+set_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
+    set_links(Level, Key, ModelName, [LinkSpec]);
+set_links(Level, Key, ModelName, Links) when is_list(Links) ->
+    ModelConfig = #model_config{} = ModelName:model_init(),
+    NormalizedLinks = normalize_link_target(ModelConfig, Links),
+    datastore:run_synchronized(ModelName, term_to_binary({links, Key}), fun() ->
+        exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks])
     end).
 
 
