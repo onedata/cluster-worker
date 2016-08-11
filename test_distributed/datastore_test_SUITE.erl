@@ -85,7 +85,24 @@ globally_cached_consistency_test(Config) ->
     TestRecord = ?config(test_record, Config),
 
     disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+
+    % clean
+    GetAllKeys = fun
+                 ('$end_of_table', Acc) ->
+                     {abort, Acc};
+                 (#document{key = Uuid}, Acc) ->
+                     {next, [Uuid | Acc]}
+             end,
+    {_, AllKeys} = AllKeysAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
+    ?assertMatch({ok, _}, AllKeysAns),
+    lists:foreach(fun(Uuid) ->
+        ?assertEqual(ok, ?call_store(Worker2, delete, [?GLOBAL_ONLY_LEVEL, TestRecord, Uuid]))
+    end, AllKeys),
+
+    ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     ?assertEqual(ok, ?call(Worker2, cache_consistency_controller, delete, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     Key = <<"key_gcct">>,
     Doc =  #document{
@@ -212,7 +229,7 @@ globally_cached_consistency_test(Config) ->
             ?assert(lists:member(GetLinkKey(I), Listed))
         end),
         ?assertMatch(Sum, length(Listed))
-                 end,
+    end,
     CheckDocsByGet = fun(Start, End) ->
         for(Start, End, fun(I) ->
             ?assertMatch({ok, _}, ?call_store(Worker2, get, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetLinkKey(I)]))
