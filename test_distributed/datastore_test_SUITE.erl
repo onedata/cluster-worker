@@ -1651,7 +1651,7 @@ clearing_global_cache_test(Config) ->
     [{_, Mem2}] = monitoring:get_memory_stats(),
     Mem2Node = node_mem(Worker2),
     Mem2Ets = ?call(Worker2, erlang, memory, [ets]),
-    ct:print("Mem2 ~p, ~p, ~p, check_mem: ~p", [Mem2, Mem2Node, Mem2Ets]),
+    ct:print("Mem2 ~p, ~p, ~p", [Mem2, Mem2Node, Mem2Ets]),
     % TODO Change add node memory checking when DB nodes will be run at separate machine
     ?assertMatch(true, Mem2Node < (Mem0Node + Mem1Node) / 2),
 %%     ?assert(Mem2 < MemTarget),
