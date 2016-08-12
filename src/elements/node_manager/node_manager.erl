@@ -304,9 +304,7 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
             {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
             case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
                 true ->
-                    % Suspend memory cleaning when usage is low
-                    % TODO - do not use foreach during clearing
-%%                    spawn(fun() -> free_memory() end),
+                    spawn(fun() -> free_memory() end),
                     State#state{last_cache_cleaning = Now};
                 _ ->
                     State
@@ -693,12 +691,15 @@ free_memory(NodeMem) ->
 
 free_memory() ->
     try
-        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
-        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
-        lists:foreach(fun
-            ({Aggressive, StoreType}) ->
-                caches_controller:clear_cache(Aggressive, StoreType)
-        end, ClearingOrder)
+        % Suspend memory cleaning when usage is low
+        % TODO - do not use foreach during clearing
+        ok
+%%        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
+%%        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
+%%        lists:foreach(fun
+%%            ({Aggressive, StoreType}) ->
+%%                caches_controller:clear_cache(Aggressive, StoreType)
+%%        end, ClearingOrder)
     catch
         E1:E2 ->
             ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
