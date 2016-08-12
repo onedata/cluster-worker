@@ -23,7 +23,7 @@
 %% node_manager_plugin_behaviour callbacks
 -export([before_init/1, after_init/1, on_terminate/2, on_code_change/3,
   handle_call_extension/3, handle_cast_extension/2, handle_info_extension/2,
-  modules_with_args/0, listeners/0, cm_nodes/0, db_nodes/0, check_node_ip_address/0, app_name/0]).
+  modules_with_args/0, listeners/0, cm_nodes/0, db_nodes/0, check_node_ip_address/0, app_name/0, clear_memory/1]).
 
 %%%===================================================================
 %%% node_manager_plugin_behaviour callbacks
@@ -56,7 +56,6 @@ db_nodes() ->
   application:get_env(?CLUSTER_WORKER_APP_NAME, db_nodes).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% {@link node_manager_plugin_behaviour} callback listeners/0.
 %% @end
@@ -65,7 +64,6 @@ db_nodes() ->
 listeners() -> node_manager:cluster_worker_listeners().
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% {@link node_manager_plugin_behaviour} callback modules_with_args/0.
 %% @end
@@ -74,7 +72,6 @@ listeners() -> node_manager:cluster_worker_listeners().
 modules_with_args() -> node_manager:cluster_worker_modules().
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% {@link node_manager_plugin_behaviour}  callback on_init/0.
 %% @end
@@ -85,7 +82,6 @@ before_init([]) ->
   ok.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% {@link node_manager_plugin_behaviour}  callback on_init/0.
 %% @end
@@ -95,7 +91,6 @@ after_init([]) ->
   ok.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Handling call messages
 %% @end
@@ -119,7 +114,6 @@ handle_call_extension(_Request, _From, State) ->
   {reply, wrong_request, State}.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Handling cast messages
 %% @end
@@ -137,7 +131,6 @@ handle_cast_extension(_Request, State) ->
   {noreply, State}.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Handling all non call/cast messages
 %% @end
@@ -155,7 +148,6 @@ handle_info_extension(_Request, State) ->
   {noreply, State}.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% This function is called by a gen_server when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
@@ -172,7 +164,6 @@ on_terminate(_Reason, _State) ->
   ok.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Convert process state when code is changed
 %% @end
@@ -185,7 +176,6 @@ on_code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Checks IP address of this node (it assumes a 127.0.0.1).
 %% @end
@@ -194,6 +184,15 @@ on_code_change(_OldVsn, State, _Extra) ->
 check_node_ip_address() ->
   ?info("IP of node defaulting to 127.0.0.1", []),
   {127, 0, 0, 1}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears memory of application.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear_memory(HighMemUse :: boolean()) -> ok.
+clear_memory(_HighMemUse) ->
+  ok.
 
 %%%===================================================================
 %%% Internal functions

@@ -127,3 +127,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback app_name() -> {ok, Name :: atom()}.
+
+%% @doc
+%% Clears memory of application.
+%% @end
+%%--------------------------------------------------------------------
+-callback clear_memory(HighMemUse :: boolean()) -> ok.

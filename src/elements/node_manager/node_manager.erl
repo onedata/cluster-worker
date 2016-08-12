@@ -304,7 +304,9 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
             {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
             case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
                 true ->
-                    spawn(fun() -> free_memory() end),
+                    % Suspend memory cleaning when usage is low
+                    % TODO - do not use foreach during clearing
+%%                    spawn(fun() -> free_memory() end),
                     State#state{last_cache_cleaning = Now};
                 _ ->
                     State
@@ -661,6 +663,7 @@ start_worker(Module, Args) ->
 -spec free_memory(NodeMem :: float()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
 free_memory(NodeMem) ->
     try
+        ok = plugins:apply(node_manager_plugin, clear_memory, [true]),
         AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
         ClearingOrder = case NodeMem >= AvgMem of
             true ->
@@ -690,6 +693,7 @@ free_memory(NodeMem) ->
 
 free_memory() ->
     try
+        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
         ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
         lists:foreach(fun
             ({Aggressive, StoreType}) ->
