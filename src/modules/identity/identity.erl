@@ -17,15 +17,37 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
--export([publish/1, verify/1, ssl_verify_fun_impl/3]).
--export([get_public_key/1, get_id/1, ensure_identity_cert_created/3, read_cert/1]).
+-export([publish/1, verify/1]).
+-export([ssl_verify_fun_impl/3]).
+-export([encode/1, decode/1]).
+-export([get_public_key/1, get_id/1]).
+-export([ensure_identity_cert_created/3, read_cert/1]).
 
 -type(id() :: binary()).
 -type(public_key() :: term()).
+-type(encoded_public_key() :: binary()).
 -type(certificate() :: #'OTPCertificate'{}).
--export_type([id/0, public_key/0, certificate/0]).
+-export_type([id/0, public_key/0, certificate/0, encoded_public_key/0]).
 
 -define(CERT_DB_KEY, <<"identity_cert">>).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Encodes public key.
+%% @end
+%%--------------------------------------------------------------------
+-spec encode(identity:public_key()) -> identity:encoded_public_key().
+encode(PublicKey) ->
+    base64:encode(term_to_binary(PublicKey)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Decodes public key.
+%% @end
+%%--------------------------------------------------------------------
+-spec decode(identity:encoded_public_key()) -> identity:public_key().
+decode(PublicKey) ->
+    binary_to_term(base64:decode(PublicKey)).
 
 %%--------------------------------------------------------------------
 %% @doc
