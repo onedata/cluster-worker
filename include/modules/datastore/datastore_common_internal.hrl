@@ -23,9 +23,9 @@
 
 -define(DEFAULT_LINK_SCOPE, links).
 
--define(MOTHER_SCOPE_DEF_FUN, fun() -> ?DEFAULT_LINK_SCOPE end).
+-define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?DEFAULT_LINK_SCOPE end).
 
--define(OTHER_SCOPES_DEF_FUN, fun() -> [] end).
+-define(OTHER_SCOPES_DEF_FUN, fun(_) -> [] end).
 
 %% This record shall not be used outside datastore engine and shall not be instantiated
 %% directly. Use MODEL_CONFIG macro instead.
@@ -40,8 +40,8 @@
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     transactional_global_cache = true :: boolean(),
     sync_cache = false :: boolean(),
-    mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope_fun(),
-    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes_fun(),
+    mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope(),
+    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
     link_duplication = false
 }).
 
