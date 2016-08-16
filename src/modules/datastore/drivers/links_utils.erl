@@ -26,7 +26,7 @@
 -export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
 -export([make_scoped_link_name/2, unpack_link_scope/2, select_scope_related_link/3]).
--export([get_context_to_propagate/1, apply_context/1]).
+-export([get_context_to_propagate/1, apply_context/1, get_scopes/2]).
 
 %%%===================================================================
 %%% API
@@ -170,7 +170,7 @@ save_links_maps(Driver,
                             {ok, LinksDoc} ->
                                 save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
                             {error, {not_found, _}} ->
-                                LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = ScopeFun1()}},
+                                LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = get_scopes(Scope1, Key)}},
                                 save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
                             {error, Reason} ->
                                 {error, Reason}
@@ -565,7 +565,7 @@ unpack_link_scope(ModelName, LinkName) when is_binary(LinkName) ->
     case binary:split(LinkName, <<?LINK_NAME_SCOPE_SEPARATOR>>) of
         [LinkName] ->
             #model_config{mother_link_scope = MScope} = ModelName:model_init(),
-            {LinkName, MScope()};
+            {LinkName, get_scopes(MScope, undefined)};
         Other ->
             [Scope, OLinkName | _] = lists:reverse(Other),
             {OLinkName, Scope}
@@ -1064,7 +1064,7 @@ add_non_existing_to_map(Driver, #model_config{bucket = _Bucket, name = ModelName
         #document{} = Doc ->
             save_links_maps(Driver, ModelConfig, Key, Doc, [Link], 1, no_old_checking);
         {error, {not_found, _}} ->
-            LinksDoc = #document{key = LDK, value = #links{origin = MScopeFun(), doc_key = Key, model = ModelName}},
+            LinksDoc = #document{key = LDK, value = #links{origin = get_scopes(MScopeFun, Key), doc_key = Key, model = ModelName}},
             save_links_maps(Driver, ModelConfig, Key, LinksDoc, [Link], 1, no_old_checking);
         {error, Reason} ->
             {error, Reason}

@@ -750,9 +750,9 @@ normalize_link_target(_ModelConfig, []) ->
 normalize_link_target(ModelConfig, [Link | R]) ->
     [normalize_link_target(ModelConfig, Link) | normalize_link_target(ModelConfig, R)];
 normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, #document{key = TargetKey} = Doc}) ->
-    normalize_link_target(ModelConfig, {LinkName, {TargetKey, model_name(Doc), MScope()}});
+    normalize_link_target(ModelConfig, {LinkName, {TargetKey, model_name(Doc), links_utils:get_scopes(MScope, undefined)}});
 normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, {TargetKey, ModelName}}) ->
-    normalize_link_target(ModelConfig, {LinkName, {TargetKey, ModelName, MScope()}});
+    normalize_link_target(ModelConfig, {LinkName, {TargetKey, ModelName, links_utils:get_scopes(MScope, undefined)}});
 normalize_link_target(ModelConfig, {LinkName, {_TargetKey, _ModelName, _ScopeId} = Target}) ->
     normalize_link_target(ModelConfig, {LinkName, {1, [Target]}}).
 
