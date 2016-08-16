@@ -32,6 +32,7 @@
 
 -define(TIMEOUT, timer:minutes(5)).
 -define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
+-define(rpc_store(W, Fun, Level, CustomArgs), rpc:call(W, datastore, Fun, [Level] ++ CustomArgs)).
 -define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
 
 %%%===================================================================
@@ -112,6 +113,14 @@ links_test(Config, Level) ->
     ?assertEqual(OpsNum, OkNum2),
 
     test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
+
+    ForechTestFun = fun(LinkName, LinkTarget, Acc) ->
+        maps:put(LinkName, LinkTarget, Acc)
+    end,
+    ForeachBeforeProcessing = os:timestamp(),
+    Ans = ?rpc_store(Worker1, foreach_link, Level, [Doc, ForechTestFun, #{}]),
+    ForeachAfterProcessing = os:timestamp(),
+
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
 
@@ -121,7 +130,9 @@ links_test(Config, Level) ->
         #parameter{name = fetch_time, value = OkTimeF / OkNumF, unit = "us",
             description = "Average time of fetch operation"},
         #parameter{name = delete_time, value = OkTime2 / OkNum2, unit = "us",
-            description = "Average time of delete operation"}
+            description = "Average time of delete operation"},
+        #parameter{name = foreach_link_time, value = timer:now_diff(ForeachAfterProcessing, ForeachBeforeProcessing),
+            unit = "us", description = "Time of forach_link operation"}
     ].
 
 create_delete_test(Config, Level) ->
@@ -227,7 +238,7 @@ save_sync_test(Config, Level) ->
     save_test_base(Config, Level, save_sync, delete_sync).
 
 save_test_base(Config, Level, Fun, Fun2) ->
-    Workers = ?config(cluster_worker_nodes, Config),
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
     DocsPerThead = ?config(docs_per_thead, Config),
     OpsPerDoc = ?config(ops_per_doc, Config),
@@ -260,10 +271,19 @@ save_test_base(Config, Level, Fun, Fun2) ->
     ?assertEqual(OpsNum, OkNum),
 
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+
+    ListBeforeProcessing = os:timestamp(),
+    Ans = ?rpc_store(Worker1, list, Level, [TestRecord, ?GET_ALL, []]),
+    ListAfterProcessing = os:timestamp(),
+
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
 
-    #parameter{name = save_time, value = OkTime / OkNum, unit = "us",
-        description = "Average time of save operation"}.
+    [
+        #parameter{name = save_time, value = OkTime / OkNum, unit = "us",
+            description = "Average time of save operation"},
+        #parameter{name = list_time, value = timer:now_diff(ListAfterProcessing, ListBeforeProcessing), unit = "us",
+            description = "Time of list operation"}
+    ].
 
 update_test(Config, Level) ->
     update_test_base(Config, Level, update, save, delete).
