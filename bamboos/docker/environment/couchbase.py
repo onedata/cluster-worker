@@ -89,13 +89,19 @@ bash'''
     assert 0 == docker.exec_(containers[0],
                  command=["/opt/couchbase/bin/couchbase-cli", "cluster-init", "-c", "{0}:8091".format(master_hostname),
                           "--cluster-init-username=admin", "--cluster-init-password=password",
-                          "--cluster-init-ramsize=512", "--services=data,index,query"],
+                          "--cluster-init-ramsize=1024", "--services=data,index,query"],
                  stdout=sys.stderr)
 
     # Create default bucket
     assert 0 == docker.exec_(containers[0],
                  command=["/opt/couchbase/bin/couchbase-cli", "bucket-create", "-c", "{0}:8091".format(master_hostname),
-                          "-u", "admin", "-p", "password", "--bucket=default", "--bucket-ramsize=512", "--wait"],
+                          "-u", "admin", "-p", "password", "--bucket=default", "--bucket-ramsize=384", "--wait"],
+                 stdout=sys.stderr)
+
+    # Create Location Service bucket
+    assert 0 == docker.exec_(containers[0],
+                 command=["/opt/couchbase/bin/couchbase-cli", "bucket-create", "-c", "{0}:8091".format(master_hostname),
+                          "-u", "admin", "-p", "password", "--bucket=location_service", "--bucket-ramsize=128", "--wait"],
                  stdout=sys.stderr)
 
     # Create database cluster nodes
