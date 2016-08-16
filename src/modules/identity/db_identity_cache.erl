@@ -26,7 +26,7 @@
 %% {@link identity_cache_behaviour} callback put/2.
 %% @end
 %%--------------------------------------------------------------------
--spec put(identity:id(), identity:public_key()) -> ok.
+-spec put(identity:id(), identity:encoded_public_key()) -> ok.
 put(ID, Key) ->
     cache(ID, Key).
 
@@ -45,8 +45,8 @@ get(ID) ->
         {ok, #document{value = #cached_identity{last_update_seconds = LastUpdate}}}
             when LastUpdate + TTL < Now ->
             {error, expired};
-        {ok, #document{value = #cached_identity{public_key = Key}}} ->
-            {ok, Key};
+        {ok, #document{value = #cached_identity{encoded_public_key = Encoded}}} ->
+            {ok, Encoded};
         {error, {not_found, identity_cache}} ->
             {error, not_found};
         {error, Reason} ->
@@ -71,17 +71,17 @@ invalidate(ID) ->
 %%%===================================================================
 
 -spec cache(identity:id(), identity:public_key()) -> ok.
-cache(ID, PublicKey) ->
+cache(ID, EncodedPublicKey) ->
     Now = now_seconds(),
     Result = cached_identity:create_or_update(#document{
         key = ID, value = #cached_identity{
             last_update_seconds = Now,
-            public_key = PublicKey,
+            encoded_public_key = EncodedPublicKey,
             id = ID
         }}, fun(Current) ->
         {ok, Current#cached_identity{
             last_update_seconds = Now,
-            public_key = PublicKey
+            encoded_public_key = EncodedPublicKey
         }}
     end),
 

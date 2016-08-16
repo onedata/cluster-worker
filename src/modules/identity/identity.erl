@@ -17,11 +17,8 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
--export([publish/1, verify/1]).
+-export([publish/1, verify/1, publish/2, verify/2, get/1]).
 -export([ssl_verify_fun_impl/3]).
--export([encode/1, decode/1]).
--export([get_public_key/1, get_id/1]).
--export([ensure_identity_cert_created/3, read_cert/1]).
 
 -type(id() :: binary()).
 -type(public_key() :: term()).
@@ -33,62 +30,53 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Encodes public key.
+%% Publishes identity info (ID and public key) to the repository.
+%% That info is used during identity verification.
+%% Identity info can be directly supplied or inferred from certificate.
 %% @end
 %%--------------------------------------------------------------------
--spec encode(identity:public_key()) -> identity:encoded_public_key().
-encode(PublicKey) ->
-    base64:encode(term_to_binary(PublicKey)).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Decodes public key.
-%% @end
-%%--------------------------------------------------------------------
--spec decode(identity:encoded_public_key()) -> identity:public_key().
-decode(PublicKey) ->
-    binary_to_term(base64:decode(PublicKey)).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Publishes public key extracted from certificate
-%% under ID determined from this certificate.
-%% @end
-%%--------------------------------------------------------------------
--spec publish(#'OTPCertificate'{}) -> ok | {error, Reason :: term()}.
+-spec publish(identity:certificate()) -> ok | {error, Reason :: term()}.
 publish(#'OTPCertificate'{} = Certificate) ->
-    ID = get_id(Certificate),
-    PublicKey = get_public_key(Certificate),
-    case plugins:apply(identity_repository, publish, [ID, PublicKey]) of
-        ok -> plugins:apply(identity_cache, put, [ID, PublicKey]);
+    ID = identity_utils:get_id(Certificate),
+    PublicKey = identity_utils:get_public_key(Certificate),
+    publish(ID, identity_utils:encode(PublicKey)).
+
+-spec publish(identity:id(), identity:encoded_public_key()) -> ok | {error, Reason :: term()}.
+publish(ID, EncodedPublicKey) ->
+    case plugins:apply(identity_repository, publish, [ID, EncodedPublicKey]) of
+        ok -> plugins:apply(identity_cache, put, [ID, EncodedPublicKey]);
         {error, Reason} -> {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Uses certificate info to verify if certificate matches data from the repository.
-%% To do so, extracts public key and ID from this certificate and compares
-%% that data with repository contents.
-%% Repository contents may be cached and if cached data do not mach given certificate,
+%% Uses identity info (ID and public key) to verify if it matches
+%% data from the repository.
+%% Repository contents may be cached and if cached data do not match,
 %% the data would be re-fetched.
 %% @end
 %%--------------------------------------------------------------------
--spec verify(#'OTPCertificate'{}) ->
+-spec verify(identity:certificate()) ->
     ok | {error, key_does_not_match} | {error, Reason :: term()}.
 verify(#'OTPCertificate'{} = Certificate) ->
-    ID = get_id(Certificate),
-    PublicKeyToMatch = get_public_key(Certificate),
+    ID = identity_utils:get_id(Certificate),
+    PublicKeyToMatch = identity_utils:get_public_key(Certificate),
+    verify(ID, identity_utils:encode(PublicKeyToMatch)).
+
+-spec verify(identity:id(), identity:encoded_public_key()) ->
+    ok | {error, key_does_not_match} | {error, Reason :: term()}.
+verify(ID, EncodedPublicKeyToMatch) ->
     case plugins:apply(identity_cache, get, [ID]) of
-        {ok, PublicKeyToMatch} -> ok;
+        {ok, EncodedPublicKeyToMatch} -> ok;
         _ ->
             case plugins:apply(identity_repository, get, [ID]) of
                 {error, Reason} ->
                     ?warning("Cached key does not match and unable to refetch key for ~p", [ID]),
                     plugins:apply(identity_cache, invalidate, [ID]),
                     {error, Reason};
-                {ok, PublicKeyToMatch} ->
+                {ok, EncodedPublicKeyToMatch} ->
                     ?info("Key changed for ~p", [ID]),
-                    plugins:apply(identity_cache, put, [ID, PublicKeyToMatch]),
+                    plugins:apply(identity_cache, put, [ID, EncodedPublicKeyToMatch]),
                     ok;
                 {ok, _ActualPublicKey} ->
                     ?warning("Attempt to connect with wrong public key from ~p", [ID]),
@@ -96,6 +84,15 @@ verify(#'OTPCertificate'{} = Certificate) ->
                     {error, key_does_not_match}
             end
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Retrieves public key for given ID from the repository.
+%% @end
+%%--------------------------------------------------------------------
+-spec get(identity:id()) -> {ok, identity:encoded_public_key()} | {error, Reason :: term()}.
+get(ID) ->
+    plugins:apply(identity_repository, get, [ID]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -122,60 +119,6 @@ ssl_verify_fun_impl(OtpCert, valid_peer, UserState) ->
 ssl_verify_fun_impl(_, valid, UserState) ->
     {valid, UserState}.
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Ensures that certificates used in identity verifications are present
-%% in db and are synced to filesystem.
-%% Creates self-signed certificate if none present.
-%% @end
-%%--------------------------------------------------------------------
--spec ensure_identity_cert_created(KeyFilePath :: string(), CertFilePath :: string(),
-    DomainForCN :: string()) -> ok.
-ensure_identity_cert_created(KeyFile, CertFile, DomainForCN) ->
-    recreate_cert_files(KeyFile, CertFile, DomainForCN),
-    try_creating_certs_doc(KeyFile, CertFile),
-    create_certs_form_doc(KeyFile, CertFile).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Reads certificate pem & decodes it.
-%% @end
-%%--------------------------------------------------------------------
--spec read_cert(CertFile :: file:name_all()) -> #'OTPCertificate'{}.
-read_cert(CertFile) ->
-    {ok, CertBin} = file:read_file(CertFile),
-    Contents = public_key:pem_decode(CertBin),
-    [{'Certificate', CertDer, not_encrypted} | _] = lists:dropwhile(fun
-        ({'Certificate', _, not_encrypted}) -> false;
-        (_) -> true
-    end, Contents),
-    public_key:pkix_decode_cert(CertDer, otp).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Extract ID from certificate data.
-%% @end
-%%--------------------------------------------------------------------
--spec get_id(#'OTPCertificate'{}) -> CommonName :: binary().
-get_id(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{subject = {rdnSequence, Subject}}}) ->
-    case [Attribute#'AttributeTypeAndValue'.value || [Attribute] <- Subject,
-        Attribute#'AttributeTypeAndValue'.type == ?'id-at-commonName'] of
-        [{teletexString, Str}] -> list_to_binary(Str);
-        [{printableString, Str}] -> list_to_binary(Str);
-        [{utf8String, Bin}] -> Bin
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Extract public key from certificate data.
-%% @end
-%%--------------------------------------------------------------------
--spec get_public_key(#'OTPCertificate'{}) -> PublicKey :: identity:public_key().
-get_public_key(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{
-    subjectPublicKeyInfo = #'OTPSubjectPublicKeyInfo'{subjectPublicKey = Key}}}) ->
-    Key.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -195,59 +138,4 @@ verify_as_ssl_callback(OtpCert, UserState) ->
         ok -> {valid, UserState};
         {error, key_does_not_match} -> {fail, rejected_by_repo_verification};
         {error, Reason} -> {fail, {repo_verification_unexpectedly_failed, Reason}}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc @private
-%% Syncs certificate files fro db to filesystem.
-%% @end
-%%--------------------------------------------------------------------
--spec create_certs_form_doc(KeyFilePath :: string(), CertFilePath :: string()) -> ok.
-create_certs_form_doc(KeyFile, CertFile) ->
-    case synced_cert:get(?CERT_DB_KEY) of
-        {ok, #document{value = #synced_cert{cert_file_content = DBCert, key_file_content = DBKey}}} ->
-            ok = file:write_file(CertFile, DBCert),
-            ok = file:write_file(KeyFile, DBKey);
-        {error, Reason} ->
-            ?error("Identity cert files not synced with DB due to ~p", [Reason])
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc @private
-%% Tries to create certificate files info in db.
-%% Does not override any existing info.
-%% @end
-%%--------------------------------------------------------------------
--spec try_creating_certs_doc(KeyFilePath :: string(), CertFilePath :: string()) -> ok.
-try_creating_certs_doc(KeyFile, CertFile) ->
-    {ok, CertBin} = file:read_file(CertFile),
-    {ok, KeyBin} = file:read_file(KeyFile),
-    Res = synced_cert:create(#document{key = ?CERT_DB_KEY, value = #synced_cert{
-        cert_file_content = CertBin, key_file_content = KeyBin
-    }}),
-    case Res of
-        {ok, _} -> ok;
-        {error, already_exists} -> ok
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc @private
-%% Creates self-signed cert files if no cert files are present on filesystem.
-%% @end
-%%--------------------------------------------------------------------
--spec recreate_cert_files(KeyFilePath :: string(), CertFilePath :: string(),
-    DomainForCN :: string()) -> ok.
-recreate_cert_files(KeyFile, CertFile, DomainForCN) ->
-    case file:read_file_info(KeyFile) of
-        {ok, _} -> ok;
-        {error, enoent} ->
-            TmpDir = utils:mkdtemp(),
-            PassFile = TmpDir ++ "/pass",
-            CSRFile = TmpDir ++ "/csr",
-
-            os:cmd(["openssl genrsa", " -des3 ", " -passout ", " pass:x ", " -out ", PassFile, " 2048 "]),
-            os:cmd(["openssl rsa", " -passin ", " pass:x ", " -in ", PassFile, " -out ", KeyFile]),
-            os:cmd(["openssl req", " -new ", " -key ", KeyFile, " -out ", CSRFile, " -subj ", "\"/CN=" ++ DomainForCN ++ "\""]),
-            os:cmd(["openssl x509", " -req ", " -days ", " 365 ", " -in ", CSRFile, " -signkey ", KeyFile, " -out ", CertFile]),
-            utils:rmtempdir(TmpDir)
     end.

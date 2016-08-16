@@ -24,7 +24,7 @@
 %% Publishes public key under given ID.
 %% @end
 %%--------------------------------------------------------------------
--callback publish(identity:id(), identity:public_key()) ->
+-callback publish(identity:id(), identity:encoded_public_key()) ->
     ok | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
@@ -33,4 +33,4 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback get(identity:id()) ->
-    {ok, identity:public_key()} | {error, Reason :: term()}.
+    {ok, identity:encoded_public_key()} | {error, Reason :: term()}.

@@ -26,7 +26,7 @@
 %% {@link identity_repository_behaviour} callback publish/2.
 %% @end
 %%--------------------------------------------------------------------
--spec publish(identity:id(), identity:public_key()) ->
+-spec publish(identity:id(), identity:encoded_public_key()) ->
     ok | {error, Reason :: term()}.
 publish(ID, Key) ->
     Saved = application:get_env(app, ?REPO_ENV, #{}),
@@ -39,7 +39,7 @@ publish(ID, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get(identity:id()) ->
-    {ok, identity:public_key()} | {error, Reason :: term()}.
+    {ok, identity:encoded_public_key()} | {error, Reason :: term()}.
 get(ID) ->
     case application:get_env(app, ?REPO_ENV, #{}) of
         #{ID := Value} -> {ok, Value};

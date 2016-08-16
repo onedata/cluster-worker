@@ -51,7 +51,7 @@
 % Cached info about identities
 -record(cached_identity, {
     id :: identity:id(),
-    public_key :: identity:public_key(),
+    encoded_public_key :: identity:encoded_public_key(),
     last_update_seconds :: integer()
 }).
 

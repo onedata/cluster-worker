@@ -86,11 +86,11 @@ cert_file_and_doc_created_on_no_cert_supplied() ->
     KeyFile = TmpDir ++ "/key",
 
     %% when
-    identity:ensure_identity_cert_created(KeyFile, CertFile, "onedata.example.com"),
+    identity_utils:ensure_synced_cert_present(KeyFile, CertFile, "onedata.example.com"),
 
     %% then
-    Cert = identity:read_cert(CertFile),
-    ?assertMatch(<<"onedata.example.com">>, identity:get_id(Cert)),
+    Cert = identity_utils:read_cert(CertFile),
+    ?assertMatch(<<"onedata.example.com">>, identity_utils:get_id(Cert)),
 
     {ok, CertBin} = file:read_file(CertFile),
     {ok, KeyBin} = file:read_file(KeyFile),
@@ -105,12 +105,12 @@ cert_file_created_on_doc_supplied() ->
     TmpDir = utils:mkdtemp(),
     CertFile = TmpDir ++ "/cert",
     KeyFile = TmpDir ++ "/key",
-    identity:ensure_identity_cert_created(KeyFile, CertFile, "onedata.example.com"),
+    identity_utils:ensure_synced_cert_present(KeyFile, CertFile, "onedata.example.com"),
 
     %% when
     ok = file:delete(CertFile),
     ok = file:delete(KeyFile),
-    identity:ensure_identity_cert_created(KeyFile, CertFile, "onedata.example.com"),
+    identity_utils:ensure_synced_cert_present(KeyFile, CertFile, "onedata.example.com"),
 
     %% then
     {ok, CertBin} = file:read_file(CertFile),
@@ -127,11 +127,11 @@ cert__doc_created_on_cert_supplied_by_fs() ->
     TmpDir = utils:mkdtemp(),
     CertFile = TmpDir ++ "/cert",
     KeyFile = TmpDir ++ "/key",
-    identity:ensure_identity_cert_created(KeyFile, CertFile, "onedata.example.com"),
+    identity_utils:ensure_synced_cert_present(KeyFile, CertFile, "onedata.example.com"),
 
     %% when
     ok = application:unset_env(app, ?DB_ENV),
-    identity:ensure_identity_cert_created(KeyFile, CertFile, "onedata.example.com"),
+    identity_utils:ensure_synced_cert_present(KeyFile, CertFile, "onedata.example.com"),
 
     %% then
     {ok, CertBin} = file:read_file(CertFile),
@@ -144,7 +144,7 @@ cert__doc_created_on_cert_supplied_by_fs() ->
 
 verification_succeeds_on_published_cert() ->
     %% given
-    Cert = identity:read_cert(?SAMPLE_CERT_FILE),
+    Cert = identity_utils:read_cert(?SAMPLE_CERT_FILE),
 
     %% when
     identity:publish(Cert),
@@ -155,7 +155,7 @@ verification_succeeds_on_published_cert() ->
 
 verification_fails_on_not_published_cert() ->
     %% given
-    Cert = identity:read_cert(?SAMPLE_CERT_FILE),
+    Cert = identity_utils:read_cert(?SAMPLE_CERT_FILE),
 
     %% when
     Res = identity:verify(Cert),
@@ -166,7 +166,7 @@ verification_fails_on_not_published_cert() ->
 
 verification_fails_on_public_key_mismatch() ->
     %% given
-    Cert = identity:read_cert(?SAMPLE_CERT_FILE),
+    Cert = identity_utils:read_cert(?SAMPLE_CERT_FILE),
     #'OTPCertificate'{tbsCertificate = TBS = #'OTPTBSCertificate'{
         subjectPublicKeyInfo = Subject = #'OTPSubjectPublicKeyInfo'{}}} = Cert,
     ChangedCert = Cert#'OTPCertificate'{tbsCertificate = TBS#'OTPTBSCertificate'{
@@ -184,7 +184,7 @@ verification_fails_on_public_key_mismatch() ->
 
 verification_succeeds_on_published_cert_not_found_in_cache() ->
     %% given
-    Cert = identity:read_cert(?SAMPLE_CERT_FILE),
+    Cert = identity_utils:read_cert(?SAMPLE_CERT_FILE),
     identity:publish(Cert),
 
     %% when

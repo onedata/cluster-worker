@@ -21,7 +21,7 @@
 %% {@link identity_cache_behaviour} callback put/2.
 %% @end
 %%--------------------------------------------------------------------
--spec put(identity:id(), identity:public_key()) -> ok.
+-spec put(identity:id(), identity:encoded_public_key()) -> ok.
 put(_, _) -> ok.
 
 %%--------------------------------------------------------------------

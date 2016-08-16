@@ -81,9 +81,9 @@ should_create_record_on_put() ->
 
     %% then
     ?assertMatch({ok, #document{key = ID1, value = #cached_identity{
-        public_key = PublicKey1, id = ID1}}}, get_from_env(ID1, ?ENV)),
+        encoded_public_key = PublicKey1, id = ID1}}}, get_from_env(ID1, ?ENV)),
     ?assertMatch({ok, #document{key = ID2, value = #cached_identity{
-        public_key = PublicKey2, id = ID2}}}, get_from_env(ID2, ?ENV)).
+        encoded_public_key = PublicKey2, id = ID2}}}, get_from_env(ID2, ?ENV)).
 
 
 should_override_record_on_put() ->
@@ -98,9 +98,9 @@ should_override_record_on_put() ->
 
     %% then
     ?assertMatch({ok, #document{key = ID1, value = #cached_identity{
-        public_key = PublicKey1, id = ID1}}}, get_from_env(ID1, ?ENV)),
+        encoded_public_key = PublicKey1, id = ID1}}}, get_from_env(ID1, ?ENV)),
     ?assertMatch({ok, #document{key = ID2, value = #cached_identity{
-        public_key = PublicKey2, id = ID2}}}, get_from_env(ID2, ?ENV)).
+        encoded_public_key = PublicKey2, id = ID2}}}, get_from_env(ID2, ?ENV)).
 
 should_delete_record_on_invalidate() ->
     %% given
@@ -114,7 +114,7 @@ should_delete_record_on_invalidate() ->
     %% then
     ?assertMatch({error, _}, get_from_env(ID1, ?ENV)),
     ?assertMatch({ok, #document{key = ID2, value = #cached_identity{
-        public_key = PublicKey2, id = ID2}}}, get_from_env(ID2, ?ENV)).
+        encoded_public_key = PublicKey2, id = ID2}}}, get_from_env(ID2, ?ENV)).
 
 should_get_data_on_record_present() ->
     %% given
@@ -151,7 +151,7 @@ should_no_get_data_on_record_expired() ->
 %%%===================================================================
 
 create_record(ID1, PublicKey1, Now) ->
-    save_to_env(ID1, #document{key = ID1, value = #cached_identity{id = ID1, public_key = PublicKey1, last_update_seconds = Now}}, ?ENV).
+    save_to_env(ID1, #document{key = ID1, value = #cached_identity{id = ID1, encoded_public_key = PublicKey1, last_update_seconds = Now}}, ?ENV).
 
 data() ->
     ID1 = <<"id1">>,
