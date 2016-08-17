@@ -1081,7 +1081,7 @@ multiple_links_creation_test_base(Config, PModule) ->
     Self = self(),
     AddLinks = fun(Links, Send) ->
         Ans = ?call(Worker1, PModule, add_links, [ModelConfig, Doc#document.key,
-            datastore:normalize_link_target(Links)]),
+            datastore:normalize_link_target(ModelConfig, Links)]),
         case Send of
             true ->
                 Self ! {link_ans, Ans};

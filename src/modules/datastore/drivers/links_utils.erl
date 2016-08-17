@@ -472,6 +472,8 @@ fetch_link(Driver, #model_config{mother_link_scope = ScopeFun1, other_link_scope
     case fetch_link(Driver, ModelConfig, LinkName, Key, ScopeFun1) of
         {error, link_not_found} ->
             fetch_link(Driver, ModelConfig, LinkName, Key, ScopeFun2());
+        {ok, {_Version, []}} ->
+            {error, link_not_found};
         Ans ->
             Ans
     end.
@@ -566,8 +568,9 @@ unpack_link_scope(ModelName, LinkName) when is_binary(LinkName) ->
             [Scope, OLinkName | _] = lists:reverse(Other),
             {OLinkName, Scope}
     end;
-unpack_link_scope(_ModelName, LinkName) ->
-    {LinkName, undefined}.
+unpack_link_scope(ModelName, LinkName) ->
+    #model_config{mother_link_scope = MScope} = ModelName:model_init(),
+    {LinkName, MScope()}.
 
 
 %%--------------------------------------------------------------------
@@ -578,11 +581,14 @@ unpack_link_scope(_ModelName, LinkName) ->
 -spec select_scope_related_link(LinkName :: datastore:link_name(), RequestedScope :: scope(), [datastore:link_final_target()]) ->
     datastore:link_final_target() | undefined.
 select_scope_related_link(LinkName, RequestedScope, Targets) ->
+
     case lists:filter(
         fun
-            ({_, _, Scope}) when is_binary(LinkName) ->
+            ({_, _, Scope}) when is_binary(LinkName), is_binary(Scope) ->
+                ?info("WTF1 ~p", [{LinkName, RequestedScope, Targets, Scope}]),
                 lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope));
             ({_, _, Scope}) ->
+                ?info("WTF2 ~p", [{LinkName, RequestedScope, Targets, Scope}]),
                 RequestedScope =:= Scope
         end, Targets) of
         [] -> undefined;
@@ -919,8 +925,13 @@ remove_from_links_map(ModelName, [Link | R], Map, NewLinks, Deleted) ->
                             remove_from_links_map(ModelName, R, Map, NewLinks, Deleted);
                         RelatedTarget ->
                             NewTargets = Targets -- [RelatedTarget],
-                            remove_from_links_map(ModelName, R, maps:put(RawLinkName, {V + 1, NewTargets}, Map), NewLinks,
-                                Deleted + length(Targets -- NewTargets))
+                            case NewTargets of
+                                [] ->
+                                    remove_from_links_map(ModelName, R, maps:remove(RawLinkName, Map), NewLinks, Deleted + length(Targets));
+                                _ ->
+                                    remove_from_links_map(ModelName, R, maps:put(RawLinkName, {V + 1, NewTargets}, Map), NewLinks,
+                                        Deleted + length(Targets -- NewTargets))
+                            end
                     end;
                 _ ->
                     remove_from_links_map(ModelName, R, maps:remove(RawLinkName, Map), NewLinks, Deleted + 1)
