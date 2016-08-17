@@ -170,15 +170,30 @@ create_or_update(Level, #document{} = Document, Diff) ->
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
     ModelName = model_name(Document),
-    Drivers = level_to_driver(Level),
-    % Do update to check disk if document is not in memory
-    case exec_cache_async(ModelName, Drivers, update, [Key, Diff]) of
-        {error, {not_found, _}} ->
-            % Document not found - proceed with operation in memory
-            exec_cache_async(ModelName, Drivers, create_or_update, [Document, Diff]);
-        Ans ->
-            Ans
+    [D1 | _] = Drivers = level_to_driver(Level),
+    SafeExec = case caches_controller:check_cache_consistency(driver_to_level(D1), ModelName) of
+                  ok ->
+                      false;
+                  {monitored, ClearedList} ->
+                      lists:member(Key, ClearedList);
+                  _ ->
+                      true
+              end,
+
+    case SafeExec of
+        true ->
+            % Do update to check disk if document is not in memory
+            case exec_cache_async(ModelName, Drivers, update, [Key, Diff]) of
+                {error, {not_found, _}} ->
+                    % Document not found - proceed with operation in memory
+                    exec_cache_async(ModelName, Drivers, create_or_update, [Document, Diff]);
+                Ans ->
+                    Ans
+            end;
+        _ ->
+            exec_cache_async(ModelName, Drivers, create_or_update, [Document, Diff])
     end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1034,14 +1049,27 @@ exec_driver_async(ModelName, Level, Method, Args) ->
 exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
     case exec_driver(ModelName, Driver1, Method, Args) of
         {error, {not_found, MN}} when Method =:= update ->
-            ModelConfig = ModelName:model_init(),
             [Key | _] = Args,
-            FullArgs1 = [ModelConfig, Key],
-            case erlang:apply(driver_to_module(Driver2), get, FullArgs1) of
-                {ok, Doc} ->
-                    FullArgs2 = [ModelConfig, Doc],
-                    erlang:apply(driver_to_module(Driver1), create, FullArgs2),
-                    exec_cache_async(ModelName, Drivers, Method, Args);
+            Proceed = case caches_controller:check_cache_consistency(driver_to_level(Driver1), ModelName) of
+                          ok ->
+                              false;
+                          {monitored, ClearedList} ->
+                              lists:member(Key, ClearedList);
+                          _ ->
+                              true
+                      end,
+            case Proceed of
+                true ->
+                    ModelConfig = ModelName:model_init(),
+                    FullArgs1 = [ModelConfig, Key],
+                    case erlang:apply(driver_to_module(Driver2), get, FullArgs1) of
+                        {ok, Doc} ->
+                            FullArgs2 = [ModelConfig, Doc],
+                            erlang:apply(driver_to_module(Driver1), create, FullArgs2),
+                            exec_cache_async(ModelName, Drivers, Method, Args);
+                        _ ->
+                            {error, {not_found, MN}}
+                    end;
                 _ ->
                     {error, {not_found, MN}}
             end;

@@ -944,25 +944,39 @@ before_del(Key, ModelName, Level, _Op) ->
 -spec check_create(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level()) -> ok | datastore:generic_error().
 check_create(Key, ModelName, Level) ->
-    Uuid = caches_controller:get_cache_uuid(Key, ModelName),
-    Check = case get(Level, Uuid) of
-                {ok, Doc2} ->
-                    Value = Doc2#document.value,
-                    Action = Value#cache_controller.action,
-                    not ((Action =:= delete) orelse (Action =:= to_be_del));
-                {error, {not_found, _}} ->
-                    true
-            end,
-    case Check of
+    Proceed = case caches_controller:check_cache_consistency(Level, ModelName) of
+        ok ->
+            false;
+        {monitored, ClearedList} ->
+            lists:member(Key, ClearedList);
+        _ ->
+            true
+    end,
+
+    case Proceed of
         true ->
-            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
-                exists, [ModelName:model_init(), Key]) of
-                {ok, false} ->
-                    ok;
-                {ok, true} ->
-                    {error, already_exists};
-                Other ->
-                    Other
+            Uuid = caches_controller:get_cache_uuid(Key, ModelName),
+            Check = case get(Level, Uuid) of
+                        {ok, Doc2} ->
+                            Value = Doc2#document.value,
+                            Action = Value#cache_controller.action,
+                            not ((Action =:= delete) orelse (Action =:= to_be_del));
+                        {error, {not_found, _}} ->
+                            true
+                    end,
+            case Check of
+                true ->
+                    case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                        exists, [ModelName:model_init(), Key]) of
+                        {ok, false} ->
+                            ok;
+                        {ok, true} ->
+                            {error, already_exists};
+                        Other ->
+                            Other
+                    end;
+                _ ->
+                    ok
             end;
         _ ->
             ok
@@ -978,25 +992,40 @@ check_create(Key, ModelName, Level) ->
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
     ok | datastore:generic_error().
 check_link_create(Key, LinkName, ModelName, Level) ->
-    Uuid = caches_controller:get_cache_uuid({Key, LinkName, cache_controller_link_key}, ModelName),
-    Check = case get(Level, Uuid) of
-                {ok, Doc2} ->
-                    Value = Doc2#document.value,
-                    Action = Value#cache_controller.action,
-                    not ((Action =:= delete_links) orelse (Action =:= to_be_del));
-                {error, {not_found, _}} ->
-                    true
-            end,
-    case Check of
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    Proceed = case caches_controller:check_cache_consistency(Level, CCCUuid) of
+                  ok ->
+                      false;
+                  {monitored, ClearedList} ->
+                      lists:member(LinkName, ClearedList);
+                  _ ->
+                      true
+              end,
+
+    case Proceed of
         true ->
-            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
-                fetch_link, [ModelName:model_init(), Key, LinkName]) of
-                {error, link_not_found} ->
-                    ok;
-                {ok, _} ->
-                    {error, already_exists};
-                Other ->
-                    Other
+            Uuid = caches_controller:get_cache_uuid({Key, LinkName, cache_controller_link_key}, ModelName),
+            Check = case get(Level, Uuid) of
+                        {ok, Doc2} ->
+                            Value = Doc2#document.value,
+                            Action = Value#cache_controller.action,
+                            not ((Action =:= delete_links) orelse (Action =:= to_be_del));
+                        {error, {not_found, _}} ->
+                            true
+                    end,
+            case Check of
+                true ->
+                    case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                        fetch_link, [ModelName:model_init(), Key, LinkName]) of
+                        {error, link_not_found} ->
+                            ok;
+                        {ok, _} ->
+                            {error, already_exists};
+                        Other ->
+                            Other
+                    end;
+                _ ->
+                    ok
             end;
         _ ->
             ok
