@@ -29,7 +29,7 @@
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
-  check_cache_consistency/2]).
+  check_cache_consistency/2, consistency_info_lock/3]).
 
 %%%===================================================================
 %%% API
@@ -129,7 +129,7 @@ get_hooks_config(Models) ->
 -spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type()) -> binary().
 get_cache_uuid(Key, ModelName) ->
-  base64:encode(term_to_binary({ModelName, Key})).
+  base64:encode(term_to_binary({Key, ModelName})).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -312,15 +312,18 @@ clear(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
 
-  Pred = fun() ->
-    case save_clear_info(Level, Uuid) of
-      {ok, _} ->
-        save_consistency_info(Level, ModelName, Key);
-      _ ->
-        false
-    end
-  end,
-  erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred]).
+  consistency_info_lock(ModelName, Key,
+    fun() ->
+      Pred = fun() ->
+        case save_clear_info(Level, Uuid) of
+          {ok, _} ->
+            save_consistency_info(Level, ModelName, Key);
+          _ ->
+            false
+        end
+      end,
+      erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
+    end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -349,17 +352,20 @@ clear(Level, ModelName, Key, all) ->
 clear(Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
+  CCCUuid = get_cache_uuid(Key, ModelName),
 
-  Pred = fun() ->
-    case save_clear_info(Level, Uuid) of
-      {ok, _} ->
-        CCCUuid = get_cache_uuid(Key, ModelName),
-        save_consistency_info(Level, CCCUuid, Link);
-      _ ->
-        false
-    end
-  end,
-  erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred]).
+  consistency_info_lock(CCCUuid, Link,
+    fun() ->
+      Pred = fun() ->
+        case save_clear_info(Level, Uuid) of
+          {ok, _} ->
+            save_consistency_info(Level, CCCUuid, Link);
+          _ ->
+            false
+        end
+      end,
+      erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+    end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -464,6 +470,16 @@ check_cache_consistency(Level, Key) ->
       ok
   end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Critical section for consistency info.
+%% @end
+%%--------------------------------------------------------------------
+-spec consistency_info_lock(Key :: datastore:ext_key(), ClearedName :: datastore:key() | datastore:link_name(),
+    Fun :: fun(() -> term())) -> term().
+consistency_info_lock(Key, ClearedName, Fun) ->
+  critical_section:run([?MODULE, consistency_info, {Key, ClearedName}], Fun).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -536,7 +552,12 @@ save_consistency_info(Level, Key, ClearedName) ->
         true ->
           {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
         _ ->
-          {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL]}}
+          case lists:member(ClearedName, CL) of
+            true ->
+              {error, already_cleared};
+            _ ->
+              {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL]}}
+          end
       end
   end,
   V = #cache_consistency_controller{cleared_list = [ClearedName]},
@@ -546,6 +567,8 @@ save_consistency_info(Level, Key, ClearedName) ->
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
+      true;
+    {error, already_cleared} ->
       true;
     Other ->
       ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
@@ -629,16 +652,19 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
 
-    Pred = fun() ->
-      case save_high_mem_clear_info(Level, Uuid) of
-        {ok, _} ->
-          CCCUuid = get_cache_uuid(Key, ModelName),
-          save_consistency_info(Level, CCCUuid, Link);
-        _ ->
-          false
-      end
-    end,
-    erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+    CCCUuid = get_cache_uuid(Key, ModelName),
+    consistency_info_lock(CCCUuid, Link,
+      fun() ->
+        Pred = fun() ->
+          case save_high_mem_clear_info(Level, Uuid) of
+            {ok, _} ->
+              save_consistency_info(Level, CCCUuid, Link);
+            _ ->
+              false
+          end
+        end,
+        erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+      end)
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
@@ -650,15 +676,18 @@ safe_delete(Level, ModelName, Key) ->
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(Key, ModelName),
 
-    Pred =fun() ->
-      case save_high_mem_clear_info(Level, Uuid) of
-        {ok, _} ->
-          save_consistency_info(Level, ModelName, Key);
-        _ ->
-          false
-      end
-    end,
-    erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
+    consistency_info_lock(ModelName, Key,
+      fun() ->
+        Pred =fun() ->
+          case save_high_mem_clear_info(Level, Uuid) of
+            {ok, _} ->
+              save_consistency_info(Level, ModelName, Key);
+            _ ->
+              false
+          end
+        end,
+        erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
+      end)
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "

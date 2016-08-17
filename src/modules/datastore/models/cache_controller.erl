@@ -409,25 +409,31 @@ restore_from_disk({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Le
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, {LinkName, Doc}],
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
-    case erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs) of
-        ok ->
-            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
-        {error, already_exists} ->
-            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
-        Error ->
-            Error
-    end;
+    caches_controller:consistency_info_lock(CCCUuid, LinkName,
+        fun() ->
+            case erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs) of
+                ok ->
+                    caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                {error, already_exists} ->
+                    caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                Error ->
+                    Error
+            end
+        end);
 restore_from_disk(Key, ModelName, Doc, Level) ->
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Doc],
-    case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of
-        {ok, _} ->
-            caches_controller:save_consistency_restored_info(Level, ModelName, Key);
-        {error, already_exists} ->
-            caches_controller:save_consistency_restored_info(Level, ModelName, Key);
-        Error ->
-            Error
-    end.
+    caches_controller:consistency_info_lock(ModelName, Key,
+        fun() ->
+            case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of
+                {ok, _} ->
+                    caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+                {error, already_exists} ->
+                    caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+                Error ->
+                    Error
+            end
+        end).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -494,26 +500,41 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
 -spec delete_dump_info(Uuid :: binary(), Owner :: list(), Level :: datastore:store_level()) ->
     ok | datastore:generic_error().
 delete_dump_info(Uuid, Owner, Level) ->
-    Pred = fun() ->
-        {LastUser, Action} = case get(Level, Uuid) of
-                       {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                           {LU, A};
-                       {error, {not_found, _}} ->
-                           {non, non}
-                   end,
-
-        case {LastUser, Action} of
-            {_, to_be_del} ->
-                false;
-            {Owner, _} ->
-                true;
-            {non, _} ->
-                true;
-            _ ->
-                false
-        end
+    {CCCUuid, ClearName} = case caches_controller:decode_uuid(Uuid) of
+        {{Key, Link, cache_controller_link_key}, ModelName} ->
+            {caches_controller:get_cache_uuid(Key, ModelName), Link};
+        {Key, ModelName} ->
+            {ModelName, Key}
     end,
-    delete(Level, Uuid, Pred).
+    caches_controller:consistency_info_lock(CCCUuid, ClearName,
+        fun() ->
+            Pred = fun() ->
+                {LastUser, Action} = case get(Level, Uuid) of
+                               {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                                   {LU, A};
+                               {error, {not_found, _}} ->
+                                   {non, non}
+                           end,
+
+                Ans1 = case {LastUser, Action} of
+                    {_, to_be_del} ->
+                        false;
+                    {Owner, _} ->
+                        true;
+                    {non, _} ->
+                        true;
+                    _ ->
+                        false
+                end,
+                case Ans1 of
+                    true ->
+                        caches_controller:save_consistency_restored_info(Level, CCCUuid, ClearName);
+                    _ ->
+                        Ans1
+                end
+            end,
+            delete(Level, Uuid, Pred)
+        end).
 %%--------------------------------------------------------------------
 %% @private
 %% @doc

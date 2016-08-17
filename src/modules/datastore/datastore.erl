@@ -245,10 +245,15 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
                             ok ->
                                 case exec_driver(ModelName, Driver2, get, [Key]) of
                                     {ok, Document} ->
-                                        cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
-                                        maps:put(Key, Document, Acc);
+                                        case maps:find(Key, Acc) of
+                                            {ok, _} -> Acc;
+                                            error ->
+                                                cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
+                                                maps:put(Key, Document, Acc)
+                                        end;
                                     {error, {not_found, _}} ->
-                                        caches_controller:save_consistency_restored_info(CLevel, ModelName, Key),
+                                        ?warning("Wrong cache consistency value (not_found at disk): ~p",
+                                            [{CLevel, ModelName, Key}]),
                                         Acc;
                                     GetErr ->
                                         ?error("Cannot get doc from disk: ~p", GetErr),
@@ -599,8 +604,12 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
                             ok ->
                                 case exec_driver(ModelName, Driver2, fetch_link, [Key, LinkName]) of
                                     {ok, LinkTarget} ->
-                                        cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
-                                        maps:put(LinkName, LinkTarget, Acc);
+                                        case maps:find(Key, Acc) of
+                                            {ok, _} -> Acc;
+                                            error ->
+                                                cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                                maps:put(LinkName, LinkTarget, Acc)
+                                        end;
                                     {error, link_not_found} ->
                                         caches_controller:save_consistency_restored_info(CLevel, CCCUuid, LinkName),
                                         Acc;

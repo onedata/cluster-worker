@@ -2345,6 +2345,7 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     Ret0 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
+    Keys0 = lists:map(fun(#document{key = Key}) -> Key end, Objects0),
 
     ObjCount = 424,
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
@@ -2368,7 +2369,7 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
         ?assertMatch({ok, _}, Ret1),
         {ok, Objects1} = Ret1,
         ReceivedKeys = lists:map(fun(#document{key = Key}) ->
-            Key end, Objects1 -- Objects0),
+            Key end, Objects1) -- Keys0,
 
         ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
         ?assertMatch([], ReceivedKeys -- Keys),
