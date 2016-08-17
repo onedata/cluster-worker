@@ -23,11 +23,32 @@
 %% API
 -export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
--export([make_scoped_link_name/2, unpack_link_scope/2, select_scope_related_link/3]).
+-export([make_scoped_link_name/2, unpack_link_scope/2, select_scope_related_link/3, get_scope/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns link scope for given model.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_scope(ModelName :: model_behaviour:model_type() | model_behaviour:model_config()) ->
+    scope().
+get_scope(ModelName) when is_atom(ModelName) ->
+    ModelConfig = ModelName:model_init(),
+    get_scope(ModelConfig);
+get_scope(#model_config{name = ModelName} = _ModelConfig) ->
+    MInfo = ModelName:module_info(),
+    Exports = proplists:get_value(exports, MInfo),
+    case lists:member({links_local_scope, 0}, Exports) of
+        false ->
+            ?DEFAULT_LINK_SCOPE;
+        true ->
+            ModelName:links_local_scope()
+    end.
 
 
 %%--------------------------------------------------------------------
