@@ -100,6 +100,7 @@ globally_cached_consistency_test(Config) ->
     end, AllKeys),
 
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
     ?assertEqual(ok, ?call(Worker2, cache_consistency_controller, delete, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -747,7 +748,7 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
 
-    ?assertMatch(ok, ?call(Worker1, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity2])),
     ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
         ?call_store(Worker2, get, [Level,
