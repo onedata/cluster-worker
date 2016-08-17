@@ -293,7 +293,6 @@ globally_cached_foreach_link_test(Config) ->
     disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
 
     ModelConfig = TestRecord:model_init(),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
 
     Key = <<"key_gcflt">>,

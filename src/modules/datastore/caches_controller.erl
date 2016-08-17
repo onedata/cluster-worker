@@ -136,7 +136,8 @@ get_cache_uuid(Key, ModelName) ->
 %% Decodes uuid to key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec decode_uuid(binary()) -> {ModelName :: model_behaviour:model_type(), Key :: datastore:key()}.
+-spec decode_uuid(binary()) -> {ModelName :: model_behaviour:model_type(),
+  Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}}.
 decode_uuid(Uuid) ->
   binary_to_term(base64:decode(Uuid)).
 
