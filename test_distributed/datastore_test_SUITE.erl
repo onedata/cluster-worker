@@ -535,18 +535,18 @@ links_scope_proc_mem_test(Config) ->
             fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
     end,
     GetAllLinks = fun(Links, MotherScope, OtherScopes) ->
-        AccFun = fun(LinkName, _, Acc) ->
-            [LinkName | Acc]
+        AccFun = fun(LinkName, LinkValue, Acc) ->
+            maps:put(LinkName, LinkValue, Acc)
         end,
         {_, ListedLinks} = FLAns = ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
-            foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []]]),
+            foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, #{}]]),
         ?assertMatch({ok, _}, FLAns),
 
         lists:foreach(fun(I) ->
-            ?assert(lists:member(GetLinkName(I), ListedLinks))
+            ?assert(maps:is_key(GetLinkName(I), ListedLinks))
         end, Links),
         LinksLength = length(Links),
-        ?assertMatch(LinksLength, length(ListedLinks))
+        ?assertMatch(LinksLength, maps:size(ListedLinks))
     end,
     DeleteLink = fun(I, MotherScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
@@ -803,7 +803,6 @@ create_globally_cached_test(Config) ->
 
     ModelConfig = TestRecord:model_init(),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     Key = <<"key_cgct">>,
     Doc =  #document{
         key = Key,
@@ -812,7 +811,7 @@ create_globally_cached_test(Config) ->
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({error, already_exists}, ?call(Worker1, TestRecord, create, [Doc])),
 
     ?assertMatch(ok, ?call(Worker2, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
@@ -833,7 +832,7 @@ create_globally_cached_test(Config) ->
     ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
     ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, link])),
     ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
 
     ?assertMatch(ok, ?call(Worker2, PModule, delete_links, [ModelConfig, Key, [link]])),
