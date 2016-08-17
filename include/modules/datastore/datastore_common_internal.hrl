@@ -21,7 +21,7 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
--define(DEFAULT_LINK_SCOPE, links).
+-define(DEFAULT_LINK_SCOPE, <<"links">>).
 
 -define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?DEFAULT_LINK_SCOPE end).
 

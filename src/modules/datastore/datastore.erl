@@ -74,7 +74,7 @@
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/1, run_posthooks/5]).
+-export([run_transaction/3, normalize_link_target/2, run_posthooks/5]).
 
 %%%===================================================================
 %%% API
@@ -446,7 +446,8 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 -spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
     ok | create_error().
 create_link(Level, Key, ModelName, Link) ->
-    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(Link)]).
+    ModelConfig = ModelName:model_init(),
+    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
 
 
 %%--------------------------------------------------------------------
@@ -518,8 +519,6 @@ fetch_link(Level, Key, ModelName, LinkName) ->
     case fetch_full_link(Level, Key, ModelName, RawLinkName) of
         {ok, {_Version, [{TargetKey, TargetModel, _}]}} ->
             {ok, {TargetKey, TargetModel}};
-        {ok, {_Version, []}} ->
-            {error, link_not_found};
         {ok, {_Version, Targets}} when is_list(Targets) ->
             ?info("WTF 0 ~p", [{RawLinkName, RequestedScope, Targets}]),
             {TargetKey, TargetModel, _} = links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets),
@@ -755,22 +754,6 @@ normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {
     normalize_link_target(ModelConfig, {LinkName, {TargetKey, ModelName, links_utils:get_scopes(MScope, undefined)}});
 normalize_link_target(ModelConfig, {LinkName, {_TargetKey, _ModelName, _ScopeId} = Target}) ->
     normalize_link_target(ModelConfig, {LinkName, {1, [Target]}}).
-
-
-normalize_link_target({_LinkName, {1, [{_TargetKey, ModelName, _ScopeId} | _]}} = ValidLink) when is_atom(ModelName) ->
-    ValidLink;
-normalize_link_target([]) ->
-    [];
-normalize_link_target([Link | R]) ->
-    [normalize_link_target(Link) | normalize_link_target(R)];
-normalize_link_target({LinkName, #document{key = TargetKey} = Doc}) ->
-    normalize_link_target({LinkName, {TargetKey, model_name(Doc), undefined}});
-normalize_link_target({LinkName, {_TargetKey, _ModelName, _ScopeId} = Target}) ->
-    normalize_link_target({LinkName, {1, [Target]}});
-normalize_link_target({LinkName, {TargetKey, ModelName}}) ->
-    normalize_link_target({LinkName, {TargetKey, ModelName, undefined}}).
-
-
 
 
 %%--------------------------------------------------------------------
