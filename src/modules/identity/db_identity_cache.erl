@@ -36,7 +36,7 @@ put(ID, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get(identity:id()) ->
-    {ok, identity:public_key()} | {error, Reason :: term()}.
+    {ok, identity:encoded_public_key()} | {error, Reason :: term()}.
 get(ID) ->
     Now = now_seconds(),
     {ok, TTL} = application:get_env(?CLUSTER_WORKER_APP_NAME, identity_cache_ttl_seconds),
