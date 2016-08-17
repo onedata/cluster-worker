@@ -1099,6 +1099,7 @@ interupt_global_cache_clearing_test(Config) ->
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     Self = self(),
     spawn_link(fun() ->
+        timer:sleep(2),
         Ans = ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0]),
         Self ! {del_old_key, Ans}
     end),

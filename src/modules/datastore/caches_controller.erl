@@ -129,14 +129,14 @@ get_hooks_config(Models) ->
 -spec get_cache_uuid(Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type()) -> binary().
 get_cache_uuid(Key, ModelName) ->
-  base64:encode(term_to_binary({Key, ModelName})).
+  base64:encode(term_to_binary({ModelName, Key})).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Decodes uuid to key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec decode_uuid(binary()) -> {Key :: datastore:key(), ModelName :: model_behaviour:model_type()}.
+-spec decode_uuid(binary()) -> {ModelName :: model_behaviour:model_type(), Key :: datastore:key()}.
 decode_uuid(Uuid) ->
   binary_to_term(base64:decode(Uuid)).
 

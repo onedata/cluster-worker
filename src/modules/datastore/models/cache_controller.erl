@@ -501,9 +501,9 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
     ok | datastore:generic_error().
 delete_dump_info(Uuid, Owner, Level) ->
     {CCCUuid, ClearName} = case caches_controller:decode_uuid(Uuid) of
-        {{Key, Link, cache_controller_link_key}, ModelName} ->
+        {ModelName, {Key, Link, cache_controller_link_key}} ->
             {caches_controller:get_cache_uuid(Key, ModelName), Link};
-        {Key, ModelName} ->
+        {ModelName, Key} ->
             {ModelName, Key}
     end,
     caches_controller:consistency_info_lock(CCCUuid, ClearName,
