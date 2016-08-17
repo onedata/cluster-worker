@@ -593,7 +593,7 @@ unpack_link_scope(ModelName, LinkName) when is_binary(LinkName) ->
     end;
 unpack_link_scope(ModelName, LinkName) ->
     #model_config{mother_link_scope = MScope} = ModelName:model_init(),
-    {LinkName, MScope()}.
+    {LinkName, get_scopes(MScope, undefined)}.
 
 
 %%--------------------------------------------------------------------
