@@ -15,3 +15,6 @@
 
 ## Set the location of crash dumps
 -env ERL_CRASH_DUMP {{crash_dump}}
+
+## Enable Symmetric Multiprocessing
+-smp enable

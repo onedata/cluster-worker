@@ -81,8 +81,7 @@ cat <<"EOF" > /tmp/gen_dev_args.json
 EOF
 {mount_commands}
 {pre_start_commands}
-/root/bin/node/bin/{executable} console
-sleep 5'''  # Add sleep so logs can be chowned
+/root/bin/node/bin/{executable} console'''
 
     mount_commands = common.mount_nfs_command(config, storages_dockers)
     pre_start_commands = configurator.pre_start_commands(domain)
@@ -101,6 +100,7 @@ sleep 5'''  # Add sleep so logs can be chowned
 
     if logdir:
         logdir = os.path.join(os.path.abspath(logdir), hostname)
+        os.makedirs(logdir)
         volumes.extend([(logdir, '/root/bin/node/log', 'rw')])
 
     container = docker.run(
@@ -164,7 +164,7 @@ def _couchbase_up(cluster_name, db_nodes, dns_servers, uid):
         return db_node_mappings, {}
 
     [dns] = dns_servers
-    couchbase_output = couchbase.up('couchbase/server:community-4.0.0', dns,
+    couchbase_output = couchbase.up('couchbase/server:community-4.1.0', dns,
                                     uid, cluster_name, len(db_node_mappings))
 
     return db_node_mappings, couchbase_output
