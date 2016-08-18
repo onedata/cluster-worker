@@ -61,6 +61,7 @@ get_scope(#model_config{name = ModelName} = _ModelConfig) ->
 %%--------------------------------------------------------------------
 -spec diff(#links{}, #links{}) -> {#{}, #{}}.
 diff(#links{link_map = OldMap}, #links{link_map = CurrentMap}) ->
+    ?info("diff ~p ~p", [OldMap, CurrentMap]),
     OldKeys = maps:keys(OldMap),
     CurrentKeys = maps:keys(CurrentMap),
     DeletedKeys = OldKeys -- CurrentKeys,
@@ -159,6 +160,8 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
 save_links_maps(Driver,
     #model_config{bucket = _Bucket, name = ModelName, mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
     Key, LinksList) ->
+
+    ?info("save_links_maps ~p", [{Key, LinksList}]),
 
     case get_scopes(Scope2, Key) of
         [] ->
@@ -586,7 +589,7 @@ unpack_link_scope(ModelName, LinkName) when is_binary(LinkName) ->
     case binary:split(LinkName, <<?LINK_NAME_SCOPE_SEPARATOR>>) of
         [LinkName] ->
             #model_config{mother_link_scope = MScope} = ModelName:model_init(),
-            {LinkName, get_scopes(MScope, undefined)};
+            {LinkName, undefined};
         Other ->
             [Scope, OLinkName | _] = lists:reverse(Other),
             {OLinkName, Scope}
@@ -607,7 +610,7 @@ select_scope_related_link(LinkName, RequestedScope, Targets) ->
 
     case lists:filter(
         fun
-            ({_, _, Scope}) when is_binary(LinkName), is_binary(Scope) ->
+            ({_, _, Scope}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope)  ->
                 ?info("WTF1 ~p", [{LinkName, RequestedScope, Targets, Scope}]),
                 lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope));
             ({_, _, Scope}) ->

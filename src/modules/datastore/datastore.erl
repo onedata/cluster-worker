@@ -359,7 +359,7 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    datastore:run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
+%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
         case LinkDuplication of
             false ->
                 exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
@@ -379,8 +379,8 @@ add_links(Level, Key, ModelName, Links) when is_list(Links) ->
                         (_, Other) ->
                             Other
                     end, ok, NormalizedLinks)
-        end
-    end).
+        end.
+%%    end).
 
 
 %%--------------------------------------------------------------------
@@ -405,9 +405,9 @@ set_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 set_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    datastore:run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
-        exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks])
-    end).
+%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
+        exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
+%%    end).
 
 
 %%--------------------------------------------------------------------
@@ -421,7 +421,7 @@ deduplicate_targets([T]) ->
     [T];
 deduplicate_targets([]) ->
     [];
-deduplicate_targets([{M, K, _}, {M, K, _} = T | R]) ->
+deduplicate_targets([{M, K, S}, {M, K, S} = T | R]) ->
     deduplicate_targets([T | R]);
 deduplicate_targets([T | R]) ->
     [T | deduplicate_targets(R)].
@@ -519,11 +519,29 @@ fetch_link(Level, Key, ModelName, LinkName) ->
     case fetch_full_link(Level, Key, ModelName, RawLinkName) of
         {ok, {_Version, [{TargetKey, TargetModel, _}]}} ->
             {ok, {TargetKey, TargetModel}};
-        {ok, {_Version, Targets}} when is_list(Targets) ->
+        {ok, {_Version, Targets = [H | _]}} ->
             ?info("WTF 0 ~p", [{RawLinkName, RequestedScope, Targets}]),
-            {TargetKey, TargetModel, _} = links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets),
-            {ok, {TargetKey, TargetModel}};
+
+                case RequestedScope of
+                    undefined ->
+                        {TargetKey, TargetModel, _} =
+                            case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
+                                undefined ->
+                                    H;
+                                ScopeRelated ->
+                                    ScopeRelated
+                            end,
+                        {ok, {TargetKey, TargetModel}};
+                    _ ->
+                        case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
+                            undefined ->
+                                {error, link_not_found};
+                            {TargetKey, TargetModel, _} ->
+                                {ok, {TargetKey, TargetModel}}
+                        end
+                end;
         Other ->
+            ?info("WTF 3 ~p", [{Key, RawLinkName, RequestedScope, Other}]),
             Other
     end.
 
