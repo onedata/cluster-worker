@@ -691,7 +691,7 @@ free_memory(NodeMem) ->
 
 free_memory() ->
     try
-        % Suspend memory cleaning when usage is low
+        % Following code will be used when clearing memory algorithm will change
         % TODO - do not use foreach during clearing
         ok
 %%        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
