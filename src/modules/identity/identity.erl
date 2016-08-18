@@ -92,7 +92,10 @@ verify(ID, EncodedPublicKeyToMatch) ->
 %%--------------------------------------------------------------------
 -spec get(identity:id()) -> {ok, identity:encoded_public_key()} | {error, Reason :: term()}.
 get(ID) ->
-    plugins:apply(identity_repository, get, [ID]).
+    case plugins:apply(identity_repository, get, [ID]) of
+        {ok, Encoded} -> plugins:apply(identity_cache, put, [ID, Encoded]), {ok, Encoded};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
