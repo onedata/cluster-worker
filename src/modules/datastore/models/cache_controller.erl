@@ -190,6 +190,8 @@ list_docs_to_be_dumped(Level) ->
     Filter = fun
         ('$end_of_table', Acc) ->
             {abort, Acc};
+        (#document{key = Uuid, value = #cache_controller{last_user = non, action = to_be_del}}, Acc) ->
+            {next, [Uuid | Acc]};
         (#document{value = #cache_controller{last_user = non}}, Acc) ->
             {next, Acc};
         % TODO check how old is clear and clear if possible

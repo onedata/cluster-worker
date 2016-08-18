@@ -96,7 +96,7 @@ globally_cached_consistency_test(Config) ->
     {_, AllKeys} = AllKeysAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
     ?assertMatch({ok, _}, AllKeysAns),
     lists:foreach(fun(Uuid) ->
-        ?assertEqual(ok, ?call_store(Worker2, delete, [?GLOBAL_ONLY_LEVEL, TestRecord, Uuid]))
+        ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, Uuid]))
     end, AllKeys),
 
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
