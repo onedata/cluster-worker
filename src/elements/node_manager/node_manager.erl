@@ -692,7 +692,7 @@ free_memory(NodeMem) ->
 free_memory() ->
     try
         % Following code will be used when clearing memory algorithm will change
-        % TODO - do not use foreach during clearing
+        % TODO VFS-2428 - do not use foreach during clearing
         ok
 %%        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
 %%        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],

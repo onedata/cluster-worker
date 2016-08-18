@@ -129,7 +129,7 @@
 -callback app_name() -> {ok, Name :: atom()}.
 
 %% @doc
-%% Clears memory of application. HighMemUse is true when memory clearing is
+%% Clears memory of node. HighMemUse is true when memory clearing is
 %% started because of high memory usage by node. When it is periodic memory
 %% cleaning HighMemUse is false.
 %% @end

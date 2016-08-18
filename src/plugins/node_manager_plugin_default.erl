@@ -187,7 +187,9 @@ check_node_ip_address() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Clears memory of application.
+%% Clears memory of node. HighMemUse is true when memory clearing is
+%% started because of high memory usage by node. When it is periodic memory
+%% cleaning HighMemUse is false.
 %% @end
 %%--------------------------------------------------------------------
 -spec clear_memory(HighMemUse :: boolean()) -> ok.
