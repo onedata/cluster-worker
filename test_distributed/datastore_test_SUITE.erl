@@ -1647,14 +1647,12 @@ clearing_global_cache_test(Config) ->
     ?assert(Mem1Node > 50 * 1024 * 1024),
 
     ?assertEqual(ok, ?call(Worker2, caches_controller, wait_for_cache_dump, []), 150),
-    % TODO Add answer checking when DB nodes will be run at separate machine
-    CheckMemAns = gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, timer:minutes(5)),
-%%     ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, ?TIMEOUT)),
+    ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, ?TIMEOUT)),
     [{_, Mem2}] = monitoring:get_memory_stats(),
     Mem2Node = node_mem(Worker2),
     Mem2Ets = ?call(Worker2, erlang, memory, [ets]),
-    ct:print("Mem2 ~p, ~p, ~p, check_mem: ~p", [Mem2, Mem2Node, Mem2Ets, CheckMemAns]),
-    % TODO Change to node memory checking when DB nodes will be run at separate machine
+    ct:print("Mem2 ~p, ~p, ~p", [Mem2, Mem2Node, Mem2Ets]),
+    % TODO Change add node memory checking when DB nodes will be run at separate machine
     ?assertMatch(true, Mem2Node < (Mem0Node + Mem1Node) / 2),
 %%     ?assert(Mem2 < MemTarget),
 
