@@ -840,14 +840,20 @@ run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
 -spec run_posthooks(Config :: model_behaviour:model_config(),
     Model :: model_behaviour:model_action(), Level :: store_level(),
     Context :: term(), ReturnValue) -> ReturnValue when ReturnValue :: term().
-run_posthooks(#model_config{name = ModelName} = _ModelConfig, Method, Level, Context, Return) ->
+run_posthooks(#model_config{name = ModelName} = ModelConfig, Method, Level, Context, Return) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
-    % TODO - check why adding link context to hook results in errors of op_worker tests
-%%    LinksContext = links_utils:get_context_to_propagate(ModelConfig),
+    LinksContext = links_utils:get_context_to_propagate(ModelConfig),
     lists:foreach(
         fun({_, HookedModule}) ->
             spawn(fun() ->
-%%                links_utils:apply_context(LinksContext),
+                case HookedModule of
+                    ModelName ->
+                        links_utils:apply_context(LinksContext);
+                    cache_controller ->
+                        links_utils:apply_context(LinksContext);
+                    _ ->
+                        ok
+                end,
                 HookedModule:'after'(ModelName, Method, Level, Context, Return) end)
         end, Hooked),
     Return.
