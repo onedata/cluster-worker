@@ -359,23 +359,25 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    run_transaction(ModelName, term_to_binary({add_links, Key}), fun() ->
+    critical_section:run([ModelName, term_to_binary({add_links, Key})], fun() ->
         case LinkDuplication of
             false ->
                 exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
             true ->
                 NewLinks = lists:map(
                     fun
-                        ({LinkName, {_V, [LinkTarget]}}) ->
+                        ({LinkName, {_V, NewLinkTargets}}) ->
                             case fetch_full_link(Level, Key, ModelName, LinkName) of
                                 {ok, {Version, LinkTargets}} ->
-                                    {LinkName, {Version + 1, deduplicate_targets(lists:usort([LinkTarget | LinkTargets]))}};
+                                    {LinkName, {Version + 1, deduplicate_targets(lists:usort(NewLinkTargets ++ LinkTargets))}};
                                 {error, link_not_found} ->
-                                    {LinkName, {1, [LinkTarget]}};
+                                    {LinkName, {1, NewLinkTargets}};
                                 Other0 ->
-                                    {LinkName, {_V, [LinkTarget]}}
+                                    {LinkName, {_V, NewLinkTargets}}
                             end
                     end, NormalizedLinks),
+%%                NewLinkNames = [LName || {LName, _} <- NewLinks],
+%%                delete_links(Level, Key, ModelName, NewLinkNames),
                 exec_driver_async(ModelName, Level, add_links, [Key, NewLinks])
         end
     end).
