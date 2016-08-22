@@ -366,7 +366,7 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                                             ok;
                                         {error, Reason} ->
                                             {error, Reason};
-                                        {ok, Doc} ->
+                                        {ok, _} ->
                                             ?critical("Cauch db wrong delete report for key ~p", [Key]),
                                             {error, delete_failed}
                                     end;
