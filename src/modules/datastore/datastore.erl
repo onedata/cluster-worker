@@ -172,9 +172,9 @@ create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
     ModelName = model_name(Document),
     [D1 | _] = Drivers = level_to_driver(Level),
     SafeExec = case caches_controller:check_cache_consistency(driver_to_level(D1), ModelName) of
-                  ok ->
+                  {ok, _, _} ->
                       false;
-                  {monitored, ClearedList} ->
+                  {monitored, ClearedList, _, _} ->
                       lists:member(Key, ClearedList);
                   _ ->
                       true
@@ -226,6 +226,7 @@ list(Level, ModelName, Fun, AccIn) ->
 list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     CLevel = driver_to_level(Driver1),
     CCCUuid = ModelName,
+    ModelConfig = ModelName:model_init(),
 
     HelperFun1 = fun
         (#document{key = Key} = Document, Acc) ->
@@ -234,104 +235,115 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             {abort, Acc}
     end,
 
-    case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        ok ->
-            exec_driver(ModelName, Driver1, list, [Fun, AccIn]);
-        {monitored, ClearedList} ->
-            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
-                {ok, Ans1} ->
-                    Ans2 = lists:foldl(fun(Key, Acc) ->
-                        case cache_controller:check_get(Key, ModelName, CLevel) of
-                            ok ->
-                                case exec_driver(ModelName, Driver2, get, [Key]) of
-                                    {ok, Document} ->
-                                        case maps:find(Key, Acc) of
-                                            {ok, _} -> Acc;
-                                            error ->
-                                                cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
-                                                maps:put(Key, Document, Acc)
-                                        end;
-                                    {error, {not_found, _}} ->
-                                        ?warning("Wrong cache consistency value (not_found at disk): ~p",
-                                            [{CLevel, ModelName, Key}]),
-                                        Acc;
-                                    GetErr ->
-                                        ?error("Cannot get doc from disk: ~p", GetErr),
-                                        Acc
-                                end;
-                            _ ->
-                                Acc
-                        end
-                    end, Ans1, ClearedList),
+    GetFromCache = fun(Time1, Time2) ->
+        case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
+            {ok, Ans1} ->
+                case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+                    {ok, Time1, _} ->
+                        {ok, Ans1};
+                    {monitored, MList, Time1, _} ->
+                        {check, Ans1, MList};
+                    {monitored, MList, _, Time2} ->
+                        {check, Ans1, MList};
+                    _ ->
+                        {check, Ans1}
+                end;
+            Err1 ->
+                Err1
+        end
+    end,
 
-                    try
-                        AccOut =
-                            maps:fold(fun(_, Doc, OAcc) ->
-                                case Fun(Doc, OAcc) of
-                                    {next, NAcc} ->
-                                        NAcc;
-                                    {abort, NAcc} ->
-                                        throw({abort, NAcc})
-                                end
-                            end, AccIn, Ans2),
-                        {ok, AccOut}
-                    catch
-                        {abort, AccOut0} ->
-                            {ok, AccOut0};
-                        _:Reason ->
-                            {error, Reason}
-                    end;
-                Err1 ->
-                    Err1
-            end;
+    FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+        {ok, Time1, Time2} ->
+            GetFromCache(Time1, Time2);
+        {monitored, _, Time1, Time2} ->
+            GetFromCache(Time1, Time2);
         _ ->
             case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
                 {ok, Ans1} ->
-                    HelperFun2 = fun
-                        (#document{key = Key} = Document, Acc) ->
-                            case cache_controller:check_get(Key, ModelName, CLevel) of
-                                ok ->
-                                    NewAcc = case maps:find(Key, Acc) of
-                                        {ok, _} -> Acc;
-                                        error ->
-                                            cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
-                                            maps:put(Key, Document, Acc)
-                                    end,
-                                    {next, NewAcc};
-                                _ ->
-                                    {next, Acc}
-                            end;
-                        (_, Acc) ->
-                            {abort, Acc}
-                    end,
-
-                    caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-                    case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans1]) of
-                        {ok, Ans2} ->
-                            caches_controller:end_consistency_restoring(CLevel, CCCUuid),
-                            try
-                                AccOut =
-                                    maps:fold(fun(_, Doc, OAcc) ->
-                                        case Fun(Doc, OAcc) of
-                                            {next, NAcc} ->
-                                                NAcc;
-                                            {abort, NAcc} ->
-                                                throw({abort, NAcc})
-                                        end
-                                    end, AccIn, Ans2),
-                                {ok, AccOut}
-                            catch
-                                {abort, AccOut0} ->
-                                    {ok, AccOut0};
-                                _:Reason ->
-                                    {error, Reason}
-                            end;
-                        Err2 ->
-                            Err2
-                    end;
+                    {check, Ans1};
                 Err1 ->
                     Err1
             end
+    end,
+
+    SecodnPhaseAns = case FirstPhaseAns of
+        {check, Ans_1, ClearedList} ->
+            {ok, lists:foldl(fun(Key, Acc) ->
+                case cache_controller:check_get(Key, ModelName, CLevel) of
+                    ok ->
+                        case erlang:apply(driver_to_module(Driver2), get, [ModelConfig, Key]) of
+                            {ok, Document} ->
+                                case maps:find(Key, Acc) of
+                                    {ok, _} -> Acc;
+                                    error ->
+                                        cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
+                                        maps:put(Key, Document, Acc)
+                                end;
+                            {error, {not_found, _}} ->
+                                ?warning("Wrong cache consistency value (not_found at disk): ~p",
+                                    [{CLevel, ModelName, Key}]),
+                                Acc;
+                            GetErr ->
+                                ?error("Cannot get doc from disk: ~p", GetErr),
+                                Acc
+                        end;
+                    _ ->
+                        Acc
+                end
+            end, Ans_1, ClearedList)};
+        {check, Ans_1} ->
+            HelperFun2 = fun
+                             (#document{key = Key} = Document, Acc) ->
+                                 case cache_controller:check_get(Key, ModelName, CLevel) of
+                                     ok ->
+                                         NewAcc = case maps:find(Key, Acc) of
+                                                      {ok, _} -> Acc;
+                                                      error ->
+                                                          cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
+                                                          maps:put(Key, Document, Acc)
+                                                  end,
+                                         {next, NewAcc};
+                                     _ ->
+                                         {next, Acc}
+                                 end;
+                             (_, Acc) ->
+                                 {abort, Acc}
+                         end,
+
+            caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
+            case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1]) of
+                {ok, Ans_2} ->
+                    caches_controller:end_consistency_restoring(CLevel, CCCUuid),
+                    {ok, Ans_2};
+                Err2 ->
+                    Err2
+            end;
+        OtherAns ->
+            OtherAns
+    end,
+
+    case SecodnPhaseAns of
+        {ok, Ans2} ->
+            try
+                AccOut =
+                    maps:fold(fun(_, Doc, OAcc) ->
+                        case Fun(Doc, OAcc) of
+                            {next, NAcc} ->
+                                NAcc;
+                            {abort, NAcc} ->
+                                throw({abort, NAcc})
+                        end
+                              end, AccIn, Ans2),
+                {ok, AccOut}
+            catch
+                {abort, AccOut0} ->
+                    {ok, AccOut0};
+                _:Reason ->
+                    {error, Reason}
+            end;
+        FinalAns ->
+            FinalAns
     end;
 list(_Level, Drivers, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
@@ -587,84 +599,107 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
 foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     CLevel = driver_to_level(Driver1),
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    ModelConfig = ModelName:model_init(),
 
     HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
 
-    case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        ok ->
-            exec_driver(ModelName, Driver1, foreach_link, [Key, Fun, AccIn]);
-        {monitored, ClearedList} ->
-            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
-                {ok, Ans1} ->
-                    Ans2 = lists:foldl(fun(LinkName, Acc) ->
-                        CacheKey = {Key, LinkName, cache_controller_link_key},
-                        case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
-                            ok ->
-                                case exec_driver(ModelName, Driver2, fetch_link, [Key, LinkName]) of
-                                    {ok, LinkTarget} ->
-                                        case maps:find(Key, Acc) of
-                                            {ok, _} -> Acc;
-                                            error ->
-                                                cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
-                                                maps:put(LinkName, LinkTarget, Acc)
-                                        end;
-                                    {error, link_not_found} ->
-                                        caches_controller:save_consistency_restored_info(CLevel, CCCUuid, LinkName),
-                                        Acc;
-                                    GetErr ->
-                                        ?error("Cannot get doc from disk: ~p", GetErr),
-                                        Acc
-                                end;
-                            _ ->
-                                Acc
-                        end
-                    end, Ans1, ClearedList),
+    GetFromCache = fun(Time1, Time2) ->
+        case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+            {ok, Ans1} ->
+                case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+                    {ok, Time1, _} ->
+                        {ok, Ans1};
+                    {monitored, MList, Time1, _} ->
+                        {check, Ans1, MList};
+                    {monitored, MList, _, Time2} ->
+                        {check, Ans1, MList};
+                    _ ->
+                        {check, Ans1}
+                end;
+            Err1 ->
+                Err1
+        end
+    end,
 
-                    try maps:fold(Fun, AccIn, Ans2) of
-                        AccOut -> {ok, AccOut}
-                    catch
-                        _:Reason ->
-                            {error, Reason}
-                    end;
-                Err1 ->
-                    Err1
-            end;
-        _ ->
-            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
-                {ok, Ans1} ->
-                    HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
-                        CacheKey = {Key, LinkName, cache_controller_link_key},
-                        case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
-                            ok ->
-                                case maps:find(LinkName, Acc) of
-                                    {ok, _} -> Acc;
-                                    error ->
-                                        cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
-                                        maps:put(LinkName, LinkTarget, Acc)
-                                end;
-                            _ ->
-                                Acc
-                        end
+    FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
+                        {ok, Time1, Time2} ->
+                            GetFromCache(Time1, Time2);
+                        {monitored, _, Time1, Time2} ->
+                            GetFromCache(Time1, Time2);
+                        _ ->
+                            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+                                {ok, Ans1} ->
+                                    {check, Ans1};
+                                Err1 ->
+                                    Err1
+                            end
                     end,
 
-                    caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-                    case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun2, Ans1]) of
-                        {ok, Ans2} ->
-                            caches_controller:end_consistency_restoring(CLevel, CCCUuid),
-                            try maps:fold(Fun, AccIn, Ans2) of
-                                AccOut -> {ok, AccOut}
-                            catch
-                                _:Reason ->
-                                    {error, Reason}
-                            end;
-                        Err2 ->
-                            Err2
-                    end;
-                Err1 ->
-                    Err1
-            end
+    SecodnPhaseAns = case FirstPhaseAns of
+                         {check, Ans_1, ClearedList} ->
+                             {ok, lists:foldl(fun(LinkName, Acc) ->
+                                 CacheKey = {Key, LinkName, cache_controller_link_key},
+                                 case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
+                                     ok ->
+                                         case erlang:apply(driver_to_module(Driver2), fetch_link, [ModelConfig, Key, LinkName]) of
+                                             {ok, LinkTarget} ->
+                                                 case maps:find(Key, Acc) of
+                                                     {ok, _} -> Acc;
+                                                     error ->
+                                                         cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                                         maps:put(LinkName, LinkTarget, Acc)
+                                                 end;
+                                             {error, link_not_found} ->
+                                                 caches_controller:save_consistency_restored_info(CLevel, CCCUuid, LinkName),
+                                                 Acc;
+                                             GetErr ->
+                                                 ?error("Cannot fetch link from disk: ~p", GetErr),
+                                                 Acc
+                                         end;
+                                     _ ->
+                                         Acc
+                                 end
+                             end, Ans_1, ClearedList)};
+                         {check, Ans_1} ->
+                             HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
+                                 CacheKey = {Key, LinkName, cache_controller_link_key},
+                                 case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
+                                     ok ->
+                                         case maps:find(LinkName, Acc) of
+                                             {ok, _} -> Acc;
+                                             error ->
+                                                 cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                                 maps:put(LinkName, LinkTarget, Acc)
+                                         end;
+                                     _ ->
+                                         Acc
+                                 end
+                                          end,
+
+                             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
+                             case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun2, Ans_1]) of
+                                 {ok, Ans_2} ->
+                                     caches_controller:end_consistency_restoring(CLevel, CCCUuid),
+                                     {ok, Ans_2};
+                                 Err2 ->
+                                     Err2
+                             end;
+                         OtherAns ->
+                             OtherAns
+                     end,
+
+    case SecodnPhaseAns of
+        {ok, Ans2} ->
+            try maps:fold(Fun, AccIn, Ans2) of
+                AccOut -> {ok, AccOut}
+            catch
+                _:Reason ->
+                    {error, Reason}
+            end;
+        FinalAns ->
+            FinalAns
     end;
 foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
     exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
@@ -1066,9 +1101,9 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
         {error, {not_found, MN}} when Method =:= update ->
             [Key | _] = Args,
             Proceed = case caches_controller:check_cache_consistency(driver_to_level(Driver1), ModelName) of
-                          ok ->
+                          {ok, _, _} ->
                               false;
-                          {monitored, ClearedList} ->
+                          {monitored, ClearedList, _, _} ->
                               lists:member(Key, ClearedList);
                           _ ->
                               true

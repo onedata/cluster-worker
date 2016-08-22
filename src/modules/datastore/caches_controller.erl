@@ -381,9 +381,10 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
                 (#cache_consistency_controller{status = not_monitored}) ->
                   {error, clearing_not_monitored};
                 (#cache_consistency_controller{cleared_list = CL} = Record) ->
-                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL)}}
+                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL),
+                    restore_timestamp = os:timestamp()}}
               end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+  Doc = #document{key = Key, value = #cache_consistency_controller{restore_timestamp = os:timestamp()}},
 
   case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
     {ok, _} ->
@@ -410,14 +411,17 @@ begin_consistency_restoring(Level, Key) ->
                     true ->
                       {error, restoring_process_in_progress};
                     _ ->
-                      {ok, Record#cache_consistency_controller{status = {restoring, Pid}}}
+                      {ok, Record#cache_consistency_controller{status = {restoring, Pid},
+                        restore_timestamp = os:timestamp()}}
                   end;
                 (#cache_consistency_controller{cleared_list = [], status = ok}) ->
                   {error, consistency_ok};
                 (Record) ->
-                  {ok, Record#cache_consistency_controller{status = {restoring, Pid}}}
+                  {ok, Record#cache_consistency_controller{status = {restoring, Pid},
+                    restore_timestamp = os:timestamp()}}
               end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid}}},
+  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid},
+    restore_timestamp = os:timestamp()}},
 
   cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
 
@@ -431,17 +435,17 @@ begin_consistency_restoring(Level, Key) ->
 end_consistency_restoring(Level, Key) ->
   Pid = self(),
   UpdateFun = fun
-                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}}) ->
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}} = Record) ->
                   case RPid of
                     Pid ->
-                      {ok, #cache_consistency_controller{}};
+                      {ok, Record#cache_consistency_controller{status = ok}};
                     _ ->
                       {error, interupted}
                   end;
-                (#cache_consistency_controller{status = {restoring, RPid}}) ->
+                (#cache_consistency_controller{status = {restoring, RPid}} = Record) ->
                   case RPid of
                     Pid ->
-                      {ok, #cache_consistency_controller{cleared_list = [], status = not_monitored}};
+                      {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
                     _ ->
                       {error, interupted}
                   end;
@@ -458,17 +462,21 @@ end_consistency_restoring(Level, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_cache_consistency(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
-  ok | {monitored, [datastore:key() | datastore:link_name()]} | not_monitored | no_return().
+  {ok, erlang:timestamp(), erlang:timestamp()}
+  | {monitored, [datastore:key() | datastore:link_name()], erlang:timestamp(), erlang:timestamp()}
+  | not_monitored | no_return().
 check_cache_consistency(Level, Key) ->
   case cache_consistency_controller:get(Level, Key) of
-    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok}}} ->
-      ok;
-    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok}}} ->
-      {monitored, CL};
+    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, last_clearing_time = LCT,
+      restore_timestamp = RT}}} ->
+      {ok, LCT, RT};
+    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, last_clearing_time = LCT,
+      restore_timestamp = RT}}} ->
+      {monitored, CL, LCT, RT};
     {ok, _} ->
       not_monitored;
     {error, {not_found, _}} ->
-      ok
+      {ok, {0,0,0}, {0,0,0}}
   end.
 
 %%--------------------------------------------------------------------
@@ -551,17 +559,19 @@ save_consistency_info(Level, Key, ClearedName) ->
     (#cache_consistency_controller{cleared_list = CL} = Record) ->
       case length(CL) >= ?CLEAR_MONITOR_MAX_SIZE of
         true ->
-          {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
+          {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored,
+            last_clearing_time = os:timestamp()}};
         _ ->
           case lists:member(ClearedName, CL) of
             true ->
               {error, already_cleared};
             _ ->
-              {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL]}}
+              {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL],
+                last_clearing_time = os:timestamp()}}
           end
       end
   end,
-  V = #cache_consistency_controller{cleared_list = [ClearedName]},
+  V = #cache_consistency_controller{cleared_list = [ClearedName], last_clearing_time = os:timestamp()},
   Doc = #document{key = Key, value = V},
 
   case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of

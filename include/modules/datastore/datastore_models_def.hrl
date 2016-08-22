@@ -40,7 +40,9 @@
 %% Model that controls consistency of cache
 -record(cache_consistency_controller, {
     cleared_list = [] :: [datastore:key() | datastore:link_name()],
-    status = ok :: ok | not_monitored | {restoring, pid()}
+    status = ok :: ok | not_monitored | {restoring, pid()},
+    last_clearing_time = {0, 0, 0} :: erlang:timestamp(),
+    restore_timestamp  = {0, 0, 0} :: erlang:timestamp()
 }).
 
 %% Description of task to be done

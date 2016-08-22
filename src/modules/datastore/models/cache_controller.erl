@@ -968,9 +968,9 @@ before_del(Key, ModelName, Level, _Op) ->
     Level :: datastore:store_level()) -> ok | datastore:generic_error().
 check_create(Key, ModelName, Level) ->
     Proceed = case caches_controller:check_cache_consistency(Level, ModelName) of
-        ok ->
+        {ok, _, _} ->
             false;
-        {monitored, ClearedList} ->
+        {monitored, ClearedList, _, _} ->
             lists:member(Key, ClearedList);
         _ ->
             true
@@ -1017,9 +1017,9 @@ check_create(Key, ModelName, Level) ->
 check_link_create(Key, LinkName, ModelName, Level) ->
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
     Proceed = case caches_controller:check_cache_consistency(Level, CCCUuid) of
-                  ok ->
+                  {ok, _, _} ->
                       false;
-                  {monitored, ClearedList} ->
+                  {monitored, ClearedList, _, _} ->
                       lists:member(LinkName, ClearedList);
                   _ ->
                       true
