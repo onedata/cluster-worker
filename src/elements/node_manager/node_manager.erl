@@ -661,6 +661,7 @@ start_worker(Module, Args) ->
 -spec free_memory(NodeMem :: float()) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
 free_memory(NodeMem) ->
     try
+        ok = plugins:apply(node_manager_plugin, clear_memory, [true]),
         AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
         ClearingOrder = case NodeMem >= AvgMem of
             true ->
@@ -690,11 +691,15 @@ free_memory(NodeMem) ->
 
 free_memory() ->
     try
-        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
-        lists:foreach(fun
-            ({Aggressive, StoreType}) ->
-                caches_controller:clear_cache(Aggressive, StoreType)
-        end, ClearingOrder)
+        % Following code will be used when clearing memory algorithm will change
+        % TODO VFS-2428 - do not use foreach during clearing
+        ok
+%%        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
+%%        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
+%%        lists:foreach(fun
+%%            ({Aggressive, StoreType}) ->
+%%                caches_controller:clear_cache(Aggressive, StoreType)
+%%        end, ClearingOrder)
     catch
         E1:E2 ->
             ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
