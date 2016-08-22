@@ -90,7 +90,7 @@ init_bucket(Bucket, Models, _NodeToSync) ->
                 {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER, "'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER, "'], doc); }">>}}
             end, Models))
     }),
-    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
+%%    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
     ok.
 
 %%--------------------------------------------------------------------
@@ -125,6 +125,7 @@ save(ModelConfig, Doc) ->
 -spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_link_doc(ModelConfig, Doc) ->
+    ?info("SAVE DOC ~p", [Doc]),
     save_doc(ModelConfig, Doc).
 
 %%--------------------------------------------------------------------
@@ -136,7 +137,7 @@ save_link_doc(ModelConfig, Doc) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
     create(ModelConfig, Doc);
-save_doc(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
+save_doc(#model_config{bucket = Bucket} = ModelConfig, Cos = #document{key = Key, rev = Rev, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
@@ -381,9 +382,10 @@ delete_link_doc(#model_config{bucket = Bucket} = _ModelConfig, Doc) ->
 %%--------------------------------------------------------------------
 -spec delete_doc(datastore:bucket(), datastore:ext_key()) ->
     ok | datastore:generic_error().
-delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
+delete_doc(Bucket, Cos = #document{key = Key, value = Value, rev = Rev}) ->
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
+    ?info("DEL DOC ~p", [Cos]),
     case db_run(couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         ok ->
             ok;
@@ -791,9 +793,9 @@ db_run(Mod, Fun, Args, Retry) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+force_save(#model_config{bucket = Bucket} = ModelConfig, Cos = #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
-
+    ?info("FORCE SAVE DOC ~p", [Cos]),
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of

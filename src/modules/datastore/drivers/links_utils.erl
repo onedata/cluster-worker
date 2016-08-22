@@ -25,7 +25,7 @@
 %% API
 -export([create_link_in_map/4, save_links_maps/4, delete_links/3, delete_links_from_maps/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
--export([make_scoped_link_name/2, unpack_link_scope/2, select_scope_related_link/3]).
+-export([make_scoped_link_name/3, unpack_link_scope/2, select_scope_related_link/3]).
 -export([get_context_to_propagate/1, apply_context/1, get_scopes/2, get_scope/1]).
 
 %%%===================================================================
@@ -163,51 +163,21 @@ save_links_maps(Driver,
 
     ?info("save_links_maps ~p", [{Key, LinksList}]),
 
-    case get_scopes(Scope2, Key) of
-        [] ->
-            LDK = links_doc_key(Key, get_scopes(Scope1, Key)),
-            SaveAns = case Driver:get_link_doc(ModelConfig, LDK) of
-                          {ok, LinksDoc} ->
-                              save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, norm);
-                          {error, {not_found, _}} ->
-                              LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = get_scopes(Scope1, Key)}},
-                              save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, no_old_checking);
-                          {error, Reason} ->
-                              {error, Reason}
-                      end,
-            case SaveAns of
-                {ok, []} ->
-                    ok;
-                _ ->
-                    SaveAns
-            end;
-        OtherScopes ->
-            S1 = get_scopes(Scope1, Key),
-            SaveAns = update_link_maps(Driver, ModelConfig, Key, LinksList, [S1 | OtherScopes]),
-            case SaveAns of
-                {ok, []} ->
-                    ok;
-                {ok, LinksToAdd} ->
-                    LDK = links_doc_key(Key, S1),
-                    SaveAns2 =
-                        case Driver:get_link_doc(ModelConfig, LDK) of
-                            {ok, LinksDoc} ->
-                                save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
-                            {error, {not_found, _}} ->
-                                LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = get_scopes(Scope1, Key)}},
-                                save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksToAdd, 1, no_old_checking);
-                            {error, Reason} ->
-                                {error, Reason}
-                        end,
-                    case SaveAns2 of
-                        {ok, []} ->
-                            ok;
-                        _ ->
-                            SaveAns2
-                    end;
-                _ ->
-                    SaveAns
-            end
+    LDK = links_doc_key(Key, get_scopes(Scope1, Key)),
+    SaveAns = case Driver:get_link_doc(ModelConfig, LDK) of
+                  {ok, LinksDoc} ->
+                      save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, norm);
+                  {error, {not_found, _}} ->
+                      LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = get_scopes(Scope1, Key)}},
+                      save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, no_old_checking);
+                  {error, Reason} ->
+                      {error, Reason}
+              end,
+    case SaveAns of
+        {ok, []} ->
+            ok;
+        _ ->
+            SaveAns
     end.
 
 %%--------------------------------------------------------------------
@@ -261,9 +231,11 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                 fill_links_map(LinksList, LinkMap)
         end,
 
+    ?info("save_links_maps new link list ~p", [{FilledMap, NewLinksList, AddedLinks}]),
     case NewLinksList of
         [] ->
             % save changes and delete links from other documents if added here
+            ?info("Save links doc ~p", [{LinksDoc#document.key, FilledMap}]),
             case Driver:save_link_doc(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
                 {ok, _} ->
                     case Mode of
@@ -444,6 +416,7 @@ delete_links_from_maps(Driver, ModelConfig = #model_config{name = ModelName}, Ke
                     {{ok, ok}, LinkDoc};
                 _ ->
                     NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
+                    ?info("delete_links_from_maps ~p", [{LinkDoc#document.key, NewLinkMap}]),
                     {Driver:save_link_doc(ModelConfig, NLD), NLD#document.key}
             end,
 
@@ -494,15 +467,21 @@ delete_links_from_maps(Driver, ModelConfig = #model_config{name = ModelName}, Ke
 %%--------------------------------------------------------------------
 -spec fetch_link(Driver :: atom(), model_behaviour:model_config(), datastore:link_name(), datastore:ext_key()) ->
     {ok, datastore:link_target()} | datastore:link_error().
-fetch_link(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = Scope2} = ModelConfig,
+fetch_link(Driver, #model_config{mother_link_scope = Scope1} = ModelConfig,
     LinkName, Key) ->
     % Try mother scope first for performance reasons
-    case fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope1, Key)) of
-        {error, link_not_found} ->
-            fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope2, Key));
-        Ans ->
-            Ans
-    end.
+    case get_scopes(Scope1, Key) of
+        [] ->
+            try
+                ok = error
+            catch
+                _:_ ->
+                    ?info_stacktrace("No scopes ~p", [{Scope1, Key, LinkName}])
+            end;
+        _ ->
+            ok
+    end,
+    fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope1, Key)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -570,11 +549,12 @@ links_doc_key(Key, Scope) ->
 %% Makes full link name based on base link name and its scope. Works only on binary link names and scopes.
 %% @end
 %%--------------------------------------------------------------------
--spec make_scoped_link_name(datastore:link_name(), scope()) ->
+-spec make_scoped_link_name(datastore:link_name(), scope(), non_neg_integer()) ->
     datastore:link_name().
-make_scoped_link_name(LinkName, Scope) when is_binary(LinkName), is_binary(Scope) ->
-    <<LinkName/binary, ?LINK_NAME_SCOPE_SEPARATOR, Scope/binary>>;
-make_scoped_link_name(LinkName, _Scope) ->
+make_scoped_link_name(LinkName, Scope, Length) when is_binary(LinkName), is_binary(Scope) ->
+    ShortScope = binary:part(Scope, 0, Length),
+    <<LinkName/binary, ?LINK_NAME_SCOPE_SEPARATOR, ShortScope/binary>>;
+make_scoped_link_name(LinkName, _Scope, _Len) ->
     LinkName.
 
 
@@ -589,14 +569,14 @@ unpack_link_scope(ModelName, LinkName) when is_binary(LinkName) ->
     case binary:split(LinkName, <<?LINK_NAME_SCOPE_SEPARATOR>>) of
         [LinkName] ->
             #model_config{mother_link_scope = MScope} = ModelName:model_init(),
-            {LinkName, undefined};
+            {LinkName, get_scopes(MScope, undefined)};
         Other ->
             [Scope, OLinkName | _] = lists:reverse(Other),
             {OLinkName, Scope}
     end;
 unpack_link_scope(ModelName, LinkName) ->
     #model_config{mother_link_scope = MScope} = ModelName:model_init(),
-    {LinkName, get_scopes(MScope, undefined)}.
+    {LinkName, undefined}.
 
 
 %%--------------------------------------------------------------------
@@ -826,6 +806,7 @@ del_old_links(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelC
                     {ok, ok};
                 _ ->
                     NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
+                    ?info("DEL ~p", [{LinkDoc#document.key, NewLinkMap}]),
                     Driver:save_link_doc(ModelConfig, NLD)
             end,
 
@@ -977,15 +958,21 @@ remove_from_links_map(_ModelName, [], Map, NewLinks, Deleted) ->
     {Map, NewLinks, Deleted};
 remove_from_links_map(ModelName, [Link | R], Map, NewLinks, Deleted) ->
     {RawLinkName, RequestedScope} = unpack_link_scope(ModelName, Link),
+    ?info("RM LINK ~p", [{Link, Map}]),
     case maps:is_key(RawLinkName, Map) of
         true ->
             {V, Targets} = maps:get(RawLinkName, Map),
             case length(Targets) of
                 L when L > 0 ->
-                    case select_scope_related_link(RawLinkName, RequestedScope, Targets) of
-                        undefined ->
+                    RelatedTarget = select_scope_related_link(RawLinkName, RequestedScope, Targets),
+                    case {RequestedScope, RelatedTarget} of
+                        {undefined, _} -> %% Non-scoped link - delete all
+                            remove_from_links_map(ModelName, R, maps:remove(RawLinkName, Map), NewLinks, Deleted + length(Targets));
+                        {_, undefined} when L == 1 -> %% Unable to find scope, but there is just one link - also delete
+                            remove_from_links_map(ModelName, R, maps:remove(RawLinkName, Map), NewLinks, Deleted + length(Targets));
+                        {_, undefined} -> %% Unable to find scope, link is ambiguous - unable to delete
                             remove_from_links_map(ModelName, R, Map, NewLinks, Deleted);
-                        RelatedTarget ->
+                        {_, _} ->
                             NewTargets = Targets -- [RelatedTarget],
                             case NewTargets of
                                 [] ->
@@ -1012,6 +999,7 @@ remove_from_links_map(ModelName, [Link | R], Map, NewLinks, Deleted) ->
 fetch_link_from_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, LinkName, LinkKey, KeyNum) ->
     case Driver:get_link_doc(ModelConfig, LinkKey) of
         {ok, #document{value = #links{link_map = LinkMap, children = Children}}} ->
+            ?info("fetch_link_from_docs ~p", [{LinkKey, LinkName, LinkMap}]),
             case maps:get(LinkName, LinkMap, undefined) of
                 undefined ->
                     LinkNum = get_link_child_num(LinkName, KeyNum),
@@ -1026,6 +1014,7 @@ fetch_link_from_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
                     {ok, LinkTarget}
             end;
         {error, {not_found, _}} ->
+            ?info("fetch_link_from_docs error ~p", [{LinkKey, LinkName}]),
             {error, link_not_found};
         {error, Reason} ->
             {error, Reason}
@@ -1079,7 +1068,7 @@ links_doc_key_from_scope(Key, Scope) ->
 %%--------------------------------------------------------------------
 -spec links_child_doc_key(PrevKey :: datastore:key(), Num :: integer()) -> BinKey :: binary().
 links_child_doc_key(Key, Num) ->
-    BinNum = base64:encode(list_to_binary("_" ++ integer_to_list(Num))),
+    BinNum = list_to_binary(list_to_binary("_" ++ integer_to_list(Num))),
     <<Key/binary, BinNum/binary>>.
 
 %%--------------------------------------------------------------------

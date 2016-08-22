@@ -359,28 +359,26 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
+    run_transaction(ModelName, term_to_binary({add_links, Key}), fun() ->
         case LinkDuplication of
             false ->
                 exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
             true ->
-                lists:foldl(
+                NewLinks = lists:map(
                     fun
-                        ({LinkName, {_V, [LinkTarget]}}, ok) ->
+                        ({LinkName, {_V, [LinkTarget]}}) ->
                             case fetch_full_link(Level, Key, ModelName, LinkName) of
                                 {ok, {Version, LinkTargets}} ->
-                                    exec_driver_async(ModelName, Level, add_links, [Key, [{LinkName,
-                                        {Version + 1, deduplicate_targets(lists:usort([LinkTarget | LinkTargets]))}}]]);
+                                    {LinkName, {Version + 1, deduplicate_targets(lists:usort([LinkTarget | LinkTargets]))}};
                                 {error, link_not_found} ->
-                                    exec_driver_async(ModelName, Level, add_links, [Key, [{LinkName, {1, [LinkTarget]}}]]);
+                                    {LinkName, {1, [LinkTarget]}};
                                 Other0 ->
-                                    Other0
-                            end ;
-                        (_, Other) ->
-                            Other
-                    end, ok, NormalizedLinks)
-        end.
-%%    end).
+                                    {LinkName, {_V, [LinkTarget]}}
+                            end
+                    end, NormalizedLinks),
+                exec_driver_async(ModelName, Level, add_links, [Key, NewLinks])
+        end
+    end).
 
 
 %%--------------------------------------------------------------------
@@ -806,15 +804,25 @@ model_name(Record) when is_tuple(Record) ->
 %%--------------------------------------------------------------------
 -spec run_prehooks(Config :: model_behaviour:model_config(),
     Method :: model_behaviour:model_action(), Level :: store_level(),
-    Context :: term()) ->
+    Context :: term(), [term()]) ->
     ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
 % TODO - check for errors before accepting task
-run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
+run_prehooks(#model_config{name = ModelName}, Method, Level, Context, ExcludedModules) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
     HooksRes =
         lists:map(
             fun({_, HookedModule}) ->
-                HookedModule:before(ModelName, Method, Level, Context)
+                case ExcludedModules of
+                    [] ->
+                        ok;
+                    _->
+                        ?info("PREHOOK ~p", [{HookedModule, ExcludedModules}])
+                end,
+                case lists:member(HookedModule, ExcludedModules) of
+                    true -> ok;
+                    false ->
+                        HookedModule:before(ModelName, Method, Level, Context)
+                end
             end, Hooked),
     case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
         [] -> ok;
@@ -977,7 +985,7 @@ exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
     exec_driver(ModelName, Driver, Method, Args);
 exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
     case exec_driver(ModelName, Driver, Method, Args) of
-        {error, {not_found, _}} when Method =:= get ->
+        {error, {not_found, _}} when Method =:= get ; Method =:= fetch_link ->
             exec_driver(ModelName, Rest, Method, Args);
         {error, link_not_found} when Method =:= fetch_link ->
             exec_driver(ModelName, Rest, Method, Args);
@@ -992,8 +1000,14 @@ exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
     end;
 exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
+    ExcludedModels = case driver_to_level(Driver) of
+        ?DISK_ONLY_LEVEL ->
+            [cache_controller, caches_controller];
+        _ ->
+            []
+    end,
     Return =
-        case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
+        case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args, ExcludedModels) of
             ok ->
                 FullArgs = [ModelConfig | Args],
                 % TODO consider which method is better when file_meta will be able to handle proxy calls in datastore
@@ -1014,6 +1028,8 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             {ok, Value} ->
                 {ok, Value};
             {task, _Task} ->
+                {error, prehook_ans_not_supported};
+            {tasks, _Task} ->
                 {error, prehook_ans_not_supported};
             {error, Reason} ->
                 {error, Reason};
@@ -1073,7 +1089,7 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
     end;
 exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
-    case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
+    case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args, []) of
         ok ->
             FullArgs = [ModelConfig | Args],
             Return = erlang:apply(driver_to_module(Driver), Method, FullArgs),
