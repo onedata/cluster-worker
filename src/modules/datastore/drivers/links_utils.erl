@@ -186,35 +186,6 @@ save_links_maps(Driver,
             SaveAns
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Update links in maps from several documents (no new elements are added).
-%% @end
-%%--------------------------------------------------------------------
--spec update_link_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
-    [datastore:normalized_link_spec()], Scopes :: scope() | [scope()]) ->
-    {ok, [datastore:normalized_link_spec()]} | datastore:generic_error().
-update_link_maps(_Driver, _ModelConfig, _Key, Links, []) ->
-    {ok, Links};
-update_link_maps(Driver, ModelConfig, Key, Links, [Scope | Scopes]) ->
-    case update_link_maps(Driver, ModelConfig, Key, Links, Scope) of
-        {ok, []} ->
-            {ok, []};
-        {ok, LinksLeft} ->
-            update_link_maps(Driver, ModelConfig, Key, LinksLeft, Scopes);
-        Ans ->
-            Ans
-    end;
-update_link_maps(Driver, ModelConfig, Key, LinksList, Scope) ->
-    LDK = links_doc_key(Key, Scope),
-    case Driver:get_link_doc(ModelConfig, LDK) of
-        {ok, LinksDoc} ->
-            save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, update);
-        {error, {not_found, _}} ->
-            {ok, LinksList};
-        {error, Reason} ->
-            {error, Reason}
-    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -240,32 +211,23 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
     ?info("save_links_maps new link list ~p", [{FilledMap, NewLinksList, AddedLinks}]),
     case NewLinksList of
         [] ->
-%%            Ret0 = case Mode of
-%%                norm ->
-%%                    case del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum) of
-%%                        ok ->
-%%                            {ok, []};
-%%                        DelErr ->
-%%                            DelErr
-%%                    end;
-%%                _ ->
-%%                    {ok, []}
-%%            end,
             % save changes and delete links from other documents if added here
             ?info("Save links doc ~p", [{LinksDoc#document.key, FilledMap}]),
             case Driver:save_link_doc(ModelConfig, LinksDoc#document{value = LinksRecord#links{link_map = FilledMap}}) of
                 {ok, _} ->
-                    case Mode of
-                        norm ->
-                            case del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum) of
-                                ok ->
-                                    {ok, []};
-                                DelErr ->
-                                    DelErr
-                            end;
-                        _ ->
-                            {ok, []}
-                    end;
+                    {ok, []};
+                    %% @todo Not used right now. Consider removing after/while solving VFS-2482
+%%                    case Mode of
+%%                        norm ->
+%%                            case del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum) of
+%%                                ok ->
+%%                                    {ok, []};
+%%                                DelErr ->
+%%                                    DelErr
+%%                            end;
+%%                        _ ->
+%%                            {ok, []}
+%%                    end;
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -303,12 +265,13 @@ try
                 end
             end, {Children, #{}, false}, SplitedLinks),
 
-            DelOldAns = case Mode of
-                norm ->
-                    del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
-                _ ->
-                    ok
-            end,
+            %% @todo Not used right now. Consider removing after/while solving VFS-2482
+%%            DelOldAns = case Mode of
+%%                norm ->
+%%                    del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
+%%                _ ->
+%%                    ok
+%%            end,
 
 
             % save modified doc
@@ -325,12 +288,14 @@ try
 
             case Proceed of
                 {ok, _} ->
-                    DelOldAns = case Mode of
-                        norm ->
-                            del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
-                        _ ->
-                            ok
-                    end,
+                    %% @todo Not used right now. Consider removing after/while solving VFS-2482
+                    DelOldAns = ok,
+%%                        case Mode of
+%%                            norm ->
+%%                                del_old_links(Driver, ModelConfig, AddedLinks, LinksDoc, KeyNum);
+%%                            _ ->
+%%                                ok
+%%                        end,
                     case DelOldAns of
                         ok ->
                             % update other docs recursive
@@ -354,9 +319,9 @@ try
                                                 OldError
                                         end
                                 end
-                            end, {ok, []}, SplitedLinks);
-                        Other ->
-                            Other
+                            end, {ok, []}, SplitedLinks)
+%%                        Other ->
+%%                            Other
                     end;
                 {error, Reason} ->
                     {error, Reason}
@@ -502,18 +467,6 @@ delete_links_from_maps(Driver, ModelConfig = #model_config{name = ModelName}, Ke
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(Driver, #model_config{mother_link_scope = Scope1} = ModelConfig,
     LinkName, Key) ->
-    % Try mother scope first for performance reasons
-    case get_scopes(Scope1, Key) of
-        [] ->
-            try
-                ok = error
-            catch
-                _:_ ->
-                    ?info_stacktrace("No scopes ~p", [{Scope1, Key, LinkName}])
-            end;
-        _ ->
-            ok
-    end,
     fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(Scope1, Key)).
 
 %%--------------------------------------------------------------------
@@ -607,8 +560,7 @@ unpack_link_scope(ModelName, LinkName) when is_binary(LinkName) ->
             [Scope, OLinkName | _] = lists:reverse(Other),
             {OLinkName, Scope}
     end;
-unpack_link_scope(ModelName, LinkName) ->
-    #model_config{mother_link_scope = MScope} = ModelName:model_init(),
+unpack_link_scope(_ModelName, LinkName) ->
     {LinkName, undefined}.
 
 
@@ -809,57 +761,6 @@ update_links_map([{LinkName, LinkTarget} = Link | R], Map, MapSize, LinksToUpdat
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Deletes links updated at higher level of links tree.
-%% @end
-%%--------------------------------------------------------------------
--spec del_old_links(Driver :: atom(), model_behaviour:model_config(), [datastore:normalized_link_spec()],
-    datastore:ext_key() | datastore:document(), KeyNum :: integer()) -> ok | datastore:generic_error().
-del_old_links(_Driver, _ModelConfig, [], _Key, _KeyNum) ->
-    ok;
-del_old_links(_Driver, #model_config{bucket = _Bucket} = _ModelConfig, _Links, <<"non">>, _KeyNum) ->
-    ok;
-del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links,
-    #document{value = #links{children = Children}}, KeyNum) ->
-    SplitedLinks = split_links_names_list(Links, KeyNum),
-    maps:fold(fun(Num, SLs, Acc) ->
-        case Acc of
-            ok ->
-                NextKey = maps:get(Num, Children, <<"non">>),
-                del_old_links(Driver, ModelConfig, SLs, NextKey, KeyNum + 1);
-            _ ->
-                Acc
-        end
-              end, ok, SplitedLinks);
-del_old_links(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Links, Key, KeyNum) ->
-    case Driver:get_link_doc(ModelConfig, Key) of
-        {ok, #document{value = #links{link_map = LinkMap} = LinksRecord} = LinkDoc} ->
-            {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(ModelName, Links, LinkMap),
-            SaveAns = case Deleted of
-                0 ->
-                    {ok, ok};
-                _ ->
-                    NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
-                    ?info("DEL ~p", [{LinkDoc#document.key, NewLinkMap}]),
-                    Driver:save_link_doc(ModelConfig, NLD)
-            end,
-
-            case {SaveAns, NewLinks} of
-                {{ok, _}, []} ->
-                    ok;
-                {{ok, _}, _} ->
-                    del_old_links(Driver, ModelConfig, NewLinks, LinkDoc, KeyNum);
-                Error ->
-                    Error
-            end;
-        {error, {not_found, _}} ->
-            ok;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Deletes all documents that store links connected with key.
 %% @end
 %%--------------------------------------------------------------------
@@ -914,6 +815,7 @@ rebuild_links_tree(Driver, ModelConfig, MainDocKey, LinkDoc, Parent, ParentNum, 
                     {error, Reason}
             end
     end.
+%%    {ok, 0}.
 
 %%--------------------------------------------------------------------
 %% @private
