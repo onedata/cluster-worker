@@ -42,4 +42,9 @@
     node :: node()
 }).
 
+%% Queue of processes waiting for lock
+-record(lock, {
+    queue = [] :: [lock:queue_element()]
+}).
+
 -endif.

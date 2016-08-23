@@ -20,7 +20,6 @@
             sasl,
             public_key,
             crypto,
-            locks,
             % Meck is needed only for development purposes, should be removed before release.
             meck,
             % ctool already requires those apps below, but they are here
@@ -73,6 +72,8 @@
             {cache_to_disk_force_delay_ms, 5000},
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 30},
+            %% Timeout for lock request
+            {lock_timeout_minutes, 30},
 
             %% ===================================================================
             %% PLUGINS
