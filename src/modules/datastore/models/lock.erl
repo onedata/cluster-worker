@@ -21,7 +21,7 @@
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, exists/1, delete/1, update/2, create/1,
     create_or_update/2, model_init/0, 'after'/5, before/4]).
--export([enqueue/2, dequeue/2]).
+-export([enqueue/3, dequeue/2]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -143,18 +143,25 @@ before(_ModelName, _Method, _Level, _Context) ->
 %% Adds Pid to queue of processes waiting for lock on Key.
 %% Returns status after operation:
 %% 'acquired' if lock is taken, 'wait' otherwise.
+%% Lock may be taken as recursive or non-recursive.
 %% @end
 %%--------------------------------------------------------------------
--spec enqueue(datastore:ext_key(), pid()) -> {ok, acquired | wait}.
-enqueue(Key, Pid) ->
+-spec enqueue(datastore:ext_key(), pid(), boolean()) ->
+    {ok, acquired | wait} | {error, already_acquired}.
+enqueue(Key, Pid, Recursive) ->
     datastore:run_transaction(?MODULE, Key, fun() ->
         case exists(Key) of
             true ->
                 {ok, #document{value = #lock{queue = Q}}} = get(Key),
                 case has(Q, Pid) of
                     true ->
-                        {ok, Key} = update(Key, #{queue => inc(Q)}),
-                        {ok, acquired};
+                        case Recursive of
+                            true ->
+                                {ok, Key} = update(Key, #{queue => inc(Q)}),
+                                {ok, acquired};
+                            false ->
+                                {error, already_acquired}
+                        end;
                     false ->
                         {ok, Key} = update(Key, #{queue => add(Q, Pid)}),
                         {ok, wait}

@@ -17,7 +17,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([run/2, lock/1, unlock/1]).
+-export([run/2, run/3]).
 
 %%%===================================================================
 %%% API
@@ -25,15 +25,28 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Runs Fun in critical section locked on Key.
-%% Guarantees that at most one function is running for selected Key in all
-%% nodes in current cluster at any given moment.
+%% @equiv run(Key, Fun, false)
 %% @end
 %%--------------------------------------------------------------------
 -spec run(Key :: datastore:key(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run(Key, Fun) ->
-    ok = lock(Key),
+    run(Key, Fun, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs Fun in critical section locked on Key.
+%% Guarantees that at most one function is running for selected Key in all
+%% nodes in current cluster at any given moment.
+%%
+%% Calling nested critical section on the same Key is possible,
+%% but option Recursive must be implicitly set to true.
+%% @end
+%%--------------------------------------------------------------------
+-spec run(Key :: datastore:key(), Fun :: fun (() -> Result :: term()),
+    Recursive :: boolean()) -> Result :: term().
+run(Key, Fun, Recursive) ->
+    ok = lock(Key, Recursive),
     try
         Fun()
     after
@@ -53,21 +66,14 @@ run(Key, Fun) ->
 %% but it must be released the same number of times.
 %% @end
 %%--------------------------------------------------------------------
--spec lock(Key :: datastore:key()) -> ok.
-lock(Key) ->
-    case lock:enqueue(Key, self()) of
+-spec lock(Key :: datastore:key(), Recursive :: boolean()) -> ok.
+lock(Key, Recursive) ->
+    case lock:enqueue(Key, self(), Recursive) of
         {ok, acquired} ->
             ok;
         {ok, wait} ->
-            {ok, TimeoutMinutes} = application:get_env(
-                ?CLUSTER_WORKER_APP_NAME,
-                lock_timeout_minutes
-            ),
-            receive
-                {acquired, Key} ->
-                    ok
-            after timer:minutes(TimeoutMinutes) ->
-                throw(lock_timeout)
+            receive {acquired, Key} ->
+                ok
             end
     end.
 
