@@ -450,8 +450,10 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 -spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
     ok | create_error().
 create_link(Level, Key, ModelName, Link) ->
+    run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
     ModelConfig = ModelName:model_init(),
-    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
+        exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)])
+    end).
 
 
 %%--------------------------------------------------------------------
@@ -472,7 +474,9 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 -spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
     link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
+    ?info("delete_links1 ~p", [{Key, LinkNames}]),
     run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
+        ?info("delete_links2 ~p", [{Key, LinkNames}]),
         delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames)
     end);
 delete_links(Level, Key, ModelName, LinkName) ->
@@ -496,6 +500,7 @@ delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNam
     {ok, Links2} = erlang:apply(driver_to_module(Driver2), foreach_link,
         [ModelConfig, Key, AccFun, Links1]),
     Links = sets:to_list(sets:from_list(Links2)),
+    ?info("delete_links all ~p", [{Key, ModelName, Links1, Links2}]),
     exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, Links]);
 delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) ->
     exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
@@ -1009,7 +1014,7 @@ exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
 exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
     ExcludedModels = case driver_to_level(Driver) of
-        ?DISK_ONLY_LEVEL ->
+        ?DISK_ONLY_LEVEL when Method /= fetch_link, Method /= get, Method /= exists ->
             [cache_controller, caches_controller];
         _ ->
             []

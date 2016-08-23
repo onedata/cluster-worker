@@ -414,7 +414,7 @@ delete_links_from_maps(Driver, ModelConfig = #model_config{name = ModelName}, Ke
                     {{ok, ok}, LinkDoc};
                 _ ->
                     NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
-                    ?info("delete_links_from_maps ~p", [{LinkDoc#document.key, NewLinkMap}]),
+                    ?info("delete_links_from_maps ~p", [{Driver, LinkDoc#document.key, NewLinkMap}]),
                     {Driver:save_link_doc(ModelConfig, NLD), NLD#document.key}
             end,
 
