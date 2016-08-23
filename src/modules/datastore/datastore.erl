@@ -359,32 +359,7 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
-        case LinkDuplication of
-            false ->
-                exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
-            true ->
-                NewLinks = lists:map(
-                    fun
-                        ({LinkName, {_V, NewLinkTargets}}) ->
-                            case fetch_full_link(Level, Key, ModelName, LinkName) of
-                                {ok, {Version, LinkTargets}} ->
-                                    {LinkName, {Version + 1, deduplicate_targets(lists:usort(NewLinkTargets ++ LinkTargets))}};
-                                {error, link_not_found} ->
-                                    {LinkName, {1, NewLinkTargets}};
-                                Reason ->
-                                    ?warning("Unable to fetch old version of link ~p (for document ~p) due to: ~p", [LinkName, Key, Reason]),
-                                    {error, link_fetch, Reason} %% 3 element tuple to contrast with normalized link format
-                            end
-                    end, NormalizedLinks),
-                case lists:keyfind(error, 1, NewLinks) of
-                    {error, link_fetch, Reason} ->
-                        {error, Reason};
-                    _ ->
-                        exec_driver_async(ModelName, Level, add_links, [Key, NewLinks])
-                end
-        end
-    end).
+    exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
 
 
 %%--------------------------------------------------------------------
@@ -450,10 +425,10 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 -spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
     ok | create_error().
 create_link(Level, Key, ModelName, Link) ->
-    run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
+%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
     ModelConfig = ModelName:model_init(),
-        exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)])
-    end).
+        exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
+%%    end).
 
 
 %%--------------------------------------------------------------------
@@ -474,11 +449,11 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 -spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
     link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
-    ?info("delete_links1 ~p", [{Key, LinkNames}]),
-    run_transaction(ModelName, term_to_binary({links, Key}), fun() ->
-        ?info("delete_links2 ~p", [{Key, LinkNames}]),
-        delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames)
-    end);
+%%    ?info("delete_links1 ~p", [{Key, LinkNames}]),
+%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
+%%        ?info("delete_links2 ~p", [{Key, LinkNames}]),
+        delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
+%%    end);
 delete_links(Level, Key, ModelName, LinkName) ->
     delete_links(Level, Key, ModelName, [LinkName]).
 

@@ -35,6 +35,23 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Removes duplicated links from given targets list.
+%% @end
+%%--------------------------------------------------------------------
+-spec deduplicate_targets([datastore:link_final_target()]) ->
+    [datastore:link_final_target()].
+deduplicate_targets([T]) ->
+    [T];
+deduplicate_targets([]) ->
+    [];
+deduplicate_targets([{M, K, S}, {M, K, S} = T | R]) ->
+    deduplicate_targets([T | R]);
+deduplicate_targets([T | R]) ->
+    [T | deduplicate_targets(R)].
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Returns link scope for given model.
 %% @end
 %%--------------------------------------------------------------------
@@ -202,7 +219,7 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
     {FilledMap, NewLinksList, AddedLinks} =
         case Mode of
             update ->
-                {Map, LinksToUpdate} = update_links_map(LinksList, LinkMap),
+                {Map, LinksToUpdate} = update_links_map(ModelConfig, LinksList, LinkMap),
                 {Map, LinksToUpdate, []};
             _ ->
                 fill_links_map(LinksList, LinkMap)
@@ -232,9 +249,7 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                     {error, Reason}
             end;
         _ ->
-
             % Update other documents if needed
-try
             % Find documents to be updated
             SplitedLinks = split_links_list(NewLinksList, KeyNum),
             ?info("save_links_maps new link childs 1 ~p", [{NewLinksList, SplitedLinks, KeyNum}]),
@@ -326,10 +341,6 @@ try
                 {error, Reason} ->
                     {error, Reason}
             end
-catch
-    _:ZOMFG ->
-        ?info_stacktrace("ZOMFG ~p", [ZOMFG])
-end
     end.
 
 %%--------------------------------------------------------------------
@@ -735,10 +746,10 @@ fill_links_map([{LinkName, LinkTarget} | R], Map, MapSize, AddedLinks, LinksToAd
 %% Updates map with links replacing link if exists.
 %% @end
 %%--------------------------------------------------------------------
--spec update_links_map([datastore:normalized_link_spec()], map()) -> {map(), LinksToUpdate :: list()}.
-update_links_map(LinksList, LinkMap) ->
+-spec update_links_map(model_behaviour:model_config(), [datastore:normalized_link_spec()], map()) -> {map(), LinksToUpdate :: list()}.
+update_links_map(ModelConfig, LinksList, LinkMap) ->
     MapSize = maps:size(LinkMap),
-    update_links_map(LinksList, LinkMap, MapSize, []).
+    update_links_map(ModelConfig, LinksList, LinkMap, MapSize, []).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -746,16 +757,20 @@ update_links_map(LinksList, LinkMap) ->
 %% Updates map with links replacing link if exists.
 %% @end
 %%--------------------------------------------------------------------
--spec update_links_map([datastore:normalized_link_spec()], map(), MapSize :: integer(),
+-spec update_links_map(model_behaviour:model_config(), [datastore:normalized_link_spec()], map(), MapSize :: integer(),
     LinksToUpdate :: list()) -> {map(), FinalLinksToUpdate :: list()}.
-update_links_map([], Map, _MapSize, LinksToUpdate) ->
+update_links_map(_ModelConfig, [], Map, _MapSize, LinksToUpdate) ->
     {Map, LinksToUpdate};
-update_links_map([{LinkName, LinkTarget} = Link | R], Map, MapSize, LinksToUpdate) ->
-    case maps:is_key(LinkName, Map) of
-        true ->
-            update_links_map(R, maps:put(LinkName, LinkTarget, Map), MapSize, LinksToUpdate);
+update_links_map(ModelConfig, [{LinkName, {NewVersion, LinkTargets} = LinkTarget} = Link | R], Map, MapSize, LinksToUpdate) ->
+    case {maps:is_key(LinkName, Map), ModelConfig#model_config.link_duplication} of
+        {true, false} ->
+            update_links_map(ModelConfig, R, maps:put(LinkName, LinkTarget, Map), MapSize, LinksToUpdate);
+        {true, true} ->
+            {OldVersion, OldLinks} = maps:get(LinkName, Map),
+            UpdatedTargets = deduplicate_targets(lists:usort(OldLinks ++ LinkTargets)),
+            update_links_map(ModelConfig, R, maps:put(LinkName, {max(OldVersion, NewVersion) + 1, UpdatedTargets}, Map), MapSize, LinksToUpdate);
         _ ->
-            update_links_map(R, Map, MapSize, [Link | LinksToUpdate])
+            update_links_map(ModelConfig, R, Map, MapSize, [Link | LinksToUpdate])
     end.
 
 %%--------------------------------------------------------------------
