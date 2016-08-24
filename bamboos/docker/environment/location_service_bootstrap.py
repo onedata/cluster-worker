@@ -49,17 +49,18 @@ def up(image, bin_oz, config, name, uid, logdir=None):
 def up_nodes(image, bin_oz, config, uid, logdir=None):
     used_names = set()
     docker_ids = []
-    for zone_config in config['zone_domains'].values():
-        for node_config in zone_config['oz_worker'].values():
-            sys_config = node_config['sys.config']
-            if 'oz_worker' in sys_config:
-                sys_config = sys_config['oz_worker']
-            if 'location_service_bootstrap_nodes' in sys_config:
-                for name in sys_config['location_service_bootstrap_nodes']:
-                    if name.startswith(TEST_NODE_PREFIX) and name not in used_names:
-                        container = up(image, bin_oz, config, name, uid, logdir)
-                        used_names.add(name)
-                        docker_ids.extend([container])
+    if 'zone_domains' in config:
+        for zone_config in config['zone_domains'].values():
+            for node_config in zone_config['oz_worker'].values():
+                sys_config = node_config['sys.config']
+                if 'oz_worker' in sys_config:
+                    sys_config = sys_config['oz_worker']
+                if 'location_service_bootstrap_nodes' in sys_config:
+                    for name in sys_config['location_service_bootstrap_nodes']:
+                        if name.startswith(TEST_NODE_PREFIX) and name not in used_names:
+                            container = up(image, bin_oz, config, name, uid, logdir)
+                            used_names.add(name)
+                            docker_ids.extend([container])
     return docker_ids
 
 
