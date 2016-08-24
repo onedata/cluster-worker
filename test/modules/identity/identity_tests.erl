@@ -64,10 +64,14 @@ setup() ->
     meck:new(synced_cert),
     meck:expect(synced_cert, create, fun(Doc = #document{key = Key}) -> save_to_env(Key, Doc, ?DB_ENV), {ok, Key} end),
     meck:expect(synced_cert, get, fun(Key) -> get_from_env(Key, ?DB_ENV) end),
+    %% critical_section
+    meck:new(critical_section),
+    meck:expect(critical_section, run, fun(_, Fun) -> Fun() end),
     ok.
 
 
 teardown(_) ->
+    meck:unload(critical_section),
     meck:unload(synced_cert),
     ok = application:unset_env(app, ?DB_ENV),
     meck:unload(plugins),
@@ -161,7 +165,7 @@ verification_fails_on_not_published_cert() ->
     Res = identity:verify(Cert),
 
     %% then
-    ?assertEqual({error, ?REPO_ENV}, Res).
+    ?assertMatch({error, {key_not_available, _}}, Res).
 
 
 verification_fails_on_public_key_mismatch() ->
@@ -211,7 +215,7 @@ delete_from_env(ID, Env) ->
 get_from_env(ID, Env) ->
     case application:get_env(app, Env, #{}) of
         #{ID := Value} -> {ok, Value};
-        _ -> {error, Env}
+        _ -> {error, {not_found, Env}}
     end.
 
 -endif.

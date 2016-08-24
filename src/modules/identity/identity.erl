@@ -50,7 +50,7 @@ publish(ID, EncodedPublicKey) ->
                     ?warning("Put to cache failed due to ~p", [Reason]),
                     ok
             end;
-        {error, Reason} -> {error, Reason}
+        {error, Reason} -> {error, {unable_to_publish, Reason}}
     end.
 
 %%--------------------------------------------------------------------
@@ -78,7 +78,7 @@ verify(ID, EncodedPublicKeyToMatch) ->
                 {error, Reason} ->
                     ?warning("Cached key does not match and unable to refetch key for ~p", [ID]),
                     plugins:apply(identity_cache, invalidate, [ID]),
-                    {error, Reason};
+                    {error, {key_not_available, Reason}};
                 {ok, EncodedPublicKeyToMatch} ->
                     ?info("Key changed for ~p", [ID]),
                     plugins:apply(identity_cache, put, [ID, EncodedPublicKeyToMatch]),

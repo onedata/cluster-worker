@@ -53,9 +53,22 @@ decode(PublicKey) ->
 -spec ensure_synced_cert_present(KeyFilePath :: filename(),
     CertFilePath :: filename(), DomainForCN :: string()) -> ok.
 ensure_synced_cert_present(KeyFile, CertFile, DomainForCN) ->
-    recreate_cert_files(KeyFile, CertFile, DomainForCN),
-    try_creating_certs_doc(KeyFile, CertFile),
-    create_certs_form_doc(KeyFile, CertFile).
+    critical_section:run(?MODULE, fun() ->
+        case synced_cert:get(?CERT_DB_KEY) of
+            {ok, #document{value = #synced_cert{
+                cert_file_content = DBCert, key_file_content = DBKey}}} ->
+                ok = file:write_file(CertFile, DBCert),
+                ok = file:write_file(KeyFile, DBKey);
+            {error, {not_found, _}} ->
+                ok = ensure_certs_files_present(KeyFile, CertFile, DomainForCN),
+                {ok, FSCert} = file:read_file(CertFile),
+                {ok, FSKey} = file:read_file(KeyFile),
+                {ok, ?CERT_DB_KEY} = synced_cert:create(#document{
+                    key = ?CERT_DB_KEY, value = #synced_cert{
+                        cert_file_content = FSCert, key_file_content = FSKey
+                    }})
+        end
+    end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -102,45 +115,12 @@ get_public_key(#'OTPCertificate'{tbsCertificate = #'OTPTBSCertificate'{
 
 %%--------------------------------------------------------------------
 %% @doc @private
-%% Syncs certificate files fro db to filesystem.
-%% @end
-%%--------------------------------------------------------------------
--spec create_certs_form_doc(KeyFilePath :: filename(), CertFilePath :: filename()) -> ok.
-create_certs_form_doc(KeyFile, CertFile) ->
-    case synced_cert:get(?CERT_DB_KEY) of
-        {ok, #document{value = #synced_cert{cert_file_content = DBCert, key_file_content = DBKey}}} ->
-            ok = file:write_file(CertFile, DBCert),
-            ok = file:write_file(KeyFile, DBKey);
-        {error, Reason} ->
-            ?error("Identity cert files not synced with DB due to ~p", [Reason])
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc @private
-%% Tries to create certificate files info in db.
-%% Does not override any existing info.
-%% @end
-%%--------------------------------------------------------------------
--spec try_creating_certs_doc(KeyFilePath :: filename(), CertFilePath :: filename()) -> ok.
-try_creating_certs_doc(KeyFile, CertFile) ->
-    {ok, CertBin} = file:read_file(CertFile),
-    {ok, KeyBin} = file:read_file(KeyFile),
-    Res = synced_cert:create(#document{key = ?CERT_DB_KEY, value = #synced_cert{
-        cert_file_content = CertBin, key_file_content = KeyBin
-    }}),
-    case Res of
-        {ok, _} -> ok;
-        {error, already_exists} -> ok
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc @private
 %% Creates self-signed cert files if no cert files are present on filesystem.
 %% @end
 %%--------------------------------------------------------------------
--spec recreate_cert_files(KeyFilePath :: filename(),
+-spec ensure_certs_files_present(KeyFilePath :: filename(),
     CertFilePath :: filename(), DomainForCN :: string()) -> ok.
-recreate_cert_files(KeyFile, CertFile, DomainForCN) ->
+ensure_certs_files_present(KeyFile, CertFile, DomainForCN) ->
     case file:read_file_info(KeyFile) of
         {ok, _} -> ok;
         {error, enoent} ->
