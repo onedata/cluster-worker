@@ -43,7 +43,13 @@ publish(#'OTPCertificate'{} = Certificate) ->
 -spec publish(identity:id(), identity:encoded_public_key()) -> ok | {error, Reason :: term()}.
 publish(ID, EncodedPublicKey) ->
     case plugins:apply(identity_repository, publish, [ID, EncodedPublicKey]) of
-        ok -> plugins:apply(identity_cache, put, [ID, EncodedPublicKey]);
+        ok ->
+            case plugins:apply(identity_cache, put, [ID, EncodedPublicKey]) of
+                ok -> ok;
+                {error, Reason} ->
+                    ?warning("Put to cache failed due to ~p", [Reason]),
+                    ok
+            end;
         {error, Reason} -> {error, Reason}
     end.
 

@@ -70,7 +70,8 @@ invalidate(ID) ->
 %%% Internal functions
 %%%===================================================================
 
--spec cache(identity:id(), identity:public_key()) -> ok.
+-spec cache(identity:id(), identity:public_key()) ->
+    ok | {error, Reason :: term()}.
 cache(ID, EncodedPublicKey) ->
     Now = now_seconds(),
     Result = cached_identity:create_or_update(#document{
@@ -87,7 +88,7 @@ cache(ID, EncodedPublicKey) ->
 
     case Result of
         {ok, _} -> ok;
-        {error, Reason} -> ?warning("Unable to cache entry for ~p due to ~p", [ID, Reason])
+        {error, Reason} -> {error, {datastore_error, Reason}}
     end.
 
 -spec now_seconds() -> non_neg_integer().

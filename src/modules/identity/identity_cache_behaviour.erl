@@ -17,7 +17,8 @@
 %% Cached public key under given ID.
 %% @end
 %%--------------------------------------------------------------------
--callback put(identity:id(), identity:encoded_public_key()) -> ok.
+-callback put(identity:id(), identity:encoded_public_key()) ->
+    ok | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
