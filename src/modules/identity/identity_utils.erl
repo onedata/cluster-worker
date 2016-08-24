@@ -58,7 +58,8 @@ ensure_synced_cert_present(KeyFile, CertFile, DomainForCN) ->
             {ok, #document{value = #synced_cert{
                 cert_file_content = DBCert, key_file_content = DBKey}}} ->
                 ok = file:write_file(CertFile, DBCert),
-                ok = file:write_file(KeyFile, DBKey);
+                ok = file:write_file(KeyFile, DBKey),
+                ok;
             {error, {not_found, _}} ->
                 ok = ensure_certs_files_present(KeyFile, CertFile, DomainForCN),
                 {ok, FSCert} = file:read_file(CertFile),
@@ -66,7 +67,8 @@ ensure_synced_cert_present(KeyFile, CertFile, DomainForCN) ->
                 {ok, ?CERT_DB_KEY} = synced_cert:create(#document{
                     key = ?CERT_DB_KEY, value = #synced_cert{
                         cert_file_content = FSCert, key_file_content = FSKey
-                    }})
+                    }}),
+                ok
         end
     end).
 
