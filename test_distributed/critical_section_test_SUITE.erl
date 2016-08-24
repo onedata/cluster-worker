@@ -64,14 +64,14 @@ performance_test_base(Config) ->
     end,
 
     TestCritical = fun() ->
-        critical_section:run([x,y,z], TestFun)
+        critical_section:run(<<"key">>, TestFun)
     end,
     TestCritical2 = fun() ->
-        critical_section:run(random:uniform(), TestFun)
+        critical_section:run(float_to_binary(random:uniform()), TestFun)
     end,
 
     TestTransaction = fun() ->
-        datastore:run_transaction(cache_controller, term_to_binary([x,y,z]), TestFun)
+        datastore:run_transaction(cache_controller, <<"key">>, TestFun)
     end,
     TestTransaction2 = fun() ->
         datastore:run_transaction(cache_controller, float_to_binary(random:uniform()), TestFun)
