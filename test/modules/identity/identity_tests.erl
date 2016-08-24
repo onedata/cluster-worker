@@ -41,7 +41,7 @@ identity_test_() ->
 
             {"certs and db state created when no cert data in both db and fs", fun cert_file_and_doc_created_on_no_cert_supplied/0},
             {"certs on fs created when cert data in db", fun cert_file_created_on_doc_supplied/0},
-            {"certs in db created when cert data on fs", fun cert__doc_created_on_cert_supplied_by_fs/0}
+            {"certs in db created when cert data on fs", fun cert_doc_created_on_cert_supplied_by_fs/0}
         ]
     }.
 
@@ -122,7 +122,7 @@ cert_file_created_on_doc_supplied() ->
     }}}, DbContent).
 
 
-cert__doc_created_on_cert_supplied_by_fs() ->
+cert_doc_created_on_cert_supplied_by_fs() ->
     %% given
     TmpDir = utils:mkdtemp(),
     CertFile = TmpDir ++ "/cert",
