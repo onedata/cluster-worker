@@ -17,8 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
--export([publish/1, verify/1, publish/2, verify/2, get/1]).
--export([ssl_verify_fun_impl/3]).
+-export([publish/1, verify/1, publish/2, verify/2]).
 
 -type(id() :: binary()).
 -type(public_key() :: term()).
@@ -85,60 +84,6 @@ verify(ID, EncodedPublicKeyToMatch) ->
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Retrieves public key for given ID from the repository.
-%% @end
-%%--------------------------------------------------------------------
--spec get(identity:id()) -> {ok, identity:encoded_public_key()} | {error, Reason :: term()}.
-get(ID) ->
-    case plugins:apply(identity_repository, get, [ID]) of
-        {ok, Encoded} -> plugins:apply(identity_cache, put, [ID, Encoded]), {ok, Encoded};
-        {error, Reason} -> {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% This callback implements verify_fun specified in ssl options.
-%% This implementation overrides peer identity verification
-%% as it uses repository as source of truth (ignoring CA's).
-%% @end
-%%--------------------------------------------------------------------
--spec ssl_verify_fun_impl(OtpCert :: #'OTPCertificate'{},
-    Event :: {bad_cert, Reason :: atom() | {revoked, atom()}} | {extension, #'Extension'{}} | valid | valid_peer,
-    InitialUserState :: term()) ->
-    {valid, UserState :: term()}
-    | {valid_peer, UserState :: term()}
-    | {fail, Reason :: term()}
-    | {unknown, UserState :: term()}.
-ssl_verify_fun_impl(_, {bad_cert, unknown_ca}, _UserState) ->
-    {fail, only_selfigned_certs_are_allowed_in_interoz_communication};
-ssl_verify_fun_impl(OtpCert, {bad_cert, _} = _Reason, UserState) ->
-    verify_as_ssl_callback(OtpCert, UserState);
-ssl_verify_fun_impl(OtpCert, {extension, _}, UserState) ->
-    verify_as_ssl_callback(OtpCert, UserState);
-ssl_verify_fun_impl(OtpCert, valid_peer, UserState) ->
-    verify_as_ssl_callback(OtpCert, UserState);
-ssl_verify_fun_impl(_, valid, UserState) ->
-    {valid, UserState}.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc @private
-%% Wraps verify function to return results conforming with verify_fun for ssl options.
-%% @end
-%%--------------------------------------------------------------------
--spec verify_as_ssl_callback(OtpCert :: #'OTPCertificate'{}, InitialUserState :: term()) ->
-    {valid, UserState :: term()}
-    | {valid_peer, UserState :: term()}
-    | {fail, Reason :: term()}
-    | {unknown, UserState :: term()}.
-verify_as_ssl_callback(OtpCert, UserState) ->
-    case identity:verify(OtpCert) of
-        ok -> {valid, UserState};
-        {error, key_does_not_match} -> {fail, rejected_by_repo_verification};
-        {error, Reason} -> {fail, {repo_verification_unexpectedly_failed, Reason}}
-    end.
