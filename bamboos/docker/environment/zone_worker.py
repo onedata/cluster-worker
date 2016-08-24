@@ -6,7 +6,7 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 """
 
 import os
-from . import docker, common, worker, gui, panel
+from . import docker, common, worker, gui, panel, location_service_bootstrap
 
 DOCKER_BINDIR_PATH = '/root/build'
 
@@ -32,6 +32,11 @@ class OZWorkerConfigurator:
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         sys_config['external_ip'] = {'string': 'IP_PLACEHOLDER'}
 
+        if 'location_service_bootstrap_nodes' in sys_config:
+            sys_config['location_service_bootstrap_nodes'] = map(lambda name:
+                location_service_bootstrap.format_if_test_node(name, uid),
+                sys_config['location_service_bootstrap_nodes'])
+
         if 'http_domain' in sys_config:
             domain = worker.cluster_domain(instance, uid)
             sys_config['http_domain'] = {'string': domain}
@@ -45,12 +50,6 @@ class OZWorkerConfigurator:
             sys_config["onepanel_rest_url"] = {
                 'string': "{0}://{1}:{2}".format(protocol, panel_hostname, port)
             }
-
-        ls_bootstrap_key = 'location_service_bootstrap_nodes'
-        if ls_bootstrap_key in sys_config:
-            split = [node.split(':') for node in sys_config[ls_bootstrap_key]]
-            sys_config[ls_bootstrap_key] = \
-                [worker.cluster_domain(id, uid) + ":" + port for id, port in split]
 
         return cfg
 
@@ -96,6 +95,12 @@ sed -i.bak s/onedata.org/{domain}/g /root/bin/node/data/dns.config
             gui_config = config['gui_override']
             extra_volumes.extend(gui.extra_volumes(gui_config, instance_domain))
         return extra_volumes
+
+    def couchbase_ramsize(self):
+        return 1024
+
+    def couchbase_buckets(self):
+        return {"default": 512, "location_service": 100}
 
     def app_name(self):
         return "oz_worker"
