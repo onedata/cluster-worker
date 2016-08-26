@@ -9,7 +9,6 @@
 %%% This module allows constructing critical sections.
 %%% @end
 %%%-------------------------------------------------------------------
-% TODO VFS-2371 - problem with nested critical sections (change to critical sections in couchdb_datastore_driver to check error).
 -module(critical_section).
 -author("Mateusz Paciorek").
 
@@ -28,7 +27,7 @@
 %% @equiv run(Key, Fun, false)
 %% @end
 %%--------------------------------------------------------------------
--spec run(Key :: datastore:key(), Fun :: fun (() -> Result :: term())) ->
+-spec run(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run(Key, Fun) ->
     run(Key, Fun, false).
@@ -43,9 +42,10 @@ run(Key, Fun) ->
 %% but option Recursive must be implicitly set to true.
 %% @end
 %%--------------------------------------------------------------------
--spec run(Key :: datastore:key(), Fun :: fun (() -> Result :: term()),
+-spec run(RawKey :: term(), Fun :: fun (() -> Result :: term()),
     Recursive :: boolean()) -> Result :: term().
-run(Key, Fun, Recursive) ->
+run(RawKey, Fun, Recursive) ->
+    Key = couchdb_datastore_driver:to_binary(RawKey),
     ok = lock(Key, Recursive),
     try
         Fun()

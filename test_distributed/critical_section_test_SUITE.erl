@@ -67,7 +67,7 @@ performance_test_base(Config) ->
         critical_section:run(<<"key">>, TestFun)
     end,
     TestCritical2 = fun() ->
-        critical_section:run(float_to_binary(random:uniform()), TestFun)
+        critical_section:run(random:uniform(), TestFun)
     end,
 
     TestTransaction = fun() ->

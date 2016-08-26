@@ -101,7 +101,7 @@ init_bucket(Bucket, Models, _NodeToSync) ->
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
-    critical_section:run(to_binary({ModelName, Key}),
+    critical_section:run({ModelName, Key},
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -158,7 +158,7 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev 
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
-    critical_section:run(to_binary({ModelName, Key}),
+    critical_section:run({ModelName, Key},
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -173,7 +173,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
-    critical_section:run(to_binary({ModelName, Key}),
+    critical_section:run({ModelName, Key},
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -214,7 +214,7 @@ create(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, value 
     {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_function(Diff) ->
-    critical_section:run(to_binary({ModelName, Key}),
+    critical_section:run({ModelName, Key},
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -232,7 +232,7 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
         end);
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_map(Diff) ->
-    critical_section:run(to_binary({ModelName, Key}),
+    critical_section:run({ModelName, Key},
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -345,7 +345,7 @@ list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
 delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred) ->
-    critical_section:run(to_binary({ModelName, Key}),
+    critical_section:run({ModelName, Key},
         fun() ->
             case Pred() of
                 true ->
@@ -421,7 +421,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    critical_section:run(to_binary({ModelName, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -435,7 +435,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    critical_section:run(to_binary({ModelName, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
@@ -451,7 +451,7 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     | {error, Reason :: term()})) -> ok | datastore:generic_error().
 create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
     Key, {LinkName, _} = Link, UpdateFun) ->
-    critical_section:run(to_binary({ModelName, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
@@ -477,13 +477,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    critical_section:run(to_binary({ModelName, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    critical_section:run(to_binary({ModelName, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
