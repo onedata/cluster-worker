@@ -62,8 +62,9 @@ get(ID) ->
 -spec invalidate(identity:id()) -> ok | {error, Reason :: term()}.
 invalidate(ID) ->
     case cached_identity:delete(ID) of
-        {error, Reason} -> {error, {db_error, Reason}};
-        ok -> ok
+        ok -> ok;
+        {error, {not_found, cached_identity}} -> ok;
+        {error, Reason} -> {error, {db_error, Reason}}
     end.
 
 %%%===================================================================
