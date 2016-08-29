@@ -44,7 +44,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/4, force_save/2, db_run/4, normalize_seq/1]).
+-export([start_gateway/4, force_save/2, db_run/4, normalize_seq/1, transaction_key/2]).
 
 -export([changes_start_link/3, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -125,7 +125,7 @@ save(ModelConfig, Doc) ->
 -spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_link_doc(ModelConfig, Doc) ->
-    ?info("SAVE DOC ~p", [Doc]),
+%%    ?info("SAVE DOC ~p", [Doc]),
     save_doc(ModelConfig, Doc).
 
 %%--------------------------------------------------------------------
@@ -423,7 +423,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Bucket, Key}),
+    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -437,7 +437,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Bucket, Key}),
+    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
@@ -453,7 +453,7 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     | {error, Reason :: term()})) -> ok | datastore:generic_error().
 create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
     Key, {LinkName, _} = Link, UpdateFun) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Bucket, Key}),
+    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
@@ -479,13 +479,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Bucket, Key}),
+    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Bucket, Key}),
+    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -720,7 +720,7 @@ get_db() ->
             {error, Reason};
         {ok, {ServerLoop, Server}} ->
             try
-                {ok, DB} = couchbeam:open_db(Server, <<"default">>),
+                {ok, DB} = couchbeam:open_db(Server, <<"default">>, [{recv_timeout, timer:minutes(5)}]),
                 {ok, {ServerLoop, DB}}
             catch
                 _:Reason ->
@@ -795,7 +795,7 @@ db_run(Mod, Fun, Args, Retry) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 force_save(#model_config{bucket = Bucket} = ModelConfig, Cos = #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
-    ?info("FORCE SAVE DOC ~p", [Cos]),
+%%    ?info("FORCE SAVE DOC ~p", [Cos]),
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
@@ -1325,3 +1325,6 @@ delete_view(Id) ->
 %%    DesignId = <<"_design/", Id/binary>>,
 %%    {ok, _} = couchdb_datastore_driver:db_run(couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
     ok.
+
+transaction_key(#model_config{bucket = Bucket}, Key) ->
+    to_binary({?MODULE, Bucket, Key}).

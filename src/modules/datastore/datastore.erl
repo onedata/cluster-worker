@@ -359,7 +359,32 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
+    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
+        case LinkDuplication of
+            false ->
+                exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
+            true ->
+                NewLinks = lists:map(
+                    fun
+                        ({LinkName, {_V, NewLinkTargets}}) ->
+                            case fetch_full_link(Level, Key, ModelName, LinkName) of
+                                {ok, {Version, LinkTargets}} ->
+                                    {LinkName, {Version + 1, deduplicate_targets(lists:usort(NewLinkTargets ++ LinkTargets))}};
+                                {error, link_not_found} ->
+                                    {LinkName, {1, NewLinkTargets}};
+                                Reason ->
+                                    ?warning("Unable to fetch old version of link ~p (for document ~p) due to: ~p", [LinkName, Key, Reason]),
+                                    {error, link_fetch, Reason} %% 3 element tuple to contrast with normalized link format
+                            end
+                    end, NormalizedLinks),
+                case lists:keyfind(error, 1, NewLinks) of
+                    {error, link_fetch, Reason} ->
+                        {error, Reason};
+                    _ ->
+                        exec_driver_async(ModelName, Level, add_links, [Key, NewLinks])
+                end
+        end
+    end).
 
 
 %%--------------------------------------------------------------------
@@ -385,7 +410,8 @@ set_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
 %%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
-        exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
+    delete_links(Level, Key, ModelName, [LinkName || {LinkName, _} <- Links]),
+    exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
 %%    end).
 
 
@@ -406,7 +432,6 @@ deduplicate_targets([T | R]) ->
     [T | deduplicate_targets(R)].
 
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates links to given document if link does not exist.
@@ -425,11 +450,8 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 -spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
     ok | create_error().
 create_link(Level, Key, ModelName, Link) ->
-%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
     ModelConfig = ModelName:model_init(),
-        exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
-%%    end).
-
+    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -449,11 +471,8 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 -spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
     link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
-%%    ?info("delete_links1 ~p", [{Key, LinkNames}]),
-%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
-%%        ?info("delete_links2 ~p", [{Key, LinkNames}]),
-        delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
-%%    end);
+%%    ?info("delete_links1 ~p", [{LinkNames, Key}]),
+    delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
 delete_links(Level, Key, ModelName, LinkName) ->
     delete_links(Level, Key, ModelName, [LinkName]).
 
@@ -478,7 +497,7 @@ delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNam
     ?info("delete_links all ~p", [{Key, ModelName, Links1, Links2}]),
     exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, Links]);
 delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) ->
-    exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
+    exec_driver(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
 delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
     exec_driver(ModelName, Driver, delete_links, [Key, LinkNames]).
 
@@ -508,24 +527,24 @@ fetch_link(Level, Key, ModelName, LinkName) ->
         {ok, {_Version, Targets = [H | _]}} ->
             ?info("WTF 0 ~p", [{RawLinkName, RequestedScope, Targets}]),
 
-                case RequestedScope of
-                    undefined ->
-                        {TargetKey, TargetModel, _} =
-                            case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
-                                undefined ->
-                                    H;
-                                ScopeRelated ->
-                                    ScopeRelated
-                            end,
-                        {ok, {TargetKey, TargetModel}};
-                    _ ->
+            case RequestedScope of
+                undefined ->
+                    {TargetKey, TargetModel, _} =
                         case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
                             undefined ->
-                                {error, link_not_found};
-                            {TargetKey, TargetModel, _} ->
-                                {ok, {TargetKey, TargetModel}}
-                        end
-                end;
+                                H;
+                            ScopeRelated ->
+                                ScopeRelated
+                        end,
+                    {ok, {TargetKey, TargetModel}};
+                _ ->
+                    case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
+                        undefined ->
+                            {error, link_not_found};
+                        {TargetKey, TargetModel, _} ->
+                            {ok, {TargetKey, TargetModel}}
+                    end
+            end;
         Other ->
             ?info("WTF 3 ~p", [{Key, RawLinkName, RequestedScope, Other}]),
             Other
@@ -676,8 +695,8 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 %%--------------------------------------------------------------------
 -spec exists_link_doc(store_level(), document(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
-    exists_link_doc(Level, Key, model_name(Doc),  Scope).
+exists_link_doc(Level, #document{key = Key} = Doc, Scope) ->
+    exists_link_doc(Level, Key, model_name(Doc), Scope).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -686,7 +705,7 @@ exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
 %%--------------------------------------------------------------------
 -spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(Level, Key, ModelName,  Scope) ->
+exists_link_doc(Level, Key, ModelName, Scope) ->
     exec_driver(ModelName, level_to_driver(Level), exists_link_doc, [Key, Scope]).
 
 %%--------------------------------------------------------------------
@@ -803,7 +822,7 @@ run_prehooks(#model_config{name = ModelName}, Method, Level, Context, ExcludedMo
                 case ExcludedModules of
                     [] ->
                         ok;
-                    _->
+                    _ ->
                         ?info("PREHOOK ~p", [{HookedModule, ExcludedModules}])
                 end,
                 case lists:member(HookedModule, ExcludedModules) of
@@ -973,7 +992,7 @@ exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
     exec_driver(ModelName, Driver, Method, Args);
 exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
     case exec_driver(ModelName, Driver, Method, Args) of
-        {error, {not_found, _}} when Method =:= get ; Method =:= fetch_link ->
+        {error, {not_found, _}} when Method =:= get; Method =:= fetch_link ->
             exec_driver(ModelName, Rest, Method, Args);
         {error, link_not_found} when Method =:= fetch_link ->
             exec_driver(ModelName, Rest, Method, Args);
@@ -1085,11 +1104,11 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         {tasks, Tasks} ->
             Level = caches_controller:cache_to_task_level(ModelName),
             lists:foreach(fun
-                              ({task, Task}) ->
-                                  ok = task_manager:start_task(Task, Level);
-                              (_) ->
-                                  ok % error already logged
-                          end, Tasks);
+                ({task, Task}) ->
+                    ok = task_manager:start_task(Task, Level);
+                (_) ->
+                    ok % error already logged
+            end, Tasks);
         {task, Task} ->
             Level = caches_controller:cache_to_task_level(ModelName),
             ok = task_manager:start_task(Task, Level);
