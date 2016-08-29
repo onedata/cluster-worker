@@ -47,4 +47,17 @@
     queue = [] :: [lock:queue_element()]
 }).
 
+%% Contents of cert files synced between nodes
+-record(synced_cert, {
+    cert_file_content :: binary(),
+    key_file_content :: binary()
+}).
+
+% Cached info about identities
+-record(cached_identity, {
+    id :: identity:id(),
+    encoded_public_key :: identity:encoded_public_key(),
+    last_update_seconds :: integer()
+}).
+
 -endif.
