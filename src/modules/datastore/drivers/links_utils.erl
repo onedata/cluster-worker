@@ -124,6 +124,7 @@ create_link_in_map(Driver, #model_config{mother_link_scope = Scope1, other_link_
     Key, {LinkName, _} = Link) ->
     case fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(<<"#local#">>, Key)) of
         {error, link_not_found} ->
+            create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, get_scopes(<<"#local#">>, Key)), 1),
             create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, get_scopes(Scope1, Key)), 1);
         {ok, _} ->
             {error, already_exists};

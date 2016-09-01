@@ -696,6 +696,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             key = GetLinkKey(I),
             value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
         },
+        ct:print("Add ~p", [{GetLinkName(I), GetLinkKey(I)}]),
         ?assertMatch(ok, ?call_store(Worker1, add_links, [
             Level, Doc, [{GetLinkName(I), LinkedDoc}]
         ]))
@@ -713,6 +714,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
         ?assertMatch({ok, _}, FLAns),
 
         for(Start, End, fun(I) ->
+%%            ct:print("~p", [{GetLinkName(I), ListedLinks}]),
             ?assert(lists:member(GetLinkName(I), ListedLinks))
         end),
 
@@ -724,6 +726,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
         end,
         ?assertMatch(Sum, length(ListedLinks))
     end,
+    ct:print("Stage 1"),
     CheckLinks(1, 120, 120),
 
     for(1, 120, fun(I) ->
@@ -735,6 +738,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             Level, Doc, [{GetLinkName(I), LinkedDoc}]
         ]))
     end),
+    ct:print("Stage 2"),
     CheckLinks(1, 120, 120),
 
     AddDocs(121, 180),
@@ -749,11 +753,13 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ?assertMatch(ok, ?call_store(Worker1, add_links, [
         Level, Doc, AddList
     ])),
+    ct:print("Stage 3"),
     CheckLinks(121, 180, 180),
 
     ?assertMatch(ok, ?call_store(Worker1, add_links, [
         Level, Doc, AddList
     ])),
+    ct:print("Stage 4"),
     CheckLinks(121, 180, 180),
 
     for(1, 180, fun(I) ->
@@ -776,8 +782,11 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [
         Level, Doc, DelList
     ])),
+    ct:print("Stage 5"),
     CheckLinks(1, 90, 140),
+    ct:print("Stage 6"),
     CheckLinks(111, 130, 140),
+    ct:print("Stage 7"),
     CheckLinks(151, 180, 140),
 
     AddDocs(181, 300),
@@ -785,6 +794,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ?assertMatch(ok, ?call_store(Worker1, add_links, [
         Level, Doc, AddList2
     ])),
+    ct:print("Stage 8"),
     CheckLinks(181, 300, 260),
 
     DelList2 = lists:map(fun(I) ->
@@ -793,14 +803,17 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [
         Level, Doc, DelList2
     ])),
+    ct:print("Stage 9"),
     CheckLinks(151, 300, 150),
 
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [
         Level, Doc, DelList2
     ])),
+    ct:print("Stage 10"),
     CheckLinks(151, 300, 150),
 
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, []])),
+    ct:print("Stage 11"),
     CheckLinks(151, 300, 150),
 
     for(161, 180, fun(I) ->
@@ -809,7 +822,9 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     for(211, 300, fun(I) ->
         ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
     end),
+    ct:print("Stage 12"),
     CheckLinks(151, 160, 40),
+    ct:print("Stage 13"),
     CheckLinks(181, 210, 40),
 
     for(1, 150, fun(I) ->
@@ -821,6 +836,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             Level, Doc, {GetLinkName(I), LinkedDoc}
         ]))
     end),
+    ct:print("Stage 14"),
     CheckLinks(1, 150, 190),
 
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
