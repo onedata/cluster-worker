@@ -199,14 +199,18 @@ save_links_maps(Driver,
         end
     end,
 
-    case Save(get_scopes(<<"#local#">>, Key)) of
-        {ok, []} ->
-            case Save(get_scopes(Scope1, Key)) of
+    LocalScope = get_scopes(<<"#local#">>, Key),
+    ReplicateScope = get_scopes(Scope1, Key),
+    case Save(LocalScope) of
+        {ok, []} when LocalScope /= ReplicateScope ->
+            case Save(ReplicateScope) of
                 {ok, []} ->
                     ok;
                 Error1 ->
                     Error1
             end;
+        {ok, []} ->
+            ok;
         Error2 ->
             Error2
     end.
@@ -379,15 +383,18 @@ delete_links(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes
     [datastore:link_name()]) -> ok | datastore:generic_error().
 delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1} = ModelConfig,
     Key, Links) ->
-    % Try mother scope first for performance reasons
-    case delete_links_from_maps(Driver, ModelConfig, Key, Links, get_scopes(<<"#local#">>, Key)) of
-        {ok, _, _} ->
+    LocalScope = get_scopes(<<"#local#">>, Key),
+    ReplicateScope = get_scopes(Scope1, Key),
+    case delete_links_from_maps(Driver, ModelConfig, Key, Links, LocalScope) of
+        {ok, _, _} when LocalScope /= ReplicateScope ->
             case delete_links_from_maps(Driver, ModelConfig, Key, Links, get_scopes(Scope1, Key)) of
                 {ok, _, _} ->
                     ok;
                 Ans0 ->
                     Ans0
             end ;
+        {ok, _, _} ->
+            ok;
         Ans ->
             Ans
     end.

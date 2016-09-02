@@ -359,33 +359,7 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
-        case LinkDuplication of
-            false ->
-                exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]);
-            true ->
-                NewLinks = lists:map(
-                    fun
-                        ({LinkName, {_V, NewLinkTargets}}) ->
-                            case fetch_full_link(Level, Key, ModelName, LinkName) of
-                                {ok, {Version, LinkTargets}} ->
-                                    {LinkName, {Version + 1, deduplicate_targets(lists:usort(NewLinkTargets ++ LinkTargets))}};
-                                {error, link_not_found} ->
-                                    {LinkName, {1, NewLinkTargets}};
-                                Reason ->
-                                    ?warning("Unable to fetch old version of link ~p (for document ~p) due to: ~p", [LinkName, Key, Reason]),
-                                    {error, link_fetch, Reason} %% 3 element tuple to contrast with normalized link format
-                            end
-                    end, NormalizedLinks),
-                case lists:keyfind(error, 1, NewLinks) of
-                    {error, link_fetch, Reason} ->
-                        {error, Reason};
-                    _ ->
-                        exec_driver_async(ModelName, Level, add_links, [Key, NewLinks])
-                end
-        end
-    end).
-
+    exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -414,22 +388,6 @@ set_links(Level, Key, ModelName, Links) when is_list(Links) ->
     exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
 %%    end).
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Removes duplicated links from given targets list.
-%% @end
-%%--------------------------------------------------------------------
--spec deduplicate_targets([link_final_target()]) ->
-    [link_final_target()].
-deduplicate_targets([T]) ->
-    [T];
-deduplicate_targets([]) ->
-    [];
-deduplicate_targets([{M, K, S}, {M, K, S} = T | R]) ->
-    deduplicate_targets([T | R]);
-deduplicate_targets([T | R]) ->
-    [T | deduplicate_targets(R)].
 
 
 %%--------------------------------------------------------------------
@@ -497,7 +455,7 @@ delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNam
     ?info("delete_links all ~p", [{Key, ModelName, Links1, Links2}]),
     exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, Links]);
 delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) ->
-    exec_driver(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
+    exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
 delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
     exec_driver(ModelName, Driver, delete_links, [Key, LinkNames]).
 

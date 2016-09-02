@@ -22,6 +22,8 @@
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
+-export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
+
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
 
@@ -52,6 +54,7 @@ init_bucket(_Bucket, Models, _NodeToSync) ->
             case ets:info(table_name(ModelConfig)) of
                 undefined ->
                     Ans = (catch ets:new(table_name(ModelConfig), [named_table, public, set])),
+                        catch ets:new(links_table_name(ModelConfig), [named_table, public, set]),
                     ?info("Creating ets table: ~p, result: ~p", [table_name(ModelConfig), Ans]);
                 _ -> ok
             end
@@ -232,8 +235,8 @@ healthcheck(State) ->
 %%--------------------------------------------------------------------
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     no_return().
-add_links(_, _, _) ->
-    erlang:error(not_implemented).
+add_links(ModelConfig, Key, Links) ->
+    links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links).
 
 
 %%--------------------------------------------------------------------
@@ -243,8 +246,8 @@ add_links(_, _, _) ->
 %%--------------------------------------------------------------------
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     no_return().
-create_link(_ModelConfig, _Key, _Link) ->
-    erlang:error(not_implemented).
+create_link(ModelConfig, Key, Link) ->
+    links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link).
 
 
 %%--------------------------------------------------------------------
@@ -254,8 +257,10 @@ create_link(_ModelConfig, _Key, _Link) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     no_return().
-delete_links(_, _, _) ->
-    erlang:error(not_implemented).
+delete_links(ModelConfig, Key, all) ->
+    links_utils:delete_links(?MODULE, ModelConfig, Key);
+delete_links(ModelConfig, Key, Links) ->
+    links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -264,8 +269,8 @@ delete_links(_, _, _) ->
 %%--------------------------------------------------------------------
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     no_return().
-fetch_link(_, _, _) ->
-    erlang:error(not_implemented).
+fetch_link(ModelConfig, Key, LinkName) ->
+    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -275,8 +280,65 @@ fetch_link(_, _, _) ->
 -spec foreach_link(model_behaviour:model_config(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     no_return().
-foreach_link(_, _Key, _, _AccIn) ->
-    erlang:error(not_implemented).
+foreach_link(ModelConfig, Key, Fun, AccIn) ->
+    links_utils:foreach_link(?MODULE, ModelConfig, Key, Fun, AccIn).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
+    true = ets:insert(links_table_name(ModelConfig), {Key, Value}),
+    {ok, Key}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document that describes links (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+    {ok, datastore:document()} | datastore:get_error().
+get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
+    case ets:lookup(links_table_name(ModelConfig), Key) of
+        [{_, Value}] ->
+            {ok, #document{key = Key, value = Value}};
+        [] ->
+            {error, {not_found, ModelName}}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
+    {ok, boolean()} | datastore:generic_error().
+exists_link_doc(ModelConfig, DocKey, Scope) ->
+    Key = links_utils:links_doc_key(DocKey, Scope),
+    case ets:lookup(links_table_name(ModelConfig), Key) of
+        [{_, _Value}] ->
+            {ok, true};
+        [] ->
+            {ok, false}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document that describes links, not using transactions (used by links utils).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
+delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document) ->
+    true = ets:delete(links_table_name(ModelConfig), Key),
+    ok.
+
 
 %%%===================================================================
 %%% Internal functions
@@ -325,3 +387,15 @@ table_name(#model_config{name = ModelName}) ->
     table_name(ModelName);
 table_name(TabName) when is_atom(TabName) ->
     binary_to_atom(<<"lc_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets Mnesia links table name for given model.
+%% @end
+%%--------------------------------------------------------------------
+-spec links_table_name(model_behaviour:model_config() | atom()) -> atom().
+links_table_name(#model_config{name = ModelName}) ->
+    links_table_name(ModelName);
+links_table_name(TabName) when is_atom(TabName) ->
+    binary_to_atom(<<"lc_links_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).

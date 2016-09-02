@@ -82,7 +82,7 @@
 ).
 
 %% Max link map size in single links record
--define(LINKS_MAP_MAX_SIZE, 32).
+-define(LINKS_MAP_MAX_SIZE, 4096).
 %% Number of children owned by each link record
 -define(LINKS_TREE_BASE, 128).
 
@@ -97,5 +97,9 @@
 
 %% Separator for link name and its scope
 -define(LINK_NAME_SCOPE_SEPARATOR, "#:#").
+
+%% SName of local only link scope (that shall not be synchronized)
+-define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
+
 
 -endif.

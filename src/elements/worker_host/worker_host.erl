@@ -64,7 +64,7 @@
     Pid :: pid(),
     Error :: {already_started, Pid} | term().
 start_link(Plugin, PluginArgs, LoadMemorySize) ->
-    gen_server:start_link({local, Plugin}, ?MODULE, [Plugin, PluginArgs, LoadMemorySize], []).
+    gen_server2:start_link({local, Plugin}, ?MODULE, [Plugin, PluginArgs, LoadMemorySize], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -74,7 +74,7 @@ start_link(Plugin, PluginArgs, LoadMemorySize) ->
 -spec stop(Plugin) -> ok when
     Plugin :: atom().
 stop(Plugin) ->
-    gen_server:cast(Plugin, stop).
+    gen_server2:cast(Plugin, stop).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -176,11 +176,11 @@ handle_cast(_Request, State) ->
     Timeout :: non_neg_integer() | infinity.
 handle_info({'EXIT', Pid, Reason}, State) ->
     Plugin = State#host_state.plugin,
-    gen_server:cast(Plugin, #worker_request{req = {'EXIT', Pid, Reason}}),
+    gen_server2:cast(Plugin, #worker_request{req = {'EXIT', Pid, Reason}}),
     {noreply, State};
 
 handle_info({timer, Msg}, State) ->
-    gen_server:cast(self(), #worker_request{req = Msg}),
+    gen_server2:cast(self(), #worker_request{req = Msg}),
     {noreply, State};
 
 handle_info({sync_timer, Msg}, State = #host_state{plugin = Plugin}) ->
@@ -189,7 +189,7 @@ handle_info({sync_timer, Msg}, State = #host_state{plugin = Plugin}) ->
     {noreply, State};
 
 handle_info(Msg, State) ->
-    gen_server:cast(self(), Msg),
+    gen_server2:cast(self(), Msg),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -246,7 +246,7 @@ state_get(Plugin, Key) ->
 -spec state_update(Plugin :: atom(), Key :: term(), UpdateFun :: fun((OldValue :: term()) -> NewValue :: term())) ->
     ok | no_return().
 state_update(Plugin, Key, UpdateFun) when is_function(UpdateFun) ->
-    ok = gen_server:call(Plugin, {update_plugin_state, Key, UpdateFun}).
+    ok = gen_server2:call(Plugin, {update_plugin_state, Key, UpdateFun}).
 
 
 %%--------------------------------------------------------------------
@@ -317,9 +317,9 @@ send_response(Plugin, BeforeProcessingRequest, #worker_request{id = MsgId, reply
         undefined -> ok;
         {gen_serv, Serv} ->
             case MsgId of
-                undefined -> gen_server:cast(Serv, Response);
+                undefined -> gen_server2:cast(Serv, Response);
                 Id ->
-                    gen_server:cast(Serv, #worker_answer{id = Id, response = Response})
+                    gen_server2:cast(Serv, #worker_answer{id = Id, response = Response})
             end;
         {proc, Pid} ->
             case MsgId of
@@ -330,7 +330,7 @@ send_response(Plugin, BeforeProcessingRequest, #worker_request{id = MsgId, reply
 
     AfterProcessingRequest = os:timestamp(),
     Time = timer:now_diff(AfterProcessingRequest, BeforeProcessingRequest),
-    gen_server:cast(Plugin, {progress_report, {BeforeProcessingRequest, Time}}).
+    gen_server2:cast(Plugin, {progress_report, {BeforeProcessingRequest, Time}}).
 
 %%--------------------------------------------------------------------
 %% @private

@@ -38,7 +38,7 @@
 -spec run(Key :: [term()] | term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run(Key, Fun) when is_list(Key) ->
-    Nodes = gen_server:call({global, cluster_manager}, get_nodes),
+    Nodes = gen_server2:call({global, cluster_manager}, get_nodes),
     {Agent, _} = locks:begin_transaction([{Key, write, Nodes, all}]),
     try
         Fun()
