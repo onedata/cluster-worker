@@ -26,7 +26,6 @@
             % ctool already requires those apps below, but they are here
             % for awareness of them being used in the project and
             % to make sure they are started before the application.
-            gproc,
             lager,
             etls,
             hackney,
@@ -82,6 +81,18 @@
             {datastore_config_plugin, datastore_config_plugin_default},
             {node_manager_plugin, node_manager_plugin_default},
             {dns_worker_plugin, dns_worker_plugin_default},
+
+            %% ===================================================================
+            %% IDENTITY
+            %% ===================================================================
+
+            %% Module which implements identity repository
+            {identity_repository, identity_repository_default},
+            %% Module which implements identity cache
+            %% In order to disable cache, use no_identity_cache here
+            {identity_cache, db_identity_cache},
+            %% Maximum number of seconds until identity cache entry is considered invalid
+            {identity_cache_ttl_seconds, 3600},
 
             %% ===================================================================
             %% HTTP
