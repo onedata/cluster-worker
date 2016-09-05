@@ -96,8 +96,7 @@ globally_cached_consistency_test(Config) ->
     {_, AllKeys} = AllKeysAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
     ?assertMatch({ok, _}, AllKeysAns),
     lists:foreach(fun(Uuid) ->
-        ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, Uuid])),
-        timer:sleep(100) % To prevent cache from killing cauch
+        ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, Uuid]))
     end, AllKeys),
 
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 100),
@@ -1871,6 +1870,24 @@ clearing_global_cache_test(Config) ->
     % TODO Change add node memory checking when DB nodes will be run at separate machine
     ?assertMatch(true, Mem2Node < (Mem0Node + Mem1Node) / 2),
 %%     ?assert(Mem2 < MemTarget),
+
+    % clean
+    GetAllKeys = fun
+                     ('$end_of_table', Acc) ->
+                         {abort, Acc};
+                     (#document{key = Uuid}, Acc) ->
+                         {next, [Uuid | Acc]}
+                 end,
+    {_, AllKeys} = AllKeysAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
+    ?assertMatch({ok, _}, AllKeysAns),
+    lists:foreach(fun(Uuid) ->
+        ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, Uuid]))
+    end, AllKeys),
+
+    ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 100),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
+
+    ?assertMatch({ok, []}, ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []])),
 
     ok.
 

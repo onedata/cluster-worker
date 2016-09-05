@@ -357,22 +357,7 @@ delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred
                         {error, Reason} ->
                             {error, Reason};
                         {ok, Doc} ->
-                            case delete_doc(Bucket, Doc) of
-                                ok ->
-                                    case get(ModelConfig, Key) of
-                                        {error, {not_found, _}} ->
-                                            ok;
-                                        {error, not_found} ->
-                                            ok;
-                                        {error, Reason} ->
-                                            {error, Reason};
-                                        {ok, _} ->
-                                            ?critical("Cauch db wrong delete report for key ~p", [Key]),
-                                            {error, delete_failed}
-                                    end;
-                                Other ->
-                                    Other
-                            end
+                            delete_doc(Bucket, Doc)
                     end;
                 false ->
                     ok
