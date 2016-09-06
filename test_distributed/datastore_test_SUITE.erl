@@ -1888,6 +1888,9 @@ clearing_global_cache_test(Config) ->
     ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
 
     ?assertMatch({ok, []}, ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []])),
+    ?assertMatch({ok, []}, ?call_store(Worker1, list, [?GLOBAL_ONLY_LEVEL, TestRecord, GetAllKeys, []])),
+    timer:sleep(timer:seconds(15)), % give couch time to process deletes
+    ?assertMatch({ok, []}, ?call_store(Worker2, list, [?DISK_ONLY_LEVEL, TestRecord, GetAllKeys, []])),
 
     ok.
 
