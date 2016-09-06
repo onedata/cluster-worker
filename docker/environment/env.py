@@ -61,11 +61,6 @@ def up(config_path, image=default('image'), ceph_image=default('ceph_image'),
     [dns_server], dns_output = dns.maybe_start('auto', uid)
     common.merge(output, dns_output)
 
-    if 'onepanel_domains' in config:
-        op_output = panel.up(image, bin_onepanel, dns_server, uid, config_path,
-                             logdir)
-        common.merge(output, op_output)
-
     # Start appmock instances
     if 'appmock_domains' in config:
         am_output = appmock.up(image, bin_am, dns_server, uid, config_path, logdir)
@@ -88,6 +83,12 @@ def up(config_path, image=default('image'), ceph_image=default('ceph_image'),
         storages.start_storages(config, config_path, ceph_image, s3_image,
                                 nfs_image, swift_image, image, uid)
     output['storages'] = storages_dockers
+
+    # Start onepanel instances
+    if 'onepanel_domains' in config:
+        op_output = panel.up(image, bin_onepanel, dns_server, uid, config_path,
+                             storages_dockers, logdir)
+        common.merge(output, op_output)
 
     # Start python LUMA service
     luma_config = None
@@ -152,14 +153,15 @@ def up(config_path, image=default('image'), ceph_image=default('ceph_image'),
 ./env_configurator.escript \'{0}\' {1} {2}
 echo $?'''
         command = command.format(json.dumps(env_configurator_input), True, True)
+        env_configurator_dir = os.path.abspath(env_configurator_dir)
         docker_output = docker.run(
             image='onedata/builder',
             interactive=True,
             tty=True,
             rm=True,
-            workdir='/root/build',
+            workdir=env_configurator_dir,
             name=common.format_hostname('env_configurator', uid),
-            volumes=[(env_configurator_dir, '/root/build', 'ro')],
+            volumes=[(env_configurator_dir, env_configurator_dir, 'ro')],
             dns_list=[dns_server],
             command=command,
             output=True
