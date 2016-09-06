@@ -281,8 +281,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
                                         maps:put(Key, Document, Acc)
                                 end;
                             {error, {not_found, _}} ->
-                                ?warning("Wrong cache consistency value (not_found at disk): ~p",
-                                    [{CLevel, ModelName, Key}]),
+                                caches_controller:save_consistency_restored_info(CLevel, ModelName, Key),
                                 Acc;
                             GetErr ->
                                 ?error("Cannot get doc from disk: ~p", GetErr),
