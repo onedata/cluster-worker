@@ -446,7 +446,19 @@ restore_from_disk(Key, ModelName, Doc, Level) ->
 -spec check_get(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level()) -> ok | {error, {not_found, model_behaviour:model_type()}}.
 check_get(Key, ModelName, Level) ->
-    check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}).
+    case caches_controller:check_cache_consistency(Level, ModelName) of
+        {ok, _, _} ->
+            {error, {not_found, ModelName}};
+        {monitored, ClearedList, _, _} ->
+            case lists:member(Key, ClearedList) of
+                true ->
+                    check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}});
+                _ ->
+                    {error, {not_found, ModelName}}
+            end;
+        _ ->
+            check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -457,7 +469,19 @@ check_get(Key, ModelName, Level) ->
 -spec check_exists(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level()) -> ok | {ok, false}.
 check_exists(Key, ModelName, Level) ->
-    check_disk_read(Key, ModelName, Level, {ok, false}).
+    case caches_controller:check_cache_consistency(Level, ModelName) of
+        {ok, _, _} ->
+            {ok, false};
+        {monitored, ClearedList, _, _} ->
+            case lists:member(Key, ClearedList) of
+                true ->
+                    check_disk_read(Key, ModelName, Level, {ok, false});
+                _ ->
+                    {ok, false}
+            end;
+        _ ->
+            check_disk_read(Key, ModelName, Level, {ok, false})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -467,8 +491,21 @@ check_exists(Key, ModelName, Level) ->
 %%--------------------------------------------------------------------
 -spec check_fetch(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) -> ok | {error, link_not_found}.
-check_fetch(Key, ModelName, Level) ->
-    check_disk_read(Key, ModelName, Level, {error, link_not_found}).
+check_fetch({Key, LinkName, cache_controller_link_key} = CacheKey, ModelName, Level) ->
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    case caches_controller:check_cache_consistency(Level, CCCUuid) of
+        {ok, _, _} ->
+            {error, link_not_found};
+        {monitored, ClearedList, _, _} ->
+            case lists:member(LinkName, ClearedList) of
+                true ->
+                    check_disk_read(CacheKey, ModelName, Level, {error, link_not_found});
+                _ ->
+                    {error, link_not_found}
+            end;
+        _ ->
+            check_disk_read(CacheKey, ModelName, Level, {error, link_not_found})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
