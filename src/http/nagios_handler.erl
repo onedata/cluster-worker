@@ -263,7 +263,7 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 -spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
 check_cm(Timeout) ->
     try
-        {ok, Nodes} = gen_server:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout),
+        {ok, Nodes} = gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout),
         Nodes
     catch
         Type:Error ->
@@ -283,7 +283,7 @@ check_node_managers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    gen_server:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout)
+                    gen_server2:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout)
                 catch T:M ->
                     ?error("Connection error to ~p at ~p: ~p:~p", [?NODE_MANAGER_NAME, Node, T, M]),
                     {error, timeout}
@@ -303,7 +303,7 @@ check_dispatchers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    gen_server:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout)
+                    gen_server2:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout)
                 catch T:M ->
                     ?error("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, Node, T, M]),
                     {error, timeout}

@@ -767,6 +767,7 @@ get_server(DBGateways) ->
 -spec db_run(atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Mod, Fun, Args, Retry) ->
     {ok, {ServerPid, DB}} = get_db(),
+    ?debug("Running CouchBase operation ~p:~p(~p)", [Mod, Fun, Args]),
     case apply(Mod, Fun, [DB | Args]) of
         {error, econnrefused} when Retry > 0 ->
             ?info("Unable to connect to ~p", [DB]),
@@ -1066,6 +1067,8 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
             State#state{last_seq = max(normalize_seq(Seq), LastSeq)}
         catch
+            _:{badmatch, false} ->
+                State;
             _:Reason ->
                 ?error_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
                 State
