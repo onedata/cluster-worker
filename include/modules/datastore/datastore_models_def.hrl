@@ -38,21 +38,21 @@
 %% Description of task to be done
 -record(task_pool, {
     task :: task_manager:task(),
-    owner :: pid(),
+    owner :: undefined | pid(),
     node :: node()
 }).
 
 %% Contents of cert files synced between nodes
 -record(synced_cert, {
-    cert_file_content :: binary(),
-    key_file_content :: binary()
+    cert_file_content :: undefined | binary(),
+    key_file_content :: undefined | binary()
 }).
 
 % Cached info about identities
 -record(cached_identity, {
-    id :: identity:id(),
-    encoded_public_key :: identity:encoded_public_key(),
-    last_update_seconds :: integer()
+    id :: undefined | identity:id(),
+    encoded_public_key :: undefined | identity:encoded_public_key(),
+    last_update_seconds :: undefined | integer()
 }).
 
 -endif.
