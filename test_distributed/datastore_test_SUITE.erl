@@ -51,7 +51,7 @@
     interupt_global_cache_clearing_test/1, disk_only_many_links_test/1, global_only_many_links_test/1,
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
     global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1,
-    globally_cached_foreach_link_test/1, links_scope_proc_mem_test/1]).
+    globally_cached_foreach_link_test/1, links_scope_proc_mem_test/1,  globally_cached_consistency_test/1]).
 -export([utilize_memory/2, update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
 
 all() ->
@@ -69,7 +69,7 @@ all() ->
         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
         create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
         globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test,
-        links_scope_proc_mem_test
+        links_scope_proc_mem_test, globally_cached_consistency_test
     ]).
 
 
@@ -80,6 +80,223 @@ all() ->
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
 
+globally_cached_consistency_test(Config) ->
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+
+    % clean
+    GetAllKeys = fun
+                 ('$end_of_table', Acc) ->
+                     {abort, Acc};
+                 (#document{key = Uuid}, Acc) ->
+                     {next, [Uuid | Acc]}
+             end,
+    {_, AllKeys} = AllKeysAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
+    ?assertMatch({ok, _}, AllKeysAns),
+    lists:foreach(fun(Uuid) ->
+        ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, Uuid]))
+    end, AllKeys),
+
+    ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 100),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
+    ?assertEqual(ok, ?call(Worker2, cache_consistency_controller, delete, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    Key = <<"key_gcct">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+    ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
+    CCCUuid = caches_controller:get_cache_uuid(Key, TestRecord),
+
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    GetLinkName = fun(I) ->
+        list_to_atom("linked_key_gcct" ++ integer_to_list(I))
+    end,
+    GetLinkKey = fun(I) ->
+        list_to_binary("linked_key_gcct" ++ integer_to_list(I))
+    end,
+
+    FlushAndClearLink = fun(I) ->
+        ?assertMatch(ok, ?call(Worker2, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, GetLinkName(I)])),
+        ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, GetLinkName(I)]))
+    end,
+
+    AddDocs = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            LinkedDoc =  #document{
+                key = GetLinkKey(I),
+                value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
+            },
+            ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [LinkedDoc])),
+            ?assertMatch(ok, ?call_store(Worker1, add_links, [
+                ?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(I), LinkedDoc}]
+            ]))
+        end)
+    end,
+    AddDocs(1, 200),
+
+    CheckLinks = fun(Start, End, Sum) ->
+        AccFun = fun(LinkName, _, Acc) ->
+            [LinkName | Acc]
+        end,
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        for(Start, End, fun(I) ->
+            ?assert(lists:member(GetLinkName(I), ListedLinks))
+        end),
+        ?assertMatch(Sum, length(ListedLinks))
+    end,
+    CheckLinksByFetch = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]))
+        end)
+    end,
+    CheckLinks(1, 200, 200),
+    CheckLinksByFetch(1, 200),
+
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    for(10, 20, fun(I) ->
+        FlushAndClearLink(I)
+    end),
+
+    for(22, 23, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [GetLinkName(I)]]))
+    end),
+
+    ?assertMatch({monitored, _, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    CheckLinks(10, 20, 198),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    for(30, 40, fun(I) ->
+        FlushAndClearLink(I)
+    end),
+
+    for(42, 43, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [GetLinkName(I)]]))
+    end),
+
+    ?assertMatch({monitored, _, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    CheckLinksByFetch(30, 40),
+    timer:sleep(timer:seconds(5)), % for posthooks
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    for(50, 100, fun(I) ->
+        FlushAndClearLink(I)
+    end),
+
+    ?assertEqual(not_monitored, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    CheckLinksByFetch(50, 100),
+    timer:sleep(timer:seconds(5)), % for posthooks
+
+    ?assertMatch(not_monitored, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    for(150, 200, fun(I) ->
+        FlushAndClearLink(I)
+    end),
+    CheckLinks(50, 200, 196),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    FlushAndClearDoc = fun(I) ->
+        ?assertMatch(ok, ?call(Worker2, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, GetLinkKey(I)])),
+        ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, GetLinkKey(I)]))
+    end,
+
+    CheckDocs = fun(Start, End, Sum) ->
+        {_, Listed} = FLAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
+        ?assertMatch({ok, _}, FLAns),
+
+        for(Start, End, fun(I) ->
+            ?assert(lists:member(GetLinkKey(I), Listed))
+        end),
+        ?assertMatch(Sum, length(Listed))
+    end,
+    CheckDocsByGet = fun(Start, End) ->
+        for(Start, End, fun(I) ->
+            ?assertMatch({ok, _}, ?call_store(Worker2, get, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetLinkKey(I)]))
+        end)
+    end,
+    CheckDocs(1, 200, 201),
+    CheckDocsByGet(1, 200),
+
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+
+    for(10, 20, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+
+    for(22, 23, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetLinkKey(I)]))
+    end),
+
+    ?assertMatch({monitored, _, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    CheckDocs(10, 20, 199),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    for(30, 40, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+
+    for(42, 43, fun(I) ->
+        ?assertMatch(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetLinkKey(I)]))
+    end),
+
+    ?assertMatch({monitored, _, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    CheckDocsByGet(30, 40),
+    timer:sleep(timer:seconds(5)), % for posthooks
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    for(50, 100, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+
+    ?assertEqual(not_monitored, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    CheckDocsByGet(50, 100),
+    timer:sleep(timer:seconds(5)), % for posthooks
+
+    ?assertEqual(not_monitored, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    for(150, 200, fun(I) ->
+        FlushAndClearDoc(I)
+    end),
+    CheckDocs(50, 200, 197),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
+    ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, CCCUuid])),
+
+    ok.
+
 globally_cached_foreach_link_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
@@ -87,7 +304,6 @@ globally_cached_foreach_link_test(Config) ->
     disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
 
     ModelConfig = TestRecord:model_init(),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
 
     Key = <<"key_gcflt">>,
@@ -122,7 +338,7 @@ globally_cached_foreach_link_test(Config) ->
         ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []])),
 
     ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, <<"key_gcflt2">>]), 6),
-    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [<<"key_gcflt2">>]])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, <<"key_gcflt2">>])),
 
     ?assertMatch({ok, [<<"key_gcflt2">>]},
         ?call_store(Worker1, foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []])),
@@ -330,18 +546,18 @@ links_scope_proc_mem_test(Config) ->
             fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
     end,
     GetAllLinks = fun(Links, MotherScope, OtherScopes) ->
-        AccFun = fun(LinkName, _, Acc) ->
-            [LinkName | Acc]
+        AccFun = fun(LinkName, LinkValue, Acc) ->
+            maps:put(LinkName, LinkValue, Acc)
         end,
         {_, ListedLinks} = FLAns = ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
-            foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, []]]),
+            foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, #{}]]),
         ?assertMatch({ok, _}, FLAns),
 
         lists:foreach(fun(I) ->
-            ?assert(lists:member(GetLinkName(I), ListedLinks))
+            ?assert(maps:is_key(GetLinkName(I), ListedLinks))
         end, Links),
         LinksLength = length(Links),
-        ?assertMatch(LinksLength, length(ListedLinks))
+        ?assertMatch(LinksLength, maps:size(ListedLinks))
     end,
     DeleteLink = fun(I, MotherScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
@@ -515,7 +731,6 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     ModelConfig = TestRecord:model_init(),
 
     Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
@@ -542,7 +757,7 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
 
-    ?assertMatch(ok, ?call(Worker1, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity2])),
     ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
         ?call_store(Worker2, get, [Level,
@@ -598,7 +813,6 @@ create_globally_cached_test(Config) ->
 
     ModelConfig = TestRecord:model_init(),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     Key = <<"key_cgct">>,
     Doc =  #document{
         key = Key,
@@ -607,7 +821,7 @@ create_globally_cached_test(Config) ->
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key]), 6),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({error, already_exists}, ?call(Worker1, TestRecord, create, [Doc])),
 
     ?assertMatch(ok, ?call(Worker2, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
@@ -628,7 +842,7 @@ create_globally_cached_test(Config) ->
     ?assertMatch(ok, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
     ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 6),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, link])),
     ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {link, LinkedDoc}])),
 
     ?assertMatch(ok, ?call(Worker2, PModule, delete_links, [ModelConfig, Key, [link]])),
@@ -740,7 +954,7 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
 
     CheckLinks = fun(Start, End, Sum) ->
         for(Start, End, fun(I) ->
-            ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)])
+            ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)]))
         end),
 
         AccFun = fun(LinkName, _, Acc) ->
@@ -893,6 +1107,7 @@ interupt_global_cache_clearing_test(Config) ->
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     Self = self(),
     spawn_link(fun() ->
+        timer:sleep(2),
         Ans = ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0]),
         Self ! {del_old_key, Ans}
     end),
@@ -1472,15 +1687,15 @@ restoring_cache_from_disk_global_cache_test(Config) ->
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, LinkedKey]), 1),
     ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link]), 1),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, get, [Key])),
     ?assertMatch({ok, true}, ?call(Worker2, CModule, exists, [ModelConfig, Key]), 1),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, update, [Key, #{field1 => 2}])),
     ?assertMatch({ok, true}, ?call(Worker2, CModule, exists, [ModelConfig, Key])),
 
-    ?assertMatch(ok, ?call(Worker2, CModule, delete_links, [ModelConfig, Key, [link]])),
+    ?assertMatch(ok, ?call(Worker2, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, link])),
     ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
     ?assertMatch({ok, _}, ?call(Worker2, CModule, fetch_link, [ModelConfig, Key, link]), 1),
     ok.
@@ -1656,6 +1871,27 @@ clearing_global_cache_test(Config) ->
     ?assertMatch(true, Mem2Node < (Mem0Node + Mem1Node) / 2),
 %%     ?assert(Mem2 < MemTarget),
 
+    % clean
+    GetAllKeys = fun
+                     ('$end_of_table', Acc) ->
+                         {abort, Acc};
+                     (#document{key = Uuid}, Acc) ->
+                         {next, [Uuid | Acc]}
+                 end,
+    {_, AllKeys} = AllKeysAns = ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []]),
+    ?assertMatch({ok, _}, AllKeysAns),
+    lists:foreach(fun(Uuid) ->
+        ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, Uuid]))
+    end, AllKeys),
+
+    ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 100),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0])),
+
+    ?assertMatch({ok, []}, ?call_store(Worker1, list, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetAllKeys, []])),
+    ?assertMatch({ok, []}, ?call_store(Worker1, list, [?GLOBAL_ONLY_LEVEL, TestRecord, GetAllKeys, []])),
+    timer:sleep(timer:seconds(15)), % give couch time to process deletes
+    ?assertMatch({ok, []}, ?call_store(Worker2, list, [?DISK_ONLY_LEVEL, TestRecord, GetAllKeys, []])),
+
     ok.
 
 node_mem(Worker) ->
@@ -1825,7 +2061,6 @@ globally_cached_list_test(Config) ->
 
     TestRecord = ?config(test_record, Config),
     PModule = ?call_store(Node1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Node1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
     ModelConfig = TestRecord:model_init(),
 
     BeforeRetryFun = fun(Keys) ->
@@ -1838,7 +2073,7 @@ globally_cached_list_test(Config) ->
 
     BeforeRetryFun2 = fun(Docs) ->
         lists:map(fun(Key) ->
-            ?assertMatch(ok, ?call(Node1, CModule, delete, [ModelConfig, Key, ?PRED_ALWAYS]))
+            ?assertMatch(ok, ?call(Node1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key]))
         end, Docs)
     end,
     generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
@@ -2138,6 +2373,7 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     Ret0 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
+    Keys0 = lists:map(fun(#document{key = Key}) -> Key end, Objects0),
 
     ObjCount = 424,
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
@@ -2161,7 +2397,7 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
         ?assertMatch({ok, _}, Ret1),
         {ok, Objects1} = Ret1,
         ReceivedKeys = lists:map(fun(#document{key = Key}) ->
-            Key end, Objects1 -- Objects0),
+            Key end, Objects1) -- Keys0,
 
         ?assertMatch(ObjCount, erlang:length(Objects1) - erlang:length(Objects0)),
         ?assertMatch([], ReceivedKeys -- Keys),

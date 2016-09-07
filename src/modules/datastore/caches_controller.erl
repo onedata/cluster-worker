@@ -28,6 +28,8 @@
 -export([delete_old_keys/2, delete_all_keys/1]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
+-export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
+  check_cache_consistency/2, consistency_info_lock/3]).
 
 %%%===================================================================
 %%% API
@@ -134,7 +136,8 @@ get_cache_uuid(Key, ModelName) ->
 %% Decodes uuid to key and model name.
 %% @end
 %%--------------------------------------------------------------------
--spec decode_uuid(binary()) -> {Key :: datastore:key(), ModelName :: model_behaviour:model_type()}.
+-spec decode_uuid(binary()) -> {ModelName :: model_behaviour:model_type(),
+  Key :: datastore:key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}}.
 decode_uuid(Uuid) ->
   binary_to_term(base64:decode(Uuid)).
 
@@ -316,15 +319,18 @@ clear(Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
 
-  Pred =fun() ->
-    case save_clear_info(Level, Uuid) of
-      {ok, _} ->
-        true;
-      _ ->
-        false
-    end
-  end,
-  erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred]).
+  consistency_info_lock(ModelName, Key,
+    fun() ->
+      Pred = fun() ->
+        case save_clear_info(Level, Uuid) of
+          {ok, _} ->
+            save_consistency_info(Level, ModelName, Key);
+          _ ->
+            false
+        end
+      end,
+      erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
+    end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -353,16 +359,141 @@ clear(Level, ModelName, Key, all) ->
 clear(Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
+  CCCUuid = get_cache_uuid(Key, ModelName),
 
-  Pred = fun() ->
-    case save_clear_info(Level, Uuid) of
-      {ok, _} ->
-        true;
-      _ ->
-        false
-    end
-  end,
-  erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred]).
+  consistency_info_lock(CCCUuid, Link,
+    fun() ->
+      Pred = fun() ->
+        case save_clear_info(Level, Uuid) of
+          {ok, _} ->
+            save_consistency_info(Level, CCCUuid, Link);
+          _ ->
+            false
+        end
+      end,
+      erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+    end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves information about restoring doc to memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_consistency_restored_info(Level :: datastore:store_level(), Key :: datastore:ext_key(),
+    ClearedName :: datastore:key() | datastore:link_name()) ->
+  boolean() | datastore:create_error().
+save_consistency_restored_info(Level, Key, ClearedName) ->
+  UpdateFun = fun
+                (#cache_consistency_controller{status = not_monitored}) ->
+                  {error, clearing_not_monitored};
+                (#cache_consistency_controller{cleared_list = CL} = Record) ->
+                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL),
+                    restore_timestamp = os:timestamp()}}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{restore_timestamp = os:timestamp()}},
+
+  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+    {ok, _} ->
+      true;
+    {error, clearing_not_monitored} ->
+      true;
+    Other ->
+      ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+      false
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency will be restored
+%% @end
+%%--------------------------------------------------------------------
+-spec begin_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+begin_consistency_restoring(Level, Key) ->
+  Pid = self(),
+  UpdateFun = fun
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}} = Record) ->
+                  case is_process_alive(RPid) of
+                    true ->
+                      {error, restoring_process_in_progress};
+                    _ ->
+                      {ok, Record#cache_consistency_controller{status = {restoring, Pid},
+                        restore_timestamp = os:timestamp()}}
+                  end;
+                (#cache_consistency_controller{cleared_list = [], status = ok}) ->
+                  {error, consistency_ok};
+                (Record) ->
+                  {ok, Record#cache_consistency_controller{status = {restoring, Pid},
+                    restore_timestamp = os:timestamp()}}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid},
+    restore_timestamp = os:timestamp()}},
+
+  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency restoring has ended
+%% @end
+%%--------------------------------------------------------------------
+-spec end_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+end_consistency_restoring(Level, Key) ->
+  Pid = self(),
+  UpdateFun = fun
+                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}} = Record) ->
+                  case RPid of
+                    Pid ->
+                      {ok, Record#cache_consistency_controller{status = ok}};
+                    _ ->
+                      {error, interupted}
+                  end;
+                (#cache_consistency_controller{status = {restoring, RPid}} = Record) ->
+                  case RPid of
+                    Pid ->
+                      {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
+                    _ ->
+                      {error, interupted}
+                  end;
+                (_) ->
+                  {error, interupted}
+              end,
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks consistency status of Key.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_cache_consistency(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
+  {ok, erlang:timestamp(), erlang:timestamp()}
+  | {monitored, [datastore:key() | datastore:link_name()], erlang:timestamp(), erlang:timestamp()}
+  | not_monitored | no_return().
+check_cache_consistency(Level, Key) ->
+  case cache_consistency_controller:get(Level, Key) of
+    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, last_clearing_time = LCT,
+      restore_timestamp = RT}}} ->
+      {ok, LCT, RT};
+    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, last_clearing_time = LCT,
+      restore_timestamp = RT}}} ->
+      {monitored, CL, LCT, RT};
+    {ok, _} ->
+      not_monitored;
+    {error, {not_found, _}} ->
+      {ok, {0,0,0}, {0,0,0}}
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Critical section for consistency info.
+%% @end
+%%--------------------------------------------------------------------
+-spec consistency_info_lock(Key :: datastore:ext_key(), ClearedName :: datastore:key() | datastore:link_name(),
+    Fun :: fun(() -> term())) -> term().
+consistency_info_lock(Key, ClearedName, Fun) ->
+  critical_section:run([?MODULE, consistency_info, {Key, ClearedName}], Fun).
 
 %%%===================================================================
 %%% Internal functions
@@ -417,6 +548,49 @@ save_high_mem_clear_info(Level, Uuid) ->
   Doc = #document{key = Uuid, value = V},
 
   cache_controller:create_or_update(Level, Doc, UpdateFun).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves information about clearing doc from memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_consistency_info(Level :: datastore:store_level(), Key :: datastore:ext_key(),
+    ClearedName :: datastore:key() | datastore:link_name()) ->
+  boolean() | datastore:create_error().
+save_consistency_info(Level, Key, ClearedName) ->
+  UpdateFun = fun
+    (#cache_consistency_controller{status = not_monitored}) ->
+      {error, clearing_not_monitored};
+    (#cache_consistency_controller{cleared_list = CL} = Record) ->
+      case length(CL) >= ?CLEAR_MONITOR_MAX_SIZE of
+        true ->
+          {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored,
+            last_clearing_time = os:timestamp()}};
+        _ ->
+          case lists:member(ClearedName, CL) of
+            true ->
+              {error, already_cleared};
+            _ ->
+              {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL],
+                last_clearing_time = os:timestamp()}}
+          end
+      end
+  end,
+  V = #cache_consistency_controller{cleared_list = [ClearedName], last_clearing_time = os:timestamp()},
+  Doc = #document{key = Key, value = V},
+
+  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+    {ok, _} ->
+      true;
+    {error, clearing_not_monitored} ->
+      true;
+    {error, already_cleared} ->
+      true;
+    Other ->
+      ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+      false
+  end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -495,15 +669,19 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
 
-    Pred = fun() ->
-      case save_high_mem_clear_info(Level, Uuid) of
-        {ok, _} ->
-          true;
-        _ ->
-          false
-      end
-    end,
-    erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+    CCCUuid = get_cache_uuid(Key, ModelName),
+    consistency_info_lock(CCCUuid, Link,
+      fun() ->
+        Pred = fun() ->
+          case save_high_mem_clear_info(Level, Uuid) of
+            {ok, _} ->
+              save_consistency_info(Level, CCCUuid, Link);
+            _ ->
+              false
+          end
+        end,
+        erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+      end)
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
@@ -515,15 +693,18 @@ safe_delete(Level, ModelName, Key) ->
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(Key, ModelName),
 
-    Pred =fun() ->
-      case save_high_mem_clear_info(Level, Uuid) of
-        {ok, _} ->
-          true;
-        _ ->
-          false
-      end
-    end,
-    erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
+    consistency_info_lock(ModelName, Key,
+      fun() ->
+        Pred =fun() ->
+          case save_high_mem_clear_info(Level, Uuid) of
+            {ok, _} ->
+              save_consistency_info(Level, ModelName, Key);
+            _ ->
+              false
+          end
+        end,
+        erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
+      end)
   catch
     E1:E2 ->
       ?error_stacktrace("Error in cache controller safe_delete. "
