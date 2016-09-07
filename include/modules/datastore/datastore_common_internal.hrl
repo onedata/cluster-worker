@@ -42,7 +42,8 @@
     sync_cache = false :: boolean(),
     mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope(),
     other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
-    link_duplication = false
+    link_duplication = false :: boolean(),
+    sync_enabled = false :: boolean()
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -77,7 +78,8 @@
         mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
         % Function that returns all scopes for links' operations
         other_link_scopes = ScopeFun2, % link_utils:other_scopes_fun()
-        link_duplication = LinkDuplication
+        link_duplication = LinkDuplication,
+        sync_enabled = false
     }
 ).
 

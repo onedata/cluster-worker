@@ -272,18 +272,18 @@ model_init() ->
 'after'(ModelName, get, disk_only, [Key], {ok, Doc}) ->
     Level2 = caches_controller:cache_to_datastore_level(ModelName),
     update_usage_info(Key, ModelName, Doc, Level2);
-'after'(ModelName, get, Level, [Key], {ok, _}) ->
-    update_usage_info(Key, ModelName, Level);
-'after'(ModelName, exists, disk_only, [Key], {ok, true}) ->
-    Level2 = caches_controller:cache_to_datastore_level(ModelName),
-    update_usage_info(Key, ModelName, Level2);
-'after'(ModelName, exists, Level, [Key], {ok, true}) ->
-    update_usage_info(Key, ModelName, Level);
+%%'after'(ModelName, get, Level, [Key], {ok, _}) ->
+%%    update_usage_info(Key, ModelName, Level);
+%%'after'(ModelName, exists, disk_only, [Key], {ok, true}) ->
+%%    Level2 = caches_controller:cache_to_datastore_level(ModelName),
+%%    update_usage_info(Key, ModelName, Level2);
+%%'after'(ModelName, exists, Level, [Key], {ok, true}) ->
+%%    update_usage_info(Key, ModelName, Level);
 'after'(ModelName, fetch_link, disk_only, [Key, LinkName], {ok, Doc}) ->
     Level2 = caches_controller:cache_to_datastore_level(ModelName),
     update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level2);
-'after'(ModelName, fetch_link, Level, [Key, LinkName], {ok, _}) ->
-    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
+%%'after'(ModelName, fetch_link, Level, [Key, LinkName], {ok, _}) ->
+%%    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
 'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
     ok.
 

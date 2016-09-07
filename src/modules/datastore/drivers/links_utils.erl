@@ -192,7 +192,7 @@ save_links_maps(Driver,
                         Other
                 end ;
             {error, {not_found, _}} ->
-                LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = get_scopes(Scope1, Key)}},
+                LinksDoc = #document{key = LDK, value = #links{doc_key = Key, model = ModelName, origin = get_scopes(Scope, Key)}},
                 save_links_maps(Driver, ModelConfig, Key, LinksDoc, LinksList, 1, no_old_checking);
             {error, Reason} ->
                 {error, Reason}
@@ -938,6 +938,8 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
 %% @end
 %%--------------------------------------------------------------------
 -spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: scope()) -> BinKey :: binary().
+links_doc_key_from_scope(Key, <<"#local#">> = Scope) when is_binary(Key) ->
+    <<"nosync_", Key/binary, Scope/binary>>;
 links_doc_key_from_scope(Key, Scope) when is_binary(Key), is_binary(Scope) ->
     <<Key/binary, Scope/binary>>;
 links_doc_key_from_scope(Key, Scope) ->

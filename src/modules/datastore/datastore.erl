@@ -68,7 +68,7 @@
 
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
-    get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
+    get/3, list/4, delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
@@ -268,11 +268,25 @@ list(_Level, Drivers, ModelName, Fun, AccIn) ->
 -spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
     Key :: datastore:ext_key(), Pred :: delete_predicate()) -> ok | datastore:generic_error().
 delete(Level, ModelName, Key, Pred) ->
+    delete(Level, ModelName, Key, Pred, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes #document with given key.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [atom()]) -> ok | datastore:generic_error().
+delete(Level, ModelName, Key, Pred, Opts) ->
     case exec_driver_async(ModelName, Level, delete, [Key, Pred]) of
         ok ->
-            % TODO - make link del asynch when tests will be able to handle it
-%%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-                catch delete_links(Level, Key, ModelName, all),
+            case lists:member(ignore_links, Opts) of
+                true -> ok;
+                false ->
+                    % TODO - make link del asynch when tests will be able to handle it
+                    %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
+                    catch delete_links(Level, Key, ModelName, all)
+            end,
             ok;
         {error, Reason} ->
             {error, Reason}
