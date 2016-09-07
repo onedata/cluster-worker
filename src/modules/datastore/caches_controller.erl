@@ -209,9 +209,14 @@ wait_for_cache_dump(N, {GSize, LSize}) ->
 %%--------------------------------------------------------------------
 -spec cache_to_datastore_level(ModelName :: atom()) -> datastore:store_level().
 cache_to_datastore_level(ModelName) ->
-  case lists:member(ModelName, datastore_config:global_caches()) of
-    true -> ?GLOBAL_ONLY_LEVEL;
-    _ -> ?LOCAL_ONLY_LEVEL
+%%  case lists:member(ModelName, datastore_config:global_caches()) of
+%%    true -> ?GLOBAL_ONLY_LEVEL;
+%%    _ -> ?LOCAL_ONLY_LEVEL
+%%  end.
+  case ModelName of
+    locally_cached_record -> ?LOCAL_ONLY_LEVEL;
+    locally_cached_sync_record -> ?LOCAL_ONLY_LEVEL;
+    _ -> ?GLOBAL_ONLY_LEVEL
   end.
 
 %%--------------------------------------------------------------------
@@ -221,10 +226,11 @@ cache_to_datastore_level(ModelName) ->
 %%--------------------------------------------------------------------
 -spec cache_to_task_level(ModelName :: atom()) -> task_manager:level().
 cache_to_task_level(ModelName) ->
-  case lists:member(ModelName, datastore_config:global_caches()) of
-    true -> ?CLUSTER_LEVEL;
-    _ -> ?NODE_LEVEL
-  end.
+%%  case lists:member(ModelName, datastore_config:global_caches()) of
+%%    true -> ?CLUSTER_LEVEL;
+%%    _ -> ?NODE_LEVEL
+%%  end.
+  ?NON_LEVEL.
 
 %%--------------------------------------------------------------------
 %% @doc
