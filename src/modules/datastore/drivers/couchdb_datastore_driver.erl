@@ -90,7 +90,8 @@ init_bucket(Bucket, Models, _NodeToSync) ->
                 {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER, "'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER, "'], doc); }">>}}
             end, Models))
     }),
-    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
+    {ok, SaveReport} = db_run(couchbeam, save_doc, [Doc], 5),
+    true = verify_ans(SaveReport),
     ok.
 
 %%--------------------------------------------------------------------
@@ -142,8 +143,13 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {_}} ->
-            {ok, Key};
+        {ok, {SaveReport}} ->
+            case verify_ans(SaveReport) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, conflict} ->
             {error, already_exists};
         {error, Reason} ->
@@ -197,8 +203,13 @@ create(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, value 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {_}} ->
-            {ok, Key};
+        {ok, {SaveReport}} ->
+            case verify_ans(SaveReport) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, conflict} ->
             {error, already_exists};
         {error, Reason} ->
@@ -255,10 +266,15 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
 get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
     case db_run(couchbeam, open_doc, [to_driver_key(Bucket, Key)], 3) of
         {ok, {Proplist} = _Doc} ->
-            {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
-            Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
-            Proplist2 = Proplist -- Proplist1,
-            {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
+            case verify_ans(Proplist) of
+                true ->
+                    {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
+                    Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+                    Proplist2 = Proplist -- Proplist1,
+                    {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, {not_found, _}} ->
             {error, {not_found, ModelName}};
         {error, not_found} ->
@@ -304,35 +320,40 @@ list(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Fun, AccIn
     _BinBucket = atom_to_binary(Bucket, utf8),
     case db_run(couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
         {ok, Rows} ->
-            Ret =
-                lists:foldl(
-                    fun({Row}, Acc) ->
-                        try
-                            {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
-                            {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
-                            Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
-                            Value2 = Value -- Value1,
-                            {_, Key} = from_driver_key(KeyBin),
-                            Doc = #document{key = Key, value = from_json_term({Value2})},
-                            case element(1, Doc#document.value) of
-                                ModelName ->
-                                    case Fun(Doc, Acc) of
-                                        {next, NewAcc} ->
-                                            NewAcc;
-                                        {abort, LastAcc} ->
-                                            throw({abort, LastAcc})
-                                    end;
-                                _ ->
-                                    Acc %% Trash entry, skipping
-                            end
-                        catch
-                            {abort, RetAcc} ->
-                                RetAcc; %% Provided function requested end of stream, exiting loop
-                            _:_ ->
-                                Acc %% Invalid entry, skipping
-                        end
-                    end, AccIn, Rows),
-            {ok, Ret};
+            case verify_ans(Rows) of
+                true ->
+                    Ret =
+                        lists:foldl(
+                            fun({Row}, Acc) ->
+                                try
+                                    {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
+                                    {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
+                                    Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
+                                    Value2 = Value -- Value1,
+                                    {_, Key} = from_driver_key(KeyBin),
+                                    Doc = #document{key = Key, value = from_json_term({Value2})},
+                                    case element(1, Doc#document.value) of
+                                        ModelName ->
+                                            case Fun(Doc, Acc) of
+                                                {next, NewAcc} ->
+                                                    NewAcc;
+                                                {abort, LastAcc} ->
+                                                    throw({abort, LastAcc})
+                                            end;
+                                        _ ->
+                                            Acc %% Trash entry, skipping
+                                    end
+                                catch
+                                    {abort, RetAcc} ->
+                                        RetAcc; %% Provided function requested end of stream, exiting loop
+                                    _:_ ->
+                                        Acc %% Invalid entry, skipping
+                                end
+                            end, AccIn, Rows),
+                    {ok, Ret};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, Reason} ->
             {error, Reason}
     end.
@@ -387,8 +408,13 @@ delete_doc(Bucket, #document{key = Key, value = Value, rev = Rev}) ->
     case db_run(couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         ok ->
             ok;
-        {ok, _} ->
-            ok;
+        {ok, DelAns} ->
+            case verify_ans(DelAns) of
+                true ->
+                    ok;
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, key_enoent} ->
             ok;
         {error, Reason} ->
@@ -792,14 +818,21 @@ db_run(Mod, Fun, Args, Retry) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+force_save(#model_config{bucket = Bucket} = ModelConfig,
+    #document{key = Key, rev = {Start, Ids} = Revs, deleted = Del, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del, utf8)} | Props]},
     case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {_}} ->
-            {ok, Key};
+        {ok, {SaveAns}} ->
+            case verify_ans(SaveAns) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, conflict} ->
             {error, already_exists};
         {error, Reason} ->
@@ -998,18 +1031,23 @@ get_with_revs(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, K
     Args = [to_driver_key(Bucket, Key), [{<<"revs">>, <<"true">>}]],
     case db_run(couchbeam, open_doc, Args, 3) of
         {ok, {Proplist} = _Doc} ->
-            Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
-            Proplist2 = Proplist -- Proplist1,
+            case verify_ans(Proplist) of
+                true ->
+                    Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+                    Proplist2 = Proplist -- Proplist1,
 
-            {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, Proplist),
-            {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
-            {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
+                    {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, Proplist),
+                    {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
+                    {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
 
-            {ok, #document{
-                key = Key,
-                value = from_json_term({Proplist2}),
-                rev = {Start, Revs}}
-            };
+                    {ok, #document{
+                        key = Key,
+                        value = from_json_term({Proplist2}),
+                        rev = {Start, Revs}}
+                    };
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, {not_found, _}} ->
             {error, {not_found, ModelName}};
         {error, not_found} ->
@@ -1139,6 +1177,7 @@ process_raw_doc({RawDoc}) ->
     RawDoc1 = [KV || {<<"_", _/binary>>, _} = KV <- RawDoc],
     RawDoc2 = RawDoc -- RawDoc1,
     {ok, {RawRichDoc}} = db_run(couchbeam, open_doc, [RawKey, [{<<"revs">>, <<"true">>}, {<<"rev">>, Rev}]], 3),
+    true = verify_ans(RawRichDoc),
     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, RawRichDoc),
     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
@@ -1249,7 +1288,8 @@ add_view(Id, ViewFunction) ->
             [{Id, #{<<"map">> => ViewFunction}}]
         )
     }),
-    {ok, _} = db_run(couchbeam, save_doc, [Doc], 5),
+    {ok, SaveAns} = db_run(couchbeam, save_doc, [Doc], 5),
+    true = verify_ans(SaveAns),
     ok.
 
 %%--------------------------------------------------------------------
@@ -1303,11 +1343,16 @@ add_view(Id, ViewFunction) ->
 query_view(Id, Options) ->
     case db_run(couchbeam_view, fetch, [{Id, Id}, Options], 3) of
         {ok, List} ->
-            Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
-                {_, DocUuid} = from_driver_key(DbDocId),
-                DocUuid
-            end, List),
-            {ok, Ids};
+            case verify_ans(List) of
+                true ->
+                    Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
+                        {_, DocUuid} = from_driver_key(DbDocId),
+                        DocUuid
+                                    end, List),
+                    {ok, Ids};
+                _ ->
+                    {error, db_internal_error}
+            end;
         Error ->
             Error
     end.
@@ -1322,5 +1367,29 @@ query_view(Id, Options) ->
 -spec delete_view(binary()) -> ok.
 delete_view(Id) ->
 %%    DesignId = <<"_design/", Id/binary>>,
+    % TODO - verify ans
 %%    {ok, _} = couchdb_datastore_driver:db_run(couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
     ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Check if ans is ok
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_ans(term()) -> boolean().
+verify_ans(Ans) when is_list(Ans) ->
+    lists:foldl(fun(E, Acc) ->
+        case Acc of
+            false ->
+                false;
+            _ ->
+                verify_ans(E)
+        end
+    end, true, Ans);
+verify_ans({<<"error">>, _} = Ans) ->
+    ?error("Cauch db error: ~p", [Ans]),
+    false;
+verify_ans({Ans}) ->
+    verify_ans(Ans);
+verify_ans(_Ans) ->
+    true.
