@@ -823,7 +823,7 @@ force_save(#model_config{bucket = Bucket} = ModelConfig,
 
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
-        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del)} | Props]},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del, utf8)} | Props]},
     case db_run(couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {SaveAns}} ->
             case verify_ans(SaveAns) of
