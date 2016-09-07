@@ -80,8 +80,8 @@ init_bucket(_BucketName, Models, NodeToSync) ->
                     };
                 _ -> %% there is at least one mnesia node -> join cluster
                     Tables = [table_name(MName) || MName <- datastore_config:models()] ++
-                             [links_table_name(MName) || MName <- datastore_config:models()] ++
-                             [transaction_table_name(MName) || MName <- datastore_config:models()],
+                        [links_table_name(MName) || MName <- datastore_config:models()] ++
+                        [transaction_table_name(MName) || MName <- datastore_config:models()],
                     ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [Tables, ?MNESIA_WAIT_TIMEOUT]),
                     ExpandTable = fun(TabName) ->
                         case rpc:call(NodeToSync, mnesia, change_config, [extra_db_nodes, [Node]]) of
@@ -114,8 +114,10 @@ init_bucket(_BucketName, Models, NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save(#model_config{} = ModelConfig, #document{key = Key, value = Value} = _Document) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+save(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = _Document) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:save(~p)", [TrxType, ModelName, Key]),
+        log(verbose, "~p -> ~p:save(~p, ~p)", [TrxType, ModelName, Key, Value]),
         ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
         {ok, Key}
     end).
@@ -139,18 +141,21 @@ save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
 update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:update(~p)", [TrxType, ModelName, Key]),
         case mnesia:read(table_name(ModelConfig), Key, write) of
             [] ->
                 {error, {not_found, ModelName}};
             [Value] when is_map(Diff) ->
                 NewValue = maps:merge(datastore_utils:shallow_to_map(strip_key(Value)), Diff),
+                log(verbose, "~p -> ~p:update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
                 ok = mnesia:write(table_name(ModelConfig),
                     inject_key(Key, datastore_utils:shallow_to_record(NewValue)), write),
                 {ok, Key};
             [Value] when is_function(Diff) ->
                 case Diff(strip_key(Value)) of
                     {ok, NewValue} ->
+                        log(verbose, "~p -> ~p:update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
                         ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
                         {ok, Key};
                     {error, Reason} ->
@@ -166,8 +171,10 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+create(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value}) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:create(~p)", [TrxType, ModelName, Key]),
+        log(verbose, "~p -> ~p:create(~p, ~p)", [TrxType, ModelName, Key, Value]),
         case mnesia:read(table_name(ModelConfig), Key) of
             [] ->
                 ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
@@ -184,20 +191,24 @@ create(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Value}, Diff) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value}, Diff) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:create_or_update(~p)", [TrxType, ModelName, Key]),
         case mnesia:read(table_name(ModelConfig), Key, write) of
             [] ->
+                log(verbose, "~p -> ~p:create_or_update(~p, ~p)", [TrxType, ModelName, Key, Value]),
                 ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
                 {ok, Key};
             [OldValue] when is_map(Diff) ->
                 NewValue = maps:merge(datastore_utils:shallow_to_map(strip_key(OldValue)), Diff),
+                log(verbose, "~p -> ~p:create_or_update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
                 ok = mnesia:write(table_name(ModelConfig),
                     inject_key(Key, datastore_utils:shallow_to_record(NewValue)), write),
                 {ok, Key};
             [OldValue] when is_function(Diff) ->
                 case Diff(strip_key(OldValue)) of
                     {ok, NewValue} ->
+                        log(verbose, "~p -> ~p:create_or_update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
                         ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
                         {ok, Key};
                     {error, Reason} ->
@@ -216,8 +227,10 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
 get(#model_config{name = ModelName} = ModelConfig, Key) ->
     TmpAns = case mnesia:is_transaction() of
         true ->
+            log(normal, "transaction -> ~p:get(~p)", [ModelName, Key]),
             mnesia:read(table_name(ModelConfig), Key);
         _ ->
+            log(normal, "dirty -> ~p:get(~p)", [ModelName, Key]),
             mnesia:dirty_read(table_name(ModelConfig), Key)
     end,
     case TmpAns of
@@ -235,8 +248,10 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
     TmpAns = case mnesia:is_transaction() of
         true ->
+            log(normal, "transaction -> ~p:get_link_doc(~p)", [ModelName, Key]),
             mnesia:read(links_table_name(ModelConfig), Key);
         _ ->
+            log(normal, "dirty -> ~p:get_link_doc(~p)", [ModelName, Key]),
             mnesia:dirty_read(links_table_name(ModelConfig), Key)
     end,
     case TmpAns of
@@ -251,13 +266,16 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(ModelConfig, DocKey, Scope) ->
+exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
     Key = links_utils:links_doc_key(DocKey, Scope),
+    LNT = links_table_name(ModelConfig),
     TmpAns = case mnesia:is_transaction() of
         true ->
-            mnesia:read(links_table_name(ModelConfig), Key);
+            log(normal, "transaction -> ~p:exists_link_doc(~p)", [ModelName, Key]),
+            mnesia:read(LNT, Key);
         _ ->
-            mnesia:dirty_read(links_table_name(ModelConfig), Key)
+            log(normal, "dirty -> ~p:exists_link_doc(~p)", [ModelName, Key]),
+            mnesia:dirty_read(LNT, Key)
     end,
     case TmpAns of
         [] -> {ok, false};
@@ -272,9 +290,10 @@ exists_link_doc(ModelConfig, DocKey, Scope) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{} = ModelConfig, Fun, AccIn) ->
+list(#model_config{name = ModelName} = ModelConfig, Fun, AccIn) ->
     SelectAll = [{'_', [], ['$_']}],
-    ToExec = fun() ->
+    ToExec = fun(TrxType) ->
+        log(normal, "~p -> ~p:list()", [TrxType, ModelName]),
         case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
             {Obj, Handle} ->
                 list_next(Obj, Handle, Fun, AccIn);
@@ -284,7 +303,7 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
     end,
     case mnesia:is_transaction() of
         true ->
-            ToExec();
+            ToExec(transaction);
         _ ->
             mnesia_run(async_dirty, ToExec)
     end.
@@ -297,8 +316,10 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
-add_links(#model_config{} = ModelConfig, Key, Links) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+add_links(#model_config{name = ModelName} = ModelConfig, Key, Links) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:add_links(~p)", [TrxType, ModelName, Key]),
+        log(verbose, "~p -> ~p:add_links(~p, ~p)", [TrxType, ModelName, Key, Links]),
         links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
     end).
 
@@ -309,8 +330,10 @@ add_links(#model_config{} = ModelConfig, Key, Links) ->
 %%--------------------------------------------------------------------
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
-create_link(#model_config{} = ModelConfig, Key, Link) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+create_link(#model_config{name = ModelName} = ModelConfig, Key, Link) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:create_link(~p)", [TrxType, ModelName, Key]),
+        log(verbose, "~p -> ~p:create_link(~p, ~p)", [TrxType, ModelName, Key, Link]),
         links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
     end).
 
@@ -331,8 +354,10 @@ delete_links(#model_config{} = ModelConfig, Key, LinkNames) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all,
     datastore:delete_predicate()) -> ok | datastore:generic_error().
-delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+delete_links(#model_config{name = ModelName} = ModelConfig, Key, all, Pred) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:delete_links(~p)", [TrxType, ModelName, Key]),
+        log(verbose, "~p -> ~p:delete_links(~p, ~p)", [TrxType, ModelName, Key, all]),
         case Pred() of
             true ->
                 ok = links_utils:delete_links(?MODULE, ModelConfig, Key);
@@ -340,8 +365,10 @@ delete_links(#model_config{} = ModelConfig, Key, all, Pred) ->
                 ok
         end
     end);
-delete_links(#model_config{} = ModelConfig, Key, Links, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+delete_links(#model_config{name = ModelName} = ModelConfig, Key, Links, Pred) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(brief, "~p -> ~p:delete_links(~p)", [TrxType, ModelName, Key]),
+        log(verbose, "~p -> ~p:delete_links(~p, ~p)", [TrxType, ModelName, Key, Links]),
         case Pred() of
             true ->
                 ok = links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
@@ -410,8 +437,9 @@ list_next([], Handle, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
-delete(#model_config{} = ModelConfig, Key, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun() ->
+delete(#model_config{name = ModelName} = ModelConfig, Key, Pred) ->
+    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
+        log(normal, "~p -> ~p:delete(~p)", [TrxType, ModelName, Key]),
         case Pred() of
             true ->
                 ok = mnesia:delete(table_name(ModelConfig), Key, write);
@@ -438,11 +466,13 @@ delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document)
 %%--------------------------------------------------------------------
 -spec exists(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, boolean()} | datastore:generic_error().
-exists(#model_config{} = ModelConfig, Key) ->
+exists(#model_config{name = ModelName} = ModelConfig, Key) ->
     TmpAns = case mnesia:is_transaction() of
         true ->
+            log(normal, "transaction -> ~p:exists(~p)", [ModelName, Key]),
             mnesia:read(table_name(ModelConfig), Key);
         _ ->
+            log(normal, "dirty -> ~p:exists(~p)", [ModelName, Key]),
             mnesia:dirty_read(table_name(ModelConfig), Key)
     end,
     case TmpAns of
@@ -485,7 +515,8 @@ healthcheck(State) ->
     when Result :: term().
 run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
     mnesia_run(sync_transaction,
-        fun() ->
+        fun(TrxType) ->
+            log(normal, "~p -> ~p:run_transation(~p)", [TrxType, ModelName, ResourceID]),
             Nodes = lists:usort(mnesia:table_info(table_name(ModelName), where_to_write)),
             case mnesia:lock({global, ResourceID, Nodes}, write) of
                 ok ->
@@ -581,9 +612,9 @@ get_key(Tuple) when is_tuple(Tuple) ->
 %% Available methods: sync_dirty, async_dirty, sync_transaction, transaction.
 %% @end
 %%--------------------------------------------------------------------
--spec mnesia_run(Method :: atom(), Fun :: fun(() -> term())) -> term().
+-spec mnesia_run(Method :: atom(), Fun :: fun((atom()) -> term())) -> term().
 mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
-    try mnesia:Method(Fun) of
+    try mnesia:Method(fun() -> Fun(Method) end) of
         Result ->
             Result
     catch
@@ -591,7 +622,7 @@ mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
             {error, Reason}
     end;
 mnesia_run(Method, Fun) when Method =:= sync_transaction; Method =:= transaction ->
-    case mnesia:Method(Fun) of
+    case mnesia:Method(fun() -> Fun(Method) end) of
         {atomic, Result} ->
             Result;
         {aborted, Reason} ->
@@ -612,3 +643,30 @@ maybe_transaction(#model_config{transactional_global_cache = false}, Transaction
     end;
 maybe_transaction(#model_config{transactional_global_cache = true}, TransactionType) ->
     TransactionType.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Logs mnesia cache driver operation if logging type equals 'normal' or match
+%% the settings.
+%% @end
+%%--------------------------------------------------------------------
+-spec log(Type :: brief | verbose | normal, Format :: string(), Args :: list()) -> ok.
+log(normal, Format, Args) ->
+    do_log(Format, Args);
+log(Type, Format, Args) ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, mnesia_cache_driver_log_type) of
+        {ok, Type} -> do_log(Format, Args);
+        _ -> ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Logs mnesia cache driver operation on given level.
+%% @end
+%%--------------------------------------------------------------------
+-spec do_log(Format :: string(), Args :: list()) -> ok.
+do_log(Format, Args) ->
+    LogLevel = application:get_env(?CLUSTER_WORKER_APP_NAME, mnesia_cache_driver_log_level, 0),
+    ?do_log(LogLevel, "[~p] " ++ Format, [?MODULE | Args], false).
