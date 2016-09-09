@@ -105,7 +105,7 @@ listeners() ->
     Pid :: pid(),
     Error :: {already_started, Pid} | term().
 start_link() ->
-    gen_server:start_link({local, ?NODE_MANAGER_NAME}, ?MODULE, [], []).
+    gen_server2:start_link({local, ?NODE_MANAGER_NAME}, ?MODULE, [], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -114,7 +114,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok.
 stop() ->
-    gen_server:cast(?NODE_MANAGER_NAME, stop).
+    gen_server2:cast(?NODE_MANAGER_NAME, stop).
 
 
 %%--------------------------------------------------------------------
@@ -123,7 +123,7 @@ stop() ->
 %% @end
 %%--------------------------------------------------------------------
 get_ip_address() ->
-    gen_server:call(?NODE_MANAGER_NAME, get_ip_address).
+    gen_server2:call(?NODE_MANAGER_NAME, get_ip_address).
 
 
 %%--------------------------------------------------------------------
@@ -132,7 +132,7 @@ get_ip_address() ->
 %% @end
 %%--------------------------------------------------------------------
 refresh_ip_address() ->
-    gen_server:cast(?NODE_MANAGER_NAME, refresh_ip_address).
+    gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -183,7 +183,7 @@ init([]) ->
         next_task_check(),
         ?info("All checks performed"),
 
-        gen_server:cast(self(), connect_to_cm),
+        gen_server2:cast(self(), connect_to_cm),
 
         NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
         MonitoringState = monitoring:start(NodeIP),
@@ -341,7 +341,7 @@ handle_cast(check_cluster_status, State) ->
                 error
         end,
         % Cast cluster status back to node manager
-        gen_server:cast(?NODE_MANAGER_NAME, {cluster_status, Status})
+        gen_server2:cast(?NODE_MANAGER_NAME, {cluster_status, Status})
     end),
     {noreply, State};
 
@@ -396,7 +396,7 @@ handle_cast(_Request, State) ->
     Timeout :: non_neg_integer() | infinity.
 
 handle_info({timer, Msg}, State) ->
-    gen_server:cast(?NODE_MANAGER_NAME, Msg),
+    gen_server2:cast(?NODE_MANAGER_NAME, Msg),
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
@@ -470,7 +470,7 @@ connect_to_cm(State = #state{cm_con_status = registered}) ->
 connect_to_cm(State = #state{cm_con_status = connected}) ->
     % Connected, but not registered (workers did not start), check again in some time
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, cm_connection_retry_period),
-    gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
     erlang:send_after(Interval, self(), {timer, connect_to_cm}),
     State;
 connect_to_cm(State = #state{cm_con_status = not_connected}) ->
@@ -487,7 +487,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
             case (catch init_net_connection(CMNodes)) of
                 ok ->
                     ?info("Initializing connection to cluster manager"),
-                    gen_server:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
+                    gen_server2:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
                     State#state{cm_con_status = connected};
                 Err ->
                     ?debug("No connection with cluster manager: ~p, retrying in ~p ms", [Err, Interval]),
@@ -506,7 +506,7 @@ cm_conn_ack(State = #state{cm_con_status = connected}) ->
     ?info("Successfully connected to cluster manager"),
     init_node(),
     ?info("Node initialized"),
-    gen_server:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     self() ! {timer, check_cluster_status},
@@ -534,7 +534,7 @@ do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, las
     NewLSA = analyse_monitoring_state(NewMonState, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
     ?debug("Sending heartbeat to cluster manager"),
-    gen_server:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA};
 
 % Stop heartbeat if node_manager is not registered in cluster manager
@@ -551,7 +551,7 @@ do_heartbeat(State) ->
 -spec update_lb_advices(State :: #state{}, LBAdvices) -> #state{} when
     LBAdvices :: {load_balancing:dns_lb_advice(), load_balancing:dispatcher_lb_advice()}.
 update_lb_advices(State, {DNSAdvice, DispatcherAdvice}) ->
-    gen_server:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
+    gen_server2:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
     worker_proxy:call({dns_worker, node()}, {update_lb_advice, DNSAdvice}),
     State.
 
@@ -607,13 +607,13 @@ init_workers() ->
             ok = start_worker(Module, Args),
             case Module of
                 datastore_worker ->
-                    {ok, NodeToSync} = gen_server:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
+                    {ok, NodeToSync} = gen_server2:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
                     ok = datastore:ensure_state_loaded(NodeToSync),
                     ?info("Datastore synchronized");
                 _ -> ok
             end;
         ({singleton, Module, Args}) ->
-            case gen_server:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
+            case gen_server2:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
                 ok ->
                     ok = start_worker(Module, Args),
                     ?info("Singleton module ~p started", [Module]);
@@ -662,7 +662,7 @@ start_worker(Module, Args) ->
 free_memory(NodeMem) ->
     try
         ok = plugins:apply(node_manager_plugin, clear_memory, [true]),
-        AvgMem = gen_server:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
+        AvgMem = gen_server2:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
         ClearingOrder = case NodeMem >= AvgMem of
             true ->
                 [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
