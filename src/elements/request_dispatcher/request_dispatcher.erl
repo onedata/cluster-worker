@@ -61,7 +61,7 @@
     Pid :: pid(),
     Error :: {already_started, Pid} | term().
 start_link() ->
-    gen_server:start_link({local, ?DISPATCHER_NAME}, ?MODULE, [], []).
+    gen_server2:start_link({local, ?DISPATCHER_NAME}, ?MODULE, [], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -70,7 +70,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok.
 stop() ->
-    gen_server:cast(?DISPATCHER_NAME, stop).
+    gen_server2:cast(?DISPATCHER_NAME, stop).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -177,7 +177,7 @@ handle_cast(_Request, State) ->
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
 handle_info({timer, Msg}, State) ->
-    gen_server:cast(?DISPATCHER_NAME, Msg),
+    gen_server2:cast(?DISPATCHER_NAME, Msg),
     {noreply, State};
 handle_info(_Request, State) ->
     ?log_bad_request(_Request),
