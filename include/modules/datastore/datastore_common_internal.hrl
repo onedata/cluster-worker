@@ -84,7 +84,7 @@
 ).
 
 %% Max link map size in single links record
--define(LINKS_MAP_MAX_SIZE, 4096).
+-define(LINKS_MAP_MAX_SIZE, 32).
 %% Number of children owned by each link record
 -define(LINKS_TREE_BASE, 128).
 
