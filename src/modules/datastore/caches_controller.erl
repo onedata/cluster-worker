@@ -828,7 +828,13 @@ safe_delete(Level, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec delete_all_keys(Level :: global_only | local_only, Caches :: list()) -> ok | cleared.
 delete_all_keys(Level, Caches) ->
-  {ok, Uuids} = cache_controller:list(Level, 0),
+  Filter = fun
+             ('$end_of_table', Acc) ->
+               {abort, Acc};
+             (#document{key = Uuid}, Acc) ->
+               {next, [Uuid | Acc]}
+           end,
+  {ok, Uuids} = cache_controller:list(Level, Filter, []),
   UuidsNum = length(Uuids),
   lists:foreach(fun(Uuid) ->
     {ModelName, Key} = decode_uuid(Uuid),
