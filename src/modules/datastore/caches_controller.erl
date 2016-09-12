@@ -393,7 +393,7 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
                     restore_timestamp = os:timestamp()}}
               end,
 
-  case cache_consistency_controller:update(Level, UpdateFun) of
+  case cache_consistency_controller:update(Level, Key, UpdateFun) of
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
@@ -616,7 +616,7 @@ save_consistency_info(Level, Key, ClearedName) ->
       end
   end,
 
-  case cache_consistency_controller:update(Level, UpdateFun) of
+  case cache_consistency_controller:update(Level, Key, UpdateFun) of
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
