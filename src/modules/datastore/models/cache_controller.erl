@@ -287,6 +287,16 @@ model_init() ->
     update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level2);
 %%'after'(ModelName, fetch_link, Level, [Key, LinkName], {ok, _}) ->
 %%    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
+'after'(_ModelName, save, disk_only, _Context, _ReturnValue) ->
+    ok;
+'after'(ModelName, save, Level, [#document{generated_uuid = false}], {ok, K}) ->
+    CCCUuid = caches_controller:get_cache_uuid(K, ModelName),
+    caches_controller:init_consistency_info(Level, CCCUuid);
+'after'(_ModelName, create, disk_only, _Context, _ReturnValue) ->
+    ok;
+'after'(ModelName, create, Level, [#document{generated_uuid = false}], {ok, K}) ->
+    CCCUuid = caches_controller:get_cache_uuid(K, ModelName),
+    caches_controller:init_consistency_info(Level, CCCUuid);
 'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
     ok.
 
@@ -308,7 +318,7 @@ before(ModelName, create_or_update, disk_only, [Doc, _Diff] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create_or_update, Args, Level2);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
-before(ModelName, create, Level, [Doc], Level) ->
+before(ModelName, create, Level, [#document{generated_uuid = false} = Doc], Level) ->
     check_create(Doc#document.key, ModelName, Level);
 before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);

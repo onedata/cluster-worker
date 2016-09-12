@@ -29,7 +29,7 @@
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
-  check_cache_consistency/2, consistency_info_lock/3]).
+  check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
 
 %%%===================================================================
 %%% API
@@ -390,16 +390,37 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
                   {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL),
                     restore_timestamp = os:timestamp()}}
               end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{restore_timestamp = os:timestamp()}},
 
-  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+  case cache_consistency_controller:update(Level, UpdateFun) of
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
       true;
+    {error, {not_found, _}} ->
+      true;
     Other ->
       ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
       false
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inits information about cache consistency
+%% @end
+%%--------------------------------------------------------------------
+-spec init_consistency_info(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
+  ok | datastore:create_error().
+init_consistency_info(Level, Key) ->
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  case cache_consistency_controller:create(Level, Doc) of
+    {ok, _} ->
+      ok;
+    {error, already_exists} ->
+      ok;
+    Other ->
+      ?error_stacktrace("Cannot init consistency_restored_info ~p, error: ~p", [{Level, Key}, Other]),
+      Other
   end.
 
 %%--------------------------------------------------------------------
@@ -482,7 +503,7 @@ check_cache_consistency(Level, Key) ->
     {ok, _} ->
       not_monitored;
     {error, {not_found, _}} ->
-      {ok, {0,0,0}, {0,0,0}}
+      not_monitored
   end.
 
 %%--------------------------------------------------------------------
@@ -577,15 +598,15 @@ save_consistency_info(Level, Key, ClearedName) ->
           end
       end
   end,
-  V = #cache_consistency_controller{cleared_list = [ClearedName], last_clearing_time = os:timestamp()},
-  Doc = #document{key = Key, value = V},
 
-  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+  case cache_consistency_controller:update(Level, UpdateFun) of
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
       true;
     {error, already_cleared} ->
+      true;
+    {error, {not_found, _}} ->
       true;
     Other ->
       ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),

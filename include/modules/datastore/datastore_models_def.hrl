@@ -23,6 +23,7 @@
     rev :: term(),
     %% if record has been deleted  (in changes stream)
     deleted = false :: boolean(),
+    generated_uuid = false :: boolean(),
     value :: datastore:value(),
     links :: term()
 }).

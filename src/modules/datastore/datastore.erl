@@ -824,7 +824,7 @@ normalize_link_target({_LinkName, {_TargetKey, ModelName}} = ValidLink) when is_
 %%--------------------------------------------------------------------
 -spec maybe_gen_uuid(document()) -> document().
 maybe_gen_uuid(#document{key = undefined} = Doc) ->
-    Doc#document{key = datastore_utils:gen_uuid()};
+    Doc#document{key = datastore_utils:gen_uuid(), generated_uuid = true};
 maybe_gen_uuid(#document{} = Doc) ->
     Doc.
 
@@ -916,6 +916,40 @@ load_local_state(Models) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Initializes information about caches consistency.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_caches_consistency(Models :: [model_behaviour:model_type()]) -> ok.
+init_caches_consistency(Models) ->
+    lists:foreach(fun(ModelName) ->
+        #model_config{store_level = SL} = ModelName:model_init(),
+        Check = case SL of
+                    ?GLOBALLY_CACHED_LEVEL -> true;
+                    ?LOCALLY_CACHED_LEVEL -> true;
+                    _ -> false
+                end,
+        case Check of
+            true ->
+                CheckFun = fun
+                               (#document{}, _) ->
+                                   {abort, used};
+                               ('$end_of_table', _) ->
+                                   {abort, empty}
+                           end,
+                case exec_driver(ModelName, level_to_driver(?DISK_ONLY_LEVEL), list, [CheckFun, []]) of
+                    empty ->
+                        caches_controller:init_consistency_info(SL, ModelName);
+                    _ ->
+                        ok
+                end;
+            _ ->
+                ok
+        end
+    end, Models).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Organizes given models into #{bucket -> [model]} map.
 %% @end
 %%--------------------------------------------------------------------
@@ -971,8 +1005,10 @@ ensure_state_loaded(NodeToSync) ->
 -spec initialize_state(NodeToSync :: node()) -> ok | {error, Reason :: term()}.
 initialize_state(NodeToSync) ->
     try
-        Configs = load_local_state(datastore_config:models()),
-        init_drivers(Configs, NodeToSync)
+        Models = datastore_config:models(),
+        Configs = load_local_state(Models),
+        init_drivers(Configs, NodeToSync),
+        init_caches_consistency(Models)
     catch
         Type:Reason ->
             ?error_stacktrace("Cannot initialize datastore local state due to"
