@@ -22,7 +22,7 @@
 
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
-    save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
+    save/2, get/2, list/3, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
     list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_get/3,
     check_fetch/3, check_disk_read/4, restore_from_disk/4]).
@@ -156,28 +156,13 @@ list(Level) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns list of records older then DocAge (in ms) that can be deleted from memory.
+%% Returns list of records filtered with provided function.
 %% @end
 %%--------------------------------------------------------------------
--spec list(Level :: datastore:store_level(), DocAge :: integer()) ->
+-spec list(Level :: datastore:store_level(), Filter :: datastore:list_fun(), Acc :: term()) ->
     {ok, [datastore:document()]} | datastore:generic_error() | no_return().
-list(Level, MinDocAge) ->
-    Now = os:timestamp(),
-    Filter = fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (#document{key = Uuid, value = V}, Acc) ->
-            T = V#cache_controller.timestamp,
-            U = V#cache_controller.last_user,
-            Age = timer:now_diff(Now, T),
-            case U of
-                non when Age >= 1000 * MinDocAge ->
-                    {next, [Uuid | Acc]};
-                _ ->
-                    {next, Acc}
-            end
-    end,
-    datastore:list(Level, ?MODEL_NAME, Filter, []).
+list(Level, Filter, Acc) ->
+    datastore:list(Level, ?MODEL_NAME, Filter, Acc).
 
 %%--------------------------------------------------------------------
 %% @doc
