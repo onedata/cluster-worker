@@ -100,8 +100,12 @@
 %% Separator for link name and its scope
 -define(LINK_NAME_SCOPE_SEPARATOR, "#:#").
 
-%% SName of local only link scope (that shall not be synchronized)
+%% Name of local only link scope (that shall not be synchronized)
 -define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
+
+%% Special prefix for keys of documents that shall not be persisted in synchronized bucket
+%% even if its model config says otherwise.
+-define(NOSYNC_KEY_OVERRIDE_PREFIX, <<"nosync_">>).
 
 
 -endif.

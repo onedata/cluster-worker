@@ -39,18 +39,39 @@
 -define(GATEWAY_BASE_PORT_MIN, 12000).
 -define(GATEWAY_BASE_PORT_MAX, 12999).
 
+%% Supported buckets
+-define(DEFAULT_BUCKET, <<"default">>).
+-define(SYNC_ENABLED_BUCKET, <<"sync">>).
+
+-type couchdb_bucket() :: binary().
+-export_type([couchdb_bucket/0]).
+
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/5, normalize_seq/1, transaction_key/2]).
+-export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1, transaction_key/2]).
 
--export([changes_start_link/3, get_with_revs/2]).
+-export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 -export([to_binary/1]).
--export([add_view/2, query_view/2, delete_view/1]).
+-export([add_view/3, query_view/3, delete_view/2]).
+-export([default_bucket/0, sync_enabled_bucket/0]).
+
+%%%===================================================================
+%%% buckets
+%%%===================================================================
+
+-spec default_bucket() -> couchdb_bucket().
+default_bucket() ->
+    ?DEFAULT_BUCKET.
+
+-spec sync_enabled_bucket() -> couchdb_bucket().
+sync_enabled_bucket() ->
+    ?SYNC_ENABLED_BUCKET.
+
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
@@ -63,17 +84,46 @@
 -spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init_driver(#{db_nodes := DBNodes0} = State) ->
     DBNodes = [lists:nth(crypto:rand_uniform(1, length(DBNodes0) + 1), DBNodes0)],
-    Gateways1 = lists:map(
-        fun({N, {Hostname, _Port}}) ->
-            GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, 8091, <<"nosync">>], ?DATASTORE_GATEWAY_SPAWN_TIMEOUT),
-            {N, GWState}
-        end, lists:zip(lists:seq(1, length(DBNodes)), DBNodes)),
-    Gateways2 = lists:map(
-        fun({N, {Hostname, _Port}}) ->
-            GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, 8091, <<"default">>], ?DATASTORE_GATEWAY_SPAWN_TIMEOUT),
-            {N, GWState}
-        end, lists:zip(lists:seq(length(DBNodes) + 1, 2 * length(DBNodes)), DBNodes)),
-    {ok, State#{db_gateways => maps:from_list(Gateways1 ++ Gateways2)}}.
+    Port = 8091,
+
+    BucketInfo = lists:foldl(fun
+            ({Hostname, _}, no_data) ->
+                URL = <<Hostname/binary, ":", (integer_to_binary(Port))/binary, "/pools/default/buckets">>,
+                case http_client:get(URL) of
+                    {ok, 200, _, JSON} ->
+                        json_utils:decode_map(JSON);
+                    Res ->
+                        ?warning("Unable to fetch bucket info from ~p. REST reponse: ~p", [Hostname, Res]),
+                        no_data
+                end;
+            (_, Data) ->
+                Data
+        end, no_data, DBNodes),
+
+    Buckets = case BucketInfo of
+        no_data ->
+            ?warning("Unable to fetch bucket info. Using only default bucket."),
+            [?DEFAULT_BUCKET];
+        JSONData ->
+            lists:map(
+                fun(BucketMap) ->
+                    maps:get(<<"name">>, BucketMap)
+                end, JSONData)
+    end,
+
+    ?info("CouchDB driver initializing with buckets: ~p", [Buckets]),
+
+    AllGateways = lists:foldl(
+        fun({BucketNo, Bucket}, Gateways) ->
+            Gateways ++ lists:map(fun({N, {Hostname, _Port}}) ->
+                GWState = proc_lib:start_link(?MODULE, start_gateway, [self(), N, Hostname, Port, Bucket],
+                    ?DATASTORE_GATEWAY_SPAWN_TIMEOUT),
+                {N, GWState}
+            end, lists:zip(lists:seq((BucketNo - 1) * length(DBNodes) + 1, BucketNo * length(DBNodes)), DBNodes))
+        end, [], lists:zip(lists:seq(1, length(Buckets)), Buckets)),
+
+
+    {ok, State#{db_gateways => maps:from_list(AllGateways), available_buckets => Buckets}}.
 
 
 %%--------------------------------------------------------------------
@@ -83,19 +133,7 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()],
     NodeToSync :: node()) -> ok.
-init_bucket(Bucket, Models, _NodeToSync) ->
-    BinBucket = atom_to_binary(Bucket, utf8),
-    DesignId = <<"_design/", BinBucket/binary>>,
-
-    Doc = to_json_term(#{
-        <<"_id">> => DesignId,
-        <<"views">> => maps:from_list(lists:map(
-            fun(#model_config{name = ModelName}) ->
-                BinModelName = atom_to_binary(ModelName, utf8),
-                {BinModelName, #{<<"map">> => <<"function(doc) { if(doc['", ?RECORD_MARKER, "'] == \"", BinModelName/binary, "\") emit(doc['", ?RECORD_MARKER, "'], doc); }">>}}
-            end, Models))
-    }),
-%%    {ok, _} = db_run(select_bucket(), couchbeam, save_doc, [Doc], 5),
+init_bucket(_Bucket, _Models, _NodeToSync) ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -296,20 +334,17 @@ get(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key) ->
 -spec get(model_behaviour:model_config(), binary(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, BucketOverride, Key) ->
-    ?info("GET1 ~p", [{BucketOverride, Key}]),
     case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key)], 3) of
         {ok, {Proplist} = _Doc} ->
             {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
             Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
             Proplist2 = Proplist -- Proplist1,
-            ?info("GET2 ~p", [{BucketOverride, Key, from_json_term({Proplist2}), Rev}]),
             {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
         {error, {not_found, _}} ->
             {error, {not_found, ModelName}};
         {error, not_found} ->
             {error, {not_found, ModelName}};
         {error, Reason} ->
-            ?info("GET3 ~p", [{BucketOverride, Key, Reason}]),
             {error, Reason}
     end.
 
@@ -430,12 +465,11 @@ delete_link_doc(ModelConfig, Doc) ->
 %% Deletes document not using transactions.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_doc(datastore:bucket(), datastore:ext_key()) ->
+-spec delete_doc(model_behaviour:model_config(), datastore:ext_key()) ->
     ok | datastore:generic_error().
-delete_doc(ModelConfig = #model_config{bucket = Bucket}, Cos = #document{key = Key, value = Value, rev = Rev} = ToDel) ->
+delete_doc(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, value = Value, rev = Rev} = ToDel) ->
     {Props} = to_json_term(Value),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
-    ?info("DEL DOC ~p", [Cos]),
     case db_run(select_bucket(ModelConfig, ToDel), couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         ok ->
             ok;
@@ -575,7 +609,7 @@ foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
 -spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
 healthcheck(_State) ->
     try
-        case get_server(<<"default">>) of
+        case get_server(?DEFAULT_BUCKET) of
             {ok, _} -> ok;
             {error, Reason} ->
                 {error, Reason}
@@ -775,7 +809,6 @@ get_db(Bucket) ->
             {error, Reason};
         {ok, {ServerLoop, Server}} ->
             try
-%%                ?info("CDB ~p", [{Bucket, couchbeam:create_db(Server, Bucket)}]),
                 {ok, DB} = couchbeam:open_db(Server, Bucket, [{recv_timeout, timer:minutes(5)}]),
                 {ok, {ServerLoop, DB}}
             catch
@@ -807,7 +840,6 @@ get_server(DBGateways, Bucket) ->
     Gateways = maps:values(DBGateways),
     ActiveGateways = [GW || #{status := running, bucket := LBucket} = GW <- Gateways, LBucket =:= Bucket],
 
-%%    ?info("Get SERVER ~p", [{DBGateways, Bucket, ActiveGateways}]),
     case ActiveGateways of
         [] ->
             ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
@@ -823,7 +855,11 @@ get_server(DBGateways, Bucket) ->
             end
     end.
 
--spec db_run(binary(), atom(), atom(), [term()], non_neg_integer()) -> term().
+-spec db_run(atom(), atom(), [term()], non_neg_integer()) -> term().
+db_run(Mod, Fun, Args, Retry) ->
+    db_run(default_bucket(), Mod, Fun, Args, Retry).
+
+-spec db_run(couchdb_bucket(), atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Bucket, Mod, Fun, Args, Retry) ->
     {ok, {ServerPid, DB}} = get_db(Bucket),
     ?debug("Running CouchBase operation ~p:~p(~p)", [Mod, Fun, Args]),
@@ -882,7 +918,6 @@ force_save(#model_config{bucket = Bucket} = ModelConfig,
     {ok, datastore:ext_key()} | datastore:generic_error().
 force_save(#model_config{bucket = Bucket} = ModelConfig, BucketOverride, ToSave = #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
-    ?info("FORCE SAVE DOC ~p", [{BucketOverride, ToSave}]),
     {Props} = to_json_term(Value),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
@@ -1337,8 +1372,8 @@ assert_value_size(Value, ModelConfig, Key) ->
 %% that will be queried with get_view function later.
 %% @end
 %%--------------------------------------------------------------------
--spec add_view(binary(), binary()) -> ok.
-add_view(Id, ViewFunction) ->
+-spec add_view(ModelName :: model_behaviour:model_type(), binary(), binary()) -> ok.
+add_view(ModelName, Id, ViewFunction) ->
     DesignId = <<"_design/", Id/binary>>,
 
     Doc = to_json_term(#{
@@ -1347,7 +1382,7 @@ add_view(Id, ViewFunction) ->
             [{Id, #{<<"map">> => ViewFunction}}]
         )
     }),
-    {ok, SaveAns} = db_run(select_bucket(), couchbeam, save_doc, [Doc], 5),
+    {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [Doc], 5),
     true = verify_ans(SaveAns),
     ok.
 
@@ -1398,9 +1433,9 @@ add_view(Id, ViewFunction) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec query_view(binary(), list()) -> {ok, [binary()]}.
-query_view(Id, Options) ->
-    case db_run(select_bucket(), couchbeam_view, fetch, [{Id, Id}, Options], 3) of
+-spec query_view(ModelName :: model_behaviour:model_type(), binary(), list()) -> {ok, [binary()]}.
+query_view(ModelName, Id, Options) ->
+    case db_run(select_bucket(ModelName:model_init()), couchbeam_view, fetch, [{Id, Id}, Options], 3) of
         {ok, List} ->
             case verify_ans(List) of
                 true ->
@@ -1423,35 +1458,42 @@ query_view(Id, Options) ->
 %% @end
 %% @TODO TODO
 %%--------------------------------------------------------------------
--spec delete_view(binary()) -> ok.
-delete_view(Id) ->
+-spec delete_view(ModelName :: model_behaviour:model_type(), binary()) -> ok.
+delete_view(_ModelName, _Id) ->
 %%    DesignId = <<"_design/", Id/binary>>,
     % TODO - verify ans
-%%    {ok, _} = couchdb_datastore_driver:db_run(select_bucket(), couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
+%%    {ok, _} = couchdb_datastore_driver:db_run(select_bucket(ModelName:model_init()), couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
     ok.
 
+
+-spec transaction_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
 transaction_key(#model_config{bucket = Bucket}, Key) ->
     to_binary({?MODULE, Bucket, Key}).
 
 
-select_bucket() ->
-    <<"default">>.
+-spec select_bucket(model_behaviour:model_config()) -> couchdb_bucket().
+select_bucket(ModelConfig) ->
+    select_bucket(ModelConfig, undefined).
 
+-spec select_bucket(model_behaviour:model_config(), datastore:ext_key() | undefined) ->
+    couchdb_bucket().
 select_bucket(ModelConfig, #document{key = Key}) ->
     select_bucket(ModelConfig, Key);
 select_bucket(#model_config{sync_enabled = true}, {nosync, _}) ->
-    <<"nosync">>;
+    default_bucket();
 select_bucket(#model_config{sync_enabled = true}, Key) when is_binary(Key) ->
-    case binary:match(Key, <<"nosync_">>) of
+    case binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of
         nomatch ->
-            <<"default">>;
+            sync_enabled_bucket();
         _ ->
-            <<"nosync">>
+            default_bucket()
     end;
-select_bucket(#model_config{sync_enabled = true}, Key) ->
-    <<"default">>;
-select_bucket(#model_config{}, Key) ->
-    <<"nosync">>.
+select_bucket(#model_config{sync_enabled = true}, _Key) ->
+    sync_enabled_bucket();
+select_bucket(#model_config{}, _Key) ->
+    default_bucket().
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Check if ans is ok

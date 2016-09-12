@@ -438,7 +438,8 @@ links_scope_test(Config) ->
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
     set_mother_scope(scope2),
-    GetAllLinks([]),
+    GetAllLinks([2,3,4]),
+    DeleteLinks([2,3,4]),
     AddLink(2),
     AddLink(3),
     AddLink(4),
@@ -461,7 +462,7 @@ links_scope_test(Config) ->
     ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
     set_mother_scope(scope1),
-    DeleteLinks([3, 7, 100]),
+    DeleteLinks([3, 7, 100, 5, 6]),
     GetAllLinks([2,4]),
     ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}])),
     AddLinkWithDoc(8),
@@ -579,7 +580,8 @@ links_scope_proc_mem_test(Config) ->
     DeleteLinkAndCheck(100, scope1, []),
     GetAllLinks([2,3,4], scope1, []),
 
-    GetAllLinks([], scope2, []),
+    GetAllLinks([2,3,4], scope2, []),
+    DeleteLinks([2,3,4], scope2, []),
 
     AddLink(2, scope2, []),
     AddLink(3, scope2, []),
@@ -597,11 +599,10 @@ links_scope_proc_mem_test(Config) ->
     FetchLink(7, scope2, []),
     GetAllLinks([2,3,4,5,6,7], scope2, []),
     DeleteLinks([3, 7, 100], scope2, []),
-    GetAllLinks([2,4,5,6], scope2, []),
 
 
-    GetAllLinks([2,3,4], scope1, []),
-    DeleteLinks([3, 7, 100], scope1, []),
+    GetAllLinks([2,4,5,6], scope1, []),
+    DeleteLinks([3, 7, 100, 5,6], scope1, []),
     ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
         create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}]])),
     AddLinkWithDoc(8, scope1, []),
@@ -617,7 +618,7 @@ links_scope_proc_mem_test(Config) ->
         fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(2)]])),
 
 
-    DeleteLinks([2,4,5,6], scope2, []),
+    DeleteLinks([2,4,5,6,8], scope2, []),
     GetAllLinks([], scope2, []),
 
     ok.
@@ -633,13 +634,6 @@ execute_with_link_context(MotherScope, OtherScopes, Module, Op, Args) ->
 set_mother_scope(MotherScope) ->
     Pid = get(?SCOPE_MASTER_PROC_NAME),
     Pid ! {set_mother_scope, self(), MotherScope},
-    receive
-        scope_changed -> ok
-    end.
-
-set_other_scopes(OtherScopes) ->
-    Pid = get(?SCOPE_MASTER_PROC_NAME),
-    Pid ! {set_other_scopes, self(), OtherScopes},
     receive
         scope_changed -> ok
     end.

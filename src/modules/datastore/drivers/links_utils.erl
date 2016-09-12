@@ -939,7 +939,7 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
 %%--------------------------------------------------------------------
 -spec links_doc_key_from_scope(Key :: datastore:key(), Scope :: scope()) -> BinKey :: binary().
 links_doc_key_from_scope(Key, <<"#local#">> = Scope) when is_binary(Key) ->
-    <<"nosync_", Key/binary, Scope/binary>>;
+    <<?NOSYNC_KEY_OVERRIDE_PREFIX/binary, Key/binary, Scope/binary>>;
 links_doc_key_from_scope(Key, Scope) when is_binary(Key), is_binary(Scope) ->
     <<Key/binary, Scope/binary>>;
 links_doc_key_from_scope(Key, Scope) ->
@@ -991,7 +991,7 @@ add_non_existing_to_map(_Driver, _ModelConfig, _Key, _LDK, _GetAns, _Link, _KeyN
 %% Get scopes.
 %% @end
 %%--------------------------------------------------------------------
--spec get_scopes(ScopesGetter :: mother_scope() | other_scopes(), datastore:key()) -> scope() | [scope()].
+-spec get_scopes(ScopesGetter :: mother_scope() | other_scopes() | scope(), datastore:key()) -> scope() | [scope()].
 get_scopes(ScopesGetter, _) when is_atom(ScopesGetter) ->
     get(ScopesGetter);
 get_scopes(ScopesGetter, Key) when is_function(ScopesGetter) ->
