@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Model that is used to controle memory utilization by caches.
+%%% @doc Model that is used to control memory utilization by caches.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(cache_controller).
@@ -24,7 +24,8 @@
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
     save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
-    list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_fetch/3, check_disk_read/4]).
+    list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_get/3,
+    check_fetch/3, check_disk_read/4, restore_from_disk/4]).
 
 
 %%%===================================================================
@@ -189,6 +190,8 @@ list_docs_to_be_dumped(Level) ->
     Filter = fun
         ('$end_of_table', Acc) ->
             {abort, Acc};
+        (#document{key = Uuid, value = #cache_controller{last_user = non, action = to_be_del}}, Acc) ->
+            {next, [Uuid | Acc]};
         (#document{value = #cache_controller{last_user = non}}, Acc) ->
             {next, Acc};
         % TODO check how old is clear and clear if possible
@@ -391,17 +394,48 @@ update_usage_info(Key, ModelName, Level) ->
 %%--------------------------------------------------------------------
 -spec update_usage_info(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
-update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
-    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level),
-    ModelConfig = ModelName:model_init(),
-    FullArgs = [ModelConfig, Key, {LinkName, Doc}],
-    erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs);
+    boolean() | datastore:generic_error().
 update_usage_info(Key, ModelName, Doc, Level) ->
     update_usage_info(Key, ModelName, Level),
+    restore_from_disk(Key, ModelName, Doc, Level).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Reads from disk and saves to memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec restore_from_disk(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
+    ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
+    boolean() | datastore:generic_error().
+restore_from_disk({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
+    ModelConfig = ModelName:model_init(),
+    FullArgs = [ModelConfig, Key, {LinkName, Doc}],
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    caches_controller:consistency_info_lock(CCCUuid, LinkName,
+        fun() ->
+            case erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs) of
+                ok ->
+                    caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                {error, already_exists} ->
+                    caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                Error ->
+                    Error
+            end
+        end);
+restore_from_disk(Key, ModelName, Doc, Level) ->
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Doc],
-    erlang:apply(datastore:level_to_driver(Level), create, FullArgs).
+    caches_controller:consistency_info_lock(ModelName, Key,
+        fun() ->
+            case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of
+                {ok, _} ->
+                    caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+                {error, already_exists} ->
+                    caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+                Error ->
+                    Error
+            end
+        end).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -412,7 +446,19 @@ update_usage_info(Key, ModelName, Doc, Level) ->
 -spec check_get(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level()) -> ok | {error, {not_found, model_behaviour:model_type()}}.
 check_get(Key, ModelName, Level) ->
-    check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}}).
+    case caches_controller:check_cache_consistency(Level, ModelName) of
+        {ok, _, _} ->
+            {error, {not_found, ModelName}};
+        {monitored, ClearedList, _, _} ->
+            case lists:member(Key, ClearedList) of
+                true ->
+                    check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}});
+                _ ->
+                    {error, {not_found, ModelName}}
+            end;
+        _ ->
+            check_disk_read(Key, ModelName, Level, {error, {not_found, ModelName}})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -423,7 +469,19 @@ check_get(Key, ModelName, Level) ->
 -spec check_exists(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level()) -> ok | {ok, false}.
 check_exists(Key, ModelName, Level) ->
-    check_disk_read(Key, ModelName, Level, {ok, false}).
+    case caches_controller:check_cache_consistency(Level, ModelName) of
+        {ok, _, _} ->
+            {ok, false};
+        {monitored, ClearedList, _, _} ->
+            case lists:member(Key, ClearedList) of
+                true ->
+                    check_disk_read(Key, ModelName, Level, {ok, false});
+                _ ->
+                    {ok, false}
+            end;
+        _ ->
+            check_disk_read(Key, ModelName, Level, {ok, false})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -433,8 +491,21 @@ check_exists(Key, ModelName, Level) ->
 %%--------------------------------------------------------------------
 -spec check_fetch(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) -> ok | {error, link_not_found}.
-check_fetch(Key, ModelName, Level) ->
-    check_disk_read(Key, ModelName, Level, {error, link_not_found}).
+check_fetch({Key, LinkName, cache_controller_link_key} = CacheKey, ModelName, Level) ->
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    case caches_controller:check_cache_consistency(Level, CCCUuid) of
+        {ok, _, _} ->
+            {error, link_not_found};
+        {monitored, ClearedList, _, _} ->
+            case lists:member(LinkName, ClearedList) of
+                true ->
+                    check_disk_read(CacheKey, ModelName, Level, {error, link_not_found});
+                _ ->
+                    {error, link_not_found}
+            end;
+        _ ->
+            check_disk_read(CacheKey, ModelName, Level, {error, link_not_found})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -468,26 +539,41 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
 -spec delete_dump_info(Uuid :: binary(), Owner :: list(), Level :: datastore:store_level()) ->
     ok | datastore:generic_error().
 delete_dump_info(Uuid, Owner, Level) ->
-    Pred = fun() ->
-        {LastUser, Action} = case get(Level, Uuid) of
-                       {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                           {LU, A};
-                       {error, {not_found, _}} ->
-                           {non, non}
-                   end,
-
-        case {LastUser, Action} of
-            {_, to_be_del} ->
-                false;
-            {Owner, _} ->
-                true;
-            {non, _} ->
-                true;
-            _ ->
-                false
-        end
+    {CCCUuid, ClearName} = case caches_controller:decode_uuid(Uuid) of
+        {ModelName, {Key, Link, cache_controller_link_key}} ->
+            {caches_controller:get_cache_uuid(Key, ModelName), Link};
+        {ModelName, Key} ->
+            {ModelName, Key}
     end,
-    delete(Level, Uuid, Pred).
+    caches_controller:consistency_info_lock(CCCUuid, ClearName,
+        fun() ->
+            Pred = fun() ->
+                {LastUser, Action} = case get(Level, Uuid) of
+                               {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                                   {LU, A};
+                               {error, {not_found, _}} ->
+                                   {non, non}
+                           end,
+
+                Ans1 = case {LastUser, Action} of
+                    {_, to_be_del} ->
+                        false;
+                    {Owner, _} ->
+                        true;
+                    {non, _} ->
+                        true;
+                    _ ->
+                        false
+                end,
+                case Ans1 of
+                    true ->
+                        caches_controller:save_consistency_restored_info(Level, CCCUuid, ClearName);
+                    _ ->
+                        Ans1
+                end
+            end,
+            delete(Level, Uuid, Pred)
+        end).
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -918,25 +1004,39 @@ before_del(Key, ModelName, Level, _Op) ->
 -spec check_create(Key :: datastore:ext_key(), ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level()) -> ok | datastore:generic_error().
 check_create(Key, ModelName, Level) ->
-    Uuid = caches_controller:get_cache_uuid(Key, ModelName),
-    Check = case get(Level, Uuid) of
-                {ok, Doc2} ->
-                    Value = Doc2#document.value,
-                    Action = Value#cache_controller.action,
-                    not ((Action =:= delete) orelse (Action =:= to_be_del));
-                {error, {not_found, _}} ->
-                    true
-            end,
-    case Check of
+    Proceed = case caches_controller:check_cache_consistency(Level, ModelName) of
+        {ok, _, _} ->
+            false;
+        {monitored, ClearedList, _, _} ->
+            lists:member(Key, ClearedList);
+        _ ->
+            true
+    end,
+
+    case Proceed of
         true ->
-            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
-                exists, [ModelName:model_init(), Key]) of
-                {ok, false} ->
-                    ok;
-                {ok, true} ->
-                    {error, already_exists};
-                Other ->
-                    Other
+            Uuid = caches_controller:get_cache_uuid(Key, ModelName),
+            Check = case get(Level, Uuid) of
+                        {ok, Doc2} ->
+                            Value = Doc2#document.value,
+                            Action = Value#cache_controller.action,
+                            not ((Action =:= delete) orelse (Action =:= to_be_del));
+                        {error, {not_found, _}} ->
+                            true
+                    end,
+            case Check of
+                true ->
+                    case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                        exists, [ModelName:model_init(), Key]) of
+                        {ok, false} ->
+                            ok;
+                        {ok, true} ->
+                            {error, already_exists};
+                        Other ->
+                            Other
+                    end;
+                _ ->
+                    ok
             end;
         _ ->
             ok
@@ -952,25 +1052,40 @@ check_create(Key, ModelName, Level) ->
     ModelName :: model_behaviour:model_type(), Level :: datastore:store_level()) ->
     ok | datastore:generic_error().
 check_link_create(Key, LinkName, ModelName, Level) ->
-    Uuid = caches_controller:get_cache_uuid({Key, LinkName, cache_controller_link_key}, ModelName),
-    Check = case get(Level, Uuid) of
-                {ok, Doc2} ->
-                    Value = Doc2#document.value,
-                    Action = Value#cache_controller.action,
-                    not ((Action =:= delete_links) orelse (Action =:= to_be_del));
-                {error, {not_found, _}} ->
-                    true
-            end,
-    case Check of
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    Proceed = case caches_controller:check_cache_consistency(Level, CCCUuid) of
+                  {ok, _, _} ->
+                      false;
+                  {monitored, ClearedList, _, _} ->
+                      lists:member(LinkName, ClearedList);
+                  _ ->
+                      true
+              end,
+
+    case Proceed of
         true ->
-            case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
-                fetch_link, [ModelName:model_init(), Key, LinkName]) of
-                {error, link_not_found} ->
-                    ok;
-                {ok, _} ->
-                    {error, already_exists};
-                Other ->
-                    Other
+            Uuid = caches_controller:get_cache_uuid({Key, LinkName, cache_controller_link_key}, ModelName),
+            Check = case get(Level, Uuid) of
+                        {ok, Doc2} ->
+                            Value = Doc2#document.value,
+                            Action = Value#cache_controller.action,
+                            not ((Action =:= delete_links) orelse (Action =:= to_be_del));
+                        {error, {not_found, _}} ->
+                            true
+                    end,
+            case Check of
+                true ->
+                    case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
+                        fetch_link, [ModelName:model_init(), Key, LinkName]) of
+                        {error, link_not_found} ->
+                            ok;
+                        {ok, _} ->
+                            {error, already_exists};
+                        Other ->
+                            Other
+                    end;
+                _ ->
+                    ok
             end;
         _ ->
             ok
