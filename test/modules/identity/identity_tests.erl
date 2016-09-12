@@ -22,7 +22,7 @@
 -define(CACHE_ENV, db_data).
 -define(REPO_ENV, repo_data).
 
--define(SAMPLE_CERT_FILE, "../certs/onedataServerWeb.pem").
+-define(SAMPLE_CERT_FILE, "certs/onedataServerWeb.pem").
 
 %%%===================================================================
 %%% Tests description

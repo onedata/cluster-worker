@@ -826,6 +826,7 @@ get_server(DBGateways, Bucket) ->
 -spec db_run(binary(), atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Bucket, Mod, Fun, Args, Retry) ->
     {ok, {ServerPid, DB}} = get_db(Bucket),
+    ?debug("Running CouchBase operation ~p:~p(~p)", [Mod, Fun, Args]),
     case apply(Mod, Fun, [DB | Args]) of
         {error, econnrefused} when Retry > 0 ->
             ?info("Unable to connect to ~p", [DB]),
