@@ -31,6 +31,8 @@
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
 
+-define(CLEAR_BATCH_SIZE, 100).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -641,13 +643,13 @@ delete_old_keys(Level, Caches, TimeWindow) ->
              ('$end_of_table', {Count, _BatchNum}) ->
                {abort, Count};
              (#document{key = Uuid, value = V}, {Count, BatchNum0}) ->
-               {Stop, BatchNum} = case Count rem 100 of
+               {Stop, BatchNum} = case Count rem ?CLEAR_BATCH_SIZE of
                  0 ->
                    case Count of
                      0 ->
                        ok;
                      _ ->
-                       count_clear_acc(Count, BatchNum0)
+                       count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
                    end,
 
                    case monitoring:get_memory_stats() of
@@ -716,13 +718,13 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                    ('$end_of_table', {Count, _}) ->
                      {abort, Count};
                    (#document{key = Uuid}, {Count, BatchNum0}) ->
-                     BatchNum = case Count rem 100 of
+                     BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
                                   0 ->
                                     case Count of
                                       0 ->
                                         ok;
                                       _ ->
-                                        count_clear_acc(Count, BatchNum0)
+                                        count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
                                     end,
                                     BatchNum0 + 1;
                                   _ ->
@@ -758,7 +760,7 @@ count_clear_acc(Count, BatchNum) ->
     {doc_cleared, BatchNum} ->
       count_clear_acc(Count - 1, BatchNum)
   after timer:minutes(1) ->
-    ?warning("Not cleared old cache for batch num ~p", [BatchNum]),
+    ?warning("Not cleared old cache for batch num ~p, current count ~p", [BatchNum, Count]),
     ok
   end.
 
