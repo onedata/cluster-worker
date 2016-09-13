@@ -113,7 +113,7 @@ clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
 -spec get_hooks_config(Models :: list()) -> list().
 get_hooks_config(Models) ->
   Methods = [save, get, exists, delete, update, create, create_or_update,
-    fetch_link, add_links, create_link, delete_links],
+    fetch_link, add_links, set_links, create_link, delete_links],
   lists:foldl(fun(Model, Ans) ->
     ModelConfig = lists:map(fun(Method) ->
       {Model, Method}

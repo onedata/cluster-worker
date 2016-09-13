@@ -49,7 +49,7 @@
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1, transaction_key/2]).
 
@@ -514,7 +514,22 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
     datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
         fun() ->
-            links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links)
+            links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
+        end
+    ).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback set_links/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+    ok | datastore:generic_error().
+set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
+    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+        fun() ->
+            links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, set)
         end
     ).
 
@@ -546,13 +561,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
-                    links_utils:save_links_maps(?MODULE, ModelConfig, Key, [Link]);
+                    links_utils:save_links_maps(?MODULE, ModelConfig, Key, [Link], set);
                 {error, Reason} ->
                     {error, Reason};
                 {ok, LinkTarget} ->
                     case UpdateFun(LinkTarget) of
                         {ok, NewLinkValue} ->
-                            links_utils:save_links_maps(?MODULE, ModelConfig, Key, [{LinkName, NewLinkValue}]);
+                            links_utils:save_links_maps(?MODULE, ModelConfig, Key, [{LinkName, NewLinkValue}], set);
                         Other ->
                             Other
                     end

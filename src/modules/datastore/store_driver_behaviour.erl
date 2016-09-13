@@ -118,6 +118,15 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Sets, overrides given links to the document with given key.
+%% @end
+%%--------------------------------------------------------------------
+-callback set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+    ok | datastore:generic_error() | no_return().
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Adds given links to the document with given key if this link does not exist.
 %% @end
 %%--------------------------------------------------------------------

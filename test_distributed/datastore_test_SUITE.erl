@@ -2262,7 +2262,7 @@ generic_links_test(Config, Level) ->
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc3])),
 
     ?assertMatch(ok, ?call_store(Worker2, add_links, [
-        Level, Doc1, [{link2, Doc2}, {link3, Doc3}]
+        Level, Doc1, [{link3, Doc2}, {link2, Doc3}]
     ])),
 
     %% Fetch all links and theirs targets
@@ -2271,10 +2271,26 @@ generic_links_test(Config, Level) ->
     Ret2 = ?call_store(Worker2, fetch_link, [Level, Doc1, link2]),
     Ret3 = ?call_store(Worker1, fetch_link, [Level, Doc1, link3]),
 
-    ?assertMatch({ok, {Key2, TestRecord}}, Ret2),
-    ?assertMatch({ok, {Key3, TestRecord}}, Ret3),
-    ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret0),
-    ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret1),
+    ?assertMatch({ok, {Key3, TestRecord}}, Ret2),
+    ?assertMatch({ok, {Key2, TestRecord}}, Ret3),
+    ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret0),
+    ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret1),
+
+    ?assertMatch(ok, ?call_store(Worker2, set_links, [
+        Level, Doc1, [{link2, Doc2}, {link3, Doc3}]
+    ])),
+
+    %% Fetch all links and theirs targets
+    Ret00 = ?call_store(Worker2, fetch_link_target, [Level, Doc1, link2]),
+    Ret01 = ?call_store(Worker1, fetch_link_target, [Level, Doc1, link3]),
+    Ret02 = ?call_store(Worker2, fetch_link, [Level, Doc1, link2]),
+    Ret03 = ?call_store(Worker1, fetch_link, [Level, Doc1, link3]),
+
+    ?assertMatch({ok, {Key2, TestRecord}}, Ret02),
+    ?assertMatch({ok, {Key3, TestRecord}}, Ret03),
+    ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret00),
+    ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret01),
+
 
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc1, [link2, link3]])),
 
@@ -2309,7 +2325,6 @@ generic_links_test(Config, Level) ->
     ), 10),
 
     %% Delete on document shall delete all its links
-    ct:print("DELETE ~p", [Key1]),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key1])),
 
     ?assertMatch({error, link_not_found}, ?call_store(

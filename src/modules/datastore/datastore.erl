@@ -465,7 +465,11 @@ add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
+    Method = case LinkDuplication of
+        true    -> add_links;
+        false   -> set_links
+    end,
+    exec_driver_async(ModelName, Level, Method, [Key, NormalizedLinks]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -489,10 +493,7 @@ set_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
 set_links(Level, Key, ModelName, Links) when is_list(Links) ->
     ModelConfig = #model_config{} = ModelName:model_init(),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-%%    critical_section:run([ModelName, term_to_binary({links, Key})], fun() ->
-    delete_links(Level, Key, ModelName, [LinkName || {LinkName, _} <- Links]),
-    exec_driver_async(ModelName, Level, add_links, [Key, NormalizedLinks]).
-%%    end).
+    exec_driver_async(ModelName, Level, set_links, [Key, NormalizedLinks]).
 
 
 
