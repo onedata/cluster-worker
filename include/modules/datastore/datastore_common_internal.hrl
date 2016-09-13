@@ -78,8 +78,8 @@
         mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
         % Function that returns all scopes for links' operations
         other_link_scopes = ScopeFun2, % link_utils:other_scopes_fun()
-        link_duplication = LinkDuplication,
-        sync_enabled = false
+        link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
+        sync_enabled = false % Models with sync enabled will be stored in non-default bucket to reduce DB load.
     }
 ).
 

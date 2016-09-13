@@ -31,8 +31,9 @@
 -type document_diff() :: #{term() => term()} | fun((OldValue :: value()) ->
     {ok, NewValue :: value()} | {error, Reason :: term()}).
 -type bucket() :: atom() | binary().
+-type option() :: ignore_links.
 
--export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0]).
+-export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0, option/0]).
 
 %% Error types
 -type generic_error() :: {error, Reason :: term()}.
@@ -365,10 +366,11 @@ delete(Level, ModelName, Key, Pred) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Deletes #document with given key.
+%% You can specify 'ignore_links' option, if links should not be deleted with the document.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
-    Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [atom()]) -> ok | datastore:generic_error().
+    Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [option()]) -> ok | datastore:generic_error().
 delete(Level, ModelName, Key, Pred, Opts) ->
     case exec_driver_async(ModelName, Level, delete, [Key, Pred]) of
         ok ->
@@ -455,7 +457,7 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds given links to the document with given key.
+%% Adds given links to the document with given key. Allows for link duplication when model is configured this way.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec() | [link_spec()]) ->
@@ -473,7 +475,7 @@ add_links(Level, Key, ModelName, Links) when is_list(Links) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Sets links to given document.
+%% Sets links to given document. Always replaces existing links with the same name.
 %% @end
 %%--------------------------------------------------------------------
 -spec set_links(Level :: store_level(), document(), link_spec() | [link_spec()]) -> ok | generic_error().

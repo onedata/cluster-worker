@@ -26,7 +26,7 @@
 -export([create_link_in_map/4, save_links_maps/5, delete_links/3, delete_links_from_maps/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
 -export([make_scoped_link_name/3, unpack_link_scope/2, select_scope_related_link/3]).
--export([get_context_to_propagate/1, apply_context/1, get_scopes/2, get_scope/1]).
+-export([get_context_to_propagate/1, apply_context/1, get_scopes/2]).
 
 %%%===================================================================
 %%% API
@@ -48,27 +48,6 @@ deduplicate_targets([{M, K, S}, {M, K, S} = T | R]) ->
     deduplicate_targets([T | R]);
 deduplicate_targets([T | R]) ->
     [T | deduplicate_targets(R)].
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns link scope for given model.
-%% @end
-%%--------------------------------------------------------------------
--spec get_scope(ModelName :: model_behaviour:model_type() | model_behaviour:model_config()) ->
-    scope().
-get_scope(ModelName) when is_atom(ModelName) ->
-    ModelConfig = ModelName:model_init(),
-    get_scope(ModelConfig);
-get_scope(#model_config{name = ModelName} = _ModelConfig) ->
-    MInfo = ModelName:module_info(),
-    Exports = proplists:get_value(exports, MInfo),
-    case lists:member({links_local_scope, 0}, Exports) of
-        false ->
-            ?DEFAULT_LINK_SCOPE;
-        true ->
-            ModelName:links_local_scope()
-    end.
 
 
 %%--------------------------------------------------------------------
@@ -778,6 +757,88 @@ update_links_map(ModelConfig, [{LinkName, {NewVersion, LinkTargets} = LinkTarget
             update_links_map(ModelConfig, R, Map, MapSize, [Link | LinksToUpdate])
     end.
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes links updated at higher level of links tree.
+%% @end
+%%--------------------------------------------------------------------
+-spec del_old_links(Driver :: atom(), model_behaviour:model_config(), [datastore:normalized_link_spec()],
+    datastore:ext_key() | datastore:document(), KeyNum :: integer()) -> ok | datastore:generic_error().
+del_old_links(_Driver, _ModelConfig, [], _Key, _KeyNum) ->
+    ok;
+del_old_links(_Driver, #model_config{bucket = _Bucket} = _ModelConfig, _Links, <<"non">>, _KeyNum) ->
+    ok;
+del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links,
+    #document{value = #links{children = Children}}, KeyNum) ->
+    SplitedLinks = split_links_names_list(ModelConfig, Links, KeyNum),
+    maps:fold(fun(Num, SLs, Acc) ->
+        case Acc of
+            ok ->
+                NextKey = maps:get(Num, Children, <<"non">>),
+                del_old_links(Driver, ModelConfig, SLs, NextKey, KeyNum + 1);
+            _ ->
+                Acc
+        end
+    end, ok, SplitedLinks);
+del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links, Key, KeyNum) ->
+    case Driver:get_link_doc(ModelConfig, Key) of
+        {ok, #document{value = #links{link_map = LinkMap} = LinksRecord} = LinkDoc} ->
+            {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(Links, LinkMap),
+            SaveAns = case Deleted of
+                0 ->
+                    {ok, ok};
+                _ ->
+                    NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
+                    Driver:save_link_doc(ModelConfig, NLD)
+            end,
+
+            case {SaveAns, NewLinks} of
+                {{ok, _}, []} ->
+                    ok;
+                {{ok, _}, _} ->
+                    del_old_links(Driver, ModelConfig, NewLinks, LinkDoc, KeyNum);
+                Error ->
+                    Error
+            end;
+        {error, {not_found, _}} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Removes links from links' map.
+%% @end
+%%--------------------------------------------------------------------
+-spec remove_from_links_map([datastore:link_name()], map()) ->
+    {map(), NewLinks :: list(), Deleted :: integer()}.
+remove_from_links_map(Links, Map) ->
+    remove_from_links_map(Links, Map, [], 0).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Removes links from links' map.
+%% @end
+%%--------------------------------------------------------------------
+-spec remove_from_links_map([datastore:link_name()], map(), TmpNewLinks :: list(), TmpDeleted :: integer()) ->
+    {map(), NewLinks :: list(), Deleted :: integer()}.
+remove_from_links_map([], Map, NewLinks, Deleted) ->
+    {Map, NewLinks, Deleted};
+remove_from_links_map([Link | R], Map, NewLinks, Deleted) ->
+    case maps:is_key(Link, Map) of
+        true ->
+            remove_from_links_map(R, maps:remove(Link, Map), NewLinks, Deleted + 1);
+        _ ->
+            remove_from_links_map(R, Map, [Link | NewLinks], Deleted)
+    end.
+
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -980,58 +1041,6 @@ add_non_existing_to_map(Driver, #model_config{bucket = _Bucket, name = ModelName
     end;
 add_non_existing_to_map(_Driver, _ModelConfig, _Key, _LDK, _GetAns, _Link, _KeyNum) ->
     ok.
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Deletes links updated at higher level of links tree.
-%% @end
-%%--------------------------------------------------------------------
--spec del_old_links(Driver :: atom(), model_behaviour:model_config(), [datastore:normalized_link_spec()],
-    datastore:ext_key() | datastore:document(), KeyNum :: integer()) -> ok | datastore:generic_error().
-del_old_links(_Driver, _ModelConfig, [], _Key, _KeyNum) ->
-    ok;
-del_old_links(_Driver, #model_config{bucket = _Bucket} = _ModelConfig, _Links, <<"non">>, _KeyNum) ->
-    ok;
-del_old_links(Driver, #model_config{bucket = _Bucket} = ModelConfig, Links,
-    #document{value = #links{children = Children}}, KeyNum) ->
-    SplitedLinks = split_links_names_list(ModelConfig, Links, KeyNum),
-    maps:fold(fun(Num, SLs, Acc) ->
-        case Acc of
-            ok ->
-                NextKey = maps:get(Num, Children, <<"non">>),
-                del_old_links(Driver, ModelConfig, SLs, NextKey, KeyNum + 1);
-            _ ->
-                Acc
-        end
-    end, ok, SplitedLinks);
-del_old_links(Driver, #model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Links, Key, KeyNum) ->
-    case Driver:get_link_doc_inside_trans(ModelConfig, Key) of
-        {ok, #document{value = #links{link_map = LinkMap} = LinksRecord} = LinkDoc} ->
-            {NewLinkMap, NewLinks, Deleted} = remove_from_links_map(ModelName, Links, LinkMap),
-            SaveAns = case Deleted of
-                0 ->
-                    {ok, ok};
-                _ ->
-                    NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
-                    Driver:save_link_doc(ModelConfig, NLD)
-            end,
-
-            case {SaveAns, NewLinks} of
-                {{ok, _}, []} ->
-                    ok;
-                {{ok, _}, _} ->
-                    del_old_links(Driver, ModelConfig, NewLinks, LinkDoc, KeyNum);
-                Error ->
-                    Error
-            end;
-        {error, {not_found, _}} ->
-            ok;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
 
 %%--------------------------------------------------------------------
 %% @private

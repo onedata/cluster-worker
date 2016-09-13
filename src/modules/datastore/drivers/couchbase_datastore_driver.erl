@@ -235,7 +235,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 %% @end
 %%--------------------------------------------------------------------
 -spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
-    ok | datastore:generic_error().
+    no_return().
 set_links(#model_config{}, _Key, Links) when is_list(Links) ->
     erlang:error(not_implemented).
 

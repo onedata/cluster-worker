@@ -305,25 +305,8 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
 %%--------------------------------------------------------------------
 -spec get(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
-get(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key) ->
-    case db_run(select_bucket(ModelConfig, Key), couchbeam, open_doc, [to_driver_key(Bucket, Key)], 3) of
-        {ok, {Proplist} = _Doc} ->
-            case verify_ans(Proplist) of
-                true ->
-                    {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
-                    Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
-                    Proplist2 = Proplist -- Proplist1,
-                    {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, {not_found, _}} ->
-            {error, {not_found, ModelName}};
-        {error, not_found} ->
-            {error, {not_found, ModelName}};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+get(#model_config{} = ModelConfig, Key) ->
+    get(ModelConfig, select_bucket(ModelConfig, Key), Key).
 
 
 %%--------------------------------------------------------------------
@@ -336,10 +319,15 @@ get(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key) ->
 get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, BucketOverride, Key) ->
     case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key)], 3) of
         {ok, {Proplist} = _Doc} ->
-            {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
-            Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
-            Proplist2 = Proplist -- Proplist1,
-            {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
+            case verify_ans(Proplist) of
+                true ->
+                    {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
+                    Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+                    Proplist2 = Proplist -- Proplist1,
+                    {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, {not_found, _}} ->
             {error, {not_found, ModelName}};
         {error, not_found} ->
@@ -904,25 +892,9 @@ db_run(Bucket, Mod, Fun, Args, Retry) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = ModelConfig,
-    ToSave = #document{key = Key, rev = {Start, Ids} = Revs, deleted = Del, value = Value}) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-    {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
-        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del, utf8)} | Props]},
-    case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveAns}} ->
-            case verify_ans(SaveAns) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+force_save(#model_config{} = ModelConfig, ToSave) ->
+    force_save(ModelConfig, select_bucket(ModelConfig, ToSave), ToSave).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -931,13 +903,20 @@ force_save(#model_config{bucket = Bucket} = ModelConfig,
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = ModelConfig, BucketOverride, ToSave = #document{key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+force_save(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
+    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
     {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del, utf8)} | Props]},
     case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {_}} ->
-            {ok, Key};
+        {ok, {SaveAns}} ->
+            case verify_ans(SaveAns) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
         {error, conflict} ->
             {error, already_exists};
         {error, Reason} ->
@@ -1481,15 +1460,30 @@ delete_view(_ModelName, _Id) ->
     ok.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns critical section's resource ID for document operations using this driver.
+%% @end
+%%--------------------------------------------------------------------
 -spec transaction_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
 transaction_key(#model_config{bucket = Bucket}, Key) ->
     to_binary({?MODULE, Bucket, Key}).
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv select_bucket(ModelConfig, undefined)
+%% @end
+%%--------------------------------------------------------------------
 -spec select_bucket(model_behaviour:model_config()) -> couchdb_bucket().
 select_bucket(ModelConfig) ->
     select_bucket(ModelConfig, undefined).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns couchdb's bucket name for given Model and/or document's Key
+%% @end
+%%--------------------------------------------------------------------
 -spec select_bucket(model_behaviour:model_config(), datastore:ext_key() | undefined) ->
     couchdb_bucket().
 select_bucket(ModelConfig, #document{key = Key}) ->
