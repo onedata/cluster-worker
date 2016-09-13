@@ -640,7 +640,7 @@ save_consistency_info(Level, Key, ClearedName) ->
 delete_old_keys(Level, Caches, TimeWindow) ->
   Now = os:timestamp(),
   ClearFun = fun
-               ('$end_of_table', {Count, BatchNum}) ->
+             ('$end_of_table', {Count, BatchNum}) ->
                  count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
                {abort, Count};
              (#document{key = Uuid, value = V}, {Count, BatchNum0}) ->
@@ -698,7 +698,14 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                                end
                                     end,
 
-                             cache_controller:delete(Level, Uuid, Pred);
+                             cache_controller:delete(Level, Uuid, Pred),
+                             case Key of
+                               {_, _, cache_controller_link_key} ->
+                                 ok;
+                               _ ->
+                                 CCCUuid = get_cache_uuid(Key, ModelName),
+                                 cache_consistency_controller:delete(Level, CCCUuid)
+                             end;
                            _ ->
                              error
                          end
@@ -710,39 +717,51 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                end
            end,
 
-  {ok, _} = cache_controller:list(Level, ClearFun, {0, 0}),
-
-  case TimeWindow of
-    0 ->
-      % TODO - the same for links
-      lists:foreach(fun(Cache) ->
-        ClearFun2 = fun
-                      ('$end_of_table', {Count, BatchNum}) ->
-                        count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
-                        {abort, Count};
-                      (#document{key = Uuid}, {Count, BatchNum0}) ->
-                        BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
-                                     0 ->
-                                       case Count of
+  case cache_controller:list(Level, ClearFun, {0, 0}) of
+    {ok, _} ->
+      case TimeWindow of
+        0 ->
+          % TODO - the same for links
+          lists:foreach(fun(Cache) ->
+            ClearFun2 = fun
+                          ('$end_of_table', {Count, BatchNum}) ->
+                            count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                            {abort, Count};
+                          (#document{key = Uuid}, {Count, BatchNum0}) ->
+                            BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
                                          0 ->
-                                           ok;
+                                           case Count of
+                                             0 ->
+                                               ok;
+                                             _ ->
+                                               count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
+                                           end,
+                                           BatchNum0 + 1;
                                          _ ->
-                                           count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
+                                           BatchNum0
                                        end,
-                                       BatchNum0 + 1;
-                                     _ ->
-                                       BatchNum0
-                                   end,
-                        Master = self(),
-                        spawn(fun() ->
-                          safe_delete(Level, Cache, Uuid),
-                          Master ! {doc_cleared, BatchNum}
-                              end),
-                        {next, {Count + 1, BatchNum}}
-                    end,
-        {ok, _} = datastore:list(Level, Cache, ClearFun2, {0, 0})
-      end, Caches);
-    _ ->
+                            Master = self(),
+                            spawn(fun() ->
+                              safe_delete(Level, Cache, Uuid),
+                              Master ! {doc_cleared, BatchNum}
+                                  end),
+                            {next, {Count + 1, BatchNum}}
+                        end,
+            {ok, _} = datastore:list(Level, Cache, ClearFun2, {0, 0})
+          end, Caches);
+        _ ->
+          ok
+      end;
+    {error, {abort, R}} ->
+      ?warning("Cache cleaning aborted: ~p", [R]),
+      case TimeWindow of
+        0 ->
+          delete_old_keys(Level, Caches, TimeWindow);
+        _ ->
+          ok
+      end;
+    Other ->
+      ?error("Error during cache cleaning: ~p", [Other]),
       ok
   end.
 

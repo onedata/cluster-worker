@@ -828,10 +828,9 @@ clear_env(Config) ->
     end.
 
 clear_cache(W) ->
-    _A1 = ?call(W, caches_controller, wait_for_cache_dump, []),
-    _A2 = gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
-    _A3 = gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_node, 60000),
-%%    ?assertMatch({ok, ok, {ok, ok}}, {A1, A2, A3}).
+    ?call(W, caches_controller, wait_for_cache_dump, []),
+    gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
+    gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_node, 60000),
     ok.
 
 %%%===================================================================

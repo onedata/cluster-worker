@@ -290,22 +290,20 @@ handle_cast(cm_conn_ack, State) ->
     {noreply, NewState};
 
 handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
-    last_cache_cleaning = Last} = State) when CacheControl =:= true ->
+    last_cache_cleaning = Last, cache_cleaning_pid = LastCleaningPid} = State) when CacheControl =:= true ->
     MemUsage = monitoring:mem_usage(MonState),
     {_, ErlangMemUsage, _} = monitoring:erlang_vm_stats(MonState),
     % Check if memory cleaning of oldest docs should be started
     % even when memory utilization is low (e.g. once a day)
     NewState = case caches_controller:should_clear_cache(MemUsage, ErlangMemUsage) of
         true ->
-            spawn(fun() -> free_memory(MemUsage) end),
-            State#state{last_cache_cleaning = os:timestamp()};
+            start_memory_cleaning(LastCleaningPid, MemUsage, State);
         _ ->
             Now = os:timestamp(),
             {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
             case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
                 true ->
-                    spawn(fun() -> free_memory() end),
-                    State#state{last_cache_cleaning = Now};
+                    start_memory_cleaning(LastCleaningPid, MemUsage, State);
                 _ ->
                     State
             end
@@ -651,6 +649,27 @@ start_worker(Module, Args) ->
             {error, Error}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Starts memory cleaning.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_memory_cleaning(LastCleaningPid :: pid(), MemUsage :: float(), State :: #state{}) -> #state{}.
+start_memory_cleaning(LastCleaningPid, MemUsage, State) ->
+    case LastCleaningPid of
+        undefined ->
+            Pid = spawn(fun() -> free_memory(MemUsage) end),
+            State#state{last_cache_cleaning = os:timestamp(), cache_cleaning_pid = Pid};
+        _ ->
+            case is_process_alive(LastCleaningPid) of
+                true ->
+                    Pid = spawn(fun() -> free_memory(MemUsage) end),
+                    State#state{last_cache_cleaning = os:timestamp(), cache_cleaning_pid = Pid};
+                _ ->
+                    State
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
