@@ -752,7 +752,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
         _ ->
           ok
       end;
-    {error, {abort, R}} ->
+    {error, {aborted, R}} ->
       ?warning("Cache cleaning aborted: ~p", [R]),
       case TimeWindow of
         0 ->
