@@ -87,18 +87,18 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
     Port = 8091,
 
     BucketInfo = lists:foldl(fun
-            ({Hostname, _}, no_data) ->
-                URL = <<Hostname/binary, ":", (integer_to_binary(Port))/binary, "/pools/default/buckets">>,
-                case http_client:get(URL) of
-                    {ok, 200, _, JSON} ->
-                        json_utils:decode_map(JSON);
-                    Res ->
-                        ?warning("Unable to fetch bucket info from ~p. REST reponse: ~p", [Hostname, Res]),
-                        no_data
-                end;
-            (_, Data) ->
-                Data
-        end, no_data, DBNodes),
+        ({Hostname, _}, no_data) ->
+            URL = <<Hostname/binary, ":", (integer_to_binary(Port))/binary, "/pools/default/buckets">>,
+            case http_client:get(URL) of
+                {ok, 200, _, JSON} ->
+                    json_utils:decode_map(JSON);
+                Res ->
+                    ?warning("Unable to fetch bucket info from ~p. REST reponse: ~p", [Hostname, Res]),
+                    no_data
+            end;
+        (_, Data) ->
+            Data
+    end, no_data, DBNodes),
 
     Buckets = case BucketInfo of
         no_data ->
@@ -1436,7 +1436,7 @@ query_view(ModelName, Id, Options) ->
                     Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
                         {_, DocUuid} = from_driver_key(DbDocId),
                         DocUuid
-                                    end, List),
+                    end, List),
                     {ok, Ids};
                 _ ->
                     {error, db_internal_error}

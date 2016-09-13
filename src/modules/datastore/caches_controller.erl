@@ -29,7 +29,9 @@
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
-  check_cache_consistency/2, consistency_info_lock/3]).
+  check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
+
+-define(CLEAR_BATCH_SIZE, 100).
 
 %%%===================================================================
 %%% API
@@ -392,16 +394,37 @@ save_consistency_restored_info(Level, Key, ClearedName) ->
                   {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL),
                     restore_timestamp = os:timestamp()}}
               end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{restore_timestamp = os:timestamp()}},
 
-  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+  case cache_consistency_controller:update(Level, Key, UpdateFun) of
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
       true;
+    {error, {not_found, _}} ->
+      true;
     Other ->
       ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
       false
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inits information about cache consistency
+%% @end
+%%--------------------------------------------------------------------
+-spec init_consistency_info(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
+  ok | datastore:create_error().
+init_consistency_info(Level, Key) ->
+  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+
+  case cache_consistency_controller:create(Level, Doc) of
+    {ok, _} ->
+      ok;
+    {error, already_exists} ->
+      ok;
+    Other ->
+      ?error_stacktrace("Cannot init consistency_restored_info ~p, error: ~p", [{Level, Key}, Other]),
+      Other
   end.
 
 %%--------------------------------------------------------------------
@@ -484,7 +507,7 @@ check_cache_consistency(Level, Key) ->
     {ok, _} ->
       not_monitored;
     {error, {not_found, _}} ->
-      {ok, {0,0,0}, {0,0,0}}
+      not_monitored
   end.
 
 %%--------------------------------------------------------------------
@@ -503,6 +526,21 @@ consistency_info_lock(Key, ClearedName, Fun) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% @private
+%% Checks if memory clearing should be stopped.
+%% @end
+%%--------------------------------------------------------------------
+-spec should_stop_clear_cache(MemUsage :: float(), ErlangMemUsage :: [{atom(), non_neg_integer()}]) -> boolean().
+should_stop_clear_cache(MemUsage, ErlangMemUsage) ->
+  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+  {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
+  {ok, StopRatio} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
+  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  (MemUsage < TargetMemUse * StopRatio / 100) orelse (MemToCompare < TargetErlangMemUse * 1024 * 1024  * StopRatio / 100).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @private
 %% Translates datastore level to module name.
 %% @end
 %%--------------------------------------------------------------------
@@ -579,15 +617,15 @@ save_consistency_info(Level, Key, ClearedName) ->
           end
       end
   end,
-  V = #cache_consistency_controller{cleared_list = [ClearedName], last_clearing_time = os:timestamp()},
-  Doc = #document{key = Key, value = V},
 
-  case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+  case cache_consistency_controller:update(Level, Key, UpdateFun) of
     {ok, _} ->
       true;
     {error, clearing_not_monitored} ->
       true;
     {error, already_cleared} ->
+      true;
+    {error, {not_found, _}} ->
       true;
     Other ->
       ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
@@ -602,60 +640,151 @@ save_consistency_info(Level, Key, ClearedName) ->
 %%--------------------------------------------------------------------
 -spec delete_old_keys(Level :: global_only | local_only, Caches :: list(), TimeWindow :: integer()) -> ok.
 delete_old_keys(Level, Caches, TimeWindow) ->
-  {ok, Uuids} = cache_controller:list(Level, TimeWindow),
-  Uuids2 = lists:foldl(fun(Uuid, Acc) ->
-    {ModelName, Key} = decode_uuid(Uuid),
-    case safe_delete(Level, ModelName, Key) of
-      ok ->
-        [Uuid | Acc];
-      _ ->
-        Acc
-    end
-  end, [], Uuids),
+  Now = os:timestamp(),
+  ClearFun = fun
+             ('$end_of_table', {Count, BatchNum}) ->
+                 count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+               {abort, Count};
+             (#document{key = Uuid, value = V}, {Count, BatchNum0}) ->
+               {Stop, BatchNum} = case Count rem ?CLEAR_BATCH_SIZE of
+                 0 ->
+                   case Count of
+                     0 ->
+                       ok;
+                     _ ->
+                       count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
+                   end,
 
-  timer:sleep(timer:seconds(2)), % allow async operations on disk start if there are any
-  lists:foreach(fun(Uuid) ->
-    Pred = fun() ->
-      CheckAns = case cache_controller:get(Level, Uuid) of
-                   {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                     {LU, A};
-                   {error, {not_found, _}} ->
-                     ok
-                 end,
+                   case monitoring:get_memory_stats() of
+                     [{<<"mem">>, MemUsage}] ->
+                       ErlangMemUsage = erlang:memory(),
+                       {should_stop_clear_cache(MemUsage, ErlangMemUsage), BatchNum0 + 1};
+                     _ ->
+                       ?warning("Not able to check memory usage"),
+                       {false, BatchNum0 + 1}
+                   end;
+                 _ ->
+                   {false, BatchNum0}
+               end,
+               case Stop of
+                 true ->
+                   {abort, Count};
+                 _ ->
+                   T = V#cache_controller.timestamp,
+                   U = V#cache_controller.last_user,
+                   Age = timer:now_diff(Now, T),
+                   case U of
+                     non when Age >= 1000 * TimeWindow ->
+                       Master = self(),
+                       spawn(fun() ->
+                         {ModelName, Key} = decode_uuid(Uuid),
+                         case safe_delete(Level, ModelName, Key) of
+                           ok ->
+                             Master ! {doc_cleared, BatchNum},
+                             timer:sleep(timer:seconds(2)), % allow start new operations if scheduled
+                             Pred = fun() ->
+                               CheckAns = case cache_controller:get(Level, Uuid) of
+                                            {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                                              {LU, A};
+                                            {error, {not_found, _}} ->
+                                              ok
+                                          end,
 
-      case CheckAns of
-        {_, to_be_del} ->
-          false;
-        {non, _} ->
-          true;
-        _ ->
-          false
-      end
-    end,
+                               case CheckAns of
+                                 {_, to_be_del} ->
+                                   false;
+                                 {non, _} ->
+                                   true;
+                                 _ ->
+                                   false
+                               end
+                                    end,
 
-    cache_controller:delete(Level, Uuid, Pred)
-  end, Uuids2),
+                             cache_controller:delete(Level, Uuid, Pred),
+                             case Key of
+                               {_, _, cache_controller_link_key} ->
+                                 ok;
+                               _ ->
+                                 CCCUuid = get_cache_uuid(Key, ModelName),
+                                 cache_consistency_controller:delete(Level, CCCUuid)
+                             end;
+                           _ ->
+                             error
+                         end
+                       end),
+                       {next, {Count + 1, BatchNum}};
+                     _ ->
+                       {next, {Count, BatchNum}}
+                   end
+               end
+           end,
 
-  case TimeWindow of
-    0 ->
-      ModelsUuids = lists:foldl(fun(Uuid, Acc) ->
-        {ModelName, Key} = decode_uuid(Uuid),
-        TmpAns = proplists:get_value(ModelName, Acc, []),
-        [{ModelName, [Key | TmpAns]} | proplists:delete(ModelName, Acc)]
-      end, [], Uuids),
-
-      lists:foreach(fun(Cache) ->
-        {ok, Docs} = datastore:list(Level, Cache, ?GET_ALL, []),
-        DocsKeys = lists:map(fun(Doc) -> Doc#document.key end, Docs),
-        lists:foreach(fun(K) ->
+  case cache_controller:list(Level, ClearFun, {0, 0}) of
+    {ok, _} ->
+      case TimeWindow of
+        0 ->
           % TODO - the same for links
-          safe_delete(Level, Cache, K)
-        end, DocsKeys -- proplists:get_value(Cache, ModelsUuids, []))
-      end, Caches);
-    _ ->
+          lists:foreach(fun(Cache) ->
+            ClearFun2 = fun
+                          ('$end_of_table', {Count, BatchNum}) ->
+                            count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                            {abort, Count};
+                          (#document{key = Uuid}, {Count, BatchNum0}) ->
+                            BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
+                                         0 ->
+                                           case Count of
+                                             0 ->
+                                               ok;
+                                             _ ->
+                                               count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
+                                           end,
+                                           BatchNum0 + 1;
+                                         _ ->
+                                           BatchNum0
+                                       end,
+                            Master = self(),
+                            spawn(fun() ->
+                              safe_delete(Level, Cache, Uuid),
+                              Master ! {doc_cleared, BatchNum}
+                                  end),
+                            {next, {Count + 1, BatchNum}}
+                        end,
+            {ok, _} = datastore:list(Level, Cache, ClearFun2, {0, 0})
+          end, Caches);
+        _ ->
+          ok
+      end;
+    {error, {aborted, R}} ->
+      ?warning("Cache cleaning aborted: ~p", [R]),
+      case TimeWindow of
+        0 ->
+          delete_old_keys(Level, Caches, TimeWindow);
+        _ ->
+          ok
+      end;
+    Other ->
+      ?error("Error during cache cleaning: ~p", [Other]),
       ok
-  end,
-  ok.
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Counts acc clearing answers.
+%% @end
+%%--------------------------------------------------------------------
+-spec count_clear_acc(Count :: integer(), BatchNum :: integer()) -> ok.
+count_clear_acc(0, _) ->
+  ok;
+count_clear_acc(Count, BatchNum) ->
+  receive
+    {doc_cleared, BatchNum} ->
+      count_clear_acc(Count - 1, BatchNum)
+  after timer:minutes(1) ->
+    ?warning("Not cleared old cache for batch num ~p, current count ~p", [BatchNum, Count]),
+    ok
+  end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -722,7 +851,13 @@ safe_delete(Level, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec delete_all_keys(Level :: global_only | local_only, Caches :: list()) -> ok | cleared.
 delete_all_keys(Level, Caches) ->
-  {ok, Uuids} = cache_controller:list(Level, 0),
+  Filter = fun
+             ('$end_of_table', Acc) ->
+               {abort, Acc};
+             (#document{key = Uuid}, Acc) ->
+               {next, [Uuid | Acc]}
+           end,
+  {ok, Uuids} = cache_controller:list(Level, Filter, []),
   UuidsNum = length(Uuids),
   lists:foreach(fun(Uuid) ->
     {ModelName, Key} = decode_uuid(Uuid),
