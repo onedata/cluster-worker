@@ -22,7 +22,7 @@
 
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
-    save/2, get/2, list/2, exists/2, delete/3, update/3, create/2,
+    save/2, get/2, list/3, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
     list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_get/3,
     check_fetch/3, check_disk_read/4, restore_from_disk/4]).
@@ -156,28 +156,13 @@ list(Level) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns list of records older then DocAge (in ms) that can be deleted from memory.
+%% Returns list of records filtered with provided function.
 %% @end
 %%--------------------------------------------------------------------
--spec list(Level :: datastore:store_level(), DocAge :: integer()) ->
+-spec list(Level :: datastore:store_level(), Filter :: datastore:list_fun(), Acc :: term()) ->
     {ok, [datastore:document()]} | datastore:generic_error() | no_return().
-list(Level, MinDocAge) ->
-    Now = os:timestamp(),
-    Filter = fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (#document{key = Uuid, value = V}, Acc) ->
-            T = V#cache_controller.timestamp,
-            U = V#cache_controller.last_user,
-            Age = timer:now_diff(Now, T),
-            case U of
-                non when Age >= 1000 * MinDocAge ->
-                    {next, [Uuid | Acc]};
-                _ ->
-                    {next, Acc}
-            end
-    end,
-    datastore:list(Level, ?MODEL_NAME, Filter, []).
+list(Level, Filter, Acc) ->
+    datastore:list(Level, ?MODEL_NAME, Filter, Acc).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -287,6 +272,16 @@ model_init() ->
     update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level2);
 %%'after'(ModelName, fetch_link, Level, [Key, LinkName], {ok, _}) ->
 %%    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
+'after'(_ModelName, save, disk_only, _Context, _ReturnValue) ->
+    ok;
+'after'(ModelName, save, Level, [#document{generated_uuid = true}], {ok, K}) ->
+    CCCUuid = caches_controller:get_cache_uuid(K, ModelName),
+    caches_controller:init_consistency_info(Level, CCCUuid);
+'after'(_ModelName, create, disk_only, _Context, _ReturnValue) ->
+    ok;
+'after'(ModelName, create, Level, _Context, {ok, K}) ->
+    CCCUuid = caches_controller:get_cache_uuid(K, ModelName),
+    caches_controller:init_consistency_info(Level, CCCUuid);
 'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
     ok.
 
@@ -308,7 +303,7 @@ before(ModelName, create_or_update, disk_only, [Doc, _Diff] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create_or_update, Args, Level2);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
-before(ModelName, create, Level, [Doc], Level) ->
+before(ModelName, create, Level, [#document{generated_uuid = false} = Doc], Level) ->
     check_create(Doc#document.key, ModelName, Level);
 before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);
