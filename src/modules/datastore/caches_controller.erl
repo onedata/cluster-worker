@@ -640,7 +640,8 @@ save_consistency_info(Level, Key, ClearedName) ->
 delete_old_keys(Level, Caches, TimeWindow) ->
   Now = os:timestamp(),
   ClearFun = fun
-             ('$end_of_table', {Count, _BatchNum}) ->
+               ('$end_of_table', {Count, BatchNum}) ->
+                 count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
                {abort, Count};
              (#document{key = Uuid, value = V}, {Count, BatchNum0}) ->
                {Stop, BatchNum} = case Count rem ?CLEAR_BATCH_SIZE of
@@ -714,32 +715,31 @@ delete_old_keys(Level, Caches, TimeWindow) ->
   case TimeWindow of
     0 ->
       % TODO - the same for links
-      ClearFun2 = fun
-                   ('$end_of_table', {Count, _}) ->
-                     {abort, Count};
-                   (#document{key = Uuid}, {Count, BatchNum0}) ->
-                     BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
-                                  0 ->
-                                    case Count of
-                                      0 ->
-                                        ok;
-                                      _ ->
-                                        count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
-                                    end,
-                                    BatchNum0 + 1;
-                                  _ ->
-                                    BatchNum0
-                                end,
-                     Master = self(),
-                     spawn(fun() ->
-                       {ModelName, Key} = decode_uuid(Uuid),
-                       safe_delete(Level, ModelName, Key),
-                       Master ! {doc_cleared, BatchNum}
-                     end),
-                     {next, {Count + 1, BatchNum}}
-                 end,
-
       lists:foreach(fun(Cache) ->
+        ClearFun2 = fun
+                      ('$end_of_table', {Count, BatchNum}) ->
+                        count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                        {abort, Count};
+                      (#document{key = Uuid}, {Count, BatchNum0}) ->
+                        BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
+                                     0 ->
+                                       case Count of
+                                         0 ->
+                                           ok;
+                                         _ ->
+                                           count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
+                                       end,
+                                       BatchNum0 + 1;
+                                     _ ->
+                                       BatchNum0
+                                   end,
+                        Master = self(),
+                        spawn(fun() ->
+                          safe_delete(Level, Cache, Uuid),
+                          Master ! {doc_cleared, BatchNum}
+                              end),
+                        {next, {Count + 1, BatchNum}}
+                    end,
         {ok, _} = datastore:list(Level, Cache, ClearFun2, {0, 0})
       end, Caches);
     _ ->
