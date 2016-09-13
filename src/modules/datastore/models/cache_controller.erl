@@ -274,12 +274,12 @@ model_init() ->
 %%    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
 'after'(_ModelName, save, disk_only, _Context, _ReturnValue) ->
     ok;
-'after'(ModelName, save, Level, [#document{generated_uuid = false}], {ok, K}) ->
+'after'(ModelName, save, Level, [#document{generated_uuid = true}], {ok, K}) ->
     CCCUuid = caches_controller:get_cache_uuid(K, ModelName),
     caches_controller:init_consistency_info(Level, CCCUuid);
 'after'(_ModelName, create, disk_only, _Context, _ReturnValue) ->
     ok;
-'after'(ModelName, create, Level, [#document{generated_uuid = false}], {ok, K}) ->
+'after'(ModelName, create, Level, _Context, {ok, K}) ->
     CCCUuid = caches_controller:get_cache_uuid(K, ModelName),
     caches_controller:init_consistency_info(Level, CCCUuid);
 'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
