@@ -51,7 +51,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1, transaction_key/2]).
+-export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1, synchronization_key/2]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -500,7 +500,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
         end
@@ -515,7 +515,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, set)
         end
@@ -529,7 +529,7 @@ set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, 
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
@@ -545,7 +545,7 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     | {error, Reason :: term()})) -> ok | datastore:generic_error().
 create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
     Key, {LinkName, _} = Link, UpdateFun) ->
-    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
@@ -571,13 +571,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_transaction(ModelName, transaction_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -1465,8 +1465,8 @@ delete_view(_ModelName, _Id) ->
 %% Returns critical section's resource ID for document operations using this driver.
 %% @end
 %%--------------------------------------------------------------------
--spec transaction_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
-transaction_key(#model_config{bucket = Bucket}, Key) ->
+-spec synchronization_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
+synchronization_key(#model_config{bucket = Bucket}, Key) ->
     to_binary({?MODULE, Bucket, Key}).
 
 

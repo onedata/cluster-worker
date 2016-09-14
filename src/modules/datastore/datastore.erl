@@ -55,11 +55,11 @@
 
 %% Links' types
 -type link_version() :: non_neg_integer().
--type link_final_target() :: {ext_key(), model_behaviour:model_type(), links_utils:scope()}.
+-type link_final_target() :: {links_utils:scope(), links_utils:vhash(), ext_key(), model_behaviour:model_type()}.
 -type normalized_link_target() :: {link_version(), [link_final_target()]}.
 -type simple_link_target() :: {ext_key(), model_behaviour:model_type()}.
 -type link_target() :: #document{} | normalized_link_target() | link_final_target() | simple_link_target().
--type link_name() :: atom() | binary().
+-type link_name() :: atom() | binary() | {scoped_link, atom() | binary(), links_utils:scope(), links_utils:vhash()}.
 -type link_spec() :: {link_name(), link_target()}.
 -type normalized_link_spec() :: {link_name(), normalized_link_target()}.
 
@@ -537,7 +537,6 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 -spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
     link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
-%%    ?info("delete_links1 ~p", [{LinkNames, Key}]),
     delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
 delete_links(Level, Key, ModelName, LinkName) ->
     delete_links(Level, Key, ModelName, [LinkName]).
@@ -560,7 +559,6 @@ delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNam
     {ok, Links2} = erlang:apply(driver_to_module(Driver2), foreach_link,
         [ModelConfig, Key, AccFun, Links1]),
     Links = sets:to_list(sets:from_list(Links2)),
-    ?info("delete_links all ~p", [{Key, ModelName, Links1, Links2}]),
     exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, Links]);
 delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) ->
     exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
@@ -586,26 +584,33 @@ fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
 -spec fetch_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
     {ok, simple_link_target()} | link_error().
 fetch_link(Level, Key, ModelName, LinkName) ->
-    {RawLinkName, RequestedScope} = links_utils:unpack_link_scope(ModelName, LinkName),
+    {RawLinkName, RequestedScope, VHash} = links_utils:unpack_link_scope(ModelName, LinkName),
     case fetch_full_link(Level, Key, ModelName, RawLinkName) of
-        {ok, {_Version, [{TargetKey, TargetModel, _}]}} ->
-            {ok, {TargetKey, TargetModel}};
         {ok, {_Version, Targets = [H | _]}} ->
             case RequestedScope of
                 undefined ->
-                    {TargetKey, TargetModel, _} =
-                        case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
+                    {_, _, TargetKey, TargetModel} =
+                        case links_utils:select_scope_related_link(RawLinkName, RequestedScope, VHash, Targets) of
                             undefined ->
-                                H;
+                                #model_config{mother_link_scope = MScope} = ModelName:model_init(),
+                                case lists:filter(
+                                    fun
+                                        ({Scope, _, _, _}) ->
+                                            Scope == links_utils:get_scopes(MScope, undefined)
+                                    end, Targets) of
+                                    [] -> H;
+                                    [L | _] ->
+                                        L
+                                end;
                             ScopeRelated ->
                                 ScopeRelated
                         end,
                     {ok, {TargetKey, TargetModel}};
                 _ ->
-                    case links_utils:select_scope_related_link(RawLinkName, RequestedScope, Targets) of
+                    case links_utils:select_scope_related_link(RawLinkName, RequestedScope, VHash, Targets) of
                         undefined ->
                             {error, link_not_found};
-                        {TargetKey, TargetModel, _} ->
+                        {_, _, TargetKey, TargetModel} ->
                             {ok, {TargetKey, TargetModel}}
                     end
             end;
@@ -904,17 +909,19 @@ link_walk7(Level, Key, ModelName, [NextLink | R], Acc, get_leaf) ->
             {error, Reason}
     end.
 
-normalize_link_target(_, {_LinkName, {_Version, [{_TargetKey, ModelName, _ScopeId} | _]}} = ValidLink) when is_atom(ModelName) ->
+normalize_link_target(_, {_LinkName, {_Version, [{_ScopeId, _VHash, _TargetKey, ModelName} | _]}} = ValidLink) when is_atom(ModelName) ->
     ValidLink;
 normalize_link_target(_ModelConfig, []) ->
     [];
+normalize_link_target(ModelConfig, [{_, {V, []}} | R]) when is_integer(V) ->
+    normalize_link_target(ModelConfig, R);
 normalize_link_target(ModelConfig, [Link | R]) ->
     [normalize_link_target(ModelConfig, Link) | normalize_link_target(ModelConfig, R)];
 normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, #document{key = TargetKey} = Doc}) ->
-    normalize_link_target(ModelConfig, {LinkName, {TargetKey, model_name(Doc), links_utils:get_scopes(MScope, undefined)}});
-normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, {TargetKey, ModelName}}) ->
-    normalize_link_target(ModelConfig, {LinkName, {TargetKey, ModelName, links_utils:get_scopes(MScope, undefined)}});
-normalize_link_target(ModelConfig, {LinkName, {_TargetKey, _ModelName, _ScopeId} = Target}) ->
+    normalize_link_target(ModelConfig, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, model_name(Doc)}});
+normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, {TargetKey, ModelName}}) when is_atom(ModelName) ->
+    normalize_link_target(ModelConfig, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, ModelName}});
+normalize_link_target(ModelConfig, {LinkName, {_ScopeId, _VHash, _TargetKey, _ModelName} = Target}) ->
     normalize_link_target(ModelConfig, {LinkName, {1, [Target]}}).
 
 
