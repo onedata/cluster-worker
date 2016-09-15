@@ -101,7 +101,7 @@
 }).
 
 %% Separator for link name and its scope
--define(LINK_NAME_SCOPE_SEPARATOR, "#:#").
+-define(LINK_NAME_SCOPE_SEPARATOR, "@provider@").
 
 %% Special prefix for keys of documents that shall not be persisted in synchronized bucket
 %% even if its model config says otherwise.

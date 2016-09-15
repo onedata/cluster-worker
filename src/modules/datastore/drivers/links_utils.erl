@@ -30,7 +30,7 @@
 -export([create_link_in_map/4, save_links_maps/5, delete_links/3, delete_links_from_maps/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
 -export([make_scoped_link_name/4, unpack_link_scope/2, select_scope_related_link/4]).
--export([get_context_to_propagate/1, apply_context/1, get_scopes/2, gen_vhash/0]).
+-export([get_context_to_propagate/1, apply_context/1, get_scopes/2, gen_vhash/0, deduplicate_targets/1]).
 
 %%%===================================================================
 %%% API
@@ -51,7 +51,7 @@ gen_vhash() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes duplicated links from given targets list.
+%% Removes duplicated links from given targets list. Requires sorted list.
 %% @end
 %%--------------------------------------------------------------------
 -spec deduplicate_targets([datastore:link_final_target()]) ->
@@ -71,8 +71,10 @@ deduplicate_targets([T | R]) ->
 %% Generates diff between two link records. Returns links that were added or deleted in second records.
 %% @end
 %%--------------------------------------------------------------------
--spec diff(#links{}, #links{}) -> {#{}, #{}}.
+-spec diff(#links{} | #{}, #links{} | #{}) -> {#{}, #{}}.
 diff(#links{link_map = OldMap}, #links{link_map = CurrentMap}) ->
+    diff(OldMap, CurrentMap);
+diff(OldMap, CurrentMap) ->
     OldKeys = maps:keys(OldMap),
     CurrentKeys = maps:keys(CurrentMap),
     DeletedKeys = OldKeys -- CurrentKeys,
@@ -401,13 +403,15 @@ delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, name = 
     case delete_links_from_maps(Driver, ModelConfig, Key, Links, LocalScope) of
         {ok, _, _, DeletedMap} when LocalScope /= ReplicateScope -> %% Deleted links form local only tree
             case delete_links_from_maps(Driver, ModelConfig, Key, Links, get_scopes(Scope1, Key)) of
-                {ok, _, Left, _} -> %% Not deleted from requested scope tree
+                {ok, _, Left, LocallyDeletedMap} -> %% Not deleted from requested scope tree
                     LeftRaw = [RawName || {RawName, _, _} <- [unpack_link_scope(ModelName, K1) || K1 <- Left]],
                     ToAdd0 = maps:with(LeftRaw, DeletedMap), %% Select all deleted locally but missing in given scope
+                    {Added, _} = diff(LocallyDeletedMap, DeletedMap),
+
                     ToAdd1 = maps:map( %% Transform deleted links to "marked" as deleted entires
                         fun(_K, {V, Targets}) ->
                             {V, [{Scope0, {deleted, VHash0}, Key0, Model0} || {Scope0, VHash0, Key0, Model0} <- Targets, ReplicateScope =/= Scope0]}
-                        end, ToAdd0),
+                        end, maps:merge(ToAdd0, maps:without(LeftRaw, Added))),
                     ToAdd2 = maps:filter( %% When link is deleted using explicit VHash, should not be marked as deleted
                                           %% since system user is unable to perform such operation
                                           %% Also ignore empty links
@@ -597,15 +601,15 @@ make_scoped_link_name(LinkName, Scope, VHash, _Len) ->
 -spec unpack_link_scope(ModelName :: model_behaviour:model_type(), LinkName :: datastore:link_name()) ->
     {datastore:link_name(), scope(), vhash()}.
 unpack_link_scope(_ModelName, LinkName) when is_binary(LinkName) ->
-    case binary:split(LinkName, <<?LINK_NAME_SCOPE_SEPARATOR>>) of
-        [LinkName] ->
-            {LinkName, undefined, undefined};
+    case binary:split(LinkName, <<?LINK_NAME_SCOPE_SEPARATOR>>, [global, trim_all]) of
+        [LinkName0] ->
+            {LinkName0, undefined, undefined};
         Other ->
             case lists:reverse(Other) of
                 [<<?VHASH_PREFIX, _/binary>> = VHash, Scope, OLinkName | _] ->
                     {OLinkName, Scope, VHash};
-                [Scope, OLinkName | _] ->
-                    {OLinkName, Scope, undefined}
+                [Scope | R] ->
+                    {str_utils:join_binary(lists:reverse(R), <<?LINK_NAME_SCOPE_SEPARATOR>>), Scope, undefined}
             end
     end;
 unpack_link_scope(_ModelName, {scoped_link, LinkName, Scope, VHash}) ->
@@ -636,8 +640,9 @@ select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
                 RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH)
         end, Targets) of
         [] -> undefined;
-        [L | _] ->
-            L
+        [L] ->
+            L;
+        _ -> undefined
     end.
 
 
@@ -965,9 +970,6 @@ remove_from_links_map(ModelName, [Link | R], Map, NewLinks, Deleted, DeletedMap)
                     RelatedTarget = select_scope_related_link(RawLinkName, RequestedScope, VHash, Targets),
                     case {RequestedScope, RelatedTarget} of
                         {undefined, _} -> %% Non-scoped link - delete all
-                            remove_from_links_map(ModelName, R, maps:remove(RawLinkName, Map), NewLinks, Deleted + length(Targets),
-                                maps:put(RawLinkName, maps:get(RawLinkName, Map), DeletedMap));
-                        {_, undefined} when L == 1 -> %% Unable to find scope, but there is just one link - also delete
                             remove_from_links_map(ModelName, R, maps:remove(RawLinkName, Map), NewLinks, Deleted + length(Targets),
                                 maps:put(RawLinkName, maps:get(RawLinkName, Map), DeletedMap));
                         {_, undefined} -> %% Unable to find scope, link is ambiguous - unable to delete

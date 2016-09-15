@@ -585,6 +585,7 @@ fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
     {ok, simple_link_target()} | link_error().
 fetch_link(Level, Key, ModelName, LinkName) ->
     {RawLinkName, RequestedScope, VHash} = links_utils:unpack_link_scope(ModelName, LinkName),
+    ?info("fetch_link ~p", [{LinkName, RawLinkName, RequestedScope, VHash}]),
     case fetch_full_link(Level, Key, ModelName, RawLinkName) of
         {ok, {_Version, Targets = [H | _]}} ->
             case RequestedScope of
