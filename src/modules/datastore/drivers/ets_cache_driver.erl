@@ -6,6 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc ETS based cache implementation.
+%%% @todo: https://jira.plgrid.pl/jira/browse/VFS-2588
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ets_cache_driver).

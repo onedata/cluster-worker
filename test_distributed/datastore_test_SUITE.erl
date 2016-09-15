@@ -578,6 +578,7 @@ links_scope_test(Config) ->
     set_mother_scope(scope2),
     GetAllLinks([2,3,4]),
     DeleteLinks([2,3,4]),
+    GetAllLinks([]),
     AddLink(2),
     AddLink(3),
     AddLink(4),

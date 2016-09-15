@@ -1191,7 +1191,7 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
     ExcludedModels = case driver_to_level(Driver) of
         ?DISK_ONLY_LEVEL when Method /= fetch_link, Method /= get, Method /= exists ->
-            [cache_controller, caches_controller];
+            [cache_controller];
         _ ->
             []
     end,

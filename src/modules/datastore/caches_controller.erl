@@ -350,7 +350,6 @@ clear(Level, ModelName, Key, all) ->
   {ok, Links} = erlang:apply(datastore:level_to_driver(Level), foreach_link, FullArgs),
   lists:foldl(fun(Link, Acc) ->
     Ans = clear(Level, ModelName, Key, Link),
-    ?info("CLEAR ~p", [{Link, Ans}]),
     case Ans of
       ok ->
         Acc;

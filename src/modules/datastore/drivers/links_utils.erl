@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
 
-%% Prefix of VHash in link name
+%% Prefix of VHash value (version hash used to tag links) in link name
 -define(VHASH_PREFIX, "__VH__").
 
 -type scope() :: atom() | binary().
@@ -117,10 +117,16 @@ diff(#links{link_map = OldMap}, #links{link_map = CurrentMap}) ->
     datastore:normalized_link_spec()) -> ok | datastore:create_error().
 create_link_in_map(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = _Scope2} = ModelConfig,
     Key, {LinkName, _} = Link) ->
-    case fetch_link(Driver, ModelConfig, LinkName, Key, get_scopes(?LOCAL_ONLY_LINK_SCOPE, Key)) of
+    LocalScope = get_scopes(?LOCAL_ONLY_LINK_SCOPE, Key),
+    RequestedScope = get_scopes(Scope1, Key),
+    case fetch_link(Driver, ModelConfig, LinkName, Key, LocalScope) of
         {error, link_not_found} ->
-            create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, get_scopes(?LOCAL_ONLY_LINK_SCOPE, Key)), 1),
-            create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, get_scopes(Scope1, Key)), 1);
+            case create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, LocalScope), 1) of
+                ok when LocalScope =/= RequestedScope ->
+                    create_link_in_map(Driver, ModelConfig, Link, Key, links_doc_key(Key, RequestedScope), 1);
+                Other0 ->
+                    Other0
+            end;
         {ok, _} ->
             {error, already_exists};
         Other ->
@@ -138,8 +144,8 @@ create_link_in_map(Driver, #model_config{mother_link_scope = Scope1, other_link_
 create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkName, _} = Link, Key, LinkKey, KeyNum) ->
     case Driver:get_link_doc(ModelConfig, LinkKey) of
         {ok, #document{value = #links{link_map = LinkMap, children = Children}} = Doc} ->
-            case maps:get(LinkName, LinkMap, undefined) of
-                undefined ->
+            DoAdd =
+                fun() ->
                     LinkNum = get_link_child_num(LinkName, KeyNum),
                     NextKey = maps:get(LinkNum, Children, <<"non">>),
                     case NextKey of
@@ -153,6 +159,17 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
                                 Other2 ->
                                     Other2
                             end
+                    end
+                end,
+            case maps:get(LinkName, LinkMap, undefined) of
+                undefined ->
+                    DoAdd();
+                {_V, LinkTargets} ->
+                    case [{S, VH, K, M} || {S, VH, K, M} <- LinkTargets, not is_tuple(VH)] of
+                        [] ->
+                            DoAdd();
+                        _ ->
+                            {error, already_exists}
                     end;
                 _ ->
                     {error, already_exists}
@@ -211,9 +228,9 @@ save_links_maps(Driver,
         add_no_local ->
             NormalizedSave(ReplicateScope);
         _ ->
-            case Save(LocalScope) of
+            case NormalizedSave(LocalScope) of
                 ok when LocalScope /= ReplicateScope ->
-                    Save(ReplicateScope);
+                    NormalizedSave(ReplicateScope);
                 ok ->
                     ok;
                 Error2 ->
@@ -445,14 +462,12 @@ delete_links_from_maps(Driver, ModelConfig = #model_config{name = ModelName}, Ke
     case Driver:get_link_doc(ModelConfig, Key) of
         {ok, #document{value = #links{children = Children, link_map = LinkMap} = LinksRecord} = LinkDoc} ->
             {NewLinkMap, NewLinks, Deleted, DeletedMap1} = remove_from_links_map(ModelName, Links, LinkMap),
-            ?info("Save after del 1 ~p", [{Key, Links, NewLinkMap, DeletedMap1, Deleted}]),
             NewSize = maps:size(NewLinkMap),
             {SaveAns, NewLinkRef} = case Deleted of
                 0 ->
                     {{ok, ok}, LinkDoc};
                 _ ->
                     NLD = LinkDoc#document{value = LinksRecord#links{link_map = NewLinkMap}},
-                    ?info("Save after del 2 ~p", [{Key, Links, NewLinkMap}]),
                     {Driver:save_link_doc(ModelConfig, NLD), NLD#document.key}
             end,
 

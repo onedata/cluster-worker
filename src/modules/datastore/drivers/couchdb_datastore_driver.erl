@@ -50,8 +50,9 @@
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([synchronization_doc_key/2, synchronization_link_key/2]).
 
--export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1, synchronization_key/2]).
+-export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -144,7 +145,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Key}),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -206,7 +207,7 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = 
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Key}),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -221,7 +222,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Key}),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -267,7 +268,7 @@ create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Ke
     {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_function(Diff) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Key}),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -285,7 +286,7 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
         end);
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_map(Diff) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Key}),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -419,7 +420,7 @@ list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn)
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
 delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred) ->
-    datastore:run_transaction(ModelName, to_binary({?MODULE, Key}),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case Pred() of
                 true ->
@@ -500,7 +501,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
         end
@@ -515,7 +516,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, set)
         end
@@ -529,7 +530,7 @@ set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, 
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
@@ -545,7 +546,7 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     | {error, Reason :: term()})) -> ok | datastore:generic_error().
 create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
     Key, {LinkName, _} = Link, UpdateFun) ->
-    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
@@ -571,13 +572,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_transaction(ModelName, synchronization_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -612,11 +613,20 @@ foreach_link(#model_config{bucket = _Bucket} = ModelConfig, Key, Fun, AccIn) ->
 -spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
 healthcheck(_State) ->
     try
-        case get_server(?DEFAULT_BUCKET) of
-            {ok, _} -> ok;
-            {error, Reason} ->
-                {error, Reason}
+        Reasons = lists:foldl(
+            fun(Bucket, AccIn) ->
+                case get_server(Bucket) of
+                    {ok, _} -> AccIn;
+                    {error, Reason} ->
+                        [Reason | AccIn]
+                end
+            end, [], datastore_worker:state_get(available_buckets)),
+        case Reasons of
+            [] -> ok;
+            _ ->
+                {error, Reasons}
         end
+
     catch
         _:R -> {error, R}
     end.
@@ -873,7 +883,6 @@ db_run(Bucket, Mod, Fun, Args, Retry) ->
             timer:sleep(crypto:rand_uniform(20, 50)),
             db_run(Bucket, Mod, Fun, Args, Retry - 1);
         Other ->
-%%            ?info("DBREs ~p", [{Bucket, Mod, Fun, Args, Other}]),
             Other
     end.
 
@@ -931,7 +940,7 @@ force_save(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
 %% endpoint on localhost : ?GATEWAY_BASE_PORT + N .
 %% @end
 %%--------------------------------------------------------------------
--spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer(), binary()) -> no_return().
+-spec start_gateway(Parent :: pid(), N :: non_neg_integer(), Hostname :: binary(), Port :: non_neg_integer(), couchdb_bucket()) -> no_return().
 start_gateway(Parent, N, Hostname, Port, Bucket) ->
     process_flag(trap_exit, true),
     GWPort = crypto:rand_uniform(?GATEWAY_BASE_PORT_MIN, ?GATEWAY_BASE_PORT_MAX),
@@ -1465,9 +1474,18 @@ delete_view(_ModelName, _Id) ->
 %% Returns critical section's resource ID for document operations using this driver.
 %% @end
 %%--------------------------------------------------------------------
--spec synchronization_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
-synchronization_key(#model_config{bucket = Bucket}, Key) ->
-    to_binary({?MODULE, Bucket, Key}).
+-spec synchronization_doc_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
+synchronization_doc_key(#model_config{bucket = Bucket}, Key) ->
+    to_binary({?MODULE, Bucket, doc, Key}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns critical section's resource ID for link operations using this driver.
+%% @end
+%%--------------------------------------------------------------------
+-spec synchronization_link_key(model_behaviour:model_config(), datastore:ext_key()) -> binary().
+synchronization_link_key(#model_config{bucket = Bucket}, Key) ->
+    to_binary({?MODULE, Bucket, link, Key}).
 
 
 %%--------------------------------------------------------------------
@@ -1488,7 +1506,7 @@ select_bucket(ModelConfig) ->
     couchdb_bucket().
 select_bucket(ModelConfig, #document{key = Key}) ->
     select_bucket(ModelConfig, Key);
-select_bucket(#model_config{sync_enabled = true}, {nosync, _}) ->
+select_bucket(#model_config{sync_enabled = true}, ?NOSYNC_WRAPPED_KEY_OVERRIDE(_)) ->
     default_bucket();
 select_bucket(#model_config{sync_enabled = true}, Key) when is_binary(Key) ->
     case binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of

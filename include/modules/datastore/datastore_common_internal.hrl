@@ -21,9 +21,12 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
--define(DEFAULT_LINK_SCOPE, <<"links">>).
+%% Name of local only link scope (that shall not be synchronized)
+%% This link scope always handles read operation like fetch and foreach
+%% All write operations on other scopes all replicated to this scope
+-define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
 
--define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?DEFAULT_LINK_SCOPE end).
+-define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?LOCAL_ONLY_LINK_SCOPE end).
 
 -define(OTHER_SCOPES_DEF_FUN, fun(_) -> [] end).
 
@@ -94,18 +97,17 @@
     model,
     link_map = #{},
     children = #{},
-    origin = ?DEFAULT_LINK_SCOPE %% Scope that is an origin to this link record
+    origin = ?LOCAL_ONLY_LINK_SCOPE %% Scope that is an origin to this link record
 }).
 
 %% Separator for link name and its scope
 -define(LINK_NAME_SCOPE_SEPARATOR, "#:#").
 
-%% Name of local only link scope (that shall not be synchronized)
--define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
-
 %% Special prefix for keys of documents that shall not be persisted in synchronized bucket
 %% even if its model config says otherwise.
 -define(NOSYNC_KEY_OVERRIDE_PREFIX, <<"nosync_">>).
+
+-define(NOSYNC_WRAPPED_KEY_OVERRIDE(KEY), {nosync, KEY}).
 
 
 -endif.
