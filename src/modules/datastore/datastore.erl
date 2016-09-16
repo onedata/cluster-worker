@@ -31,8 +31,9 @@
 -type document_diff() :: #{term() => term()} | fun((OldValue :: value()) ->
     {ok, NewValue :: value()} | {error, Reason :: term()}).
 -type bucket() :: atom() | binary().
+-type option() :: ignore_links.
 
--export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0]).
+-export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0, option/0]).
 
 %% Error types
 -type generic_error() :: {error, Reason :: term()}.
@@ -53,24 +54,28 @@
 -export_type([store_level/0, delete_predicate/0, list_fun/0, exists_return/0]).
 
 %% Links' types
--type normalized_link_target() :: {ext_key(), model_behaviour:model_type()}.
--type link_target() :: #document{} | normalized_link_target().
--type link_name() :: atom() | binary().
+-type link_version() :: non_neg_integer().
+-type link_final_target() :: {links_utils:scope(), links_utils:vhash(), ext_key(), model_behaviour:model_type()}.
+-type normalized_link_target() :: {link_version(), [link_final_target()]}.
+-type simple_link_target() :: {ext_key(), model_behaviour:model_type()}.
+-type link_target() :: #document{} | normalized_link_target() | link_final_target() | simple_link_target().
+-type link_name() :: atom() | binary() | {scoped_link, atom() | binary(), links_utils:scope(), links_utils:vhash()}.
 -type link_spec() :: {link_name(), link_target()}.
 -type normalized_link_spec() :: {link_name(), normalized_link_target()}.
 
 
--export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0]).
+-export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0,
+    link_final_target/0, link_version/0]).
 
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
-    get/3, list/4, delete/4, delete/3, delete_sync/4, delete_sync/3, exists/3]).
+    get/3, list/4, delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
-    link_walk/4, link_walk/5, exists_link_doc/3, exists_link_doc/4]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_level/1,
-    driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/1, run_posthooks/5]).
+    link_walk/4, link_walk/5, set_links/3, set_links/4]).
+-export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
+-export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
+-export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
 
 %%%===================================================================
 %%% API
@@ -172,13 +177,13 @@ create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
     ModelName = model_name(Document),
     [D1 | _] = Drivers = level_to_driver(Level),
     SafeExec = case caches_controller:check_cache_consistency(driver_to_level(D1), ModelName) of
-                  {ok, _, _} ->
-                      false;
-                  {monitored, ClearedList, _, _} ->
-                      lists:member(Key, ClearedList);
-                  _ ->
-                      true
-              end,
+        {ok, _, _} ->
+            false;
+        {monitored, ClearedList, _, _} ->
+            lists:member(Key, ClearedList);
+        _ ->
+            true
+    end,
 
     case SafeExec of
         true ->
@@ -293,22 +298,22 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             end, Ans_1, ClearedList)};
         {check, Ans_1} ->
             HelperFun2 = fun
-                             (#document{key = Key} = Document, Acc) ->
-                                 case cache_controller:check_get(Key, ModelName, CLevel) of
-                                     ok ->
-                                         NewAcc = case maps:find(Key, Acc) of
-                                                      {ok, _} -> Acc;
-                                                      error ->
-                                                          cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
-                                                          maps:put(Key, Document, Acc)
-                                                  end,
-                                         {next, NewAcc};
-                                     _ ->
-                                         {next, Acc}
-                                 end;
-                             (_, Acc) ->
-                                 {abort, Acc}
-                         end,
+                (#document{key = Key} = Document, Acc) ->
+                    case cache_controller:check_get(Key, ModelName, CLevel) of
+                        ok ->
+                            NewAcc = case maps:find(Key, Acc) of
+                                {ok, _} -> Acc;
+                                error ->
+                                    cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
+                                    maps:put(Key, Document, Acc)
+                            end,
+                            {next, NewAcc};
+                        _ ->
+                            {next, Acc}
+                    end;
+                (_, Acc) ->
+                    {abort, Acc}
+            end,
 
             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
             case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1]) of
@@ -333,7 +338,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
                             {abort, NAcc} ->
                                 throw({abort, NAcc})
                         end
-                              end, AccIn, Ans2),
+                    end, AccIn, Ans2),
                 {ok, AccOut}
             catch
                 {abort, AccOut0} ->
@@ -356,11 +361,26 @@ list(_Level, Drivers, ModelName, Fun, AccIn) ->
 -spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
     Key :: datastore:ext_key(), Pred :: delete_predicate()) -> ok | datastore:generic_error().
 delete(Level, ModelName, Key, Pred) ->
+    delete(Level, ModelName, Key, Pred, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes #document with given key.
+%% You can specify 'ignore_links' option, if links should not be deleted with the document.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [option()]) -> ok | datastore:generic_error().
+delete(Level, ModelName, Key, Pred, Opts) ->
     case exec_driver_async(ModelName, Level, delete, [Key, Pred]) of
         ok ->
-            % TODO - make link del asynch when tests will be able to handle it
-%%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-                catch delete_links(Level, Key, ModelName, all),
+            case lists:member(ignore_links, Opts) of
+                true -> ok;
+                false ->
+                    % TODO - make link del asynch when tests will be able to handle it
+                    %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
+                        catch delete_links(Level, Key, ModelName, all)
+            end,
             ok;
         {error, Reason} ->
             {error, Reason}
@@ -437,7 +457,7 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds given links to the document with given key.
+%% Adds given links to the document with given key. Allows for link duplication when model is configured this way.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec() | [link_spec()]) ->
@@ -445,7 +465,37 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
     add_links(Level, Key, ModelName, [LinkSpec]);
 add_links(Level, Key, ModelName, Links) when is_list(Links) ->
-    exec_driver_async(ModelName, Level, add_links, [Key, normalize_link_target(Links)]).
+    ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
+    NormalizedLinks = normalize_link_target(ModelConfig, Links),
+    Method = case LinkDuplication of
+        true -> add_links;
+        false -> set_links
+    end,
+    exec_driver_async(ModelName, Level, Method, [Key, NormalizedLinks]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets links to given document. Always replaces existing links with the same name.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(Level :: store_level(), document(), link_spec() | [link_spec()]) -> ok | generic_error().
+set_links(Level, #document{key = Key} = Doc, Links) ->
+    set_links(Level, Key, model_name(Doc), Links).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets given links to the document with given key.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec() | [link_spec()]) ->
+    ok | generic_error().
+set_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
+    set_links(Level, Key, ModelName, [LinkSpec]);
+set_links(Level, Key, ModelName, Links) when is_list(Links) ->
+    ModelConfig = #model_config{} = ModelName:model_init(),
+    NormalizedLinks = normalize_link_target(ModelConfig, Links),
+    exec_driver_async(ModelName, Level, set_links, [Key, NormalizedLinks]).
 
 
 %%--------------------------------------------------------------------
@@ -466,8 +516,8 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 -spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
     ok | create_error().
 create_link(Level, Key, ModelName, Link) ->
-    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(Link)]).
-
+    ModelConfig = ModelName:model_init(),
+    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -532,8 +582,62 @@ fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
-    {ok, normalized_link_target()} | generic_error().
+    {ok, simple_link_target()} | link_error().
 fetch_link(Level, Key, ModelName, LinkName) ->
+    {RawLinkName, RequestedScope, VHash} = links_utils:unpack_link_scope(ModelName, LinkName),
+    ?info("fetch_link ~p", [{LinkName, RawLinkName, RequestedScope, VHash}]),
+    case fetch_full_link(Level, Key, ModelName, RawLinkName) of
+        {ok, {_Version, Targets = [H | _]}} ->
+            case RequestedScope of
+                undefined ->
+                    {_, _, TargetKey, TargetModel} =
+                        case links_utils:select_scope_related_link(RawLinkName, RequestedScope, VHash, Targets) of
+                            undefined ->
+                                #model_config{mother_link_scope = MScope} = ModelName:model_init(),
+                                case lists:filter(
+                                    fun
+                                        ({Scope, _, _, _}) ->
+                                            Scope == links_utils:get_scopes(MScope, undefined)
+                                    end, Targets) of
+                                    [] -> H;
+                                    [L | _] ->
+                                        L
+                                end;
+                            ScopeRelated ->
+                                ScopeRelated
+                        end,
+                    {ok, {TargetKey, TargetModel}};
+                _ ->
+                    case links_utils:select_scope_related_link(RawLinkName, RequestedScope, VHash, Targets) of
+                        undefined ->
+                            {error, link_not_found};
+                        {_, _, TargetKey, TargetModel} ->
+                            {ok, {TargetKey, TargetModel}}
+                    end
+            end;
+        Other ->
+            Other
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets specified link from given document.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_full_link(Level :: store_level(), document(), link_name()) -> {ok, normalized_link_target()} | link_error().
+fetch_full_link(Level, #document{key = Key} = Doc, LinkName) ->
+    fetch_full_link(Level, Key, model_name(Doc), LinkName).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets specified link from the document given by key.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_full_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
+    {ok, normalized_link_target()} | generic_error().
+fetch_full_link(Level, Key, ModelName, LinkName) ->
     _ModelConfig = ModelName:model_init(),
     exec_driver(ModelName, level_to_driver(Level), fetch_link, [Key, LinkName]).
 
@@ -623,71 +727,71 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     end,
 
     FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-                        {ok, Time1, Time2} ->
-                            GetFromCache(Time1, Time2);
-                        {monitored, _, Time1, Time2} ->
-                            GetFromCache(Time1, Time2);
-                        _ ->
-                            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
-                                {ok, Ans1} ->
-                                    {check, Ans1};
-                                Err1 ->
-                                    Err1
-                            end
-                    end,
+        {ok, Time1, Time2} ->
+            GetFromCache(Time1, Time2);
+        {monitored, _, Time1, Time2} ->
+            GetFromCache(Time1, Time2);
+        _ ->
+            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+                {ok, Ans1} ->
+                    {check, Ans1};
+                Err1 ->
+                    Err1
+            end
+    end,
 
     SecodnPhaseAns = case FirstPhaseAns of
-                         {check, Ans_1, ClearedList} ->
-                             {ok, lists:foldl(fun(LinkName, Acc) ->
-                                 CacheKey = {Key, LinkName, cache_controller_link_key},
-                                 case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
-                                     ok ->
-                                         case erlang:apply(driver_to_module(Driver2), fetch_link, [ModelConfig, Key, LinkName]) of
-                                             {ok, LinkTarget} ->
-                                                 case maps:find(Key, Acc) of
-                                                     {ok, _} -> Acc;
-                                                     error ->
-                                                         cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
-                                                         maps:put(LinkName, LinkTarget, Acc)
-                                                 end;
-                                             {error, link_not_found} ->
-                                                 caches_controller:save_consistency_restored_info(CLevel, CCCUuid, LinkName),
-                                                 Acc;
-                                             GetErr ->
-                                                 ?error("Cannot fetch link from disk: ~p", GetErr),
-                                                 Acc
-                                         end;
-                                     _ ->
-                                         Acc
-                                 end
-                             end, Ans_1, ClearedList)};
-                         {check, Ans_1} ->
-                             HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
-                                 CacheKey = {Key, LinkName, cache_controller_link_key},
-                                 case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
-                                     ok ->
-                                         case maps:find(LinkName, Acc) of
-                                             {ok, _} -> Acc;
-                                             error ->
-                                                 cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
-                                                 maps:put(LinkName, LinkTarget, Acc)
-                                         end;
-                                     _ ->
-                                         Acc
-                                 end
-                                          end,
+        {check, Ans_1, ClearedList} ->
+            {ok, lists:foldl(fun(LinkName, Acc) ->
+                CacheKey = {Key, LinkName, cache_controller_link_key},
+                case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
+                    ok ->
+                        case erlang:apply(driver_to_module(Driver2), fetch_link, [ModelConfig, Key, LinkName]) of
+                            {ok, LinkTarget} ->
+                                case maps:find(Key, Acc) of
+                                    {ok, _} -> Acc;
+                                    error ->
+                                        cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                        maps:put(LinkName, LinkTarget, Acc)
+                                end;
+                            {error, link_not_found} ->
+                                caches_controller:save_consistency_restored_info(CLevel, CCCUuid, LinkName),
+                                Acc;
+                            GetErr ->
+                                ?error("Cannot fetch link from disk: ~p", GetErr),
+                                Acc
+                        end;
+                    _ ->
+                        Acc
+                end
+            end, Ans_1, ClearedList)};
+        {check, Ans_1} ->
+            HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
+                CacheKey = {Key, LinkName, cache_controller_link_key},
+                case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
+                    ok ->
+                        case maps:find(LinkName, Acc) of
+                            {ok, _} -> Acc;
+                            error ->
+                                cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
+                                maps:put(LinkName, LinkTarget, Acc)
+                        end;
+                    _ ->
+                        Acc
+                end
+            end,
 
-                             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-                             case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun2, Ans_1]) of
-                                 {ok, Ans_2} ->
-                                     caches_controller:end_consistency_restoring(CLevel, CCCUuid),
-                                     {ok, Ans_2};
-                                 Err2 ->
-                                     Err2
-                             end;
-                         OtherAns ->
-                             OtherAns
-                     end,
+            caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
+            case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun2, Ans_1]) of
+                {ok, Ans_2} ->
+                    caches_controller:end_consistency_restoring(CLevel, CCCUuid),
+                    {ok, Ans_2};
+                Err2 ->
+                    Err2
+            end;
+        OtherAns ->
+            OtherAns
+    end,
 
     case SecodnPhaseAns of
         {ok, Ans2} ->
@@ -736,8 +840,8 @@ link_walk(Level, Key, ModelName, R, Mode) ->
 %%--------------------------------------------------------------------
 -spec exists_link_doc(store_level(), document(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
-    exists_link_doc(Level, Key, model_name(Doc),  Scope).
+exists_link_doc(Level, #document{key = Key} = Doc, Scope) ->
+    exists_link_doc(Level, Key, model_name(Doc), Scope).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -746,7 +850,7 @@ exists_link_doc(Level, #document{key = Key} = Doc,  Scope) ->
 %%--------------------------------------------------------------------
 -spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(Level, Key, ModelName,  Scope) ->
+exists_link_doc(Level, Key, ModelName, Scope) ->
     exec_driver(ModelName, level_to_driver(Level), exists_link_doc, [Key, Scope]).
 
 %%--------------------------------------------------------------------
@@ -806,14 +910,20 @@ link_walk7(Level, Key, ModelName, [NextLink | R], Acc, get_leaf) ->
             {error, Reason}
     end.
 
-normalize_link_target([]) ->
+normalize_link_target(_, {_LinkName, {_Version, [{_ScopeId, _VHash, _TargetKey, ModelName} | _]}} = ValidLink) when is_atom(ModelName) ->
+    ValidLink;
+normalize_link_target(_ModelConfig, []) ->
     [];
-normalize_link_target([Link | R]) ->
-    [normalize_link_target(Link) | normalize_link_target(R)];
-normalize_link_target({LinkName, #document{key = TargetKey} = Doc}) ->
-    normalize_link_target({LinkName, {TargetKey, model_name(Doc)}});
-normalize_link_target({_LinkName, {_TargetKey, ModelName}} = ValidLink) when is_atom(ModelName) ->
-    ValidLink.
+normalize_link_target(ModelConfig, [{_, {V, []}} | R]) when is_integer(V) ->
+    normalize_link_target(ModelConfig, R);
+normalize_link_target(ModelConfig, [Link | R]) ->
+    [normalize_link_target(ModelConfig, Link) | normalize_link_target(ModelConfig, R)];
+normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, #document{key = TargetKey} = Doc}) ->
+    normalize_link_target(ModelConfig, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, model_name(Doc)}});
+normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, {TargetKey, ModelName}}) when is_atom(ModelName) ->
+    normalize_link_target(ModelConfig, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, ModelName}});
+normalize_link_target(ModelConfig, {LinkName, {_ScopeId, _VHash, _TargetKey, _ModelName} = Target}) ->
+    normalize_link_target(ModelConfig, {LinkName, {1, [Target]}}).
 
 
 %%--------------------------------------------------------------------
@@ -848,15 +958,19 @@ model_name(Record) when is_tuple(Record) ->
 %%--------------------------------------------------------------------
 -spec run_prehooks(Config :: model_behaviour:model_config(),
     Method :: model_behaviour:model_action(), Level :: store_level(),
-    Context :: term()) ->
+    Context :: term(), [term()]) ->
     ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
 % TODO - check for errors before accepting task
-run_prehooks(#model_config{name = ModelName}, Method, Level, Context) ->
+run_prehooks(#model_config{name = ModelName}, Method, Level, Context, ExcludedModules) ->
     Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
     HooksRes =
         lists:map(
             fun({_, HookedModule}) ->
-                HookedModule:before(ModelName, Method, Level, Context)
+                case lists:member(HookedModule, ExcludedModules) of
+                    true -> ok;
+                    false ->
+                        HookedModule:before(ModelName, Method, Level, Context)
+                end
             end, Hooked),
     case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
         [] -> ok;
@@ -924,18 +1038,18 @@ init_caches_consistency(Models) ->
     lists:foreach(fun(ModelName) ->
         #model_config{store_level = SL} = ModelName:model_init(),
         Check = case SL of
-                    ?GLOBALLY_CACHED_LEVEL -> true;
-                    ?LOCALLY_CACHED_LEVEL -> true;
-                    _ -> false
-                end,
+            ?GLOBALLY_CACHED_LEVEL -> true;
+            ?LOCALLY_CACHED_LEVEL -> true;
+            _ -> false
+        end,
         case Check of
             true ->
                 CheckFun = fun
-                               (#document{}, _) ->
-                                   {abort, used};
-                               ('$end_of_table', _) ->
-                                   {abort, empty}
-                           end,
+                    (#document{}, _) ->
+                        {abort, used};
+                    ('$end_of_table', _) ->
+                        {abort, empty}
+                end,
                 case exec_driver(ModelName, level_to_driver(?DISK_ONLY_LEVEL), list, [CheckFun, []]) of
                     empty ->
                         caches_controller:init_consistency_info(SL, ModelName);
@@ -1061,7 +1175,7 @@ exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
     exec_driver(ModelName, Driver, Method, Args);
 exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
     case exec_driver(ModelName, Driver, Method, Args) of
-        {error, {not_found, _}} when Method =:= get ->
+        {error, {not_found, _}} when Method =:= get; Method =:= fetch_link ->
             exec_driver(ModelName, Rest, Method, Args);
         {error, link_not_found} when Method =:= fetch_link ->
             exec_driver(ModelName, Rest, Method, Args);
@@ -1076,8 +1190,14 @@ exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
     end;
 exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
+    ExcludedModels = case driver_to_level(Driver) of
+        ?DISK_ONLY_LEVEL when Method /= fetch_link, Method /= get, Method /= exists ->
+            [cache_controller];
+        _ ->
+            []
+    end,
     Return =
-        case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
+        case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args, ExcludedModels) of
             ok ->
                 FullArgs = [ModelConfig | Args],
                 % TODO consider which method is better when file_meta will be able to handle proxy calls in datastore
@@ -1099,10 +1219,10 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                 {ok, Value};
             {task, _Task} ->
                 {error, prehook_ans_not_supported};
+            {tasks, _Task} ->
+                {error, prehook_ans_not_supported};
             {error, Reason} ->
-                {error, Reason};
-            Other -> % for run_transaction
-                Other
+                {error, Reason}
         end,
     run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, Return).
 
@@ -1136,13 +1256,13 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
         {error, {not_found, MN}} when Method =:= update ->
             [Key | _] = Args,
             Proceed = case caches_controller:check_cache_consistency(driver_to_level(Driver1), ModelName) of
-                          {ok, _, _} ->
-                              false;
-                          {monitored, ClearedList, _, _} ->
-                              lists:member(Key, ClearedList);
-                          _ ->
-                              true
-                      end,
+                {ok, _, _} ->
+                    false;
+                {monitored, ClearedList, _, _} ->
+                    lists:member(Key, ClearedList);
+                _ ->
+                    true
+            end,
             case Proceed of
                 true ->
                     ModelConfig = ModelName:model_init(),
@@ -1170,7 +1290,7 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
     end;
 exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
     ModelConfig = ModelName:model_init(),
-    case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args) of
+    case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args, []) of
         ok ->
             FullArgs = [ModelConfig | Args],
             Return = erlang:apply(driver_to_module(Driver), Method, FullArgs),
@@ -1180,14 +1300,15 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         {tasks, Tasks} ->
             Level = caches_controller:cache_to_task_level(ModelName),
             lists:foreach(fun
-                              ({task, Task}) ->
-                                  ok = task_manager:start_task(Task, Level);
-                              (_) ->
-                                  ok % error already logged
-                          end, Tasks);
+                ({task, Task}) ->
+                    ok = task_manager:start_task(Task, Level);
+                (_) ->
+                    ok % error already logged
+            end, Tasks);
         {task, Task} ->
             Level = caches_controller:cache_to_task_level(ModelName),
             ok = task_manager:start_task(Task, Level);
         {error, Reason} ->
             run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
     end.
+

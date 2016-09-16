@@ -324,6 +324,13 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
+before(ModelName, set_links, disk_only, [Key, Links], Level2) ->
+    Tasks = lists:foldl(fun({LN, _}, Acc) ->
+        [start_disk_op({Key, LN, cache_controller_link_key}, ModelName, set_links, [Key, [LN]], Level2, false) | Acc]
+    end, [], Links),
+    {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
+    timer:sleep(SleepTime),
+    {tasks, Tasks};
 before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
     check_link_create(Key, LinkName, ModelName, Level);
 before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->

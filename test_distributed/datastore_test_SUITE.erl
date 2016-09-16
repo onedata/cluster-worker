@@ -553,6 +553,7 @@ links_scope_test(Config) ->
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
+    set_mother_scope(scope1),
     AddLinkWithDoc(1),
     AddLinkWithDoc(2),
     FetchLink(1),
@@ -575,8 +576,12 @@ links_scope_test(Config) ->
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
     set_mother_scope(scope2),
+    GetAllLinks([2,3,4]),
+    DeleteLinks([2,3,4]),
     GetAllLinks([]),
-    set_other_scopes([scope1]),
+    AddLink(2),
+    AddLink(3),
+    AddLink(4),
     GetAllLinks([2,3,4]),
     FetchLink(2),
     FetchLink(3),
@@ -595,40 +600,16 @@ links_scope_test(Config) ->
     ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
     ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
 
-    set_other_scopes([]),
-    GetAllLinks([5,6]),
     set_mother_scope(scope1),
+    DeleteLinks([3, 7, 100, 5, 6]),
     GetAllLinks([2,4]),
     ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}])),
     AddLinkWithDoc(8),
     GetAllLinks([2,4,5,8]),
-    set_other_scopes([scope2]),
-    GetAllLinks([2,4,5,5,6,8]),
     DK1 = GetDocKey(1),
     ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(5)])),
-    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBAL_ONLY_LEVEL, Doc, [{GetLinkName(6), GetDoc(1)}]])),
     ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBAL_ONLY_LEVEL, Doc, [{GetLinkName(2), GetDoc(1)}]])),
-    GetAllLinks([2,4,5,5,6,8]),
-    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(6)])),
     ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(2)])),
-
-    set_mother_scope(scope2),
-    set_other_scopes([scope1]),
-    GetAllLinks([2,4,5,5,6,8]),
-    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(6)])),
-    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(2)])),
-    DK2 = GetDocKey(5),
-    ?assertMatch({ok, {DK2, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(5)])),
-    DeleteLink(5),
-    GetAllLinks([2,4,5,6,8]),
-    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(5)])),
-    DeleteLink(5),
-    GetAllLinks([2,4,6,8]),
-    DeleteLinks([2,4,6,8]),
-    GetAllLinks([]),
-    set_mother_scope(scope1),
-    set_other_scopes([scope2]),
-    GetAllLinks([]),
 
     MasterLoop ! stop,
     ok.
@@ -738,63 +719,47 @@ links_scope_proc_mem_test(Config) ->
     DeleteLinkAndCheck(100, scope1, []),
     GetAllLinks([2,3,4], scope1, []),
 
-    GetAllLinks([], scope2, []),
+    GetAllLinks([2,3,4], scope2, []),
+    DeleteLinks([2,3,4], scope2, []),
 
-    GetAllLinks([2,3,4], scope2, [scope1]),
-    FetchLink(2, scope2, [scope1]),
-    FetchLink(3, scope2, [scope1]),
-    AddLink(2, scope2, [scope1]),
-    AddLink(5, scope2, [scope1]),
-    AddLinkWithDoc(6, scope2, [scope1]),
-    FetchLink(5, scope2, [scope1]),
-    FetchLink(6, scope2, [scope1]),
-    CreateExistingLink(3, scope2, [scope1]),
-    CreateLinkWithDoc(7, scope2, [scope1]),
-    FetchLink(7, scope2, [scope1]),
-    GetAllLinks([2,3,4,5,6,7], scope2, [scope1]),
-    DeleteLinks([3, 7, 100], scope2, [scope1]),
-    GetAllLinks([2,4,5,6], scope2, [scope1]),
+    AddLink(2, scope2, []),
+    AddLink(3, scope2, []),
+    AddLink(4, scope2, []),
+    GetAllLinks([2,3,4], scope2, []),
+    FetchLink(2, scope2, []),
+    FetchLink(3, scope2, []),
+    AddLink(2, scope2, []),
+    AddLink(5, scope2, []),
+    AddLinkWithDoc(6, scope2, []),
+    FetchLink(5, scope2, []),
+    FetchLink(6, scope2, []),
+    CreateExistingLink(3, scope2, []),
+    CreateLinkWithDoc(7, scope2, []),
+    FetchLink(7, scope2, []),
+    GetAllLinks([2,3,4,5,6,7], scope2, []),
+    DeleteLinks([3, 7, 100], scope2, []),
 
-    GetAllLinks([5,6], scope2, []),
 
-    GetAllLinks([2,4], scope1, []),
+    GetAllLinks([2,4,5,6], scope1, []),
+    DeleteLinks([3, 7, 100, 5,6], scope1, []),
     ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
         create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}]])),
     AddLinkWithDoc(8, scope1, []),
     GetAllLinks([2,4,5,8], scope1, []),
 
-    GetAllLinks([2,4,5,6,8], scope1, [scope2]),
     DK1 = GetDocKey(1),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [scope2],
+    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
             fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(5)]])),
-    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [scope2],
-        add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(6), GetDoc(1)}]]])),
-    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [scope2],
+    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
         add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(2), GetDoc(1)}]]])),
-    GetAllLinks([2,4,5,6,8], scope1, [scope2]),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [scope2],
-        fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(6)]])),
+    GetAllLinks([2,4,5,8], scope1, []),
     ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [scope2],
         fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(2)]])),
 
-    GetAllLinks([2,4,5,6,8], scope2, [scope1]),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope2, [scope1],
-        fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(6)]])),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope2, [scope1],
-        fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(2)]])),
-    DK2 = GetDocKey(5),
-    ?assertMatch({ok, {DK2, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope2, [scope1],
-        fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(5)]])),
-    DeleteLink(5, scope2, [scope1]),
-    GetAllLinks([2,4,5,6,8], scope2, [scope1]),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope2, [scope1],
-        fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(5)]])),
-    DeleteLinkAndCheck(5, scope2, [scope1]),
-    GetAllLinks([2,4,6,8], scope2, [scope1]),
-    DeleteLinks([2,4,6,8], scope2, [scope1]),
-    GetAllLinks([], scope2, [scope1]),
 
-    GetAllLinks([], scope1, [scope2]),
+    DeleteLinks([2,4,5,6,8], scope2, []),
+    GetAllLinks([], scope2, []),
+
     ok.
 
 execute_with_link_context(MotherScope, OtherScopes, Op, Args) ->
@@ -808,13 +773,6 @@ execute_with_link_context(MotherScope, OtherScopes, Module, Op, Args) ->
 set_mother_scope(MotherScope) ->
     Pid = get(?SCOPE_MASTER_PROC_NAME),
     Pid ! {set_mother_scope, self(), MotherScope},
-    receive
-        scope_changed -> ok
-    end.
-
-set_other_scopes(OtherScopes) ->
-    Pid = get(?SCOPE_MASTER_PROC_NAME),
-    Pid ! {set_other_scopes, self(), OtherScopes},
     receive
         scope_changed -> ok
     end.
@@ -1617,7 +1575,7 @@ multiple_links_creation_test_base(Config, PModule) ->
     Self = self(),
     AddLinks = fun(Links, Send) ->
         Ans = ?call(Worker1, PModule, add_links, [ModelConfig, Doc#document.key,
-            datastore:normalize_link_target(Links)]),
+            datastore:normalize_link_target(ModelConfig, Links)]),
         case Send of
             true ->
                 Self ! {link_ans, Ans};
@@ -2445,7 +2403,7 @@ generic_links_test(Config, Level) ->
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc3])),
 
     ?assertMatch(ok, ?call_store(Worker2, add_links, [
-        Level, Doc1, [{link2, Doc2}, {link3, Doc3}]
+        Level, Doc1, [{link3, Doc2}, {link2, Doc3}]
     ])),
 
     %% Fetch all links and theirs targets
@@ -2454,10 +2412,26 @@ generic_links_test(Config, Level) ->
     Ret2 = ?call_store(Worker2, fetch_link, [Level, Doc1, link2]),
     Ret3 = ?call_store(Worker1, fetch_link, [Level, Doc1, link3]),
 
-    ?assertMatch({ok, {Key2, TestRecord}}, Ret2),
-    ?assertMatch({ok, {Key3, TestRecord}}, Ret3),
-    ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret0),
-    ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret1),
+    ?assertMatch({ok, {Key3, TestRecord}}, Ret2),
+    ?assertMatch({ok, {Key2, TestRecord}}, Ret3),
+    ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret0),
+    ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret1),
+
+    ?assertMatch(ok, ?call_store(Worker2, set_links, [
+        Level, Doc1, [{link2, Doc2}, {link3, Doc3}]
+    ])),
+
+    %% Fetch all links and theirs targets
+    Ret00 = ?call_store(Worker2, fetch_link_target, [Level, Doc1, link2]),
+    Ret01 = ?call_store(Worker1, fetch_link_target, [Level, Doc1, link3]),
+    Ret02 = ?call_store(Worker2, fetch_link, [Level, Doc1, link2]),
+    Ret03 = ?call_store(Worker1, fetch_link, [Level, Doc1, link3]),
+
+    ?assertMatch({ok, {Key2, TestRecord}}, Ret02),
+    ?assertMatch({ok, {Key3, TestRecord}}, Ret03),
+    ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret00),
+    ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret01),
+
 
     ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc1, [link2, link3]])),
 

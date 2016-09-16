@@ -21,7 +21,12 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
--define(MOTHER_SCOPE_DEF_FUN, fun(_) -> links end).
+%% Name of local only link scope (that shall not be synchronized)
+%% This link scope always handles read operation like fetch and foreach
+%% All write operations on other scopes all replicated to this scope
+-define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
+
+-define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?LOCAL_ONLY_LINK_SCOPE end).
 
 -define(OTHER_SCOPES_DEF_FUN, fun(_) -> [] end).
 
@@ -39,7 +44,9 @@
     transactional_global_cache = true :: boolean(),
     sync_cache = false :: boolean(),
     mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope(),
-    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes()
+    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
+    link_duplication = false :: boolean(),
+    sync_enabled = false :: boolean()
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -57,6 +64,8 @@
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache,
         ?MOTHER_SCOPE_DEF_FUN, ?OTHER_SCOPES_DEF_FUN)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, false)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication),
     #model_config{
         name = ?MODULE,
         size = record_info(size, ?MODULE),
@@ -71,7 +80,9 @@
         % Function that returns scope for local operations on links
         mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
         % Function that returns all scopes for links' operations
-        other_link_scopes = ScopeFun2 % link_utils:other_scopes_fun()
+        other_link_scopes = ScopeFun2, % link_utils:other_scopes_fun()
+        link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
+        sync_enabled = false % Models with sync enabled will be stored in non-default bucket to reduce DB load.
     }
 ).
 
@@ -85,7 +96,18 @@
     doc_key,
     model,
     link_map = #{},
-    children = #{}
+    children = #{},
+    origin = ?LOCAL_ONLY_LINK_SCOPE %% Scope that is an origin to this link record
 }).
+
+%% Separator for link name and its scope
+-define(LINK_NAME_SCOPE_SEPARATOR, "@provider@").
+
+%% Special prefix for keys of documents that shall not be persisted in synchronized bucket
+%% even if its model config says otherwise.
+-define(NOSYNC_KEY_OVERRIDE_PREFIX, <<"nosync_">>).
+
+-define(NOSYNC_WRAPPED_KEY_OVERRIDE(KEY), {nosync, KEY}).
+
 
 -endif.
