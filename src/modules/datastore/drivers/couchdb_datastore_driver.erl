@@ -186,7 +186,7 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = 
     {ok, {Pid, _}} = get_server(Bucket),
     Ref = make_ref(),
     Pid ! {{self(), Ref}, Doc},
-    receive
+    wut = receive
         {Ref, Response} ->
             Response
     after
@@ -1062,7 +1062,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                 Pid ! {Ref, Res}
             end, Keys)
         end),
-        LState#{doc_batch_ts => erlang:system_time(milli_seconds), doc_batch_map = #{}}
+        LState#{doc_batch_ts => erlang:system_time(milli_seconds), doc_batch_map => #{}}
     end,
 
     UpdatedState = case CT - DocBatchTS > timer:seconds(1) of
