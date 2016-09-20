@@ -53,6 +53,7 @@
 -export([synchronization_doc_key/2, synchronization_link_key/2]).
 
 -export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1]).
+-export([bulk_force_save/2, bulk_force_save/3, save_docs/2, save_docs/3]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -178,15 +179,14 @@ save_link_doc(ModelConfig, Doc) ->
 %%--------------------------------------------------------------------
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
-    create(ModelConfig, Doc);
-save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Key, rev = Rev, value = Value}) ->
-    Doc = make_raw_doc(ModelConfig, ToSave),
-
-    {ok, {Pid, _}} = get_server(Bucket),
+save_doc(#model_config{aggregate_db_writes = false} = ModelConfig, ToSave = #document{}) ->
+    [Res] = save_docs(select_bucket(ModelConfig), [{ModelConfig, ToSave}]),
+    Res;
+save_doc(#model_config{aggregate_db_writes = true} = ModelConfig, ToSave = #document{}) ->
+    {ok, {Pid, _}} = get_server(select_bucket(ModelConfig)),
     Ref = make_ref(),
-    Pid ! {{self(), Ref}, Doc},
-    wut = receive
+    Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+    receive
         {Ref, Response} ->
             Response
     after
@@ -194,27 +194,34 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = 
             {error, loop_timeout}
     end.
 
-%%save_doc_sync(ModelConfig, ToSave = #document{key = Key, rev = Rev, value = Value}) ->
-%%    Doc = make_raw_doc(ModelConfig, ToSave),
-%%    case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-%%        {ok, {SaveReport}} ->
-%%            case verify_ans(SaveReport) of
-%%                true ->
-%%                    {ok, Key};
-%%                _ ->
-%%                    {error, db_internal_error}
-%%            end;
-%%        {error, conflict} ->
-%%            {error, already_exists};
-%%        {error, Reason} ->
-%%            {error, Reason}
-%%    end.
+save_docs(DBBucket, Documents) ->
+    save_docs(DBBucket, Documents, []).
+save_docs(DBBucket, Documents, Opts) ->
+    Docs = [make_raw_doc(MC, Doc) || {MC, Doc} <- Documents],
+    case db_run(DBBucket, couchbeam, save_docs, [Docs, Opts], 3) of
+        {ok, Res} ->
+            parse_response(Res);
+        {error, Reason} ->
+            [{error, Reason} || _ <- lists:seq(1, length(Documents))]
+    end.
 
-make_raw_doc(#model_config{bucket = Bucket} = ModelConfig, #document{key = Key, rev = Rev, value = Value}) ->
+make_raw_doc(_MC, []) ->
+        [];
+make_raw_doc(MC, [Doc | T]) ->
+    [make_raw_doc(MC, Doc) | make_raw_doc(MC, T)];
+make_raw_doc(#model_config{bucket = Bucket} = ModelConfig, #document{deleted = Del, key = Key, rev = Rev, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
 
     {Props} = to_json_term(Value),
-    {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]}.
+    RawRevInfo = case Rev of
+        undefined ->
+            [];
+        {Start, Ids} = Revs ->
+            [{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}];
+        _ ->
+            [{<<"_rev">>, Rev}]
+    end,
+    {RawRevInfo ++ [{<<"_deleted">>, atom_to_binary(Del, utf8)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -257,24 +264,8 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Key, value = Value}) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-
-    {Props} = to_json_term(Value),
-    Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveReport}} ->
-            case verify_ans(SaveReport) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+create(#model_config{} = ModelConfig, ToSave = #document{}) ->
+    save_doc(ModelConfig, ToSave).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -872,7 +863,7 @@ get_server(DBGateways, Bucket) ->
 
     case ActiveGateways of
         [] ->
-            ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
+            ?error("Unable to select CouchBase Gateway for bucket ~p: no active gateway among: ~p", [Bucket, Gateways]),
             {error, no_active_gateway};
         _ ->
             try
@@ -929,26 +920,15 @@ force_save(#model_config{} = ModelConfig, ToSave) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-    {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
-        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del, utf8)} | Props]},
-    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveAns}} ->
-            case verify_ans(SaveAns) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+force_save(#model_config{} = ModelConfig, BucketOverride, Doc) ->
+    [Res] = save_docs(BucketOverride, [{ModelConfig, Doc}], [{<<"new_edits">>, false}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT),
+    Res.
 
+
+bulk_force_save(BucketOverride, Docs) ->
+    bulk_force_save(BucketOverride, Docs, []).
+bulk_force_save(BucketOverride, Docs, Opts) ->
+    save_docs(BucketOverride, Docs, Opts ++ [{<<"new_edits">>, false}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1057,13 +1037,17 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         BatchDocs = maps:get(doc_batch_map, LState),
         {Keys, Docs} = lists:unzip(maps:to_list(BatchDocs)),
         spawn(fun() ->
-            Res = db_run(couchbeam, save_docs, [get_db(Bucket), Docs], 3),
-            utils:pmap(fun({Pid, Ref}) ->
+            Responses = save_docs(Bucket, Docs),
+
+            utils:pmap(fun({{Pid, Ref}, Res}) ->
+                ?info("NOTIFY ~p", [{Pid, Ref, Res}]),
                 Pid ! {Ref, Res}
-            end, Keys)
+            end, lists:zip(Keys, Responses))
         end),
         LState#{doc_batch_ts => erlang:system_time(milli_seconds), doc_batch_map => #{}}
     end,
+
+    ?info("WUT ~p", [{CT - DocBatchTS, maps:get(doc_batch_map, UpdatedState0)}]),
 
     UpdatedState = case CT - DocBatchTS > timer:seconds(1) of
         true ->
@@ -1100,7 +1084,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             stop ->
                 stop_gateway(PortFD),
                 UpdatedState#{status => closed};
-            {save_doc, {{_From, _Ref} = K, Doc}} ->
+            {save_doc, {{_From, _Ref} = K, ModelWithDoc}} ->
                 DocBatchMap = maps:get(doc_batch_map, UpdatedState),
                 UpdatedState1 = case maps:size(DocBatchMap) > 100 of
                     true ->
@@ -1108,7 +1092,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                     false ->
                         UpdatedState
                 end,
-                UpdatedState1#{doc_batch_map => maps:put(K, Doc, DocBatchMap)};
+                UpdatedState1#{doc_batch_map => maps:put(K, ModelWithDoc, DocBatchMap)};
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
                 UpdatedState
@@ -1578,6 +1562,7 @@ verify_ans(Ans) when is_list(Ans) ->
         case Acc of
             false ->
                 false;
+
             _ ->
                 verify_ans(E)
         end
@@ -1589,3 +1574,20 @@ verify_ans({Ans}) ->
     verify_ans(Ans);
 verify_ans(_Ans) ->
     true.
+
+parse_response([]) ->
+        [];
+parse_response([E | T]) ->
+    [parse_response(E) | parse_response(T)];
+parse_response({_} = JSONTerm) ->
+    JSONBin = json_utils:encode(JSONTerm),
+    JSONMap = json_utils:decode_map(JSONBin),
+    case maps:get(<<"error">>, JSONMap, undefined) of
+        undefined ->
+            {_, Key} = from_driver_key(maps:get(<<"id">>, JSONMap)),
+            {ok, Key};
+        <<"conflict">> ->
+            {error, already_exists};
+        Error ->
+            {error, binary_to_atom(Error, utf8)}
+    end.

@@ -46,7 +46,8 @@
     mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope(),
     other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
     link_duplication = false :: boolean(),
-    sync_enabled = false :: boolean()
+    sync_enabled = false :: boolean(),
+    aggregate_db_writes = false :: boolean()
 }).
 
 %% Helper macro for instantiating #model_config record.
