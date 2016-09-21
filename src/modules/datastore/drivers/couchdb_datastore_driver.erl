@@ -1283,13 +1283,12 @@ terminate(Reason, _State) ->
 %%--------------------------------------------------------------------
 -spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_revision(ModelConfig, BucketOverride, #document{rev = {_Start, _Ids} = Revs} = Doc) ->
-    save_revision(ModelConfig, BucketOverride, Doc#document{rev = rev_info_to_rev(Revs)});
 save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = Rev, value = Value}) ->
+    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
     {Props} = to_json_term(Value),
-    Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
     case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {SaveAns}} ->
             case verify_ans(SaveAns) of

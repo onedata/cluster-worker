@@ -253,7 +253,7 @@ delete_force_save_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
 
     %% given
-    Doc1Key = <<"doc1_key">>,
+    Doc1Key = <<"dfst_key">>,
 
     Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
     Doc1 = #document{key = Doc1Key, value = Doc1Val},
@@ -298,7 +298,7 @@ delete_conflict_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
 
     %% given
-    Doc1Key = <<"doc1_key">>,
+    Doc1Key = <<"dct_key">>,
 
     Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
     Doc1 = #document{key = Doc1Key, value = Doc1Val},
@@ -352,7 +352,7 @@ delete_conflict_test(Config) ->
         {DeletedR1_4, KeyR1_4, ValR1_4, ModR1_4}
     ),
 
-    {_, [H4]} = Rev4,
+    {_, [H4 | _]} = Rev4,
     RevCheck4 = <<"2-", H4/binary>>,
 
     ?assertMatch({ok, #document{rev = RevCheck4}}, rpc:call(W, test_record_1, get, [Doc1Key])),
