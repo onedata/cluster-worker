@@ -45,7 +45,8 @@
     finite_stream_test/1,
     record_deletion_test/1,
     delete_conflict_test/1,
-    delete_force_save_test/1]).
+    delete_force_save_test/1,
+    delete_double_conflict_test/1]).
 
 -performance({test_cases, []}).
 all() ->
@@ -57,7 +58,8 @@ all() ->
         force_save_test,
         finite_stream_test,
         delete_conflict_test,
-        delete_force_save_test
+        delete_force_save_test,
+        delete_double_conflict_test
     ]).
 
 %%%===================================================================
@@ -340,7 +342,7 @@ delete_conflict_test(Config) ->
 
     ?assertMatch({ok, #document{rev = RevCheck}}, rpc:call(W, test_record_1, get, [Doc1Key])),
 
-    Doc1Val4 = #test_record_1{field1 = 3, field2 = 2, field3 = 3},
+    Doc1Val4 = #test_record_1{field1 = 4, field2 = 2, field3 = 3},
     Doc1_4 = #document{key = Doc1Key, value = Doc1Val4, rev = {RNum, [<<"z">>, H2]}},
     ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_4])),
 
@@ -366,7 +368,106 @@ delete_conflict_test(Config) ->
         {_, #document{}, _}}, ?TIMEOUT),
     #document{key = KeyR2, value = ValR2, deleted = DeletedR2} = DocR2,
     ?assertEqual(
-        {true, Doc1Key, Doc1Val3, test_record_1},
+        {true, Doc1Key, Doc1Val4, test_record_1},
+        {DeletedR2, KeyR2, ValR2, ModR2}
+    ).
+
+delete_double_conflict_test(Config) ->
+    [W | _] = ?config(cluster_worker_nodes, Config),
+
+    %% given
+    Doc1Key = <<"ddct_key">>,
+
+    Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
+    Doc1 = #document{key = Doc1Key, value = Doc1Val},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1])),
+    {_, {_, DocR1, ModR1}} = ?assertReceivedMatch({delete_double_conflict_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1, value = ValR1, deleted = DeletedR1} = DocR1,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val, test_record_1},
+        {DeletedR1, KeyR1, ValR1, ModR1}
+    ),
+
+    Doc1Val2 = #test_record_1{field1 = 2, field2 = 2, field3 = 3},
+    Doc1_2 = #document{key = Doc1Key, value = Doc1Val2},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1_2])),
+    {_, {_, DocR1_2, ModR1_2}} = ?assertReceivedMatch({delete_double_conflict_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1_2, value = ValR1_2, deleted = DeletedR1_2} = DocR1_2,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val2, test_record_1},
+        {DeletedR1_2, KeyR1_2, ValR1_2, ModR1_2}
+    ),
+
+    Doc1Val22 = #test_record_1{field1 = 2, field2 = 2, field3 = 32},
+    Doc1_22 = #document{key = Doc1Key, value = Doc1Val22},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1_22])),
+    {_, {_, DocR1_22, ModR1_22}} = ?assertReceivedMatch({delete_double_conflict_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1_22, value = ValR1_22, deleted = DeletedR1_22, rev = Rev} = DocR1_22,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val22, test_record_1},
+        {DeletedR1_22, KeyR1_22, ValR1_22, ModR1_22}
+    ),
+
+    {RNum, [H1, _H2, H3]} = Rev,
+    RevCheck = <<"3-", H1/binary>>,
+    ?assertMatch({ok, #document{rev = RevCheck}}, rpc:call(W, test_record_1, get, [Doc1Key])),
+
+    Doc1Val3 = #test_record_1{field1 = 3, field2 = 2, field3 = 3},
+    Doc1_3 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum, [<<"001">>, <<"002">>, H3]}},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
+
+    ?assertEqual(timeout, receive
+                              {delete_double_conflict_test,
+                                  {_, #document{}, _}} = __Result__ -> __Result__
+                          after
+                              ?TIMEOUT ->
+                                  timeout
+                          end),
+
+    Doc1_33 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum, [<<"001">>, <<"zzz">>, H3]}},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_33])),
+
+    ?assertEqual(timeout, receive
+                              {delete_double_conflict_test,
+                                  {_, #document{}, _}} = __Result__ -> __Result__
+                          after
+                              ?TIMEOUT ->
+                                  timeout
+                          end),
+
+    ?assertMatch({ok, #document{rev = RevCheck}}, rpc:call(W, test_record_1, get, [Doc1Key])),
+
+    Doc1Val4 = #test_record_1{field1 = 4, field2 = 2, field3 = 3},
+    Doc1_4 = #document{key = Doc1Key, value = Doc1Val4, rev = {RNum, [<<"zz1">>, <<"zz2">>, H3]}},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_4])),
+
+    {_, {_, DocR1_4, ModR1_4}} = ?assertReceivedMatch({delete_double_conflict_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1_4, value = ValR1_4, deleted = DeletedR1_4, rev = Rev4} = DocR1_4,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val4, test_record_1},
+        {DeletedR1_4, KeyR1_4, ValR1_4, ModR1_4}
+    ),
+
+    {_, [H4 | _]} = Rev4,
+    RevCheck4 = <<"3-", H4/binary>>,
+
+    ?assertMatch({ok, #document{rev = RevCheck4}}, rpc:call(W, test_record_1, get, [Doc1Key])),
+
+    %% when
+    ?assertEqual(ok, rpc:call(W, test_record_1, delete, [Doc1Key])),
+
+    %% then
+    ?assertMatch({error, {not_found, _}}, rpc:call(W, test_record_1, get, [Doc1Key])),
+    {_, {_, DocR2, ModR2}} = ?assertReceivedMatch({delete_double_conflict_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR2, value = ValR2, deleted = DeletedR2} = DocR2,
+
+    ?assertEqual(
+        {true, Doc1Key, Doc1Val4, test_record_1},
         {DeletedR2, KeyR2, ValR2, ModR2}
     ).
 
