@@ -454,7 +454,7 @@ delete_link_doc(ModelConfig, Doc) ->
 %% Deletes document not using transactions.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+-spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
 delete_doc(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, value = Value, rev = Rev} = ToDel) ->
     {Props} = to_json_term(Value),
@@ -912,26 +912,41 @@ force_save(#model_config{} = ModelConfig, ToSave) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-    {Props} = to_json_term(Value),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
-        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, atom_to_binary(Del, utf8)} | Props]},
-    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveAns}} ->
-            case verify_ans(SaveAns) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
+force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride, #document{key = Key, rev = {RNum, [Id | _]}} = ToSave) ->
+    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+        fun() ->
+            case get(ModelConfig, Key) of
+                {error, {not_found, _}} ->
+                    save_revision(ModelConfig, BucketOverride, ToSave);
+                {error, not_found} ->
+                    save_revision(ModelConfig, BucketOverride, ToSave);
+                {error, Reason} ->
+                    {error, Reason};
+                {ok, #document{key = Key, rev = Rev} = Old} ->
+                    {OldRNum, OldId} = rev_to_info(Rev),
+                    case RNum of
+                        OldRNum ->
+                            case Id > OldId of
+                                true ->
+                                    case save_revision(ModelConfig, BucketOverride, ToSave) of
+                                        {ok, _} ->
+                                            % TODO - what happens if first save is ok and second fails
+                                            % Delete in new task type that starts if first try fails
+                                            delete_doc(ModelConfig, Old),
+                                            {ok, Key};
+                                        Other ->
+                                            Other
+                                    end;
+                                false ->
+                                    {ok, Key}
+                            end;
+                        Higher when Higher > OldRNum ->
+                            save_revision(ModelConfig, BucketOverride, ToSave);
+                        _ ->
+                            {ok, Key}
+                    end
+            end
+        end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1263,6 +1278,33 @@ terminate(Reason, _State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Inserts given revision of document to database. Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
+    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
+    {Props} = to_json_term(Value),
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
+    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+        {ok, {SaveAns}} ->
+            case verify_ans(SaveAns) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Converts raw document given by CouchDB to datastore's #document.
 %% @end
 %%--------------------------------------------------------------------
@@ -1344,6 +1386,19 @@ rev_info_to_rev({Num, [_Hash | _] = Revs}) when is_integer(Num) ->
     rev_info_to_rev({integer_to_binary(Num), Revs});
 rev_info_to_rev({NumBin, [Hash | _]}) when is_binary(NumBin) ->
     <<NumBin/binary, "-", Hash/binary>>.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Converts given binary into tuple {revision_num, hash}.
+%% @end
+%%--------------------------------------------------------------------
+-spec rev_to_info(binary()) ->
+    {Num :: non_neg_integer() | binary(), Hash :: binary()}.
+rev_to_info(Rev) ->
+    [Num, ID] = binary:split(Rev, <<"-">>),
+    {binary_to_integer(Num), ID}.
 
 
 %%--------------------------------------------------------------------
