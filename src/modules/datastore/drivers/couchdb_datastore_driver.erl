@@ -179,13 +179,15 @@ save_link_doc(ModelConfig, Doc) ->
 %%--------------------------------------------------------------------
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_doc(#model_config{aggregate_db_writes = false} = ModelConfig, ToSave = #document{}) ->
-    [Res] = save_docs(select_bucket(ModelConfig), [{ModelConfig, ToSave}]),
-    Res;
-save_doc(#model_config{aggregate_db_writes = true} = ModelConfig, ToSave = #document{}) ->
+save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = #document{}) ->
     {ok, {Pid, _}} = get_server(select_bucket(ModelConfig)),
     Ref = make_ref(),
     Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+    case Aggregate of
+        true -> ok;
+        false ->
+            Pid ! flush_docs
+    end,
     receive
         {Ref, Response} ->
             Response
@@ -1093,6 +1095,8 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                         UpdatedState
                 end,
                 UpdatedState1#{doc_batch_map => maps:put(K, ModelWithDoc, DocBatchMap)};
+            flush_docs ->
+                FlushBatchDocs(UpdatedState);
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
                 UpdatedState
