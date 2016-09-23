@@ -33,7 +33,8 @@
     timestamp = {0, 0, 0} :: erlang:timestamp(),
     action = non :: atom(),
     last_user = non :: string() | non,
-    last_action_time = {0, 0, 0} :: erlang:timestamp()
+    last_action_time = {0, 0, 0} :: erlang:timestamp(),
+    action_data :: term()
 }).
 
 % Max size of cleared_list in cache_consistency_controller
