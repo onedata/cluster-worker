@@ -1036,22 +1036,22 @@ load_local_state(Models) ->
 init_caches_consistency(Models) ->
     lists:foreach(fun(ModelName) ->
         #model_config{store_level = SL} = ModelName:model_init(),
-        Check = case SL of
-            ?GLOBALLY_CACHED_LEVEL -> true;
-            ?LOCALLY_CACHED_LEVEL -> true;
-            _ -> false
+        {Check, InfoLevel} = case SL of
+            ?GLOBALLY_CACHED_LEVEL -> {true, ?GLOBAL_ONLY_LEVEL};
+            ?LOCALLY_CACHED_LEVEL -> {true, ?LOCAL_ONLY_LEVEL};
+            _ -> {false, SL}
         end,
         case Check of
             true ->
                 CheckFun = fun
                     (#document{}, _) ->
                         {abort, used};
-                    ('$end_of_table', _) ->
-                        {abort, empty}
+                    ('$end_of_table', Acc) ->
+                        {abort, Acc}
                 end,
-                case exec_driver(ModelName, level_to_driver(?DISK_ONLY_LEVEL), list, [CheckFun, []]) of
-                    empty ->
-                        caches_controller:init_consistency_info(SL, ModelName);
+                case exec_driver(ModelName, level_to_driver(?DISK_ONLY_LEVEL), list, [CheckFun, empty]) of
+                    {ok, empty} ->
+                        caches_controller:init_consistency_info(InfoLevel, ModelName);
                     _ ->
                         ok
                 end;

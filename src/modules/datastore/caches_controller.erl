@@ -421,7 +421,7 @@ init_consistency_info(Level, Key) ->
     {error, already_exists} ->
       ok;
     Other ->
-      ?error_stacktrace("Cannot init consistency_restored_info ~p, error: ~p", [{Level, Key}, Other]),
+      ?error_stacktrace("Cannot init consistency_info ~p, error: ~p", [{Level, Key}, Other]),
       Other
   end.
 

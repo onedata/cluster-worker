@@ -145,7 +145,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -207,7 +207,7 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = 
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -222,7 +222,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -268,7 +268,7 @@ create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Ke
     {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_function(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -286,7 +286,7 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
         end);
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_map(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -420,7 +420,7 @@ list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn)
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
 delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
         fun() ->
             case Pred() of
                 true ->
@@ -912,8 +912,15 @@ force_save(#model_config{} = ModelConfig, ToSave) ->
 %%--------------------------------------------------------------------
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride, #document{key = Key, rev = {RNum, [Id | _]}} = ToSave) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
+    #document{key = Key, rev = {RNum, [Id | _]}, value = V} = ToSave) ->
+    SynchKey = case V of
+                   #links{} ->
+                       synchronization_link_key(ModelConfig, Key);
+                   _ ->
+                       synchronization_doc_key(ModelConfig, Key)
+               end,
+    datastore:run_transaction(ModelName, SynchKey,
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
