@@ -42,16 +42,16 @@
 %%--------------------------------------------------------------------
 -spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level()) -> ok.
 start_task(Task, Level) ->
-    start_task(Task, Level, save_pid).
+    start_task(Task, Level, false).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts task.
 %% @end
 %%--------------------------------------------------------------------
--spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level(), PersistFun :: save_pid | update_pid) -> ok.
-start_task(Task, Level, PersistFun) ->
-    start_task(Task, Level, PersistFun, false).
+-spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level(), DelaySave :: boolean()) -> ok.
+start_task(Task, Level, DelaySave) ->
+    start_task(Task, Level, save_pid, false, DelaySave).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -59,8 +59,8 @@ start_task(Task, Level, PersistFun) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level(),
-    PersistFun :: save_pid | update_pid, Sleep :: boolean()) -> ok.
-start_task(Task, Level, PersistFun, Sleep) ->
+    PersistFun :: save_pid | update_pid, Sleep :: boolean(), DelaySave :: boolean()) -> ok.
+start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
     Pid = spawn(fun() ->
         receive
             {start, Uuid} ->
@@ -70,7 +70,7 @@ start_task(Task, Level, PersistFun, Sleep) ->
                     _ ->
                         ok
                 end,
-                case do_task(Task, ?TASK_REPEATS) of
+                case do_task(Task, ?TASK_REPEATS, Level, DelaySave) of
                     ok ->
                         ok = delete_task(Uuid, Task, Level);
                     _ ->
@@ -174,22 +174,28 @@ do_task(Task) ->
 %% Executes task.
 %% @end
 %%--------------------------------------------------------------------
--spec do_task(Task :: task(), Repeats :: integer()) -> term().
-do_task(Task, Num) when is_record(Task, document) ->
+-spec do_task(Task :: task(), Repeats :: integer(), Level :: level(), SaveOnFail :: boolean()) -> term().
+do_task(Task, Num, Level, SaveOnFail) when is_record(Task, document) ->
     V = Task#document.value,
-    do_task(V#task_pool.task, Num);
+    do_task(V#task_pool.task, Num, Level, SaveOnFail);
 
-do_task(_Task, 0) ->
-    task_failed;
+do_task(Task, 0, Level, SaveOnFail) ->
+    case SaveOnFail of
+        true ->
+            {ok, _Uuid} = apply(?MODULE, save_pid, [Task, self(), Level]),
+            task_failed;
+        _ ->
+            task_failed
+    end;
 
-do_task(Task, Num) ->
+do_task(Task, Num, Level, SaveOnFail) ->
     try
         ok = do_task(Task)
     catch
         E1:E2 ->
             ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
-            sleep_random_interval(),
-            do_task(Task, Num - 1)
+            sleep_random_interval(?TASK_REPEATS - Num + 1),
+            do_task(Task, Num - 1, Level, SaveOnFail)
     end.
 
 %%--------------------------------------------------------------------
@@ -201,7 +207,7 @@ do_task(Task, Num) ->
 check_and_rerun_all(Level) ->
     {ok, Tasks} = task_pool:list_failed(Level),
     lists:foreach(fun(Task) ->
-        start_task(Task, Level, update_pid, true)
+        start_task(Task, Level, update_pid, true, false)
     end, Tasks).
 
 %%--------------------------------------------------------------------
@@ -226,6 +232,16 @@ kill_all(Level) ->
 %%--------------------------------------------------------------------
 -spec sleep_random_interval() -> ok.
 sleep_random_interval() ->
+    sleep_random_interval(1).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sleeps random interval specified in task_fail_min_sleep_time_ms and task_fail_max_sleep_time_ms
+%% variables.
+%% @end
+%%--------------------------------------------------------------------
+-spec sleep_random_interval(Num :: integer()) -> ok.
+sleep_random_interval(Num) ->
     {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
     {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
-    timer:sleep(crypto:rand_uniform(Interval1, Interval2 + 1)).
+    timer:sleep(Num * crypto:rand_uniform(Interval1, Interval2 + 1)).
