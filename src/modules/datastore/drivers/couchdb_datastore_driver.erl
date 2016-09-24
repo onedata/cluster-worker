@@ -1108,7 +1108,7 @@ stop_gateway(PortFD) ->
         {os_pid, OsPid} -> lists:flatten(io_lib:format("kill -9 ~p", [OsPid]));
         _ -> ""
     end,
-        catch port_close(PortFD),
+    catch port_close(PortFD),
     os:cmd(ForcePortCloseCmd),
     ok.
 

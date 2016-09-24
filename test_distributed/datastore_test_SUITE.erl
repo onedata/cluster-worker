@@ -100,6 +100,7 @@ globally_cached_consistency_with_ambigues_link_names(Config) ->
     Scope1 = <<"scope1">>,
     Scope2 = <<"scope2">>,
     Scope3 = <<"scope3">>,
+    Scope4 = <<"scope4">>,
     VHash = <<"vhash">>,
     LinkTargetKey = <<"target">>,
 
@@ -111,23 +112,29 @@ globally_cached_consistency_with_ambigues_link_names(Config) ->
             [{LinkName, {1, [
                 {Scope1, VHash, LinkTargetKey, TestRecord},
                 {Scope2, VHash, LinkTargetKey, TestRecord},
-                {Scope3, VHash, LinkTargetKey, TestRecord}
+                {Scope3, VHash, LinkTargetKey, TestRecord},
+                {Scope4, VHash, LinkTargetKey, TestRecord}
                 ]}}]])),
+
+    ?assertMatch(ok, ?call(Worker1, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
 
     ?assertMatch(ok,
         ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
             [links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))]])),
-
-    ?assertMatch(ok, ?call(Worker1, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
-    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
 
     %% then
     ?assertMatch({error, link_not_found},
         ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
             links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))])),
 
+    %% when
     ?assertMatch(ok, ?call(Worker1, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
     ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
+
+    ?assertMatch(ok,
+        ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
+            [links_utils:make_scoped_link_name(LinkName, Scope4, undefined, size(Scope4))]])),
 
     ?assertMatch({ok, _},
         ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
@@ -135,21 +142,21 @@ globally_cached_consistency_with_ambigues_link_names(Config) ->
 
     ?assertMatch({ok, _},
         ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
-            links_utils:make_scoped_link_name(LinkName, Scope1, undefined, size(Scope3))])),
+            links_utils:make_scoped_link_name(LinkName, Scope3, undefined, size(Scope3))])),
 
 
     %% when
     ?assertMatch(ok,
         ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
-            [links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope1))]])),
+            [links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))]])),
 
     %% then
     ?assertMatch({ok, _},
         ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
-            links_utils:make_scoped_link_name(LinkName, Scope1, undefined, size(Scope3))])),
+            links_utils:make_scoped_link_name(LinkName, Scope1, undefined, size(Scope1))])),
     ?assertMatch({error, link_not_found},
         ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
-            links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope1))])),
+            links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))])),
 
     ok.
 

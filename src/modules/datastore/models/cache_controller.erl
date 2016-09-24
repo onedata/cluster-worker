@@ -555,12 +555,12 @@ check_disk_fetch({DocKey, RawLinkName, _} = CacheKey, ModelName, Level, ErrorAns
         case DiskDriver:fetch_link(ModelConfig, DocKey, RawLinkName) of
             {ok, {V, LinkTargets}}  ->
                 {RawLinkName0, Scope, _} = links_utils:unpack_link_scope(ModelName, ExcludedLinkName),
-                ExcludedTargets0 = links_utils:select_scope_related_link(RawLinkName0, Scope, undefined, LinkTargets),
-                ExcludedTargets = case ExcludedTargets0 of
+                ExcludedTarget = links_utils:select_scope_related_link(RawLinkName0, Scope, undefined, LinkTargets),
+                ExcludedTargets = case ExcludedTarget of
                     undefined ->
                         [];
                     _ ->
-                        ExcludedTargets0
+                        [ExcludedTarget]
                 end,
                 {ok, {V, LinkTargets -- ExcludedTargets}};
             OtherRes ->
@@ -758,7 +758,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                 non ->
                                     {ok, non};
                                 _ ->
-                                    {ok, delete_links, [Key, [Link]]}
+                                    {ok, delete_links, [Key, [Value#cache_controller.action_data]]}
                             end;
                         {error, {not_found, _}} ->
                             case Flush of
