@@ -106,8 +106,8 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     Workers = [W1, W2, W1, W2, W1],
 
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 1000)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 1000))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 500)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 500))
     end, WorkersList),
 
     ControllerPid = start_tasks(Level, Workers, 5),
@@ -117,7 +117,7 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
     ?assertEqual(0, count_answers(), 1, timer:seconds(1)),
-    ?assertEqual(5, count_answers(), 1, timer:seconds(6)),
+    ?assertEqual(5, count_answers(), 1, timer:seconds(10)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
@@ -145,7 +145,7 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
     ?assertEqual(FirstCheckNum, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(5)),
+    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
 
     case Level of
         ?NON_LEVEL ->
@@ -154,7 +154,7 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
             lists:foreach(fun(W) ->
                 gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
             end, WorkersList),
-            ?assertEqual(5, count_answers(), 1, timer:seconds(2)),
+            ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level]))
     end,

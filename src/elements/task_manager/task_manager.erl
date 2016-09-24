@@ -59,14 +59,14 @@ start_task(Task, Level, DelaySave) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec start_task(Task :: task() | #document{value :: #task_pool{}}, Level :: level(),
-    PersistFun :: save_pid | update_pid, Sleep :: boolean(), DelaySave :: boolean()) -> ok.
+    PersistFun :: save_pid | update_pid, Sleep :: boolean() | {boolean(), integer()}, DelaySave :: boolean()) -> ok.
 start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
     Pid = spawn(fun() ->
         receive
             {start, Uuid} ->
                 case Sleep of
-                    true ->
-                        sleep_random_interval();
+                    {true, N} ->
+                        sleep_random_interval(N);
                     _ ->
                         ok
                 end,
@@ -207,7 +207,7 @@ do_task(Task, Num, Level, SaveOnFail) ->
 check_and_rerun_all(Level) ->
     {ok, Tasks} = task_pool:list_failed(Level),
     lists:foreach(fun(Task) ->
-        start_task(Task, Level, update_pid, true, false)
+        start_task(Task, Level, update_pid, {true, min(20, length(Tasks))}, false)
     end, Tasks).
 
 %%--------------------------------------------------------------------
