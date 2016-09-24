@@ -8,7 +8,6 @@
 %%% @doc
 %%% This module coordinates tasks that needs special supervision.
 %%% @end
-%%% TODO - atomic update at persistent driver needed
 %%%-------------------------------------------------------------------
 -module(task_manager).
 -author("Michal Wrzeszcz").
@@ -111,9 +110,8 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
 -spec check_and_rerun_all() -> ok.
 check_and_rerun_all() ->
     check_and_rerun_all(?NODE_LEVEL),
-    check_and_rerun_all(?CLUSTER_LEVEL).
-% TODO - list at persistent driver needed
-%%     check_and_rerun_all(?PERSISTENT_LEVEL).
+    check_and_rerun_all(?CLUSTER_LEVEL),
+    check_and_rerun_all(?PERSISTENT_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -127,7 +125,13 @@ is_task_alive(Task) ->
         N ->
             is_process_alive(Task#task_pool.owner);
         OtherNode ->
-            rpc:call(OtherNode, erlang, is_process_alive, [Task#task_pool.owner])
+            case rpc:call(OtherNode, erlang, is_process_alive, [Task#task_pool.owner]) of
+                {badrpc, R} ->
+                    ?error("Badrpc: ~p checking task ~p", [R, Task]),
+                    false;
+                CallAns ->
+                    CallAns
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -138,9 +142,8 @@ is_task_alive(Task) ->
 -spec kill_all() -> ok.
 kill_all() ->
     kill_all(?NODE_LEVEL),
-    kill_all(?CLUSTER_LEVEL).
-% TODO - list at persistent driver needed
-%%     kill_all(?PERSISTENT_LEVEL).
+    kill_all(?CLUSTER_LEVEL),
+    kill_all(?PERSISTENT_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
