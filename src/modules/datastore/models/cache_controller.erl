@@ -578,7 +578,7 @@ check_disk_fetch({DocKey, RawLinkName, _} = CacheKey, ModelName, Level, ErrorAns
                 to_be_del ->
                     ExcludedFetch(ActionData);
                 delete_links ->
-                    ExcludedFetch(ActionData)c;
+                    ExcludedFetch(ActionData);
                 _ -> ErrorAns
             end;
         {error, {not_found, _}} ->
