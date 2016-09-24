@@ -26,14 +26,14 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 -export([cm_and_worker_test/1, task_pool_test/1, task_manager_repeats_test/1, task_manager_rerun_test/1,
-    transaction_test/1, transaction_rollback_test/1, transaction_rollback_stop_test/1,
+    task_manager_delayed_save_test/1, transaction_test/1, transaction_rollback_test/1, transaction_rollback_stop_test/1,
     multi_transaction_test/1, transaction_retry_test/1, transaction_error_test/1]).
 -export([transaction_retry_test_base/0, transaction_error_test_base/0]).
 
 all() ->
     ?ALL([
         cm_and_worker_test, task_pool_test, task_manager_repeats_test,
-        task_manager_rerun_test, transaction_test, transaction_rollback_test,
+        task_manager_rerun_test, task_manager_delayed_save_test, transaction_test, transaction_rollback_test,
         transaction_rollback_stop_test, multi_transaction_test,
         transaction_retry_test, transaction_error_test]).
 
@@ -161,7 +161,47 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
 
     ControllerPid ! kill.
 
+task_manager_delayed_save_test(Config) ->
+    task_manager_delayed_save_test_base(Config, ?NODE_LEVEL, 3),
+    task_manager_delayed_save_test_base(Config, ?CLUSTER_LEVEL, 5).
+% TODO Uncomment when list on db will be added (without list, task cannot be repeted)
+%%     task_manager_delayed_save_test_base(Config, ?PERSISTENT_LEVEL, 5).
+
+task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
+    [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
+    Workers = [W1, W2, W1, W2, W1],
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 100)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 100))
+    end, WorkersList),
+
+    ControllerPid = start_tasks(Level, true, Workers, 15),
+    {A1, A2} = rpc:call(W1, task_pool, list, [Level]),
+    ?assertMatch({ok, _}, {A1, A2}),
+    ?assertEqual(0, length(A2)),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
+
+    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+
+    {A1_2, A2_2} = rpc:call(W1, task_pool, list, [Level]),
+    ?assertMatch({ok, _}, {A1_2, A2_2}),
+    ?assertEqual(SecondCheckNum, length(A2_2)),
+    {A1_3, A2_3} = rpc:call(W1, task_pool, list_failed, [Level]),
+    ?assertMatch({ok, _}, {A1_3, A2_3}),
+    ?assertEqual(SecondCheckNum, length(A2_3)),
+
+    gen_server:cast({?NODE_MANAGER_NAME, W1}, check_tasks),
+    ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
+
+    ControllerPid ! kill.
+
 start_tasks(Level, Workers, Num) ->
+    start_tasks(Level, false, Workers, Num).
+
+start_tasks(Level, DelaySave, Workers, Num) ->
     ControllerPid = spawn(fun() -> task_controller([]) end),
     Master = self(),
     {Funs, _} = lists:foldl(fun(_W, {Acc, Counter}) ->
@@ -182,7 +222,7 @@ start_tasks(Level, Workers, Num) ->
     end, {[], 1}, Workers),
 
     lists:foreach(fun({Fun, W}) ->
-        ?assertMatch(ok, rpc:call(W, task_manager, start_task, [Fun, Level]))
+        ?assertMatch(ok, rpc:call(W, task_manager, start_task, [Fun, Level, DelaySave]))
     end, lists:zip(Funs, Workers)),
 
     ControllerPid.

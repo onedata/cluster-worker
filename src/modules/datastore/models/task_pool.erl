@@ -127,8 +127,7 @@ list_failed(Level) ->
         ('$end_of_table', Acc) ->
             {abort, Acc};
         (#document{value = V} = Doc, Acc) ->
-            N = node(),
-            case (V#task_pool.node =/= N) orelse is_process_alive(V#task_pool.owner) of
+            case task_manager:is_task_alive(V) of
                 false ->
                     {next, [Doc | Acc]};
                 _ ->
