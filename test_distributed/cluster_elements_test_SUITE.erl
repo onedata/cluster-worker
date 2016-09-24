@@ -76,7 +76,9 @@ task_pool_test(Config) ->
         ?assertMatch({ok, _}, rpc:call(W1, task_pool, update, [Level, Key, #{task => NewName}]))
     end, ToUpdate),
 
-    ListTest = [{?NODE_LEVEL, [t2_2]}, {?CLUSTER_LEVEL, [t3_2, t4_2]}, {?PERSISTENT_LEVEL, [t5_2, t6_2, t7_2]}],
+    ListTest = [{?NODE_LEVEL, [t2_2]}, {?CLUSTER_LEVEL, [t3_2, t4_2]}],
+    %TODO - add PERSISTENT_LEVEL checking when list on db will be added
+%%     ListTest = [{?NODE_LEVEL, [t2_2]}, {?CLUSTER_LEVEL, [t3_2, t4_2]}, {?PERSISTENT_LEVEL, [t5_2, t6_2, t7_2]}],
     lists:foreach(fun({Level, Names}) ->
         ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
         {A1, ListedTasks} = rpc:call(W1, task_pool, list, [Level]),
@@ -95,8 +97,9 @@ task_pool_test(Config) ->
 task_manager_repeats_test(Config) ->
     task_manager_repeats_test_base(Config, ?NON_LEVEL, 0),
     task_manager_repeats_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_repeats_test_base(Config, ?CLUSTER_LEVEL, 5),
-    task_manager_repeats_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_repeats_test_base(Config, ?CLUSTER_LEVEL, 5).
+% TODO Uncomment when list on db will be added (without list, task cannot be repeted)
+%%     task_manager_repeats_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
@@ -123,8 +126,9 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
 task_manager_rerun_test(Config) ->
     task_manager_rerun_test_base(Config, ?NON_LEVEL, 0),
     task_manager_rerun_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_rerun_test_base(Config, ?CLUSTER_LEVEL, 5),
-    task_manager_rerun_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_rerun_test_base(Config, ?CLUSTER_LEVEL, 5).
+% TODO Uncomment when list on db will be added (without list, task cannot be repeted)
+%%     task_manager_rerun_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
@@ -159,8 +163,8 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
 
 task_manager_delayed_save_test(Config) ->
     task_manager_delayed_save_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_delayed_save_test_base(Config, ?CLUSTER_LEVEL, 5),
-    task_manager_delayed_save_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_delayed_save_test_base(Config, ?CLUSTER_LEVEL, 5).
+%%    task_manager_delayed_save_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),

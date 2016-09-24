@@ -142,8 +142,9 @@ is_task_alive(Task) ->
 -spec kill_all() -> ok.
 kill_all() ->
     kill_all(?NODE_LEVEL),
-    kill_all(?CLUSTER_LEVEL),
-    kill_all(?PERSISTENT_LEVEL).
+    kill_all(?CLUSTER_LEVEL).
+% TODO - list at persistent driver needed
+%%     kill_all(?PERSISTENT_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
