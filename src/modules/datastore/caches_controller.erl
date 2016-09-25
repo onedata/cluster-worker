@@ -274,7 +274,7 @@ flush(Level, ModelName, Key, all) ->
   end, ok, Links);
 
 flush(Level, ModelName, Key, Link) ->
-  flush(Level, ModelName, {Key, Link, cache_controller_link_key}).
+  flush(Level, ModelName, cache_controller:link_cache_key(ModelName, Key, Link)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -360,7 +360,7 @@ clear(Level, ModelName, Key, all) ->
 
 clear(Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
-  Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
+  Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
   CCCUuid = get_cache_uuid(Key, ModelName),
 
   consistency_info_lock(CCCUuid, Link,
@@ -796,7 +796,7 @@ count_clear_acc(Count, BatchNum) ->
 safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
-    Uuid = get_cache_uuid({Key, Link, cache_controller_link_key}, ModelName),
+    Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
 
     CCCUuid = get_cache_uuid(Key, ModelName),
     consistency_info_lock(CCCUuid, Link,
