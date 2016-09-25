@@ -20,7 +20,7 @@
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
--export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3]).
+-export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
@@ -183,6 +183,16 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
         '$end_of_table' ->
             list_next('$end_of_table', undefined, Fun, AccIn)
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback is_model_empty/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_model_empty(model_behaviour:model_config()) -> no_return().
+is_model_empty(_ModelConfig) ->
+    error(not_supported).
 
 
 %%--------------------------------------------------------------------

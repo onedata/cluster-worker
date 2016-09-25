@@ -99,6 +99,15 @@
 -callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:generic_error() | no_return().
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if there is any doc in model.
+%% @end
+%%--------------------------------------------------------------------
+-callback is_model_empty(model_behaviour:model_config()) -> {ok, boolean()} | datastore:generic_error().
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Checks driver state.

@@ -419,7 +419,7 @@ list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn)
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Checks if there is any doc in model.
+%% {@link store_driver_behaviour} callback is_model_empty/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec is_model_empty(model_behaviour:model_config()) -> {ok, boolean()} | datastore:generic_error().
