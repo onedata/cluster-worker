@@ -235,7 +235,11 @@ cache_to_task_level(ModelName) ->
 %%    true -> ?CLUSTER_LEVEL;
 %%    _ -> ?NODE_LEVEL
 %%  end.
-  ?NON_LEVEL.
+  case ModelName of
+    locally_cached_record -> ?NODE_LEVEL;
+    locally_cached_sync_record -> ?NODE_LEVEL;
+    _ -> ?CLUSTER_LEVEL
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -122,13 +122,27 @@ list(Level) ->
 list_failed(?NON_LEVEL) ->
     {ok, []};
 
-list_failed(Level) ->
+list_failed(?NODE_LEVEL = Level) ->
     Filter = fun
         ('$end_of_table', Acc) ->
             {abort, Acc};
         (#document{value = V} = Doc, Acc) ->
             N = node(),
-            case (V#task_pool.node =/= N) orelse is_process_alive(V#task_pool.owner) of
+            case (V#task_pool.node =/= N) orelse task_manager:check_owner(V#task_pool.owner) of
+                false ->
+                    {next, [Doc | Acc]};
+                _ ->
+                    {next, Acc}
+            end
+    end,
+    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, []);
+
+list_failed(Level) ->
+    Filter = fun
+        ('$end_of_table', Acc) ->
+            {abort, Acc};
+        (#document{value = V} = Doc, Acc) ->
+            case task_manager:is_task_alive(V) of
                 false ->
                     {next, [Doc | Acc]};
                 _ ->

@@ -22,7 +22,7 @@
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
 %% TODO Add non_transactional updates (each update creates tmp ets!)
--export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3]).
+-export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_transation/3]).
 
@@ -307,6 +307,16 @@ list(#model_config{name = ModelName} = ModelConfig, Fun, AccIn) ->
         _ ->
             mnesia_run(async_dirty, ToExec)
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback is_model_empty/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_model_empty(model_behaviour:model_config()) -> no_return().
+is_model_empty(_ModelConfig) ->
+    error(not_supported).
 
 
 %%--------------------------------------------------------------------

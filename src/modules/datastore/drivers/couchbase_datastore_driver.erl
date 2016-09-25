@@ -31,7 +31,7 @@
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
--export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
+-export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 %%%===================================================================
@@ -164,6 +164,17 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
     % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
     error(not_supported).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback is_model_empty/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_model_empty(model_behaviour:model_config()) -> no_return().
+is_model_empty(_ModelConfig) ->
+    error(not_supported).
+
 
 %%--------------------------------------------------------------------
 %% @doc
