@@ -136,6 +136,18 @@ globally_cached_consistency_with_ambigues_link_names(Config) ->
         ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
             [links_utils:make_scoped_link_name(LinkName, Scope4, undefined, size(Scope4))]])),
 
+    %% when
+    Res0 = ?call_store(Worker1, fetch_full_link, [?GLOBALLY_CACHED_LEVEL, Doc, LinkName]),
+    ?assertMatch({ok, _}, Res0),
+
+    %% then
+    {ok, {_, LinkTargets}} = Res0,
+    TargetScopes = [Scope0 || {Scope0, _, _, _} <- LinkTargets],
+    ?assertMatch(true, lists:member(Scope1, TargetScopes)),
+    ?assertMatch(true, lists:member(Scope3, TargetScopes)),
+    ?assertMatch(false, lists:member(Scope4, TargetScopes)),
+    ?assertMatch(false, lists:member(Scope2, TargetScopes)),
+
     ?assertMatch({ok, _},
         ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
             links_utils:make_scoped_link_name(LinkName, Scope1, undefined, size(Scope1))])),
