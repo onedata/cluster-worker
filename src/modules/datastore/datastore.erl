@@ -1035,7 +1035,7 @@ load_local_state(Models) ->
 -spec init_caches_consistency(Models :: [model_behaviour:model_type()]) -> ok.
 init_caches_consistency(Models) ->
     lists:foreach(fun(ModelName) ->
-        #model_config{store_level = SL} = ModelName:model_init(),
+        #model_config{store_level = SL} = ModelConfig = ModelName:model_init(),
         {Check, InfoLevel} = case SL of
             ?GLOBALLY_CACHED_LEVEL -> {true, ?GLOBAL_ONLY_LEVEL};
             ?LOCALLY_CACHED_LEVEL -> {true, ?LOCAL_ONLY_LEVEL};
@@ -1043,14 +1043,8 @@ init_caches_consistency(Models) ->
         end,
         case Check of
             true ->
-                CheckFun = fun
-                    (#document{}, _) ->
-                        {abort, used};
-                    ('$end_of_table', Acc) ->
-                        {abort, Acc}
-                end,
-                case exec_driver(ModelName, level_to_driver(?DISK_ONLY_LEVEL), list, [CheckFun, empty]) of
-                    {ok, empty} ->
+                case erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), is_model_empty, [ModelConfig]) of
+                    {ok, true} ->
                         caches_controller:init_consistency_info(InfoLevel, ModelName);
                     _ ->
                         ok

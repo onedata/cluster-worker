@@ -63,7 +63,8 @@ task_pool_test(Config) ->
 
     % then
     CreateAns = lists:foldl(fun({Task, Level, Worker}, Acc) ->
-        {A1, A2} = rpc:call(Worker, task_pool, create, [Level, #document{value = Task#task_pool{owner = self()}}]),
+        {A1, A2} = rpc:call(Worker, task_pool, create, [Level,
+            #document{value = Task#task_pool{owner = pid_to_list(self()), node = node()}}]),
         ?assertMatch({ok, _}, {A1, A2}),
         [{A2, Level} | Acc]
     end, [], Tasks),

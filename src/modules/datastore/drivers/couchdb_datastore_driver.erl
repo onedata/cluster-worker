@@ -48,7 +48,7 @@
 
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
--export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
+-export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 -export([synchronization_doc_key/2, synchronization_link_key/2]).
 
@@ -377,34 +377,61 @@ list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn)
             case verify_ans(Rows) of
                 true ->
                     Ret =
-                        lists:foldl(
-                            fun({Row}, Acc) ->
-                                try
-                                    {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
-                                    {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
-                                    Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
-                                    Value2 = Value -- Value1,
-                                    {_, Key} = from_driver_key(KeyBin),
-                                    Doc = #document{key = Key, value = from_json_term({Value2})},
-                                    case element(1, Doc#document.value) of
-                                        ModelName ->
-                                            case Fun(Doc, Acc) of
-                                                {next, NewAcc} ->
-                                                    NewAcc;
-                                                {abort, LastAcc} ->
-                                                    throw({abort, LastAcc})
-                                            end;
-                                        _ ->
-                                            Acc %% Trash entry, skipping
+                        try
+                            lists:foldl(
+                                fun({Row}, Acc) ->
+                                    try
+                                        {Value} = proplists:get_value(<<"doc">>, Row, {[]}),
+                                        {_, KeyBin} = lists:keyfind(<<"id">>, 1, Row),
+                                        Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
+                                        Value2 = Value -- Value1,
+                                        {_, Key} = from_driver_key(KeyBin),
+                                        Doc = #document{key = Key, value = from_json_term({Value2})},
+                                        case element(1, Doc#document.value) of
+                                            ModelName ->
+                                                case Fun(Doc, Acc) of
+                                                    {next, NewAcc} ->
+                                                        NewAcc;
+                                                    {abort, LastAcc} ->
+                                                        throw({abort, LastAcc})
+                                                end;
+                                            _ ->
+                                                Acc %% Trash entry, skipping
+                                        end
+                                    catch
+                                        {abort, RetAcc} ->
+                                            throw({abort, RetAcc}); %% Provided function requested end of stream, exiting loop
+                                        _:_ ->
+                                            Acc %% Invalid entry, skipping
                                     end
-                                catch
-                                    {abort, RetAcc} ->
-                                        RetAcc; %% Provided function requested end of stream, exiting loop
-                                    _:_ ->
-                                        Acc %% Invalid entry, skipping
-                                end
-                            end, AccIn, Rows),
+                                end, AccIn, Rows)
+                        catch
+                            {abort, RetAcc} ->
+                                RetAcc %% Catch exit loop
+                        end,
                     {ok, Ret};
+                _ ->
+                    {error, db_internal_error}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if there is any doc in model.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_model_empty(model_behaviour:model_config()) -> {ok, boolean()} | datastore:generic_error().
+is_model_empty(#model_config{name = ModelName} = ModelConfig) ->
+    BinModelName = atom_to_binary(ModelName, utf8),
+    case db_run(select_bucket(ModelConfig, undefined), couchbeam_view, first, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
+        {ok, nil} ->
+            {ok, true};
+        {ok, Row} ->
+            case verify_ans(Row) of
+                true ->
+                    {ok, false};
                 _ ->
                     {error, db_internal_error}
             end;

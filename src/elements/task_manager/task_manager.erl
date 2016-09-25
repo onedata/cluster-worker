@@ -27,7 +27,7 @@
 -export_type([task/0, level/0]).
 
 %% API
--export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0, is_task_alive/1]).
+-export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0, is_task_alive/1, check_owner/1, kill_owner/1]).
 -export([save_pid/3, update_pid/3]).
 
 -define(TASK_REPEATS, 10).
@@ -125,9 +125,9 @@ is_task_alive(Task) ->
     N = node(),
     case Task#task_pool.node of
         N ->
-            is_process_alive(Task#task_pool.owner);
+            check_owner(Task#task_pool.owner);
         OtherNode ->
-            case rpc:call(OtherNode, erlang, is_process_alive, [Task#task_pool.owner]) of
+            case rpc:call(OtherNode, ?MODULE, check_owner, [Task#task_pool.owner]) of
                 {badrpc, R} ->
                     ?error("Badrpc: ~p checking task ~p", [R, Task]),
                     false;
@@ -135,6 +135,15 @@ is_task_alive(Task) ->
                     CallAns
             end
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if process that owns task is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_owner(Owner :: string()) -> boolean().
+check_owner(Owner) ->
+    is_process_alive(list_to_pid(Owner)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -156,7 +165,7 @@ kill_all() ->
 -spec save_pid(Task :: task(), Pid :: pid(), Level :: level()) ->
     {ok, datastore:key()} | datastore:create_error().
 save_pid(Task, Pid, Level) ->
-    task_pool:create(Level, #document{value = #task_pool{task = Task, owner = Pid, node = node()}}).
+    task_pool:create(Level, #document{value = #task_pool{task = Task, owner = pid_to_list(Pid), node = node()}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -169,7 +178,7 @@ update_pid(Task, Pid, Level) ->
     UpdateFun = fun(Record) ->
         case is_task_alive(Record) of
             false ->
-                {ok, Record#task_pool{owner = Pid}};
+                {ok, Record#task_pool{owner = pid_to_list(Pid)}};
             _ ->
                 {error, owner_alive}
         end
@@ -259,11 +268,32 @@ check_and_rerun_all(Level) ->
 -spec kill_all(Level :: level()) -> ok.
 kill_all(Level) ->
     {ok, Tasks} = task_pool:list(Level),
+    N = node(),
     lists:foreach(fun(Task) ->
         task_pool:delete(Level, Task#document.key),
         Value = Task#document.value,
-        exit(Value#task_pool.owner, stopped_by_manager)
+        case Value#task_pool.node of
+            N ->
+                kill_owner(Value#task_pool.owner);
+            OtherNode ->
+                case rpc:call(OtherNode, ?MODULE, kill_owner, [Value#task_pool.owner]) of
+                    {badrpc, R} ->
+                        ?error("Badrpc: ~p killing task ~p", [R, Task]),
+                        ok;
+                    CallAns ->
+                        CallAns
+                end
+        end
     end, Tasks).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Kills process that owns task.
+%% @end
+%%--------------------------------------------------------------------
+-spec kill_owner(Owner :: string()) -> boolean().
+kill_owner(Owner) ->
+    exit(list_to_pid(Owner), stopped_by_manager).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -49,7 +49,7 @@
 %% Description of task to be done
 -record(task_pool, {
     task :: task_manager:task(),
-    owner :: undefined | pid(),
+    owner :: undefined | string(),
     node :: node()
 }).
 
