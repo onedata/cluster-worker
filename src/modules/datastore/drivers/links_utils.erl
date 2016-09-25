@@ -623,7 +623,7 @@ unpack_link_scope(_ModelName, LinkName) ->
 %% Select link that corresponds to given scope name.
 %% @end
 %%--------------------------------------------------------------------
--spec select_scope_related_link(LinkName :: datastore:link_name(), RequestedScope :: scope(), VHash :: binary(),
+-spec select_scope_related_link(LinkName :: datastore:link_name(), RequestedScope :: scope(), VHash :: vhash(),
     [datastore:link_final_target()]) -> datastore:link_final_target() | undefined.
 select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
     case lists:filter(

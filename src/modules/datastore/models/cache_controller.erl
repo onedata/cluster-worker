@@ -25,7 +25,7 @@
     save/2, get/2, list/3, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
     list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_get/3,
-    check_fetch/3, check_disk_read/4, restore_from_disk/4]).
+    check_fetch/3, check_disk_read/4, restore_from_disk/4, link_cache_key/3]).
 
 
 %%%===================================================================
@@ -269,7 +269,7 @@ model_init() ->
 %%    update_usage_info(Key, ModelName, Level);
 'after'(ModelName, fetch_link, disk_only, [Key, LinkName], {ok, Doc}) ->
     Level2 = caches_controller:cache_to_datastore_level(ModelName),
-    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level2);
+    update_usage_info(link_cache_key(ModelName, Key, LinkName), ModelName, Doc, Level2);
 %%'after'(ModelName, fetch_link, Level, [Key, LinkName], {ok, _}) ->
 %%    update_usage_info({Key, LinkName, cache_controller_link_key}, ModelName, Level);
 'after'(_ModelName, save, disk_only, _Context, _ReturnValue) ->
@@ -316,17 +316,17 @@ before(ModelName, get, disk_only, [Key], Level2) ->
 before(ModelName, exists, disk_only, [Key], Level2) ->
     check_exists(Key, ModelName, Level2);
 before(ModelName, fetch_link, disk_only, [Key, LinkName], Level2) ->
-    check_fetch({Key, LinkName, cache_controller_link_key}, ModelName, Level2);
+    check_fetch(link_cache_key(ModelName, Key, LinkName), ModelName, Level2);
 before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun({LN, _}, Acc) ->
-        [start_disk_op({Key, LN, cache_controller_link_key}, ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
+        [start_disk_op(link_cache_key(ModelName, Key, LN), ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
     end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
 before(ModelName, set_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun({LN, _}, Acc) ->
-        [start_disk_op({Key, LN, cache_controller_link_key}, ModelName, set_links, [Key, [LN]], Level2, false) | Acc]
+        [start_disk_op(link_cache_key(ModelName, Key, LN), ModelName, set_links, [Key, [LN]], Level2, false) | Acc]
     end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
@@ -334,10 +334,10 @@ before(ModelName, set_links, disk_only, [Key, Links], Level2) ->
 before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
     check_link_create(Key, LinkName, ModelName, Level);
 before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->
-    start_disk_op({Key, LinkName, cache_controller_link_key}, ModelName, create_link, Args, Level2);
+    start_disk_op(link_cache_key(ModelName, Key, LinkName), ModelName, create_link, Args, Level2);
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
     lists:foldl(fun(Link, Acc) ->
-        Ans = before_del({Key, Link, cache_controller_link_key}, ModelName, Level, delete_links),
+        Ans = before_del(link_cache_key(ModelName, Key, Link), ModelName, Level, Link),
         case Ans of
             ok ->
                 Acc;
@@ -347,7 +347,7 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
     end, ok, Links);
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
-        [start_disk_op({Key, Link, cache_controller_link_key}, ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
+        [start_disk_op(link_cache_key(ModelName, Key, Link), ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
     end, [], Links),
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
@@ -358,6 +358,19 @@ before(_ModelName, _Method, _Level, _Context, _Level2) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Generates cache key for link entry based on link's name and document's key.
+%% @end
+%%--------------------------------------------------------------------
+-spec link_cache_key(model_behaviour:model_type(), datastore:ext_key(), datastore:link_name()) ->
+    {datastore:ext_key(), datastore:link_name(), cache_controller_link_key}.
+link_cache_key(ModelName, Key, Link) ->
+    {LinkRawName, _, _} = links_utils:unpack_link_scope(ModelName, Link),
+    {Key, LinkRawName, cache_controller_link_key}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -501,12 +514,12 @@ check_fetch({Key, LinkName, cache_controller_link_key} = CacheKey, ModelName, Le
         {monitored, ClearedList, _, _} ->
             case lists:member(LinkName, ClearedList) of
                 true ->
-                    check_disk_read(CacheKey, ModelName, Level, {error, link_not_found});
+                    check_disk_fetch(CacheKey, ModelName, Level, {error, link_not_found});
                 _ ->
                     {error, link_not_found}
             end;
         _ ->
-            check_disk_read(CacheKey, ModelName, Level, {error, link_not_found})
+            check_disk_fetch(CacheKey, ModelName, Level, {error, link_not_found})
     end.
 
 %%--------------------------------------------------------------------
@@ -526,6 +539,54 @@ check_disk_read(Key, ModelName, Level, ErrorAns) ->
             case Value#cache_controller.action of
                 non -> ok;
                 cleared -> ok;
+                _ -> ErrorAns
+            end;
+        {error, {not_found, _}} ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if operation on disk should be performed.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_disk_fetch(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
+    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(),
+    ErrorAns :: term()) -> term().
+check_disk_fetch({DocKey, RawLinkName, _} = CacheKey, ModelName, Level, ErrorAns) ->
+    Uuid = caches_controller:get_cache_uuid(CacheKey, ModelName),
+    DiskDriver = datastore:driver_to_module(datastore:level_to_driver(?DISK_ONLY_LEVEL)),
+    ModelConfig = ModelName:model_init(),
+
+    ExcludedFetch = fun(ExcludedLinkName) ->
+        case DiskDriver:fetch_link(ModelConfig, DocKey, RawLinkName) of
+            {ok, {V, LinkTargets}}  ->
+                {RawLinkName0, Scope, _} = links_utils:unpack_link_scope(ModelName, ExcludedLinkName),
+                ExcludedTarget = links_utils:select_scope_related_link(RawLinkName0, Scope, undefined, LinkTargets),
+                ExcludedTargets = case ExcludedTarget of
+                    undefined ->
+                        [];
+                    _ ->
+                        [ExcludedTarget]
+                end,
+                {ok, {V, LinkTargets -- ExcludedTargets}};
+            OtherRes ->
+                OtherRes
+        end
+    end,
+
+    case get(Level, Uuid) of
+        {ok, Doc} ->
+            Value = Doc#document.value,
+            ActionData = Value#cache_controller.action_data,
+            case Value#cache_controller.action of
+                non -> ok;
+                cleared -> ok;
+                to_be_del ->
+                    ExcludedFetch(ActionData);
+                delete_links ->
+                    ExcludedFetch(ActionData);
                 _ -> ErrorAns
             end;
         {error, {not_found, _}} ->
@@ -705,7 +766,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                 non ->
                                     {ok, non};
                                 _ ->
-                                    {ok, delete_links, [Key, [Link]]}
+                                    {ok, delete_links, [Key, [Value#cache_controller.action_data]]}
                             end;
                         {error, {not_found, _}} ->
                             case Flush of
@@ -976,14 +1037,14 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec before_del(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), check_disk_read},
-    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(), Op :: atom()) ->
+    ModelName :: model_behaviour:model_type(), Level :: datastore:store_level(), Op :: {atom(), term()} | atom()) ->
     ok | {error, preparing_op_failed}.
-before_del(Key, ModelName, Level, _Op) ->
+before_del(Key, ModelName, Level, Op) ->
     try
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
 
         UpdateFun = fun(Record) ->
-            {ok, Record#cache_controller{action = to_be_del}}
+            {ok, Record#cache_controller{action = to_be_del, action_data = Op}}
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
         V = #cache_controller{action = to_be_del},
@@ -1066,7 +1127,7 @@ check_link_create(Key, LinkName, ModelName, Level) ->
 
     case Proceed of
         true ->
-            Uuid = caches_controller:get_cache_uuid({Key, LinkName, cache_controller_link_key}, ModelName),
+            Uuid = caches_controller:get_cache_uuid(link_cache_key(ModelName, Key, LinkName), ModelName),
             Check = case get(Level, Uuid) of
                         {ok, Doc2} ->
                             Value = Doc2#document.value,

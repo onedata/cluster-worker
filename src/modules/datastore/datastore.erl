@@ -742,7 +742,7 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     SecodnPhaseAns = case FirstPhaseAns of
         {check, Ans_1, ClearedList} ->
             {ok, lists:foldl(fun(LinkName, Acc) ->
-                CacheKey = {Key, LinkName, cache_controller_link_key},
+                CacheKey = cache_controller:link_cache_key(ModelName, Key, LinkName),
                 case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
                     ok ->
                         case erlang:apply(driver_to_module(Driver2), fetch_link, [ModelConfig, Key, LinkName]) of
@@ -766,7 +766,7 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
             end, Ans_1, ClearedList)};
         {check, Ans_1} ->
             HelperFun2 = fun(LinkName, LinkTarget, Acc) ->
-                CacheKey = {Key, LinkName, cache_controller_link_key},
+                CacheKey = cache_controller:link_cache_key(ModelName, Key, LinkName),
                 case cache_controller:check_fetch(CacheKey, ModelName, CLevel) of
                     ok ->
                         case maps:find(LinkName, Acc) of

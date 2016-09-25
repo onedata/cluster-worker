@@ -52,7 +52,7 @@
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
     global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1,
     globally_cached_foreach_link_test/1, links_scope_proc_mem_test/1,  globally_cached_consistency_test/1,
-    globally_cached_consistency_without_consistency_metadata_test/1]).
+    globally_cached_consistency_without_consistency_metadata_test/1, globally_cached_consistency_with_ambigues_link_names/1]).
 -export([utilize_memory/2, update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
 
 all() ->
@@ -71,7 +71,8 @@ all() ->
         create_globally_cached_test, disk_only_create_or_update_test, global_only_create_or_update_test,
         globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test,
         links_scope_proc_mem_test, globally_cached_consistency_test,
-        globally_cached_consistency_without_consistency_metadata_test
+        globally_cached_consistency_without_consistency_metadata_test,
+        globally_cached_consistency_with_ambigues_link_names
     ]).
 
 
@@ -81,6 +82,96 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+globally_cached_consistency_with_ambigues_link_names(Config) ->
+    %% given
+    [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    TestRecord = ?config(test_record, Config),
+
+    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
+
+    Key = <<"key_gccwaln">>,
+    Doc =  #document{
+        key = Key,
+        value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
+    },
+
+    LinkName = <<"link">>,
+    Scope1 = <<"scope1">>,
+    Scope2 = <<"scope2">>,
+    Scope3 = <<"scope3">>,
+    Scope4 = <<"scope4">>,
+    VHash = <<"vhash">>,
+    LinkTargetKey = <<"target">>,
+
+    {ok, _} = ?call(Worker1, TestRecord, save, [Doc]),
+
+    %% when
+    ?assertMatch(ok,
+        ?call_store(Worker1, add_links, [?GLOBALLY_CACHED_LEVEL, Doc,
+            [{LinkName, {1, [
+                {Scope1, VHash, LinkTargetKey, TestRecord},
+                {Scope2, VHash, LinkTargetKey, TestRecord},
+                {Scope3, VHash, LinkTargetKey, TestRecord},
+                {Scope4, VHash, LinkTargetKey, TestRecord}
+                ]}}]])),
+
+    ?assertMatch(ok, ?call(Worker1, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
+
+    ?assertMatch(ok,
+        ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
+            [links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))]])),
+
+    %% then
+    ?assertMatch({error, link_not_found},
+        ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
+            links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))])),
+
+    %% when
+    ?assertMatch(ok, ?call(Worker1, caches_controller, flush, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
+    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key, LinkName])),
+
+    ?assertMatch(ok,
+        ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
+            [links_utils:make_scoped_link_name(LinkName, Scope4, undefined, size(Scope4))]])),
+
+    %% when
+    Res0 = ?call_store(Worker1, fetch_full_link, [?GLOBALLY_CACHED_LEVEL, Doc, LinkName]),
+    ?assertMatch({ok, _}, Res0),
+
+    %% then
+    {ok, {_, LinkTargets}} = Res0,
+    TargetScopes = [Scope0 || {Scope0, _, _, _} <- LinkTargets],
+    ?assertMatch(true, lists:member(Scope1, TargetScopes)),
+    ?assertMatch(true, lists:member(Scope3, TargetScopes)),
+    ?assertMatch(false, lists:member(Scope4, TargetScopes)),
+    ?assertMatch(false, lists:member(Scope2, TargetScopes)),
+
+    ?assertMatch({ok, _},
+        ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
+            links_utils:make_scoped_link_name(LinkName, Scope1, undefined, size(Scope1))])),
+
+    ?assertMatch({ok, _},
+        ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
+            links_utils:make_scoped_link_name(LinkName, Scope3, undefined, size(Scope3))])),
+
+
+    %% when
+    ?assertMatch(ok,
+        ?call_store(Worker1, delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
+            [links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))]])),
+
+    %% then
+    ?assertMatch({ok, _},
+        ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
+            links_utils:make_scoped_link_name(LinkName, Scope1, undefined, size(Scope1))])),
+    ?assertMatch({error, link_not_found},
+        ?call_store(Worker1, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc,
+            links_utils:make_scoped_link_name(LinkName, Scope2, undefined, size(Scope2))])),
+
+    ok.
+
 
 globally_cached_consistency_without_consistency_metadata_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
