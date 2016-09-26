@@ -142,12 +142,15 @@ create_sync_delete_test(Config, Level) ->
 
 create_delete_test_base(Config, Level, Fun, Fun2) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    ThreadsNum = ?config(threads_num, Config),
-    DocsPerThead = ?config(docs_per_thead, Config),
-    OpsPerDoc = ?config(ops_per_doc, Config),
-    ConflictedThreads = ?config(conflicted_threads, Config),
+    ThreadsNum = 18,
+    DocsPerThead = 1,
+    OpsPerDoc = 1,
+    ConflictedThreads = 1,
     TestRecord = ?config(test_record, Config),
 
+    ct:print("aaaa"),
+%%    timer:sleep(timer:minutes(3)),
+%%    ct:print("xxxx"),
     set_test_type(Config, Workers),
     Master = self(),
     AnswerDesc = get(file_beg),
@@ -167,9 +170,16 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
         end)
     end,
 
-    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, TestFun),
+    TF = fun(_DocsSet) ->
+        helper(123)
+    end,
+
+    Now = now(),
+%%    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, TestFun),
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, TF),
     OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
     {OkNum, OkTime, ErrorNum, ErrorTime, _ErrorsList} = count_answers(OpsNum),
+    ct:print("aaaa ~p", [timer:now_diff(os:timestamp(), Now)]),
     ?assertEqual(OpsNum, OkNum + ErrorNum),
     TmpTN = trunc(ThreadsNum/ConflictedThreads),
     WLength = length(Workers),
@@ -229,6 +239,10 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
         #parameter{name = delete_time, value = OkTime2 / OkNum2, unit = "us",
             description = "Average time of delete operation"}
     ].
+
+helper(Int) ->
+    NewInt = (Int + 10) * Int,
+    helper(NewInt).
 
 save_test(Config, Level) ->
     save_test_base(Config, Level, save, delete).

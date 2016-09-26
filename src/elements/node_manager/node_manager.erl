@@ -368,6 +368,9 @@ handle_cast({update_lb_advices, Advices}, State) ->
     NewState = update_lb_advices(State, Advices),
     {noreply, NewState};
 
+handle_cast({update_scheduler_info, SI}, State) ->
+    {noreply, State#state{scheduler_info = SI}};
+
 handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
     NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
     NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
@@ -525,11 +528,12 @@ cm_conn_ack(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec do_heartbeat(State :: #state{}) -> #state{}.
-do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA} = State) ->
+do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
+    scheduler_info = SchedulerInfo} = State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
-    NewLSA = analyse_monitoring_state(NewMonState, LSA),
+    NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
     ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
@@ -772,9 +776,9 @@ check_port(Port) ->
 %% Analyse monitoring state and log result.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
+-spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(), SchedulerInfo :: undefined | list(),
     LastAnalysisTime :: erlang:timestamp()) -> erlang:timestamp().
-analyse_monitoring_state(MonState, LastAnalysisTime) ->
+analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
     {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
@@ -789,7 +793,7 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
 
     Now = os:timestamp(),
-    TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000000,
+    TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
     case (TimeDiff >= timer:minutes(MaxInterval)) orelse
         ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
         true ->
@@ -836,9 +840,29 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
                     TopProcesses, MergedStacks, MergedStacks2
                 ]),
 
-                ?info("Schedulers info: all: ~p, online: ~p~nload: ~p",
-                    [erlang:system_info(schedulers), erlang:system_info(schedulers_online),
-                        erlang:statistics(scheduler_wall_time)])
+                ?info("Schedulers basic info: all: ~p, online: ~p",
+                    [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
+                NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
+                case is_list(NewSchedulerInfo0) of
+                    true ->
+                        NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
+                        gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
+
+                        ?info("Schedulers advanced info: ~p", [NewSchedulerInfo]),
+                        case is_list(SchedulerInfo) of
+                            true ->
+                                Percent = lists:map(fun({{I, A0, T0}, {I, A1, T1}}) ->
+                                    {I, (A1 - A0)/(T1 - T0)} end, lists:zip(SchedulerInfo,NewSchedulerInfo)),
+                                {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai,Ti}) ->
+                                    {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo,NewSchedulerInfo)),
+                                Aggregated = A/T,
+                                ?info("Schedulers utilization percent: ~p, aggregated: ~p", [Percent,Aggregated]);
+                            _ ->
+                                ok
+                        end;
+                    _ ->
+                        ok
+                end
             end),
             Now;
         _ ->
