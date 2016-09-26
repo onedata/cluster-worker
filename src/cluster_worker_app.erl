@@ -34,6 +34,8 @@
     {error, Reason ::term()}.
 start(_StartType, _StartArgs) ->
     test_node_starter:maybe_start_cover(),
+    {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME, schedulers_monitoring),
+    erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
     cluster_worker_sup:start_link().
 
 %%--------------------------------------------------------------------
