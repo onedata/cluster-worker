@@ -63,62 +63,67 @@ links_test(Config, Level) ->
     Create = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
-                BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(add_links, Level, [Doc,
+                BeforeProcessing = os:system_time(milli_seconds),
+                Ans = ?call_store(add_links, Level, [list_to_binary(DocsSet), TestRecord,
                     [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                         {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
-                AfterProcessing = os:timestamp(),
-                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                AfterProcessing = os:system_time(milli_seconds),
+                Master ! {store_ans, AnswerDesc, Ans, AfterProcessing - BeforeProcessing}
             end)
         end)
     end,
-
+    ct:print("Start Create"),
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Create),
     OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
     {OkNum, OkTime, _ErrorNum, _ErrorTime, _ErrorsList} = count_answers(OpsNum),
     ?assertEqual(OpsNum, OkNum),
+    ct:print("Stop Create"),
 
     Fetch = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
-                BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(fetch_link, Level, [
-                    Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
-                AfterProcessing = os:timestamp(),
-                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                BeforeProcessing = os:system_time(milli_seconds),
+                Ans = ?call_store(fetch_link, Level, [list_to_binary(DocsSet), TestRecord,
+                    list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
+                AfterProcessing = os:system_time(milli_seconds),
+                Master ! {store_ans, AnswerDesc, Ans, AfterProcessing - BeforeProcessing}
             end)
         end)
     end,
 
+    ct:print("Start Fetch"),
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Fetch),
     {OkNumF, OkTimeF, _ErrorNumF, _ErrorTimeF, _ErrorsListF} = count_answers(OpsNum),
     ?assertEqual(OpsNum, OkNumF),
+    ct:print("Stop Fetch"),
 
     Delete = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
-                BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(delete_links, Level, [
-                    Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
-                AfterProcessing = os:timestamp(),
-                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+                BeforeProcessing = os:system_time(milli_seconds),
+                Ans = ?call_store(delete_links, Level, [list_to_binary(DocsSet), TestRecord,
+                    [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
+                AfterProcessing = os:system_time(milli_seconds),
+                Master ! {store_ans, AnswerDesc, Ans, AfterProcessing - BeforeProcessing}
             end)
         end)
     end,
 
+    ct:print("Start Delete"),
     spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, Delete),
     {OkNum2, OkTime2, _ErrorNum2, _ErrorTime2, ErrorsList2} = count_answers(OpsNum),
     ?assertEqual([], ErrorsList2),
     ?assertEqual(OpsNum, OkNum2),
+    ct:print("Stop Delete"),
 
     test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
 
     ForechTestFun = fun(LinkName, LinkTarget, Acc) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
-    ForeachBeforeProcessing = os:timestamp(),
+    ForeachBeforeProcessing = os:system_time(milli_seconds),
     Ans = ?rpc_store(Worker1, foreach_link, Level, [Doc, ForechTestFun, #{}]),
-    ForeachAfterProcessing = os:timestamp(),
+    ForeachAfterProcessing = os:system_time(milli_seconds),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
@@ -130,7 +135,7 @@ links_test(Config, Level) ->
             description = "Average time of fetch operation"},
         #parameter{name = delete_time, value = OkTime2 / OkNum2, unit = "us",
             description = "Average time of delete operation"},
-        #parameter{name = foreach_link_time, value = timer:now_diff(ForeachAfterProcessing, ForeachBeforeProcessing),
+        #parameter{name = foreach_link_time, value = ForeachAfterProcessing - ForeachBeforeProcessing,
             unit = "us", description = "Time of forach_link operation"}
     ].
 
@@ -883,6 +888,7 @@ count_answers(Num, {OkNum, OkTime, ErrorNum, ErrorTime, ErrorsList}) ->
     AnswerDesc = get(file_beg),
     NewAns = receive
                  {store_ans, AnswerDesc, Ans, Time} ->
+%%                     ct:print("Ans ~p", [{Ans, Time}]),
                      case Ans of
                          ok ->
                              {OkNum + 1, OkTime + Time, ErrorNum, ErrorTime, ErrorsList};

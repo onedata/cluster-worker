@@ -148,7 +148,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -210,7 +210,7 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = 
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -225,7 +225,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -271,7 +271,7 @@ create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Ke
     {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_function(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -289,7 +289,7 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
         end);
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_map(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -450,7 +450,7 @@ is_model_empty(#model_config{name = ModelName} = ModelConfig) ->
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
 delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case Pred() of
                 true ->
@@ -531,7 +531,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
         end
@@ -546,7 +546,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, set)
         end
@@ -560,7 +560,7 @@ set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, 
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
@@ -576,7 +576,7 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     | {error, Reason :: term()})) -> ok | datastore:generic_error().
 create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
     Key, {LinkName, _} = Link, UpdateFun) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
@@ -602,13 +602,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -953,7 +953,7 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
                    _ ->
                        synchronization_doc_key(ModelConfig, Key)
                end,
-    datastore:run_transaction(ModelName, SynchKey,
+    critical_section:run([ModelName, SynchKey],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -1258,6 +1258,9 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             State#state{last_seq = max(normalize_seq(Seq), LastSeq)}
         catch
             _:{badmatch, false} ->
+                State;
+            _:{badmatch, {error, not_found}} = Reason -> %% This revision is an ancestor to deleted one
+                ?debug_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
                 State;
             _:Reason ->
                 ?error_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
