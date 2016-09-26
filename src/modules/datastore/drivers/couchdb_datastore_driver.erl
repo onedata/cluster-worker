@@ -758,20 +758,20 @@ to_json_term(Term) when is_atom(Term) ->
     to_binary(Term);
 to_json_term(Term) when is_tuple(Term) ->
     ModelName = element(1, Term),
-    try ModelName:model_init() of
-        #model_config{fields = Fields} ->
+    IsModel = is_atom(ModelName) andalso lists:member(ModelName, datastore_config:models()),
+    case IsModel of
+        true ->
+            #model_config{fields = Fields} = ModelName:model_init(),
             [_ | Values1] = tuple_to_list(Term),
             Map = maps:from_list(lists:zip(Fields, Values1)),
-            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(ModelName, utf8)})
-    catch
-        _:_ -> %% encode as tuple
+            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(ModelName, utf8)});
+        false -> %% encode as tuple
             Values = tuple_to_list(Term),
             Keys = lists:seq(1, length(Values)),
             KeyValue = lists:zip(Keys, Values),
             Map = maps:from_list(KeyValue),
             to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(undefined, utf8)})
-    end
-;
+    end;
 to_json_term(Term) when is_map(Term) ->
     Proplist0 = maps:to_list(Term),
     Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
