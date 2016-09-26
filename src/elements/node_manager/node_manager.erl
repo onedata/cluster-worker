@@ -785,6 +785,9 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
     {ok, MemThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_analysis_treshold),
     {ok, ProcThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, procs_num_analysis_treshold),
 
+    {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME, schedulers_monitoring),
+    erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
+
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000000,
     case (TimeDiff >= timer:minutes(MaxInterval)) orelse
@@ -831,7 +834,11 @@ analyse_monitoring_state(MonState, LastAnalysisTime) ->
                 ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
                     "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
                     TopProcesses, MergedStacks, MergedStacks2
-                ])
+                ]),
+
+                ?info("Schedulers info: all: ~p, online: ~p~nload: ~p",
+                    [erlang:system_info(schedulers), erlang:system_info(schedulers_online),
+                        erlang:statistics(scheduler_wall_time)])
             end),
             Now;
         _ ->
