@@ -27,6 +27,9 @@
 %% Encoded atom prefix
 -define(ATOM_PREFIX, "ATOM::").
 
+%% Encoded integer prefix
+-define(INT_PREFIX, "INT::").
+
 %% Encoded record name field
 -define(RECORD_MARKER, "RECORD::").
 
@@ -718,9 +721,10 @@ to_binary(Term) when is_binary(Term) ->
     Term;
 to_binary(Term) when is_atom(Term) ->
     <<?ATOM_PREFIX, (atom_to_binary(Term, utf8))/binary>>;
+to_binary(Term) when is_integer(Term) ->
+    <<?INT_PREFIX, (integer_to_binary(Term))/binary>>;
 to_binary(Term) ->
     term_to_base64(Term).
-
 
 %%--------------------------------------------------------------------
 %% @private
@@ -733,6 +737,8 @@ from_binary(<<?OBJ_PREFIX, _/binary>> = Bin) ->
     base64_to_term(Bin);
 from_binary(<<?ATOM_PREFIX, Atom/binary>>) ->
     binary_to_atom(Atom, utf8);
+from_binary(<<?INT_PREFIX, Int/binary>>) ->
+    binary_to_integer(Int);
 from_binary(Bin) ->
     Bin.
 
