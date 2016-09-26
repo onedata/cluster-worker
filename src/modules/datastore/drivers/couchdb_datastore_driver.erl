@@ -61,7 +61,6 @@
 -export([add_view/3, query_view/3, delete_view/2]).
 -export([default_bucket/0, sync_enabled_bucket/0]).
 
-
 %%%===================================================================
 %%% buckets
 %%%===================================================================
@@ -759,8 +758,7 @@ to_json_term(Term) when is_atom(Term) ->
     to_binary(Term);
 to_json_term(Term) when is_tuple(Term) ->
     ModelName = element(1, Term),
-    Models = datastore_config:models(),
-    IsModel = is_atom(ModelName) andalso lists:member(ModelName, Models),
+    IsModel = is_atom(ModelName) andalso lists:member(ModelName, datastore_config:models()),
     case IsModel of
         true ->
             #model_config{fields = Fields} = ModelName:model_init(),
