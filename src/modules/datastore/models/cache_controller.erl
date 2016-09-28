@@ -976,7 +976,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
             Ans = case ToDo0 of
                       ok ->
                           links_utils:apply_context(LinksContext),
-                          critical_section:run([?MODULE, start_disk_op, Uuid],
+                          critical_section:run({?MODULE, start_disk_op, Uuid},
                               fun() ->
                                   ToDo = choose_action(Op, Level, ModelName, Key, Uuid),
 
