@@ -66,15 +66,36 @@ run(RawKey, Fun, Recursive) ->
 %% but it must be released the same number of times.
 %% @end
 %%--------------------------------------------------------------------
--spec lock(Key :: datastore:key(), Recursive :: boolean()) -> ok.
+-spec lock(Key :: datastore:key(), Recursive :: boolean()) -> ok | no_return().
 lock(Key, Recursive) ->
     case lock:enqueue(Key, self(), Recursive) of
         {ok, acquired} ->
             ok;
         {ok, wait} ->
-            receive {acquired, Key} ->
-                ok
-            end
+            WaitFun = fun Wait() ->
+                receive {acquired, Key} ->
+                    ok
+                after timer:seconds(10) ->
+                    case lock:current_owner(Key) of
+                        {ok, Owner} when is_pid(Owner) ->
+                            case is_process_alive(Owner) of
+                                true ->
+                                    Wait();
+                                false ->
+                                    case lock:dequeue(Key, Owner) of
+                                        {ok, Pid} ->
+                                            Pid ! {acquired, Key},
+                                            Wait();
+                                        Error ->
+                                            throw({?MODULE, unable_to_repair_lock_status, Error})
+                                    end
+                            end;
+                        {error, Reason} ->
+                            throw({?MODULE, unable_to_check_lock_status, Reason})
+                    end
+                end
+            end,
+            WaitFun()
     end.
 
 %%--------------------------------------------------------------------

@@ -706,7 +706,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
             case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(Level)),
                 fetch_link, [ModelConfig, Key, Link]) of
                 {ok, SavedValue} ->
-                    {ok, add_links, [Key, [{Link, SavedValue}]]};
+                    {ok, set_links, [Key, [{Link, SavedValue}]]};
                 {error, link_not_found} ->
                     case get(Level, Uuid) of
                         {ok, Doc} ->
@@ -748,13 +748,13 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                         non ->
                                             {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]};
                                         _ ->
-                                            {ok, add_links, [Key, [{Link, SavedValue}]]}
+                                            {ok, set_links, [Key, [{Link, SavedValue}]]}
                                     end;
                                 {error, {not_found, _}} ->
                                     {ok, create_or_update_link, [Key, {Link, SavedValue}, UpdateFun]}
                             end;
                         _ ->
-                            {ok, add_links, [Key, [{Link, SavedValue}]]}
+                            {ok, set_links, [Key, [{Link, SavedValue}]]}
                     end;
                 {error, link_not_found} ->
                     case get(Level, Uuid) of

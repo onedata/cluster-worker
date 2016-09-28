@@ -21,7 +21,7 @@
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, exists/1, delete/1, update/2, create/1,
     create_or_update/2, model_init/0, 'after'/5, before/4]).
--export([enqueue/3, dequeue/2]).
+-export([enqueue/3, dequeue/2, current_owner/1]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -150,9 +150,8 @@ before(_ModelName, _Method, _Level, _Context) ->
     {ok, acquired | wait} | {error, already_acquired}.
 enqueue(Key, Pid, Recursive) ->
     datastore:run_transaction(?MODULE, Key, fun() ->
-        case exists(Key) of
-            true ->
-                {ok, #document{value = #lock{queue = Q}}} = get(Key),
+        case get(Key) of
+            {ok, #document{value = #lock{queue = Q}}} ->
                 case has(Q, Pid) of
                     true ->
                         case Recursive of
@@ -166,8 +165,8 @@ enqueue(Key, Pid, Recursive) ->
                         {ok, Key} = update(Key, #{queue => add(Q, Pid)}),
                         {ok, wait}
                 end;
-            false ->
-                create(#document{key = Key, value = #lock{queue = add([], Pid)}}),
+            {error, {not_found, _}} ->
+                {ok, _} = create(#document{key = Key, value = #lock{queue = add([], Pid)}}),
                 {ok, acquired}
         end
     end).
@@ -183,9 +182,8 @@ enqueue(Key, Pid, Recursive) ->
     {ok, pid() | empty} | {error, not_lock_owner | lock_does_not_exist}.
 dequeue(Key, Pid) ->
     datastore:run_transaction(?MODULE, Key, fun() ->
-        case exists(Key) of
-            true ->
-                {ok, #document{value = #lock{queue = Q}}} = get(Key),
+        case get(Key) of
+            {ok, #document{value = #lock{queue = Q}}} ->
                 case has(Q, Pid) of
                     false ->
                         {error, not_lock_owner};
@@ -200,10 +198,26 @@ dequeue(Key, Pid) ->
                                 {ok, owner(NewQ)}
                         end
                 end;
-            false ->
+            {error, {not_found, _}} ->
                 {error, lock_does_not_exist}
         end
     end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns current owner the lock.
+%% @end
+%%--------------------------------------------------------------------
+-spec current_owner(Key :: term()) -> {ok, pid()} | {error, term()}.
+current_owner(Key) ->
+    case get(Key) of
+        {ok, #document{value = #lock{queue = Q}}} ->
+            Owner = owner(Q),
+            {ok, Owner};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 
 %%%===================================================================
 %%% Internal functions
