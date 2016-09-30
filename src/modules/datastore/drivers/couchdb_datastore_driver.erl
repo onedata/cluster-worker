@@ -148,7 +148,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(#model_config{name = ModelName} = ModelConfig, #document{rev = undefined, key = Key, value = Value} = Doc) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -210,7 +210,7 @@ save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = 
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -225,7 +225,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
             end
         end);
 update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, Reason} ->
@@ -271,7 +271,7 @@ create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Ke
     {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_function(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -289,7 +289,7 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
         end);
 create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key} = NewDoc, Diff)
     when is_map(Diff) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, ModelName}} ->
@@ -450,7 +450,7 @@ is_model_empty(#model_config{name = ModelName} = ModelConfig) ->
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
 delete(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Key, Pred) ->
-    datastore:run_transaction(ModelName, synchronization_doc_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_doc_key(ModelConfig, Key)],
         fun() ->
             case Pred() of
                 true ->
@@ -531,7 +531,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
         end
@@ -546,7 +546,7 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
 -spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, set)
         end
@@ -560,7 +560,7 @@ set_links(#model_config{name = ModelName, bucket = _Bucket} = ModelConfig, Key, 
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
 create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Link) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
         end
@@ -576,7 +576,7 @@ create_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key,
     | {error, Reason :: term()})) -> ok | datastore:generic_error().
 create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelConfig,
     Key, {LinkName, _} = Link, UpdateFun) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             case links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key) of
                 {error, link_not_found} ->
@@ -602,13 +602,13 @@ create_or_update_link(#model_config{name = ModelName, bucket = Bucket} = ModelCo
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, all) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:delete_links(?MODULE, ModelConfig, Key)
         end
     );
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_transaction(ModelName, synchronization_link_key(ModelConfig, Key),
+    critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
             links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
         end
@@ -888,7 +888,7 @@ get_server(DBGateways, Bucket) ->
 
     case ActiveGateways of
         [] ->
-            ?error("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
+            ?warning("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
             {error, no_active_gateway};
         _ ->
             try
@@ -953,7 +953,7 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
                    _ ->
                        synchronization_doc_key(ModelConfig, Key)
                end,
-    datastore:run_transaction(ModelName, SynchKey,
+    critical_section:run([ModelName, SynchKey],
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
@@ -988,6 +988,26 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
             end
         end).
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Apply given function with specified timeout.
+%% @end
+%%--------------------------------------------------------------------
+-spec timeoutize_apply(fun(() -> Res :: term()), non_neg_integer()) -> Res :: term() | {error, timeoutize_apply_timeout}.
+timeoutize_apply(Fun, Timeout) ->
+    Ref = make_ref(),
+    Srv = self(),
+    Pid = spawn(fun() ->
+        Srv ! {timeoutize_apply, Ref, catch Fun()}
+    end),
+    receive
+        {timeoutize_apply, Ref, Res} -> Res
+    after Timeout ->
+        exit(Pid, normal),
+        {error, timeoutize_apply_timeout}
+    end.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
@@ -1002,6 +1022,28 @@ start_gateway(Parent, N, Hostname, Port, Bucket) ->
     GWAdminPort = GWPort + 1000,
     ?info("Statring couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
 
+    InitState = #{
+        server => self(), port_fd => undefined, status => pre_init, id => {node(), N},
+        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
+        start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1, bucket => Bucket
+    },
+    Gateways = datastore_worker:state_get(db_gateways),
+    case Gateways of
+        _ when is_map(Gateways) ->
+            NewGateways = maps:update(N, InitState, Gateways),
+            datastore_worker:state_put(db_gateways, NewGateways);
+        _ -> ok
+    end,
+
+    FlushFun = fun Flush() ->
+        receive
+            _ -> Flush()
+        after 0 -> ok
+        end end,
+
+    FlushFun(),
+
+
     BinPath = code:priv_dir(cluster_worker) ++ "/sync_gateway",
     PortFD = erlang:open_port({spawn_executable, BinPath}, [binary, stderr_to_stdout, {line, 4 * 1024}, {args, [
         "-bucket", binary_to_list(Bucket),
@@ -1012,11 +1054,7 @@ start_gateway(Parent, N, Hostname, Port, Bucket) ->
     ]}]),
     erlang:link(PortFD),
 
-    State = #{
-        server => self(), port_fd => PortFD, status => init, id => {node(), N},
-        gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1, bucket => Bucket
-    },
+    State = InitState#{port_fd => PortFD, status => init},
     proc_lib:init_ack(Parent, State),
 
     BusyWaitInterval = 20,
@@ -1034,10 +1072,19 @@ start_gateway(Parent, N, Hostname, Port, Bucket) ->
     end,
 
     WaitForConnectionFun = fun WaitForConnection(Timeout) ->
-        try couchbeam:server_info(catch couchbeam:server_connection("localhost", maps:get(gw_port, State))) of
+
+        CheckDBFun = fun() ->
+            couchbeam:server_info(catch couchbeam:server_connection("localhost", maps:get(gw_port, State)))
+        end,
+        try timeoutize_apply(CheckDBFun, timer:seconds(30)) of
             {error, econnrefused} when Timeout > BusyWaitInterval ->
                 timer:sleep(BusyWaitInterval),
-                WaitForConnection(Timeout - BusyWaitInterval);
+                case erlang:port_info(PortFD, os_pid) of
+                    {os_pid, _} ->
+                        WaitForConnection(Timeout - BusyWaitInterval);
+                    _ ->
+                        ok %% Other errors will be handled in gateway_loop/1
+                end;
             _ ->
                 ok %% Other errors will be handled in gateway_loop/1
         catch
@@ -1049,7 +1096,6 @@ start_gateway(Parent, N, Hostname, Port, Bucket) ->
     WaitForConnectionFun(?WAIT_FOR_CONNECTION_TIMEOUT),
 
     gateway_loop(State#{status => running}).
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1069,12 +1115,14 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             datastore_worker:state_put(db_gateways, NewGateways)
     end,
 
-
     UpdatedState = case erlang:system_time(milli_seconds) - LPT > timer:seconds(1) of
         true ->
             try
                 true = port_command(PortFD, <<"ping">>, [nosuspend]),
-                {ok, _} = couchbeam:server_info(catch couchbeam:server_connection("localhost", GWPort)),
+                CheckDBFun = fun() ->
+                    couchbeam:server_info(catch couchbeam:server_connection("localhost", maps:get(gw_port, State)))
+                end,
+                {ok, _} = timeoutize_apply(CheckDBFun, timer:seconds(30)),
                 State#{last_ping_time => erlang:system_time(milli_seconds)}
             catch
                 _:{badmap, undefined} ->
@@ -1105,7 +1153,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
                 UpdatedState#{status => failed};
             {'EXIT', Parent, Reason} ->
                 ?info("Parent: ~p down due to: ~p", [Parent, Reason]),
-                stop_gateway(PortFD),
+                stop_gateway(UpdatedState),
                 UpdatedState#{status => closed};
             {port_comm_error, Reason} ->
                 ?error("[CouchBase Gateway ~p] Unable to communicate with port due to: ~p", [ID, Reason]),
@@ -1116,7 +1164,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             restart ->
                 UpdatedState;
             stop ->
-                stop_gateway(PortFD),
+                stop_gateway(UpdatedState),
                 UpdatedState#{status => closed};
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
@@ -1130,10 +1178,12 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         #{status := closed} ->
             ok;
         #{status := restarting} ->
-            stop_gateway(PortFD),
+            ?info("[CouchBase Gateway ~p] Restarting...", [ID]),
+            stop_gateway(NewState),
             start_gateway(self(), N, Hostname, Port, Bucket);
         #{status := failed} ->
-            stop_gateway(PortFD),
+            ?info("[CouchBase Gateway ~p] Restarting due to failure...", [ID]),
+            stop_gateway(NewState),
             start_gateway(self(), N, Hostname, Port, Bucket)
     end.
 
@@ -1142,15 +1192,23 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 %% Closes port and forces exit of couchbase-sync-gateway executable.
 %% @end
 %%--------------------------------------------------------------------
--spec stop_gateway(PortFD :: port()) -> ok.
-stop_gateway(PortFD) ->
-    ForcePortCloseCmd = case erlang:port_info(PortFD, os_pid) of
-        {os_pid, OsPid} -> lists:flatten(io_lib:format("kill -9 ~p", [OsPid]));
-        _ -> ""
-    end,
-    catch port_close(PortFD),
-    os:cmd(ForcePortCloseCmd),
-    ok.
+-spec stop_gateway(State :: #{atom() => term()}) -> ok | {error, timeout}.
+stop_gateway(#{port_fd := PortFD, id := {_, N}, db_hostname := Hostname, db_port := Port, gw_port := GWPort}) ->
+    ?info("Stopping couchbase gateway #~p: localhost:~p => ~p:~p", [N, GWPort, Hostname, Port]),
+    timeoutize_apply(fun() ->
+        ForcePortCloseCmd = case erlang:port_info(PortFD, os_pid) of
+            {os_pid, OsPid} -> lists:flatten(io_lib:format("kill -9 ~p", [OsPid]));
+            _ -> undefined
+        end,
+        catch port_close(PortFD),
+        case ForcePortCloseCmd of
+            undefined -> ok;
+            _ ->
+                os:cmd(ForcePortCloseCmd)
+        end,
+        ok
+    end, timer:seconds(10)).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1258,6 +1316,9 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
             State#state{last_seq = max(normalize_seq(Seq), LastSeq)}
         catch
             _:{badmatch, false} ->
+                State;
+            _:{badmatch, {error, not_found}} = Reason -> %% This revision is an ancestor to deleted one
+                ?debug_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),
                 State;
             _:Reason ->
                 ?error_stacktrace("Unable to process CouchDB change ~p due to ~p", [Change, Reason]),

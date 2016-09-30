@@ -27,14 +27,12 @@
 -export([
     run_and_update_test/1,
     run_and_increment_test/1,
-    hierarchical_lock_test/1,
     failure_in_critical_section_test/1,
     performance_test/1, performance_test_base/1]).
 
 -define(TEST_CASES, [
     run_and_update_test,
     run_and_increment_test,
-    hierarchical_lock_test,
     failure_in_critical_section_test]).
 
 -define(PERFORMANCE_TEST_CASES, [
@@ -66,14 +64,14 @@ performance_test_base(Config) ->
     end,
 
     TestCritical = fun() ->
-        critical_section:run([x,y,z], TestFun)
+        critical_section:run(<<"key">>, TestFun)
     end,
     TestCritical2 = fun() ->
         critical_section:run(random:uniform(), TestFun)
     end,
 
     TestTransaction = fun() ->
-        datastore:run_transaction(cache_controller, term_to_binary([x,y,z]), TestFun)
+        datastore:run_transaction(cache_controller, <<"key">>, TestFun)
     end,
     TestTransaction2 = fun() ->
         datastore:run_transaction(cache_controller, float_to_binary(random:uniform()), TestFun)
@@ -183,29 +181,6 @@ run_and_increment_test(Config) ->
         rpc:call(Worker, disk_only_record, get, [RecordId])),
     ok.
 
-hierarchical_lock_test(Config) ->
-    % given
-    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
-    Self = self(),
-
-    RecordId = <<"some_id">>,
-    ?assertEqual({ok, RecordId}, rpc:call(Worker, disk_only_record, save,
-        [#document{key = RecordId, value = #disk_only_record{}}])),
-
-    % then
-    Targets = [{nth_with_modulo(N, Workers), N, gen_hierarchical_key(N)} || N <- lists:seq(1, 4)],
-
-    Pids = lists:map(fun({W, V, K}) ->
-        spawn(fun() ->
-            Self ! {self(), rpc:call(W, ?MODULE, critical_fun_update, [RecordId, V, K])}
-        end)
-    end, Targets),
-
-    lists:foreach(fun(Pid) ->
-        ?assertReceivedMatch({Pid, {ok, _}}, ?TIMEOUT)
-    end, Pids),
-    ok.
-
 failure_in_critical_section_test(Config) ->
     % given
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -275,15 +250,3 @@ failure_test_fun(Key) ->
 %% returns nth element from list, treating list as ring
 nth_with_modulo(N, List) ->
     lists:nth((N rem length(List)) + 1, List).
-
-%% generates hierarchical key of given level
-gen_hierarchical_key(N) ->
-    gen_hierarchical_key(1, N).
-
-gen_hierarchical_key(N, N) ->
-    [gen_key(N)];
-gen_hierarchical_key(X, N) ->
-    [gen_key(X) | gen_hierarchical_key(X + 1, N)].
-
-gen_key(X) ->
-    <<"level_", (integer_to_binary(X))/binary, "_key">>.

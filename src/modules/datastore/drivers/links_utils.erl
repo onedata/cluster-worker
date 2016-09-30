@@ -75,40 +75,46 @@ deduplicate_targets([T | R]) ->
 diff(#links{link_map = OldMap}, #links{link_map = CurrentMap}) ->
     diff(OldMap, CurrentMap);
 diff(OldMap, CurrentMap) ->
-    OldKeys = maps:keys(OldMap),
-    CurrentKeys = maps:keys(CurrentMap),
-    DeletedKeys = OldKeys -- CurrentKeys,
-    AddedKeys = CurrentKeys -- OldKeys,
-    CommonKeys = CurrentKeys -- AddedKeys,
+    OldList = lists:sort(maps:to_list(OldMap)),
+    NewList = lists:sort(maps:to_list(CurrentMap)),
 
-    AddedMap = lists:foldl(
-        fun(Key, MapIn) ->
-            maps:put(Key, maps:get(Key, CurrentMap), MapIn)
-        end, #{}, AddedKeys),
+    {Added, Deleted} = diff2(OldList, NewList, [], []),
 
-    DeletedMap = lists:foldl(
-        fun(Key, MapIn) ->
-            maps:put(Key, maps:get(Key, OldMap), MapIn)
-        end, #{}, DeletedKeys),
+    {maps:from_list(Added), maps:from_list(Deleted)}.
 
-    {AddedCommon, DeletedCommon} = lists:foldl(
-        fun(Key, {MapIn1, MapIn2}) ->
-            {_OldV, OldTargets} = maps:get(Key, OldMap),
-            {NewV, NewTargets} = maps:get(Key, CurrentMap),
-            AddedTargets = NewTargets -- OldTargets,
-            DeletedTargets = OldTargets -- NewTargets,
-            NewMap1 = case AddedTargets of
-                [] -> MapIn1;
-                _ -> maps:put(Key, {NewV, AddedTargets}, MapIn1)
-            end,
-            NewMap2 = case DeletedTargets of
-                [] -> MapIn2;
-                _ -> maps:put(Key, {NewV, DeletedTargets}, MapIn2)
-            end,
-            {NewMap1, NewMap2}
-        end, {#{}, #{}}, CommonKeys),
+-spec diff2(OldLinks :: [Link], NewLinks :: [Link], LinkAcc, LinkAcc) ->
+    {LinkAcc, LinkAcc} when
+    Link :: {datastore:link_name(), datastore:link_final_target()},
+    LinkAcc :: [Link].
+diff2([], NT, Added, Deleted) ->
+%% No old links, assume that everything else is added as new
+    {NT ++ Added, Deleted};
+diff2(OT, [], Added, Deleted) ->
+%% No new links, assume that everything else has been removed
+    {Added, OT ++ Deleted};
+diff2([{Key, {_, Targets}} | OT], [{Key, {_, Targets}} | NT], Added, Deleted) ->
+%% Same link name and targets, nothing has changed
+    diff2(OT, NT, Added, Deleted);
+diff2([{Key, {_, TargetsO}} | OT], [{Key, {V, TargetsN}} | NT], Added, Deleted) ->
+%% Same link name, different targets -> diff targets
+    AddedTargets = TargetsN -- TargetsO,
+    DeletedTargets = TargetsO -- TargetsN,
+    NewAdded = case AddedTargets of
+        [] -> Added;
+        _ -> [{Key, {V, AddedTargets}} | Added]
+    end,
+    NewDeleted = case DeletedTargets of
+        [] -> Deleted;
+        _ -> [{Key, {V, DeletedTargets}} | Deleted]
+    end,
+    diff2(OT, NT, NewAdded, NewDeleted);
+diff2([{KeyO, _} = OldLink | OT], [{KeyN, _} = NewLink | NT], Added, Deleted) when KeyO < KeyN ->
+%% Old link name does not exist in new links' map -> assume it has been deleted
+    diff2(OT, [NewLink | NT], Added, [OldLink | Deleted]);
+diff2([{KeyO, _} = OldLink | OT], [{KeyN, _} = NewLink | NT], Added, Deleted) when KeyO > KeyN ->
+%% New link name does not exist in old links' map -> assume it has been created
+    diff2([OldLink | OT], NT, [NewLink | Added], Deleted).
 
-    {maps:merge(AddedMap, AddedCommon), maps:merge(DeletedMap, DeletedCommon)}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -413,8 +419,8 @@ delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, name = 
                             {V, [{Scope0, {deleted, VHash0}, Key0, Model0} || {Scope0, VHash0, Key0, Model0} <- Targets, ReplicateScope =/= Scope0]}
                         end, maps:merge(ToAdd0, maps:without(LeftRaw, Added))),
                     ToAdd2 = maps:filter( %% When link is deleted using explicit VHash, should not be marked as deleted
-                                          %% since system user is unable to perform such operation
-                                          %% Also ignore empty links
+                        %% since system user is unable to perform such operation
+                        %% Also ignore empty links
                         fun
                             (_, {_, []}) -> false;
                             (K0, _) ->

@@ -54,6 +54,11 @@
     node :: node()
 }).
 
+%% Queue of processes waiting for lock
+-record(lock, {
+    queue = [] :: [lock:queue_element()]
+}).
+
 %% Contents of cert files synced between nodes
 -record(synced_cert, {
     cert_file_content :: undefined | binary(),
