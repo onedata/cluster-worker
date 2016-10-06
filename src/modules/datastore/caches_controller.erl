@@ -496,7 +496,7 @@ end_consistency_restoring(Level, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_cache_consistency(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
-  {ok, erlang:timestamp(), erlang:timestamp()}
+  {ok, non_neg_integer(), non_neg_integer()}
   | {monitored, [datastore:key() | datastore:link_name()], non_neg_integer(), non_neg_integer()}
   | not_monitored | no_return().
 check_cache_consistency(Level, Key) ->
@@ -560,7 +560,7 @@ get_driver_module(Level) ->
 -spec save_clear_info(Level :: datastore:store_level(), Uuid :: binary()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 save_clear_info(Level, Uuid) ->
-  TS = os:timestamp(),
+  TS = os:system_time(?CC_TIMEUNIT),
   UpdateFun = fun(Record) ->
     {ok, Record#cache_controller{action = cleared, last_action_time = TS}}
   end,
@@ -578,7 +578,7 @@ save_clear_info(Level, Uuid) ->
 -spec save_high_mem_clear_info(Level :: datastore:store_level(), Uuid :: binary()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 save_high_mem_clear_info(Level, Uuid) ->
-  TS = os:timestamp(),
+  TS = os:system_time(?CC_TIMEUNIT),
   UpdateFun = fun
                 (#cache_controller{action = to_be_del}) ->
                   {error, document_in_use};
@@ -643,7 +643,7 @@ save_consistency_info(Level, Key, ClearedName) ->
 %%--------------------------------------------------------------------
 -spec delete_old_keys(Level :: global_only | local_only, Caches :: list(), TimeWindow :: integer()) -> ok.
 delete_old_keys(Level, Caches, TimeWindow) ->
-  Now = os:timestamp(),
+  Now = os:system_time(?CC_TIMEUNIT),
   ClearFun = fun
              ('$end_of_table', {Count, BatchNum}) ->
                  count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
@@ -675,7 +675,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                  _ ->
                    T = V#cache_controller.timestamp,
                    U = V#cache_controller.last_user,
-                   Age = timer:now_diff(Now, T),
+                   Age = Now - T,
                    case U of
                      non when Age >= 1000 * TimeWindow ->
                        Master = self(),
