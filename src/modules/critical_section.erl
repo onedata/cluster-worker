@@ -31,7 +31,7 @@
     Result :: term().
 run(RawKey, Fun) ->
     Key = couchdb_datastore_driver:to_binary(RawKey),
-    global:trans(Key, Fun).
+    global:trans({Key, self()}, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
