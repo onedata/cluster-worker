@@ -63,7 +63,7 @@ init_bucket(_BucketName, Models, NodeToSync) ->
                 true -> %% No mnesia nodes -> create new table
                     MakeTable = fun(TabName, RecordName, RecordFields) ->
                         Ans = case mnesia:create_table(TabName, [{record_name, RecordName}, {attributes, RecordFields},
-                            {ram_copies, [Node]}, {type, set}]) of
+                            {ram_copies, [Node]}, {type, set}, {majority, true}]) of
                             {atomic, ok} -> ok;
                             {aborted, {already_exists, TabName}} ->
                                 ok;
