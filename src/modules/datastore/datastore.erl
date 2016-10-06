@@ -75,7 +75,7 @@
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
+-export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
 
 %%%===================================================================
 %%% API
@@ -862,6 +862,16 @@ exists_link_doc(Level, Key, ModelName, Scope) ->
     when Result :: term().
 run_transaction(ModelName, ResourceId, Fun) ->
     exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_transation, [ResourceId, Fun]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs given function within transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_transaction(fun(() -> Result)) -> Result
+    when Result :: term().
+run_transaction(Fun) ->
+    mnesia_cache_driver:run_transation(Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
