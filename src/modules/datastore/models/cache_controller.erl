@@ -394,9 +394,9 @@ get_hooks_config() ->
 update_usage_info(Key, ModelName, Level) ->
     Uuid = caches_controller:get_cache_uuid(Key, ModelName),
     UpdateFun = fun(Record) ->
-        {ok, Record#cache_controller{timestamp = os:timestamp()}}
+        {ok, Record#cache_controller{timestamp = os:system_time(microsecond)}}
     end,
-    TS = os:timestamp(),
+    TS = os:system_time(microsecond),
     V = #cache_controller{timestamp = TS, last_action_time = TS},
     Doc = #document{key = Uuid, value = V},
     create_or_update(Level, Doc, UpdateFun).
@@ -658,10 +658,10 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
                         case {LastUser, A} of
                             {Owner, to_be_del} ->
                                 {ok, Record#cache_controller{last_user = non,
-                                    last_action_time = os:timestamp()}};
+                                    last_action_time = os:system_time(microsecond)}};
                             {Owner, _} ->
                                 {ok, Record#cache_controller{last_user = non, action = non,
-                                    last_action_time = os:timestamp()}};
+                                    last_action_time = os:system_time(microsecond)}};
                             _ ->
                                 throw(user_changed)
                         end
@@ -918,19 +918,19 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
 start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
     try
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
-        Pid = pid_to_list(self()),
+        Pid = self(),
 
         UpdateFun = fun(Record) ->
             case Record#cache_controller.action of
                 cleared ->
                     ok = check_action_after_clear(Op, Level, ModelName, Key),
-                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}};
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:system_time(microsecond), action = Op}};
                 _ ->
-                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:system_time(microsecond), action = Op}}
             end
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
-        TS = os:timestamp(),
+        TS = os:system_time(microsecond),
         V = #cache_controller{last_user = Pid, timestamp = TS, action = Op, last_action_time = TS},
         Doc = #document{key = Uuid, value = V},
         create_or_update(Level, Doc, UpdateFun),
@@ -962,10 +962,10 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                     ok;
                 _ ->
                     {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-                    case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
+                    case os:system_time(microsecond) - LAT >= 1000 * ForceTime of
                         true ->
                             UpdateFun2 = fun(Record) ->
-                                {ok, Record#cache_controller{last_action_time = os:timestamp()}}
+                                {ok, Record#cache_controller{last_action_time = os:system_time(microsecond)}}
                                          end,
                             update(Level, Uuid, UpdateFun2),
                             ok;

@@ -240,15 +240,15 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             {abort, Acc}
     end,
 
-    GetFromCache = fun(Time1, Time2) ->
+    GetFromCache = fun(Counter1, Counter2) ->
         case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-                    {ok, Time1, _} ->
+                    {ok, Counter1, _} ->
                         {ok, Ans1};
-                    {monitored, MList, Time1, _} ->
+                    {monitored, MList, Counter1, _} ->
                         {check, Ans1, MList};
-                    {monitored, MList, _, Time2} ->
+                    {monitored, MList, _, Counter2} ->
                         {check, Ans1, MList};
                     _ ->
                         {check, Ans1}
@@ -259,10 +259,10 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     end,
 
     FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        {ok, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
-        {monitored, _, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
+        {ok, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
+        {monitored, _, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
         _ ->
             case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
                 {ok, Ans1} ->
@@ -707,15 +707,15 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
 
-    GetFromCache = fun(Time1, Time2) ->
+    GetFromCache = fun(Counter1, Counter2) ->
         case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-                    {ok, Time1, _} ->
+                    {ok, Counter1, _} ->
                         {ok, Ans1};
-                    {monitored, MList, Time1, _} ->
+                    {monitored, MList, Counter1, _} ->
                         {check, Ans1, MList};
-                    {monitored, MList, _, Time2} ->
+                    {monitored, MList, _, Counter2} ->
                         {check, Ans1, MList};
                     _ ->
                         {check, Ans1}
@@ -726,10 +726,10 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     end,
 
     FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        {ok, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
-        {monitored, _, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
+        {ok, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
+        {monitored, _, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
         _ ->
             case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
                 {ok, Ans1} ->

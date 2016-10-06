@@ -121,6 +121,7 @@ check_and_rerun_all() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec is_task_alive(task_record()) -> boolean().
+% TODO - uwzglednic node_down i nowy format taskow
 is_task_alive(Task) ->
     N = node(),
     case Task#task_pool.node of
@@ -128,6 +129,8 @@ is_task_alive(Task) ->
             check_owner(Task#task_pool.owner);
         OtherNode ->
             case rpc:call(OtherNode, ?MODULE, check_owner, [Task#task_pool.owner]) of
+                {badrpc,nodedown} ->
+                    false;
                 {badrpc, R} ->
                     ?error("Badrpc: ~p checking task ~p", [R, Task]),
                     false;
@@ -141,7 +144,9 @@ is_task_alive(Task) ->
 %% Checks if process that owns task is alive.
 %% @end
 %%--------------------------------------------------------------------
--spec check_owner(Owner :: string()) -> boolean().
+-spec check_owner(Owner :: pid() | string()) -> boolean().
+check_owner(Owner) when is_pid(Owner) ->
+    is_process_alive(Owner);
 check_owner(Owner) ->
     is_process_alive(list_to_pid(Owner)).
 
@@ -165,7 +170,13 @@ kill_all() ->
 -spec save_pid(Task :: task(), Pid :: pid(), Level :: level()) ->
     {ok, datastore:key()} | datastore:create_error().
 save_pid(Task, Pid, Level) ->
-    task_pool:create(Level, #document{value = #task_pool{task = Task, owner = pid_to_list(Pid), node = node()}}).
+    Owner = case Level of
+                ?PERSISTENT_LEVEL ->
+                    pid_to_list(Pid);
+                _ ->
+                    Pid
+            end,
+    task_pool:create(Level, #document{value = #task_pool{task = Task, owner = Owner, node = node()}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -175,10 +186,16 @@ save_pid(Task, Pid, Level) ->
 -spec update_pid(Task :: #document{value :: #task_pool{}}, Pid :: pid(), Level :: level()) ->
     {ok, datastore:key()} | datastore:create_error().
 update_pid(Task, Pid, Level) ->
+    Owner = case Level of
+                ?PERSISTENT_LEVEL ->
+                    pid_to_list(Pid);
+                _ ->
+                    Pid
+            end,
     UpdateFun = fun(Record) ->
         case is_task_alive(Record) of
             false ->
-                {ok, Record#task_pool{owner = pid_to_list(Pid)}};
+                {ok, Record#task_pool{owner = Owner}};
             _ ->
                 {error, owner_alive}
         end
@@ -291,7 +308,9 @@ kill_all(Level) ->
 %% Kills process that owns task.
 %% @end
 %%--------------------------------------------------------------------
--spec kill_owner(Owner :: string()) -> boolean().
+-spec kill_owner(Owner :: pid() | string()) -> boolean().
+kill_owner(Owner) when is_pid(Owner) ->
+    exit(list_to_pid(Owner), stopped_by_manager);
 kill_owner(Owner) ->
     exit(list_to_pid(Owner), stopped_by_manager).
 
