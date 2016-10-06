@@ -310,7 +310,7 @@ kill_all(Level) ->
 %%--------------------------------------------------------------------
 -spec kill_owner(Owner :: pid() | string()) -> boolean().
 kill_owner(Owner) when is_pid(Owner) ->
-    exit(list_to_pid(Owner), stopped_by_manager);
+    exit(Owner, stopped_by_manager);
 kill_owner(Owner) ->
     exit(list_to_pid(Owner), stopped_by_manager).
 

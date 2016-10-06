@@ -30,11 +30,12 @@
 }).
 
 %% Model that controls utilization of cache
+-define(CC_TIMEUNIT, 1000000).
 -record(cache_controller, {
-    timestamp = 0 :: non_neg_integer(),
+    timestamp = 0 :: integer(),
     action = non :: atom(),
     last_user = non :: pid() | non,
-    last_action_time = 0 :: non_neg_integer(),
+    last_action_time = 0 :: integer(),
     action_data :: term()
 }).
 

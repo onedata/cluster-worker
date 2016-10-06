@@ -563,7 +563,11 @@ run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
 -spec run_transation(fun(() -> Result)) -> Result
     when Result :: term().
 run_transation(Fun) ->
-    mnesia_run(sync_transaction, Fun).
+    NewFun = fun(TrxType) ->
+        log(normal, "~p ->run_transation", [TrxType]),
+        Fun()
+    end,
+    mnesia_run(sync_transaction, NewFun).
 
 %%%===================================================================
 %%% Internal functions
