@@ -650,7 +650,7 @@ get_key(Tuple) when is_tuple(Tuple) ->
 mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
     case mnesia:is_transaction() of
         true ->
-            Fun();
+            Fun(Method);
         _ ->
             try mnesia:Method(fun() -> Fun(Method) end) of
                 Result ->
@@ -663,7 +663,7 @@ mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
 mnesia_run(Method, Fun) when Method =:= sync_transaction; Method =:= transaction ->
     case mnesia:is_transaction() of
         true ->
-            Fun();
+            Fun(Method);
         _ ->
             case mnesia:Method(fun() -> Fun(Method) end) of
                 {atomic, Result} ->
