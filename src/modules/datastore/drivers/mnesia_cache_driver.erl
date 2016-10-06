@@ -24,7 +24,7 @@
 %% TODO Add non_transactional updates (each update creates tmp ets!)
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
--export([run_transation/3]).
+-export([run_transation/1, run_transation/3]).
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
@@ -554,6 +554,16 @@ run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
                     end
             end
         end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs given function within transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_transation(fun(() -> Result)) -> Result
+    when Result :: term().
+run_transation(Fun) ->
+    mnesia_run(sync_transaction, Fun).
 
 %%%===================================================================
 %%% Internal functions

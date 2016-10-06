@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([run/2, run/3]).
+-export([run/2]).
 
 %%%===================================================================
 %%% API
@@ -29,8 +29,9 @@
 %%--------------------------------------------------------------------
 -spec run(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
-run(Key, Fun) ->
-    run(Key, Fun, false).
+run(RawKey, Fun) ->
+    Key = couchdb_datastore_driver:to_binary(RawKey),
+    global:trans(Key, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
