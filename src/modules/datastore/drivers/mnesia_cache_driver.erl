@@ -638,19 +638,29 @@ get_key(Tuple) when is_tuple(Tuple) ->
 %%--------------------------------------------------------------------
 -spec mnesia_run(Method :: atom(), Fun :: fun((atom()) -> term())) -> term().
 mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
-    try mnesia:Method(fun() -> Fun(Method) end) of
-        Result ->
-            Result
-    catch
-        _:Reason ->
-            {error, Reason}
+    case mnesia:is_transaction() of
+        true ->
+            Fun();
+        _ ->
+            try mnesia:Method(fun() -> Fun(Method) end) of
+                Result ->
+                    Result
+            catch
+                _:Reason ->
+                    {error, Reason}
+            end
     end;
 mnesia_run(Method, Fun) when Method =:= sync_transaction; Method =:= transaction ->
-    case mnesia:Method(fun() -> Fun(Method) end) of
-        {atomic, Result} ->
-            Result;
-        {aborted, Reason} ->
-            {error, Reason}
+    case mnesia:is_transaction() of
+        true ->
+            Fun();
+        _ ->
+            case mnesia:Method(fun() -> Fun(Method) end) of
+                {atomic, Result} ->
+                    Result;
+                {aborted, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 %%--------------------------------------------------------------------
