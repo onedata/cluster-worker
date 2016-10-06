@@ -25,8 +25,7 @@
   task_pool,
   cache_consistency_controller,
   cached_identity,
-  synced_cert,
-  lock
+  synced_cert
 ]).
 
 %% datastore_config_behaviour callbacks
