@@ -213,7 +213,7 @@ get(Level, ModelName, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
@@ -223,7 +223,7 @@ list(Level, ModelName, Fun, AccIn) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
@@ -272,7 +272,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             end
     end,
 
-    SecodnPhaseAns = case FirstPhaseAns of
+    SecondPhaseAns = case FirstPhaseAns of
         {check, Ans_1, ClearedList} ->
             {ok, lists:foldl(fun(Key, Acc) ->
                 case cache_controller:check_get(Key, ModelName, CLevel) of
@@ -327,7 +327,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             OtherAns
     end,
 
-    case SecodnPhaseAns of
+    case SecondPhaseAns of
         {ok, Ans2} ->
             try
                 AccOut =

@@ -425,7 +425,7 @@ foreach_link(#model_config{} = ModelConfig, Key, Fun, AccIn) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Internat helper - accumulator for list/3.
+%% Internal helper - accumulator for list/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec list_next([term()] | '$end_of_table', term(), datastore:list_fun(), term()) ->
@@ -632,7 +632,7 @@ get_key(Tuple) when is_tuple(Tuple) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Convinience function for executing given Mnesia's transaction-like function and normalizing Result.
+%% Convenience function for executing given Mnesia's transaction-like function and normalizing Result.
 %% Available methods: sync_dirty, async_dirty, sync_transaction, transaction.
 %% @end
 %%--------------------------------------------------------------------
