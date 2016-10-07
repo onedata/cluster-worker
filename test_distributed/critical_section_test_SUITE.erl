@@ -71,17 +71,17 @@ performance_test_base(Config) ->
     end,
 
     TestCriticalMnesia = fun() ->
-        critical_section:run(<<"key">>, TestFun)
-                   end,
+        critical_section:run_on_mnesia(<<"key">>, TestFun)
+    end,
     TestCriticalMnesia2 = fun() ->
-        critical_section:run(random:uniform(), TestFun)
-                    end,
+        critical_section:run_on_mnesia(random:uniform(), TestFun)
+    end,
 
     TestTransaction = fun() ->
-        datastore:run_transaction(cache_controller, <<"key">>, TestFun)
+        critical_section:run_in_mnesia_transaction(<<"key">>, TestFun)
     end,
     TestTransaction2 = fun() ->
-        datastore:run_transaction(cache_controller, float_to_binary(random:uniform()), TestFun)
+        critical_section:run_in_mnesia_transaction(float_to_binary(random:uniform()), TestFun)
     end,
 
     T1 = check_time(TestCritical, [Worker]),
