@@ -25,7 +25,8 @@
     deleted = false :: boolean(),
     generated_uuid = false :: boolean(),
     value :: datastore:value(),
-    links :: term()
+    links :: term(),
+    version :: non_neg_integer() | undefined
 }).
 
 %% Model that controls utilization of cache

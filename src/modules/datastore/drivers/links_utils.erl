@@ -18,7 +18,7 @@
 %% Prefix of VHash value (version hash used to tag links) in link name
 -define(VHASH_PREFIX, "__VH__").
 
--type scope() :: atom() | binary().
+-type scope() :: binary().
 -type vhash() :: binary() | undefined | {deleted, binary()}.
 % mapping to mother scope - function or key in process dict
 -type mother_scope() :: fun((datastore:key()) -> scope()) | atom().

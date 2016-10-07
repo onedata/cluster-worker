@@ -19,6 +19,7 @@
 %% model_behaviour callbacks
 -export([save/1, get/1, exists/1, delete/1, update/2, create/1,
     model_init/0, 'after'/5, before/4, list/0, create_or_update/2]).
+-export([record_struct/1]).
 
 
 %%%===================================================================
@@ -129,3 +130,17 @@ list() ->
     {ok, datastore:ext_key()} | datastore:update_error().
 create_or_update(Doc, Diff) ->
     datastore:create_or_update(?STORE_LEVEL, Doc, Diff).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns structure of the record in specified version.
+%% @end
+%%--------------------------------------------------------------------
+-spec record_struct(datastore_json:record_version()) -> datastore_json:record_struct().
+record_struct(1) ->
+    {record, [
+        {cert_file_content, binary},
+        {key_file_content, binary}
+    ]}.
+

@@ -30,9 +30,6 @@
 %% Encoded integer prefix
 -define(INT_PREFIX, "INT::").
 
-%% Encoded record name field
--define(RECORD_MARKER, "RECORD::").
-
 -define(LINKS_KEY_SUFFIX, "$$").
 
 %% Maximum size of document's value.
@@ -186,7 +183,7 @@ save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
 save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Key, rev = Rev, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
 
-    {Props} = to_json_term(Value),
+    {Props} = datastore_json:encode_record(ToSave),
     Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {SaveReport}} ->
@@ -246,7 +243,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Key, value = Value}) ->
     ok = assert_value_size(Value, ModelConfig, Key),
 
-    {Props} = to_json_term(Value),
+    {Props} = datastore_json:encode_record(ToSave),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
     case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {SaveReport}} ->
@@ -328,7 +325,8 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, BucketOverr
                     {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
                     Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
                     Proplist2 = Proplist -- Proplist1,
-                    {ok, #document{key = Key, value = from_json_term({Proplist2}), rev = Rev}};
+                    {Version, Value} = datastore_json:decode_record({Proplist2}),
+                    {ok, #document{key = Key, value = Value, rev = Rev, version = Version}};
                 _ ->
                     {error, db_internal_error}
             end;
@@ -389,7 +387,8 @@ list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn)
                                         Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
                                         Value2 = Value -- Value1,
                                         {_, Key} = from_driver_key(KeyBin),
-                                        Doc = #document{key = Key, value = from_json_term({Value2})},
+                                        {Version, DocValue} = datastore_json:decode_record({Value2}),
+                                        Doc = #document{key = Key, value = DocValue, version = Version},
                                         case element(1, Doc#document.value) of
                                             ModelName ->
                                                 case Fun(Doc, Acc) of
@@ -487,7 +486,7 @@ delete_link_doc(ModelConfig, Doc) ->
 -spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
 delete_doc(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, value = Value, rev = Rev} = ToDel) ->
-    {Props} = to_json_term(Value),
+    {Props} = datastore_json:encode_record(ToDel),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
     case db_run(select_bucket(ModelConfig, ToDel), couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         ok ->
@@ -700,15 +699,6 @@ term_to_base64(Term) ->
     Base = base64:encode(term_to_binary(Term)),
     <<?OBJ_PREFIX, Base/binary>>.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Decodes given base64 binary to erlang term (reverses term_to_base64/1).
-%% @end
-%%--------------------------------------------------------------------
--spec base64_to_term(binary()) -> term().
-base64_to_term(<<?OBJ_PREFIX, Base/binary>>) ->
-    binary_to_term(base64:decode(Base)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -726,100 +716,6 @@ to_binary(Term) when is_integer(Term) ->
 to_binary(Term) ->
     term_to_base64(Term).
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Translates given database "register" object to erlang term (reverses to_binary/1).
-%% @end
-%%--------------------------------------------------------------------
--spec from_binary(binary()) -> term().
-from_binary(<<?OBJ_PREFIX, _/binary>> = Bin) ->
-    base64_to_term(Bin);
-from_binary(<<?ATOM_PREFIX, Atom/binary>>) ->
-    binary_to_atom(Atom, utf8);
-from_binary(<<?INT_PREFIX, Int/binary>>) ->
-    binary_to_integer(Int);
-from_binary(Bin) ->
-    Bin.
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Translates given internal model's record format into couchbeam document.
-%% @end
-%%--------------------------------------------------------------------
--spec to_json_term(term()) -> term().
-to_json_term(Term) when is_integer(Term) ->
-    Term;
-to_json_term(Term) when is_binary(Term) ->
-    Term;
-to_json_term(Term) when is_boolean(Term) ->
-    Term;
-to_json_term(Term) when is_float(Term) ->
-    Term;
-to_json_term(Term) when is_list(Term) ->
-    [to_json_term(Elem) || Elem <- Term];
-to_json_term(Term) when is_atom(Term) ->
-    to_binary(Term);
-to_json_term(Term) when is_tuple(Term) ->
-    ModelName = element(1, Term),
-    IsModel = is_atom(ModelName) andalso lists:member(ModelName, datastore_config:models()),
-    case IsModel of
-        true ->
-            #model_config{fields = Fields} = ModelName:model_init(),
-            [_ | Values1] = tuple_to_list(Term),
-            Map = maps:from_list(lists:zip(Fields, Values1)),
-            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(ModelName, utf8)});
-        false -> %% encode as tuple
-            Values = tuple_to_list(Term),
-            Keys = lists:seq(1, length(Values)),
-            KeyValue = lists:zip(Keys, Values),
-            Map = maps:from_list(KeyValue),
-            to_json_term(Map#{<<?RECORD_MARKER>> => atom_to_binary(undefined, utf8)})
-    end;
-to_json_term(Term) when is_map(Term) ->
-    Proplist0 = maps:to_list(Term),
-    Proplist1 = [{to_binary(Key), to_json_term(Value)} || {Key, Value} <- Proplist0],
-    {Proplist1};
-to_json_term(Term) ->
-    to_binary(Term).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Translates given couchbeam document into internal model's record format.
-%% @end
-%%--------------------------------------------------------------------
--spec from_json_term(term()) -> term().
-from_json_term(Term) when is_integer(Term) ->
-    Term;
-from_json_term(Term) when is_boolean(Term) ->
-    Term;
-from_json_term(Term) when is_float(Term) ->
-    Term;
-from_json_term(Term) when is_list(Term) ->
-    [from_json_term(Elem) || Elem <- Term];
-from_json_term({Term}) when is_list(Term) ->
-    case lists:keyfind(<<?RECORD_MARKER>>, 1, Term) of
-        false ->
-            Proplist2 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term],
-            maps:from_list(Proplist2);
-        {_, <<"undefined">>} ->
-            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
-            Proplist1 = lists:sort(Proplist0),
-            {_, Values} = lists:unzip(Proplist1),
-            list_to_tuple(Values);
-        {_, RecordType} ->
-            Proplist0 = [{from_binary(Key), from_json_term(Value)} || {Key, Value} <- Term, Key =/= <<?RECORD_MARKER>>],
-            ModelName = binary_to_atom(RecordType, utf8),
-            #model_config{fields = Fields} = ModelName:model_init(),
-            Values = [proplists:get_value(Key, Proplist0, undefined) || Key <- Fields],
-            list_to_tuple([binary_to_atom(RecordType, utf8) | Values])
-    end;
-from_json_term(Term) when is_binary(Term) ->
-    from_binary(Term).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1247,10 +1143,11 @@ get_with_revs(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Ke
                     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, Proplist),
                     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
                     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
-
+                    {Version, Value} = datastore_json:decode_record({Proplist2}),
                     {ok, #document{
                         key = Key,
-                        value = from_json_term({Proplist2}),
+                        value = Value,
+                        version = Version,
                         rev = {Start, Revs}}
                     };
                 _ ->
@@ -1385,9 +1282,9 @@ terminate(Reason, _State) ->
 -spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value}) ->
+    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value} = ToSave) ->
     ok = assert_value_size(Value, ModelConfig, Key),
-    {Props} = to_json_term(Value),
+    {Props} = datastore_json:encode_record(ToSave),
     Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
         {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
     case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
@@ -1421,8 +1318,8 @@ process_raw_doc(Bucket, {RawDoc}) ->
     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, RawRichDoc),
     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
-
-    #document{key = Key, rev = {Start, Revs}, value = from_json_term({RawDoc2})}.
+    {Version, Value} = datastore_json:decode_record({RawDoc2}),
+    #document{key = Key, rev = {Start, Revs}, value = Value, version = Version}.
 
 
 %%--------------------------------------------------------------------
@@ -1535,13 +1432,13 @@ assert_value_size(Value, ModelConfig, Key) ->
 add_view(ModelName, Id, ViewFunction) ->
     DesignId = <<"_design/", Id/binary>>,
 
-    Doc = to_json_term(#{
+    Doc = jiffy:decode(jiffy:encode(#{
         <<"_id">> => DesignId,
         <<"views">> => maps:from_list(
             [{Id, #{<<"map">> => ViewFunction}}]
         )
-    }),
-    {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [Doc], 5),
+    })),
+    {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [{Doc}], 5),
     true = verify_ans(SaveAns),
     ok.
 

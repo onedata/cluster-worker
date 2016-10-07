@@ -368,8 +368,8 @@ delete_conflict_test(Config) ->
         {_, #document{}, _}}, ?TIMEOUT),
     #document{key = KeyR2, value = ValR2, deleted = DeletedR2} = DocR2,
     ?assertEqual(
-        {true, Doc1Key, Doc1Val4, test_record_1},
-        {DeletedR2, KeyR2, ValR2, ModR2}
+        {true, Doc1Key, test_record_1},
+        {DeletedR2, KeyR2, ModR2}
     ).
 
 delete_double_conflict_test(Config) ->
