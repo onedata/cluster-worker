@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([run/2, run_on_global/2, run_on_mnesia/2, run_on_mnesia/3]).
+-export([run/2, run_on_global/2, run_in_mnesia_transaction/2, run_on_mnesia/2, run_on_mnesia/3]).
 
 %%%===================================================================
 %%% API
@@ -31,6 +31,16 @@
     Result :: term().
 run(RawKey, Fun) ->
     run_on_global(RawKey, Fun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs Fun in critical section inside mnesia transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_in_mnesia_transaction(Key :: term(), Fun :: fun (() -> Result :: term())) ->
+    Result :: term().
+run_in_mnesia_transaction(Key, Fun) ->
+    mnesia_cache_driver:run_transation(Key, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
