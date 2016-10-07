@@ -12,6 +12,7 @@
 -author("Rafal Slota").
 
 -type driver_action() :: model_behaviour:model_action().
+-type mode() :: dirty | transaction.
 
 -export_type([driver_action/0]).
 
@@ -92,11 +93,11 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Traverses entire or part of table. Acts simililar to erlang:foldl except that it may be interrupted
+%% Traverses entire or part of table. Acts similar to erlang:foldl except that it may be interrupted
 %% by returning {abort, Acc} from given fun.
 %% @end
 %%--------------------------------------------------------------------
--callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term()) ->
+-callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term(), Mode :: mode()) ->
     {ok, Acc :: term()} | datastore:generic_error() | no_return().
 
 

@@ -51,7 +51,7 @@
 
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
--export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
+-export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 -export([synchronization_doc_key/2, synchronization_link_key/2]).
 
@@ -367,12 +367,12 @@ exists_link_doc(ModelConfig, Key, Scope) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback list/3.
+%% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), _Mode :: store_driver_behaviour:mode()) -> no_return().
+list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn, _Mode) ->
     BinModelName = atom_to_binary(ModelName, utf8),
     _BinBucket = atom_to_binary(Bucket, utf8),
     case db_run(select_bucket(ModelConfig, undefined), couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
