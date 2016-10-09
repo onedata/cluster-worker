@@ -121,7 +121,6 @@ check_and_rerun_all() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec is_task_alive(task_record()) -> boolean().
-% TODO - uwzglednic node_down i nowy format taskow
 is_task_alive(Task) ->
     N = node(),
     case Task#task_pool.node of
