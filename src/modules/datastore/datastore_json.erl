@@ -81,6 +81,12 @@ validate_struct({record, Fields}) when is_list(Fields) ->
 
 encode_record(value, undefined, _) ->
     null;
+encode_record(value, Term, {custom_value, {M, Encoder, _Decoder}}) ->
+    encode_record(value, M:Encoder(Term), json);
+encode_record(value, Term, {custom_type, TypeName, {Mod, Encoder, _Decoder}}) ->
+    encode_record(value, Mod:Encoder(Term, TypeName), json);
+encode_record(value, Term, {custom_type, TypeName, Mod}) ->
+    encode_record(value, Term, {custom_type, TypeName, {Mod, encode_value, decode_value}});
 encode_record(_, Term, {record, Type}) when is_atom(Type), is_tuple(Term) ->
     #model_config{version = Version} = Type:model_init(),
     {record, Fields} = Type:record_struct(Version),
@@ -129,7 +135,7 @@ encode_record(_, Term, binary) when is_binary(Term)  ->
 encode_record(_, Term, term) ->
     base64:encode(term_to_binary(Term));
 encode_record(value, Term, json) when is_binary(Term) ->
-    jiffy:encode(Term);
+    jiffy:decode(Term);
 encode_record(Context, Term, Type)  ->
     error({invalid_term_structure, Context, Term, Type}).
 
@@ -137,6 +143,12 @@ encode_record(Context, Term, Type)  ->
 
 decode_record(null, _) ->
     undefined;
+decode_record(Term, {custom_value, {M, _Encoder, Decoder}}) ->
+    M:Decoder(decode_record(Term, json));
+decode_record(Term, {custom_type, TypeName, {Mod, _Encoder, Decoder}}) ->
+    Mod:Decoder(decode_record(Term, json), TypeName);
+decode_record(Term, {custom_type, TypeName, Mod}) ->
+    decode_record(Term, {custom_type, TypeName, {Mod, encode_value, decode_value}});
 decode_record({Term}, {record, _Version, Fields}) when is_list(Fields), is_list(Term) ->
     list_to_tuple(lists:reverse(lists:foldl(
         fun({Name, Type}, RecordList) ->
@@ -174,7 +186,7 @@ decode_record(Term, boolean) when is_binary(Term)  ->
 decode_record(Term, binary) when is_binary(Term)  ->
     Term;
 decode_record(Term, json) ->
-    jiffy:decode(Term);
+    jiffy:encode(Term);
 decode_record(Term, term) ->
     binary_to_term(base64:decode(Term));
 decode_record(Term, Type) ->

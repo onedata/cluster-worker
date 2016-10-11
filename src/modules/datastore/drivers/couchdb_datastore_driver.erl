@@ -1438,7 +1438,7 @@ add_view(ModelName, Id, ViewFunction) ->
             [{Id, #{<<"map">> => ViewFunction}}]
         )
     })),
-    {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [{Doc}], 5),
+    {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [Doc], 5),
     true = verify_ans(SaveAns),
     ok.
 
