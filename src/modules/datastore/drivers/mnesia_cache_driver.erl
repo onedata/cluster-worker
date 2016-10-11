@@ -22,7 +22,7 @@
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
 %% TODO Add non_transactional updates (each update creates tmp ets!)
--export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
+-export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_transation/3]).
 
@@ -284,13 +284,15 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback list/3.
+%% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term()) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), Mode :: store_driver_behaviour:mode()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{name = ModelName} = ModelConfig, Fun, AccIn) ->
+list(#model_config{} = ModelConfig, Fun, AccIn, dirty) ->
+    list_dirty(ModelConfig, Fun, AccIn);
+list(#model_config{name = ModelName} = ModelConfig, Fun, AccIn, _Mode) ->
     SelectAll = [{'_', [], ['$_']}],
     ToExec = fun(TrxType) ->
         log(normal, "~p -> ~p:list()", [TrxType, ModelName]),
@@ -425,7 +427,7 @@ foreach_link(#model_config{} = ModelConfig, Key, Fun, AccIn) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Internat helper - accumulator for list/3.
+%% Internal helper - accumulator for list/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec list_next([term()] | '$end_of_table', term(), datastore:list_fun(), term()) ->
@@ -632,7 +634,7 @@ get_key(Tuple) when is_tuple(Tuple) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Convinience function for executing given Mnesia's transaction-like function and normalizing Result.
+%% Convenience function for executing given Mnesia's transaction-like function and normalizing Result.
 %% Available methods: sync_dirty, async_dirty, sync_transaction, transaction.
 %% @end
 %%--------------------------------------------------------------------
@@ -694,3 +696,43 @@ log(Type, Format, Args) ->
 do_log(Format, Args) ->
     LogLevel = application:get_env(?CLUSTER_WORKER_APP_NAME, mnesia_cache_driver_log_level, 0),
     ?do_log(LogLevel, "[~p] " ++ Format, [?MODULE | Args], false).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Dirty alternative of list/4
+%% @end
+%%--------------------------------------------------------------------
+-spec list_dirty(model_behaviour:model_config(), Fun :: datastore:list_fun(),
+    AccIn :: term()) ->
+    {ok, Acc :: term()} | datastore:generic_error() | no_return().
+list_dirty(#model_config{} = ModelConfig, Fun, AccIn) ->
+    Table = table_name(ModelConfig),
+    First = mnesia:dirty_first(Table),
+    list_dirty_next(Table, First, Fun, AccIn).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Accumulator helper function for dirty_list
+%% @end
+%%--------------------------------------------------------------------
+-spec list_dirty_next(any(), any(), any(), any()) -> any().
+list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
+    case Fun(EoT, AccIn) of
+        {abort, NewAcc} ->
+            {ok, NewAcc}
+    end;
+list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
+
+    [Obj] = mnesia:dirty_read(Table, CurrentKey),
+    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
+    case Fun(Doc, AccIn) of
+        {next, NewAcc} ->
+            Next = mnesia:dirty_next(Table, CurrentKey),
+            list_dirty_next(Table, Next, Fun, NewAcc);
+        {abort, NewAcc} ->
+            {ok, NewAcc}
+    end.

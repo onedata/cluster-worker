@@ -69,7 +69,7 @@
 
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
-    get/3, list/4, delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
+    get/3, list/4, list_dirty/4,delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
@@ -210,25 +210,38 @@ create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
 get(Level, ModelName, Key) ->
     exec_driver(ModelName, level_to_driver(Level), get, [Key]).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Dirty alternative of list/4.
+%% Executes given function for each model's record. After each record function may interrupt operation.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_dirty(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list_dirty(Level, ModelName, Fun, AccIn) ->
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, dirty).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, ModelName, Fun, AccIn) ->
-    list(Level, level_to_driver(Level), ModelName, Fun, AccIn).
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, transaction).
+
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes given funcion for each model's record. After each record function may interrupt operation.
+%% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
--spec list(Level :: store_level(), Drivers :: atom() | [atom()], ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+-spec list(Level :: store_level(), Drivers :: atom() | [atom()],
+    ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term(),
+    Mode :: store_driver_behaviour:mode()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
+list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
     CLevel = driver_to_level(Driver1),
     CCCUuid = ModelName,
     ModelConfig = ModelName:model_init(),
@@ -241,7 +254,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
     end,
 
     GetFromCache = fun(Time1, Time2) ->
-        case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
+        case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Mode]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
                     {ok, Time1, _} ->
@@ -264,7 +277,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
         {monitored, _, Time1, Time2} ->
             GetFromCache(Time1, Time2);
         _ ->
-            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}]) of
+            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Mode]) of
                 {ok, Ans1} ->
                     {check, Ans1};
                 Err1 ->
@@ -272,7 +285,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             end
     end,
 
-    SecodnPhaseAns = case FirstPhaseAns of
+    SecondPhaseAns = case FirstPhaseAns of
         {check, Ans_1, ClearedList} ->
             {ok, lists:foldl(fun(Key, Acc) ->
                 case cache_controller:check_get(Key, ModelName, CLevel) of
@@ -316,7 +329,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             end,
 
             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-            case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1]) of
+            case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1, Mode]) of
                 {ok, Ans_2} ->
                     caches_controller:end_consistency_restoring(CLevel, CCCUuid),
                     {ok, Ans_2};
@@ -327,7 +340,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
             OtherAns
     end,
 
-    case SecodnPhaseAns of
+    case SecondPhaseAns of
         {ok, Ans2} ->
             try
                 AccOut =
@@ -349,8 +362,8 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn) ->
         FinalAns ->
             FinalAns
     end;
-list(_Level, Drivers, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, Drivers, list, [Fun, AccIn]).
+list(_Level, Drivers, ModelName, Fun, AccIn, Mode) ->
+    exec_driver(ModelName, Drivers, list, [Fun, AccIn, Mode]).
 
 
 %%--------------------------------------------------------------------
