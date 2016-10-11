@@ -30,12 +30,121 @@
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
+-export([throttle/0, throttle/1, configure_throttling/0, plan_next_throttling_check/0]).
 
 -define(CLEAR_BATCH_SIZE, 100).
+-define(MNESIA_throttling_KEY, <<"mnesia_throttling">>).
+-define(MNESIA_throttling_DATA_KEY, <<"mnesia_throttling_data">>).
+-define(throttling_ERROR, {error, load_to_high}).
+
+-define(BLOCK_throttling, 3).
+-define(LIMIT_throttling, 2).
+-define(CONFIG_throttling, 1).
+-define(NO_throttling, 0).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+
+throttle() ->
+  case node_management:get(?MNESIA_throttling_KEY) of
+    {ok, #document{value = #node_management{value = V}}} ->
+      case V of
+        ok ->
+          ok;
+        {throttle, Time} ->
+          timer:sleep(Time),
+          ok;
+        overloaded ->
+          ?throttling_ERROR
+      end;
+    {error, {not_found, _}} ->
+      ok;
+    Error ->
+      ?error("throttling error: ~p", [Error]),
+      ?throttling_ERROR
+  end.
+
+throttle(TmpAns) ->
+  case TmpAns of
+    ok ->
+      throttle();
+    _ ->
+      TmpAns
+  end.
+
+configure_throttling() ->
+  {MemAction, MemoryUsage} = verify_memory(),
+  {TaskAction, NewFailed, NewTasks} = verify_tasks(),
+  Action = max(MemAction, TaskAction),
+
+  case Action of
+    ?BLOCK_throttling ->
+      {ok, _} = node_management:save(#document{key = ?MNESIA_throttling_KEY,
+        value = #node_management{value = overloaded}});
+    _ ->
+      Oldthrottling = case node_management:get(?MNESIA_throttling_KEY) of
+                       {ok, #document{value = #node_management{value = V}}} ->
+                         case V of
+                           ok ->
+                             0;
+                           {throttle, Time} ->
+                             Time;
+                           Other ->
+                             Other
+                         end;
+                       {error, {not_found, _}} ->
+                         ok
+                     end,
+
+      case {Action, Oldthrottling} of
+        {?NO_throttling, ok} ->
+          plan_next_throttling_check();
+        {?NO_throttling, _} ->
+          ok = node_management:delete(?MNESIA_throttling_KEY),
+          ok = node_management:delete(?MNESIA_throttling_DATA_KEY),
+          plan_next_throttling_check();
+        {?CONFIG_throttling, ok} ->
+          plan_next_throttling_check();
+        _ ->
+          TimeBase = case Oldthrottling of
+                       ok ->
+                         {ok, DefaultTimeBase} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+                         DefaultTimeBase;
+                       OT ->
+                         OT
+                     end,
+
+          {OldFaild, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_throttling_DATA_KEY) of
+                                              {ok, #document{value = #node_management{value = TD}}} ->
+                                                TD;
+                                              {error, {not_found, _}} ->
+                                                {0, 0, 0, 0}
+                                            end,
+
+          throttlingTime = case (NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory) of
+                            true ->
+                              2 * TimeBase;
+                            _ ->
+                              TimeBase
+                          end,
+
+          {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+          NextCheck = plan_next_throttling_check(MemoryUsage-OldFaild, MemRatioThreshold-MemoryUsage, LastInterval),
+
+          {ok, _} = node_management:save(#document{key = ?MNESIA_throttling_KEY,
+            value = #node_management{value = {throttle, throttlingTime}}}),
+          {ok, _} = node_management:save(#document{key = ?MNESIA_throttling_DATA_KEY,
+            value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
+
+          NextCheck
+      end
+  end.
+
+plan_next_throttling_check() ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval),
+  timer:seconds(Interval).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -46,7 +155,7 @@
 should_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
-  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
   (MemUsage >= TargetMemUse) andalso (MemToCompare >= TargetErlangMemUse * 1024 * 1024).
 
 %%--------------------------------------------------------------------
@@ -538,7 +647,7 @@ should_stop_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
   {ok, StopRatio} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
-  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
   (MemUsage < TargetMemUse * StopRatio / 100) orelse (MemToCompare < TargetErlangMemUse * 1024 * 1024  * StopRatio / 100).
 
 %%--------------------------------------------------------------------
@@ -914,4 +1023,61 @@ value_delete(Level, ModelName, Key) ->
       ?error_stacktrace("Error in cache controller value_delete. "
       ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, Key}, E1, E2]),
       {error, delete_failed}
+  end.
+
+verify_tasks() ->
+  {ok, FailedTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
+  {ok, PendingTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+
+  {ok, {NewFailed, NewTasks}} =
+    task_pool:count_tasks(?CLUSTER_LEVEL, cache_dump, FailedTasksNumThreshold+PendingTasksNumThreshold),
+
+  TaskAction = case {NewFailed, NewTasks} of
+                 {NF, _} when NF >= FailedTasksNumThreshold ->
+                   ?LIMIT_throttling;
+                 {NF, _} when NF > 0 ->
+                   ?CONFIG_throttling;
+                 {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
+                   ?LIMIT_throttling;
+                 _ ->
+                   ?NO_throttling
+               end,
+
+  {TaskAction, NewFailed, NewTasks}.
+
+
+verify_memory() ->
+  {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
+
+  MemoryUsage = case monitoring:get_memory_stats() of
+                  [{<<"mem">>, MemUsage}] ->
+                    MemUsage
+                end,
+
+  MemAction = case MemoryUsage of
+                MU when MU >= MemRatioThreshold ->
+                  ?BLOCK_throttling;
+                MU when MU >= (MemRatioThreshold + MemCleanRatioThreshold)/2 ->
+                  ?LIMIT_throttling;
+                MU when MU >= MemCleanRatioThreshold ->
+                  ?CONFIG_throttling;
+                _ ->
+                  ?NO_throttling
+              end,
+
+  {MemAction, MemoryUsage}.
+
+plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
+  plan_next_throttling_check();
+plan_next_throttling_check(0, _MemoryToStop, _LastInterval) ->
+  plan_next_throttling_check();
+plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
+  Default = plan_next_throttling_check(),
+  Corrected = LastInterval*MemoryToStop/MemoryChange,
+  case (Corrected < Default) and (Corrected >= 0) of
+    true ->
+      Corrected;
+    _ ->
+      Default
   end.

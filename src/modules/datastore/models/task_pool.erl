@@ -18,6 +18,8 @@
 %% model_behaviour callbacks
 -export([save/1, get/1, list/0, list/1, list_failed/1, exists/1, delete/1, delete/2, update/2, update/3,
     create/1, create/2, model_init/0, 'after'/5, before/4]).
+%% API
+-export([count_tasks/3]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -214,6 +216,46 @@ model_init() ->
     ok | datastore:generic_error().
 before(_ModelName, _Method, _Level, _Context) ->
     ok.
+
+%%%===================================================================
+%%% API functions
+%%%===================================================================
+
+%% @doc
+%%
+%% @end
+%%--------------------------------------------------------------------
+%%-spec count_tasks(Level :: task_manager:level()) -> ok.
+count_tasks(Level, Type, Limit) ->
+    Filter = fun
+                 ('$end_of_table', {Failed, All}) ->
+                     {abort, {Failed, All}};
+                 (#document{value = #task_pool{task_type = T, node = N} = V}, {Failed, All}) ->
+                     Failed = case Level of
+                         ?NODE_LEVEL ->
+                             MyNode = node(),
+                             (MyNode =:= N) andalso not task_manager:check_owner(V#task_pool.owner);
+                         _ ->
+                             not task_manager:is_task_alive(V)
+                     end,
+                     NewFailed = case Failed of
+                         true ->
+                             Failed + 1;
+                         _ ->
+                             Failed
+                     end,
+                     case T of
+                         Type ->
+                             NewAll = All + 1,
+                             case NewAll >= Limit of
+                                 true ->
+                                     {abort, {NewFailed, NewAll}};
+                                 _ ->
+                                     {next, {NewFailed, NewAll}}
+                             end
+                     end
+             end,
+    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, {0,0}).
 
 %%%===================================================================
 %%% Internal functions

@@ -49,6 +49,11 @@
             {erlang_mem_to_clear_cache_mb, 500},
             %% Memory clearing will be stopped if memory usage less than {mem_clearing_ratio_to_stop}% clearing levels
             {mem_clearing_ratio_to_stop, 80},
+
+            {throttling_mem_error_ratio, 99},
+            {throttling_start_failed_tasks_number, 50},
+            {throttling_start_pending_tasks_number, 500},
+
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 300},
             {procs_num_analysis_treshold, 2000},

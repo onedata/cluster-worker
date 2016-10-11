@@ -26,7 +26,8 @@
   cache_consistency_controller,
   cached_identity,
   synced_cert,
-  lock
+  lock,
+  node_management
 ]).
 
 %% datastore_config_behaviour callbacks
