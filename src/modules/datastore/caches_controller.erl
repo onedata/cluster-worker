@@ -1074,7 +1074,7 @@ plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
   plan_next_throttling_check();
 plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
   Default = plan_next_throttling_check(),
-  Corrected = LastInterval*MemoryToStop/MemoryChange,
+  Corrected = round(LastInterval*MemoryToStop/MemoryChange),
   case (Corrected < Default) and (Corrected >= 0) of
     true ->
       Corrected;
