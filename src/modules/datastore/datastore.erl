@@ -1310,7 +1310,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             end, Tasks);
         {task, Task} ->
             Level = caches_controller:cache_to_task_level(ModelName),
-            ok = task_manager:start_task(Task, Level, true);
+            ok = task_manager:start_task({cache_dump, Task}, Level, first_try);
         {error, Reason} ->
             run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
     end.

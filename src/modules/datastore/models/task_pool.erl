@@ -231,14 +231,14 @@ count_tasks(Level, Type, Limit) ->
                  ('$end_of_table', {Failed, All}) ->
                      {abort, {Failed, All}};
                  (#document{value = #task_pool{task_type = T, node = N} = V}, {Failed, All}) ->
-                     Failed = case Level of
+                     IsFailed = case Level of
                          ?NODE_LEVEL ->
                              MyNode = node(),
                              (MyNode =:= N) andalso not task_manager:check_owner(V#task_pool.owner);
                          _ ->
                              not task_manager:is_task_alive(V)
                      end,
-                     NewFailed = case Failed of
+                     NewFailed = case IsFailed of
                          true ->
                              Failed + 1;
                          _ ->
