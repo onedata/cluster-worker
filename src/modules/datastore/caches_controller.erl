@@ -123,7 +123,7 @@ configure_throttling() ->
                                                 {0, 0, 0, 0}
                                             end,
 
-          throttlingTime = case (NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory) of
+          ThrottlingTime = case (NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory) of
                             true ->
                               2 * TimeBase;
                             _ ->
@@ -134,7 +134,7 @@ configure_throttling() ->
           NextCheck = plan_next_throttling_check(MemoryUsage-OldFaild, MemRatioThreshold-MemoryUsage, LastInterval),
 
           {ok, _} = node_management:save(#document{key = ?MNESIA_throttling_KEY,
-            value = #node_management{value = {throttle, throttlingTime}}}),
+            value = #node_management{value = {throttle, ThrottlingTime}}}),
           {ok, _} = node_management:save(#document{key = ?MNESIA_throttling_DATA_KEY,
             value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
 
