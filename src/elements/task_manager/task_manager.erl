@@ -187,7 +187,7 @@ kill_all() ->
 %%--------------------------------------------------------------------
 -spec save_pid(Task :: task(), Pid :: pid(), Level :: level()) ->
     {ok, datastore:key()} | datastore:create_error().
-save_pid({TaskType, TaskFun}, Pid, Level) ->
+save_pid({TaskType, TaskFun}, Pid, Level) when is_atom(TaskType) ->
     Owner = case Level of
                 ?PERSISTENT_LEVEL ->
                     pid_to_list(Pid);
@@ -304,7 +304,7 @@ do_task(Task, Num) ->
 check_and_rerun_all(Level) ->
     {ok, Tasks} = task_pool:list_failed(Level),
     lists:foreach(fun(Task) ->
-        start_task(Task, Level, update_pid, {true, min(20, length(Tasks))}, false)
+        start_task(Task, Level, update_pid, {true, min(20, length(Tasks))}, non)
     end, Tasks).
 
 %%--------------------------------------------------------------------

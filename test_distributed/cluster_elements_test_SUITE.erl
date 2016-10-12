@@ -176,7 +176,7 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 100))
     end, WorkersList),
 
-    ControllerPid = start_tasks(Level, true, Workers, 15),
+    ControllerPid = start_tasks(Level, batch, Workers, 15),
     {A1, A2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1, A2}),
     ?assertEqual(0, length(A2)),
@@ -207,7 +207,7 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     ControllerPid ! kill.
 
 start_tasks(Level, Workers, Num) ->
-    start_tasks(Level, false, Workers, Num).
+    start_tasks(Level, non, Workers, Num).
 
 start_tasks(Level, DelaySave, Workers, Num) ->
     ControllerPid = spawn(fun() -> task_controller([]) end),
