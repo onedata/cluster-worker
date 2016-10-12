@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc TODO
+%%% @doc JSON encoding for datastore models
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_json).
@@ -31,8 +31,24 @@
 %%% Types
 %%%===================================================================
 
+-type field_name() :: atom().
+-type record_key() :: binary | atom | integer.
+-type record_value() :: json %% Raw JSON binary
+    %% or simple types
+    | record_key() | boolean | [record_struct()] | {record_struct()} | #{record_key() => record_struct()}
+    %% or custom value - executes Mod:Encoder(GivenTerm) while encoding and Mod:Decoder(SavedJSON) while decoding.
+    %% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
+    | {custom_value, {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}
+    %% or custom value - executes Mod:Encoder(TypeName, GivenTerm) while encoding and Mod:Decoder(TypeName, SavedJSON) while decoding.
+    %% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
+    %% You can specify only module name, Decoder defaults to 'encode_value', Decoder defaults to 'decode_value'
+    | {custom_type, TypeName :: atom(), Mod :: atom()} | {custom_type, TypeName :: atom(), {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}.
 -type record_version() :: non_neg_integer().
--type record_struct() :: term(). %% @todo: make this type more specific
+-type record_struct() :: record_value()
+    | {record, record_version(), [{field_name(), record_value()}]} %% Used only internally
+    | {record, [{field_name(), record_value()}]} %% For defining model structure
+    | {record, model_behaviour:model_type()}. %% For referencing nasted model
+-type ejson() :: term(). %% eJSON
 
 
 %%%===================================================================
@@ -51,6 +67,12 @@
 %%% API functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Encodes given datastore document to ejson.
+%% @end
+%%--------------------------------------------------------------------
+-spec encode_record(datastore:document()) -> ejson() | no_return().
 encode_record(#document{version = undefined, value = Value}) ->
     Type = element(1, Value),
     encode_record(Value, {record, Type});
@@ -59,10 +81,22 @@ encode_record(#document{version = Version, value = Value}) when is_integer(Versi
     {record, Fields} = Type:record_struct(Version),
     encode_record(Value, {record, Version, Fields}).
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Encodes given term to ejson with given structure.
+%% @end
+%%--------------------------------------------------------------------
+-spec encode_record(term(), record_struct()) -> ejson() | no_return().
 encode_record(Term, Struct) ->
     encode_record(value, Term, Struct).
 
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Decodes ejson to term with given structure.
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_record(ejson()) -> term().
 decode_record({Term}) when is_list(Term) ->
     Type = decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom),
     Version = decode_record(proplists:get_value(<<?RECORD_VERSION_MARKER>>, Term), integer),
@@ -70,6 +104,11 @@ decode_record({Term}) when is_list(Term) ->
     {Version, decode_record({Term}, {record, Version, Fields})}.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Validates given record structure.
+%% @end
+%%--------------------------------------------------------------------
 -spec validate_struct(record_struct()) -> ok | no_return().
 validate_struct({record, Fields}) when is_list(Fields) ->
     ok.
@@ -79,6 +118,13 @@ validate_struct({record, Fields}) when is_list(Fields) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Encodes given term to ejson with given structure. Given term can be either
+%% encoded as json key or value. This distinction is required since JSON disallows keys with types other then string.
+%% @end
+%%--------------------------------------------------------------------
+-spec encode_record(key | value, term(), record_struct()) -> ejson() | no_return().
 encode_record(value, undefined, _) ->
     null;
 encode_record(value, Term, {custom_value, {M, Encoder, _Decoder}}) ->
@@ -140,7 +186,12 @@ encode_record(Context, Term, Type)  ->
     error({invalid_term_structure, Context, Term, Type}).
 
 
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Decodes ejson to term with given structure.
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_record(ejson(), record_struct()) -> term().
 decode_record(null, _) ->
     undefined;
 decode_record(Term, {custom_value, {M, _Encoder, Decoder}}) ->
