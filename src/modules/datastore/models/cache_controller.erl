@@ -348,8 +348,17 @@ before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
     caches_controller:throttle(TmpAns);
 before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->
     start_disk_op(link_cache_key(ModelName, Key, LinkName), ModelName, create_link, Args, Level2);
-before(_ModelName, delete_links, Level, _, Level) ->
-    caches_controller:throttle();
+before(ModelName, delete_links, Level, [Key, Links], Level) ->
+    TmpAns = lists:foldl(fun(Link, Acc) ->
+        Ans = before_del(link_cache_key(ModelName, Key, Link), ModelName, Level, Link),
+        case Ans of
+            ok ->
+                Acc;
+            _ ->
+                Ans
+        end
+    end, ok, Links),
+    caches_controller:throttle(TmpAns);
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
         [start_disk_op(link_cache_key(ModelName, Key, Link), ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]
