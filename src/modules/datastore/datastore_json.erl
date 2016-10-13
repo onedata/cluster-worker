@@ -61,6 +61,7 @@
 %% API
 -export([encode_record/1, decode_record/1, validate_struct/1]).
 -export([encode_record/2, decode_record/2]).
+-export([decode_record_vcs/1]).
 
 
 %%%===================================================================
@@ -96,12 +97,43 @@ encode_record(Term, Struct) ->
 %% Decodes ejson to term with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec decode_record(ejson()) -> term().
+-spec decode_record(ejson()) -> {record_version(), term()}.
 decode_record({Term}) when is_list(Term) ->
     Type = decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom),
     Version = decode_record(proplists:get_value(<<?RECORD_VERSION_MARKER>>, Term), integer),
     {record, Fields} = Type:record_struct(Version),
     {Version, decode_record({Term}, {record, Version, Fields})}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Decodes ejson to term with given structure. Returns current version of the record.
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_record_vcs(ejson()) -> {WasUpdated :: boolean(), record_version(), term()}.
+decode_record_vcs({Term}) when is_list(Term) ->
+    {Version, Record} = decode_record({Term}),
+    ModelName = element(1, Record),
+    #model_config{version = TargetVersion} = ModelName:model_init(),
+    {NewVersion, NewRecord} = record_upgrade(ModelName, TargetVersion, Version, Record),
+    {Version /= NewVersion, NewVersion, NewRecord}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Upgrades given datastore record to requested version.
+%% @end
+%%--------------------------------------------------------------------
+-spec record_upgrade(model_behaviour:model_type(), record_version(), record_version(), term()) ->
+    {record_version(), term()}.
+record_upgrade(ModelName, TargetVersion, CurrentVersion, Record) when TargetVersion > CurrentVersion ->
+    {NextVersion, NextRecord} = ModelName:upgrade_record(CurrentVersion, Record),
+    case NextVersion > CurrentVersion of
+        true ->
+            record_upgrade(ModelName, TargetVersion, NextVersion, NextRecord);
+        false ->
+            error({record_not_upgraded, {ModelName, TargetVersion, CurrentVersion, Record}})
+    end;
+record_upgrade(_ModelName, _TargetVersion, CurrentVersion, Record) ->
+    {CurrentVersion, Record}.
 
 
 %%--------------------------------------------------------------------

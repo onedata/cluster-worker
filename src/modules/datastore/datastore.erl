@@ -1045,6 +1045,13 @@ validate_model_config(#model_config{version = CurrentVersion, name = ModelName, 
                         %% Check all versions up to CurrentVersion
                         [datastore_json:validate_struct(ModelName:record_struct(Version))
                             || Version <- lists:seq(1, CurrentVersion)],
+                        HasUpdater = lists:member({record_upgrade, 2}, ModelName:module_info(exports))
+                            orelse CurrentVersion == 1,
+                        case HasUpdater of
+                            true -> ok;
+                            false ->
+                                error({no_record_updater, CurrentVersion, ModelName})
+                        end,
                         ok
                     catch
                         _:Reason ->

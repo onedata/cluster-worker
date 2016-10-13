@@ -317,7 +317,7 @@ get(#model_config{} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec get(model_behaviour:model_config(), binary(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
-get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, BucketOverride, Key) ->
+get(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, BucketOverride, Key) ->
     case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key)], 3) of
         {ok, {Proplist} = _Doc} ->
             case verify_ans(Proplist) of
@@ -325,8 +325,17 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, BucketOverr
                     {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
                     Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
                     Proplist2 = Proplist -- Proplist1,
-                    {Version, Value} = datastore_json:decode_record({Proplist2}),
-                    {ok, #document{key = Key, value = Value, rev = Rev, version = Version}};
+                    {WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
+                    RetDoc = #document{key = Key, value = Value, rev = Rev, version = Version},
+                    spawn(
+                        fun() ->
+                            case WasUpdated of
+                                true ->
+                                    save(ModelConfig, RetDoc);
+                                _ -> ok
+                            end
+                        end),
+                    {ok, RetDoc};
                 _ ->
                     {error, db_internal_error}
             end;
@@ -387,7 +396,7 @@ list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn)
                                         Value1 = [KV || {<<"_", _/binary>>, _} = KV <- Value],
                                         Value2 = Value -- Value1,
                                         {_, Key} = from_driver_key(KeyBin),
-                                        {Version, DocValue} = datastore_json:decode_record({Value2}),
+                                        {_WasUpdated, Version, DocValue} = datastore_json:decode_record_vcs({Value2}),
                                         Doc = #document{key = Key, value = DocValue, version = Version},
                                         case element(1, Doc#document.value) of
                                             ModelName ->
@@ -1143,7 +1152,7 @@ get_with_revs(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Ke
                     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, Proplist),
                     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
                     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
-                    {Version, Value} = datastore_json:decode_record({Proplist2}),
+                    {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
                     {ok, #document{
                         key = Key,
                         value = Value,
@@ -1318,7 +1327,7 @@ process_raw_doc(Bucket, {RawDoc}) ->
     {_, {RevsRaw}} = lists:keyfind(<<"_revisions">>, 1, RawRichDoc),
     {_, Revs} = lists:keyfind(<<"ids">>, 1, RevsRaw),
     {_, Start} = lists:keyfind(<<"start">>, 1, RevsRaw),
-    {Version, Value} = datastore_json:decode_record({RawDoc2}),
+    {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({RawDoc2}),
     #document{key = Key, rev = {Start, Revs}, value = Value, version = Version}.
 
 
