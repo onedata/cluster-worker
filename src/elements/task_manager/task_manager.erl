@@ -282,17 +282,25 @@ do_task(Task, Num) when is_record(Task, document) ->
     V = Task#document.value,
     do_task(V#task_pool.task, Num);
 
-do_task(_Task, 0) ->
-    task_failed;
-
 do_task(Task, Num) ->
+    do_task(Task, Num, Num).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes task.
+%% @end
+%%--------------------------------------------------------------------
+-spec do_task(Task :: task(), Repeats :: integer(), MaxNum :: integer()) -> term().
+do_task(_Task, 0, _MaxNum) ->
+    task_failed;
+do_task(Task, CurrentNum, MaxNum) ->
     try
         ok = do_task(Task)
     catch
         E1:E2 ->
             ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
-            sleep_random_interval(?TASK_REPEATS - Num + 1),
-            do_task(Task, Num - 1)
+            sleep_random_interval(MaxNum - CurrentNum + 1),
+            do_task(Task, CurrentNum - 1, MaxNum)
     end.
 
 %%--------------------------------------------------------------------

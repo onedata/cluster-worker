@@ -233,28 +233,30 @@ count_tasks(Level, Type, Limit) ->
                  ('$end_of_table', {Failed, All}) ->
                      {abort, {Failed, All}};
                  (#document{value = #task_pool{task_type = T, node = N} = V}, {Failed, All}) ->
-                     IsFailed = case Level of
-                         ?NODE_LEVEL ->
-                             MyNode = node(),
-                             (MyNode =:= N) andalso not task_manager:check_owner(V#task_pool.owner);
-                         _ ->
-                             not task_manager:is_task_alive(V)
-                     end,
-                     NewFailed = case IsFailed of
-                         true ->
-                             Failed + 1;
-                         _ ->
-                             Failed
-                     end,
                      case T of
                          Type ->
+                             IsFailed = case Level of
+                                 ?NODE_LEVEL ->
+                                     MyNode = node(),
+                                     (MyNode =:= N) andalso not task_manager:check_owner(V#task_pool.owner);
+                                 _ ->
+                                     not task_manager:is_task_alive(V)
+                             end,
+                             NewFailed = case IsFailed of
+                                 true ->
+                                     Failed + 1;
+                                 _ ->
+                                     Failed
+                             end,
                              NewAll = All + 1,
                              case NewAll >= Limit of
                                  true ->
                                      {abort, {NewFailed, NewAll}};
                                  _ ->
                                      {next, {NewFailed, NewAll}}
-                             end
+                             end;
+                         _ ->
+                             {next, {Failed, All}}
                      end
              end,
     datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, {0,0}).
