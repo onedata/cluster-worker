@@ -50,10 +50,19 @@
             %% Memory clearing will be stopped if memory usage less than {mem_clearing_ratio_to_stop}% clearing levels
             {mem_clearing_ratio_to_stop, 80},
 
+            %% Memory percent that results in blocking operations on mnesia
             {throttling_block_mem_error_ratio, 95},
+            %% Number of failed tasks to start throttling
             {throttling_start_failed_tasks_number, 50},
+            %% Number of ongoing (but at least once failed) tasks to start throttling
             {throttling_start_pending_tasks_number, 500},
-            {throttling_base_time_ms, 64},
+            %% Base time for throttling
+            {throttling_base_time_ms, 12},
+            %% Maximum throttling time
+            {throttling_max_time_ms, 1024},
+            %% Interval of throttling configuration when system is overloaded
+            {throttling_overload_check_interval, 30},
+            %% Interval of throttling configuration
             {throttling_check_interval, 300},
 
             % Thresholds to start node analysis

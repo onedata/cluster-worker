@@ -221,11 +221,13 @@ before(_ModelName, _Method, _Level, _Context) ->
 %%% API functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
 %% @doc
-%%
+%% Counts alive and failed tasks.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec count_tasks(Level :: task_manager:level()) -> ok.
+-spec count_tasks(Level :: task_manager:level(), Type :: atom(), Limit :: non_neg_integer()) ->
+    {ok, {Failed :: non_neg_integer(), All :: non_neg_integer()}} | datastore:generic_error() | no_return().
 count_tasks(Level, Type, Limit) ->
     Filter = fun
                  ('$end_of_table', {Failed, All}) ->

@@ -314,8 +314,7 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
     {noreply, NewState};
 
 handle_cast(configure_throttling, State) ->
-    NextCheck = caches_controller:configure_throttling(),
-    erlang:send_after(NextCheck, self(), {timer, configure_throttling}),
+    ok = caches_controller:configure_throttling(),
     {noreply, State};
 
 handle_cast(check_mem, State) ->
