@@ -1996,7 +1996,7 @@ check_clearing(TestRecord, [{K, TimeWindow} | R] = KeysWithTimes, Worker1, Worke
         Uuid = caches_controller:get_cache_uuid(K2, TestRecord),
         UpdateFun = fun(Record) ->
             {ok, Record#cache_controller{
-                timestamp = to_timestamp(from_timestamp(os:timestamp()) - T - timer:minutes(5))
+                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
             }}
         end,
         ?assertMatch({ok, _}, ?call(Worker1, cache_controller, update, [?GLOBAL_ONLY_LEVEL, Uuid, UpdateFun]), 10)
@@ -2674,11 +2674,11 @@ while(Counter, F, Guard) ->
             while(Counter + 1, F, Guard)
     end.
 
-from_timestamp({Mega, Sec, Micro}) ->
-    (Mega * 1000000 + Sec) * 1000 + Micro / 1000.
+from_timestamp(T) ->
+    T / 1000.
 
 to_timestamp(T) ->
-    {trunc(T / 1000000000), trunc(T / 1000) rem 1000000, trunc(T * 1000) rem 1000000}.
+    T * 1000.
 
 disable_cache_control(Workers) ->
     disable_cache_control_and_set_dump_delay(Workers, 1000).
