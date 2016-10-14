@@ -32,7 +32,7 @@
 %%%===================================================================
 
 -type field_name() :: atom().
--type record_key() :: binary | atom | integer.
+-type record_key() :: binary | atom | integer | term.
 -type record_value() :: json %% Raw JSON binary
     %% or simple types
     | record_key() | boolean | [record_struct()] | {record_struct()} | #{record_key() => record_struct()}
