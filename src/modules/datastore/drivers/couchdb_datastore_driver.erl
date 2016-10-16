@@ -60,6 +60,7 @@
 -export([to_binary/1]).
 -export([add_view/3, query_view/3, delete_view/2]).
 -export([default_bucket/0, sync_enabled_bucket/0]).
+-export([rev_to_number/1]).
 
 %%%===================================================================
 %%% buckets
@@ -1406,6 +1407,17 @@ rev_info_to_rev({NumBin, [Hash | _]}) when is_binary(NumBin) ->
 rev_to_info(Rev) ->
     [Num, ID] = binary:split(Rev, <<"-">>),
     {binary_to_integer(Num), ID}.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Converts given binary into revision number.
+%% @end
+%%--------------------------------------------------------------------
+-spec rev_to_number(binary()) -> non_neg_integer().
+rev_to_number(Rev) ->
+    [Num, _ID] = binary:split(Rev, <<"-">>),
+    binary_to_integer(Num).
 
 
 %%--------------------------------------------------------------------

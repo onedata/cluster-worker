@@ -394,9 +394,9 @@ get_hooks_config() ->
 update_usage_info(Key, ModelName, Level) ->
     Uuid = caches_controller:get_cache_uuid(Key, ModelName),
     UpdateFun = fun(Record) ->
-        {ok, Record#cache_controller{timestamp = os:timestamp()}}
+        {ok, Record#cache_controller{timestamp = os:system_time(?CC_TIMEUNIT)}}
     end,
-    TS = os:timestamp(),
+    TS = os:system_time(?CC_TIMEUNIT),
     V = #cache_controller{timestamp = TS, last_action_time = TS},
     Doc = #document{key = Uuid, value = V},
     create_or_update(Level, Doc, UpdateFun).
@@ -599,7 +599,7 @@ check_disk_fetch({DocKey, RawLinkName, _} = CacheKey, ModelName, Level, ErrorAns
 %% Delates info about dumping of cache to disk.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_dump_info(Uuid :: binary(), Owner :: list(), Level :: datastore:store_level()) ->
+-spec delete_dump_info(Uuid :: binary(), Owner :: pid(), Level :: datastore:store_level()) ->
     ok | datastore:generic_error().
 delete_dump_info(Uuid, Owner, Level) ->
     {CCCUuid, ClearName} = case caches_controller:decode_uuid(Uuid) of
@@ -643,7 +643,7 @@ delete_dump_info(Uuid, Owner, Level) ->
 %% Saves dump information after disk operation.
 %% @end
 %%--------------------------------------------------------------------
--spec end_disk_op(Uuid :: binary(), Owner :: list(), ModelName :: model_behaviour:model_type(),
+-spec end_disk_op(Uuid :: binary(), Owner :: pid(), ModelName :: model_behaviour:model_type(),
     Op :: atom(), Level :: datastore:store_level()) -> ok.
 end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
     try
@@ -658,10 +658,10 @@ end_disk_op(Uuid, Owner, _ModelName, Op, Level) ->
                         case {LastUser, A} of
                             {Owner, to_be_del} ->
                                 {ok, Record#cache_controller{last_user = non,
-                                    last_action_time = os:timestamp()}};
+                                    last_action_time = os:system_time(?CC_TIMEUNIT)}};
                             {Owner, _} ->
                                 {ok, Record#cache_controller{last_user = non, action = non,
-                                    last_action_time = os:timestamp()}};
+                                    last_action_time = os:system_time(?CC_TIMEUNIT)}};
                             _ ->
                                 throw(user_changed)
                         end
@@ -918,19 +918,19 @@ start_disk_op(Key, ModelName, Op, Args, Level) ->
 start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
     try
         Uuid = caches_controller:get_cache_uuid(Key, ModelName),
-        Pid = pid_to_list(self()),
+        Pid = self(),
 
         UpdateFun = fun(Record) ->
             case Record#cache_controller.action of
                 cleared ->
                     ok = check_action_after_clear(Op, Level, ModelName, Key),
-                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}};
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:system_time(?CC_TIMEUNIT), action = Op}};
                 _ ->
-                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:timestamp(), action = Op}}
+                    {ok, Record#cache_controller{last_user = Pid, timestamp = os:system_time(?CC_TIMEUNIT), action = Op}}
             end
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
-        TS = os:timestamp(),
+        TS = os:system_time(?CC_TIMEUNIT),
         V = #cache_controller{last_user = Pid, timestamp = TS, action = Op, last_action_time = TS},
         Doc = #document{key = Uuid, value = V},
         create_or_update(Level, Doc, UpdateFun),
@@ -962,10 +962,10 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                     ok;
                 _ ->
                     {ok, ForceTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-                    case timer:now_diff(os:timestamp(), LAT) >= 1000 * ForceTime of
+                    case os:system_time(?CC_TIMEUNIT) - LAT >= 1000 * ForceTime of
                         true ->
                             UpdateFun2 = fun(Record) ->
-                                {ok, Record#cache_controller{last_action_time = os:timestamp()}}
+                                {ok, Record#cache_controller{last_action_time = os:system_time(?CC_TIMEUNIT)}}
                                          end,
                             update(Level, Uuid, UpdateFun2),
                             ok;
