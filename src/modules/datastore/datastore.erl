@@ -1029,12 +1029,49 @@ load_local_state(Models) ->
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
+            ok = validate_model_config(Config),
             lists:foreach(
                 fun(Hook) ->
                     ets:insert(?LOCAL_STATE, {Hook, ModelName})
                 end, Hooks),
             Config
         end, Models).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Validates model's configuration.
+%% @end
+%%--------------------------------------------------------------------
+-spec validate_model_config(model_behaviour:model_config()) -> ok | no_return().
+validate_model_config(#model_config{version = CurrentVersion, name = ModelName, store_level = StoreLevel}) ->
+    case lists:member(?PERSISTENCE_DRIVER, lists:flatten([level_to_driver(StoreLevel)])) of
+        false -> ok;
+        true ->
+            case lists:member({record_struct, 1}, ModelName:module_info(exports)) of
+                true ->
+                    try
+                        %% Check all versions up to CurrentVersion
+                        [datastore_json:validate_struct(ModelName:record_struct(Version))
+                            || Version <- lists:seq(1, CurrentVersion)],
+                        HasUpdater = lists:member({record_upgrade, 2}, ModelName:module_info(exports))
+                            orelse CurrentVersion == 1,
+                        case HasUpdater of
+                            true -> ok;
+                            false ->
+                                error({no_record_updater, CurrentVersion, ModelName})
+                        end,
+                        ok
+                    catch
+                        _:Reason ->
+                            ?error_stacktrace("Unable to validate record version for model ~p due to ~p", [ModelName, Reason]),
+                            error({invalid_record_version, CurrentVersion, ModelName})
+                    end;
+                false ->
+                    error({no_struct_def, ModelName})
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
