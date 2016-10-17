@@ -1202,7 +1202,7 @@ plan_next_throttling_check(_) ->
 %% Decreases interval if memory is growing too high.
 %% @end
 %%--------------------------------------------------------------------
--spec plan_next_throttling_check(MemoryChange :: float(), MemoryToStop :: float(), LastInterval :: integer()) ->
+-spec plan_next_throttling_check(MemoryChange :: number(), MemoryToStop :: float(), LastInterval :: integer()) ->
   non_neg_integer().
 plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
   plan_next_throttling_check();
