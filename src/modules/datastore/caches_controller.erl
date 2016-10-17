@@ -1182,6 +1182,6 @@ plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
 %% Similar to erlang:send_after but enables mocking.
 %% @end
 %%--------------------------------------------------------------------
--spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term) -> reference().
+-spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().
 send_after(CheckInterval, Master, Message) ->
   erlang:send_after(CheckInterval, Master, Message).
