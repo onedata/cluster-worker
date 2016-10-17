@@ -44,6 +44,9 @@ all() ->
 -define(call_cc(N, F, A), rpc:call(N, caches_controller, F, A, ?TIMEOUT)).
 -define(call_test(N, F, A), rpc:call(N, ?MODULE, F, A, ?TIMEOUT)).
 
+-define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(THROTTLING_ERROR, {error, load_to_high}).
+
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
@@ -57,18 +60,32 @@ throttling_test(Config) ->
             fun () -> [{<<"mem">>, MemUsage}] end)
     end,
 
+    {ok,TBT} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
     TCI = 2,
     TOCI = 1,
+    TMT = 4*TBT,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval, TCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval, TOCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
 
     VerifyInterval = fun(Ans) ->
-        ?assertEqual(1000*TCI, Ans)
+%%        ?assertEqual(1000*TCI, Ans)
+    ok
     end,
 
-    CheckThrottling = fun(VerifyIntervalFun, ThrottlingAns) ->
+    CheckThrottling = fun(VerifyIntervalFun, ThrottlingAns, ThrottlingConfig) ->
         {A1, A2} = ?call_test(Worker1, configure_throttling, []),
         ?assertMatch({ok, _}, {A1, A2}),
+
+        NMConfig = case ?call(Worker1, node_management, get, [?MNESIA_THROTTLING_KEY]) of
+            {ok, #document{value = #node_management{value = V}}} ->
+                V;
+            OtherConfig ->
+                OtherConfig
+        end,
+        ?assertEqual(ThrottlingConfig, NMConfig),
+
+
         VerifyIntervalFun(A2),
         ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [])),
         ?assertEqual(error, ?call_cc(Worker1, throttle, [error])),
@@ -76,10 +93,87 @@ throttling_test(Config) ->
     end,
 
     CheckThrottlingDefault = fun() ->
-        CheckThrottling(VerifyInterval, ok)
+        CheckThrottling(VerifyInterval, ok, {error, {not_found, node_management}})
+    end,
+
+    CheckThrottlingAns = fun(Ans, Config) ->
+        CheckThrottling(VerifyInterval, Ans, Config)
     end,
 
     MockUsage(0,0,10),
+    CheckThrottlingDefault(),
+
+    {ok,TSFTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
+    {ok,TSPTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+
+    MockUsage(TSFTN + 10,0,10),
+    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+
+    MockUsage(TSFTN + 2,0,10),
+    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+
+    MockUsage(TSFTN - 10,0,10),
+    CheckThrottlingAns(ok, {throttle, TBT}),
+
+    MockUsage(TSFTN - 9,0,10),
+    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+
+    MockUsage(TSFTN - 8,0,10),
+    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+
+    MockUsage(TSFTN - 7,0,10),
+    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+
+    MockUsage(TSFTN - 9,0,10),
+    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+
+    MockUsage(0,0,10),
+    CheckThrottlingDefault(),
+
+    MockUsage(0, TSPTN + 10,10),
+    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+
+    MockUsage(0, TSPTN + 20,10),
+    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+
+    MockUsage(0, TSPTN + 2,10),
+    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+
+    MockUsage(0, TSPTN - 10,10),
+    CheckThrottlingDefault(),
+
+    {ok,TBMER} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+    {ok,NMRTCC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+    MemTh = (TBMER + NMRTCC)/2,
+
+    MockUsage(0,0,MemTh - 1),
+    CheckThrottlingDefault(),
+
+    MockUsage(0,0,MemTh + 1),
+    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+
+    MockUsage(0,0,MemTh + 2),
+    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+
+    MockUsage(0,0,MemTh + 3),
+    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+
+    MockUsage(0,0,TBMER + 1),
+    CheckThrottlingAns(?THROTTLING_ERROR, overloaded),
+
+    MockUsage(0,0,MemTh + 1),
+    CheckThrottlingAns(?THROTTLING_ERROR, overloaded),
+
+    MockUsage(0,0,MemTh - 1),
+    CheckThrottlingAns(ok, {throttle, round(TBT/2)}),
+
+    MockUsage(0,0,MemTh - 2),
+    CheckThrottlingAns(ok, {throttle, round(TBT/4)}),
+
+    MockUsage(0,0,MemTh - 1),
+    CheckThrottlingAns(ok, {throttle, round(TBT/2)}),
+
+    MockUsage(0,0,NMRTCC - 1),
     CheckThrottlingDefault(),
 
     ok.
@@ -563,6 +657,10 @@ init_per_testcase(throttling_test, Config) ->
 
     test_utils:mock_expect(Workers, caches_controller, send_after,
         fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
+    end, Workers),
 
     Config;
 

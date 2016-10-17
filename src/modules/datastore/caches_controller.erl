@@ -106,60 +106,74 @@ configure_throttling() ->
         ?BLOCK_THROTTLING ->
           {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
             value = #node_management{value = overloaded}}),
+          ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p",
+            [MemoryUsage, NewFailed, NewTasks]),
           plan_next_throttling_check(true);
         _ ->
           Oldthrottling = case node_management:get(?MNESIA_THROTTLING_KEY) of
-                           {ok, #document{value = #node_management{value = V}}} ->
-                             case V of
-                               ok ->
-                                 0;
-                               {throttle, Time} ->
-                                 Time;
-                               Other ->
-                                 Other
-                             end;
-                           {error, {not_found, _}} ->
-                             ok
-                         end,
+            {ok, #document{value = #node_management{value = V}}} ->
+              case V of
+                {throttle, Time} ->
+                  Time;
+                Other ->
+                  Other
+              end;
+            {error, {not_found, _}} ->
+              ok
+          end,
 
           case {Action, Oldthrottling} of
             {?NO_THROTTLING, ok} ->
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
               plan_next_throttling_check();
             {?NO_THROTTLING, _} ->
               ok = node_management:delete(?MNESIA_THROTTLING_KEY),
               ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
+              ?info("Throttling: stop, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
               plan_next_throttling_check();
             {?CONFIG_THROTTLING, ok} ->
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check();
+            {?LIMIT_THROTTLING, overloaded} ->
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
               plan_next_throttling_check();
             _ ->
               TimeBase = case Oldthrottling of
-                           ok ->
-                             {ok, DefaultTimeBase} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
-                             DefaultTimeBase;
-                           OT ->
-                             OT
-                         end,
+                OT when is_integer(OT) ->
+                  OT;
+                _ ->
+                  {ok, DefaultTimeBase} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+                  DefaultTimeBase
+              end,
 
               {OldFaild, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
-                                                  {ok, #document{value = #node_management{value = TD}}} ->
-                                                    TD;
-                                                  {error, {not_found, _}} ->
-                                                    {0, 0, 0, 0}
-                                                end,
+                {ok, #document{value = #node_management{value = TD}}} ->
+                  TD;
+                {error, {not_found, _}} ->
+                  {0, 0, 0, 0}
+              end,
 
-              ThrottlingTime = case (NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory) of
-                                true ->
-                                  TB2 = 2 * TimeBase,
-                                  {ok, MaxTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms),
-                                  case TB2 > MaxTime of
-                                    true ->
-                                      MaxTime;
-                                    _ ->
-                                      TB2
-                                  end;
-                                _ ->
-                                  TimeBase
-                              end,
+              ThrottlingTime = case
+                {(NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory),
+                Action} of
+                {true, _} ->
+                  TB2 = 2 * TimeBase,
+                  {ok, MaxTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms),
+                  case TB2 > MaxTime of
+                    true ->
+                      MaxTime;
+                    _ ->
+                      TB2
+                  end;
+                {_, ?CONFIG_THROTTLING} ->
+                  max(round(TimeBase / 2), 1);
+                _ ->
+                  TimeBase
+              end,
 
               {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
               NextCheck = plan_next_throttling_check(MemoryUsage-OldFaild, MemRatioThreshold-MemoryUsage, LastInterval),
@@ -168,6 +182,9 @@ configure_throttling() ->
                 value = #node_management{value = {throttle, ThrottlingTime}}}),
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
                 value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
+
+              ?info("Throttling: delay ~p ms used, mem: ~p, failed tasks ~p, all tasks ~p",
+                [ThrottlingTime, MemoryUsage, NewFailed, NewTasks]),
 
               NextCheck
           end
