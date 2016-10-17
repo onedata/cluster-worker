@@ -24,12 +24,13 @@
 -define(DICT_KEY, transactions_list).
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 -export([cm_and_worker_test/1, task_pool_test/1, task_manager_repeats_test/1, task_manager_rerun_test/1,
     task_manager_delayed_save_test/1, transaction_test/1, transaction_rollback_test/1, transaction_rollback_stop_test/1,
     multi_transaction_test/1, transaction_retry_test/1, transaction_error_test/1,
     task_manager_delayed_save_with_type_test/1, throttling_test/1]).
 -export([transaction_retry_test_base/0, transaction_error_test_base/0]).
+-export([configure_throttling/0]).
 
 all() ->
     ?ALL([
@@ -38,12 +39,59 @@ all() ->
         transaction_rollback_stop_test, multi_transaction_test,
         transaction_retry_test, transaction_error_test, task_manager_delayed_save_with_type_test, throttling_test]).
 
+-define(TIMEOUT, timer:minutes(1)).
+-define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
+-define(call_cc(N, F, A), rpc:call(N, caches_controller, F, A, ?TIMEOUT)).
+-define(call_test(N, F, A), rpc:call(N, ?MODULE, F, A, ?TIMEOUT)).
+
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
 
 throttling_test(Config) ->
+    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    MockUsage = fun(FailedTasks, AllTasks, MemUsage) ->
+        test_utils:mock_expect(Workers, task_pool, count_tasks,
+            fun (_, _, _) -> {ok, {FailedTasks, AllTasks}} end),
+        test_utils:mock_expect(Workers, monitoring, get_memory_stats,
+            fun () -> [{<<"mem">>, MemUsage}] end)
+    end,
+
+    TCI = 2,
+    TOCI = 1,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval, TCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval, TOCI),
+
+    VerifyInterval = fun(Ans) ->
+        ?assertEqual(1000*TCI, Ans)
+    end,
+
+    CheckThrottling = fun(VerifyIntervalFun, ThrottlingAns) ->
+        {A1, A2} = ?call_test(Worker1, configure_throttling, []),
+        ?assertMatch({ok, _}, {A1, A2}),
+        VerifyIntervalFun(A2),
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [])),
+        ?assertEqual(error, ?call_cc(Worker1, throttle, [error])),
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [ok]))
+    end,
+
+    CheckThrottlingDefault = fun() ->
+        CheckThrottling(VerifyInterval, ok)
+    end,
+
+    MockUsage(0,0,10),
+    CheckThrottlingDefault(),
+
     ok.
+
+configure_throttling() ->
+    Ans1 = caches_controller:configure_throttling(),
+    Ans2 = receive
+        {send_after, {timer, configure_throttling}, CheckInterval} -> CheckInterval
+    after
+        5000 -> timeout
+    end,
+    {Ans1, Ans2}.
 
 cm_and_worker_test(Config) ->
     % given
@@ -508,6 +556,25 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
+
+init_per_testcase(throttling_test, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller]),
+
+    test_utils:mock_expect(Workers, caches_controller, send_after,
+        fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
+
+    Config;
+
+init_per_testcase(_Case, Config) ->
+    Config.
+
+end_per_testcase(throttling_test, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller]);
+
+end_per_testcase(_Case, _Config) ->
+    ok.
 
 %%%===================================================================
 %%% Internal functions

@@ -31,6 +31,8 @@
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
 -export([throttle/0, throttle/1, configure_throttling/0, plan_next_throttling_check/0]).
+% for tests
+-export([send_after/3]).
 
 -define(CLEAR_BATCH_SIZE, 100).
 -define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
@@ -175,7 +177,7 @@ configure_throttling() ->
         ?error_stacktrace("Error during throtling configuration: ~p:~p", [E1, E2]),
         plan_next_throttling_check()
     end,
-    erlang:send_after(CheckInterval, Self, {timer, configure_throttling})
+    caches_controller:send_after(CheckInterval, Self, {timer, configure_throttling})
   end),
   ok.
 
@@ -1157,3 +1159,12 @@ plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
     _ ->
       Default
   end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Similar to erlang:send_after but enables mocking.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term) -> reference().
+send_after(CheckInterval, Master, Message) ->
+  erlang:send_after(CheckInterval, Master, Message).
