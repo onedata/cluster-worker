@@ -316,7 +316,7 @@ before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);
 before(ModelName, delete, Level, [Key, _Pred], Level) ->
     TmpAns = before_del(Key, ModelName, Level, delete),
-    caches_controller:throttle(TmpAns);
+    caches_controller:throttle_del(TmpAns);
 before(ModelName, delete, disk_only, [Key, _Pred] = Args, Level2) ->
     start_disk_op(Key, ModelName, delete, Args, Level2);
 before(ModelName, get, disk_only, [Key], Level2) ->
@@ -358,7 +358,7 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
                 Ans
         end
     end, ok, Links),
-    caches_controller:throttle(TmpAns);
+    caches_controller:throttle_del(TmpAns);
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
         [start_disk_op(link_cache_key(ModelName, Key, Link), ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]

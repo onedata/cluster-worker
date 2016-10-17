@@ -30,7 +30,7 @@
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
--export([throttle/0, throttle/1, configure_throttling/0, plan_next_throttling_check/0]).
+-export([throttle/0, throttle/1, throttle_del/1, configure_throttling/0, plan_next_throttling_check/0]).
 % for tests
 -export([send_after/3]).
 
@@ -60,10 +60,10 @@ throttle() ->
       case V of
         ok ->
           ok;
-        {throttle, Time} ->
+        {throttle, Time, _} ->
           timer:sleep(Time),
           ok;
-        overloaded ->
+        {overloaded, _} ->
           ?THROTTLING_ERROR
       end;
     {error, {not_found, _}} ->
@@ -90,6 +90,41 @@ throttle(TmpAns) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Limits delete operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle_del(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+  TmpAns :: term().
+throttle_del(TmpAns) ->
+  case TmpAns of
+    ok ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, true} ->
+              timer:sleep(Time),
+              ok;
+            {throttle, _, _} ->
+              ok;
+            {overloaded, true} ->
+              ?THROTTLING_ERROR;
+            {overloaded, _} ->
+              ok
+          end;
+        {error, {not_found, _}} ->
+          ok;
+        Error ->
+          ?error("throttling error: ~p", [Error]),
+          ?THROTTLING_ERROR
+      end;
+    _ ->
+      TmpAns
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Configures throttling settings.
 %% @end
 %%--------------------------------------------------------------------
@@ -105,7 +140,7 @@ configure_throttling() ->
       case Action of
         ?BLOCK_THROTTLING ->
           {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
-            value = #node_management{value = overloaded}}),
+            value = #node_management{value = {overloaded, MemAction =:= ?NO_THROTTLING}}}),
           ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p",
             [MemoryUsage, NewFailed, NewTasks]),
           plan_next_throttling_check(true);
@@ -113,7 +148,7 @@ configure_throttling() ->
           Oldthrottling = case node_management:get(?MNESIA_THROTTLING_KEY) of
             {ok, #document{value = #node_management{value = V}}} ->
               case V of
-                {throttle, Time} ->
+                {throttle, Time, _} ->
                   Time;
                 Other ->
                   Other
@@ -137,10 +172,16 @@ configure_throttling() ->
               ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
                 [MemoryUsage, NewFailed, NewTasks]),
               plan_next_throttling_check();
-            {?LIMIT_THROTTLING, overloaded} ->
+            {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+                value = #node_management{value = {overloaded, false}}}),
               ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
                 [MemoryUsage, NewFailed, NewTasks]),
-              plan_next_throttling_check();
+              plan_next_throttling_check(true);
+            {?LIMIT_THROTTLING, {overloaded, _}} ->
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check(true);
             _ ->
               TimeBase = case Oldthrottling of
                 OT when is_integer(OT) ->
@@ -176,10 +217,10 @@ configure_throttling() ->
               end,
 
               {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
-              NextCheck = plan_next_throttling_check(MemoryUsage-OldFaild, MemRatioThreshold-MemoryUsage, LastInterval),
+              NextCheck = plan_next_throttling_check(MemoryUsage-OldMemory, MemRatioThreshold-MemoryUsage, LastInterval),
 
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
-                value = #node_management{value = {throttle, ThrottlingTime}}}),
+                value = #node_management{value = {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}}}),
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
                 value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
 
@@ -1166,6 +1207,8 @@ plan_next_throttling_check(_) ->
 plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
   plan_next_throttling_check();
 plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
+  plan_next_throttling_check();
+plan_next_throttling_check(0, _MemoryToStop, _LastInterval) ->
   plan_next_throttling_check();
 plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
   Default = plan_next_throttling_check(),

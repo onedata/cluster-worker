@@ -61,16 +61,23 @@ throttling_test(Config) ->
     end,
 
     {ok,TBT} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
-    TCI = 2,
-    TOCI = 1,
+    TCI = 60,
+    TOCI = 30,
     TMT = 4*TBT,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval, TCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval, TOCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
 
     VerifyInterval = fun(Ans) ->
-%%        ?assertEqual(1000*TCI, Ans)
-    ok
+        ?assertEqual(timer:seconds(TCI), Ans)
+    end,
+
+    VerifyShortInterval = fun(Ans) ->
+        ?assert(timer:seconds(TCI) > Ans)
+    end,
+
+    VerifyIntervalOverload = fun(Ans) ->
+        ?assertEqual(timer:seconds(TOCI), Ans)
     end,
 
     CheckThrottling = fun(VerifyIntervalFun, ThrottlingAns, ThrottlingConfig) ->
@@ -96,8 +103,8 @@ throttling_test(Config) ->
         CheckThrottling(VerifyInterval, ok, {error, {not_found, node_management}})
     end,
 
-    CheckThrottlingAns = fun(Ans, Config) ->
-        CheckThrottling(VerifyInterval, Ans, Config)
+    CheckThrottlingAns = fun(Ans, C) ->
+        CheckThrottling(VerifyInterval, Ans, C)
     end,
 
     MockUsage(0,0,10),
@@ -107,37 +114,37 @@ throttling_test(Config) ->
     {ok,TSPTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
 
     MockUsage(TSFTN + 10,0,10),
-    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
     MockUsage(TSFTN + 2,0,10),
-    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
     MockUsage(TSFTN - 10,0,10),
-    CheckThrottlingAns(ok, {throttle, TBT}),
+    CheckThrottlingAns(ok, {throttle, TBT, true}),
 
     MockUsage(TSFTN - 9,0,10),
-    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
     MockUsage(TSFTN - 8,0,10),
-    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
     MockUsage(TSFTN - 7,0,10),
-    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
     MockUsage(TSFTN - 9,0,10),
-    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
     MockUsage(0,0,10),
     CheckThrottlingDefault(),
 
     MockUsage(0, TSPTN + 10,10),
-    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
     MockUsage(0, TSPTN + 20,10),
-    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
     MockUsage(0, TSPTN + 2,10),
-    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
     MockUsage(0, TSPTN - 10,10),
     CheckThrottlingDefault(),
@@ -146,32 +153,38 @@ throttling_test(Config) ->
     {ok,NMRTCC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
     MemTh = (TBMER + NMRTCC)/2,
 
-    MockUsage(0,0,MemTh - 1),
+    MockUsage(0,0,MemTh - 10),
     CheckThrottlingDefault(),
 
     MockUsage(0,0,MemTh + 1),
-    CheckThrottlingAns(ok, {throttle, 2*TBT}),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, false}),
 
-    MockUsage(0,0,MemTh + 2),
-    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+    MockUsage(0,0,MemTh + 5),
+    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
 
-    MockUsage(0,0,MemTh + 3),
-    CheckThrottlingAns(ok, {throttle, 4*TBT}),
+    MockUsage(0,0,MemTh + 7),
+    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
 
     MockUsage(0,0,TBMER + 1),
-    CheckThrottlingAns(?THROTTLING_ERROR, overloaded),
+    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
 
     MockUsage(0,0,MemTh + 1),
-    CheckThrottlingAns(?THROTTLING_ERROR, overloaded),
+    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
 
     MockUsage(0,0,MemTh - 1),
-    CheckThrottlingAns(ok, {throttle, round(TBT/2)}),
+    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
 
-    MockUsage(0,0,MemTh - 2),
-    CheckThrottlingAns(ok, {throttle, round(TBT/4)}),
+    MockUsage(0,0,MemTh - 5),
+    CheckThrottlingAns(ok, {throttle, round(TBT/4), false}),
 
     MockUsage(0,0,MemTh - 1),
-    CheckThrottlingAns(ok, {throttle, round(TBT/2)}),
+    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
+
+    MockUsage(TSFTN + 10,0,10),
+    CheckThrottlingAns(ok, {throttle, round(TBT), true}),
+
+    MockUsage(0,0,MemTh + 1),
+    CheckThrottling(VerifyShortInterval, ok, {throttle, 2*TBT, false}),
 
     MockUsage(0,0,NMRTCC - 1),
     CheckThrottlingDefault(),
