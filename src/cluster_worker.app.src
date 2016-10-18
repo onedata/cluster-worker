@@ -48,7 +48,7 @@
             {node_mem_ratio_to_clear_cache, 80},
             {erlang_mem_to_clear_cache_mb, 500},
             %% Memory clearing will be stopped if memory usage less than {mem_clearing_ratio_to_stop}% clearing levels
-            {mem_clearing_ratio_to_stop, 80},
+            {mem_clearing_ratio_to_stop, 75},
 
             %% Memory percent that results in blocking operations on mnesia
             {throttling_block_mem_error_ratio, 95},
@@ -61,9 +61,9 @@
             %% Maximum throttling time
             {throttling_max_time_ms, 1024},
             %% Interval of throttling configuration when system is overloaded
-            {throttling_overload_check_interval, 30},
+            {throttling_overload_check_interval_seconds, 30},
             %% Interval of throttling configuration
-            {throttling_check_interval, 300},
+            {throttling_check_interval_seconds, 120},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 300},

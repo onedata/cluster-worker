@@ -64,8 +64,8 @@ throttling_test(Config) ->
     TCI = 60,
     TOCI = 30,
     TMT = 4*TBT,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval, TCI),
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval, TOCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds, TCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds, TOCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
 
     VerifyInterval = fun(Ans) ->
@@ -190,15 +190,6 @@ throttling_test(Config) ->
     CheckThrottlingDefault(),
 
     ok.
-
-configure_throttling() ->
-    Ans1 = caches_controller:configure_throttling(),
-    Ans2 = receive
-        {send_after, {timer, configure_throttling}, CheckInterval} -> CheckInterval
-    after
-        5000 -> timeout
-    end,
-    {Ans1, Ans2}.
 
 cm_and_worker_test(Config) ->
     % given
@@ -710,3 +701,12 @@ count_answers() ->
         0 ->
             0
     end.
+
+configure_throttling() ->
+    Ans1 = caches_controller:configure_throttling(),
+    Ans2 = receive
+        {send_after, {timer, configure_throttling}, CheckInterval} -> CheckInterval
+    after
+        5000 -> timeout
+    end,
+    {Ans1, Ans2}.

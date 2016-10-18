@@ -80,13 +80,10 @@ throttle() ->
 %%--------------------------------------------------------------------
 -spec throttle(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
+throttle(ok) ->
+  throttle();
 throttle(TmpAns) ->
-  case TmpAns of
-    ok ->
-      throttle();
-    _ ->
-      TmpAns
-  end.
+  TmpAns.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -95,33 +92,30 @@ throttle(TmpAns) ->
 %%--------------------------------------------------------------------
 -spec throttle_del(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
-throttle_del(TmpAns) ->
-  case TmpAns of
-    ok ->
-      case node_management:get(?MNESIA_THROTTLING_KEY) of
-        {ok, #document{value = #node_management{value = V}}} ->
-          case V of
-            ok ->
-              ok;
-            {throttle, Time, true} ->
-              timer:sleep(Time),
-              ok;
-            {throttle, _, _} ->
-              ok;
-            {overloaded, true} ->
-              ?THROTTLING_ERROR;
-            {overloaded, _} ->
-              ok
-          end;
-        {error, {not_found, _}} ->
+throttle_del(ok) ->
+  case node_management:get(?MNESIA_THROTTLING_KEY) of
+    {ok, #document{value = #node_management{value = V}}} ->
+      case V of
+        ok ->
           ok;
-        Error ->
-          ?error("throttling error: ~p", [Error]),
-          ?THROTTLING_ERROR
+        {throttle, Time, true} ->
+          timer:sleep(Time),
+          ok;
+        {throttle, _, _} ->
+          ok;
+        {overloaded, true} ->
+          ?THROTTLING_ERROR;
+        {overloaded, _} ->
+          ok
       end;
-    _ ->
-      TmpAns
-  end.
+    {error, {not_found, _}} ->
+      ok;
+    Error ->
+      ?error("throttling error: ~p", [Error]),
+      ?THROTTLING_ERROR
+  end;
+throttle_del(TmpAns) ->
+  TmpAns.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1163,7 +1157,7 @@ verify_tasks() ->
   {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
 verify_memory() ->
   {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
-  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
+  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
 
   MemoryUsage = case monitoring:get_memory_stats() of
                   [{<<"mem">>, MemUsage}] ->
@@ -1190,10 +1184,10 @@ verify_memory() ->
 %%--------------------------------------------------------------------
 -spec plan_next_throttling_check(Overloaded :: boolean()) -> non_neg_integer().
 plan_next_throttling_check(true) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval),
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds),
   timer:seconds(Interval);
 plan_next_throttling_check(_) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval),
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
   timer:seconds(Interval).
 
 %%--------------------------------------------------------------------
@@ -1220,7 +1214,7 @@ plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Similar to erlang:send_after but enables mocking.
+%% @equiv erlang:send_after but enables mocking.
 %% @end
 %%--------------------------------------------------------------------
 -spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().

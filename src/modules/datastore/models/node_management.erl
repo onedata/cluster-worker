@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Model that holds informantion useful in node management.
+%%% @doc Model that holds information useful in node management.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(node_management).

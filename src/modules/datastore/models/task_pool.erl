@@ -223,7 +223,7 @@ before(_ModelName, _Method, _Level, _Context) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Counts alive and failed tasks.
+%% Counts alive and failed tasks. Stops counting after specified limit.
 %% @end
 %%--------------------------------------------------------------------
 -spec count_tasks(Level :: task_manager:level(), Type :: atom(), Limit :: non_neg_integer()) ->
