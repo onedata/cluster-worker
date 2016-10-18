@@ -24,22 +24,172 @@
 -define(DICT_KEY, transactions_list).
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 -export([cm_and_worker_test/1, task_pool_test/1, task_manager_repeats_test/1, task_manager_rerun_test/1,
     task_manager_delayed_save_test/1, transaction_test/1, transaction_rollback_test/1, transaction_rollback_stop_test/1,
-    multi_transaction_test/1, transaction_retry_test/1, transaction_error_test/1]).
+    multi_transaction_test/1, transaction_retry_test/1, transaction_error_test/1,
+    task_manager_delayed_save_with_type_test/1, throttling_test/1]).
 -export([transaction_retry_test_base/0, transaction_error_test_base/0]).
+-export([configure_throttling/0]).
 
 all() ->
     ?ALL([
         cm_and_worker_test, task_pool_test, task_manager_repeats_test,
         task_manager_rerun_test, task_manager_delayed_save_test, transaction_test, transaction_rollback_test,
         transaction_rollback_stop_test, multi_transaction_test,
-        transaction_retry_test, transaction_error_test]).
+        transaction_retry_test, transaction_error_test, task_manager_delayed_save_with_type_test, throttling_test]).
+
+-define(TIMEOUT, timer:minutes(1)).
+-define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
+-define(call_cc(N, F, A), rpc:call(N, caches_controller, F, A, ?TIMEOUT)).
+-define(call_test(N, F, A), rpc:call(N, ?MODULE, F, A, ?TIMEOUT)).
+
+-define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(THROTTLING_ERROR, {error, load_to_high}).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
+
+throttling_test(Config) ->
+    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    MockUsage = fun(FailedTasks, AllTasks, MemUsage) ->
+        test_utils:mock_expect(Workers, task_pool, count_tasks,
+            fun (_, _, _) -> {ok, {FailedTasks, AllTasks}} end),
+        test_utils:mock_expect(Workers, monitoring, get_memory_stats,
+            fun () -> [{<<"mem">>, MemUsage}] end)
+    end,
+
+    {ok,TBT} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+    TCI = 60,
+    TOCI = 30,
+    TMT = 4*TBT,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds, TCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds, TOCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
+
+    VerifyInterval = fun(Ans) ->
+        ?assertEqual(timer:seconds(TCI), Ans)
+    end,
+
+    VerifyShortInterval = fun(Ans) ->
+        ?assert(timer:seconds(TCI) > Ans)
+    end,
+
+    VerifyIntervalOverload = fun(Ans) ->
+        ?assertEqual(timer:seconds(TOCI), Ans)
+    end,
+
+    CheckThrottling = fun(VerifyIntervalFun, ThrottlingAns, ThrottlingConfig) ->
+        {A1, A2} = ?call_test(Worker1, configure_throttling, []),
+        ?assertMatch({ok, _}, {A1, A2}),
+
+        NMConfig = case ?call(Worker1, node_management, get, [?MNESIA_THROTTLING_KEY]) of
+            {ok, #document{value = #node_management{value = V}}} ->
+                V;
+            OtherConfig ->
+                OtherConfig
+        end,
+        ?assertEqual(ThrottlingConfig, NMConfig),
+
+
+        VerifyIntervalFun(A2),
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [])),
+        ?assertEqual(error, ?call_cc(Worker1, throttle, [error])),
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [ok]))
+    end,
+
+    CheckThrottlingDefault = fun() ->
+        CheckThrottling(VerifyInterval, ok, {error, {not_found, node_management}})
+    end,
+
+    CheckThrottlingAns = fun(Ans, C) ->
+        CheckThrottling(VerifyInterval, Ans, C)
+    end,
+
+    MockUsage(0,0,10),
+    CheckThrottlingDefault(),
+
+    {ok,TSFTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
+    {ok,TSPTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+
+    MockUsage(TSFTN + 10,0,10.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+
+    MockUsage(TSFTN + 2,0,10.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+
+    MockUsage(TSFTN - 10,0,10.0),
+    CheckThrottlingAns(ok, {throttle, TBT, true}),
+
+    MockUsage(TSFTN - 9,0,10.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+
+    MockUsage(TSFTN - 8,0,10.0),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+
+    MockUsage(TSFTN - 7,0,10.0),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+
+    MockUsage(TSFTN - 9,0,10.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+
+    MockUsage(0,0,10.0),
+    CheckThrottlingDefault(),
+
+    MockUsage(0, TSPTN + 10,10.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+
+    MockUsage(0, TSPTN + 20,10.0),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+
+    MockUsage(0, TSPTN + 2,10.0),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+
+    MockUsage(0, TSPTN - 10,10.0),
+    CheckThrottlingDefault(),
+
+    {ok,TBMER} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+    {ok,NMRTCC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+    MemTh = (TBMER + NMRTCC)/2,
+
+    MockUsage(0,0,MemTh - 10.0),
+    CheckThrottlingDefault(),
+
+    MockUsage(0,0,MemTh + 1.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, false}),
+
+    MockUsage(0,0,MemTh + 5.0),
+    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
+
+    MockUsage(0,0,MemTh + 7.0),
+    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
+
+    MockUsage(0,0,TBMER + 1.0),
+    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
+
+    MockUsage(0,0,MemTh + 1.0),
+    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
+
+    MockUsage(0,0,MemTh - 1.0),
+    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
+
+    MockUsage(0,0,MemTh - 5.0),
+    CheckThrottlingAns(ok, {throttle, round(TBT/4), false}),
+
+    MockUsage(0,0,MemTh - 1.0),
+    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
+
+    MockUsage(TSFTN + 10,0,10.0),
+    CheckThrottlingAns(ok, {throttle, round(TBT), true}),
+
+    MockUsage(0,0,MemTh + 1.0),
+    CheckThrottling(VerifyShortInterval, ok, {throttle, 2*TBT, false}),
+
+    MockUsage(0,0,NMRTCC - 1.0),
+    CheckThrottlingDefault(),
+
+    ok.
 
 cm_and_worker_test(Config) ->
     % given
@@ -176,7 +326,7 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 100))
     end, WorkersList),
 
-    ControllerPid = start_tasks(Level, true, Workers, 15),
+    ControllerPid = start_tasks(Level, batch, Workers, 15),
     {A1, A2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1, A2}),
     ?assertEqual(0, length(A2)),
@@ -206,10 +356,63 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
 
     ControllerPid ! kill.
 
+task_manager_delayed_save_with_type_test(Config) ->
+    task_manager_delayed_save_with_type_test_base(Config, ?NODE_LEVEL, 3),
+    task_manager_delayed_save_with_type_test_base(Config, ?CLUSTER_LEVEL, 5).
+%%    task_manager_delayed_save_with_type_test_base(Config, ?PERSISTENT_LEVEL, 5).
+task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
+    [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
+    Workers = [W1, W2, W1, W2, W1],
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 300)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 300))
+    end, WorkersList),
+
+    ControllerPid = start_tasks(Level, first_try, Workers, 12, type1),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
+
+    timer:sleep(2000),
+    {A1, A2} = rpc:call(W1, task_pool, list, [Level]),
+    ?assertMatch({ok, _}, {A1, A2}),
+    ?assertEqual(SecondCheckNum, length(A2)),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
+    ?assertEqual({ok, {0,0}}, rpc:call(W1, task_pool, count_tasks, [Level, undefined, 10])),
+    ?assertEqual({ok, {0,SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
+
+    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+
+    {A1_2, A2_2} = rpc:call(W1, task_pool, list, [Level]),
+    ?assertMatch({ok, _}, {A1_2, A2_2}),
+    ?assertEqual(SecondCheckNum, length(A2_2)),
+    {A1_3, A2_3} = rpc:call(W1, task_pool, list_failed, [Level]),
+    ?assertMatch({ok, _}, {A1_3, A2_3}),
+    ?assertEqual(SecondCheckNum, length(A2_3)),
+    ?assertEqual({ok, {SecondCheckNum,SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
+
+    case Level of
+        ?NODE_LEVEL ->
+            lists:foreach(fun(W) ->
+                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
+            end, WorkersList);
+        _ ->
+            gen_server:cast({?NODE_MANAGER_NAME, W1}, check_tasks)
+    end,
+
+    ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
+    ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
+    ?assertEqual({ok, {0,0}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
+
+    ControllerPid ! kill.
+
 start_tasks(Level, Workers, Num) ->
-    start_tasks(Level, false, Workers, Num).
+    start_tasks(Level, non, Workers, Num).
 
 start_tasks(Level, DelaySave, Workers, Num) ->
+    start_tasks(Level, DelaySave, Workers, Num, undefined).
+
+start_tasks(Level, DelaySave, Workers, Num, TaskType) ->
     ControllerPid = spawn(fun() -> task_controller([]) end),
     Master = self(),
     {Funs, _} = lists:foldl(fun(_W, {Acc, Counter}) ->
@@ -230,7 +433,11 @@ start_tasks(Level, DelaySave, Workers, Num) ->
     end, {[], 1}, Workers),
 
     lists:foreach(fun({Fun, W}) ->
-        ?assertMatch(ok, rpc:call(W, task_manager, start_task, [Fun, Level, DelaySave]))
+        T = case TaskType of
+            undefined -> Fun;
+            _ -> {TaskType, Fun}
+        end,
+        ?assertMatch(ok, rpc:call(W, task_manager, start_task, [T, Level, DelaySave]))
     end, lists:zip(Funs, Workers)),
 
     ControllerPid.
@@ -448,6 +655,29 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     test_node_starter:clean_environment(Config).
 
+init_per_testcase(throttling_test, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller]),
+
+    test_utils:mock_expect(Workers, caches_controller, send_after,
+        fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
+    end, Workers),
+
+    Config;
+
+init_per_testcase(_Case, Config) ->
+    Config.
+
+end_per_testcase(throttling_test, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller]);
+
+end_per_testcase(_Case, _Config) ->
+    ok.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -471,3 +701,12 @@ count_answers() ->
         0 ->
             0
     end.
+
+configure_throttling() ->
+    Ans1 = caches_controller:configure_throttling(),
+    Ans2 = receive
+        {send_after, {timer, configure_throttling}, CheckInterval} -> CheckInterval
+    after
+        5000 -> timeout
+    end,
+    {Ans1, Ans2}.

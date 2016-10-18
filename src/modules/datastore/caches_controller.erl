@@ -30,12 +30,217 @@
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
+-export([throttle/0, throttle/1, throttle_del/1, configure_throttling/0, plan_next_throttling_check/0]).
+% for tests
+-export([send_after/3]).
 
 -define(CLEAR_BATCH_SIZE, 100).
+-define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(MNESIA_THROTTLING_DATA_KEY, <<"mnesia_throttling_data">>).
+-define(THROTTLING_ERROR, {error, load_to_high}).
+
+-define(BLOCK_THROTTLING, 3).
+-define(LIMIT_THROTTLING, 2).
+-define(CONFIG_THROTTLING, 1).
+-define(NO_THROTTLING, 0).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle() -> ok | ?THROTTLING_ERROR.
+throttle() ->
+  case node_management:get(?MNESIA_THROTTLING_KEY) of
+    {ok, #document{value = #node_management{value = V}}} ->
+      case V of
+        ok ->
+          ok;
+        {throttle, Time, _} ->
+          timer:sleep(Time),
+          ok;
+        {overloaded, _} ->
+          ?THROTTLING_ERROR
+      end;
+    {error, {not_found, _}} ->
+      ok;
+    Error ->
+      ?error("throttling error: ~p", [Error]),
+      ?THROTTLING_ERROR
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+  TmpAns :: term().
+throttle(ok) ->
+  throttle();
+throttle(TmpAns) ->
+  TmpAns.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits delete operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle_del(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+  TmpAns :: term().
+throttle_del(ok) ->
+  case node_management:get(?MNESIA_THROTTLING_KEY) of
+    {ok, #document{value = #node_management{value = V}}} ->
+      case V of
+        ok ->
+          ok;
+        {throttle, Time, true} ->
+          timer:sleep(Time),
+          ok;
+        {throttle, _, _} ->
+          ok;
+        {overloaded, true} ->
+          ?THROTTLING_ERROR;
+        {overloaded, _} ->
+          ok
+      end;
+    {error, {not_found, _}} ->
+      ok;
+    Error ->
+      ?error("throttling error: ~p", [Error]),
+      ?THROTTLING_ERROR
+  end;
+throttle_del(TmpAns) ->
+  TmpAns.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Configures throttling settings.
+%% @end
+%%--------------------------------------------------------------------
+-spec configure_throttling() -> ok.
+configure_throttling() ->
+  Self = self(),
+  spawn(fun() ->
+    CheckInterval = try
+      {MemAction, MemoryUsage} = verify_memory(),
+      {TaskAction, NewFailed, NewTasks} = verify_tasks(),
+      Action = max(MemAction, TaskAction),
+
+      case Action of
+        ?BLOCK_THROTTLING ->
+          {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+            value = #node_management{value = {overloaded, MemAction =:= ?NO_THROTTLING}}}),
+          ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p",
+            [MemoryUsage, NewFailed, NewTasks]),
+          plan_next_throttling_check(true);
+        _ ->
+          Oldthrottling = case node_management:get(?MNESIA_THROTTLING_KEY) of
+            {ok, #document{value = #node_management{value = V}}} ->
+              case V of
+                {throttle, Time, _} ->
+                  Time;
+                Other ->
+                  Other
+              end;
+            {error, {not_found, _}} ->
+              ok
+          end,
+
+          case {Action, Oldthrottling} of
+            {?NO_THROTTLING, ok} ->
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check();
+            {?NO_THROTTLING, _} ->
+              ok = node_management:delete(?MNESIA_THROTTLING_KEY),
+              ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
+              ?info("Throttling: stop, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check();
+            {?CONFIG_THROTTLING, ok} ->
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check();
+            {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+                value = #node_management{value = {overloaded, false}}}),
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check(true);
+            {?LIMIT_THROTTLING, {overloaded, _}} ->
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check(true);
+            _ ->
+              TimeBase = case Oldthrottling of
+                OT when is_integer(OT) ->
+                  OT;
+                _ ->
+                  {ok, DefaultTimeBase} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+                  DefaultTimeBase
+              end,
+
+              {OldFaild, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
+                {ok, #document{value = #node_management{value = TD}}} ->
+                  TD;
+                {error, {not_found, _}} ->
+                  {0, 0, 0, 0}
+              end,
+
+              ThrottlingTime = case
+                {(NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory),
+                Action} of
+                {true, _} ->
+                  TB2 = 2 * TimeBase,
+                  {ok, MaxTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms),
+                  case TB2 > MaxTime of
+                    true ->
+                      MaxTime;
+                    _ ->
+                      TB2
+                  end;
+                {_, ?CONFIG_THROTTLING} ->
+                  max(round(TimeBase / 2), 1);
+                _ ->
+                  TimeBase
+              end,
+
+              {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+              NextCheck = plan_next_throttling_check(MemoryUsage-OldMemory, MemRatioThreshold-MemoryUsage, LastInterval),
+
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+                value = #node_management{value = {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}}}),
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
+                value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
+
+              ?info("Throttling: delay ~p ms used, mem: ~p, failed tasks ~p, all tasks ~p",
+                [ThrottlingTime, MemoryUsage, NewFailed, NewTasks]),
+
+              NextCheck
+          end
+      end
+    catch
+      E1:E2 ->
+        ?error_stacktrace("Error during throtling configuration: ~p:~p", [E1, E2]),
+        plan_next_throttling_check()
+    end,
+    caches_controller:send_after(CheckInterval, Self, {timer, configure_throttling})
+  end),
+  ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns time after which next throttling config should start.
+%% @end
+%%--------------------------------------------------------------------
+-spec plan_next_throttling_check() -> non_neg_integer().
+plan_next_throttling_check() ->
+  plan_next_throttling_check(false).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -46,7 +251,7 @@
 should_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
-  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
   (MemUsage >= TargetMemUse) andalso (MemToCompare >= TargetErlangMemUse * 1024 * 1024).
 
 %%--------------------------------------------------------------------
@@ -538,7 +743,7 @@ should_stop_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
   {ok, StopRatio} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
-  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
   (MemUsage < TargetMemUse * StopRatio / 100) orelse (MemToCompare < TargetErlangMemUse * 1024 * 1024  * StopRatio / 100).
 
 %%--------------------------------------------------------------------
@@ -915,3 +1120,103 @@ value_delete(Level, ModelName, Key) ->
       ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, Key}, E1, E2]),
       {error, delete_failed}
   end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks tasks poll and recommends throttling action.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_tasks() ->
+  {TaskAction :: non_neg_integer(), NewFailed :: non_neg_integer(), NewTasks :: non_neg_integer()}.
+verify_tasks() ->
+  {ok, FailedTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
+  {ok, PendingTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+
+  {ok, {NewFailed, NewTasks}} =
+    task_pool:count_tasks(?CLUSTER_LEVEL, cache_dump, FailedTasksNumThreshold+PendingTasksNumThreshold),
+
+  TaskAction = case {NewFailed, NewTasks} of
+                 {NF, _} when NF >= FailedTasksNumThreshold ->
+                   ?LIMIT_THROTTLING;
+                 {NF, _} when NF > 0 ->
+                   ?CONFIG_THROTTLING;
+                 {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
+                   ?LIMIT_THROTTLING;
+                 _ ->
+                   ?NO_THROTTLING
+               end,
+
+  {TaskAction, NewFailed, NewTasks}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks memory and recommends throttling action.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_memory() ->
+  {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
+verify_memory() ->
+  {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+
+  MemoryUsage = case monitoring:get_memory_stats() of
+                  [{<<"mem">>, MemUsage}] ->
+                    MemUsage
+                end,
+
+  MemAction = case MemoryUsage of
+                MU when MU >= MemRatioThreshold ->
+                  ?BLOCK_THROTTLING;
+                MU when MU >= (MemRatioThreshold + MemCleanRatioThreshold)/2 ->
+                  ?LIMIT_THROTTLING;
+                MU when MU >= MemCleanRatioThreshold ->
+                  ?CONFIG_THROTTLING;
+                _ ->
+                  ?NO_THROTTLING
+              end,
+
+  {MemAction, MemoryUsage}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns time after which next throttling config should start.
+%% @end
+%%--------------------------------------------------------------------
+-spec plan_next_throttling_check(Overloaded :: boolean()) -> non_neg_integer().
+plan_next_throttling_check(true) ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds),
+  timer:seconds(Interval);
+plan_next_throttling_check(_) ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
+  timer:seconds(Interval).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns time after which next throttling config should start.
+%% Decreases interval if memory is growing too high.
+%% @end
+%%--------------------------------------------------------------------
+-spec plan_next_throttling_check(MemoryChange :: float(), MemoryToStop :: float(), LastInterval :: integer()) ->
+  non_neg_integer().
+plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
+  plan_next_throttling_check();
+plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
+  plan_next_throttling_check();
+plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
+  Default = plan_next_throttling_check(),
+  Corrected = round(LastInterval*MemoryToStop/MemoryChange),
+  case (Corrected < Default) and (Corrected >= 0) of
+    true ->
+      Corrected;
+    _ ->
+      Default
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv erlang:send_after but enables mocking.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().
+send_after(CheckInterval, Master, Message) ->
+  erlang:send_after(CheckInterval, Master, Message).

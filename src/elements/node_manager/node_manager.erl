@@ -181,6 +181,7 @@ init([]) ->
 
         next_mem_check(),
         next_task_check(),
+        erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
@@ -311,6 +312,10 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
 
     next_mem_check(),
     {noreply, NewState};
+
+handle_cast(configure_throttling, State) ->
+    ok = caches_controller:configure_throttling(),
+    {noreply, State};
 
 handle_cast(check_mem, State) ->
     next_mem_check(),

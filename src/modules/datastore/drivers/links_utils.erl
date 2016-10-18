@@ -634,15 +634,15 @@ unpack_link_scope(_ModelName, LinkName) ->
 select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
     case lists:filter(
         fun
-            ({Scope, VH, _, _}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope) ->
-                lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope))
-                    andalso (VHash == undefined orelse VHash == VH);
-            ({Scope, VH, _, _}) ->
-                RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH);
             ({Scope, {deleted, VH}, _, _}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope) ->
                 lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope))
                     andalso (VHash == undefined orelse VHash == VH);
             ({Scope, {deleted, VH}, _, _}) ->
+                RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH);
+            ({Scope, VH, _, _}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope) ->
+                lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope))
+                    andalso (VHash == undefined orelse VHash == VH);
+            ({Scope, VH, _, _}) ->
                 RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH)
         end, Targets) of
         [] -> undefined;
