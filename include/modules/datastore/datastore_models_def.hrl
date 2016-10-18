@@ -74,6 +74,7 @@
     last_update_seconds :: undefined | integer()
 }).
 
+% Record for various data used during node management
 %
 -record(node_management, {
     value :: term()
