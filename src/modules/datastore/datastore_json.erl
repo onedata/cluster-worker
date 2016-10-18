@@ -32,7 +32,7 @@
 %%%===================================================================
 
 -type field_name() :: atom().
--type record_key() :: binary | atom | integer | term.
+-type record_key() :: binary | atom | integer | term | string.
 -type record_value() :: json %% Raw JSON binary
     %% or simple types
     | record_key() | boolean | [record_struct()] | {record_struct()} | #{record_key() => record_struct()}
@@ -181,6 +181,8 @@ encode_record(value, Term, {record, Version, Fields}) when is_list(Fields), is_t
             {<<?RECORD_TYPE_MARKER>>, encode_record(value, RecordType, atom)},
             {<<?RECORD_VERSION_MARKER>>, encode_record(value, Version, integer)}
         ], RawMap)};
+encode_record(_, Term, string) when is_binary(Term) ->
+    Term;
 encode_record(key, Term, integer) when is_integer(Term) ->
     integer_to_binary(Term);
 encode_record(value, Term, integer) when is_integer(Term) ->
@@ -209,7 +211,7 @@ encode_record(value, Term, Types) when is_tuple(Types), is_tuple(Term) ->
 encode_record(value, Term, boolean) when is_boolean(Term)  ->
     Term;
 encode_record(_, Term, binary) when is_binary(Term)  ->
-    Term;
+    base64:encode(Term);
 encode_record(_, Term, term) ->
     base64:encode(term_to_binary(Term));
 encode_record(value, Term, json) when is_binary(Term) ->
@@ -238,6 +240,8 @@ decode_record({Term}, {record, _Version, Fields}) when is_list(Fields), is_list(
             [decode_record(proplists:get_value(encode_record(key, Name, atom), Term), Type) | RecordList]
         end,
         [decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom)], Fields)));
+decode_record(Term, string) when is_binary(Term) ->
+    Term;
 decode_record(Term, integer) when is_integer(Term) ->
     Term;
 decode_record(Term, integer) when is_binary(Term) ->
@@ -267,7 +271,7 @@ decode_record(Term, boolean) when is_boolean(Term)  ->
 decode_record(Term, boolean) when is_binary(Term)  ->
     binary_to_atom(Term, utf8);
 decode_record(Term, binary) when is_binary(Term)  ->
-    Term;
+    base64:decode(Term);
 decode_record(Term, json) ->
     jiffy:encode(Term);
 decode_record(Term, term) ->
