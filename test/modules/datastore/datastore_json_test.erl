@@ -63,22 +63,22 @@ term_encoder_test() ->
     Term = #test{
         field1 = 12313,
         field2 = 432.423,
-        field3 = "omfg yey",
+        field3 = <<"onedata yey">>,
         field4 = false,
         field5 = test_atom,
         field6 = <<"binary yey">>,
         field7 = {53, 243, undefined, 5435},
         field8 = [atom1, atom2, atom3, other_atom],
-        field9 = {134, atom_test, "string in tuple", {6546.6456, 42432.43242, "string test"}},
+        field9 = {134, atom_test, <<"string in tuple">>, {6546.6456, 42432.43242, <<"string test">>}},
         field11 = #{
-            "str1" => [1,2,3],
-            "str2" => [5,3,6,undefined,2,5,7,3,42,21]
+            <<"str1">> => [1,2,3],
+            <<"str2">> => [5,3,6,undefined,2,5,7,3,42,21]
         },
         field10 = #nasted{
             field1 = NastedF1Value,
             field2 = json_utils:encode([null, false, 5, <<"string">>])
         },
-        field12 = #{56 => {321, [{<<"bin2">>, self(), atomfds, other_atom2}, {<<"bin3">>, self(), atomfds, other_atom3}]}},
+        field12 = #{56 => {321, [{<<245,123,53,64,33,1>>, self(), atomfds, other_atom2}, {<<145,123,53,64,33,2>>, self(), atomfds, other_atom3}]}},
         field13 = Set
         },
 
@@ -103,7 +103,7 @@ term_encoder_test() ->
 
     ?assertMatch(true, lists:member(<<"field3">>, Keys)),
     F3Value = proplists:get_value(<<"field3">>, Props),
-    ?assertMatch(<<"omfg yey">>, F3Value),
+    ?assertMatch(<<"onedata yey">>, F3Value),
 
     ?assertMatch(true, lists:member(<<"field4">>, Keys)),
     F4Value = proplists:get_value(<<"field4">>, Props),
@@ -115,7 +115,8 @@ term_encoder_test() ->
 
     ?assertMatch(true, lists:member(<<"field6">>, Keys)),
     F6Value = proplists:get_value(<<"field6">>, Props),
-    ?assertMatch(<<"binary yey">>, F6Value),
+    BaseBin6 = base64:encode(<<"binary yey">>),
+    ?assertMatch(BaseBin6, F6Value),
 
     ?assertMatch(true, lists:member(<<"field7">>, Keys)),
     F7Value = proplists:get_value(<<"field7">>, Props),
@@ -158,9 +159,11 @@ term_encoder_test() ->
 
     ?assertMatch(true, lists:member(<<"field12">>, Keys)),
     F12Value = proplists:get_value(<<"field12">>, Props),
+    Bin1 = base64:encode(<<245,123,53,64,33,1>>),
+    Bin2 = base64:encode(<<145,123,53,64,33,2>>),
     ?assertMatch({[{<<"56">>, [321, [
-        [<<"bin2">>, SelfTerm, AtomTerm, <<"other_atom2">>],
-        [<<"bin3">>, SelfTerm, AtomTerm, <<"other_atom3">>]
+        [Bin1, SelfTerm, AtomTerm, <<"other_atom2">>],
+        [Bin2, SelfTerm, AtomTerm, <<"other_atom3">>]
     ]]}]}, F12Value),
 
     ?assertMatch(true, lists:member(<<"field13">>, Keys)),

@@ -191,8 +191,6 @@ encode_record(key, Term, float) when is_float(Term) ->
     float_to_binary(Term);
 encode_record(value, Term, float) when is_float(Term) ->
     Term;
-encode_record(_, Term, string) when is_list(Term) ->
-    list_to_binary(Term);
 encode_record(value, Term, #{} = Struct) when is_map(Term) ->
     [{KeyType, ValueType}] = maps:to_list(Struct),
     {maps:fold(
@@ -250,8 +248,6 @@ decode_record(Term, float) when is_float(Term) ->
     Term;
 decode_record(Term, float) when is_binary(Term) ->
     binary_to_float(Term);
-decode_record(Term, string) when is_binary(Term) ->
-    binary_to_list(Term);
 decode_record({Term}, #{} = Struct) when is_list(Term) ->
     [{KeyType, ValueType}] = maps:to_list(Struct),
     lists:foldl(
