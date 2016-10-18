@@ -47,11 +47,16 @@
 
 %% API utility types
 -type store_level() :: ?DISK_ONLY_LEVEL | ?LOCAL_ONLY_LEVEL | ?GLOBAL_ONLY_LEVEL | ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
+-type aux_store_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
 -type delete_predicate() :: fun(() -> boolean()).
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
+-type aux_store_key() :: {timestamp(), key()}.
+-type aux_store_handle() :: aux_store_key() | '$end_of_table'.
 
--export_type([store_level/0, delete_predicate/0, list_fun/0, exists_return/0]).
+
+-export_type([store_level/0, aux_store_level/0, delete_predicate/0, list_fun/0,
+    exists_return/0, aux_store_key/0, aux_store_handle/0]).
 
 %% Links' types
 -type link_version() :: non_neg_integer().
@@ -75,7 +80,7 @@
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
+-export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1, models_with_aux_stores/0]).
 
 %%%===================================================================
 %%% API
@@ -901,6 +906,19 @@ driver_to_module(?PERSISTENCE_DRIVER) ->
 driver_to_module(Driver) ->
     Driver.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns list of models which have auxiliary stores created.
+%% @end
+%%--------------------------------------------------------------------
+-spec models_with_aux_stores() -> [#model_config{}].
+models_with_aux_stores() ->
+    [{_, Models}] = ets:lookup(?LOCAL_STATE, models_with_aux_stores),
+    Models.
+
+
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -1096,7 +1114,8 @@ init_drivers(Configs, NodeToSync) ->
                 fun(Driver) ->
                     DriverModule = driver_to_module(Driver),
                     ok = DriverModule:init_bucket(Bucket, Models, NodeToSync)
-                end, [?PERSISTENCE_DRIVER, ?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER])
+                end, [?PERSISTENCE_DRIVER, ?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER]),
+            init_auxiliary_stores(Models, NodeToSync)
         end, maps:to_list(configs_per_bucket(Configs))).
 
 %%--------------------------------------------------------------------
@@ -1135,6 +1154,47 @@ initialize_state(NodeToSync) ->
             " ~p: ~p", [Type, Reason]),
             {error, Reason}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initialize auxiliary tables for given Models
+%% @end
+%%--------------------------------------------------------------------
+-spec init_auxiliary_stores([#model_config{}], NodeToSync :: node()) -> ok.
+init_auxiliary_stores(Models, NodeToSync) ->
+    ModelsWithAuxStores = lists:foldl(
+        fun
+            (#model_config{auxiliary_stores=[]}, AccIn) ->
+                AccIn;
+            (M = #model_config{auxiliary_stores=AuxStores}, AccIn) ->
+                lists:foldl(fun({StoreLevel, Fields}) ->
+                    Driver = level_to_driver(StoreLevel),
+                    Driver:create_auxiliary_ordered_stores(M, Fields, NodeToSync)
+                end, [], maps:to_list(invert(AuxStores))),
+                [M | AccIn]
+        end, [], Models),
+    ets:insert(?LOCAL_STATE, {models_with_aux_stores, ModelsWithAuxStores}),
+    ok.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inverts map. key becomes values and  values become keys.
+%% In new map each key's (old value) value is of keys associated with
+%% these value in original map.
+%% e.g.
+%% M = #{ k1 => v1, k2 => v1, k3 => v3 }
+%% invert(M) = #{ v1 => [k1, k2], v2 => [k3] }
+%% @end
+%%--------------------------------------------------------------------
+-spec invert(#{}) -> #{term() => [term()]}.
+invert(Map) ->
+    maps:fold(fun(K, V, AccIn) ->
+        CurrentValue = maps:get(V, AccIn, []),
+        maps:put(V, [K | CurrentValue], AccIn)
+    end, #{}, Map).
 
 %%--------------------------------------------------------------------
 %% @private

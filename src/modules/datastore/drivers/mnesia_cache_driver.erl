@@ -28,6 +28,9 @@
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
+%% auxiliary ordered_store behaviour
+-export([create_auxiliary_ordered_stores/3, aux_delete/3, aux_save/3, aux_update/3]).
+
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
 
@@ -53,56 +56,25 @@ init_driver(State) ->
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
 init_bucket(_BucketName, Models, NodeToSync) ->
+    Node = node(),
     lists:foreach( %% model
         fun(#model_config{name = ModelName, fields = Fields}) ->
-            Node = node(),
             Table = table_name(ModelName),
             LinkTable = links_table_name(ModelName),
             TransactionTable = transaction_table_name(ModelName),
             case NodeToSync == Node of
                 true -> %% No mnesia nodes -> create new table
-                    MakeTable = fun(TabName, RecordName, RecordFields) ->
-                        Ans = case mnesia:create_table(TabName, [{record_name, RecordName}, {attributes, RecordFields},
-                            {ram_copies, [Node]}, {type, set}]) of
-                            {atomic, ok} -> ok;
-                            {aborted, {already_exists, TabName}} ->
-                                ok;
-                            {aborted, Reason} ->
-                                ?error("Cannot init mnesia cluster (table ~p) on node ~p due to ~p", [TabName, node(), Reason]),
-                                throw(Reason)
-                        end,
-                        ?info("Creating mnesia table: ~p, result: ~p", [TabName, Ans])
-                    end,
-                    {
-                        MakeTable(Table, ModelName, [key | Fields]),
-                        MakeTable(LinkTable, links, [key | record_info(fields, links)]),
-                        MakeTable(TransactionTable, ModelName, [key | Fields])
-                    };
+                    create_table(Table, ModelName, [key | Fields], Node),
+                    create_table(LinkTable, links, [key | record_info(fields, links)], Node),
+                    create_table(TransactionTable, ModelName, [key | Fields], Node);
                 _ -> %% there is at least one mnesia node -> join cluster
                     Tables = [table_name(MName) || MName <- datastore_config:models()] ++
                         [links_table_name(MName) || MName <- datastore_config:models()] ++
                         [transaction_table_name(MName) || MName <- datastore_config:models()],
                     ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [Tables, ?MNESIA_WAIT_TIMEOUT]),
-                    ExpandTable = fun(TabName) ->
-                        case rpc:call(NodeToSync, mnesia, change_config, [extra_db_nodes, [Node]]) of
-                            {ok, [Node]} ->
-                                case rpc:call(NodeToSync, mnesia, add_table_copy, [TabName, Node, ram_copies]) of
-                                    {atomic, ok} ->
-                                        ?info("Expanding mnesia cluster (table ~p) from ~p to ~p", [TabName, NodeToSync, node()]);
-                                    {aborted, Reason} ->
-                                        ?error("Cannot replicate mnesia table ~p to node ~p due to: ~p", [TabName, node(), Reason])
-                                end,
-                                ok;
-                            {error, Reason} ->
-                                ?error("Cannot expand mnesia cluster (table ~p) on node ~p due to ~p", [TabName, node(), Reason]),
-                                throw(Reason)
-                        end
-                    end,
-                    {
-                        ExpandTable(Table),
-                        ExpandTable(LinkTable),
-                        ExpandTable(TransactionTable)
-                    }
+                    expand_table(Table, Node, NodeToSync),
+                    expand_table(LinkTable, Node, NodeToSync),
+                    expand_table(TransactionTable, Node, NodeToSync)
             end
         end, Models),
     ok.
@@ -557,6 +529,82 @@ run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
             end
         end).
 
+
+%%%===================================================================
+%%% auxiliary_ordered_store_behaviour callbacks
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_ordered_store_behaviour} callback
+%% create_auxiliary_ordered_stores/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_auxiliary_ordered_stores(
+    model_behaviour:model_config(), Fields :: [atom()], NodeToSync :: node()) ->
+    ok | datastore:generic_error() | no_return().
+create_auxiliary_ordered_stores(#model_config{}=ModelConfig, Fields, NodeToSync) ->
+    Node = node(),
+    lists:foreach(fun(Field) ->
+        TabName = aux_table_name(ModelConfig, Field),
+        case NodeToSync == Node of
+            true ->
+                create_table(TabName, auxiliary_store_entry, [], [Node]); %% TODO must define record for mnesia
+            _ ->
+                ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [[TabName], ?MNESIA_WAIT_TIMEOUT]),
+                expand_table(TabName, Node, NodeToSync)
+        end
+    end, Fields),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_ordered_store_behaviour} callback delete/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
+    Key :: datastore:ext_key()) -> ok.
+aux_delete(ModelConfig, Field, Key) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    MatchSpec = ets:fun2ms(
+        fun(#auxiliary_store_entry{key={_, K}}=R) when K == Key -> R end),
+    Action = fun() ->
+        Selected = mnesia:dirty_select(AuxTableName, MatchSpec),
+        lists:foreach(fun(#auxiliary_store_entry{key=K}) ->
+            mnesia:dirty_delete(AuxTableName, K)
+        end, Selected)
+    end,
+    mnesia_run(dirty_async, Action),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_ordered_store_behaviour} callback aux_save/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_save(Model :: model_behaviour:model_config(), Field :: atom(),
+    Key :: datastore:ext_key()) -> ok.
+aux_save(ModelConfig, Field, Key) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    Action = fun() ->
+        mnesia:dirty_write(AuxTableName,
+            #auxiliary_store_entry{key={erlang:system_time(miliseconds), Key}})
+    end,
+    mnesia_run(dirty_async, Action),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_ordered_store_behaviour} callback aux_update/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
+    Key :: datastore:ext_key()) -> ok.
+aux_update(ModelConfig, Field, Key) ->
+    aux_delete(ModelConfig, Field, Key),
+    aux_save(ModelConfig, Field, Key).
+
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -573,6 +621,19 @@ table_name(#model_config{name = ModelName}) ->
 table_name(TabName) when is_atom(TabName) ->
     binary_to_atom(<<"dc_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets Mnesia auxiliary table name for given model and field.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_table_name(model_behaviour:model_config() | atom(), atom()) -> atom().
+aux_table_name(#model_config{name = ModelName}, Field) ->
+    aux_table_name(ModelName, Field);
+aux_table_name(TabName, Field) when is_atom(TabName) and is_atom(Field) ->
+    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, <<"_">>,
+        (atom_to_binary(Field, utf8))>>, utf8).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -596,6 +657,70 @@ links_table_name(TabName) when is_atom(TabName) ->
 -spec transaction_table_name(atom()) -> atom().
 transaction_table_name(TabName) when is_atom(TabName) ->
     binary_to_atom(<<"dc_transaction_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Create Mnesia table of default type 'set'.
+%% RamCopiesNodes is list of nodes where the table is supposed to have
+%% RAM copies
+%% @end
+%%--------------------------------------------------------------------
+-spec create_table(TabName :: atom(), RecordName :: atom(),
+    Attributes :: [atom()], RamCopiesNodes :: [atom()]) -> atom().
+create_table(TabName, RecordName, Attributes, RamCopiesNodes) ->
+    create_table(TabName, RecordName, Attributes, RamCopiesNodes, set).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Create Mnesia table of type Type.
+%% RamCopiesNodes is list of nodes where the table is supposed to have
+%% RAM copies
+%% @end
+%%--------------------------------------------------------------------
+-spec create_table(TabName :: atom(), RecordName :: atom(),
+    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom()) -> atom().
+create_table(TabName, RecordName, RecordFields, RamCopiesNodes, Type) ->
+    Ans = case mnesia:create_table(TabName, [
+            {record_name, RecordName},
+            {attributes, RecordFields},
+            {ram_copies, RamCopiesNodes},
+            {type, Type}]) of
+
+        {atomic, ok} ->
+            ok;
+        {aborted, {already_exists, TabName}} ->
+            ok;
+        {aborted, Reason} ->
+            ?error("Cannot init mnesia cluster (table ~p) on node ~p due to ~p", [TabName, node(), Reason]),
+            throw(Reason)
+    end,
+    ?info("Creating mnesia table: ~p, result: ~p", [TabName, Ans]).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Expand mnesia table
+%% @end
+%%--------------------------------------------------------------------
+-spec expand_table(TabName :: atom(), Node :: atom(), NodeToSync :: atom()) -> atom().
+expand_table(TabName, Node, NodeToSync) ->
+    case rpc:call(NodeToSync, mnesia, change_config, [extra_db_nodes, [Node]]) of
+        {ok, [Node]} ->
+            case rpc:call(NodeToSync, mnesia, add_table_copy, [TabName, Node, ram_copies]) of
+                {atomic, ok} ->
+                    ?info("Expanding mnesia cluster (table ~p) from ~p to ~p", [TabName, NodeToSync, node()]);
+                {aborted, Reason} ->
+                    ?error("Cannot replicate mnesia table ~p to node ~p due to: ~p", [TabName, node(), Reason])
+            end,
+            ok;
+        {error, Reason} ->
+            ?error("Cannot expand mnesia cluster (table ~p) on node ~p due to ~p", [TabName, node(), Reason]),
+            throw(Reason)
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -722,8 +847,7 @@ list_dirty(#model_config{} = ModelConfig, Fun, AccIn) ->
 -spec list_dirty_next(any(), any(), any(), any()) -> any().
 list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
     case Fun(EoT, AccIn) of
-        {abort, NewAcc} ->
-            {ok, NewAcc}
+        {abort, NewAcc} -> {ok, NewAcc}
     end;
 list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
 

@@ -54,6 +54,7 @@
     globally_cached_foreach_link_test/1, links_scope_proc_mem_test/1,  globally_cached_consistency_test/1,
     globally_cached_consistency_without_consistency_metadata_test/1, globally_cached_consistency_with_ambigues_link_names/1]).
 -export([utilize_memory/2, update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
+-export([empty_test/1]).
 
 all() ->
     ?ALL([
@@ -72,7 +73,8 @@ all() ->
         globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test,
         links_scope_proc_mem_test, globally_cached_consistency_test,
         globally_cached_consistency_without_consistency_metadata_test,
-        globally_cached_consistency_with_ambigues_link_names
+        globally_cached_consistency_with_ambigues_link_names,
+        empty_test
     ]).
 
 
@@ -82,6 +84,9 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+empty_test(Config) ->
+    ok.
 
 globally_cached_consistency_with_ambigues_link_names(Config) ->
     %% given
@@ -2033,7 +2038,7 @@ clearing_global_cache_test(Config) ->
     Mem0Ets = ?call(Worker2, erlang, memory, [ets]),
     ct:print("Mem0 ~p, ~p, ~p", [Mem0, Mem0Node, Mem0Ets]),
     FreeMem = 100 - Mem0,
-    ToAdd = min(10, FreeMem / 2),
+    ToAdd = min(20, FreeMem / 2),
     MemCheck1 = Mem0 + ToAdd / 2,
     MemUsage = Mem0 + ToAdd,
 
@@ -2051,7 +2056,14 @@ clearing_global_cache_test(Config) ->
     ?assert(Mem1Node > 50 * 1024 * 1024),
 
     ?assertEqual(ok, ?call(Worker2, caches_controller, wait_for_cache_dump, []), 150),
+    tracer:start(Worker2),
+%%    tracer:trace_calls(caches_controller, delete_old_keys),
+%%    tracer:trace_calls(cache_controller, list_dirty),
+%%    tracer:trace_calls(mnesia_cache_driver, list),
+    tracer:trace_calls(mnesia_cache_driver, list_dirty),
+%%    tracer:trace_calls(mnesia_cache_driver, list_dirty_next),
     ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, ?TIMEOUT)),
+    tracer:stop(),
     [{_, Mem2}] = monitoring:get_memory_stats(),
     Mem2Node = node_mem(Worker2),
     Mem2Ets = ?call(Worker2, erlang, memory, [ets]),
@@ -2088,7 +2100,7 @@ node_mem(Worker) ->
 
 % helper fun used by clearing_global_cache_test
 utilize_memory(TestRecord, MemUsage) ->
-    OneDoc = list_to_binary(prepare_list(256 * 1024)),
+    OneDoc = list_to_binary(prepare_list(16 * 1024)),
 
     Add100MB = fun(_KeyBeg) ->
         for(1, 100 * 4, fun(I) ->
