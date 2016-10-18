@@ -33,7 +33,7 @@
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
-init(_Args) ->
+init(Args) ->
 
     %% Get DB nodes
     DBNodes =
@@ -45,7 +45,7 @@ init(_Args) ->
                         {list_to_binary(HostName), list_to_integer(Port)}
                     end, Nodes);
             _ ->
-                []
+                Args
         end,
 
     State0 = #{db_nodes => DBNodes},

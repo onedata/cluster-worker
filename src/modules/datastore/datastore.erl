@@ -886,6 +886,9 @@ healthcheck() ->
         _ -> ok
     end.
 
+initialize_minimal_env() ->
+    ok.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Translates datasotre's driver name to handler module.

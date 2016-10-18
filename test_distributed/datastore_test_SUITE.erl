@@ -1141,6 +1141,11 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
 
     CheckLinks = fun(Start, End, Sum) ->
         for(Start, End, fun(I) ->
+            ct:print("Check ~p", [{Worker1, GetLinkName(I)}]),
+            ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [Level, Doc, GetLinkName(I)]))
+        end),
+        for(Start, End, fun(I) ->
+            ct:print("Check ~p", [{Worker2, GetLinkName(I)}]),
             ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)]))
         end),
 

@@ -110,5 +110,11 @@
 
 -define(NOSYNC_WRAPPED_KEY_OVERRIDE(KEY), {nosync, KEY}).
 
+%% Encoded record name field
+-define(RECORD_TYPE_MARKER, "<record_type>").
+
+%% Encoded record version field
+-define(RECORD_VERSION_MARKER, "<record_version>").
+
 
 -endif.

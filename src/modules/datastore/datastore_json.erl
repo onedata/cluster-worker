@@ -17,17 +17,6 @@
 
 
 %%%===================================================================
-%%% Definitions
-%%%===================================================================
-
-%% Encoded record name field
--define(RECORD_TYPE_MARKER, "<record_type>").
-
-%% Encoded record version field
--define(RECORD_VERSION_MARKER, "<record_version>").
-
-
-%%%===================================================================
 %%% Types
 %%%===================================================================
 
@@ -61,7 +50,8 @@
 %% API
 -export([encode_record/1, decode_record/1, validate_struct/1]).
 -export([encode_record/2, decode_record/2]).
--export([decode_record_vcs/1]).
+-export([encode_record/3]).
+-export([decode_record_vcs/1, record_upgrade/4]).
 
 
 %%%===================================================================
@@ -125,7 +115,7 @@ decode_record_vcs({Term}) when is_list(Term) ->
 -spec record_upgrade(model_behaviour:model_type(), record_version(), record_version(), term()) ->
     {record_version(), term()}.
 record_upgrade(ModelName, TargetVersion, CurrentVersion, Record) when TargetVersion > CurrentVersion ->
-    {NextVersion, NextRecord} = ModelName:upgrade_record(CurrentVersion, Record),
+    {NextVersion, NextRecord} = ModelName:record_upgrade(CurrentVersion, Record),
     case NextVersion > CurrentVersion of
         true ->
             record_upgrade(ModelName, TargetVersion, NextVersion, NextRecord);
@@ -191,8 +181,6 @@ encode_record(key, Term, float) when is_float(Term) ->
     float_to_binary(Term);
 encode_record(value, Term, float) when is_float(Term) ->
     Term;
-encode_record(_, Term, string) when is_list(Term) ->
-    list_to_binary(Term);
 encode_record(value, Term, #{} = Struct) when is_map(Term) ->
     [{KeyType, ValueType}] = maps:to_list(Struct),
     {maps:fold(
@@ -250,8 +238,6 @@ decode_record(Term, float) when is_float(Term) ->
     Term;
 decode_record(Term, float) when is_binary(Term) ->
     binary_to_float(Term);
-decode_record(Term, string) when is_binary(Term) ->
-    binary_to_list(Term);
 decode_record({Term}, #{} = Struct) when is_list(Term) ->
     [{KeyType, ValueType}] = maps:to_list(Struct),
     lists:foldl(

@@ -58,7 +58,7 @@
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 -export([to_binary/1]).
--export([add_view/3, query_view/3, delete_view/2]).
+-export([add_view/3, query_view/3, delete_view/2, stream_view/3]).
 -export([default_bucket/0, sync_enabled_bucket/0]).
 -export([rev_to_number/1]).
 
@@ -84,8 +84,7 @@ sync_enabled_bucket() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
-init_driver(#{db_nodes := DBNodes0} = State) ->
-    DBNodes = [lists:nth(crypto:rand_uniform(1, length(DBNodes0) + 1), DBNodes0)],
+init_driver(#{db_nodes := DBNodes} = State) ->
     Port = 8091,
 
     BucketInfo = lists:foldl(fun
@@ -136,7 +135,25 @@ init_driver(#{db_nodes := DBNodes0} = State) ->
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()],
     NodeToSync :: node()) -> ok.
 init_bucket(_Bucket, _Models, _NodeToSync) ->
+    DesignId = <<"_design/versions">>,
+
+    Doc = jiffy:decode(jiffy:encode(#{
+        <<"_id">> => DesignId,
+        <<"views">> => #{
+            <<"versions">> =>
+                #{<<"map">> =>
+                    <<"function(doc) { emit([doc['", ?RECORD_TYPE_MARKER, "'], doc['", ?RECORD_VERSION_MARKER ,"']], doc); }">>}
+        }
+    })),
+    lists:foreach(fun(Bucket) ->
+        Res = db_run(Bucket, couchbeam, save_doc, [Doc], 5),
+        ?info("ViewRes ~p", [Res])
+        end, get_buckets()),
     ok.
+
+get_buckets() ->
+    datastore_worker:state_get(available_buckets).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -659,7 +676,7 @@ healthcheck(_State) ->
                     {error, Reason} ->
                         [Reason | AccIn]
                 end
-            end, [], datastore_worker:state_get(available_buckets)),
+            end, [], get_buckets()),
         case Reasons of
             [] -> ok;
             _ ->
@@ -1462,6 +1479,38 @@ add_view(ModelName, Id, ViewFunction) ->
     {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [Doc], 5),
     true = verify_ans(SaveAns),
     ok.
+
+stream_view(ModelName, Id, Options) ->
+    Host = self(),
+    spawn_link(fun() ->
+        case db_run(select_bucket(ModelName:model_init()), couchbeam_view, stream, [{Id, Id}, Options], 3) of
+            {ok, Ref} ->
+                Loop = fun LoopFun() ->
+                    receive
+                        {Ref, done} ->
+                            Host ! {self(), {stream_ended, done}};
+                        {Ref, {row, {Proplist}}} ->
+                            try
+                                {_, DocId} = lists:keyfind(<<"id">>, 1, Proplist),
+%%                                {_, Value} = lists:keyfind(<<"value">>, 1, Proplist),
+                                {_, DocKey} = from_driver_key(DocId),
+%%                                {Version, Record} = datastore_json:decode_record(Value),
+                                Host ! {self(), {stream_data, DocKey}}
+                            catch
+                                _:Reason ->
+                                    ct:print("Stream View: Unable to process document ~p due to ~p", [{Proplist}, Reason]),
+                                    ?warning_stacktrace("Stream View: Unable to process document ~p due to ~p", [{Proplist}, Reason])
+                            end,
+                            LoopFun();
+                        {Ref, Unknown} ->
+                            Host ! {self(), {stream_data, {none, Unknown}}}
+                    end end,
+                Loop();
+            {error, Reason} ->
+                Host ! {self(), {stream_error, Reason}}
+        end
+    end).
+
 
 %%--------------------------------------------------------------------
 %% @doc
