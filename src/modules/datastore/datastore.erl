@@ -75,7 +75,7 @@
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
+-export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
 
 %%%===================================================================
 %%% API
@@ -253,15 +253,15 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
             {abort, Acc}
     end,
 
-    GetFromCache = fun(Time1, Time2) ->
+    GetFromCache = fun(Counter1, Counter2) ->
         case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Mode]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-                    {ok, Time1, _} ->
+                    {ok, Counter1, _} ->
                         {ok, Ans1};
-                    {monitored, MList, Time1, _} ->
+                    {monitored, MList, Counter1, _} ->
                         {check, Ans1, MList};
-                    {monitored, MList, _, Time2} ->
+                    {monitored, MList, _, Counter2} ->
                         {check, Ans1, MList};
                     _ ->
                         {check, Ans1}
@@ -272,10 +272,10 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
     end,
 
     FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        {ok, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
-        {monitored, _, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
+        {ok, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
+        {monitored, _, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
         _ ->
             case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Mode]) of
                 {ok, Ans1} ->
@@ -720,15 +720,15 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
 
-    GetFromCache = fun(Time1, Time2) ->
+    GetFromCache = fun(Counter1, Counter2) ->
         case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-                    {ok, Time1, _} ->
+                    {ok, Counter1, _} ->
                         {ok, Ans1};
-                    {monitored, MList, Time1, _} ->
+                    {monitored, MList, Counter1, _} ->
                         {check, Ans1, MList};
-                    {monitored, MList, _, Time2} ->
+                    {monitored, MList, _, Counter2} ->
                         {check, Ans1, MList};
                     _ ->
                         {check, Ans1}
@@ -739,10 +739,10 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
     end,
 
     FirstPhaseAns = case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
-        {ok, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
-        {monitored, _, Time1, Time2} ->
-            GetFromCache(Time1, Time2);
+        {ok, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
+        {monitored, _, Counter1, Counter2} ->
+            GetFromCache(Counter1, Counter2);
         _ ->
             case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
                 {ok, Ans1} ->
@@ -875,6 +875,16 @@ exists_link_doc(Level, Key, ModelName, Scope) ->
     when Result :: term().
 run_transaction(ModelName, ResourceId, Fun) ->
     exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_transation, [ResourceId, Fun]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs given function within transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_transaction(fun(() -> Result)) -> Result
+    when Result :: term().
+run_transaction(Fun) ->
+    mnesia_cache_driver:run_transation(Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1032,12 +1042,49 @@ load_local_state(Models) ->
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
+            ok = validate_model_config(Config),
             lists:foreach(
                 fun(Hook) ->
                     ets:insert(?LOCAL_STATE, {Hook, ModelName})
                 end, Hooks),
             Config
         end, Models).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Validates model's configuration.
+%% @end
+%%--------------------------------------------------------------------
+-spec validate_model_config(model_behaviour:model_config()) -> ok | no_return().
+validate_model_config(#model_config{version = CurrentVersion, name = ModelName, store_level = StoreLevel}) ->
+    case lists:member(?PERSISTENCE_DRIVER, lists:flatten([level_to_driver(StoreLevel)])) of
+        false -> ok;
+        true ->
+            case lists:member({record_struct, 1}, ModelName:module_info(exports)) of
+                true ->
+                    try
+                        %% Check all versions up to CurrentVersion
+                        [datastore_json:validate_struct(ModelName:record_struct(Version))
+                            || Version <- lists:seq(1, CurrentVersion)],
+                        HasUpdater = lists:member({record_upgrade, 2}, ModelName:module_info(exports))
+                            orelse CurrentVersion == 1,
+                        case HasUpdater of
+                            true -> ok;
+                            false ->
+                                error({no_record_updater, CurrentVersion, ModelName})
+                        end,
+                        ok
+                    catch
+                        _:Reason ->
+                            ?error_stacktrace("Unable to validate record version for model ~p due to ~p", [ModelName, Reason]),
+                            error({invalid_record_version, CurrentVersion, ModelName})
+                    end;
+                false ->
+                    error({no_struct_def, ModelName})
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1307,13 +1354,13 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
             Level = caches_controller:cache_to_task_level(ModelName),
             lists:foreach(fun
                 ({task, Task}) ->
-                    ok = task_manager:start_task(Task, Level, true);
+                    ok = task_manager:start_task({cache_dump, Task}, Level, first_try);
                 (_) ->
                     ok % error already logged
             end, Tasks);
         {task, Task} ->
             Level = caches_controller:cache_to_task_level(ModelName),
-            ok = task_manager:start_task(Task, Level, true);
+            ok = task_manager:start_task({cache_dump, Task}, Level, first_try);
         {error, Reason} ->
             run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
     end.

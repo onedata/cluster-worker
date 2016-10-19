@@ -192,4 +192,4 @@ start_rollback_task(Funs, Context, Level) ->
         end
     end,
     ?warning_stacktrace("Starting rollback task"),
-    task_manager:start_task(Task, Level, true).
+    task_manager:start_task(Task, Level, batch).

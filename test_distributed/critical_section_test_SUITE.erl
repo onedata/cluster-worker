@@ -70,42 +70,61 @@ performance_test_base(Config) ->
         critical_section:run(random:uniform(), TestFun)
     end,
 
+    TestCriticalMnesia = fun() ->
+        critical_section:run_on_mnesia(<<"key">>, TestFun)
+    end,
+    TestCriticalMnesia2 = fun() ->
+        critical_section:run_on_mnesia(random:uniform(), TestFun)
+    end,
+
     TestTransaction = fun() ->
-        datastore:run_transaction(cache_controller, <<"key">>, TestFun)
+        critical_section:run_in_mnesia_transaction(<<"key">>, TestFun)
     end,
     TestTransaction2 = fun() ->
-        datastore:run_transaction(cache_controller, float_to_binary(random:uniform()), TestFun)
+        critical_section:run_in_mnesia_transaction(float_to_binary(random:uniform()), TestFun)
     end,
 
     T1 = check_time(TestCritical, [Worker]),
+    T1M = check_time(TestCriticalMnesia, [Worker]),
     T2 = check_time(TestTransaction, [Worker]),
     T3 = check_time(TestCritical, Workers),
+    T3M = check_time(TestCriticalMnesia, Workers),
     T4 = check_time(TestTransaction, Workers),
 
-    ct:print("~p", [{T1, T2, T3, T4}]),
+    ct:print("~p", [{T1, T1M, T2, T3, T3M, T4}]),
 
     T12 = check_time(TestCritical2, [Worker]),
+    T12M = check_time(TestCriticalMnesia2, [Worker]),
     T22 = check_time(TestTransaction2, [Worker]),
     T32 = check_time(TestCritical2, Workers),
+    T32M = check_time(TestCriticalMnesia2, Workers),
     T42 = check_time(TestTransaction2, Workers),
 
-    ct:print("~p", [{T12, T22, T32, T42}]),
+    ct:print("~p", [{T12, T12M, T22, T32, T32M, T42}]),
 
     [
         #parameter{name = critical_parallel_1_node, value = T1, unit = "us",
             description = "Time of 100 executions of critical section on 1 node"},
+        #parameter{name = critical_mnesia_parallel_1_node, value = T1M, unit = "us",
+            description = "Time of 100 executions of critical section with mnesia on 1 node"},
         #parameter{name = transaction_parallel_1_node, value = T2, unit = "us",
             description = "Time of 100 executions of transaction on 1 node"},
         #parameter{name = critical_parallel_2_node, value = T3, unit = "us",
             description = "Time of 100 executions of critical section on 2 nodes"},
+        #parameter{name = critical_parallel_mnesia_2_node, value = T3M, unit = "us",
+            description = "Time of 100 executions of critical section with mnesia on 2 nodes"},
         #parameter{name = transaction_parallel_2_node, value = T4, unit = "us",
             description = "Time of 100 executions of transaction on 2 nodes"},
         #parameter{name = critical_random_1_node, value = T12, unit = "us",
             description = "Time of 100 executions of critical section with random lock key on 1 node"},
+        #parameter{name = critical_mnesia_random_1_node, value = T12M, unit = "us",
+            description = "Time of 100 executions of critical section with mnesia with random lock key on 1 node"},
         #parameter{name = transaction_random_1_node, value = T22, unit = "us",
             description = "Time of 100 executions of transaction with random lock key on 1 node"},
         #parameter{name = critical_random_2_node, value = T32, unit = "us",
             description = "Time of 100 executions of critical section with random lock key on 2 nodes"},
+        #parameter{name = critical_mnesia_random_2_node, value = T32M, unit = "us",
+            description = "Time of 100 executions of critical section with mnesia with random lock key on 2 nodes"},
         #parameter{name = transaction_random_2_node, value = T42, unit = "us",
             description = "Time of 100 executions of transaction with random lock key on 2 nodes"}
     ].
@@ -126,7 +145,7 @@ run_fun(Fun, [W | Workers1], Workers2, Count) ->
     Ans = receive
         test_fun_ok -> ok
     after
-        5000 -> timeout
+        30000 -> timeout
     end,
     ?assertEqual(ok, Ans).
 

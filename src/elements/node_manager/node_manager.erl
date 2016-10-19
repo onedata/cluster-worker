@@ -181,6 +181,7 @@ init([]) ->
 
         next_mem_check(),
         next_task_check(),
+        erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
@@ -311,6 +312,10 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
 
     next_mem_check(),
     {noreply, NewState};
+
+handle_cast(configure_throttling, State) ->
+    ok = caches_controller:configure_throttling(),
+    {noreply, State};
 
 handle_cast(check_mem, State) ->
     next_mem_check(),
@@ -797,9 +802,9 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     case (TimeDiff >= timer:minutes(MaxInterval)) orelse
         ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
         true ->
-            ?info("Monitoring state: ~p", [MonState]),
+            ?debug("Monitoring state: ~p", [MonState]),
             spawn(fun() ->
-                ?info("Erlang ets mem usage: ~p", [
+                ?debug("Erlang ets mem usage: ~p", [
                     lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
 
@@ -835,12 +840,12 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                     fun({M, P}) ->
                         {M, erlang:process_info(P, current_stacktrace), P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
-                ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
+                ?debug("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
                     "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
                     TopProcesses, MergedStacks, MergedStacks2
                 ]),
 
-                ?info("Schedulers basic info: all: ~p, online: ~p",
+                ?debug("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
                 NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
                 case is_list(NewSchedulerInfo0) of
@@ -848,7 +853,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                         NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
                         gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
 
-                        ?info("Schedulers advanced info: ~p", [NewSchedulerInfo]),
+                        ?debug("Schedulers advanced info: ~p", [NewSchedulerInfo]),
                         case is_list(SchedulerInfo) of
                             true ->
                                 Percent = lists:map(fun({{I, A0, T0}, {I, A1, T1}}) ->
@@ -856,7 +861,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                                 {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai,Ti}) ->
                                     {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo,NewSchedulerInfo)),
                                 Aggregated = A/T,
-                                ?info("Schedulers utilization percent: ~p, aggregated: ~p", [Percent,Aggregated]);
+                                ?debug("Schedulers utilization percent: ~p, aggregated: ~p", [Percent,Aggregated]);
                             _ ->
                                 ok
                         end;
