@@ -51,7 +51,7 @@
 -type delete_predicate() :: fun(() -> boolean()).
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
--type aux_cache_key() :: {timestamp(), key()}.
+-type aux_cache_key() :: {term(), key()}.
 -type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
 
 

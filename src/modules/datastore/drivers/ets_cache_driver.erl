@@ -405,7 +405,7 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, _NodeToSync) ->
 %% {@link auxiliary_cache_behaviour} callback first/2.
 %% @end
 %%--------------------------------------------------------------------
--spec first(model_behaviour:model_config(), Field) -> datastore:aux_cache_handle().
+-spec first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
 first(#model_config{}=ModelConfig, Field) ->
     ets:first(aux_table_name(ModelConfig, Field)).
 
@@ -428,7 +428,7 @@ next(#model_config{}=ModelConfig, Field, Handle) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_id(datastore:aux_cache_key()) -> datastore:key().
-get_id({_Timestamp, Key}) -> Key.
+get_id({_Field, Key}) -> Key.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -452,8 +452,8 @@ aux_delete(ModelConfig, Field, [Key]) ->
     Args :: [term()]) -> ok.
 aux_save(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    CurrentFieldValue = get_field_value(Doc, Field),
-    case aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
+    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
+    case is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
         {true, AuxKey} ->
             ets:delete(AuxTableName, AuxKey),
             ets:insert(AuxTableName, {CurrentFieldValue, Key});
@@ -483,7 +483,7 @@ aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
     Args :: [term()]) -> ok.
 aux_create(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    CurrentFieldValue = get_field_value(Doc, Field),
+    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
     ets:insert(AuxTableName, {CurrentFieldValue, Key}).
 
 
@@ -615,14 +615,14 @@ create_table(TableName) ->
 %%--------------------------------------------------------------------
 -spec create_table(TableName :: atom(), Type :: ets:type()) -> ok.
 create_table(TableName, Type) ->
-    Ans = catch ets:new(TableName, [named_table, public, Type]),
+    Ans = (catch ets:new(TableName, [named_table, public, Type])),
     ?info("Creating ets table: ~p, result: ~p", [TableName, Ans]).
 
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Creates new ETS table with given name.
+%% Return driver to auxiliary cache according o given model and field.
 %% @end
 %%%--------------------------------------------------------------------
 -spec aux_cache_driver(datastore:model_config(), atom()) -> atom().
@@ -634,24 +634,17 @@ aux_cache_driver(#model_config{auxiliary_caches = AuxTables}, Field) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Creates new ETS table with given name.
+%% Determines whether value of field Field has changed. Old value is checked
+%% in auxiliary cache table.
+%% If it exists and is different than current value
+%% tuple {true, {OldFieldValue, Key}} is returned.
+%% If it doesn't exist true is returned.
+%% If it exists and it's value hasn't changed, false is returned.
 %% @end
 %%%--------------------------------------------------------------------
--spec get_field_value(datastore:model_config(), atom()) -> atom().
-get_field_value(#document{value=Value}, Field) ->
-    Map = datastore_utils:shallow_to_map(Value),
-    maps:get(Field, Map).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Creates new ETS table with given name.
-%% @end
-%%%--------------------------------------------------------------------
--spec aux_field_value_updated(datastore:model_config(), datastore:key(), atom(),
+-spec is_aux_field_value_updated(datastore:model_config(), datastore:key(), atom(),
     term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
-aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
+is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
     case aux_get(AuxTableName, Field, [Key]) of
         [] -> true;
         [{CurrentFieldValue, Key}] -> false;
@@ -665,8 +658,8 @@ aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
 %% matching the Key.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:key()) -> [{term(), datastore:key()}].
+-spec aux_get(Model :: model_behaviour:model_config(), Field :: atom(),
+    Key :: [datastore:key()]) -> [{term(), datastore:key()}].
 aux_get(ModelConfig, Field, [Key]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),

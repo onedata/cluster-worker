@@ -29,7 +29,7 @@
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
 %% auxiliary ordered_store behaviour
--export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3]).
+-export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3, aux_create/3]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -549,13 +549,45 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
         TabName = aux_table_name(ModelConfig, Field),
         case NodeToSync == Node of
             true ->
-                create_table(TabName, auxiliary_cache_entry, [], [Node]); %% TODO must define record for mnesia
+                create_table(TabName, auxiliary_cache_entry, [], [Node]);
             _ ->
                 ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [[TabName], ?MNESIA_WAIT_TIMEOUT]),
                 expand_table(TabName, Node, NodeToSync)
         end
     end, Fields),
     ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_cache_behaviour} callback first/2.
+%% @end
+%%--------------------------------------------------------------------
+-spec first(model_behaviour:model_config(), Field) -> datastore:aux_cache_handle().
+first(#model_config{}=ModelConfig, Field) ->
+    %% TODO
+    error(not_supported).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_cache_behaviour} callback next/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec next(model_behaviour:model_config(), Field :: atom(),
+    Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
+next(_, _, '$end_of_table') -> '$end_of_table';
+next(#model_config{}=ModelConfig, Field, Handle) ->
+    %% TODO
+    error(not_supported).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_cache_behaviour} callback get_id/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_id(datastore:aux_cache_key()) -> datastore:key().
+get_id({_Field, Key}) -> Key.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -583,12 +615,21 @@ aux_delete(ModelConfig, Field, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_save(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
-aux_save(ModelConfig, Field, Key) ->
+    Args :: [term()]) -> ok.
+aux_save(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    Action = fun() ->
-        mnesia:dirty_write(AuxTableName,
-            #auxiliary_cache_entry{key={erlang:system_time(miliseconds), Key}})
+    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
+    Action = case is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
+        {true, AuxKey} ->
+            fun() ->
+                mnesia:dirty_delete(AuxTableName, #auxiliary_cache_entry{key=AuxKey}),
+                mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+            end;
+        true ->
+            fun() ->
+                mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+            end;
+        _ -> ok
     end,
     mnesia_run(dirty_async, Action),
     ok.
@@ -599,11 +640,26 @@ aux_save(ModelConfig, Field, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
-aux_update(ModelConfig, Field, Key) ->
-    aux_delete(ModelConfig, Field, Key),
-    aux_save(ModelConfig, Field, Key).
+    Args :: [term()]) -> ok.
+aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
+    Doc = datastore:get(Level, ModelName, Key),
+    aux_save(ModelConfig, Field, [Key, Doc]).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_cache_behaviour} callback aux_create/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_create(Model :: model_behaviour:model_config(), Field :: atom(),
+    Args :: [term()]) -> ok.
+aux_create(ModelConfig, Field, [Key, Doc]) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
+    Action = fun() ->
+        mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+    end,
+    mnesia_run(dirty_async, Action),
+    ok.
 
 %%%===================================================================
 %%% Internal functions
@@ -860,3 +916,38 @@ list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
         {abort, NewAcc} ->
             {ok, NewAcc}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Determines whether value of field Field has changed. Old value is checked
+%% in auxiliary cache table.
+%% If it exists and is different than current value
+%% tuple {true, {OldFieldValue, Key}} is returned.
+%% If it doesn't exist true is returned.
+%% If it exists and it's value hasn't changed, false is returned.
+%% @end
+%%%--------------------------------------------------------------------
+-spec is_aux_field_value_updated(datastore:model_config(), datastore:key(), atom(),
+    term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
+is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
+    case aux_get(AuxTableName, Field, [Key]) of
+        [] -> true;
+        [{CurrentFieldValue, Key}] -> false;
+        [AuxKey] -> {true, AuxKey}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns entry from auxiliary table of Model connected with Field,
+%% matching the Key.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_get(Model :: model_behaviour:model_config(), Field :: atom(),
+    Key :: [datastore:key()]) -> [{term(), datastore:key()}].
+aux_get(ModelConfig, Field, [Key]) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),
+    mnesia:dirty_select(AuxTableName, MatchSpec).
+

@@ -12,11 +12,12 @@
 -author("Rafal Slota").
 
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_models_def.hrl").
 
 -define(KEY_LEN, 32).
 
 %% API
--export([shallow_to_map/1, shallow_to_record/1, gen_uuid/0, gen_uuid/1]).
+-export([shallow_to_map/1, shallow_to_record/1, gen_uuid/0, gen_uuid/1, get_field_value/2]).
 
 %%%===================================================================
 %%% API
@@ -93,6 +94,17 @@ gen_uuid() ->
 gen_uuid(Term) ->
     http_utils:base64url_encode(term_to_binary(Term)).
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns value of given field from record save in document.
+%% @end
+%%%--------------------------------------------------------------------
+-spec get_field_value(datastore:model_config(), atom()) -> atom().
+get_field_value(#document{value=Value}, Field) ->
+    Map = datastore_utils:shallow_to_map(Value),
+    maps:get(Field, Map).
 
 %%%===================================================================
 %%% Internal functions
