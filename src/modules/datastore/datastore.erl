@@ -219,7 +219,7 @@ get(Level, ModelName, Key) ->
 -spec list_dirty(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list_dirty(Level, ModelName, Fun, AccIn) ->
-    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, dirty).
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, dirty}]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -229,7 +229,7 @@ list_dirty(Level, ModelName, Fun, AccIn) ->
 -spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Level, ModelName, Fun, AccIn) ->
-    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, transaction).
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, transaction}]).
 
 
 %%--------------------------------------------------------------------
@@ -239,9 +239,9 @@ list(Level, ModelName, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), Drivers :: atom() | [atom()],
     ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term(),
-    Mode :: store_driver_behaviour:mode()) ->
+    Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
+list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Opts) ->
     CLevel = driver_to_level(Driver1),
     CCCUuid = ModelName,
     ModelConfig = ModelName:model_init(),
@@ -254,7 +254,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
     end,
 
     GetFromCache = fun(Counter1, Counter2) ->
-        case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Mode]) of
+        case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Opts]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
                     {ok, Counter1, _} ->
@@ -277,7 +277,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
         {monitored, _, Counter1, Counter2} ->
             GetFromCache(Counter1, Counter2);
         _ ->
-            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Mode]) of
+            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Opts]) of
                 {ok, Ans1} ->
                     {check, Ans1};
                 Err1 ->
@@ -329,7 +329,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Mode) ->
             end,
 
             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-            case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1, Mode]) of
+            case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1, Opts]) of
                 {ok, Ans_2} ->
                     caches_controller:end_consistency_restoring(CLevel, CCCUuid),
                     {ok, Ans_2};

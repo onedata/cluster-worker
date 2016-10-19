@@ -379,7 +379,7 @@ exists_link_doc(ModelConfig, Key, Scope) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), _Mode :: store_driver_behaviour:mode()) -> no_return().
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) -> no_return().
 list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn, _Mode) ->
     BinModelName = atom_to_binary(ModelName, utf8),
     _BinBucket = atom_to_binary(Bucket, utf8),

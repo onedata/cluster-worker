@@ -288,7 +288,7 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), Mode :: store_driver_behaviour:mode()) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(#model_config{} = ModelConfig, Fun, AccIn, dirty) ->
     list_dirty(ModelConfig, Fun, AccIn);
@@ -776,7 +776,6 @@ list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
             {ok, NewAcc}
     end;
 list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
-
     [Obj] = mnesia:dirty_read(Table, CurrentKey),
     Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
     case Fun(Doc, AccIn) of

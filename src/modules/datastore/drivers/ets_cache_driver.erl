@@ -173,7 +173,7 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), _Mode :: store_driver_behaviour:mode()) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(#model_config{} = ModelConfig, Fun, AccIn, _Mode) ->
     SelectAll = [{'_', [], ['$_']}],
