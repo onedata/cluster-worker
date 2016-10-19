@@ -7,7 +7,7 @@
 %%% WRITEME
 %%% @end
 %%%-------------------------------------------------------------------
--module(auxiliary_ordered_store_behaviour).
+-module(auxiliary_cache_behaviour).
 -author("Jakub Kudzia").
 
 
@@ -17,7 +17,7 @@
 %% given in list of keys of map #model_config.auxiliary_tables
 %% @end
 %%--------------------------------------------------------------------
--callback create_auxiliary_ordered_stores(model_behaviour:model_config(),
+-callback create_auxiliary_caches(model_behaviour:model_config(),
     Fields :: [atom()], NodeToSync :: node()) ->
     ok | datastore:generic_error() | no_return().
 
@@ -28,7 +28,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback first(model_behaviour:model_config(), Field :: atom()) ->
-    datastore:aux_store_handle().
+    datastore:aux_cache_handle().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -36,8 +36,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback next(model_behaviour:model_config(), Field :: atom(),
-    Handle :: datastore:aux_store_handle()) ->
-    datastore:aux_store_handle().
+    Handle :: datastore:aux_cache_handle()) ->
+    datastore:aux_cache_handle().
 
 
 %%--------------------------------------------------------------------
@@ -45,39 +45,50 @@
 %% Returns next key to iterate over auxiliary ordered store.
 %% @end
 %%--------------------------------------------------------------------
--callback get_id(Key :: datastore:aux_store_key()) -> datastore:key().
+-callback get_id(Key :: datastore:aux_cache_key()) -> datastore:key().
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes document with key Key in auxiliary_store of Model connected
+%% Deletes document with key Key in auxiliary_cache of Model connected
 %% with Field.
 %% @end
 %%--------------------------------------------------------------------
 -callback aux_delete(
     Model :: model_behaviour:model_config(),
     Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
+    Args :: [term()]) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves document with key Key in auxiliary_store of Model connected
+%% Saves document with key Key in auxiliary_cache of Model connected
 %% with Field.
 %% @end
 %%--------------------------------------------------------------------
 -callback aux_save(
     Model :: model_behaviour:model_config(),
     Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
+    Args :: [term()]) -> ok.
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates document with key Key in auxiliary_store of Model connected
+%% Updates document with key Key in auxiliary_cache of Model connected
 %% with Field.
 %% @end
 %%--------------------------------------------------------------------
 -callback aux_update(
     Model :: model_behaviour:model_config(),
     Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
+    Args :: [term()]) -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates document with key Key in auxiliary_cache of Model connected
+%% with Field.
+%% @end
+%%--------------------------------------------------------------------
+-callback aux_create(
+    Model :: model_behaviour:model_config(),
+    Field :: atom(),
+    Args :: [term()]) -> ok.

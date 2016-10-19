@@ -47,7 +47,7 @@
     other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
     link_duplication = false :: boolean(),
     sync_enabled = false :: boolean(),
-    auxiliary_stores = #{} :: #{Field :: atom() => datastore:aux_store_level()}
+    auxiliary_caches = #{} :: #{Field :: atom() => datastore:aux_cache_level()}
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -68,7 +68,7 @@
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, false)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication, [])).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication, AuxiliaryStores),
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication, AuxiliaryCaches),
     #model_config{
         name = ?MODULE,
         size = record_info(size, ?MODULE),
@@ -86,9 +86,9 @@
         other_link_scopes = ScopeFun2, % link_utils:other_scopes_fun()
         link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
         sync_enabled = false, % Models with sync enabled will be stored in non-default bucket to reduce DB load.
-        auxiliary_stores = AuxiliaryStores
-        % Map describing auxiliary stores for given model
-        % it has form of #{Field => Level} which means that auxiliary store
+        auxiliary_caches = AuxiliaryCaches
+        % Map describing auxiliary caches for given model
+        % it has form of #{Field => Level} which means that auxiliary cache
         % ordered by Field will be created on level Level
     }
 ).

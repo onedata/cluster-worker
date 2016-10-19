@@ -115,15 +115,15 @@ model_init() ->
 'after'(_ModelName, _Method, ?DISK_ONLY_LEVEL, _Context, _ReturnValue) ->
     ok;
 'after'(ModelName, delete, _Level, [Key], ok) ->
-    foreach_aux_store(ModelName, delete, [Key]);
-'after'(ModelName, save, _Level, [_Doc], {ok, Key}) ->
-    foreach_aux_store(ModelName, delete, [Key]);
-'after'(ModelName, update, _Level, [_Diff], {ok, Key}) ->
-    foreach_aux_store(ModelName, update, [Key]);
-'after'(ModelName, create, _Level, [_Diff], {ok, Key}) ->
-    foreach_aux_store(ModelName, save, [Key]);
-'after'(ModelName, create_or_update, _Level, [_Doc, _Diff], {ok, Key}) ->
-    foreach_aux_store(ModelName, update, [Key]);
+    foreach_aux_cache(ModelName, delete, [Key]);
+'after'(ModelName, save, _Level, [Doc], {ok, Key}) ->
+    foreach_aux_cache(ModelName, save, [Key, Doc]);
+'after'(ModelName, update, Level, [_Diff], {ok, Key}) ->
+    foreach_aux_cache(ModelName, update, [Key, Level]);
+'after'(ModelName, create, _Level, [Doc], {ok, Key}) ->
+    foreach_aux_cache(ModelName, create, [Key, Doc]);
+'after'(ModelName, create_or_update, Level, [_Doc, _Diff], {ok, Key}) ->
+    foreach_aux_cache(ModelName, update, [Key, Level]);
 'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
     ok.
 
@@ -150,7 +150,7 @@ before(_ModelName, _Method, _Level, _Context) ->
 %%--------------------------------------------------------------------
 -spec get_hooks_config() -> list().
 get_hooks_config() ->
-    get_hooks_config(datastore:models_with_aux_stores()).
+    get_hooks_config(datastore:models_with_aux_caches()).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -170,37 +170,36 @@ get_hooks_config(Models) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Performs given action (Method) on each auxiliary store for
+%% Performs given action (Method) on each auxiliary cache for
 %% given model.
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_aux_store(
+-spec foreach_aux_cache(
     ModelName :: model_behaviour:model_type(),
     Method :: model_behaviour:model_action(), term()) -> ok.
-foreach_aux_store(#model_config{}=ModelConfig, Method, Args) ->
-    AuxStores = get_model_aux_stores(ModelConfig),
+foreach_aux_cache(#model_config{}=ModelConfig, Method, Args) ->
+    AuxCaches = get_model_aux_caches(ModelConfig),
     AuxMethod = method_to_aux_method(Method),
     lists:foreach(fun({Field, StoreLevel}) ->
         Driver = datastore:level_to_driver(StoreLevel),
-        %% TODO !!! some kind of argument mapping is needed here, according to given store level
         Driver:AuxMethod(ModelConfig, Field, Args)
-    end, maps:to_list(AuxStores));
-foreach_aux_store(ModelName, Method, Args) ->
-    foreach_aux_store(ModelName:model_init(), Method, Args).
+    end, maps:to_list(AuxCaches));
+foreach_aux_cache(ModelName, Method, Args) ->
+    foreach_aux_cache(ModelName:model_init(), Method, Args).
 
 
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets map of auxiliary stores for given model.
+%% Gets map of auxiliary caches for given model.
 %% @end
 %%--------------------------------------------------------------------
--spec get_model_aux_stores(#model_config{} | model_behaviour:model_type()) -> #{}.
-get_model_aux_stores(#model_config{auxiliary_stores = AuxStores}) ->
-    AuxStores;
-get_model_aux_stores(ModelName) ->
-    get_model_aux_stores(ModelName:model_init()).
+-spec get_model_aux_caches(#model_config{} | model_behaviour:model_type()) -> #{}.
+get_model_aux_caches(#model_config{auxiliary_caches = AuxCaches}) ->
+    AuxCaches;
+get_model_aux_caches(ModelName) ->
+    get_model_aux_caches(ModelName:model_init()).
 
 
 %%--------------------------------------------------------------------
@@ -218,12 +217,12 @@ method_to_aux_method(Method) ->
 
 %% TODO
 %% TODO * update drivers to newest behaviours
-%% TODO * implement auxiliary_store_behaviour in mnesia and ets drivers
+%% TODO * implement auxiliary_cache_behaviour in mnesia and ets drivers
 %% TODO * implement posthook 'after' method
 %% TODO     - is delete, save and update enough ?
 %% TODO     - is update ok if it's delete and save
 
-%% TODO * implement ordered_list function
+%% TODO * implement ordered_list function using auxiliary tables !!!
 
 
 

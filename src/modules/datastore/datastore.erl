@@ -47,16 +47,16 @@
 
 %% API utility types
 -type store_level() :: ?DISK_ONLY_LEVEL | ?LOCAL_ONLY_LEVEL | ?GLOBAL_ONLY_LEVEL | ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
--type aux_store_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
+-type aux_cache_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
 -type delete_predicate() :: fun(() -> boolean()).
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
--type aux_store_key() :: {timestamp(), key()}.
--type aux_store_handle() :: aux_store_key() | '$end_of_table'.
+-type aux_cache_key() :: {timestamp(), key()}.
+-type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
 
 
--export_type([store_level/0, aux_store_level/0, delete_predicate/0, list_fun/0,
-    exists_return/0, aux_store_key/0, aux_store_handle/0]).
+-export_type([store_level/0, aux_cache_level/0, delete_predicate/0, list_fun/0,
+    exists_return/0, aux_cache_key/0, aux_cache_handle/0]).
 
 %% Links' types
 -type link_version() :: non_neg_integer().
@@ -80,7 +80,7 @@
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1, models_with_aux_stores/0]).
+-export([run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1, models_with_aux_caches/0]).
 
 %%%===================================================================
 %%% API
@@ -909,12 +909,12 @@ driver_to_module(Driver) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns list of models which have auxiliary stores created.
+%% Returns list of models which have auxiliary caches created.
 %% @end
 %%--------------------------------------------------------------------
--spec models_with_aux_stores() -> [#model_config{}].
-models_with_aux_stores() ->
-    [{_, Models}] = ets:lookup(?LOCAL_STATE, models_with_aux_stores),
+-spec models_with_aux_caches() -> [#model_config{}].
+models_with_aux_caches() ->
+    [{_, Models}] = ets:lookup(?LOCAL_STATE, models_with_aux_caches),
     Models.
 
 
@@ -1115,7 +1115,7 @@ init_drivers(Configs, NodeToSync) ->
                     DriverModule = driver_to_module(Driver),
                     ok = DriverModule:init_bucket(Bucket, Models, NodeToSync)
                 end, [?PERSISTENCE_DRIVER, ?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER]),
-            init_auxiliary_stores(Models, NodeToSync)
+            init_auxiliary_caches(Models, NodeToSync)
         end, maps:to_list(configs_per_bucket(Configs))).
 
 %%--------------------------------------------------------------------
@@ -1161,20 +1161,20 @@ initialize_state(NodeToSync) ->
 %% Initialize auxiliary tables for given Models
 %% @end
 %%--------------------------------------------------------------------
--spec init_auxiliary_stores([#model_config{}], NodeToSync :: node()) -> ok.
-init_auxiliary_stores(Models, NodeToSync) ->
-    ModelsWithAuxStores = lists:foldl(
+-spec init_auxiliary_caches([#model_config{}], NodeToSync :: node()) -> ok.
+init_auxiliary_caches(Models, NodeToSync) ->
+    ModelsWithAuxCaches = lists:foldl(
         fun
-            (#model_config{auxiliary_stores=[]}, AccIn) ->
+            (#model_config{auxiliary_caches=[]}, AccIn) ->
                 AccIn;
-            (M = #model_config{auxiliary_stores=AuxStores}, AccIn) ->
+            (M = #model_config{auxiliary_caches=AuxCaches}, AccIn) ->
                 lists:foldl(fun({StoreLevel, Fields}) ->
                     Driver = level_to_driver(StoreLevel),
-                    Driver:create_auxiliary_ordered_stores(M, Fields, NodeToSync)
-                end, [], maps:to_list(invert(AuxStores))),
+                    Driver:create_auxiliary_caches(M, Fields, NodeToSync)
+                end, [], maps:to_list(invert(AuxCaches))),
                 [M | AccIn]
         end, [], Models),
-    ets:insert(?LOCAL_STATE, {models_with_aux_stores, ModelsWithAuxStores}),
+    ets:insert(?LOCAL_STATE, {models_with_aux_caches, ModelsWithAuxCaches}),
     ok.
 
 

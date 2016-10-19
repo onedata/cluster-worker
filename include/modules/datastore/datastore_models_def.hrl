@@ -72,7 +72,9 @@
     last_update_seconds :: undefined | integer()
 }).
 
--record(auxiliary_store_entry,{
+-record(auxiliary_cache_controller,{}).
+
+-record(auxiliary_cache_entry,{
     key :: {term(), datastore:ext_key()},
     value % currently this field is not used
 }).

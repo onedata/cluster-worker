@@ -12,7 +12,7 @@
 -module(ets_cache_driver).
 -author("Rafal Slota").
 -behaviour(store_driver_behaviour).
--behaviour(auxiliary_ordered_store_behaviour).
+-behaviour(auxiliary_cache_behaviour).
 
 
 -include("modules/datastore/datastore_models_def.hrl").
@@ -27,8 +27,8 @@
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
-%% auxiliary_ordered_store_behaviour
--export([create_auxiliary_ordered_stores/3, first/2, next/3, get_id/1, aux_delete/3, aux_save/3, aux_update/3]).
+%% auxiliary_cache_behaviour
+-export([create_auxiliary_caches/3, first/2, next/3, get_id/1, aux_delete/3, aux_save/3, aux_update/3, aux_create/3]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -76,7 +76,6 @@ init_bucket(_Bucket, Models, _NodeToSync) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
     true = ets:insert(table_name(ModelConfig), {Key, Value}),
-    aux_stores_save(ModelConfig, Key),
     {ok, Key}.
 
 %%--------------------------------------------------------------------
@@ -202,8 +201,8 @@ list(#model_config{} = ModelConfig, Fun, AccIn, _Mode) ->
     Mode :: store_driver_behaviour:mode()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list_ordered(#model_config{} = ModelConfig, Fun, AccIn, Field,  _Mode) ->
-    AuxStoreDriver = aux_store_driver(ModelConfig, Field),
-    First = AuxStoreDriver:first(ModelConfig, Field),
+    AuxCacheDriver = aux_cache_driver(ModelConfig, Field),
+    First = AuxCacheDriver:first(ModelConfig, Field),
     list_ordered_next(ModelConfig, First, Field, Fun, AccIn).
 
 
@@ -383,19 +382,19 @@ delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document)
     ok.
 
 %%%===================================================================
-%%% auxiliary_ordered_store_behaviour callbacks
+%%% auxiliary_cache_behaviour callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback
-%% create_auxiliary_ordered_stores/2.
+%% {@link auxiliary_cache_behaviour} callback
+%% create_auxiliary_caches/2.
 %% @end
 %%--------------------------------------------------------------------
--spec create_auxiliary_ordered_stores(
+-spec create_auxiliary_caches(
     model_behaviour:model_config(), Fields :: [atom()], _NodeToSync :: node()) ->
     ok | datastore:generic_error() | no_return().
-create_auxiliary_ordered_stores(#model_config{}=ModelConfig, Fields, _NodeToSync) ->
+create_auxiliary_caches(#model_config{}=ModelConfig, Fields, _NodeToSync) ->
     lists:foreach(fun(Field) ->
         create_table(aux_table_name(ModelConfig, Field), ordered_set)
     end, Fields).
@@ -403,21 +402,21 @@ create_auxiliary_ordered_stores(#model_config{}=ModelConfig, Fields, _NodeToSync
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback first/2.
+%% {@link auxiliary_cache_behaviour} callback first/2.
 %% @end
 %%--------------------------------------------------------------------
--spec first(model_behaviour:model_config(), Field) -> datastore:aux_store_handle().
+-spec first(model_behaviour:model_config(), Field) -> datastore:aux_cache_handle().
 first(#model_config{}=ModelConfig, Field) ->
     ets:first(aux_table_name(ModelConfig, Field)).
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback next/3.
+%% {@link auxiliary_cache_behaviour} callback next/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec next(model_behaviour:model_config(), Field :: atom(),
-    Handle :: datastore:aux_store_handle()) -> datastore:aux_store_handle().
+    Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
 next(_, _, '$end_of_table') -> '$end_of_table';
 next(#model_config{}=ModelConfig, Field, Handle) ->
     ets:next(aux_table_name(ModelConfig, Field), Handle).
@@ -425,20 +424,20 @@ next(#model_config{}=ModelConfig, Field, Handle) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback get_id/1.
+%% {@link auxiliary_cache_behaviour} callback get_id/1.
 %% @end
 %%--------------------------------------------------------------------
--spec get_id(datastore:aux_store_key()) -> datastore:key().
+-spec get_id(datastore:aux_cache_key()) -> datastore:key().
 get_id({_Timestamp, Key}) -> Key.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback delete/3.
+%% {@link auxiliary_cache_behaviour} callback delete/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
-aux_delete(ModelConfig, Field, Key) ->
+    Args :: [term()]) -> ok.
+aux_delete(ModelConfig, Field, [Key]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),
     ets:select_delete(AuxTableName, MatchSpec),
@@ -446,26 +445,46 @@ aux_delete(ModelConfig, Field, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback aux_save/3.
+%% {@link auxiliary_cache_behaviour} callback aux_save/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_save(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
-aux_save(ModelConfig, Field, Key) ->
+    Args :: [term()]) -> ok.
+aux_save(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    ets:insert(AuxTableName, {{erlang:system_time(miliseconds), Key}}),
+    CurrentFieldValue = get_field_value(Doc, Field),
+    case aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
+        {true, AuxKey} ->
+            ets:delete(AuxTableName, AuxKey),
+            ets:insert(AuxTableName, {CurrentFieldValue, Key});
+        true -> % there is no entry in AuxTableName matching Key
+            ets:insert(AuxTableName, {CurrentFieldValue, Key});
+        _ -> ok
+    end,
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback aux_update/3.
+%% {@link auxiliary_cache_behaviour} callback aux_update/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
-aux_update(ModelConfig, Field, Key) ->
-    aux_delete(ModelConfig, Field, Key),
-    aux_save(ModelConfig, Field, Key).
+    Args :: [term()]) -> ok.
+aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
+    Doc = datastore:get(Level, ModelName, Key),
+    aux_save(ModelConfig, Field, [Key, Doc]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link auxiliary_cache_behaviour} callback aux_create/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_create(Model :: model_behaviour:model_config(), Field :: atom(),
+    Args :: [term()]) -> ok.
+aux_create(ModelConfig, Field, [Key, Doc]) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    CurrentFieldValue = get_field_value(Doc, Field),
+    ets:insert(AuxTableName, {CurrentFieldValue, Key}).
 
 
 %%%===================================================================
@@ -510,19 +529,19 @@ list_next([], Handle, Fun, AccIn) ->
 %% Internat helper - accumulator for list/3.
 %% @end
 %%--------------------------------------------------------------------
--spec list_ordered_next(datastore:model_config(), datastore:aux_store_handle(),
+-spec list_ordered_next(datastore:model_config(), datastore:aux_cache_handle(),
     Field :: atom(), datastore:list_fun(), term()) ->
     {ok, Acc :: term()} | datastore:generic_error().
 list_ordered_next(_ModelConfig, '$end_of_table', _Field, _Fun, AccIn) ->
     {ok, AccIn};
 list_ordered_next(ModelConfig, Handle, Field, Fun, AccIn) ->
-    AuxStoreDriver = aux_store_driver(ModelConfig, Field),
-    Key = AuxStoreDriver:get_id(Handle),
+    AuxCacheDriver = aux_cache_driver(ModelConfig, Field),
+    Key = AuxCacheDriver:get_id(Handle),
     Obj = ets:lookup(table_name(ModelConfig), Key),
     Doc = #document{key = Key, value = Obj},
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
-            NextHandle = AuxStoreDriver:next(ModelConfig, Field, Handle),
+            NextHandle = AuxCacheDriver:next(ModelConfig, Field, Handle),
             list_ordered_next(ModelConfig, NextHandle, Field, Fun, NewAcc);
         {abort, NewAcc} ->
             {ok, NewAcc}
@@ -606,8 +625,8 @@ create_table(TableName, Type) ->
 %% Creates new ETS table with given name.
 %% @end
 %%%--------------------------------------------------------------------
--spec aux_store_driver(datastore:model_config(), atom()) -> atom().
-aux_store_driver(#model_config{auxiliary_tables = AuxTables}, Field) ->
+-spec aux_cache_driver(datastore:model_config(), atom()) -> atom().
+aux_cache_driver(#model_config{auxiliary_caches = AuxTables}, Field) ->
     AuxStoreLevel = maps:get(AuxTables, Field),
     datastore:level_to_driver(AuxStoreLevel).
 
@@ -618,13 +637,38 @@ aux_store_driver(#model_config{auxiliary_tables = AuxTables}, Field) ->
 %% Creates new ETS table with given name.
 %% @end
 %%%--------------------------------------------------------------------
--spec aux_store_driver(datastore:model_config(), atom()) -> atom().
-aux_stores_save(#model_config{auxiliary_tables = AuxTables}, Key) ->
-    Timestamp = erlang:now(),
-    lists:foreach(fun({Field, StoreLevel}) ->
-        Driver = datastore:level_to_driver(StoreLevel),
-        AuxStoreName = aux_table_name(ModelConfig, Field),
-        Driver:s
-    end, maps:to_list(AuxTables)).
+-spec get_field_value(datastore:model_config(), atom()) -> atom().
+get_field_value(#document{value=Value}, Field) ->
+    Map = datastore_utils:shallow_to_map(Value),
+    maps:get(Field, Map).
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Creates new ETS table with given name.
+%% @end
+%%%--------------------------------------------------------------------
+-spec aux_field_value_updated(datastore:model_config(), datastore:key(), atom(),
+    term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
+aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
+    case aux_get(AuxTableName, Field, [Key]) of
+        [] -> true;
+        [{CurrentFieldValue, Key}] -> false;
+        [AuxKey] -> {true, AuxKey}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns entry from auxiliary table of Model connected with Field,
+%% matching the Key.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
+    Key :: datastore:key()) -> [{term(), datastore:key()}].
+aux_get(ModelConfig, Field, [Key]) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),
+    ets:select(AuxTableName, MatchSpec).
 

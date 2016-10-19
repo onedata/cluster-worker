@@ -29,7 +29,7 @@
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
 %% auxiliary ordered_store behaviour
--export([create_auxiliary_ordered_stores/3, aux_delete/3, aux_save/3, aux_update/3]).
+-export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -531,25 +531,25 @@ run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
 
 
 %%%===================================================================
-%%% auxiliary_ordered_store_behaviour callbacks
+%%% auxiliary_cache_behaviour callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback
-%% create_auxiliary_ordered_stores/3.
+%% {@link auxiliary_cache_behaviour} callback
+%% create_auxiliary_caches/3.
 %% @end
 %%--------------------------------------------------------------------
--spec create_auxiliary_ordered_stores(
+-spec create_auxiliary_caches(
     model_behaviour:model_config(), Fields :: [atom()], NodeToSync :: node()) ->
     ok | datastore:generic_error() | no_return().
-create_auxiliary_ordered_stores(#model_config{}=ModelConfig, Fields, NodeToSync) ->
+create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
     Node = node(),
     lists:foreach(fun(Field) ->
         TabName = aux_table_name(ModelConfig, Field),
         case NodeToSync == Node of
             true ->
-                create_table(TabName, auxiliary_store_entry, [], [Node]); %% TODO must define record for mnesia
+                create_table(TabName, auxiliary_cache_entry, [], [Node]); %% TODO must define record for mnesia
             _ ->
                 ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [[TabName], ?MNESIA_WAIT_TIMEOUT]),
                 expand_table(TabName, Node, NodeToSync)
@@ -559,7 +559,7 @@ create_auxiliary_ordered_stores(#model_config{}=ModelConfig, Fields, NodeToSync)
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback delete/3.
+%% {@link auxiliary_cache_behaviour} callback delete/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
@@ -567,10 +567,10 @@ create_auxiliary_ordered_stores(#model_config{}=ModelConfig, Fields, NodeToSync)
 aux_delete(ModelConfig, Field, Key) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     MatchSpec = ets:fun2ms(
-        fun(#auxiliary_store_entry{key={_, K}}=R) when K == Key -> R end),
+        fun(#auxiliary_cache_entry{key={_, K}}=R) when K == Key -> R end),
     Action = fun() ->
         Selected = mnesia:dirty_select(AuxTableName, MatchSpec),
-        lists:foreach(fun(#auxiliary_store_entry{key=K}) ->
+        lists:foreach(fun(#auxiliary_cache_entry{key=K}) ->
             mnesia:dirty_delete(AuxTableName, K)
         end, Selected)
     end,
@@ -579,7 +579,7 @@ aux_delete(ModelConfig, Field, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback aux_save/3.
+%% {@link auxiliary_cache_behaviour} callback aux_save/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_save(Model :: model_behaviour:model_config(), Field :: atom(),
@@ -588,14 +588,14 @@ aux_save(ModelConfig, Field, Key) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     Action = fun() ->
         mnesia:dirty_write(AuxTableName,
-            #auxiliary_store_entry{key={erlang:system_time(miliseconds), Key}})
+            #auxiliary_cache_entry{key={erlang:system_time(miliseconds), Key}})
     end,
     mnesia_run(dirty_async, Action),
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_ordered_store_behaviour} callback aux_update/3.
+%% {@link auxiliary_cache_behaviour} callback aux_update/3.
 %% @end
 %%--------------------------------------------------------------------
 -spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
