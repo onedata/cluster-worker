@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([run/2, run/3]).
+-export([run/2, run_on_global/2, run_in_mnesia_transaction/2, run_on_mnesia/2, run_on_mnesia/3]).
 
 %%%===================================================================
 %%% API
@@ -24,17 +24,48 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv run(Key, Fun, false)
+%% Runs Fun in critical section.
 %% @end
 %%--------------------------------------------------------------------
 -spec run(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
-run(Key, Fun) ->
-    run(Key, Fun, false).
+run(RawKey, Fun) ->
+    run_on_global(RawKey, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Runs Fun in critical section locked on Key.
+%% Runs Fun in critical section inside mnesia transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_in_mnesia_transaction(Key :: term(), Fun :: fun (() -> Result :: term())) ->
+    Result :: term().
+run_in_mnesia_transaction(Key, Fun) ->
+    mnesia_cache_driver:run_transation(Key, Fun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs Fun in critical section using global module.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_on_global(Key :: term(), Fun :: fun (() -> Result :: term())) ->
+    Result :: term().
+run_on_global(RawKey, Fun) ->
+    Key = couchdb_datastore_driver:to_binary(RawKey),
+    global:trans({Key, self()}, Fun).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv run_on_mnesia(Key, Fun, false)
+%% @end
+%%--------------------------------------------------------------------
+-spec run_on_mnesia(Key :: term(), Fun :: fun (() -> Result :: term())) ->
+    Result :: term().
+run_on_mnesia(Key, Fun) ->
+    run_on_mnesia(Key, Fun, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs Fun in critical section using mnesia, locked on Key.
 %% Guarantees that at most one function is running for selected Key in all
 %% nodes in current cluster at any given moment.
 %%
@@ -42,9 +73,9 @@ run(Key, Fun) ->
 %% but option Recursive must be implicitly set to true.
 %% @end
 %%--------------------------------------------------------------------
--spec run(RawKey :: term(), Fun :: fun (() -> Result :: term()),
+-spec run_on_mnesia(RawKey :: term(), Fun :: fun (() -> Result :: term()),
     Recursive :: boolean()) -> Result :: term().
-run(RawKey, Fun, Recursive) ->
+run_on_mnesia(RawKey, Fun, Recursive) ->
     Key = couchdb_datastore_driver:to_binary(RawKey),
     ok = lock(Key, Recursive),
     try

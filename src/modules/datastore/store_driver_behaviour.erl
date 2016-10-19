@@ -12,7 +12,8 @@
 -author("Rafal Slota").
 
 -type driver_action() :: model_behaviour:model_action().
--type mode() :: dirty | transaction.
+-type list_options() :: [list_option()].
+-type list_option() :: {mode, dirty | transaction}.
 
 -export_type([driver_action/0]).
 
@@ -97,7 +98,7 @@
 %% by returning {abort, Acc} from given fun.
 %% @end
 %%--------------------------------------------------------------------
--callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term(), Mode :: mode()) ->
+-callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term(), Opts :: list_options()) ->
     {ok, Acc :: term()} | datastore:generic_error() | no_return().
 
 

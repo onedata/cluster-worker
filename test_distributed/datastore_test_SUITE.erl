@@ -54,7 +54,6 @@
     globally_cached_foreach_link_test/1, links_scope_proc_mem_test/1,  globally_cached_consistency_test/1,
     globally_cached_consistency_without_consistency_metadata_test/1, globally_cached_consistency_with_ambigues_link_names/1]).
 -export([utilize_memory/2, update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
--export([empty_test/1]).
 
 all() ->
     ?ALL([
@@ -73,8 +72,7 @@ all() ->
         globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test,
         links_scope_proc_mem_test, globally_cached_consistency_test,
         globally_cached_consistency_without_consistency_metadata_test,
-        globally_cached_consistency_with_ambigues_link_names,
-        empty_test
+        globally_cached_consistency_with_ambigues_link_names
     ]).
 
 
@@ -84,9 +82,6 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
-
-empty_test(Config) ->
-    ok.
 
 globally_cached_consistency_with_ambigues_link_names(Config) ->
     %% given
@@ -646,10 +641,10 @@ links_scope_test(Config) ->
             lists:map(fun(I) -> GetLinkName(I) end, Links)]))
     end,
 
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
 
-    set_mother_scope(scope1),
+    set_mother_scope(<<"scope1">>),
     AddLinkWithDoc(1),
     AddLinkWithDoc(2),
     FetchLink(1),
@@ -668,10 +663,10 @@ links_scope_test(Config) ->
     DeleteLink(100),
     GetAllLinks([2,3,4]),
 
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
 
-    set_mother_scope(scope2),
+    set_mother_scope(<<"scope2">>),
     GetAllLinks([2,3,4]),
     DeleteLinks([2,3,4]),
     GetAllLinks([]),
@@ -693,10 +688,10 @@ links_scope_test(Config) ->
     DeleteLinks([3, 7, 100]),
     GetAllLinks([2,4,5,6]),
 
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope1])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, scope2])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
 
-    set_mother_scope(scope1),
+    set_mother_scope(<<"scope1">>),
     DeleteLinks([3, 7, 100, 5, 6]),
     GetAllLinks([2,4]),
     ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}])),
@@ -797,64 +792,64 @@ links_scope_proc_mem_test(Config) ->
         end, Links)
     end,
 
-    AddLinkWithDoc(1, scope1, []),
-    AddLinkWithDoc(2, scope1, []),
-    FetchLink(1, scope1, []),
-    FetchLink(2, scope1, []),
-    GetAllLinks([1,2], scope1, []),
-    CreateExistingLink(2, scope1, []),
-    CreateLinkWithDoc(3, scope1, []),
-    FetchLink(3, scope1, []),
-    CreateLinkWithDoc(4, scope1, []),
-    FetchLink(4, scope1, []),
-    CreateLinkWithDoc(5, scope1, []),
-    FetchLink(5, scope1, []),
-    GetAllLinks([1,2,3,4,5], scope1, []),
-    DeleteLinks([1,5], scope1, []),
-    GetAllLinks([2,3,4], scope1, []),
-    DeleteLinkAndCheck(100, scope1, []),
-    GetAllLinks([2,3,4], scope1, []),
+    AddLinkWithDoc(1, <<"scope1">>, []),
+    AddLinkWithDoc(2, <<"scope1">>, []),
+    FetchLink(1, <<"scope1">>, []),
+    FetchLink(2, <<"scope1">>, []),
+    GetAllLinks([1,2], <<"scope1">>, []),
+    CreateExistingLink(2, <<"scope1">>, []),
+    CreateLinkWithDoc(3, <<"scope1">>, []),
+    FetchLink(3, <<"scope1">>, []),
+    CreateLinkWithDoc(4, <<"scope1">>, []),
+    FetchLink(4, <<"scope1">>, []),
+    CreateLinkWithDoc(5, <<"scope1">>, []),
+    FetchLink(5, <<"scope1">>, []),
+    GetAllLinks([1,2,3,4,5], <<"scope1">>, []),
+    DeleteLinks([1,5], <<"scope1">>, []),
+    GetAllLinks([2,3,4], <<"scope1">>, []),
+    DeleteLinkAndCheck(100, <<"scope1">>, []),
+    GetAllLinks([2,3,4], <<"scope1">>, []),
 
-    GetAllLinks([2,3,4], scope2, []),
-    DeleteLinks([2,3,4], scope2, []),
+    GetAllLinks([2,3,4], <<"scope2">>, []),
+    DeleteLinks([2,3,4], <<"scope2">>, []),
 
-    AddLink(2, scope2, []),
-    AddLink(3, scope2, []),
-    AddLink(4, scope2, []),
-    GetAllLinks([2,3,4], scope2, []),
-    FetchLink(2, scope2, []),
-    FetchLink(3, scope2, []),
-    AddLink(2, scope2, []),
-    AddLink(5, scope2, []),
-    AddLinkWithDoc(6, scope2, []),
-    FetchLink(5, scope2, []),
-    FetchLink(6, scope2, []),
-    CreateExistingLink(3, scope2, []),
-    CreateLinkWithDoc(7, scope2, []),
-    FetchLink(7, scope2, []),
-    GetAllLinks([2,3,4,5,6,7], scope2, []),
-    DeleteLinks([3, 7, 100], scope2, []),
+    AddLink(2, <<"scope2">>, []),
+    AddLink(3, <<"scope2">>, []),
+    AddLink(4, <<"scope2">>, []),
+    GetAllLinks([2,3,4], <<"scope2">>, []),
+    FetchLink(2, <<"scope2">>, []),
+    FetchLink(3, <<"scope2">>, []),
+    AddLink(2, <<"scope2">>, []),
+    AddLink(5, <<"scope2">>, []),
+    AddLinkWithDoc(6, <<"scope2">>, []),
+    FetchLink(5, <<"scope2">>, []),
+    FetchLink(6, <<"scope2">>, []),
+    CreateExistingLink(3, <<"scope2">>, []),
+    CreateLinkWithDoc(7, <<"scope2">>, []),
+    FetchLink(7, <<"scope2">>, []),
+    GetAllLinks([2,3,4,5,6,7], <<"scope2">>, []),
+    DeleteLinks([3, 7, 100], <<"scope2">>, []),
 
 
-    GetAllLinks([2,4,5,6], scope1, []),
-    DeleteLinks([3, 7, 100, 5,6], scope1, []),
-    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
+    GetAllLinks([2,4,5,6], <<"scope1">>, []),
+    DeleteLinks([3, 7, 100, 5,6], <<"scope1">>, []),
+    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [],
         create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}]])),
-    AddLinkWithDoc(8, scope1, []),
-    GetAllLinks([2,4,5,8], scope1, []),
+    AddLinkWithDoc(8, <<"scope1">>, []),
+    GetAllLinks([2,4,5,8], <<"scope1">>, []),
 
     DK1 = GetDocKey(1),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
+    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [],
             fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(5)]])),
-    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [],
+    ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [],
         add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(2), GetDoc(1)}]]])),
-    GetAllLinks([2,4,5,8], scope1, []),
-    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [scope1, [scope2],
+    GetAllLinks([2,4,5,8], <<"scope1">>, []),
+    ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [<<"scope2">>],
         fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(2)]])),
 
 
-    DeleteLinks([2,4,5,6,8], scope2, []),
-    GetAllLinks([], scope2, []),
+    DeleteLinks([2,4,5,6,8], <<"scope2">>, []),
+    GetAllLinks([], <<"scope2">>, []),
 
     ok.
 
@@ -874,7 +869,7 @@ set_mother_scope(MotherScope) ->
     end.
 
 scope_master_loop() ->
-    scope_master_loop(scope1, []).
+    scope_master_loop(<<"scope1">>, []).
 
 scope_master_loop(MotherScope, OtherScopes) ->
     Todo = receive
@@ -2001,7 +1996,7 @@ check_clearing(TestRecord, [{K, TimeWindow} | R] = KeysWithTimes, Worker1, Worke
         Uuid = caches_controller:get_cache_uuid(K2, TestRecord),
         UpdateFun = fun(Record) ->
             {ok, Record#cache_controller{
-                timestamp = to_timestamp(from_timestamp(os:timestamp()) - T - timer:minutes(5))
+                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
             }}
         end,
         ?assertMatch({ok, _}, ?call(Worker1, cache_controller, update, [?GLOBAL_ONLY_LEVEL, Uuid, UpdateFun]), 10)
@@ -2038,7 +2033,7 @@ clearing_global_cache_test(Config) ->
     Mem0Ets = ?call(Worker2, erlang, memory, [ets]),
     ct:print("Mem0 ~p, ~p, ~p", [Mem0, Mem0Node, Mem0Ets]),
     FreeMem = 100 - Mem0,
-    ToAdd = min(20, FreeMem / 2),
+    ToAdd = min(10, FreeMem / 2),
     MemCheck1 = Mem0 + ToAdd / 2,
     MemUsage = Mem0 + ToAdd,
 
@@ -2056,14 +2051,7 @@ clearing_global_cache_test(Config) ->
     ?assert(Mem1Node > 50 * 1024 * 1024),
 
     ?assertEqual(ok, ?call(Worker2, caches_controller, wait_for_cache_dump, []), 150),
-    tracer:start(Worker2),
-%%    tracer:trace_calls(caches_controller, delete_old_keys),
-%%    tracer:trace_calls(cache_controller, list_dirty),
-%%    tracer:trace_calls(mnesia_cache_driver, list),
-    tracer:trace_calls(mnesia_cache_driver, list_dirty),
-%%    tracer:trace_calls(mnesia_cache_driver, list_dirty_next),
     ?assertMatch(ok, gen_server:call({?NODE_MANAGER_NAME, Worker2}, check_mem_synch, ?TIMEOUT)),
-    tracer:stop(),
     [{_, Mem2}] = monitoring:get_memory_stats(),
     Mem2Node = node_mem(Worker2),
     Mem2Ets = ?call(Worker2, erlang, memory, [ets]),
@@ -2100,7 +2088,7 @@ node_mem(Worker) ->
 
 % helper fun used by clearing_global_cache_test
 utilize_memory(TestRecord, MemUsage) ->
-    OneDoc = list_to_binary(prepare_list(16 * 1024)),
+    OneDoc = list_to_binary(prepare_list(256 * 1024)),
 
     Add100MB = fun(_KeyBeg) ->
         for(1, 100 * 4, fun(I) ->
@@ -2686,11 +2674,11 @@ while(Counter, F, Guard) ->
             while(Counter + 1, F, Guard)
     end.
 
-from_timestamp({Mega, Sec, Micro}) ->
-    (Mega * 1000000 + Sec) * 1000 + Micro / 1000.
+from_timestamp(T) ->
+    T / 1000.
 
 to_timestamp(T) ->
-    {trunc(T / 1000000000), trunc(T / 1000) rem 1000000, trunc(T * 1000) rem 1000000}.
+    T * 1000.
 
 disable_cache_control(Workers) ->
     disable_cache_control_and_set_dump_delay(Workers, 1000).

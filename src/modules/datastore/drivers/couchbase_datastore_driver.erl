@@ -160,7 +160,7 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), _Mode :: store_driver_behaviour:mode()) -> no_return().
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) -> no_return().
 list(#model_config{} = _ModelConfig, _Fun, _AccIn, _Mode) ->
     % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
     error(not_supported).

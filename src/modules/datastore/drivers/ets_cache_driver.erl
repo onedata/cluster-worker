@@ -179,7 +179,7 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), _Mode :: store_driver_behaviour:mode()) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(#model_config{} = ModelConfig, Fun, AccIn, _Mode) ->
     SelectAll = [{'_', [], ['$_']}],
@@ -581,7 +581,7 @@ links_table_name(TabName) when is_atom(TabName) ->
 aux_table_name(#model_config{name = ModelName}, Field) ->
     aux_table_name(ModelName, Field);
 aux_table_name(TabName, Field) when is_atom(TabName) and is_atom(Field) ->
-    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, <<"_">>,
+    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, "_",
         (atom_to_binary(Field, utf8))>>, utf8).
 
 %%--------------------------------------------------------------------

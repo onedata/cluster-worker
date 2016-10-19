@@ -33,6 +33,7 @@
 %% This record shall not be used outside datastore engine and shall not be instantiated
 %% directly. Use MODEL_CONFIG macro instead.
 -record(model_config, {
+    version = 1 :: non_neg_integer(),
     name :: model_behaviour:model_type(),
     size = 0 :: non_neg_integer(),
     fields = [],

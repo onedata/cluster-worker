@@ -24,7 +24,7 @@
 %% TODO Add non_transactional updates (each update creates tmp ets!)
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
--export([run_transation/3]).
+-export([run_transation/1, run_transation/2, run_transation/3]).
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
@@ -64,9 +64,9 @@ init_bucket(_BucketName, Models, NodeToSync) ->
             TransactionTable = transaction_table_name(ModelName),
             case NodeToSync == Node of
                 true -> %% No mnesia nodes -> create new table
-                    create_table(Table, ModelName, [key | Fields], Node),
-                    create_table(LinkTable, links, [key | record_info(fields, links)], Node),
-                    create_table(TransactionTable, ModelName, [key | Fields], Node);
+                    create_table(Table, ModelName, [key | Fields], [Node]),
+                    create_table(LinkTable, links, [key | record_info(fields, links)], [Node]),
+                    create_table(TransactionTable, ModelName, [key | Fields], [Node]);
                 _ -> %% there is at least one mnesia node -> join cluster
                     Tables = [table_name(MName) || MName <- datastore_config:models()] ++
                         [links_table_name(MName) || MName <- datastore_config:models()] ++
@@ -260,7 +260,7 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), Mode :: store_driver_behaviour:mode()) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(#model_config{} = ModelConfig, Fun, AccIn, dirty) ->
     list_dirty(ModelConfig, Fun, AccIn);
@@ -529,6 +529,47 @@ run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
             end
         end).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
+%% run at the same time.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_transation(ResourceId :: binary(), fun(() -> Result)) -> Result
+    when Result :: term().
+run_transation(ResourceID, Fun) ->
+    mnesia_run(sync_transaction,
+        fun(TrxType) ->
+            log(normal, "~p -> run_transation(~p)", [TrxType, ResourceID]),
+            Nodes = lists:usort(mnesia:table_info(table_name(lock), where_to_write)),
+            case mnesia:lock({global, ResourceID, Nodes}, write) of
+                ok ->
+                    Fun();
+                Nodes0 ->
+                    case lists:usort(Nodes0) of
+                        Nodes ->
+                            Fun();
+                        LessNodes ->
+                            {error, {lock_error, Nodes -- LessNodes}}
+                    end
+            end
+        end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Runs given function within transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec run_transation(fun(() -> Result)) -> Result
+    when Result :: term().
+run_transation(Fun) ->
+    NewFun = fun(TrxType) ->
+        log(normal, "~p ->run_transation", [TrxType]),
+        Fun()
+    end,
+    mnesia_run(sync_transaction, NewFun).
+
+
 
 %%%===================================================================
 %%% auxiliary_cache_behaviour callbacks
@@ -563,7 +604,7 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
 %% {@link auxiliary_cache_behaviour} callback first/2.
 %% @end
 %%--------------------------------------------------------------------
--spec first(model_behaviour:model_config(), Field) -> datastore:aux_cache_handle().
+-spec first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
 first(#model_config{}=ModelConfig, Field) ->
     %% TODO
     error(not_supported).
@@ -688,8 +729,8 @@ table_name(TabName) when is_atom(TabName) ->
 aux_table_name(#model_config{name = ModelName}, Field) ->
     aux_table_name(ModelName, Field);
 aux_table_name(TabName, Field) when is_atom(TabName) and is_atom(Field) ->
-    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, <<"_">>,
-        (atom_to_binary(Field, utf8))>>, utf8).
+    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, "_",
+        (atom_to_binary(Field, utf8))/binary>>, utf8).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -728,6 +769,19 @@ transaction_table_name(TabName) when is_atom(TabName) ->
 create_table(TabName, RecordName, Attributes, RamCopiesNodes) ->
     create_table(TabName, RecordName, Attributes, RamCopiesNodes, set).
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Create Mnesia table with default majority parameter value set to true.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_table(TabName :: atom(), RecordName :: atom(),
+    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom()) -> atom().
+create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type) ->
+    create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, true).
+
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -737,13 +791,15 @@ create_table(TabName, RecordName, Attributes, RamCopiesNodes) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_table(TabName :: atom(), RecordName :: atom(),
-    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom()) -> atom().
-create_table(TabName, RecordName, RecordFields, RamCopiesNodes, Type) ->
+    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom(), Majority :: boolean()) -> atom().
+create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, Majority) ->
     Ans = case mnesia:create_table(TabName, [
             {record_name, RecordName},
-            {attributes, RecordFields},
+            {attributes, Attributes},
             {ram_copies, RamCopiesNodes},
-            {type, Type}]) of
+            {type, Type},
+            {majority, Majority}
+        ]) of
 
         {atomic, ok} ->
             ok;
@@ -821,19 +877,29 @@ get_key(Tuple) when is_tuple(Tuple) ->
 %%--------------------------------------------------------------------
 -spec mnesia_run(Method :: atom(), Fun :: fun((atom()) -> term())) -> term().
 mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
-    try mnesia:Method(fun() -> Fun(Method) end) of
-        Result ->
-            Result
-    catch
-        _:Reason ->
-            {error, Reason}
+    case mnesia:is_transaction() of
+        true ->
+            Fun(Method);
+        _ ->
+            try mnesia:Method(fun() -> Fun(Method) end) of
+                Result ->
+                    Result
+            catch
+                _:Reason ->
+                    {error, Reason}
+            end
     end;
 mnesia_run(Method, Fun) when Method =:= sync_transaction; Method =:= transaction ->
-    case mnesia:Method(fun() -> Fun(Method) end) of
-        {atomic, Result} ->
-            Result;
-        {aborted, Reason} ->
-            {error, Reason}
+    case mnesia:is_transaction() of
+        true ->
+            Fun(Method);
+        _ ->
+            case mnesia:Method(fun() -> Fun(Method) end) of
+                {atomic, Result} ->
+                    Result;
+                {aborted, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -906,7 +972,6 @@ list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
         {abort, NewAcc} -> {ok, NewAcc}
     end;
 list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
-
     [Obj] = mnesia:dirty_read(Table, CurrentKey),
     Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
     case Fun(Doc, AccIn) of

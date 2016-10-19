@@ -18,7 +18,7 @@
 %% Prefix of VHash value (version hash used to tag links) in link name
 -define(VHASH_PREFIX, "__VH__").
 
--type scope() :: atom() | binary().
+-type scope() :: undefined | binary().
 -type vhash() :: binary() | undefined | {deleted, binary()}.
 % mapping to mother scope - function or key in process dict
 -type mother_scope() :: fun((datastore:key()) -> scope()) | atom().
@@ -429,7 +429,7 @@ delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, name = 
                         end, ToAdd1),
                     %% @fixme: find out better way to detect system operations
                     case get_scopes(Scope2, Key) of
-                        system_internal ->
+                        <<"system_internal">> ->
                             ok;
                         _ ->
                             save_links_maps(Driver, ModelConfig, Key, maps:to_list(ToAdd2), add_no_local)
@@ -634,15 +634,15 @@ unpack_link_scope(_ModelName, LinkName) ->
 select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
     case lists:filter(
         fun
-            ({Scope, VH, _, _}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope) ->
-                lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope))
-                    andalso (VHash == undefined orelse VHash == VH);
-            ({Scope, VH, _, _}) ->
-                RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH);
             ({Scope, {deleted, VH}, _, _}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope) ->
                 lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope))
                     andalso (VHash == undefined orelse VHash == VH);
             ({Scope, {deleted, VH}, _, _}) ->
+                RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH);
+            ({Scope, VH, _, _}) when is_binary(LinkName), is_binary(Scope), is_binary(RequestedScope) ->
+                lists:prefix(binary_to_list(RequestedScope), binary_to_list(Scope))
+                    andalso (VHash == undefined orelse VHash == VH);
+            ({Scope, VH, _, _}) ->
                 RequestedScope =:= Scope andalso (VHash == undefined orelse VHash == VH)
         end, Targets) of
         [] -> undefined;

@@ -25,15 +25,17 @@
     deleted = false :: boolean(),
     generated_uuid = false :: boolean(),
     value :: datastore:value(),
-    links :: term()
+    links :: term(),
+    version :: non_neg_integer() | undefined
 }).
 
 %% Model that controls utilization of cache
+-define(CC_TIMEUNIT, 1000000).
 -record(cache_controller, {
-    timestamp = {0, 0, 0} :: erlang:timestamp(),
+    timestamp = 0 :: integer(),
     action = non :: atom(),
-    last_user = non :: string() | non,
-    last_action_time = {0, 0, 0} :: erlang:timestamp(),
+    last_user = non :: pid() | non,
+    last_action_time = 0 :: integer(),
     action_data :: term()
 }).
 
@@ -43,14 +45,15 @@
 -record(cache_consistency_controller, {
     cleared_list = [] :: [datastore:key() | datastore:link_name()],
     status = ok :: ok | not_monitored | {restoring, pid()},
-    last_clearing_time = {0, 0, 0} :: erlang:timestamp(),
-    restore_timestamp  = {0, 0, 0} :: erlang:timestamp()
+    clearing_counter = 0 :: non_neg_integer(),
+    restore_counter  = 0 :: non_neg_integer()
 }).
 
 %% Description of task to be done
 -record(task_pool, {
     task :: task_manager:task(),
-    owner :: undefined | string(),
+    task_type :: atom(),
+    owner :: undefined | pid() | string(),    % MemOpt - float for ets and mnesia
     node :: node()
 }).
 
@@ -70,6 +73,12 @@
     id :: undefined | identity:id(),
     encoded_public_key :: undefined | identity:encoded_public_key(),
     last_update_seconds :: undefined | integer()
+}).
+
+% Record for various data used during node management
+%
+-record(node_management, {
+    value :: term()
 }).
 
 -record(auxiliary_cache_controller,{}).
