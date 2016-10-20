@@ -290,26 +290,11 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{} = ModelConfig, Fun, AccIn, dirty) ->
-    list_dirty(ModelConfig, Fun, AccIn);
-list(#model_config{name = ModelName} = ModelConfig, Fun, AccIn, _Mode) ->
-    SelectAll = [{'_', [], ['$_']}],
-    ToExec = fun(TrxType) ->
-        log(normal, "~p -> ~p:list()", [TrxType, ModelName]),
-        case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
-            {Obj, Handle} ->
-                list_next(Obj, Handle, Fun, AccIn);
-            '$end_of_table' ->
-                list_next('$end_of_table', undefined, Fun, AccIn)
-        end
-    end,
-    case mnesia:is_transaction() of
-        true ->
-            ToExec(transaction);
-        _ ->
-            mnesia_run(async_dirty, ToExec)
+list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
+    case proplists:get_value(mode, Opts, undefined) of
+        dirty -> list_dirty(ModelConfig, Fun, AccIn);
+        _ -> list(ModelConfig, Fun, AccIn)
     end.
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -751,7 +736,34 @@ do_log(Format, Args) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Dirty alternative of list/4
+%% Helper function for list/4
+%% @end
+%%--------------------------------------------------------------------
+-spec list(model_behaviour:model_config(), Fun :: datastore:list_fun(),
+    AccIn :: term()) -> {ok, Acc :: term()} | datastore:generic_error() | no_return().
+list(#model_config{name=ModelName} = ModelConfig, Fun, AccIn) ->
+    SelectAll = [{'_', [], ['$_']}],
+    ToExec = fun(TrxType) ->
+        log(normal, "~p -> ~p:list()", [TrxType, ModelName]),
+        case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
+            {Obj, Handle} ->
+                list_next(Obj, Handle, Fun, AccIn);
+            '$end_of_table' ->
+                list_next('$end_of_table', undefined, Fun, AccIn)
+        end
+    end,
+    case mnesia:is_transaction() of
+        true ->
+            ToExec(transaction);
+        _ ->
+            mnesia_run(async_dirty, ToExec)
+end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Dirty alternative of list/3
 %% @end
 %%--------------------------------------------------------------------
 -spec list_dirty(model_behaviour:model_config(), Fun :: datastore:list_fun(),
