@@ -1212,13 +1212,13 @@ initialize_state(NodeToSync) ->
 init_auxiliary_caches(Models, NodeToSync) ->
     ModelsWithAuxCaches = lists:foldl(
         fun
-            (#model_config{auxiliary_caches=[]}, AccIn) ->
+            (#model_config{auxiliary_caches=#{}}, AccIn) ->
                 AccIn;
             (M = #model_config{auxiliary_caches=AuxCaches}, AccIn) ->
-                lists:foldl(fun({StoreLevel, Fields}) ->
+                lists:foreach(fun({StoreLevel, Fields}) ->
                     Driver = level_to_driver(StoreLevel),
                     Driver:create_auxiliary_caches(M, Fields, NodeToSync)
-                end, [], maps:to_list(invert(AuxCaches))),
+                end, maps:to_list(invert(AuxCaches))),
                 [M | AccIn]
         end, [], Models),
     ets:insert(?LOCAL_STATE, {models_with_aux_caches, ModelsWithAuxCaches}),

@@ -213,14 +213,8 @@ method_to_aux_method(Method) ->
     binary_to_atom(<<"aux_", (atom_to_binary(Method, utf8))/binary>>, utf8).
 
 
-
-
 %% TODO
-%% TODO * update drivers to newest behaviours
 %% TODO * implement auxiliary_cache_behaviour in mnesia and ets drivers
-%% TODO * implement posthook 'after' method
-%% TODO     - is delete, save and update enough ?
-%% TODO     - is update ok if it's delete and save
 
 %% TODO * implement ordered_list function using auxiliary tables !!!
 

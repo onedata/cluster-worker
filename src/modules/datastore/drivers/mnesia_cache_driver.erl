@@ -647,7 +647,7 @@ aux_delete(ModelConfig, Field, Key) ->
             mnesia:dirty_delete(AuxTableName, K)
         end, Selected)
     end,
-    mnesia_run(dirty_async, Action),
+    mnesia_run(async_dirty, Action),
     ok.
 
 %%--------------------------------------------------------------------
@@ -672,7 +672,7 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
             end;
         _ -> ok
     end,
-    mnesia_run(dirty_async, Action),
+    mnesia_run(async_dirty, Action),
     ok.
 
 %%--------------------------------------------------------------------
@@ -699,7 +699,7 @@ aux_create(ModelConfig, Field, [Key, Doc]) ->
     Action = fun() ->
         mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
     end,
-    mnesia_run(dirty_async, Action),
+    mnesia_run(async_dirty, Action),
     ok.
 
 %%%===================================================================
