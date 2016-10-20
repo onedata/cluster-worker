@@ -24,32 +24,6 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns first key to iterate over auxiliary ordered store.
-%% @end
-%%--------------------------------------------------------------------
--callback first(model_behaviour:model_config(), Field :: atom()) ->
-    datastore:aux_cache_handle().
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns next key to iterate over auxiliary ordered store.
-%% @end
-%%--------------------------------------------------------------------
--callback next(model_behaviour:model_config(), Field :: atom(),
-    Handle :: datastore:aux_cache_handle()) ->
-    datastore:aux_cache_handle().
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns next key to iterate over auxiliary ordered store.
-%% @end
-%%--------------------------------------------------------------------
--callback get_id(Key :: datastore:aux_cache_key()) -> datastore:key().
-
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Deletes document with key Key in auxiliary_cache of Model connected
 %% with Field.
 %% @end
@@ -92,3 +66,21 @@
     Model :: model_behaviour:model_config(),
     Field :: atom(),
     Args :: [term()]) -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns first key to iterate over auxiliary ordered store.
+%% @end
+%%--------------------------------------------------------------------
+-callback aux_first(model_behaviour:model_config(), Field :: atom()) ->
+    datastore:aux_cache_handle().
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns next key to iterate over auxiliary ordered store.
+%% @end
+%%--------------------------------------------------------------------
+-callback aux_next(model_behaviour:model_config(), Field :: atom(),
+    Handle :: datastore:aux_cache_handle()) ->
+    datastore:aux_cache_handle().
+

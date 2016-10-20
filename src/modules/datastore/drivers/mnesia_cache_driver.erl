@@ -29,7 +29,8 @@
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
 %% auxiliary ordered_store behaviour
--export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3, aux_create/3]).
+-export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3,
+    aux_create/3, aux_first/2, list_ordered/4, aux_next/3]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -265,6 +266,8 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
     case proplists:get_value(mode, Opts, undefined) of
         dirty -> list_dirty(ModelConfig, Fun, AccIn);
+        {ordered, Field} ->
+            list_ordered(ModelConfig, Fun, AccIn, Field);
         _ -> list(ModelConfig, Fun, AccIn)
     end.
 
@@ -586,33 +589,26 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link auxiliary_cache_behaviour} callback first/2.
+%% {@link auxiliary_cache_behaviour} callback aux_first/2.
 %% @end
 %%--------------------------------------------------------------------
--spec first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
-first(#model_config{}=ModelConfig, Field) ->
-    %% TODO
-    error(not_supported).
+-spec aux_first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
+aux_first(#model_config{}=ModelConfig, Field) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    mnesia:dirty_first(AuxTableName).
+
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link auxiliary_cache_behaviour} callback next/3.
 %% @end
 %%--------------------------------------------------------------------
--spec next(model_behaviour:model_config(), Field :: atom(),
+-spec aux_next(model_behaviour:model_config(), Field :: atom(),
     Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
-next(_, _, '$end_of_table') -> '$end_of_table';
-next(#model_config{}=ModelConfig, Field, Handle) ->
-    %% TODO
-    error(not_supported).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback get_id/1.
-%% @end
-%%--------------------------------------------------------------------
--spec get_id(datastore:aux_cache_key()) -> datastore:key().
-get_id({_Field, Key}) -> Key.
+aux_next(_, _, '$end_of_table') -> '$end_of_table';
+aux_next(#model_config{}=ModelConfig, Field, Handle) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    mnesia:dirty_next(AuxTableName, Handle).
 
 
 %%--------------------------------------------------------------------
@@ -975,14 +971,33 @@ list_dirty(#model_config{} = ModelConfig, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% This function acts similar to list_dirty/4 but records are traversed in order
+%% by field Field, basing on auxiliary cache connected with that field
+%% @end
+%%--------------------------------------------------------------------
+-spec list_ordered(model_behaviour:model_config(), Fun :: datastore:list_fun(),
+    AccIn :: term(), Field :: atom()) ->
+    {ok, Acc :: term()} | datastore:generic_error() | no_return().
+list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, AccIn, Field) ->
+    AuxCacheLevel = maps:get(Field, AuxCaches),
+    AuxDriver = datastore:level_to_driver(AuxCacheLevel),
+    First = AuxDriver:aux_first(ModelConfig, Field),
+    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Handle) end,
+    TableName = table_name(ModelConfig),
+    list_ordered_next(TableName, First, Fun , IteratorFun, AccIn).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Accumulator helper function for dirty_list
 %% @end
 %%--------------------------------------------------------------------
--spec list_dirty_next(any(), any(), any(), any()) -> any().
+-spec list_dirty_next(atom(), atom(), Fun :: datastore:list_fun(), AccIn :: term())
+ -> {ok, Acc :: term()} | datastore:generic_error().
 list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
-    case Fun(EoT, AccIn) of
-        {abort, NewAcc} -> {ok, NewAcc}
-    end;
+    {abort, NewAcc} = Fun(EoT, AccIn),
+    {ok, NewAcc};
 list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
     [Obj] = mnesia:dirty_read(Table, CurrentKey),
     Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
@@ -993,6 +1008,30 @@ list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
         {abort, NewAcc} ->
             {ok, NewAcc}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Accumulator helper function for list_ordered
+%% @end
+%%--------------------------------------------------------------------
+-spec list_ordered_next(atom(), term(), Fun :: datastore:list_fun(),
+    IteratorFun :: datastore:aux_iterator_fun(), AccIn :: term()) ->
+    {ok, Acc :: term()} | datastore:generic_error().
+list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
+    {abort, NewAcc} = Fun(EoT, AccIn),
+    {ok, NewAcc};
+list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
+    [Obj] = mnesia:dirty_read(Table, datastore_utils:aux_key_to_key(CurrentKey)),
+    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
+    case Fun(Doc, AccIn) of
+        {next, NewAcc} ->
+            Next = IteratorFun(CurrentKey),
+            list_ordered_next(Table, Next, Fun, IteratorFun, NewAcc);
+        {abort, NewAcc} ->
+            {ok, NewAcc}
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @private

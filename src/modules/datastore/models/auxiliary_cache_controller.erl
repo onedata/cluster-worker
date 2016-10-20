@@ -211,19 +211,3 @@ get_model_aux_caches(ModelName) ->
 -spec method_to_aux_method(Method :: model_behaviour:model_action()) -> atom().
 method_to_aux_method(Method) ->
     binary_to_atom(<<"aux_", (atom_to_binary(Method, utf8))/binary>>, utf8).
-
-
-%% TODO
-%% TODO * implement auxiliary_cache_behaviour in mnesia and ets drivers
-
-%% TODO * implement ordered_list function using auxiliary tables !!!
-
-
-
-%% TODO pytania
-%% TODO * na jakich poziomach mam zapiąć 'after' tylko global_only i local_only
-%% TODO   czy na globally_cached i locally_cached tez ?
-
-
-
-

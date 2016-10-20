@@ -28,7 +28,8 @@
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
 %% auxiliary_cache_behaviour
--export([create_auxiliary_caches/3, first/2, next/3, get_id/1, aux_delete/3, aux_save/3, aux_update/3, aux_create/3]).
+-export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3,
+    aux_create/3, aux_first/2, aux_next/3]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -179,32 +180,15 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{} = ModelConfig, Fun, AccIn, _Mode) ->
-    SelectAll = [{'_', [], ['$_']}],
-    case ets:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE) of
-        {Obj, Handle} ->
-            list_next(Obj, Handle, Fun, AccIn);
-        '$end_of_table' ->
-            list_next('$end_of_table', undefined, Fun, AccIn)
-    end.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback list_ordered/4.
-%% @end
-%%--------------------------------------------------------------------
--spec list_ordered(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term(), Filed :: atom(),
-    Mode :: store_driver_behaviour:mode()) ->
-    {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list_ordered(#model_config{} = ModelConfig, Fun, AccIn, Field,  _Mode) ->
-    AuxCacheDriver = aux_cache_driver(ModelConfig, Field),
-    First = AuxCacheDriver:first(ModelConfig, Field),
-    list_ordered_next(ModelConfig, First, Field, Fun, AccIn).
-
+list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
+    case proplists:get_value(mode, Opts, undefined) of
+        {ordered, Field} ->
+            list_ordered(ModelConfig, Fun, AccIn, Field);
+        _ ->
+            list(ModelConfig, Fun, AccIn)
+        end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -405,8 +389,8 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, _NodeToSync) ->
 %% {@link auxiliary_cache_behaviour} callback first/2.
 %% @end
 %%--------------------------------------------------------------------
--spec first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
-first(#model_config{}=ModelConfig, Field) ->
+-spec aux_first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
+aux_first(#model_config{}=ModelConfig, Field) ->
     ets:first(aux_table_name(ModelConfig, Field)).
 
 
@@ -415,20 +399,12 @@ first(#model_config{}=ModelConfig, Field) ->
 %% {@link auxiliary_cache_behaviour} callback next/3.
 %% @end
 %%--------------------------------------------------------------------
--spec next(model_behaviour:model_config(), Field :: atom(),
+-spec aux_next(model_behaviour:model_config(), Field :: atom(),
     Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
-next(_, _, '$end_of_table') -> '$end_of_table';
-next(#model_config{}=ModelConfig, Field, Handle) ->
+aux_next(_, _, '$end_of_table') -> '$end_of_table';
+aux_next(#model_config{}=ModelConfig, Field, Handle) ->
     ets:next(aux_table_name(ModelConfig, Field), Handle).
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback get_id/1.
-%% @end
-%%--------------------------------------------------------------------
--spec get_id(datastore:aux_cache_key()) -> datastore:key().
-get_id({_Field, Key}) -> Key.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -494,6 +470,24 @@ aux_create(ModelConfig, Field, [Key, Doc]) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Internal helper for list/4.
+%% @end
+%%--------------------------------------------------------------------
+-spec list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list(#model_config{} = ModelConfig, Fun, AccIn) ->
+    SelectAll = [{'_', [], ['$_']}],
+    case ets:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE) of
+        {Obj, Handle} ->
+            list_next(Obj, Handle, Fun, AccIn);
+        '$end_of_table' ->
+            list_next('$end_of_table', undefined, Fun, AccIn)
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Internat helper - accumulator for list/3.
 %% @end
 %%--------------------------------------------------------------------
@@ -526,23 +520,41 @@ list_next([], Handle, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Internat helper - accumulator for list/3.
+%% This function traverses records in order by field Field,
+%% basing on auxiliary cache connected with that field
 %% @end
 %%--------------------------------------------------------------------
--spec list_ordered_next(datastore:model_config(), datastore:aux_cache_handle(),
-    Field :: atom(), datastore:list_fun(), term()) ->
+-spec list_ordered(model_behaviour:model_config(), Fun :: datastore:list_fun(),
+    AccIn :: term(), Field :: atom()) ->
+    {ok, Acc :: term()} | datastore:generic_error() | no_return().
+list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, AccIn, Field) ->
+    AuxCacheLevel = maps:get(Field, AuxCaches),
+    AuxDriver = datastore:level_to_driver(AuxCacheLevel),
+    First = AuxDriver:aux_first(ModelConfig, Field),
+    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Handle) end,
+    TableName = table_name(ModelConfig),
+    list_ordered_next(TableName, First, Fun , IteratorFun, AccIn).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Accumulator helper function for list_ordered
+%% @end
+%%--------------------------------------------------------------------
+-spec list_ordered_next(atom(), term(), Fun :: datastore:list_fun(),
+    IteratorFun :: datastore:aux_iterator_fun(), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:generic_error().
-list_ordered_next(_ModelConfig, '$end_of_table', _Field, _Fun, AccIn) ->
-    {ok, AccIn};
-list_ordered_next(ModelConfig, Handle, Field, Fun, AccIn) ->
-    AuxCacheDriver = aux_cache_driver(ModelConfig, Field),
-    Key = AuxCacheDriver:get_id(Handle),
-    Obj = ets:lookup(table_name(ModelConfig), Key),
+list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
+    {abort, NewAcc} = Fun(EoT, AccIn),
+    {ok, NewAcc};
+list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
+    [{Key, Obj}] =ets:lookup(Table, datastore_utils:aux_key_to_key(CurrentKey)),
     Doc = #document{key = Key, value = Obj},
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
-            NextHandle = AuxCacheDriver:next(ModelConfig, Field, Handle),
-            list_ordered_next(ModelConfig, NextHandle, Field, Fun, NewAcc);
+            Next = IteratorFun(CurrentKey),
+            list_ordered_next(Table, Next, Fun, IteratorFun, NewAcc);
         {abort, NewAcc} ->
             {ok, NewAcc}
     end.

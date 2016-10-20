@@ -47,13 +47,9 @@
 
 %% API utility types
 -type store_level() :: ?DISK_ONLY_LEVEL | ?LOCAL_ONLY_LEVEL | ?GLOBAL_ONLY_LEVEL | ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
--type aux_cache_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
 -type delete_predicate() :: fun(() -> boolean()).
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
--type aux_cache_key() :: {term(), key()}.
--type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
-
 
 -export_type([store_level/0, aux_cache_level/0, delete_predicate/0, list_fun/0,
     exists_return/0, aux_cache_key/0, aux_cache_handle/0]).
@@ -68,13 +64,20 @@
 -type link_spec() :: {link_name(), link_target()}.
 -type normalized_link_spec() :: {link_name(), normalized_link_target()}.
 
-
 -export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0,
     link_final_target/0, link_version/0]).
 
+%% Types for auxiliary caches
+-type aux_cache_key() :: {term(), key()}.
+-type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
+-type aux_cache_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
+-type aux_iterator_fun() :: fun((aux_cache_key()) -> aux_cache_handle()).
+
+-export_type([aux_cache_level/0, aux_cache_key/0, aux_cache_handle/0, aux_iterator_fun/0]).
+
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
-    get/3, list/4, list_dirty/4,delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
+    get/3, list/4, list_dirty/4, list_ordered/5, delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
@@ -225,6 +228,19 @@ get(Level, ModelName, Key) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list_dirty(Level, ModelName, Fun, AccIn) ->
     list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, dirty}]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given function for each model's record. Records are traversed according to
+%% order in auxiliary cache connected with Field.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_ordered(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+    Fun :: list_fun(), Field :: atom(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list_ordered(Level, ModelName, Fun, Field, AccIn) ->
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, {ordered, Field}}]).
+
 
 %%--------------------------------------------------------------------
 %% @doc
