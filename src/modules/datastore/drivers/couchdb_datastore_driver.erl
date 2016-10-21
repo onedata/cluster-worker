@@ -1292,10 +1292,10 @@ terminate(Reason, _State) ->
 -spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value} = ToSave) ->
+    #document{deleted = Del, key = Key, rev = {Start, [Hash | _]} = Revs, value = Value} = ToSave) ->
     ok = assert_value_size(Value, ModelConfig, Key),
     {Props} = datastore_json:encode_record(ToSave),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, [Hash]}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
         {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
     case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
         {ok, {SaveAns}} ->
