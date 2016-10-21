@@ -927,7 +927,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                end
            end,
 
-  case cache_controller:list(Level, ClearFun, {0, 0}) of
+  case cache_controller:list_dirty(Level, ClearFun, {0, 0}) of
     {ok, _} ->
       case TimeWindow of
         0 ->
@@ -957,7 +957,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                                   end),
                             {next, {Count + 1, BatchNum}}
                         end,
-            {ok, _} = datastore:list(Level, Cache, ClearFun2, {0, 0})
+            {ok, _} = datastore:list_dirty(Level, Cache, ClearFun2, {0, 0})
           end, Caches);
         _ ->
           ok
