@@ -34,7 +34,7 @@
 % for tests
 -export([send_after/3]).
 
--define(CLEAR_BATCH_SIZE, 100).
+-define(CLEAR_BATCH_SIZE, 50).
 -define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
 -define(MNESIA_THROTTLING_DATA_KEY, <<"mnesia_throttling_data">>).
 -define(THROTTLING_ERROR, {error, load_to_high}).
@@ -1146,15 +1146,21 @@ verify_tasks() ->
     task_pool:count_tasks(?CLUSTER_LEVEL, cache_dump, FailedTasksNumThreshold+PendingTasksNumThreshold),
 
   TaskAction = case {NewFailed, NewTasks} of
-                 {NF, _} when NF >= FailedTasksNumThreshold ->
-                   ?LIMIT_THROTTLING;
-                 {NF, _} when NF > 0 ->
-                   ?CONFIG_THROTTLING;
-                 {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
-                   ?LIMIT_THROTTLING;
-                 _ ->
-                   ?NO_THROTTLING
-               end,
+    {NF, _} when NF >= FailedTasksNumThreshold ->
+      ?BLOCK_THROTTLING;
+    {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
+      ?BLOCK_THROTTLING;
+    {NF, _} when NF >= FailedTasksNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    {NF, NT} when NT-NF >= PendingTasksNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    {NF, _} when NF > 0 ->
+      ?CONFIG_THROTTLING;
+    {_, NT} when NT > 0 ->
+      ?CONFIG_THROTTLING;
+    _ ->
+      ?NO_THROTTLING
+  end,
 
   {TaskAction, NewFailed, NewTasks}.
 

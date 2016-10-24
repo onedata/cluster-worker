@@ -32,7 +32,7 @@
 -export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0, is_task_alive/1, check_owner/1, kill_owner/1]).
 -export([save_pid/3, update_pid/3]).
 
--define(TASK_REPEATS, 10).
+-define(TASK_REPEATS, 3).
 
 %%%===================================================================
 %%% API
@@ -80,6 +80,7 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
                                 0;
                             _ ->
                                 {ok, _} = apply(?MODULE, save_pid, [Task, self(), Level]),
+                                sleep_random_interval(1),
                                 ?TASK_REPEATS - 1
                         end;
                     _ ->
@@ -291,8 +292,14 @@ do_task(Task, Num) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec do_task(Task :: task(), Repeats :: integer(), MaxNum :: integer()) -> term().
-do_task(_Task, 0, _MaxNum) ->
-    task_failed;
+do_task(Task, 1, _MaxNum) ->
+    try
+        ok = do_task(Task)
+    catch
+        E1:E2 ->
+            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
+            task_failed
+    end;
 do_task(Task, CurrentNum, MaxNum) ->
     try
         ok = do_task(Task)

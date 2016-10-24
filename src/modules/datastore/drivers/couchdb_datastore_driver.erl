@@ -1048,7 +1048,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         receive
             {PortFD, {data, {_, Data}}} ->
                 case binary:matches(Data, <<"HTTP:">>) of
-                    [] -> ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    [] -> ?debug("[CouchBase Gateway ~p] ~s", [ID, Data]);
                     _ -> ok
                 end,
                 UpdatedState;
@@ -1196,6 +1196,8 @@ changes_start_link(Callback, Since, Until, Bucket) ->
 -spec init(Args :: [term()]) -> {ok, gen_changes_state()}.
 init([Callback, Until, Bucket]) ->
     ?debug("Starting changes stream until ~p", [Until]),
+    {ok, HS} = application:get_env(?CLUSTER_WORKER_APP_NAME, changes_max_heap_size_words),
+    erlang:process_flag(max_heap_size, HS),
     {ok, #state{callback = Callback, until = Until, bucket = Bucket}}.
 
 %%--------------------------------------------------------------------
