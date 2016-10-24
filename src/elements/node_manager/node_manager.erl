@@ -838,7 +838,9 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
 
                 TopProcesses = lists:map(
                     fun({M, P}) ->
-                        {M, erlang:process_info(P, current_stacktrace), P, GetName(P)}
+                        {M, erlang:process_info(P, current_stacktrace), erlang:process_info(P, message_queue_len),
+                            erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
+                            erlang:process_info(P, total_heap_size), P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
                 ?debug("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
                     "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),

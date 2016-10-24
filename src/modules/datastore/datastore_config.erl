@@ -31,7 +31,7 @@
 ]).
 
 %% datastore_config_behaviour callbacks
--export([models/0, global_caches/0, local_caches/0]).
+-export([models/0, throttled_models/0, global_caches/0, local_caches/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -40,6 +40,14 @@
 %%--------------------------------------------------------------------
 -spec models() -> Models :: [model_behaviour:model_type()].
 models() -> ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of throttled models.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttled_models() -> Models :: [model_behaviour:model_type()].
+throttled_models() -> plugins:apply(?DATASTORE_CONFIG_PLUGIN, throttled_models, []).
 
 %%--------------------------------------------------------------------
 %% @doc

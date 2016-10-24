@@ -94,9 +94,9 @@ throttling_test(Config) ->
 
 
         VerifyIntervalFun(A2),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [])),
-        ?assertEqual(error, ?call_cc(Worker1, throttle, [error])),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [ok]))
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model])),
+        ?assertEqual(error, ?call_cc(Worker1, throttle, [throttled_model, error])),
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model, ok]))
     end,
 
     CheckThrottlingDefault = fun() ->
@@ -657,7 +657,10 @@ end_per_suite(Config) ->
 
 init_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller]),
+    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]),
+
+    test_utils:mock_expect(Workers, datastore_config_plugin_default, throttled_models,
+        fun () -> [throttled_model] end),
 
     test_utils:mock_expect(Workers, caches_controller, send_after,
         fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
@@ -673,7 +676,7 @@ init_per_testcase(_Case, Config) ->
 
 end_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller]);
+    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]);
 
 end_per_testcase(_Case, _Config) ->
     ok.

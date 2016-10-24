@@ -30,7 +30,7 @@
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
--export([throttle/0, throttle/1, throttle_del/1, configure_throttling/0, plan_next_throttling_check/0]).
+-export([throttle/1, throttle/2, throttle_del/2, configure_throttling/0, plan_next_throttling_check/0]).
 % for tests
 -export([send_after/3]).
 
@@ -53,24 +53,29 @@
 %% Limits operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle() -> ok | ?THROTTLING_ERROR.
-throttle() ->
-  case node_management:get(?MNESIA_THROTTLING_KEY) of
-    {ok, #document{value = #node_management{value = V}}} ->
-      case V of
-        ok ->
+-spec throttle(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
+throttle(ModelName) ->
+  case lists:member(ModelName, datastore_config:throttled_models()) of
+    true ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, _} ->
+              timer:sleep(Time),
+              ok;
+            {overloaded, _} ->
+              ?THROTTLING_ERROR
+          end;
+        {error, {not_found, _}} ->
           ok;
-        {throttle, Time, _} ->
-          timer:sleep(Time),
-          ok;
-        {overloaded, _} ->
+        Error ->
+          ?error("throttling error: ~p", [Error]),
           ?THROTTLING_ERROR
       end;
-    {error, {not_found, _}} ->
-      ok;
-    Error ->
-      ?error("throttling error: ~p", [Error]),
-      ?THROTTLING_ERROR
+    _ ->
+      ok
   end.
 
 %%--------------------------------------------------------------------
@@ -78,11 +83,11 @@ throttle() ->
 %% Limits operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+-spec throttle(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
-throttle(ok) ->
-  throttle();
-throttle(TmpAns) ->
+throttle(ModelName, ok) ->
+  throttle(ModelName);
+throttle(_ModelName, TmpAns) ->
   TmpAns.
 
 %%--------------------------------------------------------------------
@@ -90,31 +95,36 @@ throttle(TmpAns) ->
 %% Limits delete operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle_del(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+-spec throttle_del(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
-throttle_del(ok) ->
-  case node_management:get(?MNESIA_THROTTLING_KEY) of
-    {ok, #document{value = #node_management{value = V}}} ->
-      case V of
-        ok ->
+throttle_del(ModelName, ok) ->
+  case lists:member(ModelName, datastore_config:throttled_models()) of
+    true ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, true} ->
+              timer:sleep(Time),
+              ok;
+            {throttle, _, _} ->
+              ok;
+            {overloaded, true} ->
+              ?THROTTLING_ERROR;
+            {overloaded, _} ->
+              ok
+          end;
+        {error, {not_found, _}} ->
           ok;
-        {throttle, Time, true} ->
-          timer:sleep(Time),
-          ok;
-        {throttle, _, _} ->
-          ok;
-        {overloaded, true} ->
-          ?THROTTLING_ERROR;
-        {overloaded, _} ->
-          ok
+        Error ->
+          ?error("throttling error: ~p", [Error]),
+          ?THROTTLING_ERROR
       end;
-    {error, {not_found, _}} ->
-      ok;
-    Error ->
-      ?error("throttling error: ~p", [Error]),
-      ?THROTTLING_ERROR
+    _ ->
+      ok
   end;
-throttle_del(TmpAns) ->
+throttle_del(_ModelName, TmpAns) ->
   TmpAns.
 
 %%--------------------------------------------------------------------
