@@ -26,12 +26,14 @@
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %% tests
--export([local_only_record_with_local_aux_cache_creation_test/1, global_only_record_with_local_aux_cache_creation_test/1]).
+-export([local_only_record_with_local_aux_cache_creation_test/1,
+    global_only_record_with_local_aux_cache_creation_test/1, global_only_record_with_global_aux_cache_creation_test/1]).
 
 
 all() -> ?ALL([
     local_only_record_with_local_aux_cache_creation_test,
-    global_only_record_with_local_aux_cache_creation_test
+    global_only_record_with_local_aux_cache_creation_test,
+    global_only_record_with_global_aux_cache_creation_test
 ]).
 
 -define(FIELD(Number, Id), binary_to_atom(
@@ -55,22 +57,34 @@ local_only_record_with_local_aux_cache_creation_test(Config) ->
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
-    create(Worker1, ShuffledRecords, ?LOCAL_ONLY_LEVEL),
+    create(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_creation_test(Config) ->
 
-    [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
-    Level = ?LOCAL_ONLY_LEVEL,
+    [Worker1 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_local_aux_cache,
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
-    create(Worker1, ShuffledRecords, ?LOCAL_ONLY_LEVEL),
+    create(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
-    check_list_ordered(Worker2, OrderedRecords, Level, TestModel, field1).
+    check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1).
 
+global_only_record_with_global_aux_cache_creation_test(Config) ->
+
+    [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?GLOBAL_ONLY_LEVEL,
+    TestModel = global_only_record_with_global_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+
+    create(Worker1, ShuffledRecords, Level),
+    timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1),
+    check_list_ordered(Worker2, OrderedRecords, Level, TestModel, field1).
 
 
 %%%===================================================================
@@ -121,15 +135,12 @@ random_key() ->
 check_list_ordered(Worker, ExpectedRecords, Level, Model, OrderBy) ->
     ListFun = fun
         ('$end_of_table', AccIn) ->
-            ct:pal("END"),
             {abort, AccIn};
         (#document{key=_Key, value=Record}, AccIn) ->
-            ct:pal("Key: ~p", [_Key]),
             {next, AccIn ++ [Record]}
     end,
     Args = [Level, Model, ListFun, OrderBy, []],
     {ok, ListedRecords} = ?call_datastore(Worker, list_ordered, Args),
-    ct:pal("LISTED RECORD ~p~n", [ListedRecords]),
     ?assertMatch(ExpectedRecords, ListedRecords).
 
 %%--------------------------------------------------------------------
@@ -170,7 +181,10 @@ enable_datastore_models_with_hooks([H | _] = Nodes, Models, HooksMethods) ->
 test_to_record(local_only_record_with_local_aux_cache_creation_test) ->
     local_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_creation_test) ->
-    global_only_record_with_local_aux_cache.
+    global_only_record_with_local_aux_cache;
+test_to_record(global_only_record_with_global_aux_cache_creation_test) ->
+    global_only_record_with_global_aux_cache.
+
 
 %% TODO:
 %% TODO: * local-local

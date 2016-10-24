@@ -578,7 +578,7 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
         TabName = aux_table_name(ModelConfig, Field),
         case NodeToSync == Node of
             true ->
-                create_table(TabName, auxiliary_cache_entry, [], [Node]);
+                create_table(TabName, auxiliary_cache_entry, [], [Node], ordered_set);
             _ ->
                 ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [[TabName], ?MNESIA_WAIT_TIMEOUT]),
                 expand_table(TabName, Node, NodeToSync)
@@ -622,7 +622,8 @@ aux_delete(ModelConfig, Field, Key) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     MatchSpec = ets:fun2ms(
         fun(#auxiliary_cache_entry{key={_, K}}=R) when K == Key -> R end),
-    Action = fun() ->
+    Action = fun(TrxType) ->
+        log(normal, "~p -> aux_delete(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
         Selected = mnesia:dirty_select(AuxTableName, MatchSpec),
         lists:foreach(fun(#auxiliary_cache_entry{key=K}) ->
             mnesia:dirty_delete(AuxTableName, K)
@@ -643,12 +644,14 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
     Action = case is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
         {true, AuxKey} ->
-            fun() ->
+            fun(TrxType) ->
+                log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
                 mnesia:dirty_delete(AuxTableName, #auxiliary_cache_entry{key=AuxKey}),
                 mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
             end;
         true ->
-            fun() ->
+            fun(TrxType) ->
+                log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
                 mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
             end;
         _ -> ok
@@ -677,7 +680,8 @@ aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
 aux_create(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    Action = fun() ->
+    Action = fun(TrxType) ->
+        log(normal, "~p -> aux_create(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
         mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
     end,
     mnesia_run(async_dirty, Action),
@@ -987,7 +991,7 @@ list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, Acc
     AuxCacheLevel = maps:get(Field, AuxCaches),
     AuxDriver = datastore:level_to_driver(AuxCacheLevel),
     First = AuxDriver:aux_first(ModelConfig, Field),
-    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Handle) end,
+    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field,  Handle) end,
     TableName = table_name(ModelConfig),
     list_ordered_next(TableName, First, Fun , IteratorFun, AccIn).
 

@@ -460,7 +460,8 @@ aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
 aux_create(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined}).
+    ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined}),
+    ok.
 
 
 %%%===================================================================

@@ -121,6 +121,7 @@ model_init() ->
 'after'(ModelName, update, Level, [_Diff], {ok, Key}) ->
     foreach_aux_cache(ModelName, update, [Key, Level]);
 'after'(ModelName, create, _Level, [Doc], {ok, Key}) ->
+    ?critical("CALLED AFTER ~p~n", [Key]),
     foreach_aux_cache(ModelName, create, [Key, Doc]);
 'after'(ModelName, create_or_update, Level, [_Doc, _Diff], {ok, Key}) ->
     foreach_aux_cache(ModelName, update, [Key, Level]);
@@ -182,7 +183,7 @@ foreach_aux_cache(#model_config{}=ModelConfig, Method, Args) ->
     AuxMethod = method_to_aux_method(Method),
     lists:foreach(fun({Field, StoreLevel}) ->
         Driver = datastore:level_to_driver(StoreLevel),
-        Driver:AuxMethod(ModelConfig, Field, Args)
+        ok = Driver:AuxMethod(ModelConfig, Field, Args)
     end, maps:to_list(AuxCaches));
 foreach_aux_cache(ModelName, Method, Args) ->
     foreach_aux_cache(ModelName:model_init(), Method, Args).
