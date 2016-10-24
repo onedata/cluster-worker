@@ -22,7 +22,7 @@
 
 %% model_behaviour callbacks and API
 -export([save/1, update/2, create/1, get/1, delete/1, exists/1,
-    model_init/0, 'after'/5, before/4]).
+    model_init/0, 'after'/5, before/4, get_hooks_config/0]).
 
 
 %%%===================================================================
@@ -99,7 +99,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(acc_bucket, get_hooks_config(), ?GLOBAL_ONLY_LEVEL).
+    ?MODEL_CONFIG(acc_bucket, ?MODULE:get_hooks_config(), ?GLOBAL_ONLY_LEVEL).
 
 
 %%--------------------------------------------------------------------
@@ -137,13 +137,7 @@ model_init() ->
 before(_ModelName, _Method, _Level, _Context) ->
     ok.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Provides hooks configuration.
 %% @end
@@ -151,6 +145,12 @@ before(_ModelName, _Method, _Level, _Context) ->
 -spec get_hooks_config() -> list().
 get_hooks_config() ->
     get_hooks_config(datastore:models_with_aux_caches()).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -211,3 +211,11 @@ get_model_aux_caches(ModelName) ->
 -spec method_to_aux_method(Method :: model_behaviour:model_action()) -> atom().
 method_to_aux_method(Method) ->
     binary_to_atom(<<"aux_", (atom_to_binary(Method, utf8))/binary>>, utf8).
+
+
+%% TODO
+%% TODO * write docs and specs
+%% TODO * please dialyzer
+%% TODO * ct tests
+
+

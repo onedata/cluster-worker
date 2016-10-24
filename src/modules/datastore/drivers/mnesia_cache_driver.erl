@@ -774,12 +774,17 @@ create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type) ->
 -spec create_table(TabName :: atom(), RecordName :: atom(),
     Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom(), Majority :: boolean()) -> atom().
 create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, Majority) ->
+    AttributesArg = case Attributes of
+        [] -> [];
+        [key] -> [];
+        _ -> [{attributes, Attributes}]
+    end,
+
     Ans = case mnesia:create_table(TabName, [
             {record_name, RecordName},
-            {attributes, Attributes},
             {ram_copies, RamCopiesNodes},
             {type, Type},
-            {majority, Majority}
+            {majority, Majority} | AttributesArg
         ]) of
 
         {atomic, ok} ->

@@ -96,4 +96,23 @@
     field3 :: term()
 }).
 
+%% Sample models for tests of auxiliary cache
+-record(local_only_record_with_local_aux_cache, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
+-record(global_only_record_with_global_aux_cache, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
+-record(global_only_record_with_local_aux_cache, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
 -endif.

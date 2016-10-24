@@ -51,8 +51,8 @@
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
 
--export_type([store_level/0, aux_cache_level/0, delete_predicate/0, list_fun/0,
-    exists_return/0, aux_cache_key/0, aux_cache_handle/0]).
+-export_type([store_level/0, delete_predicate/0, list_fun/0,
+    exists_return/0]).
 
 %% Links' types
 -type link_version() :: non_neg_integer().
@@ -940,9 +940,7 @@ driver_to_module(Driver) ->
 %%--------------------------------------------------------------------
 -spec models_with_aux_caches() -> [#model_config{}].
 models_with_aux_caches() ->
-    [{_, Models}] = ets:lookup(?LOCAL_STATE, models_with_aux_caches),
-    Models.
-
+    datastore_config:models_with_aux_caches().
 
 
 %%%===================================================================
@@ -1226,18 +1224,16 @@ initialize_state(NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec init_auxiliary_caches([#model_config{}], NodeToSync :: node()) -> ok.
 init_auxiliary_caches(Models, NodeToSync) ->
-    ModelsWithAuxCaches = lists:foldl(
+    lists:foreach(
         fun
-            (#model_config{auxiliary_caches=#{}}, AccIn) ->
-                AccIn;
-            (M = #model_config{auxiliary_caches=AuxCaches}, AccIn) ->
+            (#model_config{auxiliary_caches=AuxCaches}) when map_size(AuxCaches) == 0->
+                ok;
+            (M = #model_config{auxiliary_caches=AuxCaches}) ->
                 lists:foreach(fun({StoreLevel, Fields}) ->
                     Driver = level_to_driver(StoreLevel),
                     Driver:create_auxiliary_caches(M, Fields, NodeToSync)
-                end, maps:to_list(invert(AuxCaches))),
-                [M | AccIn]
-        end, [], Models),
-    ets:insert(?LOCAL_STATE, {models_with_aux_caches, ModelsWithAuxCaches}),
+                end, maps:to_list(invert(AuxCaches)))
+        end, Models),
     ok.
 
 
@@ -1254,10 +1250,11 @@ init_auxiliary_caches(Models, NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec invert(#{}) -> #{term() => [term()]}.
 invert(Map) ->
-    maps:fold(fun(K, V, AccIn) ->
+    Inverted = maps:fold(fun(K, V, AccIn) ->
         CurrentValue = maps:get(V, AccIn, []),
         maps:put(V, [K | CurrentValue], AccIn)
-    end, #{}, Map).
+    end, #{}, Map),
+    Inverted.
 
 %%--------------------------------------------------------------------
 %% @private

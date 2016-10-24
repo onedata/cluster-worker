@@ -432,9 +432,9 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
     case is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
         {true, AuxKey} ->
             ets:delete(AuxTableName, AuxKey),
-            ets:insert(AuxTableName, {CurrentFieldValue, Key});
+            ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined});
         true -> % there is no entry in AuxTableName matching Key
-            ets:insert(AuxTableName, {CurrentFieldValue, Key});
+            ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined});
         _ -> ok
     end,
     ok.
@@ -460,7 +460,7 @@ aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
 aux_create(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    ets:insert(AuxTableName, {CurrentFieldValue, Key}).
+    ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined}).
 
 
 %%%===================================================================
@@ -531,7 +531,7 @@ list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, Acc
     AuxCacheLevel = maps:get(Field, AuxCaches),
     AuxDriver = datastore:level_to_driver(AuxCacheLevel),
     First = AuxDriver:aux_first(ModelConfig, Field),
-    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Handle) end,
+    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field, Handle) end,
     TableName = table_name(ModelConfig),
     list_ordered_next(TableName, First, Fun , IteratorFun, AccIn).
 
@@ -549,7 +549,7 @@ list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
     {abort, NewAcc} = Fun(EoT, AccIn),
     {ok, NewAcc};
 list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
-    [{Key, Obj}] =ets:lookup(Table, datastore_utils:aux_key_to_key(CurrentKey)),
+    [{Key, Obj}] = ets:lookup(Table, datastore_utils:aux_key_to_key(CurrentKey)),
     Doc = #document{key = Key, value = Obj},
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
@@ -594,7 +594,7 @@ aux_table_name(#model_config{name = ModelName}, Field) ->
     aux_table_name(ModelName, Field);
 aux_table_name(TabName, Field) when is_atom(TabName) and is_atom(Field) ->
     binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, "_",
-        (atom_to_binary(Field, utf8))>>, utf8).
+        (atom_to_binary(Field, utf8))/binary>>, utf8).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -629,18 +629,6 @@ create_table(TableName) ->
 create_table(TableName, Type) ->
     Ans = (catch ets:new(TableName, [named_table, public, Type])),
     ?info("Creating ets table: ~p, result: ~p", [TableName, Ans]).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Return driver to auxiliary cache according o given model and field.
-%% @end
-%%%--------------------------------------------------------------------
--spec aux_cache_driver(datastore:model_config(), atom()) -> atom().
-aux_cache_driver(#model_config{auxiliary_caches = AuxTables}, Field) ->
-    AuxStoreLevel = maps:get(AuxTables, Field),
-    datastore:level_to_driver(AuxStoreLevel).
 
 
 %%--------------------------------------------------------------------
