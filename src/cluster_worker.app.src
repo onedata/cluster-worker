@@ -57,7 +57,7 @@
             %% Number of ongoing (but at least once failed) tasks to start throttling
             {throttling_start_pending_tasks_number, 500},
             %% Base time for throttling
-            {throttling_base_time_ms, 12},
+            {throttling_base_time_ms, 16},
             %% Maximum throttling time
             {throttling_max_time_ms, 1024},
             %% Interval of throttling configuration when system is overloaded
