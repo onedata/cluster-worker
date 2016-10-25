@@ -379,11 +379,11 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     Workers = [W1, W2, W1, W2, W1],
 
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 300)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 300))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 200)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 200))
     end, WorkersList),
 
-    ControllerPid = start_tasks(Level, first_try, Workers, 12, type1),
+    ControllerPid = start_tasks(Level, first_try, Workers, 12, type1, true),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
 
     timer:sleep(2000),
@@ -427,10 +427,19 @@ start_tasks(Level, DelaySave, Workers, Num) ->
     start_tasks(Level, DelaySave, Workers, Num, undefined).
 
 start_tasks(Level, DelaySave, Workers, Num, TaskType) ->
+    start_tasks(Level, DelaySave, Workers, Num, TaskType, false).
+
+start_tasks(Level, DelaySave, Workers, Num, TaskType, Sleep) ->
     ControllerPid = spawn(fun() -> task_controller([]) end),
     Master = self(),
     {Funs, _} = lists:foldl(fun(_W, {Acc, Counter}) ->
         NewAcc = [fun() ->
+            case Sleep of
+                true ->
+                    timer:sleep(100);
+                _ ->
+                    ok
+            end,
             ControllerPid ! {get_num, Counter, self()},
             receive
                 {value, MyNum} ->
