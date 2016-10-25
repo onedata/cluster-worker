@@ -19,6 +19,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
@@ -415,8 +416,8 @@ aux_next(#model_config{}=ModelConfig, Field, Handle) ->
     Args :: [term()]) -> ok.
 aux_delete(ModelConfig, Field, [Key]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),
-    ets:select_delete(AuxTableName, MatchSpec),
+    ets:select_delete(AuxTableName,
+        ets:fun2ms(fun({{_, K}, _}) when K == Key -> true end)),
     ok.
 
 %%--------------------------------------------------------------------
@@ -429,9 +430,9 @@ aux_delete(ModelConfig, Field, [Key]) ->
 aux_save(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    case is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
+    case is_aux_field_value_updated(AuxTableName, Key,  CurrentFieldValue) of
         {true, AuxKey} ->
-            ets:delete(AuxTableName, AuxKey),
+            true = ets:delete(AuxTableName, AuxKey),
             ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined});
         true -> % there is no entry in AuxTableName matching Key
             ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined});
@@ -643,13 +644,13 @@ create_table(TableName, Type) ->
 %% If it exists and it's value hasn't changed, false is returned.
 %% @end
 %%%--------------------------------------------------------------------
--spec is_aux_field_value_updated(datastore:model_config(), datastore:key(), atom(),
+-spec is_aux_field_value_updated(datastore:model_config(), datastore:key(),
     term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
-is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
-    case aux_get(AuxTableName, Field, [Key]) of
+is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
+    case aux_get(AuxTableName, Key) of
         [] -> true;
         [{CurrentFieldValue, Key}] -> false;
-        [AuxKey] -> {true, AuxKey}
+        [{AuxKey, _Value}] -> {true, AuxKey}
     end.
 
 %%--------------------------------------------------------------------
@@ -659,10 +660,8 @@ is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
 %% matching the Key.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_get(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: [datastore:key()]) -> [{term(), datastore:key()}].
-aux_get(ModelConfig, Field, [Key]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),
-    ets:select(AuxTableName, MatchSpec).
+-spec aux_get(atom(), Key :: datastore:key()) -> [{term(), datastore:key()}].
+aux_get(AuxTableName, Key) ->
+    ets:select(AuxTableName,
+        ets:fun2ms(fun(T = {{_, K}, _}) when K == Key -> T end)).
 

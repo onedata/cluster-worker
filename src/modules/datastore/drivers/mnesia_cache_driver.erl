@@ -18,6 +18,7 @@
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include("timeouts.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
@@ -618,18 +619,17 @@ aux_next(#model_config{}=ModelConfig, Field, Handle) ->
 %%--------------------------------------------------------------------
 -spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
     Key :: datastore:ext_key()) -> ok.
-aux_delete(ModelConfig, Field, Key) ->
+aux_delete(ModelConfig, Field, [Key]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    MatchSpec = ets:fun2ms(
-        fun(#auxiliary_cache_entry{key={_, K}}=R) when K == Key -> R end),
     Action = fun(TrxType) ->
         log(normal, "~p -> aux_delete(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-        Selected = mnesia:dirty_select(AuxTableName, MatchSpec),
+        Selected = mnesia:dirty_select(AuxTableName, ets:fun2ms(
+            fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end)),
         lists:foreach(fun(#auxiliary_cache_entry{key=K}) ->
             mnesia:dirty_delete(AuxTableName, K)
         end, Selected)
     end,
-    mnesia_run(async_dirty, Action),
+    ok = mnesia_run(async_dirty, Action),
     ok.
 
 %%--------------------------------------------------------------------
@@ -642,7 +642,7 @@ aux_delete(ModelConfig, Field, Key) ->
 aux_save(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    Action = case is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) of
+    Action = case is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) of
         {true, AuxKey} ->
             fun(TrxType) ->
                 log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
@@ -1053,13 +1053,12 @@ list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
 %% If it exists and it's value hasn't changed, false is returned.
 %% @end
 %%%--------------------------------------------------------------------
--spec is_aux_field_value_updated(datastore:model_config(), datastore:key(), atom(),
-    term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
-is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
-    case aux_get(AuxTableName, Field, [Key]) of
+-spec is_aux_field_value_updated(atom(), datastore:key(), term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
+is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
+    case aux_get(AuxTableName, Key) of
         [] -> true;
         [{CurrentFieldValue, Key}] -> false;
-        [AuxKey] -> {true, AuxKey}
+        [#auxiliary_cache_entry{key=AuxKey}] -> {true, AuxKey}
     end.
 
 %%--------------------------------------------------------------------
@@ -1069,10 +1068,9 @@ is_aux_field_value_updated(AuxTableName, Key, Field, CurrentFieldValue) ->
 %% matching the Key.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_get(Model :: model_behaviour:model_config(), Field :: atom(),
-    Key :: [datastore:key()]) -> [{term(), datastore:key()}].
-aux_get(ModelConfig, Field, [Key]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    MatchSpec = ets:fun2ms(fun(T = {{_, K}}) when K == Key -> T end),
-    mnesia:dirty_select(AuxTableName, MatchSpec).
+-spec aux_get(atom(),Key :: datastore:key()) -> [{term(), datastore:key()}].
+aux_get(AuxTableName, Key) ->
+    mnesia:dirty_select(AuxTableName, ets:fun2ms(
+        fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end)).
+
 

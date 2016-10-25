@@ -112,16 +112,17 @@ model_init() ->
     Method :: model_behaviour:model_action(),
     Level :: datastore:store_level(), Context :: term(),
     ReturnValue :: term()) -> ok.
-'after'(_ModelName, _Method, ?DISK_ONLY_LEVEL, _Context, _ReturnValue) ->
-    ok;
-'after'(ModelName, delete, _Level, [Key], ok) ->
-    foreach_aux_cache(ModelName, delete, [Key]);
+'after'(ModelName, delete, _Level, [Key, DelPred], ok) ->
+    case DelPred() of
+        true ->
+            foreach_aux_cache(ModelName, delete, [Key]);
+        _ -> ok
+    end;
 'after'(ModelName, save, _Level, [Doc], {ok, Key}) ->
     foreach_aux_cache(ModelName, save, [Key, Doc]);
 'after'(ModelName, update, Level, [_Diff], {ok, Key}) ->
     foreach_aux_cache(ModelName, update, [Key, Level]);
 'after'(ModelName, create, _Level, [Doc], {ok, Key}) ->
-    ?critical("CALLED AFTER ~p~n", [Key]),
     foreach_aux_cache(ModelName, create, [Key, Doc]);
 'after'(ModelName, create_or_update, Level, [_Doc, _Diff], {ok, Key}) ->
     foreach_aux_cache(ModelName, update, [Key, Level]);
