@@ -802,7 +802,6 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     case (TimeDiff >= timer:minutes(MaxInterval)) orelse
         ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
         true ->
-            ?debug("Monitoring state: ~p", [MonState]),
             spawn(fun() ->
                 ?debug("Erlang ets mem usage: ~p", [
                     lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
