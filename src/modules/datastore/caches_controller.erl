@@ -175,7 +175,7 @@ configure_throttling() ->
             {?CONFIG_THROTTLING, ok} ->
               ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
                 [MemoryUsage, NewFailed, NewTasks]),
-              plan_next_throttling_check();
+              plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
                 value = #node_management{value = {overloaded, false}}}),
@@ -1198,9 +1198,9 @@ verify_memory() ->
 %% Returns time after which next throttling config should start.
 %% @end
 %%--------------------------------------------------------------------
--spec plan_next_throttling_check(Overloaded :: boolean()) -> non_neg_integer().
+-spec plan_next_throttling_check(Active :: boolean()) -> non_neg_integer().
 plan_next_throttling_check(true) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds),
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_active_check_interval_seconds),
   timer:seconds(Interval);
 plan_next_throttling_check(_) ->
   {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
@@ -1219,7 +1219,7 @@ plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
 plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
   plan_next_throttling_check();
 plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
-  Default = plan_next_throttling_check(),
+  Default = plan_next_throttling_check(true),
   Corrected = round(LastInterval*MemoryToStop/MemoryChange),
   case (Corrected < Default) and (Corrected >= 0) of
     true ->

@@ -60,8 +60,8 @@
             {throttling_base_time_ms, 16},
             %% Maximum throttling time
             {throttling_max_time_ms, 1024},
-            %% Interval of throttling configuration when system is overloaded
-            {throttling_overload_check_interval_seconds, 15},
+            %% Interval of throttling configuration when throttling is used
+            {throttling_active_check_interval_seconds, 15},
             %% Interval of throttling configuration
             {throttling_check_interval_seconds, 30},
 
