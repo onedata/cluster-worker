@@ -1215,9 +1215,9 @@ plan_next_throttling_check(_) ->
 -spec plan_next_throttling_check(MemoryChange :: float(), MemoryToStop :: float(), LastInterval :: integer()) ->
   non_neg_integer().
 plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
-  plan_next_throttling_check();
+  plan_next_throttling_check(true);
 plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
-  plan_next_throttling_check();
+  plan_next_throttling_check(true);
 plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
   Default = plan_next_throttling_check(true),
   Corrected = round(LastInterval*MemoryToStop/MemoryChange),
