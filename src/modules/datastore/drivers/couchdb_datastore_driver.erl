@@ -852,7 +852,7 @@ force_save(#model_config{} = ModelConfig, ToSave) ->
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
-    #document{key = Key, rev = {RNum, [Id | _]}, value = V} = ToSave) ->
+    #document{key = Key, rev = {RNum, [Id | IdsTail]}, value = V} = ToSave) ->
     SynchKey = case V of
                    #links{} ->
                        synchronization_link_key(ModelConfig, Key);
@@ -863,9 +863,9 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
-                    save_revision(ModelConfig, BucketOverride, ToSave);
+                    save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, not_found} ->
-                    save_revision(ModelConfig, BucketOverride, ToSave);
+                    save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, Reason} ->
                     {error, Reason};
                 {ok, #document{key = Key, rev = Rev} = Old} ->
@@ -887,7 +887,8 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
                                     {ok, Key}
                             end;
                         Higher when Higher > OldRNum ->
-                            save_revision(ModelConfig, BucketOverride, ToSave);
+                            NewIDs = check_revisions_list(OldId, IdsTail, OldRNum, Higher),
+                            save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id | NewIDs]}});
                         _ ->
                             {ok, Key}
                     end
@@ -1619,3 +1620,14 @@ verify_ans({Ans}) ->
     verify_ans(Ans);
 verify_ans(_Ans) ->
     true.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if revision list provided to force_save can be written.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_revisions_list(term(), list(), integer(), integer()) -> list().
+check_revisions_list(OldID, [OldID | _] = NewIDs, OldNum, NewNum) when NewNum =:= OldNum + 1 ->
+    NewIDs;
+check_revisions_list(_, _, _, _) ->
+    [].
