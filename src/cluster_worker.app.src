@@ -76,6 +76,8 @@
             %% Min and max waiting value
             {task_fail_min_sleep_time_ms, 3000},
             {task_fail_max_sleep_time_ms, 30000},
+            %% Number of task repeats by a single process
+            {task_repeats, 3},
             %% The memory will be cleared once a period defined in this variable, even when usage level is acceptable
             {clear_cache_max_period_ms, 86400}, % 1 day
             %% How often node manager checks if caches cleaning is needed
