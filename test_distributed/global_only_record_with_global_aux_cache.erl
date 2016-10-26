@@ -87,7 +87,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    BaseRecord = ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?LOCAL_ONLY_LEVEL),
+    BaseRecord = ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL),
     BaseRecord#model_config{auxiliary_caches = #{field1 => ?GLOBAL_ONLY_LEVEL}}.
 
 %%--------------------------------------------------------------------

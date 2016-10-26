@@ -112,6 +112,8 @@ model_init() ->
     Method :: model_behaviour:model_action(),
     Level :: datastore:store_level(), Context :: term(),
     ReturnValue :: term()) -> ok.
+'after'(_ModelName, _Method, ?DISK_ONLY_LEVEL, _Context, _ReturnValue) ->
+    ok;
 'after'(ModelName, delete, _Level, [Key, DelPred], ok) ->
     case DelPred() of
         true ->

@@ -646,8 +646,8 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
         {true, AuxKey} ->
             fun(TrxType) ->
                 log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-                mnesia:dirty_delete(AuxTableName, #auxiliary_cache_entry{key=AuxKey}),
-                mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+                ok = mnesia:dirty_delete(AuxTableName, AuxKey),
+                ok = mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
             end;
         true ->
             fun(TrxType) ->
