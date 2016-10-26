@@ -4,7 +4,7 @@
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @doc
-%%% WRITEME
+%%% This suite contains tests of mechanism of auxiliary cache tables.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(auxiliary_cache_test_SUITE).
@@ -29,14 +29,17 @@
     local_only_record_with_local_aux_cache_save_test/1,
     local_only_record_with_local_aux_cache_deletion_test/1,
     local_only_record_with_local_aux_cache_update_test/1,
+    local_only_record_with_local_aux_cache_create_or_update_test/1,
     global_only_record_with_local_aux_cache_creation_test/1,
     global_only_record_with_local_aux_cache_save_test/1,
     global_only_record_with_local_aux_cache_deletion_test/1,
     global_only_record_with_local_aux_cache_update_test/1,
+    global_only_record_with_local_aux_cache_create_or_update_test/1,
     global_only_record_with_global_aux_cache_creation_test/1,
     global_only_record_with_global_aux_cache_save_test/1,
     global_only_record_with_global_aux_cache_deletion_test/1,
-    global_only_record_with_global_aux_cache_update_test/1]).
+    global_only_record_with_global_aux_cache_update_test/1,
+    global_only_record_with_global_aux_cache_create_or_update_test/1]).
 
 -define(POSTHOOK_METHODS, [save, delete, update, create, create_or_update]).
 
@@ -45,14 +48,17 @@ all() -> ?ALL([
     local_only_record_with_local_aux_cache_save_test,
     local_only_record_with_local_aux_cache_deletion_test,
     local_only_record_with_local_aux_cache_update_test,
+    local_only_record_with_local_aux_cache_create_or_update_test,
     global_only_record_with_local_aux_cache_creation_test,
     global_only_record_with_local_aux_cache_save_test,
     global_only_record_with_local_aux_cache_deletion_test,
     global_only_record_with_local_aux_cache_update_test,
+    global_only_record_with_local_aux_cache_create_or_update_test,
     global_only_record_with_global_aux_cache_creation_test,
     global_only_record_with_global_aux_cache_save_test,
     global_only_record_with_global_aux_cache_deletion_test,
-    global_only_record_with_global_aux_cache_update_test
+    global_only_record_with_global_aux_cache_update_test,
+    global_only_record_with_global_aux_cache_create_or_update_test
 ]).
 
 -define(FIELD(Number, Id), binary_to_atom(
@@ -135,6 +141,30 @@ local_only_record_with_local_aux_cache_update_test(Config) ->
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
+local_only_record_with_local_aux_cache_create_or_update_test(Config) ->
+
+    [Worker1 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?LOCAL_ONLY_LEVEL,
+    TestModel = local_only_record_with_local_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
+    SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
+    {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
+    UpdateFun = fun(OldRecord) ->
+        {ok, OldRecord#local_only_record_with_local_aux_cache{field1=field1_0020}}
+    end,
+    {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
+    OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
+    create_or_update(Worker1, Key, UpdatedRecord, Level, UpdateFun),
+    timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
+
+    NewRecord = create_test_record(TestModel, 0),
+    create_or_update(Worker1, <<"non_existing_key">>, NewRecord, Level, UpdateFun),
+    OrderedRecords3 = [NewRecord | OrderedRecords2],
+    check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1).
+
 global_only_record_with_local_aux_cache_creation_test(Config) ->
 
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
@@ -204,6 +234,30 @@ global_only_record_with_local_aux_cache_update_test(Config) ->
     update(Worker1, TestModel, Level, Key, UpdateFun),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
+
+global_only_record_with_local_aux_cache_create_or_update_test(Config) ->
+
+    [Worker1 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?GLOBAL_ONLY_LEVEL,
+    TestModel = global_only_record_with_local_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
+    SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
+    {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
+    UpdateFun = fun(OldRecord) ->
+        {ok, OldRecord#global_only_record_with_local_aux_cache{field1=field1_0020}}
+    end,
+    {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
+    OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
+    create_or_update(Worker1, Key, UpdatedRecord, Level, UpdateFun),
+    timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
+
+    NewRecord = create_test_record(TestModel, 0),
+    create_or_update(Worker1, <<"non_existing_key">>, NewRecord, Level, UpdateFun),
+    OrderedRecords3 = [NewRecord | OrderedRecords2],
+    check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1).
 
 global_only_record_with_global_aux_cache_creation_test(Config) ->
 
@@ -279,6 +333,33 @@ global_only_record_with_global_aux_cache_update_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
+global_only_record_with_global_aux_cache_create_or_update_test(Config) ->
+
+    [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?GLOBAL_ONLY_LEVEL,
+    TestModel = global_only_record_with_global_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
+    SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
+    {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
+    UpdateFun = fun(OldRecord) ->
+        {ok, OldRecord#global_only_record_with_global_aux_cache{field1=field1_0020}}
+    end,
+    {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
+    OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
+    create_or_update(Worker1, Key, UpdatedRecord, Level, UpdateFun),
+    timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
+    check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1),
+
+    NewRecord = create_test_record(TestModel, 0),
+    create_or_update(Worker1, <<"non_existing_key">>, NewRecord, Level, UpdateFun),
+    OrderedRecords3 = [NewRecord | OrderedRecords2],
+    check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1),
+    check_list_ordered(Worker2, OrderedRecords3, Level, TestModel, field1).
+
+
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
@@ -332,6 +413,10 @@ save_records(Worker, RecordsAndKeys2, Level) ->
         {ok, K} = ?call_datastore(Worker, save, [Level, Doc])
     end, RecordsAndKeys2).
 
+create_or_update(Worker, Key, Record, Level, UpdateFun) ->
+    Doc = #document{key=Key, value=Record},
+    {ok, Key} = ?call_datastore(Worker, create_or_update, [Level, Doc, UpdateFun]).
+
 update(Worker, TestModel, Level, Key, UpdateFun) ->
     {ok, Key} = ?call_datastore(Worker, update, [Level ,TestModel, Key, UpdateFun]).
 
@@ -350,8 +435,6 @@ check_list_ordered(Worker, ExpectedRecords, Level, Model, OrderBy) ->
     end,
     Args = [Level, Model, ListFun, OrderBy, []],
     {ok, ListedRecords} = ?call_datastore(Worker, list_ordered, Args),
-    ct:pal("~p", [ExpectedRecords]),
-    ct:pal("~p", [ListedRecords]),
 
     ?assertMatch(ExpectedRecords, ListedRecords).
 
@@ -413,6 +496,8 @@ test_to_record(local_only_record_with_local_aux_cache_deletion_test) ->
     local_only_record_with_local_aux_cache;
 test_to_record(local_only_record_with_local_aux_cache_update_test) ->
     local_only_record_with_local_aux_cache;
+test_to_record(local_only_record_with_local_aux_cache_create_or_update_test) ->
+    local_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_creation_test) ->
     global_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_save_test) ->
@@ -421,6 +506,8 @@ test_to_record(global_only_record_with_local_aux_cache_deletion_test) ->
     global_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_update_test) ->
     global_only_record_with_local_aux_cache;
+test_to_record(global_only_record_with_local_aux_cache_create_or_update_test) ->
+    global_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_global_aux_cache_creation_test) ->
     global_only_record_with_global_aux_cache;
 test_to_record(global_only_record_with_global_aux_cache_save_test) ->
@@ -428,6 +515,8 @@ test_to_record(global_only_record_with_global_aux_cache_save_test) ->
 test_to_record(global_only_record_with_global_aux_cache_deletion_test) ->
     global_only_record_with_global_aux_cache;
 test_to_record(global_only_record_with_global_aux_cache_update_test) ->
+    global_only_record_with_global_aux_cache;
+test_to_record(global_only_record_with_global_aux_cache_create_or_update_test) ->
     global_only_record_with_global_aux_cache.
 
 
@@ -464,10 +553,3 @@ mnesia_table_name(TabName) ->
 
 ets_table_name(TabName) ->
     binary_to_atom(<<"lc_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
-
-
-%% TODO:
-%% TODO: * local-local
-%% TODO: * global-local
-%% TODO: * global-global
-%% TODO: * test for all posthooks
