@@ -65,11 +65,15 @@ throttling_test(Config) ->
     TOCI = 30,
     TMT = 4*TBT,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds, TCI),
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds, TOCI),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_active_check_interval_seconds, TOCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
 
     VerifyInterval = fun(Ans) ->
         ?assertEqual(timer:seconds(TCI), Ans)
+    end,
+
+    VerifyIntervalTh = fun(Ans) ->
+        ?assertEqual(timer:seconds(TOCI), Ans)
     end,
 
     VerifyShortInterval = fun(Ans) ->
@@ -94,9 +98,9 @@ throttling_test(Config) ->
 
 
         VerifyIntervalFun(A2),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [])),
-        ?assertEqual(error, ?call_cc(Worker1, throttle, [error])),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [ok]))
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model])),
+        ?assertEqual(error, ?call_cc(Worker1, throttle, [throttled_model, error])),
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model, ok]))
     end,
 
     CheckThrottlingDefault = fun() ->
@@ -104,14 +108,16 @@ throttling_test(Config) ->
     end,
 
     CheckThrottlingAns = fun(Ans, C) ->
-        CheckThrottling(VerifyInterval, Ans, C)
+        CheckThrottling(VerifyIntervalTh, Ans, C)
     end,
 
     MockUsage(0,0,10),
     CheckThrottlingDefault(),
 
-    {ok,TSFTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
-    {ok,TSPTN} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+    TSFTN = 50,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number, 2*TSFTN),
+    TSPTN = 500,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number, 2*TSPTN),
 
     MockUsage(TSFTN + 10,0,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
@@ -134,6 +140,9 @@ throttling_test(Config) ->
     MockUsage(TSFTN - 9,0,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
+    MockUsage(2*TSFTN,0,10.0),
+    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
+
     MockUsage(0,0,10.0),
     CheckThrottlingDefault(),
 
@@ -146,11 +155,16 @@ throttling_test(Config) ->
     MockUsage(0, TSPTN + 2,10.0),
     CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
-    MockUsage(0, TSPTN - 10,10.0),
+    MockUsage(0,2*TSPTN,10.0),
+    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
+
+    MockUsage(0,0,10.0),
     CheckThrottlingDefault(),
 
-    {ok,TBMER} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
-    {ok,NMRTCC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+    TBMER = 95,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio, TBMER),
+    NMRTCC = 80,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, NMRTCC),
     MemTh = (TBMER + NMRTCC)/2,
 
     MockUsage(0,0,MemTh - 10.0),
@@ -365,11 +379,11 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     Workers = [W1, W2, W1, W2, W1],
 
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 300)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 300))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms, 200)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms, 200))
     end, WorkersList),
 
-    ControllerPid = start_tasks(Level, first_try, Workers, 12, type1),
+    ControllerPid = start_tasks(Level, first_try, Workers, 12, type1, true),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
 
     timer:sleep(2000),
@@ -413,10 +427,19 @@ start_tasks(Level, DelaySave, Workers, Num) ->
     start_tasks(Level, DelaySave, Workers, Num, undefined).
 
 start_tasks(Level, DelaySave, Workers, Num, TaskType) ->
+    start_tasks(Level, DelaySave, Workers, Num, TaskType, false).
+
+start_tasks(Level, DelaySave, Workers, Num, TaskType, Sleep) ->
     ControllerPid = spawn(fun() -> task_controller([]) end),
     Master = self(),
     {Funs, _} = lists:foldl(fun(_W, {Acc, Counter}) ->
         NewAcc = [fun() ->
+            case Sleep of
+                true ->
+                    timer:sleep(100);
+                _ ->
+                    ok
+            end,
             ControllerPid ! {get_num, Counter, self()},
             receive
                 {value, MyNum} ->
@@ -657,7 +680,10 @@ end_per_suite(Config) ->
 
 init_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller]),
+    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]),
+
+    test_utils:mock_expect(Workers, datastore_config_plugin_default, throttled_models,
+        fun () -> [throttled_model] end),
 
     test_utils:mock_expect(Workers, caches_controller, send_after,
         fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
@@ -669,11 +695,15 @@ init_per_testcase(throttling_test, Config) ->
     Config;
 
 init_per_testcase(_Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_repeats, 10))
+    end, Workers),
     Config.
 
 end_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller]);
+    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]);
 
 end_per_testcase(_Case, _Config) ->
     ok.

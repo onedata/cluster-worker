@@ -30,11 +30,11 @@
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
--export([throttle/0, throttle/1, throttle_del/1, configure_throttling/0, plan_next_throttling_check/0]).
+-export([throttle/1, throttle/2, throttle_del/2, configure_throttling/0, plan_next_throttling_check/0]).
 % for tests
 -export([send_after/3]).
 
--define(CLEAR_BATCH_SIZE, 100).
+-define(CLEAR_BATCH_SIZE, 50).
 -define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
 -define(MNESIA_THROTTLING_DATA_KEY, <<"mnesia_throttling_data">>).
 -define(THROTTLING_ERROR, {error, load_to_high}).
@@ -53,24 +53,29 @@
 %% Limits operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle() -> ok | ?THROTTLING_ERROR.
-throttle() ->
-  case node_management:get(?MNESIA_THROTTLING_KEY) of
-    {ok, #document{value = #node_management{value = V}}} ->
-      case V of
-        ok ->
+-spec throttle(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
+throttle(ModelName) ->
+  case lists:member(ModelName, datastore_config:throttled_models()) of
+    true ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, _} ->
+              timer:sleep(Time),
+              ok;
+            {overloaded, _} ->
+              ?THROTTLING_ERROR
+          end;
+        {error, {not_found, _}} ->
           ok;
-        {throttle, Time, _} ->
-          timer:sleep(Time),
-          ok;
-        {overloaded, _} ->
+        Error ->
+          ?error("throttling error: ~p", [Error]),
           ?THROTTLING_ERROR
       end;
-    {error, {not_found, _}} ->
-      ok;
-    Error ->
-      ?error("throttling error: ~p", [Error]),
-      ?THROTTLING_ERROR
+    _ ->
+      ok
   end.
 
 %%--------------------------------------------------------------------
@@ -78,11 +83,11 @@ throttle() ->
 %% Limits operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+-spec throttle(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
-throttle(ok) ->
-  throttle();
-throttle(TmpAns) ->
+throttle(ModelName, ok) ->
+  throttle(ModelName);
+throttle(_ModelName, TmpAns) ->
   TmpAns.
 
 %%--------------------------------------------------------------------
@@ -90,31 +95,36 @@ throttle(TmpAns) ->
 %% Limits delete operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle_del(TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+-spec throttle_del(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
-throttle_del(ok) ->
-  case node_management:get(?MNESIA_THROTTLING_KEY) of
-    {ok, #document{value = #node_management{value = V}}} ->
-      case V of
-        ok ->
+throttle_del(ModelName, ok) ->
+  case lists:member(ModelName, datastore_config:throttled_models()) of
+    true ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, true} ->
+              timer:sleep(Time),
+              ok;
+            {throttle, _, _} ->
+              ok;
+            {overloaded, true} ->
+              ?THROTTLING_ERROR;
+            {overloaded, _} ->
+              ok
+          end;
+        {error, {not_found, _}} ->
           ok;
-        {throttle, Time, true} ->
-          timer:sleep(Time),
-          ok;
-        {throttle, _, _} ->
-          ok;
-        {overloaded, true} ->
-          ?THROTTLING_ERROR;
-        {overloaded, _} ->
-          ok
+        Error ->
+          ?error("throttling error: ~p", [Error]),
+          ?THROTTLING_ERROR
       end;
-    {error, {not_found, _}} ->
-      ok;
-    Error ->
-      ?error("throttling error: ~p", [Error]),
-      ?THROTTLING_ERROR
+    _ ->
+      ok
   end;
-throttle_del(TmpAns) ->
+throttle_del(_ModelName, TmpAns) ->
   TmpAns.
 
 %%--------------------------------------------------------------------
@@ -165,7 +175,7 @@ configure_throttling() ->
             {?CONFIG_THROTTLING, ok} ->
               ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
                 [MemoryUsage, NewFailed, NewTasks]),
-              plan_next_throttling_check();
+              plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
                 value = #node_management{value = {overloaded, false}}}),
@@ -1136,15 +1146,21 @@ verify_tasks() ->
     task_pool:count_tasks(?CLUSTER_LEVEL, cache_dump, FailedTasksNumThreshold+PendingTasksNumThreshold),
 
   TaskAction = case {NewFailed, NewTasks} of
-                 {NF, _} when NF >= FailedTasksNumThreshold ->
-                   ?LIMIT_THROTTLING;
-                 {NF, _} when NF > 0 ->
-                   ?CONFIG_THROTTLING;
-                 {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
-                   ?LIMIT_THROTTLING;
-                 _ ->
-                   ?NO_THROTTLING
-               end,
+    {NF, _} when NF >= FailedTasksNumThreshold ->
+      ?BLOCK_THROTTLING;
+    {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
+      ?BLOCK_THROTTLING;
+    {NF, _} when NF >= FailedTasksNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    {NF, NT} when NT-NF >= PendingTasksNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    {NF, _} when NF > 0 ->
+      ?CONFIG_THROTTLING;
+    {_, NT} when NT > 0 ->
+      ?CONFIG_THROTTLING;
+    _ ->
+      ?NO_THROTTLING
+  end,
 
   {TaskAction, NewFailed, NewTasks}.
 
@@ -1182,9 +1198,9 @@ verify_memory() ->
 %% Returns time after which next throttling config should start.
 %% @end
 %%--------------------------------------------------------------------
--spec plan_next_throttling_check(Overloaded :: boolean()) -> non_neg_integer().
+-spec plan_next_throttling_check(Active :: boolean()) -> non_neg_integer().
 plan_next_throttling_check(true) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_overload_check_interval_seconds),
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_active_check_interval_seconds),
   timer:seconds(Interval);
 plan_next_throttling_check(_) ->
   {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
@@ -1199,11 +1215,11 @@ plan_next_throttling_check(_) ->
 -spec plan_next_throttling_check(MemoryChange :: float(), MemoryToStop :: float(), LastInterval :: integer()) ->
   non_neg_integer().
 plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
-  plan_next_throttling_check();
+  plan_next_throttling_check(true);
 plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
-  plan_next_throttling_check();
+  plan_next_throttling_check(true);
 plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
-  Default = plan_next_throttling_check(),
+  Default = plan_next_throttling_check(true),
   Corrected = round(LastInterval*MemoryToStop/MemoryChange),
   case (Corrected < Default) and (Corrected >= 0) of
     true ->
