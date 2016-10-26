@@ -448,7 +448,7 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
 -spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
-    Doc = datastore:get(Level, ModelName, Key),
+    {ok, Doc} = datastore:get(Level, ModelName, Key),
     aux_save(ModelConfig, Field, [Key, Doc]).
 
 %%--------------------------------------------------------------------

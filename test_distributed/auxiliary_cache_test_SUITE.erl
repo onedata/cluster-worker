@@ -28,13 +28,15 @@
 -export([local_only_record_with_local_aux_cache_creation_test/1,
     local_only_record_with_local_aux_cache_save_test/1,
     local_only_record_with_local_aux_cache_deletion_test/1,
+    local_only_record_with_local_aux_cache_update_test/1,
     global_only_record_with_local_aux_cache_creation_test/1,
     global_only_record_with_local_aux_cache_save_test/1,
     global_only_record_with_local_aux_cache_deletion_test/1,
+    global_only_record_with_local_aux_cache_update_test/1,
     global_only_record_with_global_aux_cache_creation_test/1,
     global_only_record_with_global_aux_cache_save_test/1,
-    global_only_record_with_global_aux_cache_deletion_test/1
-]).
+    global_only_record_with_global_aux_cache_deletion_test/1,
+    global_only_record_with_global_aux_cache_update_test/1]).
 
 -define(POSTHOOK_METHODS, [save, delete, update, create, create_or_update]).
 
@@ -42,12 +44,15 @@ all() -> ?ALL([
     local_only_record_with_local_aux_cache_creation_test,
     local_only_record_with_local_aux_cache_save_test,
     local_only_record_with_local_aux_cache_deletion_test,
+    local_only_record_with_local_aux_cache_update_test,
     global_only_record_with_local_aux_cache_creation_test,
     global_only_record_with_local_aux_cache_save_test,
     global_only_record_with_local_aux_cache_deletion_test,
+    global_only_record_with_local_aux_cache_update_test,
     global_only_record_with_global_aux_cache_creation_test,
     global_only_record_with_global_aux_cache_save_test,
-    global_only_record_with_global_aux_cache_deletion_test
+    global_only_record_with_global_aux_cache_deletion_test,
+    global_only_record_with_global_aux_cache_update_test
 ]).
 
 -define(FIELD(Number, Id), binary_to_atom(
@@ -71,7 +76,7 @@ local_only_record_with_local_aux_cache_creation_test(Config) ->
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
-    create(Worker1, ShuffledRecords, Level),
+    create_records(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1).
 
@@ -82,14 +87,14 @@ local_only_record_with_local_aux_cache_save_test(Config) ->
     TestModel = local_only_record_with_local_aux_cache,
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
-    RecordsAndKeys = create(Worker1, ShuffledRecords, Level),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1),
 
     OrderedRecords2 = create_test_records(TestModel, 11, 20),
     RecordsAndKeys2 = [{NewR, K} || {{_R, K}, NewR} <- lists:zip(RecordsAndKeys, OrderedRecords2)],
     ShuffledRecordsAndKeys = shuffle(RecordsAndKeys2),
-    save(Worker1, ShuffledRecordsAndKeys, Level),
+    save_records(Worker1, ShuffledRecordsAndKeys, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
@@ -100,7 +105,7 @@ local_only_record_with_local_aux_cache_deletion_test(Config) ->
     TestModel = local_only_record_with_local_aux_cache,
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
-    RecordsAndKeys = create(Worker1, ShuffledRecords, Level),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
     timer:sleep(timer:seconds(1)),
     {RecordToDelete, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
@@ -110,6 +115,25 @@ local_only_record_with_local_aux_cache_deletion_test(Config) ->
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
+local_only_record_with_local_aux_cache_update_test(Config) ->
+
+    [Worker1 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?LOCAL_ONLY_LEVEL,
+    TestModel = local_only_record_with_local_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
+    SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
+    timer:sleep(timer:seconds(1)),
+    {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
+    UpdateFun = fun(OldRecord) ->
+        {ok, OldRecord#local_only_record_with_local_aux_cache{field1=field1_0020}}
+    end,
+    {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
+    OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
+    update(Worker1, TestModel, Level, Key, UpdateFun),
+    timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_creation_test(Config) ->
 
@@ -119,7 +143,7 @@ global_only_record_with_local_aux_cache_creation_test(Config) ->
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
-    create(Worker1, ShuffledRecords, Level),
+    create_records(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1).
 
@@ -130,7 +154,7 @@ global_only_record_with_local_aux_cache_save_test(Config) ->
     TestModel = global_only_record_with_local_aux_cache,
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
-    RecordsAndKeys = create(Worker1, ShuffledRecords, Level),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1),
 
@@ -138,7 +162,7 @@ global_only_record_with_local_aux_cache_save_test(Config) ->
     RecordsAndKeys2 = [{NewR, K} || {{_R, K}, NewR} <- lists:zip(RecordsAndKeys, OrderedRecords2)],
 
     ShuffledRecordsAndKeys = shuffle(RecordsAndKeys2),
-    save(Worker1, ShuffledRecordsAndKeys, Level),
+    save_records(Worker1, ShuffledRecordsAndKeys, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
@@ -150,7 +174,7 @@ global_only_record_with_local_aux_cache_deletion_test(Config) ->
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
-    RecordsAndKeys = create(Worker1, ShuffledRecords, Level),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
 
     timer:sleep(timer:seconds(1)),
@@ -158,6 +182,26 @@ global_only_record_with_local_aux_cache_deletion_test(Config) ->
     OrderedRecords2 = OrderedRecords -- [RecordToDelete],
 
     delete(Worker1, TestModel, Key, Level),
+    timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
+
+global_only_record_with_local_aux_cache_update_test(Config) ->
+
+    [Worker1 | _] = ?config(cluster_worker_nodes, Config),
+    Level = ?GLOBAL_ONLY_LEVEL,
+    TestModel = global_only_record_with_local_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
+    SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
+
+    {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
+    UpdateFun = fun(OldRecord) ->
+        {ok, OldRecord#global_only_record_with_local_aux_cache{field1=field1_0020}}
+    end,
+    {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
+    OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate] ,
+    update(Worker1, TestModel, Level, Key, UpdateFun),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
@@ -169,7 +213,7 @@ global_only_record_with_global_aux_cache_creation_test(Config) ->
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
-    create(Worker1, ShuffledRecords, Level),
+    create_records(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords, Level, TestModel, field1).
@@ -181,7 +225,7 @@ global_only_record_with_global_aux_cache_save_test(Config) ->
     TestModel = global_only_record_with_global_aux_cache,
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
-    RecordsAndKeys = create(Worker1, ShuffledRecords, Level),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1),
 
@@ -189,7 +233,7 @@ global_only_record_with_global_aux_cache_save_test(Config) ->
     RecordsAndKeys2 = [{NewR, K} || {{_R, K}, NewR} <- lists:zip(RecordsAndKeys, OrderedRecords2)],
     ShuffledRecordsAndKeys = shuffle(RecordsAndKeys2),
 
-    save(Worker1, ShuffledRecordsAndKeys, Level),
+    save_records(Worker1, ShuffledRecordsAndKeys, Level),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
@@ -201,8 +245,7 @@ global_only_record_with_global_aux_cache_deletion_test(Config) ->
     TestModel = global_only_record_with_global_aux_cache,
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
-
-    RecordsAndKeys = create(Worker1, ShuffledRecords, Level),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
 
     timer:sleep(timer:seconds(1)),
@@ -211,6 +254,28 @@ global_only_record_with_global_aux_cache_deletion_test(Config) ->
 
     delete(Worker1, TestModel, Key, Level),
     timer:sleep(timer:seconds(1)),
+    check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
+    check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
+
+global_only_record_with_global_aux_cache_update_test(Config) ->
+
+    [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
+    Level = ?GLOBAL_ONLY_LEVEL,
+    TestModel = global_only_record_with_global_aux_cache,
+    OrderedRecords = create_test_records(TestModel, 10),
+    ShuffledRecords = shuffle(OrderedRecords),
+    RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
+    SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
+    {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
+    UpdateFun = fun(OldRecord) ->
+        {ok, OldRecord#global_only_record_with_global_aux_cache{field1=field1_0020}}
+    end,
+    {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
+    OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate] ,
+    update(Worker1, TestModel, Level, Key, UpdateFun),
+    timer:sleep(timer:seconds(1)),
+
+    update(Worker1, TestModel, Level, Key, UpdateFun),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
@@ -238,9 +303,12 @@ end_per_testcase(Case, Config) ->
 %%% Internal functions
 %%%===================================================================
 
+create_test_record(RecordName, N) ->
+    datastore_basic_ops_utils:get_record(RecordName, ?FIELD(1, N), ?FIELD(2, N), ?FIELD(3, N)).
+
 create_test_records(RecordName, Number) ->
     lists:map(fun(N) ->
-        datastore_basic_ops_utils:get_record(RecordName, ?FIELD(1, N), ?FIELD(2, N), ?FIELD(3, N))
+        create_test_record(RecordName, N)
     end, lists:seq(1, Number)).
 
 create_test_records(RecordName, From, To) ->
@@ -251,19 +319,21 @@ create_test_records(RecordName, From, To) ->
 shuffle(List) ->
     [ X || {_,X} <- lists:sort([ {rand:uniform(), N} || N <- List])].
 
-create(Worker, Records, Level) ->
+create_records(Worker, Records, Level) ->
     lists:map(fun(R) ->
         Doc = #document{key=random_key(), value=R},
         {ok, Key} = ?call_datastore(Worker, create, [Level, Doc]),
         {R, Key}
     end, Records).
 
-save(Worker, RecordsAndKeys2, Level) ->
+save_records(Worker, RecordsAndKeys2, Level) ->
     lists:foreach(fun({R, K}) ->
         Doc = #document{key=K, value=R},
         {ok, K} = ?call_datastore(Worker, save, [Level, Doc])
     end, RecordsAndKeys2).
 
+update(Worker, TestModel, Level, Key, UpdateFun) ->
+    {ok, Key} = ?call_datastore(Worker, update, [Level ,TestModel, Key, UpdateFun]).
 
 delete(Worker, ModelName, Key, Level) ->
     ?call_datastore(Worker, delete, [Level, ModelName, Key]).
@@ -329,7 +399,9 @@ enable_datastore_models_with_hooks([H | _] = Nodes, Models, HooksMethods) ->
 
     lists:foreach(
         fun(Node) ->
-            ok = rpc:call(Node, gen_server, call, [node_manager, {apply, datastore, initialize_state, [H]}], timer:seconds(30))
+            ok = rpc:call(Node, gen_server, call,
+                [node_manager, {apply, datastore, initialize_state, [H]}],
+                timer:seconds(30))
         end, Nodes).
 
 
@@ -339,17 +411,23 @@ test_to_record(local_only_record_with_local_aux_cache_save_test) ->
     local_only_record_with_local_aux_cache;
 test_to_record(local_only_record_with_local_aux_cache_deletion_test) ->
     local_only_record_with_local_aux_cache;
+test_to_record(local_only_record_with_local_aux_cache_update_test) ->
+    local_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_creation_test) ->
     global_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_save_test) ->
     global_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_local_aux_cache_deletion_test) ->
     global_only_record_with_local_aux_cache;
+test_to_record(global_only_record_with_local_aux_cache_update_test) ->
+    global_only_record_with_local_aux_cache;
 test_to_record(global_only_record_with_global_aux_cache_creation_test) ->
     global_only_record_with_global_aux_cache;
 test_to_record(global_only_record_with_global_aux_cache_save_test) ->
     global_only_record_with_global_aux_cache;
 test_to_record(global_only_record_with_global_aux_cache_deletion_test) ->
+    global_only_record_with_global_aux_cache;
+test_to_record(global_only_record_with_global_aux_cache_update_test) ->
     global_only_record_with_global_aux_cache.
 
 
@@ -386,7 +464,6 @@ mnesia_table_name(TabName) ->
 
 ets_table_name(TabName) ->
     binary_to_atom(<<"lc_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
-
 
 
 %% TODO:

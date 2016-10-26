@@ -122,7 +122,7 @@ model_init() ->
     end;
 'after'(ModelName, save, _Level, [Doc], {ok, Key}) ->
     foreach_aux_cache(ModelName, save, [Key, Doc]);
-'after'(ModelName, update, Level, [_Diff], {ok, Key}) ->
+'after'(ModelName, update, Level, [Key, _Diff], {ok, Key}) ->
     foreach_aux_cache(ModelName, update, [Key, Level]);
 'after'(ModelName, create, _Level, [Doc], {ok, Key}) ->
     foreach_aux_cache(ModelName, create, [Key, Doc]);
