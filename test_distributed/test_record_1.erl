@@ -124,8 +124,8 @@ exists(Key) ->
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
     ok = maybe_init_versioning(?MODEL_NAME),
-    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
-        #model_config{version = get_test_record_version(?MODEL_NAME)}.
+    ?MODEL_CONFIG(test_bucket1, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
+        #model_config{version = get_test_record_version(?MODEL_NAME), aggregate_db_writes = true}.
 
 %%--------------------------------------------------------------------
 %% @doc

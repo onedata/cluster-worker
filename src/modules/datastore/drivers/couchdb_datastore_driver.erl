@@ -53,6 +53,7 @@
 -export([synchronization_doc_key/2, synchronization_link_key/2]).
 
 -export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1]).
+-export([save_docs/2, save_docs/3, get_docs/2]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -142,7 +143,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
         <<"views">> => #{
             <<"versions">> =>
                 #{<<"map">> =>
-                    <<"function(doc) { emit([doc['", ?RECORD_TYPE_MARKER, "'], doc['", ?RECORD_VERSION_MARKER ,"']], doc); }">>}
+                    <<"function(doc) { emit([doc['", ?RECORD_TYPE_MARKER, "'], doc['", ?RECORD_VERSION_MARKER ,"']], 1); }">>}
         }
     })),
     lists:foreach(fun(Bucket) ->
@@ -196,26 +197,76 @@ save_link_doc(ModelConfig, Doc) ->
 %%--------------------------------------------------------------------
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_doc(ModelConfig, #document{rev = undefined} = Doc) ->
-    create(ModelConfig, Doc);
-save_doc(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Key, rev = Rev, value = Value}) ->
+save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = #document{}) ->
+    {ok, {Pid, _}} = get_server(select_bucket(ModelConfig)),
+    Ref = make_ref(),
+    Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+    case Aggregate of
+        true -> ok;
+        false ->
+            Pid ! flush_docs
+    end,
+    receive
+        {Ref, Response} ->
+            Response
+    after
+        timer:minutes(5) ->
+            {error, gateway_loop_timeout}
+    end.
+
+save_docs(DBBucketOrModelConfig, Documents) ->
+    save_docs(DBBucketOrModelConfig, Documents, []).
+save_docs(#model_config{} = ModelConfig, Documents, Opts) ->
+    save_docs(select_bucket(ModelConfig), Documents, Opts);
+save_docs(DBBucket, Documents, Opts) ->
+    Docs = [make_raw_doc(MC, Doc) || {MC, Doc} <- Documents],
+    case db_run(DBBucket, couchbeam, save_docs, [Docs, Opts], 3) of
+        {ok, Res} ->
+            parse_response(Res);
+        {error, Reason} ->
+            [{error, Reason} || _ <- lists:seq(1, length(Documents))]
+    end.
+
+get_docs(#model_config{} = ModelConfig, KeysWithModelConfig) ->
+    get_docs(select_bucket(ModelConfig), KeysWithModelConfig);
+get_docs(DBBucket, KeysWithModelConfig) ->
+    DriverKeys = [to_driver_key(Bucket, Key) || {#model_config{bucket = Bucket}, Key} <- KeysWithModelConfig],
+    case db_run(DBBucket, couchbeam_view, all, [[
+        {keys, DriverKeys}, include_docs
+    ]], 3) of
+        {ok, Res} ->
+            lists:map(fun
+                ({{_, Key}, {ok, {Proplist}}}) ->
+                    {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
+                    Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+                    Proplist2 = Proplist -- Proplist1,
+                    {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
+                    {ok, #document{key = Key, value = Value, rev = Rev, version = Version}};
+                ({{_, _Key}, Other}) ->
+                    Other
+            end, lists:zip(KeysWithModelConfig, parse_response(Res)));
+        {error, Reason} ->
+            [{error, Reason} || _ <- lists:seq(1, length(KeysWithModelConfig))]
+    end.
+
+
+make_raw_doc(_MC, []) ->
+        [];
+make_raw_doc(MC, [Doc | T]) ->
+    [make_raw_doc(MC, Doc) | make_raw_doc(MC, T)];
+make_raw_doc(#model_config{bucket = Bucket} = ModelConfig, #document{deleted = Del, key = Key, rev = Rev, value = Value} = Doc) ->
     ok = assert_value_size(Value, ModelConfig, Key),
 
-    {Props} = datastore_json:encode_record(ToSave),
-    Doc = {[{<<"_rev">>, Rev}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveReport}} ->
-            case verify_ans(SaveReport) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+    {Props} = datastore_json:encode_record(Doc),
+    RawRevInfo = case Rev of
+        undefined ->
+            [];
+        {Start, Ids} = Revs ->
+            [{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)}];
+        _ ->
+            [{<<"_rev">>, Rev}]
+    end,
+    {RawRevInfo ++ [{<<"_deleted">>, atom_to_binary(Del, utf8)}, {<<"_id">>, to_driver_key(Bucket, Key)} | Props]}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -258,24 +309,8 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{bucket = Bucket} = ModelConfig, ToSave = #document{key = Key, value = Value}) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-
-    {Props} = datastore_json:encode_record(ToSave),
-    Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)} | Props]},
-    case db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveReport}} ->
-            case verify_ans(SaveReport) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, conflict} ->
-            {error, already_exists};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+create(#model_config{} = ModelConfig, ToSave = #document{}) ->
+    save_doc(ModelConfig, ToSave).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -793,7 +828,7 @@ get_db(Bucket) ->
 %% Returns server handle used by couchbeam library to connect to couchdb-based DB.
 %% @end
 %%--------------------------------------------------------------------
--spec get_server(binary()) -> {ok, {pid, term()}} | {error, term()}.
+-spec get_server(binary()) -> {ok, {pid(), term()}} | {error, term()}.
 get_server(Bucket) ->
     get_server(datastore_worker:state_get(db_gateways), Bucket).
 
@@ -811,7 +846,7 @@ get_server(DBGateways, Bucket) ->
 
     case ActiveGateways of
         [] ->
-            ?warning("Unable to select CouchBase Gateway: no active gateway among: ~p", [Gateways]),
+            ?warning("Unable to select CouchBase Gateway for bucket ~p: no active gateway among: ~p", [Bucket, Gateways]),
             {error, no_active_gateway};
         _ ->
             try
@@ -931,6 +966,17 @@ timeoutize_apply(Fun, Timeout) ->
         {error, timeoutize_apply_timeout}
     end.
 
+
+%%force_save(#model_config{} = ModelConfig, BucketOverride, Doc) ->
+%%    [Res] = save_docs(BucketOverride, [{ModelConfig, Doc}], [{<<"new_edits">>, false}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT),
+%%    Res.
+%%
+%%
+%%bulk_force_save(BucketOverride, Docs) ->
+%%    bulk_force_save(BucketOverride, Docs, []).
+%%bulk_force_save(BucketOverride, Docs, Opts) ->
+%%    save_docs(BucketOverride, Docs, Opts ++ [{<<"new_edits">>, false}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Entry point for Erlang Port (couchbase-sync-gateway) loop spawned with proc_lib.
@@ -948,7 +994,8 @@ start_gateway(Parent, N, Hostname, Port, Bucket) ->
     InitState = #{
         server => self(), port_fd => undefined, status => pre_init, id => {node(), N},
         gw_port => GWPort, gw_admin_port => GWAdminPort, db_hostname => Hostname, db_port => Port,
-        start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1, bucket => Bucket
+        start_time => erlang:system_time(milli_seconds), parent => Parent, last_ping_time => -1, bucket => Bucket,
+        doc_batch_map => #{}, doc_batch_ts => erlang:system_time(milli_seconds)
     },
     Gateways = datastore_worker:state_get(db_gateways),
     case Gateways of
@@ -1027,7 +1074,7 @@ start_gateway(Parent, N, Hostname, Port, Bucket) ->
 %%--------------------------------------------------------------------
 -spec gateway_loop(State :: #{atom() => term()}) -> no_return().
 gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db_port := Port, gw_port := GWPort,
-    start_time := ST, parent := Parent, last_ping_time := LPT, bucket := Bucket} = State) ->
+    start_time := ST, parent := Parent, last_ping_time := LPT, bucket := Bucket, doc_batch_ts := DocBatchTS} = State) ->
 
     %% Update state
     Gateways = datastore_worker:state_get(db_gateways),
@@ -1038,7 +1085,8 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             datastore_worker:state_put(db_gateways, NewGateways)
     end,
 
-    UpdatedState = case erlang:system_time(milli_seconds) - LPT > timer:seconds(1) of
+
+    UpdatedState0 = case erlang:system_time(milli_seconds) - LPT > timer:seconds(1) of
         true ->
             try
                 true = port_command(PortFD, <<"ping">>, [nosuspend]),
@@ -1060,6 +1108,59 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
 
     CT = erlang:system_time(milli_seconds),
     MinRestartTime = ST + ?DATASTORE_GATEWAY_SPAWN_TIMEOUT,
+
+    FlushBatchDocs = fun(LState) ->
+        BatchDocs = maps:get(doc_batch_map, LState),
+        {Keys, Docs} = lists:unzip(maps:to_list(BatchDocs)),
+        spawn(fun() ->
+            Responses =
+                try
+                    UpdatedDocs = try
+                        ToFetch = lists:foldl(fun
+                            ({K, {ModelConfig, #document{key = DocKey, rev = undefined}}}, Acc) ->
+                                [{K, {ModelConfig, DocKey}} ||Acc];
+                            (_, Acc) ->
+                                Acc
+                        end, [], maps:to_list(BatchDocs)),
+                        {Refs, ToFetchRaw} = lists:unzip(ToFetch),
+                        Revs = maps:from_list(lists:map(fun
+                            ({K, {ok, #document{rev = Rev}}}) ->
+                                {K, Rev};
+                            ({K, {error, _}}) ->
+                                {K, undefined}
+                        end, lists:zip(Refs, get_docs(Bucket, ToFetchRaw)))),
+                        NewDocMap = maps:map(fun
+                            (K, {MC, Doc = #document{rev = undefined}}) ->
+                                {MC, Doc#document{rev = maps:get(K, Revs, undefined)}};
+                            (_, V) ->
+                                V
+                        end, BatchDocs),
+                        maps:values(NewDocMap)
+                    catch
+                        _:_ ->
+                            Docs
+                    end,
+
+                    save_docs(Bucket, UpdatedDocs)
+                catch
+                    _:Reason2 ->
+                        [{error, Reason2} || _ <- lists:seq(1, length(Docs))]
+                end,
+
+            utils:pmap(fun({{Pid, Ref}, Res}) ->
+                ct:print("NOTIFY ~p", [{Pid, Ref, Res}]),
+                Pid ! {Ref, Res}
+            end, lists:zip(Keys, Responses))
+        end),
+        LState#{doc_batch_ts => erlang:system_time(milli_seconds), doc_batch_map => #{}}
+    end,
+
+    UpdatedState = case CT - DocBatchTS > timer:seconds(1) of
+        true ->
+            FlushBatchDocs(UpdatedState0);
+        false ->
+            UpdatedState0
+    end,
 
     NewState =
         receive
@@ -1089,10 +1190,20 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
             stop ->
                 stop_gateway(UpdatedState),
                 UpdatedState#{status => closed};
+            {save_doc, {{_From, _Ref} = K, ModelWithDoc}} ->
+                UpdatedState1 = case maps:size(maps:get(doc_batch_map, UpdatedState)) > 100 of
+                    true ->
+                         FlushBatchDocs(UpdatedState);
+                    false ->
+                        UpdatedState
+                end,
+                UpdatedState1#{doc_batch_map => maps:put(K, ModelWithDoc, maps:get(doc_batch_map, UpdatedState1))};
+            flush_docs ->
+                FlushBatchDocs(UpdatedState);
             Other ->
                 ?warning("[CouchBase Gateway ~p] ~p", [ID, Other]),
                 UpdatedState
-        after timer:seconds(2) ->
+        after timer:seconds(1) ->
             UpdatedState
         end,
     case NewState of
@@ -1492,9 +1603,8 @@ stream_view(ModelName, Id, Options) ->
                         {Ref, {row, {Proplist}}} ->
                             try
                                 {_, DocId} = lists:keyfind(<<"id">>, 1, Proplist),
-%%                                {_, Value} = lists:keyfind(<<"value">>, 1, Proplist),
+                                {_, Key} = lists:keyfind(<<"key">>, 1, Proplist),
                                 {_, DocKey} = from_driver_key(DocId),
-%%                                {Version, Record} = datastore_json:decode_record(Value),
                                 Host ! {self(), {stream_data, DocKey}}
                             catch
                                 _:Reason ->
@@ -1655,6 +1765,7 @@ verify_ans(Ans) when is_list(Ans) ->
         case Acc of
             false ->
                 false;
+
             _ ->
                 verify_ans(E)
         end
@@ -1666,3 +1777,25 @@ verify_ans({Ans}) ->
     verify_ans(Ans);
 verify_ans(_Ans) ->
     true.
+
+parse_response([]) ->
+        [];
+parse_response([E | T]) ->
+    [parse_response(E) | parse_response(T)];
+parse_response({_} = JSONTerm) ->
+    JSONBin = json_utils:encode(JSONTerm),
+    JSONMap = json_utils:decode_map(JSONBin),
+    case maps:get(<<"error">>, JSONMap, undefined) of
+        undefined ->
+            case maps:get(<<"doc">>, JSONMap, undefined) of
+                undefined ->
+                    {_, Key} = from_driver_key(maps:get(<<"id">>, JSONMap)),
+                    {ok, Key};
+                RawDoc ->
+                    {ok, {json_utils:decode(json_utils:encode_map(RawDoc))}}
+            end;
+        <<"conflict">> ->
+            {error, already_exists};
+        Error ->
+            {error, binary_to_atom(Error, utf8)}
+    end.

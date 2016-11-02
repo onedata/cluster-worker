@@ -76,6 +76,7 @@
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
+-export([initialize_minimal_env/0, initialize_minimal_env/1]).
 
 %%%===================================================================
 %%% API
@@ -887,6 +888,14 @@ healthcheck() ->
     end.
 
 initialize_minimal_env() ->
+    initialize_minimal_env([]).
+
+initialize_minimal_env(DBNodes) ->
+    hackney:start(),
+    couchbeam_sup:start_link(),
+        catch ets:new(datastore_worker, [named_table, public, set, {read_concurrency, true}]),
+    datastore:ensure_state_loaded([node()]),
+    {ok, _} = datastore_worker:init(DBNodes),
     ok.
 
 %%--------------------------------------------------------------------

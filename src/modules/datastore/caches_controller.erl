@@ -295,7 +295,7 @@ flush(Level, ModelName, Key) ->
 
   Ans = case ToDo of
           {ok, NewMethod, NewArgs} ->
-            FullArgs = [ModelConfig | NewArgs],
+            FullArgs = [ModelConfig#model_config{aggregate_db_writes = false} | NewArgs],
             case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs) of
               {error, already_updated} ->
                 ok;

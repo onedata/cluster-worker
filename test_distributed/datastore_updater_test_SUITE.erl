@@ -80,32 +80,53 @@ offline_upgrade_init_test(Config) ->
     ok = set_model_version(Config, test_record_1, 1),
     ok = set_model_version(Config, test_record_2, 1),
 
-    hackney:start(),
-    couchbeam_sup:start_link(),
+    TR1Num = 1374,
+    TR1IDs = [?id(list_to_atom(integer_to_list(N))) || N <- lists:seq(1, TR1Num)],
+    TR2Num = 231,
+    TR2IDs = [?id(list_to_atom(integer_to_list(N))) || N <- lists:seq(1, TR2Num)],
+
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?PERSISTENCE_DRIVER, couchdb_datastore_driver),
-    datastore:ensure_state_loaded([node()]),
-    ets:new(datastore_worker, [named_table, public, set, {read_concurrency, true}]),
-    ct:print("1 ~p", [?rpc(worker_host, state_get, [datastore_worker, db_nodes])]),
-    datastore_worker:init(?rpc(worker_host, state_get, [datastore_worker, db_nodes])),
-    ct:print("2"),
+    {ok, DBNodes} = ?rpc(plugins, apply, [node_manager_plugin, db_nodes, []]),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, db_nodes, DBNodes),
+    datastore:initialize_minimal_env(),
 
 
-    ?assertMatch({ok, _}, ?rpc(test_record_1, save, [#document{key = ?id(v11), value = {test_record_1, 1, 2, 3}}])),
-    ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_1, get, [?id(v11)])),
+    utils:pmap(
+        fun(ID) ->
+            ?assertMatch({ok, _}, ?rpc(test_record_1, save, [#document{key = ID, value = {test_record_1, 1, 2, 3}}])),
+            ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_1, get, [ID]))
+        end, TR1IDs),
+
+    utils:pmap(
+        fun(ID) ->
+            ?assertMatch({ok, _}, ?rpc(test_record_1, save, [#document{key = ID, value = {test_record_1, 2, 2, 3}}])),
+            ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_1, get, [ID]))
+        end, TR1IDs),
     ok = set_model_version(Config, test_record_1, 2),
 
-    ?assertMatch({ok, _}, ?rpc(test_record_2, save, [#document{key = ?id(v21), value = {test_record_2, 10, 20, 30}}])),
-    ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_2, get, [?id(v21)])),
+    lists:foreach(
+        fun(ID) ->
+            ?assertMatch({ok, _}, ?rpc(test_record_2, save, [#document{key = ID, value = {test_record_2, 10, '20', <<"30">>}}])),
+            ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_2, get, [ID]))
+        end, TR2IDs),
     ok = set_model_version(Config, test_record_2, 2),
 
+    Upgrade1 = datastore_versions:shell_upgrade(),
+    ?assertMatch({ok, {TR1Num, 0}}, proplists:get_value(test_record_1, Upgrade1)),
+    ?assertMatch({ok, {TR2Num, 0}}, proplists:get_value(test_record_2, Upgrade1)),
 
-    datastore_versions:stream_outdated_records(test_record_1),
+    Upgrade2 = datastore_versions:shell_upgrade(),
+    ?assertMatch({ok, {0, 0}}, proplists:get_value(test_record_1, Upgrade2)),
+    ?assertMatch({ok, {0, 0}}, proplists:get_value(test_record_2, Upgrade2)),
 
-    flush(timer:seconds(5)),
-
-    datastore_versions:stream_outdated_records(test_record_2),
-
-    flush(timer:seconds(5)),
+    lists:foreach(
+        fun(ID) ->
+            ?assertMatch({ok, #document{version = 2}}, ?rpc(test_record_1, get, [ID]))
+        end, TR1IDs),
+    lists:foreach(
+        fun(ID) ->
+            ?assertMatch({ok, #document{version = 2}}, ?rpc(test_record_2, get, [ID]))
+        end, TR2IDs),
 
     ok.
 
@@ -123,6 +144,15 @@ end_per_suite(Config) ->
 init_per_testcase(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:enable_datastore_models(Workers, [test_record_1, test_record_2]),
+    test_utils:mock_unload([node()], [plugins]),
+        catch test_utils:mock_new([node()], [plugins]),
+    ok = test_utils:mock_expect([node()], plugins, apply,
+        fun
+            (datastore_config_plugin, models, []) ->
+                meck:passthrough([datastore_config_plugin, models, []]) ++ [test_record_1, test_record_2];
+            (A1, A2, A3) ->
+                meck:passthrough([A1, A2, A3])
+        end),
     datastore_basic_ops_utils:set_env(Case, Config).
 
 end_per_testcase(_Case, Config) ->
@@ -138,13 +168,3 @@ set_model_version(Config, Model, Version) ->
     {_, []} = rpc:multicall(Workers ++ [node()], test_record_1, set_test_record_version, [Model, Version]),
     ?assertMatch(#model_config{version = Version}, Model:model_init()),
     ok.
-
-
-flush(Timeout) ->
-    receive
-        Msg ->
-            ct:print("FLUSH ~p", [Msg]),
-            flush(Timeout)
-    after Timeout ->
-        ok
-    end.
