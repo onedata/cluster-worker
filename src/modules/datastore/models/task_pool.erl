@@ -18,6 +18,8 @@
 %% model_behaviour callbacks
 -export([save/1, get/1, list/0, list/1, list_failed/1, exists/1, delete/1, delete/2, update/2, update/3,
     create/1, create/2, model_init/0, 'after'/5, before/4]).
+%% API
+-export([count_tasks/3]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -122,13 +124,27 @@ list(Level) ->
 list_failed(?NON_LEVEL) ->
     {ok, []};
 
-list_failed(Level) ->
+list_failed(?NODE_LEVEL = Level) ->
     Filter = fun
         ('$end_of_table', Acc) ->
             {abort, Acc};
         (#document{value = V} = Doc, Acc) ->
             N = node(),
-            case (V#task_pool.node =/= N) orelse is_process_alive(V#task_pool.owner) of
+            case (V#task_pool.node =/= N) orelse task_manager:check_owner(V#task_pool.owner) of
+                false ->
+                    {next, [Doc | Acc]};
+                _ ->
+                    {next, Acc}
+            end
+    end,
+    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, []);
+
+list_failed(Level) ->
+    Filter = fun
+        ('$end_of_table', Acc) ->
+            {abort, Acc};
+        (#document{value = V} = Doc, Acc) ->
+            case task_manager:is_task_alive(V) of
                 false ->
                     {next, [Doc | Acc]};
                 _ ->
@@ -200,6 +216,50 @@ model_init() ->
     ok | datastore:generic_error().
 before(_ModelName, _Method, _Level, _Context) ->
     ok.
+
+%%%===================================================================
+%%% API functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Counts alive and failed tasks. Stops counting after specified limit.
+%% @end
+%%--------------------------------------------------------------------
+-spec count_tasks(Level :: task_manager:level(), Type :: atom(), Limit :: non_neg_integer()) ->
+    {ok, {Failed :: non_neg_integer(), All :: non_neg_integer()}} | datastore:generic_error() | no_return().
+count_tasks(Level, Type, Limit) ->
+    Filter = fun
+                 ('$end_of_table', {Failed, All}) ->
+                     {abort, {Failed, All}};
+                 (#document{value = #task_pool{task_type = T, node = N} = V}, {Failed, All}) ->
+                     case T of
+                         Type ->
+                             IsFailed = case Level of
+                                 ?NODE_LEVEL ->
+                                     MyNode = node(),
+                                     (MyNode =:= N) andalso not task_manager:check_owner(V#task_pool.owner);
+                                 _ ->
+                                     not task_manager:is_task_alive(V)
+                             end,
+                             NewFailed = case IsFailed of
+                                 true ->
+                                     Failed + 1;
+                                 _ ->
+                                     Failed
+                             end,
+                             NewAll = All + 1,
+                             case NewAll >= Limit of
+                                 true ->
+                                     {abort, {NewFailed, NewAll}};
+                                 _ ->
+                                     {next, {NewFailed, NewAll}}
+                             end;
+                         _ ->
+                             {next, {Failed, All}}
+                     end
+             end,
+    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, {0,0}).
 
 %%%===================================================================
 %%% Internal functions

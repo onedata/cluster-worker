@@ -12,6 +12,8 @@
 -author("Rafal Slota").
 
 -type driver_action() :: model_behaviour:model_action().
+-type list_options() :: [list_option()].
+-type list_option() :: {mode, dirty | transaction}.
 
 -export_type([driver_action/0]).
 
@@ -92,12 +94,21 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Traverses entire or part of table. Acts simililar to erlang:foldl except that it may be interrupted
+%% Traverses entire or part of table. Acts similar to erlang:foldl except that it may be interrupted
 %% by returning {abort, Acc} from given fun.
 %% @end
 %%--------------------------------------------------------------------
--callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term()) ->
+-callback list(model_behaviour:model_config(), Fun :: datastore:list_fun(), AccIn :: term(), Opts :: list_options()) ->
     {ok, Acc :: term()} | datastore:generic_error() | no_return().
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if there is any doc in model.
+%% @end
+%%--------------------------------------------------------------------
+-callback is_model_empty(model_behaviour:model_config()) -> {ok, boolean()} | datastore:generic_error().
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -113,6 +124,15 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+    ok | datastore:generic_error() | no_return().
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets, overrides given links to the document with given key.
+%% @end
+%%--------------------------------------------------------------------
+-callback set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error() | no_return().
 
 

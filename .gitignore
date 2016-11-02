@@ -16,19 +16,15 @@ src/gui_static/n2o
 *.pyc
 *.o
 
-rel/cluster_worker
-rel/test_cluster
 rel/*.rpm
 
 test/eunit_results
 test_distributed/cover_tmp.spec
 test_coverage
 
-deps
 doc
 logs
-ebin
-priv
+priv/sync_gateway
 vendor
 
 c_lib
@@ -37,3 +33,6 @@ c_src/rt_container/*.o
 c_src/oneproxy/build/*
 
 docs/_build/
+_build
+compile_commands.json
+cluster_manager

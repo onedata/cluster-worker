@@ -61,7 +61,7 @@
     Pid :: pid(),
     Error :: {already_started, Pid} | term().
 start_link() ->
-    gen_server:start_link({local, ?DISPATCHER_NAME}, ?MODULE, [], []).
+    gen_server2:start_link({local, ?DISPATCHER_NAME}, ?MODULE, [], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -70,7 +70,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok.
 stop() ->
-    gen_server:cast(?DISPATCHER_NAME, stop).
+    gen_server2:cast(?DISPATCHER_NAME, stop).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -177,7 +177,7 @@ handle_cast(_Request, State) ->
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
 handle_info({timer, Msg}, State) ->
-    gen_server:cast(?DISPATCHER_NAME, Msg),
+    gen_server2:cast(?DISPATCHER_NAME, Msg),
     {noreply, State};
 handle_info(_Request, State) ->
     ?log_bad_request(_Request),
@@ -246,11 +246,11 @@ get_worker_node(WorkerName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker_nodes(WorkerName :: worker_name()) -> {ok, [node()]} | {error, dispatcher_out_of_sync}.
-get_worker_nodes(_WorkerName) ->
+get_worker_nodes(WorkerName) ->
     case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
         [{?LB_ADVICE_KEY, undefined}] ->
             {error, dispatcher_out_of_sync};
         [{?LB_ADVICE_KEY, LBAdvice}] ->
-            Nodes = load_balancing:all_nodes_for_dispatcher(LBAdvice),
+            Nodes = load_balancing:all_nodes_for_dispatcher(LBAdvice, WorkerName),
             {ok, Nodes}
     end.

@@ -1,16 +1,16 @@
 {
     "dirs_config": {
         "cluster_manager": {
-            "input_dir": "rel/cluster_manager",
-            "target_dir": "rel/test_cluster"
+            "input_dir": "_build/default/rel/cluster_manager",
+            "target_dir": "_build/default/rel/test_cluster"
         },
         "op_worker": {
-            "input_dir": "rel/op_worker",
-            "target_dir": "rel/test_cluster"
+            "input_dir": "_build/default/rel/op_worker",
+            "target_dir": "_build/default/rel/test_cluster"
         },
         "oz_worker": {
-            "input_dir": "rel/oz_worker",
-            "target_dir": "rel/test_cluster"
+            "input_dir": "_build/default/rel/oz_worker",
+            "target_dir": "_build/default/rel/test_cluster"
         }
     },
     "os_configs": {
@@ -41,7 +41,6 @@
         "p1": {
             "db_driver": "couchdb",
             "os_config": "cfg1",
-            "gui_livereload": "none",
             "cluster_manager": {
                 "cm1": {
                     "vm.args": {
@@ -80,7 +79,6 @@
     },
     "zone_domains": {
         "oz": {
-            "gui_livereload": "none",
             "db_driver": "couchdb",
             "cluster_manager": {
                 "cm": {

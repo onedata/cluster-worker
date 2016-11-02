@@ -19,7 +19,17 @@
 %% custom initialisation.
 %% @end
 %%--------------------------------------------------------------------
--callback on_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
+-callback before_init(Args :: term()) -> ok | {error, Reason :: term()}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% This callback is executed when cluster has finished to initialize
+%% (nagios has reported healthy status).
+%% Use to run custom code required for application initialization that might
+%% need working services (e.g. database).
+%% @end
+%%--------------------------------------------------------------------
+-callback after_init(Args :: term()) -> ok | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -29,12 +39,12 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_call_extension(Request :: term(), From :: {pid(), Tag :: term()}, State :: term()) ->
-  {reply, Reply :: term(), NewState :: term()} |
-  {reply, Reply :: term(), NewState :: term(), timeout() | hibernate} |
-  {noreply, NewState :: term()} |
-  {noreply, NewState :: term(), timeout() | hibernate} |
-  {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
-  {stop, Reason :: term(), NewState :: term()}.
+    {reply, Reply :: term(), NewState :: term()} |
+    {reply, Reply :: term(), NewState :: term(), timeout() | hibernate} |
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+    {stop, Reason :: term(), NewState :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -43,9 +53,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_cast_extension(Request :: term(), State :: term()) ->
-  {noreply, NewState :: term()} |
-  {noreply, NewState :: term(), timeout() | hibernate} |
-  {stop, Reason :: term(), NewState :: term()}.
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,9 +64,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_info_extension(Info :: timeout | term(), State :: term()) ->
-  {noreply, NewState :: term()} |
-  {noreply, NewState :: term(), timeout() | hibernate} |
-  {stop, Reason :: term(), NewState :: term()}.
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -66,7 +76,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback on_terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()), State :: term()) ->
-  term().
+    term().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -75,7 +85,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback on_code_change(OldVsn :: (term() | {down, term()}), State :: term(), Extra :: term()) ->
-  {ok, NewState :: term()} | {error, Reason :: term()}.
+    {ok, NewState :: term()} | {error, Reason :: term()}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -97,7 +107,7 @@
 %% List of modules (accompanied by their configs) to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
--callback modules_with_args() -> Models :: [{atom(), [any()]}].
+-callback modules_with_args() -> Models :: [{atom(), [any()]} | {singleton, atom(), [any()]}].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -117,3 +127,11 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback app_name() -> {ok, Name :: atom()}.
+
+%% @doc
+%% Clears memory of node. HighMemUse is true when memory clearing is
+%% started because of high memory usage by node. When it is periodic memory
+%% cleaning HighMemUse is false.
+%% @end
+%%--------------------------------------------------------------------
+-callback clear_memory(HighMemUse :: boolean()) -> ok.

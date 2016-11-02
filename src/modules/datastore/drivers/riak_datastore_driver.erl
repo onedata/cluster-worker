@@ -36,8 +36,8 @@
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
--export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
+-export([add_links/3, set_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -167,13 +167,24 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback list/3.
+%% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) -> no_return().
+list(#model_config{} = _ModelConfig, _Fun, _AccIn, _Mode) ->
     error(not_supported).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback is_model_empty/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_model_empty(model_behaviour:model_config()) -> no_return().
+is_model_empty(_ModelConfig) ->
+    error(not_supported).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -254,6 +265,17 @@ add_links4(#model_config{bucket = _Bucket} = ModelConfig, Key, [Link | R], Ctx) 
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     no_return().
 create_link(_ModelConfig, _Key, _Link) ->
+    erlang:error(not_implemented).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback set_links/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+    no_return().
+set_links(_ModelConfig, _Key, _Link) ->
     erlang:error(not_implemented).
 
 

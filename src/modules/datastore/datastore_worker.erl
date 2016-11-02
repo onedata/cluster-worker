@@ -14,6 +14,7 @@
 -behaviour(worker_plugin_behaviour).
 
 -include("global_definitions.hrl").
+-include("timeouts.hrl").
 -include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -53,7 +54,7 @@ init(_Args) ->
             DriverMod = datastore:driver_to_module(Driver),
             {ok, NState} = DriverMod:init_driver(State0),
             [state_put(Key, Value) || {Key, Value} <- maps:to_list(NState)],
-            ok = wait_for(fun() -> DriverMod:healthcheck(NState) end, timer:seconds(10)),
+            ok = wait_for(fun() -> DriverMod:healthcheck(NState) end, ?DATASTORE_DRIVER_INIT_TIMEOUT),
             NState
         end, State0, [?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER, ?PERSISTENCE_DRIVER]),
 

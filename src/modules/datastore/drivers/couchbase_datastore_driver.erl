@@ -31,8 +31,8 @@
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
--export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3]).
--export([add_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
+-export([add_links/3, set_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -156,14 +156,25 @@ get(#model_config{bucket = Bucket, name = ModelName} = _ModelConfig, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback list/3.
+%% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{} = _ModelConfig, _Fun, _AccIn) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) -> no_return().
+list(#model_config{} = _ModelConfig, _Fun, _AccIn, _Mode) ->
     % Add support for multivelel list in datastore (simmilar to foreach_link) during implementation
     error(not_supported).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback is_model_empty/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_model_empty(model_behaviour:model_config()) -> no_return().
+is_model_empty(_ModelConfig) ->
+    error(not_supported).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -215,7 +226,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             case get(ModelConfig, links_doc_key(Key)) of
                 {ok, #document{value = LinkMap}} ->
@@ -227,6 +238,18 @@ add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, L
             end
         end
     ).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback set_links/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+    no_return().
+set_links(#model_config{}, _Key, Links) when is_list(Links) ->
+    erlang:error(not_implemented).
+
 
 -spec add_links4(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()], InternalCtx :: term()) ->
     ok | datastore:generic_error().
@@ -261,7 +284,7 @@ create_link(_ModelConfig, _Key, _Link) ->
 delete_links(#model_config{bucket = _Bucket} = ModelConfig, Key, all) ->
     delete(ModelConfig, links_doc_key(Key), ?PRED_ALWAYS);
 delete_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) ->
-    datastore:run_synchronized(ModelName, to_binary({?MODULE, Bucket, Key}),
+    critical_section:run({ModelName, Bucket, Key},
         fun() ->
             case get(ModelConfig, links_doc_key(Key)) of
                 {ok, #document{value = LinkMap}} ->

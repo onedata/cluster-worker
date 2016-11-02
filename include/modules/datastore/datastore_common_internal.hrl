@@ -21,9 +21,19 @@
 
 -define(DEFAULT_STORE_LEVEL, ?GLOBALLY_CACHED_LEVEL).
 
+%% Name of local only link scope (that shall not be synchronized)
+%% This link scope always handles read operation like fetch and foreach
+%% All write operations on other scopes all replicated to this scope
+-define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
+
+-define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?LOCAL_ONLY_LINK_SCOPE end).
+
+-define(OTHER_SCOPES_DEF_FUN, fun(_) -> [] end).
+
 %% This record shall not be used outside datastore engine and shall not be instantiated
 %% directly. Use MODEL_CONFIG macro instead.
 -record(model_config, {
+    version = 1 :: non_neg_integer(),
     name :: model_behaviour:model_type(),
     size = 0 :: non_neg_integer(),
     fields = [],
@@ -33,7 +43,11 @@
     store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     transactional_global_cache = true :: boolean(),
-    sync_cache = false :: boolean()
+    sync_cache = false :: boolean(),
+    mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope(),
+    other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
+    link_duplication = false :: boolean(),
+    sync_enabled = false :: boolean()
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -47,17 +61,31 @@
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, true)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, false)).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache), #model_config{name = ?MODULE,
-    size = record_info(size, ?MODULE),
-    fields = record_info(fields, ?MODULE),
-    defaults = #?MODULE{},
-    bucket = Bucket,
-    hooks = Hooks,
-    store_level = StoreLevel,
-    link_store_level = LinkStoreLevel,
-    transactional_global_cache = Transactions,
-    sync_cache = SyncCache
-}).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache,
+        ?MOTHER_SCOPE_DEF_FUN, ?OTHER_SCOPES_DEF_FUN)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, false)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication),
+    #model_config{
+        name = ?MODULE,
+        size = record_info(size, ?MODULE),
+        fields = record_info(fields, ?MODULE),
+        defaults = #?MODULE{},
+        bucket = Bucket,
+        hooks = Hooks,
+        store_level = StoreLevel,
+        link_store_level = LinkStoreLevel,
+        transactional_global_cache = Transactions,
+        sync_cache = SyncCache,
+        % Function that returns scope for local operations on links
+        mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
+        % Function that returns all scopes for links' operations
+        other_link_scopes = ScopeFun2, % link_utils:other_scopes_fun()
+        link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
+        sync_enabled = false % Models with sync enabled will be stored in non-default bucket to reduce DB load.
+    }
+).
 
 %% Max link map size in single links record
 -define(LINKS_MAP_MAX_SIZE, 32).
@@ -69,7 +97,18 @@
     doc_key,
     model,
     link_map = #{},
-    children = #{}
+    children = #{},
+    origin = ?LOCAL_ONLY_LINK_SCOPE %% Scope that is an origin to this link record
 }).
+
+%% Separator for link name and its scope
+-define(LINK_NAME_SCOPE_SEPARATOR, "@provider@").
+
+%% Special prefix for keys of documents that shall not be persisted in synchronized bucket
+%% even if its model config says otherwise.
+-define(NOSYNC_KEY_OVERRIDE_PREFIX, <<"nosync_">>).
+
+-define(NOSYNC_WRAPPED_KEY_OVERRIDE(KEY), {nosync, KEY}).
+
 
 -endif.

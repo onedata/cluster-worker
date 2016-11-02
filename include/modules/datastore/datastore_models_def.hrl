@@ -23,23 +23,62 @@
     rev :: term(),
     %% if record has been deleted  (in changes stream)
     deleted = false :: boolean(),
+    generated_uuid = false :: boolean(),
     value :: datastore:value(),
-    links :: term()
+    links :: term(),
+    version :: non_neg_integer() | undefined
 }).
 
 %% Model that controls utilization of cache
+-define(CC_TIMEUNIT, 1000000).
 -record(cache_controller, {
-    timestamp = {0, 0, 0} :: erlang:timestamp(),
+    timestamp = 0 :: integer(),
     action = non :: atom(),
-    last_user = non :: string() | non,
-    last_action_time = {0, 0, 0} :: erlang:timestamp()
+    last_user = non :: pid() | non,
+    last_action_time = 0 :: integer(),
+    action_data :: term()
+}).
+
+% Max size of cleared_list in cache_consistency_controller
+-define(CLEAR_MONITOR_MAX_SIZE, 32).
+%% Model that controls consistency of cache
+-record(cache_consistency_controller, {
+    cleared_list = [] :: [datastore:key() | datastore:link_name()],
+    status = ok :: ok | not_monitored | {restoring, pid()},
+    clearing_counter = 0 :: non_neg_integer(),
+    restore_counter  = 0 :: non_neg_integer()
 }).
 
 %% Description of task to be done
 -record(task_pool, {
     task :: task_manager:task(),
-    owner :: pid(),
+    task_type :: atom(),
+    owner :: undefined | pid() | string(),    % MemOpt - float for ets and mnesia
     node :: node()
+}).
+
+%% Queue of processes waiting for lock
+-record(lock, {
+    queue = [] :: [lock:queue_element()]
+}).
+
+%% Contents of cert files synced between nodes
+-record(synced_cert, {
+    cert_file_content :: undefined | binary(),
+    key_file_content :: undefined | binary()
+}).
+
+% Cached info about identities
+-record(cached_identity, {
+    id :: undefined | identity:id(),
+    encoded_public_key :: undefined | identity:encoded_public_key(),
+    last_update_seconds :: undefined | integer()
+}).
+
+% Record for various data used during node management
+%
+-record(node_management, {
+    value :: term()
 }).
 
 -endif.

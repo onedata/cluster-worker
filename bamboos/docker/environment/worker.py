@@ -12,10 +12,6 @@ import os
 from . import common, docker, riak, couchbase, dns, cluster_manager
 from timeouts import *
 
-# mounting point for op-worker-node docker
-DOCKER_BINDIR_PATH = '/root/build'
-
-
 def cluster_domain(instance, uid):
     """Formats domain for a cluster."""
     return common.format_hostname(instance, uid)
@@ -61,8 +57,8 @@ def _tweak_config(config, name, instance, uid, configurator):
     return cfg, sys_config[app_name]['db_nodes']
 
 
-def _node_up(image, bindir, config, dns_servers, db_node_mappings, logdir,
-             configurator):
+def _node_up(image, bindir, dns_servers, config, db_node_mappings, logdir,
+             configurator, storages_dockers):
     app_name = configurator.app_name()
     node_name = config['nodes']['node']['vm.args']['name']
     db_nodes = config['nodes']['node']['sys.config'][app_name]['db_nodes']
@@ -73,30 +69,38 @@ def _node_up(image, bindir, config, dns_servers, db_node_mappings, logdir,
     (name, sep, hostname) = node_name.partition('@')
     (_, _, domain) = hostname.partition('.')
 
+    bindir = os.path.abspath(bindir)
+
     command = '''set -e
 mkdir -p /root/bin/node/log/
-echo 'while ((1)); do chown -R {uid}:{gid} /root/bin/node/log; sleep 1; done' > /root/bin/chown_logs.sh
-bash /root/bin/chown_logs.sh &
+bindfs --create-for-user={uid} --create-for-group={gid} /root/bin/node/log /root/bin/node/log
 cat <<"EOF" > /tmp/gen_dev_args.json
 {gen_dev_args}
 EOF
+{mount_commands}
 {pre_start_commands}
+ln -s {bindir} /root/build
 /root/bin/node/bin/{executable} console'''
-    pre_start_commands = configurator.pre_start_commands(domain)
 
+    mount_commands = common.mount_nfs_command(config, storages_dockers)
+    pre_start_commands = configurator.pre_start_commands(domain)
     command = command.format(
+        bindir=bindir,
         gen_dev_args=json.dumps({configurator.app_name(): config}),
+        mount_commands=mount_commands,
         pre_start_commands=pre_start_commands,
         uid=os.geteuid(),
         gid=os.getegid(),
         executable=configurator.app_name()
     )
 
-    volumes = [(bindir, DOCKER_BINDIR_PATH, 'ro')]
-    volumes += configurator.extra_volumes(config, bindir)
+    volumes = ['/root/bin', (bindir, bindir, 'ro')]
+    volumes += configurator.extra_volumes(config, bindir, domain,
+                                          storages_dockers)
 
     if logdir:
         logdir = os.path.join(os.path.abspath(logdir), hostname)
+        os.makedirs(logdir)
         volumes.extend([(logdir, '/root/bin/node/log', 'rw')])
 
     container = docker.run(
@@ -106,9 +110,10 @@ EOF
         detach=True,
         interactive=True,
         tty=True,
-        workdir=DOCKER_BINDIR_PATH,
+        workdir=bindir,
         volumes=volumes,
         dns_list=dns_servers,
+        privileged=True,
         command=command)
 
     # create system users and groups (if specified)
@@ -147,7 +152,7 @@ def _riak_up(cluster_name, db_nodes, dns_servers, uid):
     return db_node_mappings, riak_output
 
 
-def _couchbase_up(cluster_name, db_nodes, dns_servers, uid):
+def _couchbase_up(cluster_name, db_nodes, dns_servers, uid, configurator):
     db_node_mappings = {}
     for node in db_nodes:
         db_node_mappings[node] = ''
@@ -159,8 +164,10 @@ def _couchbase_up(cluster_name, db_nodes, dns_servers, uid):
         return db_node_mappings, {}
 
     [dns] = dns_servers
-    couchbase_output = couchbase.up('couchbase/server:community-4.0.0', dns,
-                                    uid, cluster_name, len(db_node_mappings))
+    couchbase_output = couchbase.up('couchbase/server:community-4.1.0', dns,
+                                    uid, cluster_name, len(db_node_mappings),
+                                    configurator.couchbase_buckets(),
+                                    configurator.couchbase_ramsize())
 
     return db_node_mappings, couchbase_output
 
@@ -183,7 +190,9 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None,
     dns_servers, output = dns.maybe_start(dns_server, uid)
 
     # Workers of every cluster are started together
+    # here we call that an instance
     for instance in config[configurator.domains_attribute()]:
+        instance_config = config[configurator.domains_attribute()][instance]
         current_output = {}
 
         gen_dev_cfg = {
@@ -191,24 +200,18 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None,
                 'input_dir': input_dir,
                 'target_dir': '/root/bin'
             },
-            'nodes': config[configurator.domains_attribute()][instance][
-                configurator.app_name()],
-            'db_driver': _db_driver(
-                config[configurator.domains_attribute()][instance])
+            'nodes': instance_config[configurator.app_name()],
+            'db_driver': _db_driver(instance_config)
         }
 
         # If present, include os_config
-        if 'os_config' in config[configurator.domains_attribute()][instance]:
-            os_config = config[configurator.domains_attribute()][instance][
-                'os_config']
+        if 'os_config' in instance_config:
+            os_config = instance_config['os_config']
             gen_dev_cfg['os_config'] = config['os_configs'][os_config]
 
-        # If present, include gui_livereload
-        if 'gui_livereload' in config[configurator.domains_attribute()][
-            instance]:
-            gui_livereload = config[configurator.domains_attribute()][instance][
-                'gui_livereload']
-            gen_dev_cfg['gui_livereload'] = gui_livereload
+        # If present, include gui config
+        if 'gui_override' in instance_config:
+            gen_dev_cfg['gui_override'] = instance_config['gui_override']
 
         # Tweak configs, retrieve list of db nodes to start
         configs = []
@@ -222,8 +225,7 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None,
 
         db_node_mappings = None
         db_out = None
-        db_driver = _db_driver(
-            config[configurator.domains_attribute()][instance])
+        db_driver = _db_driver(instance_config)
 
         # Start db nodes, obtain mappings
         if db_driver == 'riak':
@@ -231,18 +233,25 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None,
                                                 dns_servers, uid)
         elif db_driver in ['couchbase', 'couchdb']:
             db_node_mappings, db_out = _couchbase_up(instance, all_db_nodes,
-                                                     dns_servers, uid)
+                                                     dns_servers, uid,
+                                                     configurator)
         else:
             raise ValueError("Invalid db_driver: {0}".format(db_driver))
 
         common.merge(current_output, db_out)
 
+        instance_domain = cluster_domain(instance, uid)
+
+        # Call pre-start configuration for instance (cluster)
+        configurator.pre_configure_instance(instance, instance_domain, config)
+
         # Start the workers
         workers = []
         worker_ips = []
         for cfg in configs:
-            worker, node_out = _node_up(image, bindir, cfg, dns_servers,
-                                        db_node_mappings, logdir, configurator)
+            worker, node_out = _node_up(image, bindir, dns_servers, cfg,
+                                        db_node_mappings, logdir, configurator,
+                                        storages_dockers)
             workers.append(worker)
             worker_ips.append(common.get_docker_ip(worker))
             common.merge(current_output, node_out)
@@ -253,16 +262,22 @@ def up(image, bindir, dns_server, uid, config_path, configurator, logdir=None,
         # Add the domain of current clusters
         domains = {
             'domains': {
-                cluster_domain(instance, uid): {
+                instance_domain: {
                     'ns': worker_ips,
                     'a': []
                 }
+            },
+            'domain_mappings': {
+                instance: instance_domain
             }
         }
         common.merge(current_output, domains)
-        configurator.configure_started_instance(bindir, instance, config,
-                                                workers, current_output, storages_dockers)
         common.merge(output, current_output)
+
+        # Call post-start configuration for instance (cluster)
+        configurator.post_configure_instance(bindir, instance, config,
+                                             workers, current_output,
+                                             storages_dockers)
 
     # Make sure domains are added to the dns server.
     dns.maybe_restart_with_configuration(dns_server, uid, output)
