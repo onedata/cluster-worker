@@ -40,6 +40,7 @@ handle(Req, State) ->
     {Qs, _} = cowboy_req:qs(Req),
     QsString = case str_utils:to_binary(Qs) of
         <<"">> -> <<"">>;
+        <<"undefined">> -> <<"">>;
         Bin -> <<"?", Bin/binary>>
     end,
     % Remove the leading 'www.' if present
