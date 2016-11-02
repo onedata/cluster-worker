@@ -38,11 +38,9 @@ init(_Type, Req, _Opts) ->
 handle(Req, State) ->
     {FullHostname, _} = cowboy_req:header(<<"host">>, Req),
     {Qs, _} = cowboy_req:qs(Req),
-    QsString = case Qs of
-        undefined ->
-            <<"">>;
-        Bin when is_binary(Bin) ->
-            <<"?", Qs/binary>>
+    QsString = case str_utils:to_binary(Qs) of
+        <<"">> -> <<"">>;
+        Bin -> <<"?", Bin/binary>>
     end,
     % Remove the leading 'www.' if present
     Hostname = case FullHostname of
