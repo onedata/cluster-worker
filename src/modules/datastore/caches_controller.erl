@@ -968,6 +968,14 @@ delete_old_keys(Level, Caches, TimeWindow) ->
       ok
   end.
 
+ %%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Lists keys and executes fun for each key. Reruns listing if aborted.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_old_keys(Level :: global_only | local_only, ClearFun :: datastore:list_fun(),
+    ModelName :: model_behaviour:model_type()) -> {ok, term()} | datastore:generic_error() | no_return().
 list_old_keys(Level, ClearFun, Model) ->
   case datastore:list_dirty(Level, Model, ClearFun, {0, 0, undefined}) of
     {ok, _} = Ans ->
@@ -985,7 +993,7 @@ list_old_keys(Level, ClearFun, Model) ->
 %% Deletes key with cache data.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_old_key(Level, Uuid, BatchNum :: integer()) -> ok.
+-spec delete_old_key(Level :: global_only | local_only, Uuid :: binary(), BatchNum :: integer()) -> ok.
 delete_old_key(Level, Uuid, BatchNum) ->
   Master = self(),
   spawn(fun() ->
