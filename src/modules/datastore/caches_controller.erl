@@ -1017,19 +1017,30 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
-
     CCCUuid = get_cache_uuid(Key, ModelName),
+    Driver = get_driver_module(Level),
+
     consistency_info_lock(CCCUuid, Link,
       fun() ->
-        Pred = fun() ->
-          case save_high_mem_clear_info(Level, Uuid) of
-            {ok, _} ->
-              save_consistency_info(Level, CCCUuid, Link);
-            _ ->
-              false
-          end
-        end,
-        erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+        critical_section:run({cache_controller, start_disk_op, Uuid},
+          fun() ->
+            {ok, DiskValue} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), fetch_link, [ModelConfig, Key, Link]),
+            Pred = fun() ->
+              {ok, MemValue} = erlang:apply(Driver, fetch_link, [ModelConfig, Key, Link]),
+              case MemValue of
+                DiskValue ->
+                  case save_high_mem_clear_info(Level, Uuid) of
+                    {ok, _} ->
+                      save_consistency_info(Level, CCCUuid, Link);
+                    _ ->
+                      false
+                  end;
+                _ ->
+                  false
+              end
+            end,
+            erlang:apply(Driver, delete_links, [ModelConfig, Key, [Link], Pred])
+          end)
       end)
   catch
     E1:E2 ->
@@ -1041,9 +1052,29 @@ safe_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(Key, ModelName),
+    Driver = get_driver_module(Level),
 
     consistency_info_lock(ModelName, Key,
       fun() ->
+        critical_section:run({cache_controller, start_disk_op, Uuid},
+          fun() ->
+            {ok, #document{value = DiskValue}} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, [ModelConfig, Key]),
+            Pred = fun() ->
+              {ok, #document{value = MemValue}} = erlang:apply(Driver, fetch_link, [ModelConfig, Key]),
+              case MemValue of
+                DiskValue ->
+                  case save_high_mem_clear_info(Level, Uuid) of
+                    {ok, _} ->
+                      save_consistency_info(Level, ModelName, Key);
+                    _ ->
+                      false
+                  end;
+                _ ->
+                  false
+              end
+            end,
+            erlang:apply(Driver, delete, [ModelConfig, Key, Pred])
+          end),
         Pred =fun() ->
           case save_high_mem_clear_info(Level, Uuid) of
             {ok, _} ->
