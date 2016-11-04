@@ -63,7 +63,7 @@ init_bucket(_BucketName, Models, NodeToSync) ->
                 true -> %% No mnesia nodes -> create new table
                     MakeTable = fun(TabName, RecordName, RecordFields) ->
                         Ans = case mnesia:create_table(TabName, [{record_name, RecordName}, {attributes, RecordFields},
-                            {ram_copies, [Node]}, {type, set}, {majority, true}]) of
+                            {ram_copies, [Node]}, {type, set}]) of
                             {atomic, ok} -> ok;
                             {aborted, {already_exists, TabName}} ->
                                 ok;
@@ -231,7 +231,9 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
             mnesia:read(table_name(ModelConfig), Key);
         _ ->
             log(normal, "dirty -> ~p:get(~p)", [ModelName, Key]),
-            mnesia:dirty_read(table_name(ModelConfig), Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(table_name(ModelConfig), Key)
+            end)
     end,
     case TmpAns of
         [] -> {error, {not_found, ModelName}};
@@ -252,7 +254,9 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
             mnesia:read(links_table_name(ModelConfig), Key);
         _ ->
             log(normal, "dirty -> ~p:get_link_doc(~p)", [ModelName, Key]),
-            mnesia:dirty_read(links_table_name(ModelConfig), Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(links_table_name(ModelConfig), Key)
+            end)
     end,
     case TmpAns of
         [] -> {error, {not_found, ModelName}};
@@ -275,7 +279,9 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
             mnesia:read(LNT, Key);
         _ ->
             log(normal, "dirty -> ~p:exists_link_doc(~p)", [ModelName, Key]),
-            mnesia:dirty_read(LNT, Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(LNT, Key)
+            end)
     end,
     case TmpAns of
         [] -> {ok, false};
@@ -484,7 +490,9 @@ exists(#model_config{name = ModelName} = ModelConfig, Key) ->
             mnesia:read(table_name(ModelConfig), Key);
         _ ->
             log(normal, "dirty -> ~p:exists(~p)", [ModelName, Key]),
-            mnesia:dirty_read(table_name(ModelConfig), Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(table_name(ModelConfig), Key)
+            end)
     end,
     case TmpAns of
         [] -> {ok, false};

@@ -860,123 +860,106 @@ save_consistency_info(Level, Key, ClearedName) ->
 delete_old_keys(Level, Caches, TimeWindow) ->
   Now = os:system_time(?CC_TIMEUNIT),
   ClearFun = fun
-             ('$end_of_table', {Count, BatchNum}) ->
-                 count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
-               {abort, Count};
-             (#document{key = Uuid, value = V}, {Count, BatchNum0}) ->
-               {Stop, BatchNum} = case Count rem ?CLEAR_BATCH_SIZE of
-                 0 ->
-                   case Count of
-                     0 ->
-                       ok;
-                     _ ->
-                       count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
-                   end,
+    ('$end_of_table', {0, _, undefined}) ->
+      {abort, 0};
+    ('$end_of_table', {Count0, BatchNum, {Uuid, V}}) ->
+      T = V#cache_controller.timestamp,
+      U = V#cache_controller.last_user,
+      Age = Now - T,
+      Count = case U of
+        non when Age >= 1000 * TimeWindow ->
+          delete_old_key(Level, Uuid, BatchNum),
+          Count0 + 1;
+        _ ->
+          Count0
+      end,
+      case Count of
+        0 ->
+          ok;
+        _ ->
+          count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum)
+      end,
+      {abort, Count};
+    (#document{key = Uuid, value = V}, {0, BatchNum, undefined}) ->
+      {next, {0, BatchNum, {Uuid, V}}};
+    (#document{key = NewUuid, value = NewV}, {Count0, BatchNum0, {Uuid, V}}) ->
+      T = V#cache_controller.timestamp,
+      U = V#cache_controller.last_user,
+      Age = Now - T,
+      {Stop, BatchNum, Count} = case U of
+        non when Age >= 1000 * TimeWindow ->
+          delete_old_key(Level, Uuid, BatchNum0),
+          NewCount = Count0 + 1,
+          case NewCount rem ?CLEAR_BATCH_SIZE of
+            0 ->
+              count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
 
-                   case monitoring:get_memory_stats() of
-                     [{<<"mem">>, MemUsage}] ->
-                       ErlangMemUsage = erlang:memory(),
-                       {should_stop_clear_cache(MemUsage, ErlangMemUsage), BatchNum0 + 1};
-                     _ ->
-                       ?warning("Not able to check memory usage"),
-                       {false, BatchNum0 + 1}
-                   end;
-                 _ ->
-                   {false, BatchNum0}
-               end,
-               case Stop of
-                 true ->
-                   {abort, Count};
-                 _ ->
-                   T = V#cache_controller.timestamp,
-                   U = V#cache_controller.last_user,
-                   Age = Now - T,
-                   case U of
-                     non when Age >= 1000 * TimeWindow ->
-                       Master = self(),
-                       spawn(fun() ->
-                         {ModelName, Key} = decode_uuid(Uuid),
-                         case safe_delete(Level, ModelName, Key) of
-                           ok ->
-                             Master ! {doc_cleared, BatchNum},
-                             timer:sleep(timer:seconds(2)), % allow start new operations if scheduled
-                             Pred = fun() ->
-                               CheckAns = case cache_controller:get(Level, Uuid) of
-                                            {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                                              {LU, A};
-                                            {error, {not_found, _}} ->
-                                              ok
-                                          end,
+              case monitoring:get_memory_stats() of
+                [{<<"mem">>, MemUsage}] ->
+                  ErlangMemUsage = erlang:memory(),
+                  {should_stop_clear_cache(MemUsage, ErlangMemUsage), BatchNum0 + 1, NewCount};
+                _ ->
+                  ?warning("Not able to check memory usage"),
+                  {false, BatchNum0 + 1, NewCount}
+              end;
+            _ ->
+              {false, BatchNum0, NewCount}
+          end;
+        _ ->
+          {false, BatchNum0, Count0}
+      end,
 
-                               case CheckAns of
-                                 {_, to_be_del} ->
-                                   false;
-                                 {non, _} ->
-                                   true;
-                                 _ ->
-                                   false
-                               end
-                                    end,
+      case Stop of
+        true ->
+          {abort, Count};
+        _ ->
+          {next, {Count, BatchNum, {NewUuid, NewV}}}
+      end
+  end,
 
-                             cache_controller:delete(Level, Uuid, Pred),
-                             case Key of
-                               {_, _, cache_controller_link_key} ->
-                                 ok;
-                               _ ->
-                                 CCCUuid = get_cache_uuid(Key, ModelName),
-                                 cache_consistency_controller:delete(Level, CCCUuid)
-                             end;
-                           _ ->
-                             error
-                         end
-                       end),
-                       {next, {Count + 1, BatchNum}};
-                     _ ->
-                       {next, {Count, BatchNum}}
-                   end
-               end
-           end,
+  ClearAns = case TimeWindow of
+    0 ->
+      list_old_keys(Level, ClearFun, cache_controller);
+    _ ->
+      cache_controller:list_dirty(Level, ClearFun, {0, 0, undefined})
+  end,
 
-  case cache_controller:list_dirty(Level, ClearFun, {0, 0}) of
+  case ClearAns of
     {ok, _} ->
       case TimeWindow of
         0 ->
           % TODO - the same for links
           lists:foreach(fun(Cache) ->
             ClearFun2 = fun
-                          ('$end_of_table', {Count, BatchNum}) ->
-                            count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
-                            {abort, Count};
-                          (#document{key = Uuid}, {Count, BatchNum0}) ->
-                            BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
-                                         0 ->
-                                           case Count of
-                                             0 ->
-                                               ok;
-                                             _ ->
-                                               count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
-                                           end,
-                                           BatchNum0 + 1;
-                                         _ ->
-                                           BatchNum0
-                                       end,
-                            Master = self(),
-                            spawn(fun() ->
-                              safe_delete(Level, Cache, Uuid),
-                              Master ! {doc_cleared, BatchNum}
-                                  end),
-                            {next, {Count + 1, BatchNum}}
-                        end,
-            {ok, _} = datastore:list_dirty(Level, Cache, ClearFun2, {0, 0})
+              ('$end_of_table', {0, _, undefined}) ->
+                {abort, 0};
+              ('$end_of_table', {Count, BatchNum, UuidToDel}) ->
+                Master = self(),
+                spawn(fun() ->
+                  safe_delete(Level, Cache, UuidToDel),
+                  Master ! {doc_cleared, BatchNum}
+                end),
+                count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                {abort, Count};
+              (#document{key = Uuid}, {0, BatchNum, undefined}) ->
+                {next, {1, BatchNum, Uuid}};
+              (#document{key = Uuid}, {Count, BatchNum0, UuidToDel}) ->
+                Master = self(),
+                spawn(fun() ->
+                  safe_delete(Level, Cache, UuidToDel),
+                  Master ! {doc_cleared, BatchNum0}
+                end),
+                BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
+                  0 ->
+                    count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
+                    BatchNum0 + 1;
+                  _ ->
+                    BatchNum0
+                end,
+                {next, {Count + 1, BatchNum, Uuid}}
+            end,
+            {ok, _} = list_old_keys(Level, ClearFun2, Cache)
           end, Caches);
-        _ ->
-          ok
-      end;
-    {error, {aborted, R}} ->
-      ?warning("Cache cleaning aborted: ~p", [R]),
-      case TimeWindow of
-        0 ->
-          delete_old_keys(Level, Caches, TimeWindow);
         _ ->
           ok
       end;
@@ -984,6 +967,72 @@ delete_old_keys(Level, Caches, TimeWindow) ->
       ?error("Error during cache cleaning: ~p", [Other]),
       ok
   end.
+
+ %%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Lists keys and executes fun for each key. Reruns listing if aborted.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_old_keys(Level :: global_only | local_only, ClearFun :: datastore:list_fun(),
+    ModelName :: model_behaviour:model_type()) -> {ok, term()} | datastore:generic_error() | no_return().
+list_old_keys(Level, ClearFun, Model) ->
+  case datastore:list_dirty(Level, Model, ClearFun, {0, 0, undefined}) of
+    {ok, _} = Ans ->
+      Ans;
+    {error, {aborted, R}} ->
+      ?warning("Cache cleaning aborted: ~p", [R]),
+      list_old_keys(Level, ClearFun, Model);
+    Other ->
+      Other
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes key with cache data.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_old_key(Level :: global_only | local_only, Uuid :: binary(), BatchNum :: integer()) -> ok.
+delete_old_key(Level, Uuid, BatchNum) ->
+  Master = self(),
+  spawn(fun() ->
+    {ModelName, Key} = decode_uuid(Uuid),
+    case safe_delete(Level, ModelName, Key) of
+      ok ->
+        Master ! {doc_cleared, BatchNum},
+        timer:sleep(timer:seconds(2)), % allow start new operations if scheduled
+        Pred = fun() ->
+          CheckAns = case cache_controller:get(Level, Uuid) of
+            {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+              {LU, A};
+            {error, {not_found, _}} ->
+              ok
+          end,
+
+          case CheckAns of
+            {_, to_be_del} ->
+              false;
+            {non, _} ->
+              true;
+            _ ->
+              false
+          end
+        end,
+
+        cache_controller:delete(Level, Uuid, Pred),
+        case Key of
+          {_, _, cache_controller_link_key} ->
+            ok;
+          _ ->
+            CCCUuid = get_cache_uuid(Key, ModelName),
+            cache_consistency_controller:delete(Level, CCCUuid)
+        end;
+      _ ->
+        error
+    end
+  end),
+  ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1017,19 +1066,30 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
-
     CCCUuid = get_cache_uuid(Key, ModelName),
+    Driver = get_driver_module(Level),
+
     consistency_info_lock(CCCUuid, Link,
       fun() ->
-        Pred = fun() ->
-          case save_high_mem_clear_info(Level, Uuid) of
-            {ok, _} ->
-              save_consistency_info(Level, CCCUuid, Link);
-            _ ->
-              false
-          end
-        end,
-        erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+        critical_section:run({cache_controller, start_disk_op, Uuid},
+          fun() ->
+            {ok, DiskValue} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), fetch_link, [ModelConfig, Key, Link]),
+            Pred = fun() ->
+              {ok, MemValue} = erlang:apply(Driver, fetch_link, [ModelConfig, Key, Link]),
+              case MemValue of
+                DiskValue ->
+                  case save_high_mem_clear_info(Level, Uuid) of
+                    {ok, _} ->
+                      save_consistency_info(Level, CCCUuid, Link);
+                    _ ->
+                      false
+                  end;
+                _ ->
+                  false
+              end
+            end,
+            erlang:apply(Driver, delete_links, [ModelConfig, Key, [Link], Pred])
+          end)
       end)
   catch
     E1:E2 ->
@@ -1041,9 +1101,29 @@ safe_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(Key, ModelName),
+    Driver = get_driver_module(Level),
 
     consistency_info_lock(ModelName, Key,
       fun() ->
+        critical_section:run({cache_controller, start_disk_op, Uuid},
+          fun() ->
+            {ok, #document{value = DiskValue}} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, [ModelConfig, Key]),
+            Pred = fun() ->
+              {ok, #document{value = MemValue}} = erlang:apply(Driver, fetch_link, [ModelConfig, Key]),
+              case MemValue of
+                DiskValue ->
+                  case save_high_mem_clear_info(Level, Uuid) of
+                    {ok, _} ->
+                      save_consistency_info(Level, ModelName, Key);
+                    _ ->
+                      false
+                  end;
+                _ ->
+                  false
+              end
+            end,
+            erlang:apply(Driver, delete, [ModelConfig, Key, Pred])
+          end),
         Pred =fun() ->
           case save_high_mem_clear_info(Level, Uuid) of
             {ok, _} ->
