@@ -198,7 +198,7 @@ save_link_doc(ModelConfig, Doc) ->
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = #document{}) ->
-    {ok, {Pid, _}} = get_server(select_bucket(ModelConfig)),
+    {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave)),
     Ref = make_ref(),
     Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
     case Aggregate of
@@ -594,6 +594,7 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
     critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
+            os:system_time(milli_seconds),
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
         end
     ).
@@ -1115,40 +1116,13 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         spawn(fun() ->
             Responses =
                 try
-                    UpdatedDocs = try
-                        ToFetch = lists:foldl(fun
-                            ({K, {ModelConfig, #document{key = DocKey, rev = undefined}}}, Acc) ->
-                                [{K, {ModelConfig, DocKey}} ||Acc];
-                            (_, Acc) ->
-                                Acc
-                        end, [], maps:to_list(BatchDocs)),
-                        {Refs, ToFetchRaw} = lists:unzip(ToFetch),
-                        Revs = maps:from_list(lists:map(fun
-                            ({K, {ok, #document{rev = Rev}}}) ->
-                                {K, Rev};
-                            ({K, {error, _}}) ->
-                                {K, undefined}
-                        end, lists:zip(Refs, get_docs(Bucket, ToFetchRaw)))),
-                        NewDocMap = maps:map(fun
-                            (K, {MC, Doc = #document{rev = undefined}}) ->
-                                {MC, Doc#document{rev = maps:get(K, Revs, undefined)}};
-                            (_, V) ->
-                                V
-                        end, BatchDocs),
-                        maps:values(NewDocMap)
-                    catch
-                        _:_ ->
-                            Docs
-                    end,
-
-                    save_docs(Bucket, UpdatedDocs)
+                    save_docs(Bucket, Docs)
                 catch
                     _:Reason2 ->
                         [{error, Reason2} || _ <- lists:seq(1, length(Docs))]
                 end,
 
             utils:pmap(fun({{Pid, Ref}, Res}) ->
-                ct:print("NOTIFY ~p", [{Pid, Ref, Res}]),
                 Pid ! {Ref, Res}
             end, lists:zip(Keys, Responses))
         end),
@@ -1787,12 +1761,18 @@ parse_response({_} = JSONTerm) ->
     JSONMap = json_utils:decode_map(JSONBin),
     case maps:get(<<"error">>, JSONMap, undefined) of
         undefined ->
-            case maps:get(<<"doc">>, JSONMap, undefined) of
+            MaybeDoc =
+                case maps:get(<<"doc">>, JSONMap, undefined) of
+                    undefined ->
+                        JSONMap;
+                    Doc -> Doc
+                end,
+            case maps:get(<<?RECORD_TYPE_MARKER>>, MaybeDoc, undefined) of
                 undefined ->
                     {_, Key} = from_driver_key(maps:get(<<"id">>, JSONMap)),
                     {ok, Key};
-                RawDoc ->
-                    {ok, {json_utils:decode(json_utils:encode_map(RawDoc))}}
+                _ ->
+                    {ok, jiffy:decode(jiffy:encode(MaybeDoc))}
             end;
         <<"conflict">> ->
             {error, already_exists};

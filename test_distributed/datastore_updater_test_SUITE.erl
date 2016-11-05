@@ -97,11 +97,8 @@ offline_upgrade_init_test(Config) ->
             ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_1, get, [ID]))
         end, TR1IDs),
 
-    utils:pmap(
-        fun(ID) ->
-            ?assertMatch({ok, _}, ?rpc(test_record_1, save, [#document{key = ID, value = {test_record_1, 2, 2, 3}}])),
-            ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_1, get, [ID]))
-        end, TR1IDs),
+    ?assertMatch({ok, _}, ?rpc(test_record_1, save, [#document{key = lists:nth(1, TR1IDs), value = {test_record_1, 2, 2, 3}}])),
+    ?assertMatch({ok, #document{version = 1, value = {_, 2,2,3}}}, ?rpc(test_record_1, get, [lists:nth(1, TR1IDs)])),
     ok = set_model_version(Config, test_record_1, 2),
 
     lists:foreach(
