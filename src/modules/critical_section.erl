@@ -14,6 +14,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([run/2, run_on_global/2, run_in_mnesia_transaction/2, run_on_mnesia/2, run_on_mnesia/3]).
@@ -89,6 +90,7 @@ run_on_mnesia(RawKey, Fun, Recursive) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Enqueues process for lock on given key.
 %% If process is first in the queue, this function returns immediately,
@@ -99,7 +101,7 @@ run_on_mnesia(RawKey, Fun, Recursive) ->
 %%--------------------------------------------------------------------
 -spec lock(Key :: datastore:key(), Recursive :: boolean()) -> ok | no_return().
 lock(Key, Recursive) ->
-    case lock:enqueue(Key, self(), Recursive) of
+    case lock:enqueue(Key, self(), node(), Recursive) of
         {ok, acquired} ->
             ok;
         {ok, wait} ->
@@ -108,12 +110,12 @@ lock(Key, Recursive) ->
                     ok
                 after timer:seconds(10) ->
                     case lock:current_owner(Key) of
-                        {ok, Owner} when is_pid(Owner) ->
-                            case is_process_alive(Owner) of
+                        {ok, {OwnerP, OwnerN} = Owner} when is_pid(OwnerP) ->
+                            case is_owner_alive(Owner) of
                                 true ->
                                     Wait();
                                 false ->
-                                    case lock:dequeue(Key, Owner) of
+                                    case lock:dequeue(Key, OwnerP, OwnerN) of
                                         {ok, Pid} ->
                                             Pid ! {acquired, Key},
                                             Wait();
@@ -130,6 +132,7 @@ lock(Key, Recursive) ->
     end.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Dequeues process from lock on given key.
 %% If process has acquired this lock multiple times, counter is decreased.
@@ -140,14 +143,39 @@ lock(Key, Recursive) ->
 -spec unlock(Key :: datastore:key()) -> ok | {error, term()}.
 unlock(Key) ->
     Self = self(),
-    case lock:dequeue(Key, Self) of
+    Node = node(),
+    case lock:dequeue(Key, Self, Node) of
         {ok, empty} ->
             ok;
-        {ok, Self} ->
+        {ok, {Self, Node}} ->
             ok;
-        {ok, Pid} ->
+        {ok, {Pid, _}} ->
             Pid ! {acquired, Key},
             ok;
         Error ->
             Error
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if owner is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_owner_alive({pid(), node()}) -> boolean().
+is_owner_alive({OwnerP, OwnerN} = Owner) ->
+    N = node(),
+    case OwnerN of
+        N ->
+            is_process_alive(OwnerP);
+        OtherNode ->
+            case rpc:call(OtherNode, erlang, is_process_alive, [OwnerP]) of
+                {badrpc,nodedown} ->
+                    false;
+                {badrpc, R} ->
+                    ?error("Badrpc: ~p checking owner ~p", [R, Owner]),
+                    false;
+                CallAns ->
+                    CallAns
+            end
     end.
