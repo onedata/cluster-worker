@@ -101,7 +101,7 @@ run_on_mnesia(RawKey, Fun, Recursive) ->
 %%--------------------------------------------------------------------
 -spec lock(Key :: datastore:key(), Recursive :: boolean()) -> ok | no_return().
 lock(Key, Recursive) ->
-    case lock:enqueue(Key, self(), node(), Recursive) of
+    case lock:enqueue(Key, self(), Recursive) of
         {ok, acquired} ->
             ok;
         {ok, wait} ->
@@ -110,12 +110,12 @@ lock(Key, Recursive) ->
                     ok
                 after timer:seconds(10) ->
                     case lock:current_owner(Key) of
-                        {ok, {OwnerP, OwnerN} = Owner} when is_pid(OwnerP) ->
+                        {ok, Owner} when is_pid(Owner) ->
                             case is_owner_alive(Owner) of
                                 true ->
                                     Wait();
                                 false ->
-                                    case lock:dequeue(Key, OwnerP, OwnerN) of
+                                    case lock:dequeue(Key, Owner) of
                                         {ok, Pid} ->
                                             Pid ! {acquired, Key},
                                             Wait();
@@ -143,13 +143,12 @@ lock(Key, Recursive) ->
 -spec unlock(Key :: datastore:key()) -> ok | {error, term()}.
 unlock(Key) ->
     Self = self(),
-    Node = node(),
-    case lock:dequeue(Key, Self, Node) of
+    case lock:dequeue(Key, Self) of
         {ok, empty} ->
             ok;
-        {ok, {Self, Node}} ->
+        {ok, Self} ->
             ok;
-        {ok, {Pid, _}} ->
+        {ok, Pid} ->
             Pid ! {acquired, Key},
             ok;
         Error ->
@@ -162,14 +161,16 @@ unlock(Key) ->
 %% Checks if owner is alive.
 %% @end
 %%--------------------------------------------------------------------
--spec is_owner_alive({pid(), node()}) -> boolean().
-is_owner_alive({OwnerP, OwnerN} = Owner) ->
+-spec is_owner_alive(pid()) -> boolean().
+is_owner_alive(Owner) ->
     N = node(),
-    case OwnerN of
+    case node(Owner) of
         N ->
-            is_process_alive(OwnerP);
+            is_process_alive(Owner);
+        nonode@nohost ->
+            false;
         OtherNode ->
-            case rpc:call(OtherNode, erlang, is_process_alive, [OwnerP]) of
+            case rpc:call(OtherNode, erlang, is_process_alive, [Owner]) of
                 {badrpc,nodedown} ->
                     false;
                 {badrpc, R} ->

@@ -15,13 +15,13 @@
 -include("modules/datastore/datastore_internal_model.hrl").
 -include_lib("ctool/include/logging.hrl").
 
--type queue_element() :: {Pid :: pid(), Node :: node(), Counter :: non_neg_integer()}.
+-type queue_element() :: {Pid :: pid(), Counter :: non_neg_integer()}.
 -export_type([queue_element/0]).
 
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, exists/1, delete/1, update/2, create/1,
     create_or_update/2, model_init/0, 'after'/5, before/4]).
--export([enqueue/4, dequeue/3, current_owner/1]).
+-export([enqueue/3, dequeue/2, current_owner/1]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -146,13 +146,13 @@ before(_ModelName, _Method, _Level, _Context) ->
 %% Lock may be taken as recursive or non-recursive.
 %% @end
 %%--------------------------------------------------------------------
--spec enqueue(datastore:ext_key(), pid(), node(), boolean()) ->
+-spec enqueue(datastore:ext_key(), pid(), boolean()) ->
     {ok, acquired | wait} | {error, already_acquired}.
-enqueue(Key, Pid, Node, Recursive) ->
+enqueue(Key, Pid, Recursive) ->
     datastore:run_transaction(?MODULE, Key, fun() ->
         case get(Key) of
             {ok, #document{value = #lock{queue = Q}}} ->
-                case has(Q, Pid, Node) of
+                case has(Q, Pid) of
                     true ->
                         case Recursive of
                             true ->
@@ -162,11 +162,11 @@ enqueue(Key, Pid, Node, Recursive) ->
                                 {error, already_acquired}
                         end;
                     false ->
-                        {ok, Key} = update(Key, #{queue => add(Q, Pid, Node)}),
+                        {ok, Key} = update(Key, #{queue => add(Q, Pid)}),
                         {ok, wait}
                 end;
             {error, {not_found, _}} ->
-                {ok, _} = create(#document{key = Key, value = #lock{queue = add([], Pid, Node)}}),
+                {ok, _} = create(#document{key = Key, value = #lock{queue = add([], Pid)}}),
                 {ok, acquired}
         end
     end).
@@ -178,13 +178,13 @@ enqueue(Key, Pid, Node, Recursive) ->
 %% Record is automatically deleted if queue is empty after operation.
 %% @end
 %%--------------------------------------------------------------------
--spec dequeue(datastore:ext_key(), pid(), node()) ->
-    {ok, {pid(), node()} | empty} | {error, not_lock_owner | lock_does_not_exist}.
-dequeue(Key, Pid, Node) ->
+-spec dequeue(datastore:ext_key(), pid()) ->
+    {ok, pid() | empty} | {error, not_lock_owner | lock_does_not_exist}.
+dequeue(Key, Pid) ->
     datastore:run_transaction(?MODULE, Key, fun() ->
         case get(Key) of
             {ok, #document{value = #lock{queue = Q}}} ->
-                case has(Q, Pid, Node) of
+                case has(Q, Pid) of
                     false ->
                         {error, not_lock_owner};
                     true ->
@@ -208,7 +208,7 @@ dequeue(Key, Pid, Node) ->
 %% Returns current owner the lock.
 %% @end
 %%--------------------------------------------------------------------
--spec current_owner(Key :: term()) -> {ok, {pid(), node()}} | {error, term()}.
+-spec current_owner(Key :: term()) -> {ok, pid()} | {error, term()}.
 current_owner(Key) ->
     case get(Key) of
         {ok, #document{value = #lock{queue = Q}}} ->
@@ -229,9 +229,9 @@ current_owner(Key) ->
 %% Adds new element with given Pid and Counter set to 1 at the end of queue.
 %% @end
 %%--------------------------------------------------------------------
--spec add([queue_element()], pid(), node()) -> [queue_element()].
-add(Q, Pid, Node) ->
-    Q ++ [{Pid, Node, 1}].
+-spec add([queue_element()], pid()) -> [queue_element()].
+add(Q, Pid) ->
+    Q ++ [{Pid, 1}].
 
 %%--------------------------------------------------------------------
 %% @private
@@ -239,9 +239,9 @@ add(Q, Pid, Node) ->
 %% Checks whether given Pid has the lock.
 %% @end
 %%--------------------------------------------------------------------
--spec has([queue_element()], pid(), node()) -> boolean().
-has(Q, Pid, Node) ->
-    {Pid, Node} =:= owner(Q).
+-spec has([queue_element()], pid()) -> boolean().
+has(Q, Pid) ->
+    Pid =:= owner(Q).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -249,9 +249,9 @@ has(Q, Pid, Node) ->
 %% Returns owner of the lock, ie. pid in the front of queue.
 %% @end
 %%--------------------------------------------------------------------
--spec owner([queue_element()]) -> {pid(), node()}.
-owner([{Pid, Node, _} | _]) ->
-    {Pid, Node}.
+-spec owner([queue_element()]) -> pid().
+owner([{Pid, _} | _]) ->
+    Pid.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -260,8 +260,8 @@ owner([{Pid, Node, _} | _]) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec inc([queue_element()]) -> [queue_element()].
-inc([{Pid, Node, C} | T]) when C > 0 ->
-    [{Pid, Node, C + 1} | T].
+inc([{Pid, C} | T]) when C > 0 ->
+    [{Pid, C + 1} | T].
 
 %%--------------------------------------------------------------------
 %% @private
@@ -270,7 +270,7 @@ inc([{Pid, Node, C} | T]) when C > 0 ->
 %% @end
 %%--------------------------------------------------------------------
 -spec dec([queue_element()]) -> [queue_element()].
-dec([{Pid, Node, C} | T]) when C > 1 ->
-    [{Pid, Node, C - 1} | T];
-dec([{_Pid, _Node, C} | T]) when C =:= 1 ->
+dec([{Pid, C} | T]) when C > 1 ->
+    [{Pid, C - 1} | T];
+dec([{_Pid, C} | T]) when C =:= 1 ->
     T.
