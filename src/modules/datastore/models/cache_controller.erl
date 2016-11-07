@@ -22,7 +22,7 @@
 
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, list/1, exists/1, delete/1, delete/2, update/2, create/1,
-    save/2, get/2, list/3, exists/2, delete/3, update/3, create/2,
+    save/2, get/2, list/3, list_dirty/3, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4,
     list_docs_to_be_dumped/1, choose_action/5, choose_action/6, check_get/3,
     check_fetch/3, check_disk_read/4, restore_from_disk/4, link_cache_key/3]).
@@ -166,6 +166,17 @@ list(Level, Filter, Acc) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Dirty alternative of list/3.
+%% Returns list of records filtered with provided function.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_dirty(Level :: datastore:store_level(), Filter :: datastore:list_fun(), Acc :: term()) ->
+    {ok, [datastore:document()]} | datastore:generic_error() | no_return().
+list_dirty(Level, Filter, Acc) ->
+    datastore:list_dirty(Level, ?MODEL_NAME, Filter, Acc).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Returns list of records not persisted.
 %% @end
 %%--------------------------------------------------------------------
@@ -297,18 +308,26 @@ model_init() ->
 before(ModelName, Method, Level, Context) ->
     Level2 = caches_controller:cache_to_datastore_level(ModelName),
     before(ModelName, Method, Level, Context, Level2).
+before(ModelName, save, Level, _, Level) ->
+    caches_controller:throttle(ModelName);
 before(ModelName, save, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, save, Args, Level2);
+before(ModelName, create_or_update, Level, _, Level) ->
+    caches_controller:throttle(ModelName);
 before(ModelName, create_or_update, disk_only, [Doc, _Diff] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create_or_update, Args, Level2);
+before(ModelName, update, Level, _, Level) ->
+    caches_controller:throttle(ModelName);
 before(ModelName, update, disk_only, [Key, _Diff] = Args, Level2) ->
     start_disk_op(Key, ModelName, update, Args, Level2);
 before(ModelName, create, Level, [#document{generated_uuid = false} = Doc], Level) ->
-    check_create(Doc#document.key, ModelName, Level);
+    TmpAns = check_create(Doc#document.key, ModelName, Level),
+    caches_controller:throttle(ModelName, TmpAns);
 before(ModelName, create, disk_only, [Doc] = Args, Level2) ->
     start_disk_op(Doc#document.key, ModelName, create, Args, Level2);
 before(ModelName, delete, Level, [Key, _Pred], Level) ->
-    before_del(Key, ModelName, Level, delete);
+    TmpAns = before_del(Key, ModelName, Level, delete),
+    caches_controller:throttle_del(ModelName, TmpAns);
 before(ModelName, delete, disk_only, [Key, _Pred] = Args, Level2) ->
     start_disk_op(Key, ModelName, delete, Args, Level2);
 before(ModelName, get, disk_only, [Key], Level2) ->
@@ -317,6 +336,8 @@ before(ModelName, exists, disk_only, [Key], Level2) ->
     check_exists(Key, ModelName, Level2);
 before(ModelName, fetch_link, disk_only, [Key, LinkName], Level2) ->
     check_fetch(link_cache_key(ModelName, Key, LinkName), ModelName, Level2);
+before(ModelName, add_links, Level, _, Level) ->
+    caches_controller:throttle(ModelName);
 before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun({LN, _}, Acc) ->
         [start_disk_op(link_cache_key(ModelName, Key, LN), ModelName, add_links, [Key, [LN]], Level2, false) | Acc]
@@ -324,6 +345,8 @@ before(ModelName, add_links, disk_only, [Key, Links], Level2) ->
     {ok, SleepTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
     timer:sleep(SleepTime),
     {tasks, Tasks};
+before(ModelName, set_links, Level, _, Level) ->
+    caches_controller:throttle(ModelName);
 before(ModelName, set_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun({LN, _}, Acc) ->
         [start_disk_op(link_cache_key(ModelName, Key, LN), ModelName, set_links, [Key, [LN]], Level2, false) | Acc]
@@ -332,11 +355,12 @@ before(ModelName, set_links, disk_only, [Key, Links], Level2) ->
     timer:sleep(SleepTime),
     {tasks, Tasks};
 before(ModelName, create_link, Level, [Key, {LinkName, _}], Level) ->
-    check_link_create(Key, LinkName, ModelName, Level);
+    TmpAns = check_link_create(Key, LinkName, ModelName, Level),
+    caches_controller:throttle(ModelName, TmpAns);
 before(ModelName, create_link, disk_only, [Key, {LinkName, _}] = Args, Level2) ->
     start_disk_op(link_cache_key(ModelName, Key, LinkName), ModelName, create_link, Args, Level2);
 before(ModelName, delete_links, Level, [Key, Links], Level) ->
-    lists:foldl(fun(Link, Acc) ->
+    TmpAns = lists:foldl(fun(Link, Acc) ->
         Ans = before_del(link_cache_key(ModelName, Key, Link), ModelName, Level, Link),
         case Ans of
             ok ->
@@ -344,7 +368,8 @@ before(ModelName, delete_links, Level, [Key, Links], Level) ->
             _ ->
                 Ans
         end
-    end, ok, Links);
+    end, ok, Links),
+    caches_controller:throttle_del(ModelName, TmpAns);
 before(ModelName, delete_links, disk_only, [Key, Links], Level2) ->
     Tasks = lists:foldl(fun(Link, Acc) ->
         [start_disk_op(link_cache_key(ModelName, Key, Link), ModelName, delete_links, [Key, [Link]], Level2, false) | Acc]

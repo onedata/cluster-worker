@@ -181,6 +181,7 @@ init([]) ->
 
         next_mem_check(),
         next_task_check(),
+        erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
@@ -311,6 +312,10 @@ handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = Cache
 
     next_mem_check(),
     {noreply, NewState};
+
+handle_cast(configure_throttling, State) ->
+    ok = caches_controller:configure_throttling(),
+    {noreply, State};
 
 handle_cast(check_mem, State) ->
     next_mem_check(),
@@ -797,7 +802,6 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     case (TimeDiff >= timer:minutes(MaxInterval)) orelse
         ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
         true ->
-            ?debug("Monitoring state: ~p", [MonState]),
             spawn(fun() ->
                 ?debug("Erlang ets mem usage: ~p", [
                     lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
@@ -833,7 +837,9 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
 
                 TopProcesses = lists:map(
                     fun({M, P}) ->
-                        {M, erlang:process_info(P, current_stacktrace), P, GetName(P)}
+                        {M, erlang:process_info(P, current_stacktrace), erlang:process_info(P, message_queue_len),
+                            erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
+                            erlang:process_info(P, total_heap_size), P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
                 ?debug("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
                     "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),

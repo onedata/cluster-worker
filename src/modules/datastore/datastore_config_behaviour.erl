@@ -19,3 +19,10 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback models() -> Models :: [model_behaviour:model_type()].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of models to be throttled.
+%% @end
+%%--------------------------------------------------------------------
+-callback throttled_models() -> Models :: [model_behaviour:model_type()].

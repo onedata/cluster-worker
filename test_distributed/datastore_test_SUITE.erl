@@ -858,7 +858,6 @@ execute_with_link_context(MotherScope, OtherScopes, Op, Args) ->
 
 execute_with_link_context(MotherScope, OtherScopes, Module, Op, Args) ->
     put(mother_scope, MotherScope),
-    put(other_scopes, OtherScopes),
     apply(Module, Op, Args).
 
 set_mother_scope(MotherScope) ->
@@ -875,14 +874,9 @@ scope_master_loop(MotherScope, OtherScopes) ->
     Todo = receive
                {get_mother_scope, Sender} ->
                    Sender ! {mother_scope, MotherScope};
-               {get_other_scopes, Sender2} ->
-                   Sender2 ! {other_scopes, OtherScopes};
                {set_mother_scope, Sender3, MotherScope2} ->
                    Sender3 ! scope_changed,
                    {change_scopes, MotherScope2, OtherScopes};
-               {set_other_scopes, Sender4, OtherScopes2} ->
-                   Sender4 ! scope_changed,
-                   {change_scopes, MotherScope, OtherScopes2};
                stop ->
                    stop
            end,
@@ -1299,7 +1293,7 @@ interupt_global_cache_clearing_test(Config) ->
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     Self = self(),
     spawn_link(fun() ->
-        timer:sleep(2),
+        timer:sleep(1),
         Ans = ?call(Worker1, caches_controller, delete_old_keys, [globally_cached, 0]),
         Self ! {del_old_key, Ans}
     end),

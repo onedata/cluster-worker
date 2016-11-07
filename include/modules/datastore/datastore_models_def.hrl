@@ -52,6 +52,7 @@
 %% Description of task to be done
 -record(task_pool, {
     task :: task_manager:task(),
+    task_type :: atom(),
     owner :: undefined | pid() | string(),    % MemOpt - float for ets and mnesia
     node :: node()
 }).
@@ -72,6 +73,12 @@
     id :: undefined | identity:id(),
     encoded_public_key :: undefined | identity:encoded_public_key(),
     last_update_seconds :: undefined | integer()
+}).
+
+% Record for various data used during node management
+%
+-record(node_management, {
+    value :: term()
 }).
 
 -endif.

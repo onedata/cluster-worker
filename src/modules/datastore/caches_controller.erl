@@ -30,12 +30,227 @@
 -export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
 -export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
   check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
+-export([throttle/1, throttle/2, throttle_del/2, configure_throttling/0, plan_next_throttling_check/0]).
+% for tests
+-export([send_after/3]).
 
--define(CLEAR_BATCH_SIZE, 100).
+-define(CLEAR_BATCH_SIZE, 50).
+-define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(MNESIA_THROTTLING_DATA_KEY, <<"mnesia_throttling_data">>).
+-define(THROTTLING_ERROR, {error, load_to_high}).
+
+-define(BLOCK_THROTTLING, 3).
+-define(LIMIT_THROTTLING, 2).
+-define(CONFIG_THROTTLING, 1).
+-define(NO_THROTTLING, 0).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
+throttle(ModelName) ->
+  case lists:member(ModelName, datastore_config:throttled_models()) of
+    true ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, _} ->
+              timer:sleep(Time),
+              ok;
+            {overloaded, _} ->
+              ?THROTTLING_ERROR
+          end;
+        {error, {not_found, _}} ->
+          ok;
+        Error ->
+          ?error("throttling error: ~p", [Error]),
+          ?THROTTLING_ERROR
+      end;
+    _ ->
+      ok
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+  TmpAns :: term().
+throttle(ModelName, ok) ->
+  throttle(ModelName);
+throttle(_ModelName, TmpAns) ->
+  TmpAns.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits delete operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle_del(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+  TmpAns :: term().
+throttle_del(ModelName, ok) ->
+  case lists:member(ModelName, datastore_config:throttled_models()) of
+    true ->
+      case node_management:get(?MNESIA_THROTTLING_KEY) of
+        {ok, #document{value = #node_management{value = V}}} ->
+          case V of
+            ok ->
+              ok;
+            {throttle, Time, true} ->
+              timer:sleep(Time),
+              ok;
+            {throttle, _, _} ->
+              ok;
+            {overloaded, true} ->
+              ?THROTTLING_ERROR;
+            {overloaded, _} ->
+              ok
+          end;
+        {error, {not_found, _}} ->
+          ok;
+        Error ->
+          ?error("throttling error: ~p", [Error]),
+          ?THROTTLING_ERROR
+      end;
+    _ ->
+      ok
+  end;
+throttle_del(_ModelName, TmpAns) ->
+  TmpAns.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Configures throttling settings.
+%% @end
+%%--------------------------------------------------------------------
+-spec configure_throttling() -> ok.
+configure_throttling() ->
+  Self = self(),
+  spawn(fun() ->
+    CheckInterval = try
+      {MemAction, MemoryUsage} = verify_memory(),
+      {TaskAction, NewFailed, NewTasks} = verify_tasks(),
+      Action = max(MemAction, TaskAction),
+
+      case Action of
+        ?BLOCK_THROTTLING ->
+          {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+            value = #node_management{value = {overloaded, MemAction =:= ?NO_THROTTLING}}}),
+          ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p",
+            [MemoryUsage, NewFailed, NewTasks]),
+          plan_next_throttling_check(true);
+        _ ->
+          Oldthrottling = case node_management:get(?MNESIA_THROTTLING_KEY) of
+            {ok, #document{value = #node_management{value = V}}} ->
+              case V of
+                {throttle, Time, _} ->
+                  Time;
+                Other ->
+                  Other
+              end;
+            {error, {not_found, _}} ->
+              ok
+          end,
+
+          case {Action, Oldthrottling} of
+            {?NO_THROTTLING, ok} ->
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check();
+            {?NO_THROTTLING, _} ->
+              ok = node_management:delete(?MNESIA_THROTTLING_KEY),
+              ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
+              ?info("Throttling: stop, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check();
+            {?CONFIG_THROTTLING, ok} ->
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check(true);
+            {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+                value = #node_management{value = {overloaded, false}}}),
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check(true);
+            {?LIMIT_THROTTLING, {overloaded, _}} ->
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
+                [MemoryUsage, NewFailed, NewTasks]),
+              plan_next_throttling_check(true);
+            _ ->
+              TimeBase = case Oldthrottling of
+                OT when is_integer(OT) ->
+                  OT;
+                _ ->
+                  {ok, DefaultTimeBase} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+                  DefaultTimeBase
+              end,
+
+              {OldFaild, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
+                {ok, #document{value = #node_management{value = TD}}} ->
+                  TD;
+                {error, {not_found, _}} ->
+                  {0, 0, 0, 0}
+              end,
+
+              ThrottlingTime = case
+                {(NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory),
+                Action} of
+                {true, _} ->
+                  TB2 = 2 * TimeBase,
+                  {ok, MaxTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms),
+                  case TB2 > MaxTime of
+                    true ->
+                      MaxTime;
+                    _ ->
+                      TB2
+                  end;
+                {_, ?CONFIG_THROTTLING} ->
+                  max(round(TimeBase / 2), 1);
+                _ ->
+                  TimeBase
+              end,
+
+              {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+              NextCheck = plan_next_throttling_check(MemoryUsage-OldMemory, MemRatioThreshold-MemoryUsage, LastInterval),
+
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
+                value = #node_management{value = {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}}}),
+              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
+                value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
+
+              ?info("Throttling: delay ~p ms used, mem: ~p, failed tasks ~p, all tasks ~p",
+                [ThrottlingTime, MemoryUsage, NewFailed, NewTasks]),
+
+              NextCheck
+          end
+      end
+    catch
+      E1:E2 ->
+        ?error_stacktrace("Error during throtling configuration: ~p:~p", [E1, E2]),
+        plan_next_throttling_check()
+    end,
+    caches_controller:send_after(CheckInterval, Self, {timer, configure_throttling})
+  end),
+  ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns time after which next throttling config should start.
+%% @end
+%%--------------------------------------------------------------------
+-spec plan_next_throttling_check() -> non_neg_integer().
+plan_next_throttling_check() ->
+  plan_next_throttling_check(false).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -46,7 +261,7 @@
 should_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
-  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
   (MemUsage >= TargetMemUse) andalso (MemToCompare >= TargetErlangMemUse * 1024 * 1024).
 
 %%--------------------------------------------------------------------
@@ -538,7 +753,7 @@ should_stop_clear_cache(MemUsage, ErlangMemUsage) ->
   {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
   {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
   {ok, StopRatio} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
-  MemToCompare = proplists:get_value(ets, ErlangMemUsage, 0) + proplists:get_value(system, ErlangMemUsage, 0),
+  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
   (MemUsage < TargetMemUse * StopRatio / 100) orelse (MemToCompare < TargetErlangMemUse * 1024 * 1024  * StopRatio / 100).
 
 %%--------------------------------------------------------------------
@@ -645,123 +860,106 @@ save_consistency_info(Level, Key, ClearedName) ->
 delete_old_keys(Level, Caches, TimeWindow) ->
   Now = os:system_time(?CC_TIMEUNIT),
   ClearFun = fun
-             ('$end_of_table', {Count, BatchNum}) ->
-                 count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
-               {abort, Count};
-             (#document{key = Uuid, value = V}, {Count, BatchNum0}) ->
-               {Stop, BatchNum} = case Count rem ?CLEAR_BATCH_SIZE of
-                 0 ->
-                   case Count of
-                     0 ->
-                       ok;
-                     _ ->
-                       count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
-                   end,
+    ('$end_of_table', {0, _, undefined}) ->
+      {abort, 0};
+    ('$end_of_table', {Count0, BatchNum, {Uuid, V}}) ->
+      T = V#cache_controller.timestamp,
+      U = V#cache_controller.last_user,
+      Age = Now - T,
+      Count = case U of
+        non when Age >= 1000 * TimeWindow ->
+          delete_old_key(Level, Uuid, BatchNum),
+          Count0 + 1;
+        _ ->
+          Count0
+      end,
+      case Count of
+        0 ->
+          ok;
+        _ ->
+          count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum)
+      end,
+      {abort, Count};
+    (#document{key = Uuid, value = V}, {0, BatchNum, undefined}) ->
+      {next, {0, BatchNum, {Uuid, V}}};
+    (#document{key = NewUuid, value = NewV}, {Count0, BatchNum0, {Uuid, V}}) ->
+      T = V#cache_controller.timestamp,
+      U = V#cache_controller.last_user,
+      Age = Now - T,
+      {Stop, BatchNum, Count} = case U of
+        non when Age >= 1000 * TimeWindow ->
+          delete_old_key(Level, Uuid, BatchNum0),
+          NewCount = Count0 + 1,
+          case NewCount rem ?CLEAR_BATCH_SIZE of
+            0 ->
+              count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
 
-                   case monitoring:get_memory_stats() of
-                     [{<<"mem">>, MemUsage}] ->
-                       ErlangMemUsage = erlang:memory(),
-                       {should_stop_clear_cache(MemUsage, ErlangMemUsage), BatchNum0 + 1};
-                     _ ->
-                       ?warning("Not able to check memory usage"),
-                       {false, BatchNum0 + 1}
-                   end;
-                 _ ->
-                   {false, BatchNum0}
-               end,
-               case Stop of
-                 true ->
-                   {abort, Count};
-                 _ ->
-                   T = V#cache_controller.timestamp,
-                   U = V#cache_controller.last_user,
-                   Age = Now - T,
-                   case U of
-                     non when Age >= 1000 * TimeWindow ->
-                       Master = self(),
-                       spawn(fun() ->
-                         {ModelName, Key} = decode_uuid(Uuid),
-                         case safe_delete(Level, ModelName, Key) of
-                           ok ->
-                             Master ! {doc_cleared, BatchNum},
-                             timer:sleep(timer:seconds(2)), % allow start new operations if scheduled
-                             Pred = fun() ->
-                               CheckAns = case cache_controller:get(Level, Uuid) of
-                                            {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                                              {LU, A};
-                                            {error, {not_found, _}} ->
-                                              ok
-                                          end,
+              case monitoring:get_memory_stats() of
+                [{<<"mem">>, MemUsage}] ->
+                  ErlangMemUsage = erlang:memory(),
+                  {should_stop_clear_cache(MemUsage, ErlangMemUsage), BatchNum0 + 1, NewCount};
+                _ ->
+                  ?warning("Not able to check memory usage"),
+                  {false, BatchNum0 + 1, NewCount}
+              end;
+            _ ->
+              {false, BatchNum0, NewCount}
+          end;
+        _ ->
+          {false, BatchNum0, Count0}
+      end,
 
-                               case CheckAns of
-                                 {_, to_be_del} ->
-                                   false;
-                                 {non, _} ->
-                                   true;
-                                 _ ->
-                                   false
-                               end
-                                    end,
+      case Stop of
+        true ->
+          {abort, Count};
+        _ ->
+          {next, {Count, BatchNum, {NewUuid, NewV}}}
+      end
+  end,
 
-                             cache_controller:delete(Level, Uuid, Pred),
-                             case Key of
-                               {_, _, cache_controller_link_key} ->
-                                 ok;
-                               _ ->
-                                 CCCUuid = get_cache_uuid(Key, ModelName),
-                                 cache_consistency_controller:delete(Level, CCCUuid)
-                             end;
-                           _ ->
-                             error
-                         end
-                       end),
-                       {next, {Count + 1, BatchNum}};
-                     _ ->
-                       {next, {Count, BatchNum}}
-                   end
-               end
-           end,
+  ClearAns = case TimeWindow of
+    0 ->
+      list_old_keys(Level, ClearFun, cache_controller);
+    _ ->
+      cache_controller:list_dirty(Level, ClearFun, {0, 0, undefined})
+  end,
 
-  case cache_controller:list(Level, ClearFun, {0, 0}) of
+  case ClearAns of
     {ok, _} ->
       case TimeWindow of
         0 ->
           % TODO - the same for links
           lists:foreach(fun(Cache) ->
             ClearFun2 = fun
-                          ('$end_of_table', {Count, BatchNum}) ->
-                            count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
-                            {abort, Count};
-                          (#document{key = Uuid}, {Count, BatchNum0}) ->
-                            BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
-                                         0 ->
-                                           case Count of
-                                             0 ->
-                                               ok;
-                                             _ ->
-                                               count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0)
-                                           end,
-                                           BatchNum0 + 1;
-                                         _ ->
-                                           BatchNum0
-                                       end,
-                            Master = self(),
-                            spawn(fun() ->
-                              safe_delete(Level, Cache, Uuid),
-                              Master ! {doc_cleared, BatchNum}
-                                  end),
-                            {next, {Count + 1, BatchNum}}
-                        end,
-            {ok, _} = datastore:list(Level, Cache, ClearFun2, {0, 0})
+              ('$end_of_table', {0, _, undefined}) ->
+                {abort, 0};
+              ('$end_of_table', {Count, BatchNum, UuidToDel}) ->
+                Master = self(),
+                spawn(fun() ->
+                  safe_delete(Level, Cache, UuidToDel),
+                  Master ! {doc_cleared, BatchNum}
+                end),
+                count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                {abort, Count};
+              (#document{key = Uuid}, {0, BatchNum, undefined}) ->
+                {next, {1, BatchNum, Uuid}};
+              (#document{key = Uuid}, {Count, BatchNum0, UuidToDel}) ->
+                Master = self(),
+                spawn(fun() ->
+                  safe_delete(Level, Cache, UuidToDel),
+                  Master ! {doc_cleared, BatchNum0}
+                end),
+                BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
+                  0 ->
+                    count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
+                    BatchNum0 + 1;
+                  _ ->
+                    BatchNum0
+                end,
+                {next, {Count + 1, BatchNum, Uuid}}
+            end,
+            {ok, _} = list_old_keys(Level, ClearFun2, Cache)
           end, Caches);
-        _ ->
-          ok
-      end;
-    {error, {aborted, R}} ->
-      ?warning("Cache cleaning aborted: ~p", [R]),
-      case TimeWindow of
-        0 ->
-          delete_old_keys(Level, Caches, TimeWindow);
         _ ->
           ok
       end;
@@ -769,6 +967,72 @@ delete_old_keys(Level, Caches, TimeWindow) ->
       ?error("Error during cache cleaning: ~p", [Other]),
       ok
   end.
+
+ %%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Lists keys and executes fun for each key. Reruns listing if aborted.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_old_keys(Level :: global_only | local_only, ClearFun :: datastore:list_fun(),
+    ModelName :: model_behaviour:model_type()) -> {ok, term()} | datastore:generic_error() | no_return().
+list_old_keys(Level, ClearFun, Model) ->
+  case datastore:list_dirty(Level, Model, ClearFun, {0, 0, undefined}) of
+    {ok, _} = Ans ->
+      Ans;
+    {error, {aborted, R}} ->
+      ?warning("Cache cleaning aborted: ~p", [R]),
+      list_old_keys(Level, ClearFun, Model);
+    Other ->
+      Other
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes key with cache data.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_old_key(Level :: global_only | local_only, Uuid :: binary(), BatchNum :: integer()) -> ok.
+delete_old_key(Level, Uuid, BatchNum) ->
+  Master = self(),
+  spawn(fun() ->
+    {ModelName, Key} = decode_uuid(Uuid),
+    case safe_delete(Level, ModelName, Key) of
+      ok ->
+        Master ! {doc_cleared, BatchNum},
+        timer:sleep(timer:seconds(2)), % allow start new operations if scheduled
+        Pred = fun() ->
+          CheckAns = case cache_controller:get(Level, Uuid) of
+            {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+              {LU, A};
+            {error, {not_found, _}} ->
+              ok
+          end,
+
+          case CheckAns of
+            {_, to_be_del} ->
+              false;
+            {non, _} ->
+              true;
+            _ ->
+              false
+          end
+        end,
+
+        cache_controller:delete(Level, Uuid, Pred),
+        case Key of
+          {_, _, cache_controller_link_key} ->
+            ok;
+          _ ->
+            CCCUuid = get_cache_uuid(Key, ModelName),
+            cache_consistency_controller:delete(Level, CCCUuid)
+        end;
+      _ ->
+        error
+    end
+  end),
+  ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -802,19 +1066,30 @@ safe_delete(Level, ModelName, {Key, Link, cache_controller_link_key}) ->
   try
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
-
     CCCUuid = get_cache_uuid(Key, ModelName),
+    Driver = get_driver_module(Level),
+
     consistency_info_lock(CCCUuid, Link,
       fun() ->
-        Pred = fun() ->
-          case save_high_mem_clear_info(Level, Uuid) of
-            {ok, _} ->
-              save_consistency_info(Level, CCCUuid, Link);
-            _ ->
-              false
-          end
-        end,
-        erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
+        critical_section:run({cache_controller, start_disk_op, Uuid},
+          fun() ->
+            {ok, DiskValue} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), fetch_link, [ModelConfig, Key, Link]),
+            Pred = fun() ->
+              {ok, MemValue} = erlang:apply(Driver, fetch_link, [ModelConfig, Key, Link]),
+              case MemValue of
+                DiskValue ->
+                  case save_high_mem_clear_info(Level, Uuid) of
+                    {ok, _} ->
+                      save_consistency_info(Level, CCCUuid, Link);
+                    _ ->
+                      false
+                  end;
+                _ ->
+                  false
+              end
+            end,
+            erlang:apply(Driver, delete_links, [ModelConfig, Key, [Link], Pred])
+          end)
       end)
   catch
     E1:E2 ->
@@ -826,9 +1101,29 @@ safe_delete(Level, ModelName, Key) ->
   try
     ModelConfig = ModelName:model_init(),
     Uuid = get_cache_uuid(Key, ModelName),
+    Driver = get_driver_module(Level),
 
     consistency_info_lock(ModelName, Key,
       fun() ->
+        critical_section:run({cache_controller, start_disk_op, Uuid},
+          fun() ->
+            {ok, #document{value = DiskValue}} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, [ModelConfig, Key]),
+            Pred = fun() ->
+              {ok, #document{value = MemValue}} = erlang:apply(Driver, fetch_link, [ModelConfig, Key]),
+              case MemValue of
+                DiskValue ->
+                  case save_high_mem_clear_info(Level, Uuid) of
+                    {ok, _} ->
+                      save_consistency_info(Level, ModelName, Key);
+                    _ ->
+                      false
+                  end;
+                _ ->
+                  false
+              end
+            end,
+            erlang:apply(Driver, delete, [ModelConfig, Key, Pred])
+          end),
         Pred =fun() ->
           case save_high_mem_clear_info(Level, Uuid) of
             {ok, _} ->
@@ -915,3 +1210,109 @@ value_delete(Level, ModelName, Key) ->
       ++ "Args: ~p. Error: ~p:~p.", [{Level, ModelName, Key}, E1, E2]),
       {error, delete_failed}
   end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks tasks poll and recommends throttling action.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_tasks() ->
+  {TaskAction :: non_neg_integer(), NewFailed :: non_neg_integer(), NewTasks :: non_neg_integer()}.
+verify_tasks() ->
+  {ok, FailedTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
+  {ok, PendingTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+
+  {ok, {NewFailed, NewTasks}} =
+    task_pool:count_tasks(?CLUSTER_LEVEL, cache_dump, FailedTasksNumThreshold+PendingTasksNumThreshold),
+
+  TaskAction = case {NewFailed, NewTasks} of
+    {NF, _} when NF >= FailedTasksNumThreshold ->
+      ?BLOCK_THROTTLING;
+    {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
+      ?BLOCK_THROTTLING;
+    {NF, _} when NF >= FailedTasksNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    {NF, NT} when NT-NF >= PendingTasksNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    {NF, _} when NF > 0 ->
+      ?CONFIG_THROTTLING;
+    {_, NT} when NT > 0 ->
+      ?CONFIG_THROTTLING;
+    _ ->
+      ?NO_THROTTLING
+  end,
+
+  {TaskAction, NewFailed, NewTasks}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks memory and recommends throttling action.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_memory() ->
+  {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
+verify_memory() ->
+  {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
+  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+
+  MemoryUsage = case monitoring:get_memory_stats() of
+                  [{<<"mem">>, MemUsage}] ->
+                    MemUsage
+                end,
+
+  MemAction = case MemoryUsage of
+                MU when MU >= MemRatioThreshold ->
+                  ?BLOCK_THROTTLING;
+                MU when MU >= (MemRatioThreshold + MemCleanRatioThreshold)/2 ->
+                  ?LIMIT_THROTTLING;
+                MU when MU >= MemCleanRatioThreshold ->
+                  ?CONFIG_THROTTLING;
+                _ ->
+                  ?NO_THROTTLING
+              end,
+
+  {MemAction, MemoryUsage}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns time after which next throttling config should start.
+%% @end
+%%--------------------------------------------------------------------
+-spec plan_next_throttling_check(Active :: boolean()) -> non_neg_integer().
+plan_next_throttling_check(true) ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_active_check_interval_seconds),
+  timer:seconds(Interval);
+plan_next_throttling_check(_) ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
+  timer:seconds(Interval).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns time after which next throttling config should start.
+%% Decreases interval if memory is growing too high.
+%% @end
+%%--------------------------------------------------------------------
+-spec plan_next_throttling_check(MemoryChange :: float(), MemoryToStop :: float(), LastInterval :: integer()) ->
+  non_neg_integer().
+plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
+  plan_next_throttling_check(true);
+plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
+  plan_next_throttling_check(true);
+plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
+  Default = plan_next_throttling_check(true),
+  Corrected = round(LastInterval*MemoryToStop/MemoryChange),
+  case (Corrected < Default) and (Corrected >= 0) of
+    true ->
+      Corrected;
+    _ ->
+      Default
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv erlang:send_after but enables mocking.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().
+send_after(CheckInterval, Master, Message) ->
+  erlang:send_after(CheckInterval, Master, Message).

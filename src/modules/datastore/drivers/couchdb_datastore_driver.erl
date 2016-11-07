@@ -48,7 +48,7 @@
 
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
--export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/3, delete/3, is_model_empty/1]).
+-export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 -export([synchronization_doc_key/2, synchronization_link_key/2]).
 
@@ -147,8 +147,7 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
         }
     })),
     lists:foreach(fun(Bucket) ->
-        Res = db_run(Bucket, couchbeam, save_doc, [Doc], 5),
-        ?info("ViewRes ~p", [Res])
+            db_run(Bucket, couchbeam, save_doc, [Doc], 5)
         end, get_buckets()),
     ok.
 
@@ -200,18 +199,23 @@ save_link_doc(ModelConfig, Doc) ->
 save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = #document{}) ->
     {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave)),
     Ref = make_ref(),
-    Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+
     case Aggregate of
-        true -> ok;
+        true ->
+            Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+            
+            receive
+                {Ref, Response} ->
+                    Response
+            after
+                timer:minutes(5) ->
+                    {error, gateway_loop_timeout}
+            end;
         false ->
-            Pid ! flush_docs
-    end,
-    receive
-        {Ref, Response} ->
-            Response
-    after
-        timer:minutes(5) ->
-            {error, gateway_loop_timeout}
+            [RawDoc] = make_raw_doc(ModelConfig, [ToSave]),
+            {ok, [RawRes]} = db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_docs,
+                [[RawDoc], ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3),
+            parse_response(save, RawRes)
     end.
 
 save_docs(DBBucketOrModelConfig, Documents) ->
@@ -222,7 +226,7 @@ save_docs(DBBucket, Documents, Opts) ->
     Docs = [make_raw_doc(MC, Doc) || {MC, Doc} <- Documents],
     case db_run(DBBucket, couchbeam, save_docs, [Docs, Opts], 3) of
         {ok, Res} ->
-            parse_response(Res);
+            parse_response(save, Res);
         {error, Reason} ->
             [{error, Reason} || _ <- lists:seq(1, length(Documents))]
     end.
@@ -244,7 +248,7 @@ get_docs(DBBucket, KeysWithModelConfig) ->
                     {ok, #document{key = Key, value = Value, rev = Rev, version = Version}};
                 ({{_, _Key}, Other}) ->
                     Other
-            end, lists:zip(KeysWithModelConfig, parse_response(Res)));
+            end, lists:zip(KeysWithModelConfig, parse_response(get, Res)));
         {error, Reason} ->
             [{error, Reason} || _ <- lists:seq(1, length(KeysWithModelConfig))]
     end.
@@ -310,7 +314,7 @@ update(#model_config{bucket = _Bucket, name = ModelName} = ModelConfig, Key, Dif
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create(#model_config{} = ModelConfig, ToSave = #document{}) ->
-    save_doc(ModelConfig, ToSave).
+    save_doc(ModelConfig, ToSave#document{rev = undefined}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -427,12 +431,12 @@ exists_link_doc(ModelConfig, Key, Scope) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback list/3.
+%% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(model_behaviour:model_config(),
-    Fun :: datastore:list_fun(), AccIn :: term()) -> no_return().
-list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn) ->
+    Fun :: datastore:list_fun(), AccIn :: term(), _Opts :: store_driver_behaviour:list_options()) -> no_return().
+list(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, Fun, AccIn, _Mode) ->
     BinModelName = atom_to_binary(ModelName, utf8),
     _BinBucket = atom_to_binary(Bucket, utf8),
     case db_run(select_bucket(ModelConfig, undefined), couchbeam_view, fetch, [all_docs, [include_docs, {start_key, BinModelName}, {end_key, BinModelName}]], 3) of
@@ -905,7 +909,7 @@ force_save(#model_config{} = ModelConfig, ToSave) ->
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
-    #document{key = Key, rev = {RNum, [Id | _]}, value = V} = ToSave) ->
+    #document{key = Key, rev = {RNum, [Id | IdsTail]}, value = V} = ToSave) ->
     SynchKey = case V of
                    #links{} ->
                        synchronization_link_key(ModelConfig, Key);
@@ -916,9 +920,9 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
-                    save_revision(ModelConfig, BucketOverride, ToSave);
+                    save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, not_found} ->
-                    save_revision(ModelConfig, BucketOverride, ToSave);
+                    save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, Reason} ->
                     {error, Reason};
                 {ok, #document{key = Key, rev = Rev} = Old} ->
@@ -940,7 +944,8 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
                                     {ok, Key}
                             end;
                         Higher when Higher > OldRNum ->
-                            save_revision(ModelConfig, BucketOverride, ToSave);
+                            NewIDs = check_revisions_list(OldId, IdsTail, OldRNum, Higher),
+                            save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id | NewIDs]}});
                         _ ->
                             {ok, Key}
                     end
@@ -1140,7 +1145,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         receive
             {PortFD, {data, {_, Data}}} ->
                 case binary:matches(Data, <<"HTTP:">>) of
-                    [] -> ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    [] -> ?debug("[CouchBase Gateway ~p] ~s", [ID, Data]);
                     _ -> ok
                 end,
                 UpdatedState;
@@ -1298,6 +1303,8 @@ changes_start_link(Callback, Since, Until, Bucket) ->
 -spec init(Args :: [term()]) -> {ok, gen_changes_state()}.
 init([Callback, Until, Bucket]) ->
     ?debug("Starting changes stream until ~p", [Until]),
+    {ok, HS} = application:get_env(?CLUSTER_WORKER_APP_NAME, changes_max_heap_size_words),
+    erlang:process_flag(max_heap_size, HS),
     {ok, #state{callback = Callback, until = Until, bucket = Bucket}}.
 
 %%--------------------------------------------------------------------
@@ -1752,11 +1759,11 @@ verify_ans({Ans}) ->
 verify_ans(_Ans) ->
     true.
 
-parse_response([]) ->
+parse_response(_, []) ->
         [];
-parse_response([E | T]) ->
-    [parse_response(E) | parse_response(T)];
-parse_response({_} = JSONTerm) ->
+parse_response(OpType, [E | T]) ->
+    [parse_response(OpType, E) | parse_response(OpType, T)];
+parse_response(OpType, {_} = JSONTerm) ->
     JSONBin = json_utils:encode(JSONTerm),
     JSONMap = json_utils:decode_map(JSONBin),
     case maps:get(<<"error">>, JSONMap, undefined) of
@@ -1767,11 +1774,11 @@ parse_response({_} = JSONTerm) ->
                         JSONMap;
                     Doc -> Doc
                 end,
-            case maps:get(<<?RECORD_TYPE_MARKER>>, MaybeDoc, undefined) of
-                undefined ->
-                    {_, Key} = from_driver_key(maps:get(<<"id">>, JSONMap)),
+            case OpType of
+                save ->
+                    {_, Key} = from_driver_key(maps:get(<<"id">>, JSONMap, maps:get(<<"_id">>, JSONMap, undefined))),
                     {ok, Key};
-                _ ->
+                get ->
                     {ok, jiffy:decode(jiffy:encode(MaybeDoc))}
             end;
         <<"conflict">> ->
@@ -1779,3 +1786,15 @@ parse_response({_} = JSONTerm) ->
         Error ->
             {error, binary_to_atom(Error, utf8)}
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if revision list provided to force_save can be written.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_revisions_list(term(), list(), integer(), integer()) -> list().
+check_revisions_list(OldID, [OldID | _] = NewIDs, OldNum, NewNum) when NewNum =:= OldNum + 1 ->
+    NewIDs;
+check_revisions_list(_, _, _, _) ->
+    [].

@@ -45,10 +45,26 @@
             %% Memory size which stores information about worker load
             {worker_load_memory_size, 1000},
             %% Memory usage level above which caches will be cleared
-            {node_mem_ratio_to_clear_cache, 80},
+            {node_mem_ratio_to_clear_cache, 60},
             {erlang_mem_to_clear_cache_mb, 500},
             %% Memory clearing will be stopped if memory usage less than {mem_clearing_ratio_to_stop}% clearing levels
-            {mem_clearing_ratio_to_stop, 80},
+            {mem_clearing_ratio_to_stop, 75},
+
+            %% Memory percent that results in blocking operations on mnesia
+            {throttling_block_mem_error_ratio, 90},
+            %% Number of failed tasks to start throttling
+            {throttling_start_failed_tasks_number, 2},
+            %% Number of ongoing (but at least once failed) tasks to start throttling
+            {throttling_start_pending_tasks_number, 10},
+            %% Base time for throttling
+            {throttling_base_time_ms, 16},
+            %% Maximum throttling time
+            {throttling_max_time_ms, 1024},
+            %% Interval of throttling configuration when throttling is used
+            {throttling_active_check_interval_seconds, 15},
+            %% Interval of throttling configuration
+            {throttling_check_interval_seconds, 30},
+
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 300},
             {procs_num_analysis_treshold, 2000},
@@ -60,10 +76,12 @@
             %% Min and max waiting value
             {task_fail_min_sleep_time_ms, 3000},
             {task_fail_max_sleep_time_ms, 30000},
+            %% Number of task repeats by a single process
+            {task_repeats, 3},
             %% The memory will be cleared once a period defined in this variable, even when usage level is acceptable
             {clear_cache_max_period_ms, 86400}, % 1 day
             %% How often node manager checks if caches cleaning is needed
-            {check_mem_interval_minutes, 5},
+            {check_mem_interval_minutes, 1},
             %% List of beam directories to be covered, cover is not started if list is empty
             {covered_dirs, []},
             %% List of modules to be excluded during cover analysis
@@ -74,7 +92,9 @@
             %% Maximal delay in cache dumping to disk
             {cache_to_disk_force_delay_ms, 5000},
             %% Period between checkings of tasks lists (to find tasks without owner)
-            {task_checking_period_minutes, 30},
+            {task_checking_period_minutes, 5},
+            %% Heap size limit for changes stream (it works all the time and must be limited)
+            {changes_max_heap_size_words, 33554432}, % 256 MB with 8byte word
 
             %% ===================================================================
             %% PLUGINS

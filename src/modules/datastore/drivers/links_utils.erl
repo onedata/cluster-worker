@@ -13,6 +13,8 @@
 
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_engine.hrl").
+
 -include_lib("ctool/include/logging.hrl").
 
 %% Prefix of VHash value (version hash used to tag links) in link name
@@ -123,7 +125,7 @@ diff2([{KeyO, _} = OldLink | OT], [{KeyN, _} = NewLink | NT], Added, Deleted) wh
 %%--------------------------------------------------------------------
 -spec create_link_in_map(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
     datastore:normalized_link_spec()) -> ok | datastore:create_error().
-create_link_in_map(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = _Scope2} = ModelConfig,
+create_link_in_map(Driver, #model_config{mother_link_scope = Scope1} = ModelConfig,
     Key, {LinkName, _} = Link) ->
     LocalScope = get_scopes(?LOCAL_ONLY_LINK_SCOPE, Key),
     RequestedScope = get_scopes(Scope1, Key),
@@ -195,7 +197,7 @@ create_link_in_map(Driver, #model_config{bucket = _Bucket} = ModelConfig, {LinkN
 -spec save_links_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
     [datastore:normalized_link_spec()], OpType :: set | add | add_no_local) -> ok | datastore:generic_error().
 save_links_maps(Driver,
-    #model_config{bucket = _Bucket, name = ModelName, mother_link_scope = Scope1, other_link_scopes = _Scope2} = ModelConfig,
+    #model_config{bucket = _Bucket, name = ModelName, mother_link_scope = Scope1} = ModelConfig,
     Key, LinksList, OpType) ->
     Save = fun(Scope) ->
         LDK = links_doc_key(Key, Scope),
@@ -384,7 +386,7 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
 %%--------------------------------------------------------------------
 -spec delete_links(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key()) ->
     ok | datastore:generic_error().
-delete_links(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes = _Scope2} = ModelConfig, Key) ->
+delete_links(Driver, #model_config{mother_link_scope = Scope1} = ModelConfig, Key) ->
     Scopes = lists:usort([get_scopes(Scope1, Key), get_scopes(?LOCAL_ONLY_LINK_SCOPE, Key)]),
     lists:foldl(fun(Scope, Acc) ->
         case delete_links_docs(Driver, ModelConfig, links_doc_key(Key, Scope)) of
@@ -403,7 +405,7 @@ delete_links(Driver, #model_config{mother_link_scope = Scope1, other_link_scopes
 %%--------------------------------------------------------------------
 -spec delete_links_from_maps(Driver :: atom(), model_behaviour:model_config(), datastore:ext_key(),
     [datastore:link_name()]) -> ok | datastore:generic_error().
-delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, name = ModelName, other_link_scopes = Scope2} = ModelConfig,
+delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, name = ModelName, disable_remote_link_delete = DisableRemoteDelete} = ModelConfig,
     Key, Links) ->
     LocalScope = get_scopes(?LOCAL_ONLY_LINK_SCOPE, Key),
     ReplicateScope = get_scopes(Scope1, Key),
@@ -429,10 +431,9 @@ delete_links_from_maps(Driver, #model_config{mother_link_scope = Scope1, name = 
                                 VH0 == undefined
                         end, ToAdd1),
                     %% @fixme: find out better way to detect system operations
-                    case get_scopes(Scope2, Key) of
-                        <<"system_internal">> ->
-                            ok;
-                        _ ->
+                    case DisableRemoteDelete of
+                        true -> ok;
+                        false ->
                             save_links_maps(Driver, ModelConfig, Key, maps:to_list(ToAdd2), add_no_local)
                     end;
                 Ans0 ->
@@ -660,15 +661,12 @@ select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
 %%--------------------------------------------------------------------
 -spec get_context_to_propagate(model_behaviour:model_config()) ->
     {{ok | skip, mother_scope() | skip, scope() | skip}, {ok | skip, other_scopes() | skip, [scope()] | skip}}.
-get_context_to_propagate(#model_config{mother_link_scope = MS, other_link_scopes = OS}) ->
+get_context_to_propagate(#model_config{mother_link_scope = MS}) ->
     A1 = case is_atom(MS) of
         true -> {ok, MS, get(MS)};
         _ -> {skip, skip, skip}
     end,
-    A2 = case is_atom(OS) of
-        true -> {ok, OS, get(OS)};
-        _ -> {skip, skip, skip}
-    end,
+    A2 = {skip, skip, skip},
     {A1, A2}.
 
 %%--------------------------------------------------------------------
@@ -1049,6 +1047,11 @@ foreach_link_in_docs(Driver, #model_config{bucket = _Bucket} = ModelConfig, Link
         {ok, #document{value = #links{link_map = LinkMap, children = Children}}} ->
             WrapperFun = fun
                 (K0, {Ver0, Targets0}, Acc0) ->
+                    case [{S, VH, K, M} || {S, VH, K, M} <- Targets0, is_tuple(VH)] of
+                        [] -> ok;
+                        OMG2 ->
+                            try o = k catch _:_ -> ?error_stacktrace("OMG2 ~p", [{OMG2, LinkKey,Driver}]) end
+                    end,
                     case [{S, VH, K, M} || {S, VH, K, M} <- Targets0, not is_tuple(VH)] of
                         [] ->
                             Acc0;
