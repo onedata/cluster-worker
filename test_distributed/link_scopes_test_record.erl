@@ -97,13 +97,9 @@ model_init() ->
                     Scope
             end
         end,
-    ScopeFun2 =
-        fun(_) ->
-            undefined
-        end,
 
     ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, true, false,
-        ScopeFun1, ScopeFun2).
+        ScopeFun1).
 
 %%--------------------------------------------------------------------
 %% @doc

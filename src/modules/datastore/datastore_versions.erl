@@ -97,8 +97,6 @@ async_update_records(ModelName) ->
                     ({_, {ok, #document{} = Doc}}, {OKDocs, ErrorKeysAcc}) ->
                         {[Doc | OKDocs], ErrorKeysAcc};
                     ({Key, {error, _Reason}}, {OKKeys, ErrorKeysAcc}) ->
-                        {OKKeys, [Key | ErrorKeysAcc]};
-                    ({Key, {error, _Reason}}, {OKKeys, ErrorKeysAcc}) ->
                         {OKKeys, [Key | ErrorKeysAcc]}
                     end, {[], []}, lists:zip(Keys, Results)),
                 ConfigsWithDocs = [{ModelConfig, Doc} || Doc <- DocsToSave],

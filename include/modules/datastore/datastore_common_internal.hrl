@@ -26,9 +26,7 @@
 %% All write operations on other scopes all replicated to this scope
 -define(LOCAL_ONLY_LINK_SCOPE, <<"#$LOCAL$#">>).
 
--define(MOTHER_SCOPE_DEF_FUN, fun(_) -> ?LOCAL_ONLY_LINK_SCOPE end).
-
--define(OTHER_SCOPES_DEF_FUN, fun(_) -> [] end).
+-define(DEFAULT_LINK_REPLICA_SCOPE, ?LOCAL_ONLY_LINK_SCOPE).
 
 %% This record shall not be used outside datastore engine and shall not be instantiated
 %% directly. Use MODEL_CONFIG macro instead.
@@ -44,7 +42,7 @@
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     transactional_global_cache = true :: boolean(),
     sync_cache = false :: boolean(),
-    mother_link_scope = ?MOTHER_SCOPE_DEF_FUN :: links_utils:mother_scope(),
+    link_replica_scope = ?DEFAULT_LINK_REPLICA_SCOPE :: links_utils:link_replica_scope(),
     link_duplication = false :: boolean(),
     sync_enabled = false :: boolean(),
     aggregate_db_writes = false :: boolean(),
@@ -64,10 +62,10 @@
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, false)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache,
-        ?MOTHER_SCOPE_DEF_FUN, ?OTHER_SCOPES_DEF_FUN)).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2),
-    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, false)).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, ScopeFun1, ScopeFun2, LinkDuplication),
+        ?DEFAULT_LINK_REPLICA_SCOPE)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope),
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, false)).
+-define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication),
     #model_config{
         name = ?MODULE,
         size = record_info(size, ?MODULE),
@@ -80,7 +78,7 @@
         transactional_global_cache = Transactions,
         sync_cache = SyncCache,
         % Function that returns scope for local operations on links
-        mother_link_scope = ScopeFun1, % link_utils:mother_scope_fun()
+        link_replica_scope = LinkReplicaScope, % link_utils:mother_scope_fun()
         % Function that returns all scopes for links' operations
         link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
         sync_enabled = false % Models with sync enabled will be stored in non-default bucket to reduce DB load.
