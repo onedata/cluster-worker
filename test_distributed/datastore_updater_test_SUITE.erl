@@ -46,7 +46,7 @@ all() ->
 
 
 online_upgrade_test(Config) ->
-    [W1, W2] = Workers = ?config(cluster_worker_nodes, Config),
+    [W1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ok = set_model_version(Config, test_record_1, 1),
     ok = set_model_version(Config, test_record_2, 1),
 
@@ -76,11 +76,11 @@ online_upgrade_test(Config) ->
 
 offline_upgrade_init_test(Config) ->
 
-    [W1, W2] = Workers = ?config(cluster_worker_nodes, Config),
+    [W1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ok = set_model_version(Config, test_record_1, 1),
     ok = set_model_version(Config, test_record_2, 1),
 
-    TR1Num = 1374,
+    TR1Num = 21374,
     TR1IDs = [?id(list_to_atom(integer_to_list(N))) || N <- lists:seq(1, TR1Num)],
     TR2Num = 231,
     TR2IDs = [?id(list_to_atom(integer_to_list(N))) || N <- lists:seq(1, TR2Num)],
@@ -109,10 +109,11 @@ offline_upgrade_init_test(Config) ->
     ok = set_model_version(Config, test_record_2, 2),
 
     Upgrade1 = datastore_versions:shell_upgrade(),
+    Upgrade2 = datastore_versions:shell_upgrade(),
+
     ?assertMatch({ok, {TR1Num, 0}}, proplists:get_value(test_record_1, Upgrade1)),
     ?assertMatch({ok, {TR2Num, 0}}, proplists:get_value(test_record_2, Upgrade1)),
 
-    Upgrade2 = datastore_versions:shell_upgrade(),
     ?assertMatch({ok, {0, 0}}, proplists:get_value(test_record_1, Upgrade2)),
     ?assertMatch({ok, {0, 0}}, proplists:get_value(test_record_2, Upgrade2)),
 

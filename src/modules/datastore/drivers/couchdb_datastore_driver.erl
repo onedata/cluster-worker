@@ -1572,6 +1572,16 @@ add_view(ModelName, Id, ViewFunction) ->
     true = verify_ans(SaveAns),
     ok.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Streams documents from given view in form of messages:
+%% {Ref, {stream_data, DocKey :: datastore:ext_key()}} - received DocKey of document in view
+%% {Ref, {stream_ended, Reason :: done | {error, Reason :: any()}} - stream has ended
+%% {Ref, {stream_data, {unknown, Unknown :: any()}}} - unknown data from stream,
+%% @end
+%%--------------------------------------------------------------------
+-spec stream_view(ModelName :: model_behaviour:model_type(), Id :: binary(), Options :: [term()]) ->
+    Ref :: term().
 stream_view(ModelName, Id, Options) ->
     Host = self(),
     spawn_link(fun() ->
@@ -1584,21 +1594,19 @@ stream_view(ModelName, Id, Options) ->
                         {Ref, {row, {Proplist}}} ->
                             try
                                 {_, DocId} = lists:keyfind(<<"id">>, 1, Proplist),
-                                {_, Key} = lists:keyfind(<<"key">>, 1, Proplist),
                                 {_, DocKey} = from_driver_key(DocId),
                                 Host ! {self(), {stream_data, DocKey}}
                             catch
                                 _:Reason ->
-                                    ct:print("Stream View: Unable to process document ~p due to ~p", [{Proplist}, Reason]),
                                     ?warning_stacktrace("Stream View: Unable to process document ~p due to ~p", [{Proplist}, Reason])
                             end,
                             LoopFun();
                         {Ref, Unknown} ->
-                            Host ! {self(), {stream_data, {none, Unknown}}}
+                            Host ! {self(), {stream_data, {unknown, Unknown}}}
                     end end,
                 Loop();
             {error, Reason} ->
-                Host ! {self(), {stream_error, Reason}}
+                Host ! {self(), {stream_ended, {error, Reason}}}
         end
     end).
 
