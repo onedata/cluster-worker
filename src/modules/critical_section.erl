@@ -163,20 +163,11 @@ unlock(Key) ->
 %%--------------------------------------------------------------------
 -spec is_owner_alive(pid()) -> boolean().
 is_owner_alive(Owner) ->
-    N = node(),
-    case node(Owner) of
-        N ->
-            is_process_alive(Owner);
-        nonode@nohost ->
+    case rpc:pinfo(Owner) of
+        undefined ->
             false;
-        OtherNode ->
-            case rpc:call(OtherNode, erlang, is_process_alive, [Owner]) of
-                {badrpc,nodedown} ->
-                    false;
-                {badrpc, R} ->
-                    ?error("Badrpc: ~p checking owner ~p", [R, Owner]),
-                    false;
-                CallAns ->
-                    CallAns
-            end
+        {badrpc,nodedown} ->
+            false;
+        _ ->
+            true
     end.
