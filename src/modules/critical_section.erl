@@ -14,6 +14,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([run/2, run_on_global/2, run_in_mnesia_transaction/2, run_on_mnesia/2, run_on_mnesia/3]).
@@ -89,6 +90,7 @@ run_on_mnesia(RawKey, Fun, Recursive) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Enqueues process for lock on given key.
 %% If process is first in the queue, this function returns immediately,
@@ -109,7 +111,7 @@ lock(Key, Recursive) ->
                 after timer:seconds(10) ->
                     case lock:current_owner(Key) of
                         {ok, Owner} when is_pid(Owner) ->
-                            case is_process_alive(Owner) of
+                            case is_owner_alive(Owner) of
                                 true ->
                                     Wait();
                                 false ->
@@ -130,6 +132,7 @@ lock(Key, Recursive) ->
     end.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Dequeues process from lock on given key.
 %% If process has acquired this lock multiple times, counter is decreased.
@@ -150,4 +153,19 @@ unlock(Key) ->
             ok;
         Error ->
             Error
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if owner is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_owner_alive(pid()) -> boolean().
+is_owner_alive(Owner) ->
+    case rpc:pinfo(Owner) of
+        Info when is_list(Info) ->
+            true;
+        _ ->
+            false
     end.
