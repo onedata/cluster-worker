@@ -164,10 +164,8 @@ unlock(Key) ->
 -spec is_owner_alive(pid()) -> boolean().
 is_owner_alive(Owner) ->
     case rpc:pinfo(Owner) of
-        undefined ->
-            false;
-        {badrpc,nodedown} ->
-            false;
+        Info when is_list(Info) ->
+            true;
         _ ->
-            true
+            false
     end.
