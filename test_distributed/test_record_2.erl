@@ -90,7 +90,7 @@ exists(Key) ->
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
     ok = test_record_1:maybe_init_versioning(?MODEL_NAME),
-    ?MODEL_CONFIG(test_bucket2, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
+    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
     #model_config{version = test_record_1:get_test_record_version(?MODEL_NAME)}.
 
 %%--------------------------------------------------------------------

@@ -15,6 +15,7 @@
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("timeouts.hrl").
 
 -define(shell(F), ?shell(F, [])).
 -define(shell(F, A), io:format(user, F, A)).
@@ -89,9 +90,14 @@ shell_upgrade(Ref, N, Models, OKs, Errors, BatchSize, AvgSpeed) ->
                 [13, N, length(Models), OKs, Errors, BatchSize, AvgSpeed, lists:nth(N, Models)]),
             {ok, {OKs, Errors}};
         {Ref, {error, Reason}} ->
-            ?shell("~c[~p/~p] Faild to update model (OK: ~p, Errors: ~p, Speed ~p * ~.2f): ~p (reason: ~p)~n",
+            ?shell("~c[~p/~p] Failed to update model (OK: ~p, Errors: ~p, Speed ~p * ~.2f): ~p (reason: ~p)~n",
                 [13, N, length(Models), OKs, Errors, BatchSize, AvgSpeed, lists:nth(N, Models), Reason]),
             {error, Reason, {OKs, Errors}}
+    after ?DOCUMENT_BATCH_UPGRADE_TIMEOUT ->
+        Reason = batch_timeout,
+        ?shell("~c[~p/~p] Failed to update model (OK: ~p, Errors: ~p, Speed ~p * ~.2f): ~p (reason: ~p)~n",
+            [13, N, length(Models), OKs, Errors, BatchSize, AvgSpeed, lists:nth(N, Models), Reason]),
+        {error, Reason}
     end.
 
 

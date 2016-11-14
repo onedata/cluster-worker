@@ -52,11 +52,22 @@
 -export([encode_record/2, decode_record/2]).
 -export([encode_record/3]).
 -export([decode_record_vcs/1, record_upgrade/4]).
+-export([get_renamed_models/0]).
 
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Maps old model name to new one.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_renamed_models() -> #{OldName :: model_behaviour:model_type() => {RenameVersion :: record_version(), NewName :: model_behaviour:model_type()}}.
+get_renamed_models() ->
+    #{}.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -89,9 +100,10 @@ encode_record(Term, Struct) ->
 %%--------------------------------------------------------------------
 -spec decode_record(ejson()) -> {record_version(), term()}.
 decode_record({Term}) when is_list(Term) ->
-    Type = decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom),
+    ModelName0 = decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom),
     Version = decode_record(proplists:get_value(<<?RECORD_VERSION_MARKER>>, Term), integer),
-    {record, Fields} = Type:record_struct(Version),
+    ModelName = maybe_rename_model(ModelName0, Version),
+    {record, Fields} = ModelName:record_struct(Version),
     {Version, decode_record({Term}, {record, Version, Fields})}.
 
 %%--------------------------------------------------------------------
@@ -102,7 +114,8 @@ decode_record({Term}) when is_list(Term) ->
 -spec decode_record_vcs(ejson()) -> {WasUpdated :: boolean(), record_version(), term()}.
 decode_record_vcs({Term}) when is_list(Term) ->
     {Version, Record} = decode_record({Term}),
-    ModelName = element(1, Record),
+    ModelName0 = element(1, Record),
+    ModelName = maybe_rename_model(ModelName0, Version),
     #model_config{version = TargetVersion} = ModelName:model_init(),
     {NewVersion, NewRecord} = record_upgrade(ModelName, TargetVersion, Version, Record),
     {Version /= NewVersion, NewVersion, NewRecord}.
@@ -222,12 +235,14 @@ decode_record(Term, {custom_type, TypeName, {Mod, _Encoder, Decoder}}) ->
     Mod:Decoder(decode_record(Term, json), TypeName);
 decode_record(Term, {custom_type, TypeName, Mod}) ->
     decode_record(Term, {custom_type, TypeName, {Mod, encode_value, decode_value}});
-decode_record({Term}, {record, _Version, Fields}) when is_list(Fields), is_list(Term) ->
+decode_record({Term}, {record, Version, Fields}) when is_list(Fields), is_list(Term) ->
+    ModelName0 = decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom),
+    ModelName = maybe_rename_model(ModelName0, Version),
     list_to_tuple(lists:reverse(lists:foldl(
         fun({Name, Type}, RecordList) ->
             [decode_record(proplists:get_value(encode_record(key, Name, atom), Term), Type) | RecordList]
         end,
-        [decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom)], Fields)));
+        [ModelName], Fields)));
 decode_record(Term, string) when is_binary(Term) ->
     Term;
 decode_record(Term, integer) when is_integer(Term) ->
@@ -264,3 +279,20 @@ decode_record(Term, term) ->
     binary_to_term(base64:decode(Term));
 decode_record(Term, Type) ->
     error({invalid_json_structure, Term, Type}).
+
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns current model name base on defined model-name changes.
+%% @end
+%%--------------------------------------------------------------------
+-spec maybe_rename_model(RecordType :: model_behaviour:model_type(), RecordVersion :: record_version()) ->
+    model_behaviour:model_type().
+maybe_rename_model(RecordType, RecordVersion) ->
+    case maps:get(RecordType, ?MODULE:get_renamed_models(), undefined) of
+        {RenamedVersion, RenamedTargetModel} when RenamedVersion >= RecordVersion ->
+            RenamedTargetModel;
+        _ ->
+            RecordType
+    end.

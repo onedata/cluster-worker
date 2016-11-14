@@ -38,3 +38,5 @@
 -define(DEFAULT_DNS_TCP_TIMEOUT, 60).
 
 -define(DOCUMENT_AGGREGATE_SAVE_TIMEOUT, timer:minutes(5)).
+
+-define(DOCUMENT_BATCH_UPGRADE_TIMEOUT, timer:minutes(1)).

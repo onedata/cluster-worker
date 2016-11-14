@@ -42,6 +42,7 @@ maybe_init_versioning(ModelName) ->
 
 get_test_record_version(ModelName) ->
     Ref = make_ref(),
+    maybe_init_versioning(ModelName),
     ModelName ! {get_version, Ref, self()},
     receive
         {Ref, Version} ->
@@ -50,6 +51,7 @@ get_test_record_version(ModelName) ->
 
 set_test_record_version(ModelName, Version) ->
     Ref = make_ref(),
+    maybe_init_versioning(ModelName),
     ModelName ! {set_version, Version, Ref, self()},
     receive
         {Ref, ok} -> ok
@@ -124,7 +126,7 @@ exists(Key) ->
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
     ok = maybe_init_versioning(?MODEL_NAME),
-    ?MODEL_CONFIG(test_bucket1, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
+    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
         #model_config{version = get_test_record_version(?MODEL_NAME), aggregate_db_writes = true}.
 
 %%--------------------------------------------------------------------
@@ -153,16 +155,18 @@ before(_ModelName, _Method, _Level, _Context) ->
 
 record_upgrade(1, {?MODEL_NAME, F1, F2, F3}) ->
     {2, {?MODEL_NAME, F1, F2, F3}};
-record_upgrade(2, {?MODEL_NAME, F1, F2, _}) ->
-    {3, {?MODEL_NAME, F1, F2}};
-record_upgrade(3, {?MODEL_NAME, F1, F2}) ->
-    {4, {?MODEL_NAME, F1, F2, {default, 5, atom}}};
-record_upgrade(4, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_atom(F31), is_atom(F33), is_integer(F32) ->
-    {5, {?MODEL_NAME, F1, F2, {F31, F32, F33}, [true, false]}};
-record_upgrade(4, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F31) ->
-    record_upgrade(4, {?MODEL_NAME, F1, F2, {list_to_atom(integer_to_list(F31)), F32, F33}});
-record_upgrade(4, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F33) ->
-    record_upgrade(4, {?MODEL_NAME, F1, F2, {F31, F32, list_to_atom(integer_to_list(F33))}}).
+record_upgrade(2, {?MODEL_NAME, F1, F2, F3}) ->
+    {3, {?MODEL_NAME, F1, F2, F3}};
+record_upgrade(3, {?MODEL_NAME, F1, F2, _}) ->
+    {4, {?MODEL_NAME, F1, F2}};
+record_upgrade(4, {?MODEL_NAME, F1, F2}) ->
+    {5, {?MODEL_NAME, F1, F2, {default, 5, atom}}};
+record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_atom(F31), is_atom(F33), is_integer(F32) ->
+    {6, {?MODEL_NAME, F1, F2, {F31, F32, F33}, [true, false]}};
+record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F31) ->
+    record_upgrade(5, {?MODEL_NAME, F1, F2, {list_to_atom(integer_to_list(F31)), F32, F33}});
+record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F33) ->
+    record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, list_to_atom(integer_to_list(F33))}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -172,28 +176,34 @@ record_upgrade(4, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F33) -
 -spec record_struct(datastore_json:record_version()) -> datastore_json:record_struct().
 record_struct(1) ->
     {record, [
-        {field1, integer},
-        {field2, integer},
-        {field3, integer}
+        {field1, term},
+        {field2, term},
+        {field3, term}
     ]};
 record_struct(2) ->
     {record, [
         {field1, integer},
-        {field2, term},
+        {field2, integer},
         {field3, integer}
     ]};
 record_struct(3) ->
     {record, [
         {field1, integer},
-        {field2, term}
+        {field2, term},
+        {field3, integer}
     ]};
 record_struct(4) ->
+    {record, [
+        {field1, integer},
+        {field2, term}
+    ]};
+record_struct(5) ->
     {record, [
         {field1, term},
         {field2, term},
         {field3, term}
     ]};
-record_struct(5) ->
+record_struct(6) ->
     {record, [
         {field1, term},
         {field2, term},

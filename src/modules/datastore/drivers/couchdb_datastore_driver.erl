@@ -1002,6 +1002,7 @@ timeoutize_apply(Fun, Timeout) ->
     end.
 
 
+%% @todo: VFS-2825 Use this functions to optimize dbsync performance
 %%force_save(#model_config{} = ModelConfig, BucketOverride, Doc) ->
 %%    [Res] = save_docs(BucketOverride, [{ModelConfig, Doc}], [{<<"new_edits">>, false}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT),
 %%    Res.
@@ -1803,7 +1804,8 @@ verify_ans(_Ans) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec parse_response(get | save, [datastore_json:ejson()] | datastore_json:ejson()) ->
-    [{ok, datastore:ext_key() | datastore:document()} | datastore:generic_error()].
+    Response | [Response] when
+    Response :: {ok, datastore:ext_key() | datastore:document()} | datastore:generic_error().
 parse_response(_, []) ->
         [];
 parse_response(OpType, [E | T]) ->
