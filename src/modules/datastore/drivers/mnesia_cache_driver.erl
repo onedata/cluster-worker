@@ -205,7 +205,9 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
             mnesia:read(table_name(ModelConfig), Key);
         _ ->
             log(normal, "dirty -> ~p:get(~p)", [ModelName, Key]),
-            mnesia:dirty_read(table_name(ModelConfig), Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(table_name(ModelConfig), Key)
+            end)
     end,
     case TmpAns of
         [] -> {error, {not_found, ModelName}};
@@ -226,7 +228,9 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
             mnesia:read(links_table_name(ModelConfig), Key);
         _ ->
             log(normal, "dirty -> ~p:get_link_doc(~p)", [ModelName, Key]),
-            mnesia:dirty_read(links_table_name(ModelConfig), Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(links_table_name(ModelConfig), Key)
+            end)
     end,
     case TmpAns of
         [] -> {error, {not_found, ModelName}};
@@ -249,7 +253,9 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
             mnesia:read(LNT, Key);
         _ ->
             log(normal, "dirty -> ~p:exists_link_doc(~p)", [ModelName, Key]),
-            mnesia:dirty_read(LNT, Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(LNT, Key)
+            end)
     end,
     case TmpAns of
         [] -> {ok, false};
@@ -460,7 +466,9 @@ exists(#model_config{name = ModelName} = ModelConfig, Key) ->
             mnesia:read(table_name(ModelConfig), Key);
         _ ->
             log(normal, "dirty -> ~p:exists(~p)", [ModelName, Key]),
-            mnesia:dirty_read(table_name(ModelConfig), Key)
+            mnesia:activity(ets, fun() ->
+                mnesia:read(table_name(ModelConfig), Key)
+            end)
     end,
     case TmpAns of
         [] -> {ok, false};

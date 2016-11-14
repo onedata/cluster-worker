@@ -32,8 +32,6 @@
 -export([start_task/2, start_task/3, check_and_rerun_all/0, kill_all/0, is_task_alive/1, check_owner/1, kill_owner/1]).
 -export([save_pid/3, update_pid/3]).
 
--define(TASK_REPEATS, 10).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -65,6 +63,7 @@ start_task(Task, Level, DelaySave) ->
     PersistFun :: save_pid | update_pid, Sleep :: boolean() | {boolean(), integer()}, DelaySave :: delay_config()) -> ok.
 start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
     Pid = spawn(fun() ->
+        {ok, TaskRepeats} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_repeats),
         receive
             {start, Uuid} ->
                 case Sleep of
@@ -80,10 +79,11 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
                                 0;
                             _ ->
                                 {ok, _} = apply(?MODULE, save_pid, [Task, self(), Level]),
-                                ?TASK_REPEATS - 1
+                                sleep_random_interval(1),
+                                TaskRepeats - 1
                         end;
                     _ ->
-                        ?TASK_REPEATS
+                        TaskRepeats
                 end,
                 case Repeats of
                     0 ->
@@ -96,9 +96,9 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
                                 ok;
                             {task_failed, batch} ->
                                 {ok, _} = apply(?MODULE, save_pid, [Task, self(), Level]),
-                                ?error_stacktrace("~p fails of a task ~p", [?TASK_REPEATS, Task]);
+                                ?error_stacktrace("~p fails of a task ~p", [TaskRepeats, Task]);
                             _ ->
-                                ?error_stacktrace("~p fails of a task ~p", [?TASK_REPEATS, Task])
+                                ?error_stacktrace("~p fails of a task ~p", [TaskRepeats, Task])
                         end
                 end
         after
@@ -291,8 +291,14 @@ do_task(Task, Num) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec do_task(Task :: task(), Repeats :: integer(), MaxNum :: integer()) -> term().
-do_task(_Task, 0, _MaxNum) ->
-    task_failed;
+do_task(Task, 1, _MaxNum) ->
+    try
+        ok = do_task(Task)
+    catch
+        E1:E2 ->
+            ?error_stacktrace("Task ~p error: ~p:~p", [Task, E1, E2]),
+            task_failed
+    end;
 do_task(Task, CurrentNum, MaxNum) ->
     try
         ok = do_task(Task)

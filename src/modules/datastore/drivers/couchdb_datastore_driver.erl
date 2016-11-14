@@ -852,7 +852,7 @@ force_save(#model_config{} = ModelConfig, ToSave) ->
 -spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
-    #document{key = Key, rev = {RNum, [Id | _]}, value = V} = ToSave) ->
+    #document{key = Key, rev = {RNum, [Id | IdsTail]}, value = V} = ToSave) ->
     SynchKey = case V of
                    #links{} ->
                        synchronization_link_key(ModelConfig, Key);
@@ -863,9 +863,9 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
         fun() ->
             case get(ModelConfig, Key) of
                 {error, {not_found, _}} ->
-                    save_revision(ModelConfig, BucketOverride, ToSave);
+                    save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, not_found} ->
-                    save_revision(ModelConfig, BucketOverride, ToSave);
+                    save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, Reason} ->
                     {error, Reason};
                 {ok, #document{key = Key, rev = Rev} = Old} ->
@@ -887,7 +887,8 @@ force_save(#model_config{name = ModelName} = ModelConfig, BucketOverride,
                                     {ok, Key}
                             end;
                         Higher when Higher > OldRNum ->
-                            save_revision(ModelConfig, BucketOverride, ToSave);
+                            NewIDs = check_revisions_list(OldId, IdsTail, OldRNum, Higher),
+                            save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id | NewIDs]}});
                         _ ->
                             {ok, Key}
                     end
@@ -1048,7 +1049,7 @@ gateway_loop(#{port_fd := PortFD, id := {_, N} = ID, db_hostname := Hostname, db
         receive
             {PortFD, {data, {_, Data}}} ->
                 case binary:matches(Data, <<"HTTP:">>) of
-                    [] -> ?info("[CouchBase Gateway ~p] ~s", [ID, Data]);
+                    [] -> ?debug("[CouchBase Gateway ~p] ~s", [ID, Data]);
                     _ -> ok
                 end,
                 UpdatedState;
@@ -1196,6 +1197,8 @@ changes_start_link(Callback, Since, Until, Bucket) ->
 -spec init(Args :: [term()]) -> {ok, gen_changes_state()}.
 init([Callback, Until, Bucket]) ->
     ?debug("Starting changes stream until ~p", [Until]),
+    {ok, HS} = application:get_env(?CLUSTER_WORKER_APP_NAME, changes_max_heap_size_words),
+    erlang:process_flag(max_heap_size, HS),
     {ok, #state{callback = Callback, until = Until, bucket = Bucket}}.
 
 %%--------------------------------------------------------------------
@@ -1617,3 +1620,14 @@ verify_ans({Ans}) ->
     verify_ans(Ans);
 verify_ans(_Ans) ->
     true.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if revision list provided to force_save can be written.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_revisions_list(term(), list(), integer(), integer()) -> list().
+check_revisions_list(OldID, [OldID | _] = NewIDs, OldNum, NewNum) when NewNum =:= OldNum + 1 ->
+    NewIDs;
+check_revisions_list(_, _, _, _) ->
+    [].
