@@ -4,7 +4,7 @@
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @doc
-%%% WRITEME
+%%% Model responsible for updating state of auxiliary tables.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(auxiliary_cache_controller).
@@ -201,9 +201,7 @@ foreach_aux_cache(ModelName, Method, Args) ->
 %%--------------------------------------------------------------------
 -spec get_model_aux_caches(#model_config{} | model_behaviour:model_type()) -> #{}.
 get_model_aux_caches(#model_config{auxiliary_caches = AuxCaches}) ->
-    AuxCaches;
-get_model_aux_caches(ModelName) ->
-    get_model_aux_caches(ModelName:model_init()).
+    AuxCaches.
 
 
 %%--------------------------------------------------------------------
@@ -215,11 +213,3 @@ get_model_aux_caches(ModelName) ->
 -spec method_to_aux_method(Method :: model_behaviour:model_action()) -> atom().
 method_to_aux_method(Method) ->
     binary_to_atom(<<"aux_", (atom_to_binary(Method, utf8))/binary>>, utf8).
-
-
-%% TODO
-%% TODO * write docs and specs
-%% TODO * please dialyzer
-%% TODO * ct tests
-
-

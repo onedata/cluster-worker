@@ -4,7 +4,8 @@
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @doc
-%%% WRITEME
+%%% Test model used in auxiliary_cache_test_SUITE.
+%%% Represents global only model with global auxiliary cache.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(global_only_record_with_global_aux_cache).

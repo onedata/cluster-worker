@@ -42,6 +42,19 @@
     global_only_record_with_global_aux_cache_create_or_update_test/1]).
 
 -define(POSTHOOK_METHODS, [save, delete, update, create, create_or_update]).
+-define(FIELD(Number, Id), binary_to_atom(
+    <<"field", (integer_to_binary(Number))/binary, "_",
+        (str_utils:format_bin("~4..0B", [Id]))/binary>>, utf8)).
+
+-define(TIMEOUT, timer:minutes(5)).
+-define(call_datastore(N, F, A), ?call(N, datastore, F, A)).
+-define(call(N, M, F, A), rpc:call(N, M, F, A)).
+-define(TEST_RECORDS, [
+    local_only_record_with_local_aux_cache,
+    global_only_record_with_local_aux_cache,
+    global_only_record_with_global_aux_cache
+]).
+
 
 all() -> ?ALL([
     local_only_record_with_local_aux_cache_creation_test,
@@ -61,13 +74,6 @@ all() -> ?ALL([
     global_only_record_with_global_aux_cache_create_or_update_test
 ]).
 
--define(FIELD(Number, Id), binary_to_atom(
-    <<"field", (integer_to_binary(Number))/binary, "_",
-        (str_utils:format_bin("~4..0B", [Id]))/binary>>, utf8)).
-
--define(TIMEOUT, timer:minutes(5)).
--define(call_datastore(N, F, A), ?call(N, datastore, F, A)).
--define(call(N, M, F, A), rpc:call(N, M, F, A)).
 
 
 %%%===================================================================
@@ -75,7 +81,6 @@ all() -> ?ALL([
 %%%===================================================================
 
 local_only_record_with_local_aux_cache_creation_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?LOCAL_ONLY_LEVEL,
     TestModel = local_only_record_with_local_aux_cache,
@@ -87,10 +92,10 @@ local_only_record_with_local_aux_cache_creation_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1).
 
 local_only_record_with_local_aux_cache_save_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?LOCAL_ONLY_LEVEL,
     TestModel = local_only_record_with_local_aux_cache,
+
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
     RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
@@ -105,7 +110,6 @@ local_only_record_with_local_aux_cache_save_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 local_only_record_with_local_aux_cache_deletion_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?LOCAL_ONLY_LEVEL,
     TestModel = local_only_record_with_local_aux_cache,
@@ -122,7 +126,6 @@ local_only_record_with_local_aux_cache_deletion_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 local_only_record_with_local_aux_cache_update_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?LOCAL_ONLY_LEVEL,
     TestModel = local_only_record_with_local_aux_cache,
@@ -137,12 +140,12 @@ local_only_record_with_local_aux_cache_update_test(Config) ->
     end,
     {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
     OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
+
     update(Worker1, TestModel, Level, Key, UpdateFun),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 local_only_record_with_local_aux_cache_create_or_update_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?LOCAL_ONLY_LEVEL,
     TestModel = local_only_record_with_local_aux_cache,
@@ -159,14 +162,13 @@ local_only_record_with_local_aux_cache_create_or_update_test(Config) ->
     create_or_update(Worker1, Key, UpdatedRecord, Level, UpdateFun),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
-
     NewRecord = create_test_record(TestModel, 0),
+
     create_or_update(Worker1, <<"non_existing_key">>, NewRecord, Level, UpdateFun),
     OrderedRecords3 = [NewRecord | OrderedRecords2],
     check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_creation_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_local_aux_cache,
@@ -178,7 +180,6 @@ global_only_record_with_local_aux_cache_creation_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_save_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_local_aux_cache,
@@ -197,7 +198,6 @@ global_only_record_with_local_aux_cache_save_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_deletion_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_local_aux_cache,
@@ -216,7 +216,6 @@ global_only_record_with_local_aux_cache_deletion_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_update_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_local_aux_cache,
@@ -236,7 +235,6 @@ global_only_record_with_local_aux_cache_update_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_local_aux_cache_create_or_update_test(Config) ->
-
     [Worker1 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_local_aux_cache,
@@ -250,6 +248,7 @@ global_only_record_with_local_aux_cache_create_or_update_test(Config) ->
     end,
     {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
     OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
+
     create_or_update(Worker1, Key, UpdatedRecord, Level, UpdateFun),
     timer:sleep(timer:seconds(1)),
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
@@ -260,7 +259,6 @@ global_only_record_with_local_aux_cache_create_or_update_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1).
 
 global_only_record_with_global_aux_cache_creation_test(Config) ->
-
     [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_global_aux_cache,
@@ -273,7 +271,6 @@ global_only_record_with_global_aux_cache_creation_test(Config) ->
     check_list_ordered(Worker2, OrderedRecords, Level, TestModel, field1).
 
 global_only_record_with_global_aux_cache_save_test(Config) ->
-
     [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_global_aux_cache,
@@ -293,7 +290,6 @@ global_only_record_with_global_aux_cache_save_test(Config) ->
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_global_aux_cache_deletion_test(Config) ->
-
     [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_global_aux_cache,
@@ -312,7 +308,6 @@ global_only_record_with_global_aux_cache_deletion_test(Config) ->
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_global_aux_cache_update_test(Config) ->
-
     [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_global_aux_cache,
@@ -334,7 +329,6 @@ global_only_record_with_global_aux_cache_update_test(Config) ->
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
 global_only_record_with_global_aux_cache_create_or_update_test(Config) ->
-
     [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
     TestModel = global_only_record_with_global_aux_cache,
@@ -488,36 +482,10 @@ enable_datastore_models_with_hooks([H | _] = Nodes, Models, HooksMethods) ->
         end, Nodes).
 
 
-test_to_record(local_only_record_with_local_aux_cache_creation_test) ->
-    local_only_record_with_local_aux_cache;
-test_to_record(local_only_record_with_local_aux_cache_save_test) ->
-    local_only_record_with_local_aux_cache;
-test_to_record(local_only_record_with_local_aux_cache_deletion_test) ->
-    local_only_record_with_local_aux_cache;
-test_to_record(local_only_record_with_local_aux_cache_update_test) ->
-    local_only_record_with_local_aux_cache;
-test_to_record(local_only_record_with_local_aux_cache_create_or_update_test) ->
-    local_only_record_with_local_aux_cache;
-test_to_record(global_only_record_with_local_aux_cache_creation_test) ->
-    global_only_record_with_local_aux_cache;
-test_to_record(global_only_record_with_local_aux_cache_save_test) ->
-    global_only_record_with_local_aux_cache;
-test_to_record(global_only_record_with_local_aux_cache_deletion_test) ->
-    global_only_record_with_local_aux_cache;
-test_to_record(global_only_record_with_local_aux_cache_update_test) ->
-    global_only_record_with_local_aux_cache;
-test_to_record(global_only_record_with_local_aux_cache_create_or_update_test) ->
-    global_only_record_with_local_aux_cache;
-test_to_record(global_only_record_with_global_aux_cache_creation_test) ->
-    global_only_record_with_global_aux_cache;
-test_to_record(global_only_record_with_global_aux_cache_save_test) ->
-    global_only_record_with_global_aux_cache;
-test_to_record(global_only_record_with_global_aux_cache_deletion_test) ->
-    global_only_record_with_global_aux_cache;
-test_to_record(global_only_record_with_global_aux_cache_update_test) ->
-    global_only_record_with_global_aux_cache;
-test_to_record(global_only_record_with_global_aux_cache_create_or_update_test) ->
-    global_only_record_with_global_aux_cache.
+test_to_record(Case) ->
+    CaseStr = atom_to_list(Case),
+    [Record] = [R || R <- ?TEST_RECORDS, string:str(CaseStr, atom_to_list(R)) > 0 ],
+    Record.
 
 
 clear_env(Case, Workers) ->

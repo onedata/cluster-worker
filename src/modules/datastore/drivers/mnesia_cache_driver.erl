@@ -784,7 +784,7 @@ create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_table(TabName :: atom(), RecordName :: atom(),
-    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom(), Majority :: boolean()) -> atom().
+    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom(), Majority :: boolean()) -> ok.
 create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, Majority) ->
     AttributesArg = case Attributes of
         [] -> [];
@@ -1061,11 +1061,12 @@ list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
 %% If it exists and it's value hasn't changed, false is returned.
 %% @end
 %%%--------------------------------------------------------------------
--spec is_aux_field_value_updated(atom(), datastore:key(), term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
+-spec is_aux_field_value_updated(atom(), datastore:ext_key(), term()) ->
+    boolean() | {true, OldAuxKey :: {term(), datastore:ext_key()}}.
 is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
     case aux_get(AuxTableName, Key) of
         [] -> true;
-        [{CurrentFieldValue, Key}] -> false;
+        [#auxiliary_cache_entry{key={CurrentFieldValue, Key}}] -> false;
         [#auxiliary_cache_entry{key=AuxKey}] -> {true, AuxKey}
     end.
 
@@ -1076,7 +1077,7 @@ is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
 %% matching the Key.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_get(atom(),Key :: datastore:key()) -> [{term(), datastore:key()}].
+-spec aux_get(atom(),Key :: datastore:ext_key()) -> [#auxiliary_cache_entry{}].
 aux_get(AuxTableName, Key) ->
     mnesia:dirty_select(AuxTableName, ets:fun2ms(
         fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end)).

@@ -23,6 +23,7 @@
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
+    auxiliary_cache_controller,
     cache_controller,
     task_pool,
     cache_consistency_controller,
@@ -42,8 +43,7 @@
 %%--------------------------------------------------------------------
 -spec models() -> Models :: [model_behaviour:model_type()].
 models() ->
-    ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []) ++ [
-    auxiliary_cache_controller].
+    ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []).
 
 %%--------------------------------------------------------------------
 %% @doc

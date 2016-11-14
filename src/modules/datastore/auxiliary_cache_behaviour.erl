@@ -4,7 +4,7 @@
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @doc
-%%% WRITEME
+%%% Behaviour for datastore driver that implements auxiliary cache.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(auxiliary_cache_behaviour).

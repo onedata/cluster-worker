@@ -461,7 +461,7 @@ aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
 aux_create(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined}),
+    ets:insert_new(AuxTableName, {{CurrentFieldValue, Key}, undefined}),
     ok.
 
 
@@ -535,7 +535,7 @@ list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, Acc
     First = AuxDriver:aux_first(ModelConfig, Field),
     IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field, Handle) end,
     TableName = table_name(ModelConfig),
-    list_ordered_next(TableName, First, Fun , IteratorFun, AccIn).
+    list_ordered_next(TableName, First, Fun, IteratorFun, AccIn).
 
 
 %%--------------------------------------------------------------------

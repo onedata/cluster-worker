@@ -4,7 +4,8 @@
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @doc
-%%% WRITEME
+%%% Test model used in auxiliary_cache_test_SUITE.
+%%% Represents local only model with local auxiliary cache.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(local_only_record_with_local_aux_cache).

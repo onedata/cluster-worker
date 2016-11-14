@@ -938,7 +938,7 @@ driver_to_module(Driver) ->
 %% Returns list of models which have auxiliary caches created.
 %% @end
 %%--------------------------------------------------------------------
--spec models_with_aux_caches() -> [#model_config{}].
+-spec models_with_aux_caches() -> [model_behaviour:model_type()].
 models_with_aux_caches() ->
     datastore_config:models_with_aux_caches().
 
@@ -1226,7 +1226,7 @@ initialize_state(NodeToSync) ->
 init_auxiliary_caches(Models, NodeToSync) ->
     lists:foreach(
         fun
-            (#model_config{auxiliary_caches=AuxCaches}) when map_size(AuxCaches) == 0->
+            (#model_config{auxiliary_caches=AuxCaches}) when map_size(AuxCaches) == 0 ->
                 ok;
             (M = #model_config{auxiliary_caches=AuxCaches}) ->
                 lists:foreach(fun({StoreLevel, Fields}) ->
@@ -1241,7 +1241,7 @@ init_auxiliary_caches(Models, NodeToSync) ->
 %% @private
 %% @doc
 %% Inverts map. key becomes values and  values become keys.
-%% In new map each key's (old value) value is of keys associated with
+%% In new map each key's (old value) value is list of keys associated with
 %% these value in original map.
 %% e.g.
 %% M = #{ k1 => v1, k2 => v1, k3 => v3 }

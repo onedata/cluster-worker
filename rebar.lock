@@ -99,7 +99,7 @@
   0},
  {<<"plain_fsm">>,
   {git,"git://github.com/uwiger/plain_fsm.git",
-       {ref,"573d78d0d2b30b6f4366efa0c0df6b51c828b871"}},
+       {ref,"ae9eca8a8df8f61a32185b06882a55d60e62e904"}},
   1},
  {<<"ranch">>,
   {git,"git://github.com/ninenines/ranch.git",
