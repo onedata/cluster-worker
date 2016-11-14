@@ -5,7 +5,8 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Module for model schema upgrade
+%%% @doc Module for model schema upgrade.
+%%%      Allows for offline schema upgrade to current model version.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_versions).

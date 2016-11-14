@@ -311,27 +311,6 @@ case "$1" in
         exec $ERTS_PATH/erl -name c_$$_$NODE_NAME -hidden -remsh $NODE_NAME $COOKIE_ARG $NET_TICKTIME_ARG
         ;;
 
-    upgrade)
-        # Bootstrap daemon command (check perms & drop to $RUNNER_USER)
-        bootstrapd $@
-
-        check_config
-        ES=$?
-        if [ "$ES" -ne 0 ]; then
-            exit $ES
-        fi
-
-        # Warn the user if ulimit -n is less than the defined threshold
-        check_ulimit
-
-        # Make sure log directory exists
-        mkdir -p $RUNNER_LOG_DIR
-
-        exec $ERTS_PATH/erl -hidden $CONFIG_ARGS -pa $RUNNER_PATCH_DIR -name updater \
-            -s datastore initialize_minimal_env -s datastore_versions shell_upgrade -s erlang halt
-
-        ;;
-
     console)
         # Bootstrap daemon command (check perms & drop to $RUNNER_USER)
         bootstrapd $@

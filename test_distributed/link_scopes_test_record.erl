@@ -91,9 +91,9 @@ exists(Key) ->
 model_init() ->
     ScopeFun1 =
         fun(_) ->
-            global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),
+            global:send(?SCOPE_MASTER_PROC_NAME, {get_link_replica_scope, self()}),global:send(?SCOPE_MASTER_PROC_NAME, {get_link_replica_scope, self()}),
             receive
-                {mother_scope, Scope} ->
+                {link_replica_scope, Scope} ->
                     Scope
             end
         end,

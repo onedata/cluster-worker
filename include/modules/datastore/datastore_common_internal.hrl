@@ -77,9 +77,7 @@
         link_store_level = LinkStoreLevel,
         transactional_global_cache = Transactions,
         sync_cache = SyncCache,
-        % Function that returns scope for local operations on links
-        link_replica_scope = LinkReplicaScope, % link_utils:mother_scope_fun()
-        % Function that returns all scopes for links' operations
+        link_replica_scope = LinkReplicaScope,
         link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
         sync_enabled = false % Models with sync enabled will be stored in non-default bucket to reduce DB load.
     }

@@ -151,6 +151,13 @@ init_bucket(_Bucket, _Models, _NodeToSync) ->
         end, get_buckets()),
     ok.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns available data buckets in database.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_buckets() -> [binary()] | undefined.
 get_buckets() ->
     datastore_worker:state_get(available_buckets).
 
@@ -208,7 +215,7 @@ save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = 
                 {Ref, Response} ->
                     Response
             after
-                timer:minutes(5) ->
+                ?DOCUMENT_AGGREGATE_SAVE_TIMEOUT ->
                     {error, gateway_loop_timeout}
             end;
         false ->
@@ -218,6 +225,14 @@ save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = 
             parse_response(save, RawRes)
     end.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves documents in batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_docs(model_behaviour:model_config() | couchdb_bucket(), [{model_behaviour:model_config(), datastore:ext_key()}]) ->
+    [{ok, datastore:ext_key()} | datastore:generic_error()].
 save_docs(DBBucketOrModelConfig, Documents) ->
     save_docs(DBBucketOrModelConfig, Documents, []).
 save_docs(#model_config{} = ModelConfig, Documents, Opts) ->
@@ -231,6 +246,14 @@ save_docs(DBBucket, Documents, Opts) ->
             [{error, Reason} || _ <- lists:seq(1, length(Documents))]
     end.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets documents in batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_docs(model_behaviour:model_config() | couchdb_bucket(), [{model_behaviour:model_config(), datastore:ext_key()}]) ->
+    [{ok, datastore:ext_key()} | datastore:generic_error()].
 get_docs(#model_config{} = ModelConfig, KeysWithModelConfig) ->
     get_docs(select_bucket(ModelConfig), KeysWithModelConfig);
 get_docs(DBBucket, KeysWithModelConfig) ->
@@ -254,6 +277,13 @@ get_docs(DBBucket, KeysWithModelConfig) ->
     end.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Translates given document to eJSON format.
+%% @end
+%%--------------------------------------------------------------------
+-spec make_raw_doc(model_behaviour:model_config(), [datastore:document()]) ->
+    [datastore_json:ejson()].
 make_raw_doc(_MC, []) ->
         [];
 make_raw_doc(MC, [Doc | T]) ->
@@ -595,10 +625,9 @@ exists(#model_config{bucket = _Bucket} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
-add_links(#model_config{name = ModelName, bucket = Bucket} = ModelConfig, Key, Links) when is_list(Links) ->
+add_links(#model_config{name = ModelName} = ModelConfig, Key, Links) when is_list(Links) ->
     critical_section:run([ModelName, synchronization_link_key(ModelConfig, Key)],
         fun() ->
-            os:system_time(milli_seconds),
             links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
         end
     ).
@@ -1767,6 +1796,14 @@ verify_ans({Ans}) ->
 verify_ans(_Ans) ->
     true.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Parse JSON response form DB and return corresponding result normalize to datastore standards.
+%% @end
+%%--------------------------------------------------------------------
+-spec parse_response(get | save, [datastore_json:ejson()] | datastore_json:ejson()) ->
+    [{ok, datastore:ext_key() | datastore:document()} | datastore:generic_error()].
 parse_response(_, []) ->
         [];
 parse_response(OpType, [E | T]) ->
