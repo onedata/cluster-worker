@@ -43,7 +43,11 @@
 -define(DEFAULT_BUCKET, <<"default">>).
 -define(SYNC_ENABLED_BUCKET, <<"sync">>).
 
+-define(COUCHBASE_ADMIN_PORT, 8091).
+-define(COUCHBASE_API_PORT, 8092).
+
 -type couchdb_bucket() :: binary().
+-type db_run_opt() :: direct.
 -export_type([couchdb_bucket/0]).
 
 %% store_driver_behaviour callbacks
@@ -59,7 +63,7 @@
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 -export([to_binary/1]).
--export([add_view/3, query_view/3, delete_view/2, stream_view/3]).
+-export([add_view/4, query_view/3, delete_view/2, stream_view/3]).
 -export([default_bucket/0, sync_enabled_bucket/0]).
 -export([rev_to_number/1]).
 
@@ -86,7 +90,7 @@ sync_enabled_bucket() ->
 %%--------------------------------------------------------------------
 -spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init_driver(#{db_nodes := DBNodes} = State) ->
-    Port = 8091,
+    Port = ?COUCHBASE_ADMIN_PORT,
 
     BucketInfo = lists:foldl(fun
         ({Hostname, _}, no_data) ->
@@ -124,8 +128,8 @@ init_driver(#{db_nodes := DBNodes} = State) ->
             end, lists:zip(lists:seq((BucketNo - 1) * length(DBNodes) + 1, BucketNo * length(DBNodes)), DBNodes))
         end, [], lists:zip(lists:seq(1, length(Buckets)), Buckets)),
 
-
-    {ok, State#{db_gateways => maps:from_list(AllGateways), available_buckets => Buckets}}.
+    {ok, State#{db_gateways => maps:from_list(AllGateways), available_buckets => Buckets,
+        db_nodes => DBNodes}}.
 
 
 %%--------------------------------------------------------------------
@@ -204,14 +208,14 @@ save_link_doc(ModelConfig, Doc) ->
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc(#model_config{aggregate_db_writes = _Aggregate} = ModelConfig, ToSave = #document{}) ->
-    {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave)),
+    {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave), []),
     Ref = make_ref(),
 
     Aggregate = false, % TODO - fix batch save performance
     case Aggregate of
         true ->
             Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
-            
+
             receive
                 {Ref, Response} ->
                     Response
@@ -740,7 +744,7 @@ healthcheck(_State) ->
     try
         Reasons = lists:foldl(
             fun(Bucket, AccIn) ->
-                case get_server(Bucket) of
+                case get_server(Bucket, []) of
                     {ok, _} -> AccIn;
                     {error, Reason} ->
                         [Reason | AccIn]
@@ -835,14 +839,21 @@ from_driver_key(RawKey) ->
 
 
 %%--------------------------------------------------------------------
+%% @equiv get_db(Bucket, []).
+%%--------------------------------------------------------------------
+-spec get_db(binary()) -> {ok, {pid() | undefined, term()}} | {error, term()}.
+get_db(Bucket) ->
+    get_db(Bucket, []).
+
+%%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Returns DB handle used by couchbeam library to connect to couchdb-based DB.
 %% @end
 %%--------------------------------------------------------------------
--spec get_db(binary()) -> {ok, {pid, term()}} | {error, term()}.
-get_db(Bucket) ->
-    case get_server(Bucket) of
+-spec get_db(binary(), [db_run_opt()]) -> {ok, {pid() | undefined, term()}} | {error, term()}.
+get_db(Bucket, Opts) ->
+    case get_server(Bucket, Opts) of
         {error, Reason} ->
             {error, Reason};
         {ok, {ServerLoop, Server}} ->
@@ -862,9 +873,16 @@ get_db(Bucket) ->
 %% Returns server handle used by couchbeam library to connect to couchdb-based DB.
 %% @end
 %%--------------------------------------------------------------------
--spec get_server(binary()) -> {ok, {pid(), term()}} | {error, term()}.
-get_server(Bucket) ->
-    get_server(datastore_worker:state_get(db_gateways), Bucket).
+-spec get_server(binary(), [db_run_opt()]) -> {ok, {pid() | undefined, term()}} | {error, term()}.
+get_server(Bucket, Opts) ->
+    case lists:member(direct, Opts) of
+        true ->
+            {DbHost, _DbPort} = utils:random_element(datastore_worker:state_get(db_nodes)),
+            Server = couchbeam:server_connection(DbHost, ?COUCHBASE_API_PORT),
+            {ok, {undefined, Server}};
+        false ->
+            get_server_gateway(datastore_worker:state_get(db_gateways), Bucket)
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -873,8 +891,8 @@ get_server(Bucket) ->
 %% Returns server handle used by couchbeam library to connect to couchdb-based DB.
 %% @end
 %%--------------------------------------------------------------------
--spec get_server(State :: worker_host:plugin_state(), binary()) -> {ok, {pid, term()}} | {error, term()}.
-get_server(DBGateways, Bucket) ->
+-spec get_server_gateway(State :: worker_host:plugin_state(), binary()) -> {ok, {pid() | undefined, term()}} | {error, term()}.
+get_server_gateway(DBGateways, Bucket) ->
     Gateways = maps:values(DBGateways),
     ActiveGateways = [GW || #{status := running, bucket := LBucket} = GW <- Gateways, LBucket =:= Bucket],
 
@@ -899,12 +917,26 @@ db_run(Mod, Fun, Args, Retry) ->
 
 -spec db_run(couchdb_bucket(), atom(), atom(), [term()], non_neg_integer()) -> term().
 db_run(Bucket, Mod, Fun, Args, Retry) ->
-    {ok, {ServerPid, DB}} = get_db(Bucket),
+    db_run_internal(Bucket, Mod, Fun, Args, Retry, []).
+
+-spec db_run_direct(couchdb_bucket(), atom(), atom(), [term()], non_neg_integer()) -> term().
+db_run_direct(Bucket, Mod, Fun, Args, Retry) ->
+    db_run_internal(Bucket, Mod, Fun, Args, Retry, [direct]).
+
+-spec db_run_internal(couchdb_bucket(), atom(), atom(), [term()], non_neg_integer(),
+    [db_run_opt()]) ->  term().
+db_run_internal(Bucket, Mod, Fun, Args, Retry, Opts) ->
+    {ok, {ServerPid, DB}} = get_db(Bucket, Opts),
     ?debug("Running CouchBase operation ~p:~p(~p)", [Mod, Fun, Args]),
     case apply(Mod, Fun, [DB | Args]) of
         {error, econnrefused} when Retry > 0 ->
             ?info("Unable to connect to ~p", [DB]),
-            ServerPid ! restart,
+            case ServerPid of
+                undefined ->
+                    ok;
+                _ ->
+                    ServerPid ! restart
+            end,
             timer:sleep(crypto:rand_uniform(20, 50)),
             db_run(Bucket, Mod, Fun, Args, Retry - 1);
         Other ->
@@ -1588,17 +1620,23 @@ assert_value_size(Value, ModelConfig, Key) ->
 %% that will be queried with get_view function later.
 %% @end
 %%--------------------------------------------------------------------
--spec add_view(ModelName :: model_behaviour:model_type(), binary(), binary()) -> ok.
-add_view(ModelName, Id, ViewFunction) ->
+-spec add_view(ModelName :: model_behaviour:model_type(), binary(), binary(), boolean()) -> ok.
+add_view(ModelName, Id, ViewFunction, Spatial) ->
     DesignId = <<"_design/", Id/binary>>,
+    Doc = case Spatial of
+        true ->
+            jiffy:decode(jiffy:encode(#{
+                <<"_id">> => DesignId,
+                <<"spatial">> => #{Id => ViewFunction}
+            }));
+        false ->
+            jiffy:decode(jiffy:encode(#{
+                <<"_id">> => DesignId,
+                <<"views">> => #{Id => #{<<"map">> => ViewFunction}}
+            }))
+    end,
 
-    Doc = jiffy:decode(jiffy:encode(#{
-        <<"_id">> => DesignId,
-        <<"views">> => maps:from_list(
-            [{Id, #{<<"map">> => ViewFunction}}]
-        )
-    })),
-    {ok, SaveAns} = db_run(select_bucket(ModelName:model_init()), couchbeam, save_doc, [Doc], 5),
+    {ok, SaveAns} = db_run_direct(select_bucket(ModelName:model_init()), couchbeam, save_doc, [Doc], 5),
     true = verify_ans(SaveAns),
     ok.
 
@@ -1615,7 +1653,7 @@ add_view(ModelName, Id, ViewFunction) ->
 stream_view(ModelName, Id, Options) ->
     Host = self(),
     spawn_link(fun() ->
-        case db_run(select_bucket(ModelName:model_init()), couchbeam_view, stream, [{Id, Id}, Options], 3) of
+        case db_run_direct(select_bucket(ModelName:model_init()), couchbeam_view, stream, [{Id, Id}, Options], 3) of
             {ok, Ref} ->
                 Loop = fun LoopFun() ->
                     receive
@@ -1623,9 +1661,13 @@ stream_view(ModelName, Id, Options) ->
                             Host ! {self(), {stream_ended, done}};
                         {Ref, {row, {Proplist}}} ->
                             try
-                                {_, DocId} = lists:keyfind(<<"id">>, 1, Proplist),
-                                {_, DocKey} = from_driver_key(DocId),
-                                Host ! {self(), {stream_data, DocKey}}
+                                case lists:keyfind(<<"id">>, 1, Proplist) of
+                                    {<<"id">>, <<"_sync:", _/binary>>} ->
+                                        ok;
+                                    {<<"id">>, DbDocId} ->
+                                        {_, DocKey} = from_driver_key(DbDocId),
+                                        Host ! {self(), {stream_data, DocKey}}
+                                end
                             catch
                                 _:Reason ->
                                     ?warning_stacktrace("Stream View: Unable to process document ~p due to ~p", [{Proplist}, Reason])
@@ -1685,18 +1727,22 @@ stream_view(ModelName, Id, Options) ->
 %%      the result. It defaults to true.
 %%      conflicts: include conflicts
 %%      {keys, [Keys]}: to pass multiple keys to the view query
+%%      {spatial, boolean()}: to query view of spatial type
 %%
 %% @end
 %%--------------------------------------------------------------------
 -spec query_view(ModelName :: model_behaviour:model_type(), binary(), list()) -> {ok, [binary()]}.
 query_view(ModelName, Id, Options) ->
-    case db_run(select_bucket(ModelName:model_init()), couchbeam_view, fetch, [{Id, Id}, Options], 3) of
+    case db_run_direct(select_bucket(ModelName:model_init()), couchbeam_view, fetch, [{Id, Id}, Options], 3) of
         {ok, List} ->
             case verify_ans(List) of
                 true ->
-                    Ids = lists:map(fun({[{<<"id">>, DbDocId} | _]}) ->
-                        {_, DocUuid} = from_driver_key(DbDocId),
-                        DocUuid
+                    Ids = lists:filtermap(fun
+                        ({[{<<"id">>, <<"_sync:", _/binary>>} | _]}) ->
+                            false;
+                        ({[{<<"id">>, DbDocId} | _]}) ->
+                            {_, DocUuid} = from_driver_key(DbDocId),
+                            {true, DocUuid}
                     end, List),
                     {ok, Ids};
                 _ ->
@@ -1790,7 +1836,7 @@ verify_ans(Ans) when is_list(Ans) ->
         end
     end, true, Ans);
 verify_ans({<<"error">>, _} = Ans) ->
-    ?error("Cauch db error: ~p", [Ans]),
+    ?error("Couch db error: ~p", [Ans]),
     false;
 verify_ans({Ans}) ->
     verify_ans(Ans);
