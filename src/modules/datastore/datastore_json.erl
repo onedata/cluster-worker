@@ -66,7 +66,9 @@
 %%--------------------------------------------------------------------
 -spec get_renamed_models() -> #{OldName :: model_behaviour:model_type() => {RenameVersion :: record_version(), NewName :: model_behaviour:model_type()}}.
 get_renamed_models() ->
-    #{}.
+    maps:merge(plugins:apply(node_manager_plugin, renamed_models, []),
+        #{}
+    ).
 
 
 %%--------------------------------------------------------------------

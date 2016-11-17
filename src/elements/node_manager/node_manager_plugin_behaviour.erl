@@ -115,6 +115,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback cm_nodes() -> {ok, Nodes :: [atom()]} | undefined.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% List db nodes to be used by node manager.
@@ -122,6 +123,16 @@
 %%--------------------------------------------------------------------
 -callback db_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Maps old model name to new one.
+%% @end
+%%--------------------------------------------------------------------
+-callback renamed_models() ->
+    #{OldName :: model_behaviour:model_type() =>
+            {RenameVersion :: datastore_json:record_version(), NewName :: model_behaviour:model_type()}}.
+
+%%--------------------------------------------------------------------
 %% @doc
 %% Returns the name of the application that bases on cluster worker.
 %% @end
