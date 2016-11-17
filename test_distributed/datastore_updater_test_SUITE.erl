@@ -138,8 +138,8 @@ model_rename_test(Config) ->
     ?assertMatch({ok, _}, ?rpc(test_record_2, save, [#document{key = to_rename, value = {test_record_2, 10, '20', {atom1, 9, atom2}}}])),
     ?assertMatch({ok, #document{version = 1}}, ?rpc(test_record_2, get, [to_rename])),
 
-    test_utils:mock_new(Workers, datastore_json),
-    test_utils:mock_expect(Workers, datastore_json, get_renamed_models, fun() ->
+    test_utils:mock_new(Workers, node_manager_plugin_default),
+    test_utils:mock_expect(Workers, node_manager_plugin_default, renamed_models, fun() ->
         #{test_record_2 => {1, test_record_1}}
     end),
 
