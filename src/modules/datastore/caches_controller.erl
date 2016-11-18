@@ -877,7 +877,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
         0 ->
           ok;
         _ ->
-          count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum)
+          count_clear_acc(Count rem (?CLEAR_BATCH_SIZE + 1), BatchNum)
       end,
       {abort, Count};
     (#document{key = Uuid, value = V}, {0, BatchNum, undefined}) ->
@@ -939,7 +939,7 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                   safe_delete(Level, Cache, UuidToDel),
                   Master ! {doc_cleared, BatchNum}
                 end),
-                count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                count_clear_acc(Count rem (?CLEAR_BATCH_SIZE + 1), BatchNum),
                 {abort, Count};
               (#document{key = Uuid}, {0, BatchNum, undefined}) ->
                 {next, {1, BatchNum, Uuid}};
