@@ -19,6 +19,7 @@
 -export([save/1, get/1, exists/1, delete/1, update/2, create/1, model_init/0,
     'after'/5, before/4]).
 -export([record_struct/1]).
+-export([record_upgrade/2]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -88,7 +89,9 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL).
+    ok = test_record_1:maybe_init_versioning(?MODEL_NAME),
+    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
+    #model_config{version = test_record_1:get_test_record_version(?MODEL_NAME)}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -114,6 +117,14 @@ model_init() ->
 before(_ModelName, _Method, _Level, _Context) ->
     ok.
 
+record_upgrade(1, {?MODEL_NAME, F1, F2, F3}) ->
+    {2, {?MODEL_NAME, F1, F2, F3}};
+record_upgrade(2, {?MODEL_NAME, F1, F2, F3}) ->
+    {3, {?MODEL_NAME, F1, F2, F3, default}};
+record_upgrade(3, {?MODEL_NAME, F1, F2, _F3, F4}) ->
+    {4, {?MODEL_NAME, F1, F2, F4}}.
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns structure of the record in specified version.
@@ -125,4 +136,23 @@ record_struct(1) ->
         {field1, term},
         {field2, term},
         {field3, term}
+    ]};
+record_struct(2) ->
+    {record, [
+        {field1, integer},
+        {field2, atom},
+        {field3, string}
+    ]};
+record_struct(3) ->
+    {record, [
+        {field1, integer},
+        {field2, atom},
+        {field3, string},
+        {field4, atom}
+    ]};
+record_struct(4) ->
+    {record, [
+        {field1, integer},
+        {field2, atom},
+        {field4, atom}
     ]}.
