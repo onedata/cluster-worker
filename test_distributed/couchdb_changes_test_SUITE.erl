@@ -46,7 +46,8 @@
     record_deletion_test/1,
     delete_conflict_test/1,
     delete_force_save_test/1,
-    delete_double_conflict_test/1]).
+    delete_double_conflict_test/1,
+    force_save_after_delete_test/1]).
 
 -performance({test_cases, []}).
 all() ->
@@ -59,7 +60,8 @@ all() ->
         finite_stream_test,
         delete_conflict_test,
         delete_force_save_test,
-        delete_double_conflict_test
+        delete_double_conflict_test,
+        force_save_after_delete_test
     ]).
 
 %%%===================================================================
@@ -470,6 +472,59 @@ delete_double_conflict_test(Config) ->
         {true, Doc1Key, Doc1Val4, test_record_1},
         {DeletedR2, KeyR2, ValR2, ModR2}
     ).
+
+force_save_after_delete_test(Config) ->
+    [W | _] = ?config(cluster_worker_nodes, Config),
+
+    %% given
+    Doc1Key = <<"fsadt_key">>,
+
+    Doc1Val = #test_record_1{field1 = 1, field2 = 2, field3 = 3},
+    Doc1 = #document{key = Doc1Key, value = Doc1Val},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1])),
+    {_, {_, DocR1, ModR1}} = ?assertReceivedMatch({force_save_after_delete_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1, value = ValR1, deleted = DeletedR1} = DocR1,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val, test_record_1},
+        {DeletedR1, KeyR1, ValR1, ModR1}
+    ),
+
+    Doc1Val2 = #test_record_1{field1 = 2, field2 = 2, field3 = 3},
+    Doc1_2 = #document{key = Doc1Key, value = Doc1Val2},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, test_record_1, save, [Doc1_2])),
+    {_, {_, DocR1_2, ModR1_2}} = ?assertReceivedMatch({force_save_after_delete_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1_2, value = ValR1_2, deleted = DeletedR1_2} = DocR1_2,
+    ?assertEqual(
+        {false, Doc1Key, Doc1Val2, test_record_1},
+        {DeletedR1_2, KeyR1_2, ValR1_2, ModR1_2}
+    ),
+
+    ?assertEqual(ok, rpc:call(W, test_record_1, delete, [Doc1Key])),
+    {_, {_, DocR1_3, ModR1_3}} = ?assertReceivedMatch({force_save_after_delete_test,
+        {_, #document{}, _}}, ?TIMEOUT),
+    #document{key = KeyR1_3, value = ValR1_3, deleted = DeletedR1_3, rev = Rev} = DocR1_3,
+    ?assertEqual(
+        {true, Doc1Key, Doc1Val2, test_record_1},
+        {DeletedR1_3, KeyR1_3, ValR1_3, ModR1_3}
+    ),
+
+    {RNum, [_H1, _H2, H3]} = Rev,
+
+    Doc1Val3 = #test_record_1{field1 = 3, field2 = 2, field3 = 3},
+    Doc1_3 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum - 1, [<<"z">>, H3]}, deleted = false},
+    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
+
+    %% then
+    ?assertMatch({error, {not_found, _}}, rpc:call(W, test_record_1, get, [Doc1Key])),
+    ?assertEqual(timeout, receive
+        {force_save_after_delete_test,
+            {_, #document{}, _}} = __Result__ -> __Result__
+    after
+        ?TIMEOUT ->
+            timeout
+    end).
 
 %%%===================================================================
 %%% SetUp and TearDown functions
