@@ -22,7 +22,7 @@ all: test_rel
 
 priv/sync_gateway:
 	mkdir -p vendor/sync_gateway
-	curl https://raw.githubusercontent.com/couchbase/sync_gateway/1.3/bootstrap.sh > vendor/sync_gateway/bootstrap.sh
+	curl https://raw.githubusercontent.com/couchbase/sync_gateway/1.3.1/bootstrap.sh > vendor/sync_gateway/bootstrap.sh
 	cd vendor/sync_gateway && sh bootstrap.sh && ./build.sh
 	find vendor/sync_gateway -name shallow -type l -exec test ! -e '{}' ';' -delete
 	cp vendor/sync_gateway/godeps/bin/sync_gateway priv/

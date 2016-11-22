@@ -91,23 +91,15 @@ exists(Key) ->
 model_init() ->
     ScopeFun1 =
         fun(_) ->
-            global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),global:send(?SCOPE_MASTER_PROC_NAME, {get_mother_scope, self()}),
+            global:send(?SCOPE_MASTER_PROC_NAME, {get_link_replica_scope, self()}),global:send(?SCOPE_MASTER_PROC_NAME, {get_link_replica_scope, self()}),
             receive
-                {mother_scope, Scope} ->
+                {link_replica_scope, Scope} ->
                     Scope
-            end
-        end,
-    ScopeFun2 =
-        fun(_) ->
-            global:send(?SCOPE_MASTER_PROC_NAME, {get_other_scopes, self()}),
-            receive
-                {other_scopes, Scopes} ->
-                    Scopes
             end
         end,
 
     ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, true, false,
-        ScopeFun1, ScopeFun2).
+        ScopeFun1).
 
 %%--------------------------------------------------------------------
 %% @doc
