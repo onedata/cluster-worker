@@ -33,7 +33,7 @@
 -define(LINKS_KEY_SUFFIX, "$$").
 
 %% Maximum size of document's value.
--define(MAX_VALUE_SIZE, 512 * 1024).
+-define(MAX_VALUE_SIZE, 10 * 1024 * 1024).
 
 %% Base port for gateway endpoints
 -define(GATEWAY_BASE_PORT_MIN, 12000).
