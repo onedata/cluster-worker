@@ -327,8 +327,14 @@ handle_cast(check_tasks, State) ->
     {noreply, State};
 
 handle_cast(do_heartbeat, State) ->
-    NewState = do_heartbeat(State),
-    {noreply, NewState};
+    spawn(fun() ->
+        {NewMonState, NewLSA} = do_heartbeat(State),
+        gen_server2:cast(?NODE_MANAGER_NAME, {heartbeat_state_update, {NewMonState, NewLSA}})
+    end),
+    {noreply, State};
+
+handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
+    {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
 handle_cast(check_cluster_status, State) ->
     % Check if cluster is initialized - this must be done in different process
@@ -532,9 +538,9 @@ cm_conn_ack(State) ->
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: #state{}) -> #state{}.
+-spec do_heartbeat(State :: #state{}) -> {monitoring:node_monitoring_state(), {integer(), integer(), integer()}}.
 do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
-    scheduler_info = SchedulerInfo} = State) ->
+    scheduler_info = SchedulerInfo} = _State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
     NewMonState = monitoring:update(MonState),
@@ -542,11 +548,11 @@ do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, las
     NodeState = monitoring:get_node_state(NewMonState),
     ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
-    State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA};
+    {NewMonState, NewLSA};
 
 % Stop heartbeat if node_manager is not registered in cluster manager
-do_heartbeat(State) ->
-    State.
+do_heartbeat(#state{monitoring_state = MonState, last_state_analysis = LSA} = _State) ->
+    {MonState, LSA}.
 
 
 %%--------------------------------------------------------------------
