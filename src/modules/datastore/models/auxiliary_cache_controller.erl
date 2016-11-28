@@ -181,27 +181,14 @@ get_hooks_config(Models) ->
 -spec foreach_aux_cache(
     ModelName :: model_behaviour:model_type(),
     Method :: model_behaviour:model_action(), term()) -> ok.
-foreach_aux_cache(#model_config{}=ModelConfig, Method, Args) ->
-    AuxCaches = get_model_aux_caches(ModelConfig),
+foreach_aux_cache(#model_config{auxiliary_caches = AuxCaches}=ModelConfig, Method, Args) ->
     AuxMethod = method_to_aux_method(Method),
-    lists:foreach(fun({Field, StoreLevel}) ->
+    lists:foreach(fun({Field, #aux_cache_config{level = StoreLevel}}) ->
         Driver = datastore:level_to_driver(StoreLevel),
         ok = Driver:AuxMethod(ModelConfig, Field, Args)
     end, maps:to_list(AuxCaches));
 foreach_aux_cache(ModelName, Method, Args) ->
     foreach_aux_cache(ModelName:model_init(), Method, Args).
-
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets map of auxiliary caches for given model.
-%% @end
-%%--------------------------------------------------------------------
--spec get_model_aux_caches(#model_config{} | model_behaviour:model_type()) -> #{}.
-get_model_aux_caches(#model_config{auxiliary_caches = AuxCaches}) ->
-    AuxCaches.
 
 
 %%--------------------------------------------------------------------

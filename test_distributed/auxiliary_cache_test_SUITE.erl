@@ -35,11 +35,16 @@
     global_only_record_with_local_aux_cache_deletion_test/1,
     global_only_record_with_local_aux_cache_update_test/1,
     global_only_record_with_local_aux_cache_create_or_update_test/1,
-    global_only_record_with_global_aux_cache_creation_test/1,
-    global_only_record_with_global_aux_cache_save_test/1,
-    global_only_record_with_global_aux_cache_deletion_test/1,
-    global_only_record_with_global_aux_cache_update_test/1,
-    global_only_record_with_global_aux_cache_create_or_update_test/1]).
+    global_only_record_with_global_aux_cache_dirty_creation_test/1,
+    global_only_record_with_global_aux_cache_dirty_save_test/1,
+    global_only_record_with_global_aux_cache_dirty_deletion_test/1,
+    global_only_record_with_global_aux_cache_dirty_update_test/1,
+    global_only_record_with_global_aux_cache_dirty_create_or_update_test/1,
+    global_only_record_with_global_aux_cache_transaction_creation_test/1,
+    global_only_record_with_global_aux_cache_transaction_save_test/1,
+    global_only_record_with_global_aux_cache_transaction_deletion_test/1,
+    global_only_record_with_global_aux_cache_transaction_update_test/1,
+    global_only_record_with_global_aux_cache_transaction_create_or_update_test/1]).
 
 -define(POSTHOOK_METHODS, [save, delete, update, create, create_or_update]).
 -define(FIELD(Number, Id), binary_to_atom(
@@ -52,7 +57,8 @@
 -define(TEST_RECORDS, [
     local_only_record_with_local_aux_cache,
     global_only_record_with_local_aux_cache,
-    global_only_record_with_global_aux_cache
+    global_only_record_with_global_aux_cache_dirty,
+    global_only_record_with_global_aux_cache_transaction
 ]).
 
 
@@ -67,11 +73,16 @@ all() -> ?ALL([
     global_only_record_with_local_aux_cache_deletion_test,
     global_only_record_with_local_aux_cache_update_test,
     global_only_record_with_local_aux_cache_create_or_update_test,
-    global_only_record_with_global_aux_cache_creation_test,
-    global_only_record_with_global_aux_cache_save_test,
-    global_only_record_with_global_aux_cache_deletion_test,
-    global_only_record_with_global_aux_cache_update_test,
-    global_only_record_with_global_aux_cache_create_or_update_test
+    global_only_record_with_global_aux_cache_dirty_creation_test,
+    global_only_record_with_global_aux_cache_dirty_save_test,
+    global_only_record_with_global_aux_cache_dirty_deletion_test,
+    global_only_record_with_global_aux_cache_dirty_update_test,
+    global_only_record_with_global_aux_cache_dirty_create_or_update_test,
+    global_only_record_with_global_aux_cache_transaction_creation_test,
+    global_only_record_with_global_aux_cache_transaction_save_test,
+    global_only_record_with_global_aux_cache_transaction_deletion_test,
+    global_only_record_with_global_aux_cache_transaction_update_test,
+    global_only_record_with_global_aux_cache_transaction_create_or_update_test
 ]).
 
 
@@ -258,10 +269,44 @@ global_only_record_with_local_aux_cache_create_or_update_test(Config) ->
     OrderedRecords3 = [NewRecord | OrderedRecords2],
     check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1).
 
-global_only_record_with_global_aux_cache_creation_test(Config) ->
+global_only_record_with_global_aux_cache_dirty_creation_test(Config) ->
+    global_only_record_with_global_aux_cache_creation_test(Config, dirty).
+
+global_only_record_with_global_aux_cache_dirty_save_test(Config) ->
+    global_only_record_with_global_aux_cache_save_test(Config, dirty).
+
+global_only_record_with_global_aux_cache_dirty_deletion_test(Config) ->
+    global_only_record_with_global_aux_cache_deletion_test(Config, dirty).
+
+global_only_record_with_global_aux_cache_dirty_update_test(Config) ->
+    global_only_record_with_global_aux_cache_update_test(Config, dirty).
+
+global_only_record_with_global_aux_cache_dirty_create_or_update_test(Config) ->
+    global_only_record_with_global_aux_cache_create_or_update_test(Config, dirty).
+
+global_only_record_with_global_aux_cache_transaction_creation_test(Config) ->
+    global_only_record_with_global_aux_cache_creation_test(Config, transaction).
+
+global_only_record_with_global_aux_cache_transaction_save_test(Config) ->
+    global_only_record_with_global_aux_cache_save_test(Config, transaction).
+
+global_only_record_with_global_aux_cache_transaction_deletion_test(Config) ->
+    global_only_record_with_global_aux_cache_deletion_test(Config, transaction).
+
+global_only_record_with_global_aux_cache_transaction_update_test(Config) ->
+    global_only_record_with_global_aux_cache_update_test(Config, transaction).
+
+global_only_record_with_global_aux_cache_transaction_create_or_update_test(Config) ->
+    global_only_record_with_global_aux_cache_create_or_update_test(Config, transaction).
+
+%%%===================================================================
+%%% Base functions
+%%%===================================================================
+
+global_only_record_with_global_aux_cache_creation_test(Config, AccessContext) ->
     [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
-    TestModel = global_only_record_with_global_aux_cache,
+    TestModel = join_atoms([global_only_record_with_global_aux_cache, AccessContext], '_'),
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
 
@@ -270,10 +315,10 @@ global_only_record_with_global_aux_cache_creation_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords, Level, TestModel, field1).
 
-global_only_record_with_global_aux_cache_save_test(Config) ->
+global_only_record_with_global_aux_cache_save_test(Config, AccessContext) ->
     [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
-    TestModel = global_only_record_with_global_aux_cache,
+    TestModel = join_atoms([global_only_record_with_global_aux_cache, AccessContext], '_'),
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
     RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
@@ -289,10 +334,10 @@ global_only_record_with_global_aux_cache_save_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
-global_only_record_with_global_aux_cache_deletion_test(Config) ->
+global_only_record_with_global_aux_cache_deletion_test(Config, AccessContext) ->
     [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
-    TestModel = global_only_record_with_global_aux_cache,
+    TestModel = join_atoms([global_only_record_with_global_aux_cache, AccessContext], '_'),
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
     RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
@@ -307,17 +352,22 @@ global_only_record_with_global_aux_cache_deletion_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
-global_only_record_with_global_aux_cache_update_test(Config) ->
+global_only_record_with_global_aux_cache_update_test(Config, AccessContext) ->
     [Worker1, Worker2| _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
-    TestModel = global_only_record_with_global_aux_cache,
+    TestModel = join_atoms([global_only_record_with_global_aux_cache, AccessContext], '_'),
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
     RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
     {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
     UpdateFun = fun(OldRecord) ->
-        {ok, OldRecord#global_only_record_with_global_aux_cache{field1=field1_0020}}
+        case OldRecord of
+            #global_only_record_with_global_aux_cache_dirty{} ->
+                {ok, OldRecord#global_only_record_with_global_aux_cache_dirty{field1=field1_0020}};
+            #global_only_record_with_global_aux_cache_transaction{} ->
+                {ok, OldRecord#global_only_record_with_global_aux_cache_transaction{field1=field1_0020}}
+        end
     end,
     {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
     OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate] ,
@@ -328,17 +378,22 @@ global_only_record_with_global_aux_cache_update_test(Config) ->
     check_list_ordered(Worker1, OrderedRecords2, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords2, Level, TestModel, field1).
 
-global_only_record_with_global_aux_cache_create_or_update_test(Config) ->
+global_only_record_with_global_aux_cache_create_or_update_test(Config, AccessContext) ->
     [Worker1, Worker2 | _] = ?config(cluster_worker_nodes, Config),
     Level = ?GLOBAL_ONLY_LEVEL,
-    TestModel = global_only_record_with_global_aux_cache,
+    TestModel = join_atoms([global_only_record_with_global_aux_cache, AccessContext], '_'),
     OrderedRecords = create_test_records(TestModel, 10),
     ShuffledRecords = shuffle(OrderedRecords),
     RecordsAndKeys = create_records(Worker1, ShuffledRecords, Level),
     SortedKeys = sort_keys(RecordsAndKeys, OrderedRecords),
     {RecordToUpdate, Key} = choose_random_element_from_list(OrderedRecords, SortedKeys),
     UpdateFun = fun(OldRecord) ->
-        {ok, OldRecord#global_only_record_with_global_aux_cache{field1=field1_0020}}
+        case OldRecord of
+            #global_only_record_with_global_aux_cache_dirty{} ->
+                {ok, OldRecord#global_only_record_with_global_aux_cache_dirty{field1=field1_0020}};
+            #global_only_record_with_global_aux_cache_transaction{} ->
+                {ok, OldRecord#global_only_record_with_global_aux_cache_transaction{field1=field1_0020}}
+        end
     end,
     {ok, UpdatedRecord} = UpdateFun(RecordToUpdate),
     OrderedRecords2 = (OrderedRecords ++ [UpdatedRecord]) -- [RecordToUpdate],
@@ -352,7 +407,6 @@ global_only_record_with_global_aux_cache_create_or_update_test(Config) ->
     OrderedRecords3 = [NewRecord | OrderedRecords2],
     check_list_ordered(Worker1, OrderedRecords3, Level, TestModel, field1),
     check_list_ordered(Worker2, OrderedRecords3, Level, TestModel, field1).
-
 
 %%%===================================================================
 %%% SetUp and TearDown functions
@@ -521,3 +575,7 @@ mnesia_table_name(TabName) ->
 
 ets_table_name(TabName) ->
     binary_to_atom(<<"lc_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
+
+join_atoms(Atoms, Sep) ->
+    Bins = [atom_to_binary(A, latin1) || A <- Atoms],
+    binary_to_atom(str_utils:join_binary(Bins, atom_to_binary(Sep, latin1)), latin1).

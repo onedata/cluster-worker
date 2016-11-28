@@ -5,10 +5,11 @@
 %%% cited in 'LICENSE.txt'.
 %%% @doc
 %%% Test model used in auxiliary_cache_test_SUITE.
-%%% Represents global only model with local auxiliary cache.
+%%% Represents global only model with global auxiliary cache with transaction
+%%% access context.
 %%% @end
 %%%-------------------------------------------------------------------
--module(global_only_record_with_local_aux_cache).
+-module(global_only_record_with_global_aux_cache_transaction).
 -author("Jakub Kudzia").
 
 -behaviour(model_behaviour).
@@ -90,7 +91,9 @@ exists(Key) ->
 model_init() ->
     BaseRecord = ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL),
     BaseRecord#model_config{auxiliary_caches = #{
-        field1 => #aux_cache_config{level =  ?LOCAL_ONLY_LEVEL
+        field1 => #aux_cache_config{
+            level =  ?GLOBAL_ONLY_LEVEL,
+            context = transaction
     }}}.
 
 %%--------------------------------------------------------------------

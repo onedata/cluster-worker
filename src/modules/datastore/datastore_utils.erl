@@ -17,7 +17,8 @@
 -define(KEY_LEN, 32).
 
 %% API
--export([shallow_to_map/1, shallow_to_record/1, gen_uuid/0, gen_uuid/1, get_field_value/2, aux_key_to_key/1]).
+-export([shallow_to_map/1, shallow_to_record/1, gen_uuid/0, gen_uuid/1,
+    get_field_value/2, aux_key_to_key/1, get_aux_cache_level/2]).
 
 %%%===================================================================
 %%% API
@@ -112,6 +113,18 @@ get_field_value(#document{value=Value}, Field) ->
 %%%--------------------------------------------------------------------
 -spec aux_key_to_key({term(), atom()}) -> any().
 aux_key_to_key({_Field, Key}) -> Key.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns level of auxiliary cache associated with given field.
+%% @end
+%%%--------------------------------------------------------------------
+-spec get_aux_cache_level(#{atom() => datastore:aux_cache_config()}, Field :: atom()) ->
+    datastore:aux_cache_level().
+get_aux_cache_level(AuxCachesMap, Field) ->
+    #aux_cache_config{level = Level} = maps:get(Field, AuxCachesMap),
+    Level.
 
 %%%===================================================================
 %%% Internal functions

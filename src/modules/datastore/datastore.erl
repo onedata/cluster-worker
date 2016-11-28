@@ -72,8 +72,11 @@
 -type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
 -type aux_cache_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
 -type aux_iterator_fun() :: fun((aux_cache_key()) -> aux_cache_handle()).
+-type aux_cache_access_context() :: transaction | async_dirty.
+-type aux_cache_config() :: #aux_cache_config{}.
 
--export_type([aux_cache_level/0, aux_cache_key/0, aux_cache_handle/0, aux_iterator_fun/0]).
+-export_type([aux_cache_level/0, aux_cache_key/0, aux_cache_handle/0,
+    aux_iterator_fun/0, aux_cache_access_context/0, aux_cache_config/0]).
 
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
@@ -1070,7 +1073,7 @@ run_posthooks(#model_config{name = ModelName} = ModelConfig, Method, Level, Cont
 -spec load_local_state(Models :: [model_behaviour:model_type()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
+    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = ModelName:model_init(),
@@ -1232,7 +1235,7 @@ init_auxiliary_caches(Models, NodeToSync) ->
                 lists:foreach(fun({StoreLevel, Fields}) ->
                     Driver = level_to_driver(StoreLevel),
                     Driver:create_auxiliary_caches(M, Fields, NodeToSync)
-                end, maps:to_list(invert(AuxCaches)))
+                end, maps:to_list(invert_aux_cache_config(AuxCaches)))
         end, Models),
     ok.
 
@@ -1248,11 +1251,11 @@ init_auxiliary_caches(Models, NodeToSync) ->
 %% invert(M) = #{ v1 => [k1, k2], v2 => [k3] }
 %% @end
 %%--------------------------------------------------------------------
--spec invert(#{}) -> #{term() => [term()]}.
-invert(Map) ->
-    Inverted = maps:fold(fun(K, V, AccIn) ->
-        CurrentValue = maps:get(V, AccIn, []),
-        maps:put(V, [K | CurrentValue], AccIn)
+-spec invert_aux_cache_config(#{}) -> #{term() => [term()]}.
+invert_aux_cache_config(Map) ->
+    Inverted = maps:fold(fun(K, #aux_cache_config{level =Field}, AccIn) ->
+        CurrentValue = maps:get(Field, AccIn, []),
+        maps:put(Field, [K | CurrentValue], AccIn) %todo test
     end, #{}, Map),
     Inverted.
 

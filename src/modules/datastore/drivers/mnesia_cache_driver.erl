@@ -601,10 +601,15 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
 %% {@link auxiliary_cache_behaviour} callback aux_first/2.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
+-spec aux_first(model_behaviour:model_config(), Field :: atom()) ->
+    datastore:aux_cache_handle().
 aux_first(#model_config{}=ModelConfig, Field) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    mnesia:dirty_first(AuxTableName).
+    Action = fun(TrxType) ->
+        log(normal, "~p -> aux_first(~p, ~p)", [TrxType, ModelConfig, Field]),
+        mnesia:first(AuxTableName)
+    end,
+    mnesia_run(aux_cache_context(ModelConfig, Field), Action).
 
 
 %%--------------------------------------------------------------------
@@ -612,12 +617,16 @@ aux_first(#model_config{}=ModelConfig, Field) ->
 %% {@link auxiliary_cache_behaviour} callback next/3.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_next(model_behaviour:model_config(), Field :: atom(),
+-spec aux_next(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
 aux_next(_, _, '$end_of_table') -> '$end_of_table';
 aux_next(#model_config{}=ModelConfig, Field, Handle) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
-    mnesia:dirty_next(AuxTableName, Handle).
+    Action = fun(TrxType) ->
+        log(normal, "~p -> aux_next(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Handle]),
+        mnesia:next(AuxTableName, Handle)
+    end,
+    mnesia_run(aux_cache_context(ModelConfig, Field), Action).
 
 
 %%--------------------------------------------------------------------
@@ -625,54 +634,52 @@ aux_next(#model_config{}=ModelConfig, Field, Handle) ->
 %% {@link auxiliary_cache_behaviour} callback delete/3.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
+-spec aux_delete(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Key :: datastore:ext_key()) -> ok.
 aux_delete(ModelConfig, Field, [Key]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     Action = fun(TrxType) ->
         log(normal, "~p -> aux_delete(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-        Selected = mnesia:dirty_select(AuxTableName, ets:fun2ms(
+        Selected = mnesia:select(AuxTableName, ets:fun2ms(
             fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end)),
         lists:foreach(fun(#auxiliary_cache_entry{key=K}) ->
-            mnesia:dirty_delete(AuxTableName, K)
+            mnesia:delete({AuxTableName, K})
         end, Selected)
     end,
-    ok = mnesia_run(async_dirty, Action),
-    ok.
+    ok = mnesia_run(aux_cache_context(ModelConfig, Field), Action).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link auxiliary_cache_behaviour} callback aux_save/3.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_save(Model :: model_behaviour:model_config(), Field :: atom(),
+-spec aux_save(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_save(ModelConfig, Field, [Key, Doc]) ->
     AuxTableName = aux_table_name(ModelConfig, Field),
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    Action = case is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) of
+    Action = case is_aux_field_value_updated(ModelConfig, Field, Key, CurrentFieldValue) of
         {true, AuxKey} ->
             fun(TrxType) ->
                 log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-                ok = mnesia:dirty_delete(AuxTableName, AuxKey),
-                ok = mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+                ok = mnesia:delete({AuxTableName, AuxKey}),
+                ok = mnesia:write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}}, write)
             end;
         true ->
             fun(TrxType) ->
                 log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-                mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+                mnesia:write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}}, write)
             end;
         _ -> ok
     end,
-    mnesia_run(async_dirty, Action),
-    ok.
+    ok = mnesia_run(aux_cache_context(ModelConfig, Field), Action).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link auxiliary_cache_behaviour} callback aux_update/3.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
+-spec aux_update(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
     {ok, Doc} = datastore:get(Level, ModelName, Key),
@@ -690,10 +697,9 @@ aux_create(ModelConfig, Field, [Key, Doc]) ->
     CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
     Action = fun(TrxType) ->
         log(normal, "~p -> aux_create(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-        mnesia:dirty_write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}})
+        mnesia:write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}}, write)
     end,
-    mnesia_run(async_dirty, Action),
-    ok.
+    ok = mnesia_run(aux_cache_context(ModelConfig, Field), Action).
 
 %%%===================================================================
 %%% Internal functions
@@ -996,7 +1002,7 @@ list_dirty(#model_config{} = ModelConfig, Fun, AccIn) ->
     AccIn :: term(), Field :: atom()) ->
     {ok, Acc :: term()} | datastore:generic_error() | no_return().
 list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, AccIn, Field) ->
-    AuxCacheLevel = maps:get(Field, AuxCaches),
+    AuxCacheLevel = datastore_utils:get_aux_cache_level(AuxCaches, Field),
     AuxDriver = datastore:level_to_driver(AuxCacheLevel),
     First = AuxDriver:aux_first(ModelConfig, Field),
     IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field,  Handle) end,
@@ -1061,10 +1067,12 @@ list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
 %% If it exists and it's value hasn't changed, false is returned.
 %% @end
 %%%--------------------------------------------------------------------
--spec is_aux_field_value_updated(atom(), datastore:ext_key(), term()) ->
+-spec is_aux_field_value_updated(
+    ModelConfig :: model_behaviour:model_config(),
+    Field :: atom(), datastore:ext_key(), term()) ->
     boolean() | {true, OldAuxKey :: {term(), datastore:ext_key()}}.
-is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
-    case aux_get(AuxTableName, Key) of
+is_aux_field_value_updated(ModelConfig, Field, Key, CurrentFieldValue) ->
+    case aux_get(ModelConfig, Field, Key) of
         [] -> true;
         [#auxiliary_cache_entry{key={CurrentFieldValue, Key}}] -> false;
         [#auxiliary_cache_entry{key=AuxKey}] -> {true, AuxKey}
@@ -1077,9 +1085,26 @@ is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
 %% matching the Key.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_get(atom(),Key :: datastore:ext_key()) -> [#auxiliary_cache_entry{}].
-aux_get(AuxTableName, Key) ->
-    mnesia:dirty_select(AuxTableName, ets:fun2ms(
-        fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end)).
+-spec aux_get(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
+    Key :: datastore:ext_key()) -> [#auxiliary_cache_entry{}].
+aux_get(ModelConfig, Field, Key) ->
+    AuxTableName = aux_table_name(ModelConfig, Field),
+    Action = fun(TrxType) ->
+        log(normal, "~p -> aux_get(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
+        mnesia:select(AuxTableName, ets:fun2ms(
+            fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end))
+    end,
+    mnesia_run(aux_cache_context(ModelConfig, Field), Action).
 
-
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns access context defined for auxiliary cache associated with
+%% given field.
+%% @end
+%%--------------------------------------------------------------------
+-spec aux_cache_context(model_behaviour:model_config(), atom()) ->
+    datastore:aux_cache_access_context().
+aux_cache_context(#model_config{auxiliary_caches = AuxCaches}, Field) ->
+    #aux_cache_config{context = Context} = maps:get(Field, AuxCaches),
+    Context.

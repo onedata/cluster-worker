@@ -103,7 +103,13 @@
     field3 :: term()
 }).
 
--record(global_only_record_with_global_aux_cache, {
+-record(global_only_record_with_global_aux_cache_dirty, {
+    field1 :: term(),
+    field2 :: term(),
+    field3 :: term()
+}).
+
+-record(global_only_record_with_global_aux_cache_transaction, {
     field1 :: term(),
     field2 :: term(),
     field3 :: term()

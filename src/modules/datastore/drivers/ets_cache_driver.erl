@@ -530,7 +530,7 @@ list_next([], Handle, Fun, AccIn) ->
     AccIn :: term(), Field :: atom()) ->
     {ok, Acc :: term()} | datastore:generic_error() | no_return().
 list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, AccIn, Field) ->
-    AuxCacheLevel = maps:get(Field, AuxCaches),
+    AuxCacheLevel = datastore_utils:get_aux_cache_level(AuxCaches, Field),
     AuxDriver = datastore:level_to_driver(AuxCacheLevel),
     First = AuxDriver:aux_first(ModelConfig, Field),
     IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field, Handle) end,

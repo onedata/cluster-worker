@@ -48,7 +48,7 @@
     other_link_scopes = ?OTHER_SCOPES_DEF_FUN :: links_utils:other_scopes(),
     link_duplication = false :: boolean(),
     sync_enabled = false :: boolean(),
-    auxiliary_caches = #{} :: #{Field :: atom() => datastore:aux_cache_level()}
+    auxiliary_caches = #{} :: #{Field :: atom() => datastore:aux_cache_config()}
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -89,7 +89,7 @@
         sync_enabled = false, % Models with sync enabled will be stored in non-default bucket to reduce DB load.
         auxiliary_caches = AuxiliaryCaches
         % Map describing auxiliary caches for given model
-        % it has form of #{Field => Level} which means that auxiliary cache
+        % it has form of #{Field => #aux_cache_config{level=Level} which means that auxiliary cache
         % ordered by Field will be created on level Level
     }
 ).
@@ -106,6 +106,15 @@
     link_map = #{},
     children = #{},
     origin = ?LOCAL_ONLY_LINK_SCOPE %% Scope that is an origin to this link record
+}).
+
+%% Record describing config for auxiliary cache
+-record(aux_cache_config, {
+    % store level of auxiliary cache
+    level :: datastore:aux_cache_level(),
+    % mnesia context in which operations on aux_cache will be performed
+    % if level=local_only context field will be ignored
+    context = async_dirty :: datastore:aux_cache_access_context()
 }).
 
 %% Separator for link name and its scope
