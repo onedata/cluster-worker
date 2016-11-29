@@ -84,7 +84,7 @@ models_with_aux_caches() ->
             case ets:lookup(?LOCAL_STATE, aux_caches_models) of
                 [] ->
                     AuxCachesModels = filter_models_with_aux_caches(),
-                    ets:insert(?LOCAL_STATE, {aux_caches_models, AuxCachesModels}),
+                    ets:insert_new(?LOCAL_STATE, {aux_caches_models, AuxCachesModels}),
                     AuxCachesModels;
                 [{_, AuxCachesModels}] -> AuxCachesModels
             end
