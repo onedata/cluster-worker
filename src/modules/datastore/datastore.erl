@@ -35,7 +35,7 @@
 %% Error types
 -type generic_error() :: {error, Reason :: term()}.
 -type not_found_error(ObjectType) :: {error, {not_found, ObjectType}}.
--type update_error() :: not_found_error(model_behaviour:model_type()) | generic_error().
+-type update_error() :: not_found_error(model_behaviour:model_type() | model_behaviour:model_config()) | generic_error().
 -type create_error() :: generic_error() | {error, already_exists}.
 -type get_error() :: not_found_error(term()) | generic_error().
 -type link_error() :: generic_error() | {error, link_not_found}.
@@ -53,9 +53,9 @@
 
 %% Links' types
 -type link_version() :: non_neg_integer().
--type link_final_target() :: {links_utils:scope(), links_utils:vhash(), ext_key(), model_behaviour:model_type()}.
+-type link_final_target() :: {links_utils:scope(), links_utils:vhash(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config()}.
 -type normalized_link_target() :: {link_version(), [link_final_target()]}.
--type simple_link_target() :: {ext_key(), model_behaviour:model_type()}.
+-type simple_link_target() :: {ext_key(), model_behaviour:model_type() | model_behaviour:model_config()}.
 -type link_target() :: #document{} | normalized_link_target() | link_final_target() | simple_link_target().
 -type link_name() :: atom() | binary() | {scoped_link, atom() | binary(), links_utils:scope(), links_utils:vhash()}.
 -type link_spec() :: {link_name(), link_target()}.
@@ -84,6 +84,7 @@
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1, models_with_aux_caches/0]).
+-export([initialize_minimal_env/0, initialize_minimal_env/1]).
 
 %%%===================================================================
 %%% API
@@ -97,8 +98,7 @@
 -spec save(Level :: store_level(), Document :: datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(Level, #document{} = Document) ->
-    ModelName = model_name(Document),
-    exec_driver_async(ModelName, Level, save, [maybe_gen_uuid(Document)]).
+    exec_driver_async(model_config(Document), Level, save, [maybe_gen_uuid(Document)]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -108,19 +108,18 @@ save(Level, #document{} = Document) ->
 -spec save_sync(Level :: store_level(), Document :: datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_sync(Level, #document{} = Document) ->
-    ModelName = model_name(Document),
-    exec_driver(ModelName, level_to_driver(Level), save, [maybe_gen_uuid(Document)]).
+    exec_driver(model_config(Document), level_to_driver(Level), save, [maybe_gen_uuid(Document)]).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Updates given by key document by replacing given fields with new values.
 %% @end
 %%--------------------------------------------------------------------
--spec update(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec update(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:update_error().
-update(Level, ModelName, Key, Diff) ->
-    exec_driver_async(ModelName, Level, update, [Key, Diff]).
+update(Level, ModelNameOrConfig, Key, Diff) ->
+    exec_driver_async(model_config(ModelNameOrConfig), Level, update, [Key, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -128,11 +127,11 @@ update(Level, ModelName, Key, Diff) ->
 %% Sync operation on memory with sync operation on disk in case of caches.
 %% @end
 %%--------------------------------------------------------------------
--spec update_sync(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec update_sync(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:update_error().
-update_sync(Level, ModelName, Key, Diff) ->
-    exec_driver(ModelName, level_to_driver(Level), update, [Key, Diff]).
+update_sync(Level, ModelNameOrConfig, Key, Diff) ->
+    exec_driver(model_config(ModelNameOrConfig), level_to_driver(Level), update, [Key, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -142,8 +141,7 @@ update_sync(Level, ModelName, Key, Diff) ->
 -spec create(Level :: store_level(), Document :: datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create(Level, #document{} = Document) ->
-    ModelName = model_name(Document),
-    exec_driver_async(ModelName, Level, create, [maybe_gen_uuid(Document)]).
+    exec_driver_async(model_config(Document), Level, create, [maybe_gen_uuid(Document)]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -154,8 +152,7 @@ create(Level, #document{} = Document) ->
 -spec create_sync(Level :: store_level(), Document :: datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create_sync(Level, #document{} = Document) ->
-    ModelName = model_name(Document),
-    exec_driver(ModelName, level_to_driver(Level), create, [maybe_gen_uuid(Document)]).
+    exec_driver(model_config(Document), level_to_driver(Level), create, [maybe_gen_uuid(Document)]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -170,8 +167,7 @@ create_or_update(?LOCALLY_CACHED_LEVEL, Document, Diff) ->
 create_or_update(?GLOBALLY_CACHED_LEVEL, #document{} = Document, Diff) ->
     create_or_update_cache(?GLOBALLY_CACHED_LEVEL, Document, Diff);
 create_or_update(Level, #document{} = Document, Diff) ->
-    ModelName = model_name(Document),
-    exec_driver(ModelName, level_to_driver(Level), create_or_update, [Document, Diff]).
+    exec_driver(model_config(Document), level_to_driver(Level), create_or_update, [Document, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -182,9 +178,9 @@ create_or_update(Level, #document{} = Document, Diff) ->
 -spec create_or_update_cache(Level :: store_level(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
-    ModelName = model_name(Document),
+    ModelConfig = model_config(Document),
     [D1 | _] = Drivers = level_to_driver(Level),
-    SafeExec = case caches_controller:check_cache_consistency(driver_to_level(D1), ModelName) of
+    SafeExec = case caches_controller:check_cache_consistency(driver_to_level(D1), model_name(ModelConfig)) of
         {ok, _, _} ->
             false;
         {monitored, ClearedList, _, _} ->
@@ -196,15 +192,15 @@ create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
     case SafeExec of
         true ->
             % Do update to check disk if document is not in memory
-            case exec_cache_async(ModelName, Drivers, update, [Key, Diff]) of
+            case exec_cache_async(ModelConfig, Drivers, update, [Key, Diff]) of
                 {error, {not_found, _}} ->
                     % Document not found - proceed with operation in memory
-                    exec_cache_async(ModelName, Drivers, create_or_update, [Document, Diff]);
+                    exec_cache_async(ModelConfig, Drivers, create_or_update, [Document, Diff]);
                 Ans ->
                     Ans
             end;
         _ ->
-            exec_cache_async(ModelName, Drivers, create_or_update, [Document, Diff])
+            exec_cache_async(ModelConfig, Drivers, create_or_update, [Document, Diff])
     end.
 
 
@@ -213,10 +209,10 @@ create_or_update_cache(Level, #document{key = Key} = Document, Diff) ->
 %% Gets #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec get(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec get(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
-get(Level, ModelName, Key) ->
-    exec_driver(ModelName, level_to_driver(Level), get, [Key]).
+get(Level, ModelNameOrConfig, Key) ->
+    exec_driver(model_config(ModelNameOrConfig), level_to_driver(Level), get, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -224,10 +220,10 @@ get(Level, ModelName, Key) ->
 %% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
--spec list_dirty(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+-spec list_dirty(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list_dirty(Level, ModelName, Fun, AccIn) ->
-    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, dirty}]).
+list_dirty(Level, ModelNameOrConfig, Fun, AccIn) ->
+    list(Level, level_to_driver(Level), ModelNameOrConfig, Fun, AccIn, [{mode, dirty}]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -247,10 +243,10 @@ list_ordered(Level, ModelName, Fun, Field, AccIn) ->
 %% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
--spec list(Level :: store_level(), ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term()) ->
+-spec list(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(Level, ModelName, Fun, AccIn) ->
-    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, transaction}]).
+list(Level, ModelNameOrConfig, Fun, AccIn) ->
+    list(Level, level_to_driver(Level), ModelNameOrConfig, Fun, AccIn, [{mode, transaction}]).
 
 
 %%--------------------------------------------------------------------
@@ -259,13 +255,14 @@ list(Level, ModelName, Fun, AccIn) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(Level :: store_level(), Drivers :: atom() | [atom()],
-    ModelName :: model_behaviour:model_type(), Fun :: list_fun(), AccIn :: term(),
+    ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(), Fun :: list_fun(), AccIn :: term(),
     Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Opts) ->
+list(_Level, [Driver1, Driver2], ModelNameOrConfig, Fun, AccIn, Opts) ->
     CLevel = driver_to_level(Driver1),
+    ModelName = model_name(ModelNameOrConfig),
     CCCUuid = ModelName,
-    ModelConfig = ModelName:model_init(),
+    ModelConfig = model_config(ModelNameOrConfig),
 
     HelperFun1 = fun
         (#document{key = Key} = Document, Acc) ->
@@ -275,7 +272,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Opts) ->
     end,
 
     GetFromCache = fun(Counter1, Counter2) ->
-        case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Opts]) of
+        case exec_driver(ModelConfig, Driver1, list, [HelperFun1, #{}, Opts]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
                     {ok, Counter1, _} ->
@@ -298,7 +295,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Opts) ->
         {monitored, _, Counter1, Counter2} ->
             GetFromCache(Counter1, Counter2);
         _ ->
-            case exec_driver(ModelName, Driver1, list, [HelperFun1, #{}, Opts]) of
+            case exec_driver(ModelConfig, Driver1, list, [HelperFun1, #{}, Opts]) of
                 {ok, Ans1} ->
                     {check, Ans1};
                 Err1 ->
@@ -350,7 +347,7 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Opts) ->
             end,
 
             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-            case exec_driver(ModelName, Driver2, list, [HelperFun2, Ans_1, Opts]) of
+            case exec_driver(ModelConfig, Driver2, list, [HelperFun2, Ans_1, Opts]) of
                 {ok, Ans_2} ->
                     caches_controller:end_consistency_restoring(CLevel, CCCUuid),
                     {ok, Ans_2};
@@ -383,8 +380,8 @@ list(_Level, [Driver1, Driver2], ModelName, Fun, AccIn, Opts) ->
         FinalAns ->
             FinalAns
     end;
-list(_Level, Drivers, ModelName, Fun, AccIn, Mode) ->
-    exec_driver(ModelName, Drivers, list, [Fun, AccIn, Mode]).
+list(_Level, Drivers, ModelNameOrConfig, Fun, AccIn, Mode) ->
+    exec_driver(model_config(ModelNameOrConfig), Drivers, list, [Fun, AccIn, Mode]).
 
 
 %%--------------------------------------------------------------------
@@ -392,10 +389,10 @@ list(_Level, Drivers, ModelName, Fun, AccIn, Mode) ->
 %% Deletes #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec delete(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key(), Pred :: delete_predicate()) -> ok | datastore:generic_error().
-delete(Level, ModelName, Key, Pred) ->
-    delete(Level, ModelName, Key, Pred, []).
+delete(Level, ModelNameOrConfig, Key, Pred) ->
+    delete(Level, ModelNameOrConfig, Key, Pred, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -403,17 +400,18 @@ delete(Level, ModelName, Key, Pred) ->
 %% You can specify 'ignore_links' option, if links should not be deleted with the document.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec delete(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [option()]) -> ok | datastore:generic_error().
-delete(Level, ModelName, Key, Pred, Opts) ->
-    case exec_driver_async(ModelName, Level, delete, [Key, Pred]) of
+delete(Level, ModelNameOrConfig, Key, Pred, Opts) ->
+    ModelConfig = model_config(ModelNameOrConfig),
+    case exec_driver_async(ModelConfig, Level, delete, [Key, Pred]) of
         ok ->
             case lists:member(ignore_links, Opts) of
                 true -> ok;
                 false ->
                     % TODO - make link del asynch when tests will be able to handle it
-                    %%             spawn(fun() -> catch delete_links(Level, Key, ModelName, all) end),
-                        catch delete_links(Level, Key, ModelName, all)
+                    %%             spawn(fun() -> catch delete_links(Level, Key, ModelConfig, all) end),
+                        catch delete_links(Level, Key, ModelConfig, all)
             end,
             ok;
         {error, Reason} ->
@@ -426,10 +424,10 @@ delete(Level, ModelName, Key, Pred, Opts) ->
 %% Deletes #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec delete(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-delete(Level, ModelName, Key) ->
-    delete(Level, ModelName, Key, ?PRED_ALWAYS).
+delete(Level, ModelNameOrConfig, Key) ->
+    delete(Level, ModelNameOrConfig, Key, ?PRED_ALWAYS).
 
 
 %%--------------------------------------------------------------------
@@ -438,17 +436,18 @@ delete(Level, ModelName, Key) ->
 %% in case of caches.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_sync(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec delete_sync(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key(), Pred :: delete_predicate()) -> ok | datastore:generic_error().
-delete_sync(Level, ModelName, Key, Pred) ->
-    case exec_driver(ModelName, level_to_driver(Level), delete, [Key, Pred]) of
+delete_sync(Level, ModelNameOrConfig, Key, Pred) ->
+    ModelConfig = model_config(ModelNameOrConfig),
+    case exec_driver(ModelConfig, level_to_driver(Level), delete, [Key, Pred]) of
         ok ->
             spawn(fun() ->
-                    catch delete_links(?DISK_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?DISK_ONLY_LEVEL, Key, ModelConfig, all) end),
             spawn(fun() ->
-                    catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelName, all) end),
+                    catch delete_links(?GLOBAL_ONLY_LEVEL, Key, ModelConfig, all) end),
             %% @todo: uncomment following line when local cache will support links
-            % spawn(fun() -> catch delete_links(?LOCAL_ONLY_LEVEL, Key, ModelName, all) end),
+            % spawn(fun() -> catch delete_links(?LOCAL_ONLY_LEVEL, Key, ModelConfig, all) end),
             ok;
         {error, Reason} ->
             {error, Reason}
@@ -461,10 +460,10 @@ delete_sync(Level, ModelName, Key, Pred) ->
 %% in case of caches.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_sync(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec delete_sync(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-delete_sync(Level, ModelName, Key) ->
-    delete_sync(Level, ModelName, Key, ?PRED_ALWAYS).
+delete_sync(Level, ModelNameOrConfig, Key) ->
+    delete_sync(Level, ModelNameOrConfig, Key, ?PRED_ALWAYS).
 
 
 %%--------------------------------------------------------------------
@@ -473,10 +472,10 @@ delete_sync(Level, ModelName, Key) ->
 %% multiple drivers at once - use *_only levels.
 %% @end
 %%--------------------------------------------------------------------
--spec exists(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+-spec exists(Level :: store_level(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> {ok, boolean()} | datastore:generic_error().
-exists(Level, ModelName, Key) ->
-    exec_driver(ModelName, level_to_driver(Level), exists, [Key]).
+exists(Level, ModelNameOrConfig, Key) ->
+    exec_driver(model_config(ModelNameOrConfig), level_to_driver(Level), exists, [Key]).
 
 
 %%--------------------------------------------------------------------
@@ -486,7 +485,7 @@ exists(Level, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec add_links(Level :: store_level(), document(), link_spec() | [link_spec()]) -> ok | generic_error().
 add_links(Level, #document{key = Key} = Doc, Links) ->
-    add_links(Level, Key, model_name(Doc), Links).
+    add_links(Level, Key, model_config(Doc), Links).
 
 
 %%--------------------------------------------------------------------
@@ -494,18 +493,18 @@ add_links(Level, #document{key = Key} = Doc, Links) ->
 %% Adds given links to the document with given key. Allows for link duplication when model is configured this way.
 %% @end
 %%--------------------------------------------------------------------
--spec add_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec() | [link_spec()]) ->
+-spec add_links(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), link_spec() | [link_spec()]) ->
     ok | generic_error().
-add_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
-    add_links(Level, Key, ModelName, [LinkSpec]);
-add_links(Level, Key, ModelName, Links) when is_list(Links) ->
-    ModelConfig = #model_config{link_duplication = LinkDuplication} = ModelName:model_init(),
+add_links(Level, Key, ModelNameOrConfig, {_LinkName, _LinkTarget} = LinkSpec) ->
+    add_links(Level, Key, ModelNameOrConfig, [LinkSpec]);
+add_links(Level, Key, ModelNameOrConfig, Links) when is_list(Links) ->
+    ModelConfig = #model_config{link_duplication = LinkDuplication} = model_config(ModelNameOrConfig),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
     Method = case LinkDuplication of
         true -> add_links;
         false -> set_links
     end,
-    exec_driver_async(ModelName, Level, Method, [Key, NormalizedLinks]).
+    exec_driver_async(ModelConfig, Level, Method, [Key, NormalizedLinks]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -514,7 +513,7 @@ add_links(Level, Key, ModelName, Links) when is_list(Links) ->
 %%--------------------------------------------------------------------
 -spec set_links(Level :: store_level(), document(), link_spec() | [link_spec()]) -> ok | generic_error().
 set_links(Level, #document{key = Key} = Doc, Links) ->
-    set_links(Level, Key, model_name(Doc), Links).
+    set_links(Level, Key, model_config(Doc), Links).
 
 
 %%--------------------------------------------------------------------
@@ -522,14 +521,14 @@ set_links(Level, #document{key = Key} = Doc, Links) ->
 %% Sets given links to the document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec set_links(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec() | [link_spec()]) ->
+-spec set_links(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), link_spec() | [link_spec()]) ->
     ok | generic_error().
-set_links(Level, Key, ModelName, {_LinkName, _LinkTarget} = LinkSpec) ->
-    set_links(Level, Key, ModelName, [LinkSpec]);
-set_links(Level, Key, ModelName, Links) when is_list(Links) ->
-    ModelConfig = #model_config{} = ModelName:model_init(),
+set_links(Level, Key, ModelNameOrConfig, {_LinkName, _LinkTarget} = LinkSpec) ->
+    set_links(Level, Key, ModelNameOrConfig, [LinkSpec]);
+set_links(Level, Key, ModelNameOrConfig, Links) when is_list(Links) ->
+    ModelConfig = #model_config{} = model_config(ModelNameOrConfig),
     NormalizedLinks = normalize_link_target(ModelConfig, Links),
-    exec_driver_async(ModelName, Level, set_links, [Key, NormalizedLinks]).
+    exec_driver_async(ModelConfig, Level, set_links, [Key, NormalizedLinks]).
 
 
 %%--------------------------------------------------------------------
@@ -547,11 +546,11 @@ create_link(Level, #document{key = Key} = Doc, Link) ->
 %% Adds given links to the document with given key if link does not exist.
 %% @end
 %%--------------------------------------------------------------------
--spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_spec()) ->
+-spec create_link(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), link_spec()) ->
     ok | create_error().
-create_link(Level, Key, ModelName, Link) ->
-    ModelConfig = ModelName:model_init(),
-    exec_driver_async(ModelName, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
+create_link(Level, Key, ModelNameOrConfig, Link) ->
+    ModelConfig = model_config(ModelNameOrConfig),
+    exec_driver_async(ModelConfig, Level, create_link, [Key, normalize_link_target(ModelConfig, Link)]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -568,12 +567,12 @@ delete_links(Level, #document{key = Key} = Doc, LinkNames) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type(),
+-spec delete_links(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(),
     link_name() | [link_name()] | all) -> ok | generic_error().
-delete_links(Level, Key, ModelName, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
-    delete_links(Level, level_to_driver(Level), Key, ModelName, LinkNames);
-delete_links(Level, Key, ModelName, LinkName) ->
-    delete_links(Level, Key, ModelName, [LinkName]).
+delete_links(Level, Key, ModelNameOrConfig, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
+    delete_links(Level, level_to_driver(Level), Key, ModelNameOrConfig, LinkNames);
+delete_links(Level, Key, ModelNameOrConfig, LinkName) ->
+    delete_links(Level, Key, ModelNameOrConfig, [LinkName]).
 
 
 %%--------------------------------------------------------------------
@@ -583,9 +582,9 @@ delete_links(Level, Key, ModelName, LinkName) ->
 %%--------------------------------------------------------------------
 %% TODO - delete links should not leave any trash after delete of last link without all option
 -spec delete_links(Level :: store_level(), Drivers :: atom() | [atom()], ext_key(),
-    model_behaviour:model_type(), [link_name()] | all) -> ok | generic_error().
-delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNames =:= all ->
-    ModelConfig = ModelName:model_init(),
+    model_behaviour:model_type() | model_behaviour:model_config(), [link_name()] | all) -> ok | generic_error().
+delete_links(_Level, [Driver1, Driver2], Key, ModelNameOrConfig, LinkNames) when LinkNames =:= all ->
+    ModelConfig = model_config(ModelNameOrConfig),
     AccFun = fun(LinkName, _, Acc) ->
         [LinkName | Acc]
     end,
@@ -593,11 +592,11 @@ delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) when LinkNam
     {ok, Links2} = erlang:apply(driver_to_module(Driver2), foreach_link,
         [ModelConfig, Key, AccFun, Links1]),
     Links = sets:to_list(sets:from_list(Links2)),
-    exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, Links]);
-delete_links(_Level, [Driver1, Driver2], Key, ModelName, LinkNames) ->
-    exec_cache_async(ModelName, [Driver1, Driver2], delete_links, [Key, LinkNames]);
-delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
-    exec_driver(ModelName, Driver, delete_links, [Key, LinkNames]).
+    exec_cache_async(ModelConfig, [Driver1, Driver2], delete_links, [Key, Links]);
+delete_links(_Level, [Driver1, Driver2], Key, ModelNameOrConfig, LinkNames) ->
+    exec_cache_async(model_config(ModelNameOrConfig), [Driver1, Driver2], delete_links, [Key, LinkNames]);
+delete_links(_Level, Driver, Key, ModelNameOrConfig, LinkNames) ->
+    exec_driver(model_config(ModelNameOrConfig), Driver, delete_links, [Key, LinkNames]).
 
 
 %%--------------------------------------------------------------------
@@ -607,7 +606,7 @@ delete_links(_Level, Driver, Key, ModelName, LinkNames) ->
 %%--------------------------------------------------------------------
 -spec fetch_link(Level :: store_level(), document(), link_name()) -> {ok, normalized_link_target()} | link_error().
 fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
-    fetch_link(Level, Key, model_name(Doc), LinkName).
+    fetch_link(Level, Key, model_config(Doc), LinkName).
 
 
 %%--------------------------------------------------------------------
@@ -615,18 +614,19 @@ fetch_link(Level, #document{key = Key} = Doc, LinkName) ->
 %% Gets specified link from the document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
+-spec fetch_link(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), link_name()) ->
     {ok, simple_link_target()} | link_error().
-fetch_link(Level, Key, ModelName, LinkName) ->
+fetch_link(Level, Key, ModelNameOrConfig, LinkName) ->
+    ModelName = model_name(ModelNameOrConfig),
     {RawLinkName, RequestedScope, VHash} = links_utils:unpack_link_scope(ModelName, LinkName),
-    case fetch_full_link(Level, Key, ModelName, RawLinkName) of
+    case fetch_full_link(Level, Key, ModelNameOrConfig, RawLinkName) of
         {ok, {_Version, Targets = [H | _]}} ->
             case RequestedScope of
                 undefined ->
                     {_, _, TargetKey, TargetModel} =
                         case links_utils:select_scope_related_link(RawLinkName, RequestedScope, VHash, Targets) of
                             undefined ->
-                                #model_config{mother_link_scope = MScope} = ModelName:model_init(),
+                                #model_config{link_replica_scope = MScope} = model_config(ModelNameOrConfig),
                                 case lists:filter(
                                     fun
                                         ({Scope, _, _, _}) ->
@@ -668,11 +668,11 @@ fetch_full_link(Level, #document{key = Key} = Doc, LinkName) ->
 %% Gets specified link from the document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_full_link(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
+-spec fetch_full_link(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), link_name()) ->
     {ok, normalized_link_target()} | generic_error().
-fetch_full_link(Level, Key, ModelName, LinkName) ->
-    _ModelConfig = ModelName:model_init(),
-    exec_driver(ModelName, level_to_driver(Level), fetch_link, [Key, LinkName]).
+fetch_full_link(Level, Key, ModelNameOrConfig, LinkName) ->
+    ModelConfig = model_config(ModelNameOrConfig),
+    exec_driver(ModelConfig, level_to_driver(Level), fetch_link, [Key, LinkName]).
 
 
 %%--------------------------------------------------------------------
@@ -682,7 +682,7 @@ fetch_full_link(Level, Key, ModelName, LinkName) ->
 %%--------------------------------------------------------------------
 -spec fetch_link_target(Level :: store_level(), document(), link_name()) -> {ok, document()} | generic_error().
 fetch_link_target(Level, #document{key = Key} = Doc, LinkName) ->
-    fetch_link_target(Level, Key, model_name(Doc), LinkName).
+    fetch_link_target(Level, Key, model_config(Doc), LinkName).
 
 
 %%--------------------------------------------------------------------
@@ -690,10 +690,10 @@ fetch_link_target(Level, #document{key = Key} = Doc, LinkName) ->
 %% Gets document pointed by given link of document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link_target(Level :: store_level(), ext_key(), model_behaviour:model_type(), link_name()) ->
+-spec fetch_link_target(Level :: store_level(), ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), link_name()) ->
     {ok, document()} | generic_error().
-fetch_link_target(Level, Key, ModelName, LinkName) ->
-    case fetch_link(Level, Key, ModelName, LinkName) of
+fetch_link_target(Level, Key, ModelNameOrConfig, LinkName) ->
+    case fetch_link(Level, Key, ModelNameOrConfig, LinkName) of
         {ok, _Target = {TargetKey, TargetModel}} ->
             TargetModel:get(TargetKey);
         {error, Reason} ->
@@ -709,7 +709,7 @@ fetch_link_target(Level, Key, ModelName, LinkName) ->
 -spec foreach_link(Level :: store_level(), document(), fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(Level, #document{key = Key} = Doc, Fun, AccIn) ->
-    foreach_link(Level, Key, model_name(Doc), Fun, AccIn).
+    foreach_link(Level, Key, model_config(Doc), Fun, AccIn).
 
 
 %%--------------------------------------------------------------------
@@ -717,11 +717,11 @@ foreach_link(Level, #document{key = Key} = Doc, Fun, AccIn) ->
 %% Executes given function for each link of the document given by key - similar to 'foldl'.
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link(Level :: store_level(), Key :: ext_key(), ModelName :: model_behaviour:model_type(),
+-spec foreach_link(Level :: store_level(), Key :: ext_key(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
-foreach_link(Level, Key, ModelName, Fun, AccIn) ->
-    foreach_link(Level, level_to_driver(Level), Key, ModelName, Fun, AccIn).
+foreach_link(Level, Key, ModelNameOrConfig, Fun, AccIn) ->
+    foreach_link(Level, level_to_driver(Level), Key, model_config(ModelNameOrConfig), Fun, AccIn).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -729,20 +729,21 @@ foreach_link(Level, Key, ModelName, Fun, AccIn) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec foreach_link(Level :: store_level(), Drivers :: atom() | [atom()], Key :: ext_key(),
-    ModelName :: model_behaviour:model_type(),
+    ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(),
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
-foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
+foreach_link(_Level, [Driver1, Driver2], Key, ModelNameOrConfig, Fun, AccIn) ->
     CLevel = driver_to_level(Driver1),
+    ModelName = model_name(ModelNameOrConfig),
+    ModelConfig = model_config(ModelNameOrConfig),
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
-    ModelConfig = ModelName:model_init(),
 
     HelperFun1 = fun(LinkName, LinkTarget, Acc) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
 
     GetFromCache = fun(Counter1, Counter2) ->
-        case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+        case exec_driver(ModelConfig, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
             {ok, Ans1} ->
                 case caches_controller:check_cache_consistency(CLevel, CCCUuid) of
                     {ok, Counter1, _} ->
@@ -765,7 +766,7 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         {monitored, _, Counter1, Counter2} ->
             GetFromCache(Counter1, Counter2);
         _ ->
-            case exec_driver(ModelName, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
+            case exec_driver(ModelConfig, Driver1, foreach_link, [Key, HelperFun1, #{}]) of
                 {ok, Ans1} ->
                     {check, Ans1};
                 Err1 ->
@@ -815,7 +816,7 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
             end,
 
             caches_controller:begin_consistency_restoring(CLevel, CCCUuid),
-            case exec_driver(ModelName, Driver2, foreach_link, [Key, HelperFun2, Ans_1]) of
+            case exec_driver(ModelConfig, Driver2, foreach_link, [Key, HelperFun2, Ans_1]) of
                 {ok, Ans_2} ->
                     caches_controller:end_consistency_restoring(CLevel, CCCUuid),
                     {ok, Ans_2};
@@ -837,8 +838,8 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelName, Fun, AccIn) ->
         FinalAns ->
             FinalAns
     end;
-foreach_link(_Level, Driver, Key, ModelName, Fun, AccIn) ->
-    exec_driver(ModelName, Driver, foreach_link, [Key, Fun, AccIn]).
+foreach_link(_Level, Driver, Key, ModelNameOrConfig, Fun, AccIn) ->
+    exec_driver(model_config(ModelNameOrConfig), Driver, foreach_link, [Key, Fun, AccIn]).
 
 
 %%--------------------------------------------------------------------
@@ -860,10 +861,10 @@ link_walk(Level, #document{key = StartKey} = StartDoc, LinkNames, Mode) when is_
 %% In case of Mode == get_leaf, list of all link's uuids is also returned.
 %% @end
 %%--------------------------------------------------------------------
--spec link_walk(Level :: store_level(), Key :: ext_key(), ModelName :: model_behaviour:model_type(), [link_name()], get_leaf | get_all) ->
+-spec link_walk(Level :: store_level(), Key :: ext_key(), ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(), [link_name()], get_leaf | get_all) ->
     {ok, {document(), [ext_key()]} | [document()]} | link_error() | get_error().
-link_walk(Level, Key, ModelName, R, Mode) ->
-    link_walk7(Level, Key, ModelName, R, [], Mode).
+link_walk(Level, Key, ModelNameOrConfig, R, Mode) ->
+    link_walk7(Level, Key, ModelNameOrConfig, R, [], Mode).
 
 
 %%--------------------------------------------------------------------
@@ -881,10 +882,10 @@ exists_link_doc(Level, #document{key = Key} = Doc, Scope) ->
 %% Checks if document that describes links from scope exists.
 %% @end
 %%--------------------------------------------------------------------
--spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type(), links_utils:scope()) ->
+-spec exists_link_doc(store_level(), datastore:ext_key(), model_behaviour:model_type() | model_behaviour:model_config(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(Level, Key, ModelName, Scope) ->
-    exec_driver(ModelName, level_to_driver(Level), exists_link_doc, [Key, Scope]).
+exists_link_doc(Level, Key, ModelNameOrConfig, Scope) ->
+    exec_driver(model_config(ModelNameOrConfig), level_to_driver(Level), exists_link_doc, [Key, Scope]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -892,10 +893,10 @@ exists_link_doc(Level, Key, ModelName, Scope) ->
 %% run at the same time.
 %% @end
 %%--------------------------------------------------------------------
--spec run_transaction(ModelName :: model_behaviour:model_type(), ResourceId :: binary(), fun(() -> Result)) -> Result
+-spec run_transaction(ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
-run_transaction(ModelName, ResourceId, Fun) ->
-    exec_driver(ModelName, ?DISTRIBUTED_CACHE_DRIVER, run_transation, [ResourceId, Fun]).
+run_transaction(ModelNameOrConfig, ResourceId, Fun) ->
+    exec_driver(model_config(ModelNameOrConfig), ?DISTRIBUTED_CACHE_DRIVER, run_transation, [ResourceId, Fun]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -919,6 +920,17 @@ healthcheck() ->
             {error, {no_ets, ?LOCAL_STATE}};
         _ -> ok
     end.
+
+initialize_minimal_env() ->
+    initialize_minimal_env([]).
+
+initialize_minimal_env(DBNodes) ->
+    hackney:start(),
+    couchbeam_sup:start_link(),
+    catch ets:new(datastore_worker, [named_table, public, set, {read_concurrency, true}]),
+    datastore:ensure_state_loaded(node()),
+    {ok, _} = datastore_worker:init(DBNodes),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -947,17 +959,17 @@ models_with_aux_caches() ->
 %%% Internal functions
 %%%===================================================================
 
-link_walk7(_Level, _Key, _ModelName, _Links, _Acc, get_all) ->
+link_walk7(_Level, _Key, _ModelNameOrConfig, _Links, _Acc, get_all) ->
     erlang:error(not_inplemented);
-link_walk7(Level, Key, ModelName, [LastLink], Acc, get_leaf) ->
-    case fetch_link_target(Level, Key, ModelName, LastLink) of
+link_walk7(Level, Key, ModelNameOrConfig, [LastLink], Acc, get_leaf) ->
+    case fetch_link_target(Level, Key, ModelNameOrConfig, LastLink) of
         {ok, #document{key = LastKey} = Leaf} ->
             {ok, {Leaf, lists:reverse([LastKey | Acc])}};
         {error, Reason} ->
             {error, Reason}
     end;
-link_walk7(Level, Key, ModelName, [NextLink | R], Acc, get_leaf) ->
-    case fetch_link(Level, Key, ModelName, NextLink) of
+link_walk7(Level, Key, ModelNameOrConfig, [NextLink | R], Acc, get_leaf) ->
+    case fetch_link(Level, Key, ModelNameOrConfig, NextLink) of
         {ok, {TargetKey, TargetMod}} ->
             link_walk7(Level, TargetKey, TargetMod, R, [TargetKey | Acc], get_leaf);
         {error, Reason} ->
@@ -972,9 +984,9 @@ normalize_link_target(ModelConfig, [{_, {V, []}} | R]) when is_integer(V) ->
     normalize_link_target(ModelConfig, R);
 normalize_link_target(ModelConfig, [Link | R]) ->
     [normalize_link_target(ModelConfig, Link) | normalize_link_target(ModelConfig, R)];
-normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, #document{key = TargetKey} = Doc}) ->
+normalize_link_target(ModelConfig = #model_config{link_replica_scope = MScope}, {LinkName, #document{key = TargetKey} = Doc}) ->
     normalize_link_target(ModelConfig, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, model_name(Doc)}});
-normalize_link_target(ModelConfig = #model_config{mother_link_scope = MScope}, {LinkName, {TargetKey, ModelName}}) when is_atom(ModelName) ->
+normalize_link_target(ModelConfig = #model_config{link_replica_scope = MScope}, {LinkName, {TargetKey, ModelName}}) when is_atom(ModelName) ->
     normalize_link_target(ModelConfig, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, ModelName}});
 normalize_link_target(ModelConfig, {LinkName, {_ScopeId, _VHash, _TargetKey, _ModelName} = Target}) ->
     normalize_link_target(ModelConfig, {LinkName, {1, [Target]}}).
@@ -998,11 +1010,30 @@ maybe_gen_uuid(#document{} = Doc) ->
 %% Gets model name for given document/record.
 %% @end
 %%--------------------------------------------------------------------
--spec model_name(tuple() | document()) -> atom().
+-spec model_name(tuple() | document() | model_behaviour:model_config() | model_behaviour:model_type()) -> model_behaviour:model_type().
 model_name(#document{value = Record}) ->
     model_name(Record);
+model_name(#model_config{name = ModelName}) ->
+    ModelName;
 model_name(Record) when is_tuple(Record) ->
-    element(1, Record).
+    element(1, Record);
+model_name(ModelName) when is_atom(ModelName) ->
+    ModelName.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets model config for given document/record/model name.
+%% @end
+%%--------------------------------------------------------------------
+-spec model_config(tuple() | document() | model_behaviour:model_type()) -> model_behaviour:model_config().
+model_config(#model_config{} = MC) ->
+    MC;
+model_config(ModelNameOrConfig) ->
+    ModelName = model_name(ModelNameOrConfig),
+    ModelName:model_init().
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1067,13 +1098,13 @@ run_posthooks(#model_config{name = ModelName} = ModelConfig, Method, Level, Cont
 %% Returns initialized configuration.
 %% @end
 %%--------------------------------------------------------------------
--spec load_local_state(Models :: [model_behaviour:model_type()]) ->
+-spec load_local_state(Models :: [model_behaviour:model_type() | model_behaviour:model_config()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
     catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
-            Config = #model_config{hooks = Hooks} = ModelName:model_init(),
+            Config = #model_config{hooks = Hooks} = model_config(ModelName),
             ok = validate_model_config(Config),
             lists:foreach(
                 fun(Hook) ->
@@ -1124,10 +1155,10 @@ validate_model_config(#model_config{version = CurrentVersion, name = ModelName, 
 %% Initializes information about caches consistency.
 %% @end
 %%--------------------------------------------------------------------
--spec init_caches_consistency(Models :: [model_behaviour:model_type()]) -> ok.
+-spec init_caches_consistency(Models :: [model_behaviour:model_type() | model_behaviour:model_config()]) -> ok.
 init_caches_consistency(Models) ->
     lists:foreach(fun(ModelName) ->
-        #model_config{store_level = SL} = ModelConfig = ModelName:model_init(),
+        #model_config{store_level = SL} = ModelConfig = model_config(ModelName),
         {Check, InfoLevel} = case SL of
             ?GLOBALLY_CACHED_LEVEL -> {true, ?GLOBAL_ONLY_LEVEL};
             ?LOCALLY_CACHED_LEVEL -> {true, ?LOCAL_ONLY_LEVEL};
@@ -1294,17 +1325,17 @@ driver_to_level(?DISTRIBUTED_CACHE_DRIVER) ->
 %% Executes given model action on given driver(s).
 %% @end
 %%--------------------------------------------------------------------
--spec exec_driver(model_behaviour:model_type(), [Driver] | Driver,
+-spec exec_driver(model_behaviour:model_type() | model_behaviour:model_config(), [Driver] | Driver,
     Method :: store_driver_behaviour:driver_action(), [term()]) ->
     ok | {ok, term()} | {error, term()} | term() when Driver :: atom().
-exec_driver(ModelName, [Driver], Method, Args) when is_atom(Driver) ->
-    exec_driver(ModelName, Driver, Method, Args);
-exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
-    case exec_driver(ModelName, Driver, Method, Args) of
+exec_driver(ModelNameOrConfig, [Driver], Method, Args) when is_atom(Driver) ->
+    exec_driver(ModelNameOrConfig, Driver, Method, Args);
+exec_driver(ModelNameOrConfig, [Driver | Rest], Method, Args) when is_atom(Driver) ->
+    case exec_driver(ModelNameOrConfig, Driver, Method, Args) of
         {error, {not_found, _}} when Method =:= get; Method =:= fetch_link ->
-            exec_driver(ModelName, Rest, Method, Args);
+            exec_driver(ModelNameOrConfig, Rest, Method, Args);
         {error, link_not_found} when Method =:= fetch_link ->
-            exec_driver(ModelName, Rest, Method, Args);
+            exec_driver(ModelNameOrConfig, Rest, Method, Args);
         {error, Reason} ->
             {error, Reason};
         Result when Method =:= get; Method =:= fetch_link; Method =:= foreach_link ->
@@ -1312,10 +1343,10 @@ exec_driver(ModelName, [Driver | Rest], Method, Args) when is_atom(Driver) ->
         {ok, true} = Result when Method =:= exists; Method =:= exists_link_doc ->
             Result;
         _ ->
-            exec_driver(ModelName, Rest, Method, Args)
+            exec_driver(ModelNameOrConfig, Rest, Method, Args)
     end;
-exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
-    ModelConfig = ModelName:model_init(),
+exec_driver(ModelNameOrConfig, Driver, Method, Args) when is_atom(Driver) ->
+    ModelConfig = model_config(ModelNameOrConfig),
     ExcludedModels = case driver_to_level(Driver) of
         ?DISK_ONLY_LEVEL when Method /= fetch_link, Method /= get, Method /= exists ->
             [cache_controller];
@@ -1358,15 +1389,15 @@ exec_driver(ModelName, Driver, Method, Args) when is_atom(Driver) ->
 %% Executes given model action on given level. Decides if execution should be async.
 %% @end
 %%--------------------------------------------------------------------
--spec exec_driver_async(model_behaviour:model_type(), Level :: store_level(),
+-spec exec_driver_async(model_behaviour:model_type() | model_behaviour:model_config(), Level :: store_level(),
     Method :: store_driver_behaviour:driver_action(), [term()]) ->
     ok | {ok, term()} | {error, term()}.
-exec_driver_async(ModelName, ?LOCALLY_CACHED_LEVEL, Method, Args) ->
-    exec_cache_async(ModelName, level_to_driver(?LOCALLY_CACHED_LEVEL), Method, Args);
-exec_driver_async(ModelName, ?GLOBALLY_CACHED_LEVEL, Method, Args) ->
-    exec_cache_async(ModelName, level_to_driver(?GLOBALLY_CACHED_LEVEL), Method, Args);
-exec_driver_async(ModelName, Level, Method, Args) ->
-    exec_driver(ModelName, level_to_driver(Level), Method, Args).
+exec_driver_async(ModelNameOrConfig, ?LOCALLY_CACHED_LEVEL, Method, Args) ->
+    exec_cache_async(ModelNameOrConfig, level_to_driver(?LOCALLY_CACHED_LEVEL), Method, Args);
+exec_driver_async(ModelNameOrConfig, ?GLOBALLY_CACHED_LEVEL, Method, Args) ->
+    exec_cache_async(ModelNameOrConfig, level_to_driver(?GLOBALLY_CACHED_LEVEL), Method, Args);
+exec_driver_async(ModelNameOrConfig, Level, Method, Args) ->
+    exec_driver(ModelNameOrConfig, level_to_driver(Level), Method, Args).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1374,14 +1405,14 @@ exec_driver_async(ModelName, Level, Method, Args) ->
 %% Executes given model action with async execution on second driver.
 %% @end
 %%--------------------------------------------------------------------
--spec exec_cache_async(model_behaviour:model_type(), [atom()] | atom(),
+-spec exec_cache_async(model_behaviour:model_type() | model_behaviour:model_config(), [atom()] | atom(),
     Method :: store_driver_behaviour:driver_action(), [term()]) ->
     ok | {ok, term()} | {error, term()}.
-exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
-    case exec_driver(ModelName, Driver1, Method, Args) of
+exec_cache_async(ModelNameOrConfig, [Driver1, Driver2] = Drivers, Method, Args) ->
+    case exec_driver(ModelNameOrConfig, Driver1, Method, Args) of
         {error, {not_found, MN}} when Method =:= update ->
             [Key | _] = Args,
-            Proceed = case caches_controller:check_cache_consistency(driver_to_level(Driver1), ModelName) of
+            Proceed = case caches_controller:check_cache_consistency(driver_to_level(Driver1), model_name(ModelNameOrConfig)) of
                 {ok, _, _} ->
                     false;
                 {monitored, ClearedList, _, _} ->
@@ -1391,13 +1422,13 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
             end,
             case Proceed of
                 true ->
-                    ModelConfig = ModelName:model_init(),
+                    ModelConfig = model_config(ModelNameOrConfig),
                     FullArgs1 = [ModelConfig, Key],
                     case erlang:apply(driver_to_module(Driver2), get, FullArgs1) of
                         {ok, Doc} ->
                             FullArgs2 = [ModelConfig, Doc],
                             erlang:apply(driver_to_module(Driver1), create, FullArgs2),
-                            exec_cache_async(ModelName, Drivers, Method, Args);
+                            exec_cache_async(ModelNameOrConfig, Drivers, Method, Args);
                         _ ->
                             {error, {not_found, MN}}
                     end;
@@ -1407,15 +1438,15 @@ exec_cache_async(ModelName, [Driver1, Driver2] = Drivers, Method, Args) ->
         {error, Reason} ->
             {error, Reason};
         Result ->
-            ModelConfig = ModelName:model_init(),
+            ModelConfig = model_config(ModelNameOrConfig),
             LinksContext = links_utils:get_context_to_propagate(ModelConfig),
             spawn(fun() ->
                 links_utils:apply_context(LinksContext),
-                exec_cache_async(ModelName, Driver2, Method, Args) end),
+                exec_cache_async(ModelNameOrConfig, Driver2, Method, Args) end),
             Result
     end;
-exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
-    ModelConfig = ModelName:model_init(),
+exec_cache_async(ModelNameOrConfig, Driver, Method, Args) when is_atom(Driver) ->
+    ModelConfig = model_config(ModelNameOrConfig),
     case run_prehooks(ModelConfig, Method, driver_to_level(Driver), Args, []) of
         ok ->
             FullArgs = [ModelConfig | Args],
@@ -1424,7 +1455,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
         {ok, Value} ->
             run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {ok, Value});
         {tasks, Tasks} ->
-            Level = caches_controller:cache_to_task_level(ModelName),
+            Level = caches_controller:cache_to_task_level(model_name(ModelNameOrConfig)),
             lists:foreach(fun
                 ({task, Task}) ->
                     ok = task_manager:start_task({cache_dump, Task}, Level, first_try);
@@ -1432,7 +1463,7 @@ exec_cache_async(ModelName, Driver, Method, Args) when is_atom(Driver) ->
                     ok % error already logged
             end, Tasks);
         {task, Task} ->
-            Level = caches_controller:cache_to_task_level(ModelName),
+            Level = caches_controller:cache_to_task_level(model_name(ModelNameOrConfig)),
             ok = task_manager:start_task({cache_dump, Task}, Level, first_try);
         {error, Reason} ->
             run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})

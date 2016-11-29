@@ -510,7 +510,7 @@ flush(Level, ModelName, Key) ->
 
   Ans = case ToDo of
           {ok, NewMethod, NewArgs} ->
-            FullArgs = [ModelConfig | NewArgs],
+            FullArgs = [ModelConfig#model_config{aggregate_db_writes = false} | NewArgs],
             case erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), NewMethod, FullArgs) of
               {error, already_updated} ->
                 ok;
@@ -877,7 +877,13 @@ delete_old_keys(Level, Caches, TimeWindow) ->
         0 ->
           ok;
         _ ->
-          count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum)
+          ToCount = case Count rem ?CLEAR_BATCH_SIZE of
+            0 ->
+              ?CLEAR_BATCH_SIZE;
+            TC ->
+              TC
+          end,
+          count_clear_acc(ToCount, BatchNum)
       end,
       {abort, Count};
     (#document{key = Uuid, value = V}, {0, BatchNum, undefined}) ->
@@ -939,7 +945,13 @@ delete_old_keys(Level, Caches, TimeWindow) ->
                   safe_delete(Level, Cache, UuidToDel),
                   Master ! {doc_cleared, BatchNum}
                 end),
-                count_clear_acc(Count rem ?CLEAR_BATCH_SIZE, BatchNum),
+                ToCount = case Count rem ?CLEAR_BATCH_SIZE of
+                  0 ->
+                    ?CLEAR_BATCH_SIZE;
+                  TC ->
+                    TC
+                end,
+                count_clear_acc(ToCount, BatchNum),
                 {abort, Count};
               (#document{key = Uuid}, {0, BatchNum, undefined}) ->
                 {next, {1, BatchNum, Uuid}};

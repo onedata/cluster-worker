@@ -19,6 +19,43 @@
 -export([save/1, get/1, exists/1, delete/1, update/2, create/1, model_init/0,
     'after'/5, before/4]).
 -export([record_struct/1]).
+-export([record_upgrade/2]).
+-export([maybe_init_versioning/1, get_test_record_version/1, set_test_record_version/2]).
+
+maybe_init_versioning(ModelName) ->
+    case catch is_process_alive(whereis(ModelName)) of
+        true -> ok;
+        _ ->
+            Pid = spawn(fun() -> F = fun VFun(Version) ->
+                receive
+                    {get_version, Ref, Pid} ->
+                        Pid ! {Ref, Version},
+                        VFun(Version);
+                    {set_version, NewVersion, Ref, Pid} ->
+                        Pid ! {Ref, ok},
+                        VFun(NewVersion)
+                end
+            end, F(1) end),
+            register(ModelName, Pid),
+            ok
+    end.
+
+get_test_record_version(ModelName) ->
+    Ref = make_ref(),
+    maybe_init_versioning(ModelName),
+    ModelName ! {get_version, Ref, self()},
+    receive
+        {Ref, Version} ->
+            Version
+    end.
+
+set_test_record_version(ModelName, Version) ->
+    Ref = make_ref(),
+    maybe_init_versioning(ModelName),
+    ModelName ! {set_version, Version, Ref, self()},
+    receive
+        {Ref, ok} -> ok
+    end.
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -88,7 +125,9 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL).
+    ok = maybe_init_versioning(?MODEL_NAME),
+    ?MODEL_CONFIG(test_bucket, [{globally_cached_record, update}], ?DISK_ONLY_LEVEL)
+        #model_config{version = get_test_record_version(?MODEL_NAME), aggregate_db_writes = true}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -114,6 +153,20 @@ model_init() ->
 before(_ModelName, _Method, _Level, _Context) ->
     ok.
 
+record_upgrade(1, {?MODEL_NAME, F1, F2, F3}) ->
+    {2, {?MODEL_NAME, F1, F2, F3}};
+record_upgrade(2, {?MODEL_NAME, F1, F2, F3}) ->
+    {3, {?MODEL_NAME, F1, F2, F3}};
+record_upgrade(3, {?MODEL_NAME, F1, F2, _}) ->
+    {4, {?MODEL_NAME, F1, F2}};
+record_upgrade(4, {?MODEL_NAME, F1, F2}) ->
+    {5, {?MODEL_NAME, F1, F2, {default, 5, atom}}};
+record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_atom(F31), is_atom(F33), is_integer(F32) ->
+    {6, {?MODEL_NAME, F1, F2, {F31, F32, F33}, [true, false]}};
+record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F31) ->
+    record_upgrade(5, {?MODEL_NAME, F1, F2, {list_to_atom(integer_to_list(F31)), F32, F33}});
+record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, F33}}) when is_integer(F33) ->
+    record_upgrade(5, {?MODEL_NAME, F1, F2, {F31, F32, list_to_atom(integer_to_list(F33))}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -126,4 +179,36 @@ record_struct(1) ->
         {field1, term},
         {field2, term},
         {field3, term}
+    ]};
+record_struct(2) ->
+    {record, [
+        {field1, integer},
+        {field2, integer},
+        {field3, integer}
+    ]};
+record_struct(3) ->
+    {record, [
+        {field1, integer},
+        {field2, term},
+        {field3, integer}
+    ]};
+record_struct(4) ->
+    {record, [
+        {field1, integer},
+        {field2, term}
+    ]};
+record_struct(5) ->
+    {record, [
+        {field1, term},
+        {field2, term},
+        {field3, term}
+    ]};
+record_struct(6) ->
+    {record, [
+        {field1, term},
+        {field2, term},
+        {field3, {atom, integer, atom}},
+        {field4, [boolean]}
     ]}.
+
+

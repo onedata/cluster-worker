@@ -644,7 +644,7 @@ links_scope_test(Config) ->
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
 
-    set_mother_scope(<<"scope1">>),
+    set_link_replica_scope(<<"scope1">>),
     AddLinkWithDoc(1),
     AddLinkWithDoc(2),
     FetchLink(1),
@@ -666,7 +666,7 @@ links_scope_test(Config) ->
     ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
     ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
 
-    set_mother_scope(<<"scope2">>),
+    set_link_replica_scope(<<"scope2">>),
     GetAllLinks([2,3,4]),
     DeleteLinks([2,3,4]),
     GetAllLinks([]),
@@ -691,7 +691,7 @@ links_scope_test(Config) ->
     ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
     ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
 
-    set_mother_scope(<<"scope1">>),
+    set_link_replica_scope(<<"scope1">>),
     DeleteLinks([3, 7, 100, 5, 6]),
     GetAllLinks([2,4]),
     ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}])),
@@ -729,37 +729,37 @@ links_scope_proc_mem_test(Config) ->
             value = #link_scopes_test_record2{field1 = I, field2 = <<"efg">>, field3 = {test, tuple2}}
         }
     end,
-    AddLink = fun(I, MotherScope, OtherScopes) ->
-        ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    AddLink = fun(I, LinkReplicaScope, OtherScopes) ->
+        ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(I), GetDoc(I)}]]]))
     end,
-    AddLinkWithDoc = fun(I, MotherScope, OtherScopes) ->
+    AddLinkWithDoc = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({ok, _}, ?call(Worker2, link_scopes_test_record2, create, [GetDoc(I)])),
-        AddLink(I, MotherScope, OtherScopes)
+        AddLink(I, LinkReplicaScope, OtherScopes)
     end,
-    CreateLink = fun(I, MotherScope, OtherScopes) ->
-        ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    CreateLink = fun(I, LinkReplicaScope, OtherScopes) ->
+        ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]]))
     end,
-    CreateExistingLink = fun(I, MotherScope, OtherScopes) ->
-        ?assertMatch({error, already_exists}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    CreateExistingLink = fun(I, LinkReplicaScope, OtherScopes) ->
+        ?assertMatch({error, already_exists}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]]))
     end,
-    CreateLinkWithDoc = fun(I, MotherScope, OtherScopes) ->
+    CreateLinkWithDoc = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({ok, _}, ?call(Worker1, link_scopes_test_record2, create, [GetDoc(I)])),
-        CreateLink(I, MotherScope, OtherScopes)
+        CreateLink(I, LinkReplicaScope, OtherScopes)
     end,
-    FetchLink = fun(I, MotherScope, OtherScopes) ->
-        ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    FetchLink = fun(I, LinkReplicaScope, OtherScopes) ->
+        ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
-        ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes, PModule,
+        ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
             fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
     end,
-    GetAllLinks = fun(Links, MotherScope, OtherScopes) ->
+    GetAllLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
         AccFun = fun(LinkName, LinkValue, Acc) ->
             maps:put(LinkName, LinkValue, Acc)
         end,
-        {_, ListedLinks} = FLAns = ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+        {_, ListedLinks} = FLAns = ?call(Worker1, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, #{}]]),
         ?assertMatch({ok, _}, FLAns),
 
@@ -769,25 +769,25 @@ links_scope_proc_mem_test(Config) ->
         LinksLength = length(Links),
         ?assertMatch(LinksLength, maps:size(ListedLinks))
     end,
-    DeleteLink = fun(I, MotherScope, OtherScopes) ->
-        ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    DeleteLink = fun(I, LinkReplicaScope, OtherScopes) ->
+        ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [GetLinkName(I)]]]))
     end,
-    DeleteLinkAndCheck = fun(I, MotherScope, OtherScopes) ->
-        DeleteLink(I, MotherScope, OtherScopes),
-        ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    DeleteLinkAndCheck = fun(I, LinkReplicaScope, OtherScopes) ->
+        DeleteLink(I, LinkReplicaScope, OtherScopes),
+        ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
-        ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes, PModule,
+        ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
             fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
                  end,
-    DeleteLinks = fun(Links, MotherScope, OtherScopes) ->
-        ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+    DeleteLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
+        ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
             lists:map(fun(I) -> GetLinkName(I) end, Links)]])),
         lists:map(fun(I) ->
-            ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes,
+            ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
                 fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
-            ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [MotherScope, OtherScopes, PModule,
+            ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
                 fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
         end, Links)
     end,
@@ -853,17 +853,16 @@ links_scope_proc_mem_test(Config) ->
 
     ok.
 
-execute_with_link_context(MotherScope, OtherScopes, Op, Args) ->
-    execute_with_link_context(MotherScope, OtherScopes, datastore, Op, Args).
+execute_with_link_context(LinkReplicaScope, OtherScopes, Op, Args) ->
+    execute_with_link_context(LinkReplicaScope, OtherScopes, datastore, Op, Args).
 
-execute_with_link_context(MotherScope, OtherScopes, Module, Op, Args) ->
-    put(mother_scope, MotherScope),
-    put(other_scopes, OtherScopes),
+execute_with_link_context(LinkReplicaScope, OtherScopes, Module, Op, Args) ->
+    put(link_replica_scope, LinkReplicaScope),
     apply(Module, Op, Args).
 
-set_mother_scope(MotherScope) ->
+set_link_replica_scope(LinkReplicaScope) ->
     Pid = get(?SCOPE_MASTER_PROC_NAME),
-    Pid ! {set_mother_scope, self(), MotherScope},
+    Pid ! {set_link_replica_scope, self(), LinkReplicaScope},
     receive
         scope_changed -> ok
     end.
@@ -871,28 +870,23 @@ set_mother_scope(MotherScope) ->
 scope_master_loop() ->
     scope_master_loop(<<"scope1">>, []).
 
-scope_master_loop(MotherScope, OtherScopes) ->
+scope_master_loop(LinkReplicaScope, OtherScopes) ->
     Todo = receive
-               {get_mother_scope, Sender} ->
-                   Sender ! {mother_scope, MotherScope};
-               {get_other_scopes, Sender2} ->
-                   Sender2 ! {other_scopes, OtherScopes};
-               {set_mother_scope, Sender3, MotherScope2} ->
+               {get_link_replica_scope, Sender} ->
+                   Sender ! {link_replica_scope, LinkReplicaScope};
+               {set_link_replica_scope, Sender3, LinkReplicaScope2} ->
                    Sender3 ! scope_changed,
-                   {change_scopes, MotherScope2, OtherScopes};
-               {set_other_scopes, Sender4, OtherScopes2} ->
-                   Sender4 ! scope_changed,
-                   {change_scopes, MotherScope, OtherScopes2};
+                   {change_scopes, LinkReplicaScope2, OtherScopes};
                stop ->
                    stop
            end,
     case Todo of
         stop ->
             ok;
-        {change_scopes, MotherScope3, OtherScopes3} ->
-            scope_master_loop(MotherScope3, OtherScopes3);
+        {change_scopes, LinkReplicaScope3, OtherScopes3} ->
+            scope_master_loop(LinkReplicaScope3, OtherScopes3);
         _ ->
-            scope_master_loop(MotherScope, OtherScopes)
+            scope_master_loop(LinkReplicaScope, OtherScopes)
     end.
 
 disk_only_create_or_update_test(Config) ->
@@ -1140,6 +1134,9 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     end),
 
     CheckLinks = fun(Start, End, Sum) ->
+        for(Start, End, fun(I) ->
+            ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [Level, Doc, GetLinkName(I)]))
+        end),
         for(Start, End, fun(I) ->
             ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)]))
         end),
@@ -2037,6 +2034,9 @@ clearing_global_cache_test(Config) ->
     MemCheck1 = Mem0 + ToAdd / 2,
     MemUsage = Mem0 + ToAdd,
 
+    {ok, MemRatioOld} = test_utils:get_env(Worker2, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+    {ok, MemMbOld} = test_utils:get_env(Worker2, ?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
+
     ?assertMatch(ok, test_utils:set_env(Worker2, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, 0)),
     % at least 100MB will be added
     ?assertMatch(ok, test_utils:set_env(Worker2, ?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb,
@@ -2080,6 +2080,9 @@ clearing_global_cache_test(Config) ->
     ?assertMatch({ok, []}, ?call_store(Worker1, list, [?GLOBAL_ONLY_LEVEL, TestRecord, GetAllKeys, []])),
     timer:sleep(timer:seconds(15)), % give couch time to process deletes
     ?assertMatch({ok, []}, ?call_store(Worker2, list, [?DISK_ONLY_LEVEL, TestRecord, GetAllKeys, []])),
+
+    ?assertMatch(ok, test_utils:set_env(Worker2, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, MemRatioOld)),
+    ?assertMatch(ok, test_utils:set_env(Worker2, ?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb, MemMbOld)),
 
     ok.
 
