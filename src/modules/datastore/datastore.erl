@@ -18,9 +18,6 @@
 -include_lib("ctool/include/logging.hrl").
 
 
-%% ETS name for local (node scope) state.
--define(LOCAL_STATE, datastore_local_state).
-
 %% #document types
 -type uuid() :: binary().
 % TODO - exclude atom (possible crash because of to large number of atoms usage) or make apropriate WARNING

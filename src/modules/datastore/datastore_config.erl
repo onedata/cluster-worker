@@ -17,9 +17,8 @@
 -behaviour(datastore_config_behaviour).
 
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_common.hrl").
 -include_lib("ctool/include/logging.hrl").
-
--define(AUXILIARY_CACHES_MODELS, models_with_auxiliary_caches).
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
@@ -78,19 +77,18 @@ local_caches() ->
 %%--------------------------------------------------------------------
 -spec models_with_aux_caches() -> Models :: [model_behaviour:model_type()].
 models_with_aux_caches() ->
-    case ets:info(?AUXILIARY_CACHES_MODELS) of
+    case ets:info(?LOCAL_STATE) of
         undefined ->
-            ets:new(?AUXILIARY_CACHES_MODELS, [public, named_table, set]),
-            AuxCachesModels = filter_models_with_aux_caches(),
-            ets:insert(?AUXILIARY_CACHES_MODELS, {aux_caches_models, AuxCachesModels}),
-            AuxCachesModels;
+            filter_models_with_aux_caches();
         _ ->
-            case ets:lookup(?AUXILIARY_CACHES_MODELS, aux_caches_models) of
-                [] -> [];
+            case ets:lookup(?LOCAL_STATE, aux_caches_models) of
+                [] ->
+                    AuxCachesModels = filter_models_with_aux_caches(),
+                    ets:insert(?LOCAL_STATE, {aux_caches_models, AuxCachesModels}),
+                    AuxCachesModels;
                 [{_, AuxCachesModels}] -> AuxCachesModels
             end
     end.
-
 
 %%%===================================================================
 %%% Internal functions
@@ -116,7 +114,7 @@ filter_models_by_level(Level, Models) ->
 %% @end
 %%--------------------------------------------------------------------
 models_potentially_cached() ->
-    models() -- [cache_controller].
+    models() -- [cache_controller, auxiliary_cache_controller].
 
 
 %%--------------------------------------------------------------------
