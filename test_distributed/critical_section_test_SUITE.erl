@@ -35,7 +35,8 @@
 -define(TEST_CASES, [
     run_and_update_test,
     run_and_increment_test,
-    failure_in_critical_section_test]).
+    failure_in_critical_section_test,
+    massive_test]).
 
 -define(PERFORMANCE_TEST_CASES, [
     performance_test, massive_test
@@ -51,7 +52,7 @@ all() ->
 massive_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 1},
-        {success_rate, 100},
+        {success_rate, 1000},
         {parameters, [
             [{name, access_ops_num}, {value, 1000}, {description, "Number of resource access operations during single test."}],
             [{name, method}, {value, run}, {description, "Number of resource access operations during single test."}]

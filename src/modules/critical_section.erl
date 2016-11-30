@@ -111,7 +111,7 @@ lock(Key, Recursive) ->
                 after timer:seconds(10) ->
                     case lock:current_owner(Key) of
                         {ok, Owner} when is_pid(Owner) ->
-                            case is_owner_alive(Owner) of
+                            case lock:is_pid_alive(Owner) of
                                 true ->
                                     Wait();
                                 false ->
@@ -153,19 +153,4 @@ unlock(Key) ->
             ok;
         Error ->
             Error
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks if owner is alive.
-%% @end
-%%--------------------------------------------------------------------
--spec is_owner_alive(pid()) -> boolean().
-is_owner_alive(Owner) ->
-    case rpc:pinfo(Owner) of
-        Info when is_list(Info) ->
-            true;
-        _ ->
-            false
     end.
