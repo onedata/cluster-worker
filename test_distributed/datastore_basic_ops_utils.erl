@@ -718,7 +718,7 @@ links_number_test(Config, Level) ->
 
     save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
-    Key = list_to_binary("key_with_links"),
+    Key = list_to_binary("key_with_links" ++ atom_to_list(Level)),
     Doc =  #document{
         key = Key,
         value = get_record(TestRecord, 12345, <<"abcdef">>, {test, tuple111})
