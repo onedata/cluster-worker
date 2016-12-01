@@ -28,15 +28,18 @@
     run_and_update_test/1,
     run_and_increment_test/1,
     failure_in_critical_section_test/1,
-    performance_test/1, performance_test_base/1]).
+    performance_test/1, performance_test_base/1,
+    massive_test/1, massive_test_base/1]).
+-export([reset_ets_counter/0, get_ets_counter/0, increment_ets_counter/1]).
 
 -define(TEST_CASES, [
     run_and_update_test,
     run_and_increment_test,
-    failure_in_critical_section_test]).
+    failure_in_critical_section_test,
+    massive_test]).
 
 -define(PERFORMANCE_TEST_CASES, [
-    performance_test
+    performance_test, massive_test
 ]).
 
 all() ->
@@ -46,6 +49,118 @@ all() ->
 %%% Test functions
 %%%===================================================================
 
+massive_test(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, 1},
+        {success_rate, 1000},
+        {parameters, [
+            [{name, access_ops_num}, {value, 1000}, {description, "Number of resource access operations during single test."}],
+            [{name, method}, {value, run}, {description, "Number of resource access operations during single test."}]
+        ]},
+        {description, "Checks critical section when massive number of threads are accessing same resource"},
+        {config, [{name, global},
+            {parameters, [
+                [{name, method}, {value, run_on_global}]
+            ]},
+            {description, "Uses locks on global module"}
+        ]},
+        {config, [{name, in_mnesia_transaction},
+            {parameters, [
+                [{name, method}, {value, run_in_mnesia_transaction}]
+            ]},
+            {description, "Lock inside single mnesia transaction"}
+        ]},
+        {config, [{name, on_mnesia},
+            {parameters, [
+                [{name, method}, {value, run_on_mnesia}]
+            ]},
+            {description, "Mnesia used for locking"}
+        ]}
+    ]).
+massive_test_base(Config) ->
+    process_flag(trap_exit, true),
+    AccessOpsNum = ?config(access_ops_num, Config),
+    Method = ?config(method, Config),
+
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Master = self(),
+    EtsProc = spawn(Worker, fun() ->
+        ets:new(critical_section_test_ets, [named_table, public, set]),
+        Master ! ets_created,
+        receive
+            kill ->
+                ok
+        after
+            timer:minutes(10) ->
+                ok
+        end
+    end),
+    ?assertReceivedEqual(ets_created, timer:seconds(10)),
+    ?assert(rpc:call(Worker, ?MODULE, reset_ets_counter, [])),
+
+    Fun1 = fun() ->
+        increment_ets_counter(Worker, Method, 0),
+        Master ! test_fun_ok
+    end,
+
+    Fun2 = fun() ->
+        increment_ets_counter(Worker, Method, 10),
+        Master ! test_fun_ok
+    end,
+
+    Fun3 = fun() ->
+        lists:foreach(fun(_) ->
+            increment_ets_counter(Worker, Method, 0)
+        end, lists:seq(1,10)),
+        Master ! test_fun_ok
+    end,
+
+    Fun4 = fun() ->
+        lists:foreach(fun(I) ->
+            increment_ets_counter(Worker, Method, 2*I)
+        end, lists:seq(1,10)),
+        Master ! test_fun_ok
+    end,
+
+    Funs = [{Fun1, 1}, {Fun2, 1}, {Fun3, 10}, {Fun4, 10}],
+    TestCases = [{Fun, W} || Fun <- Funs, W <- [[Worker], Workers]],
+    lists:foreach(fun({{Fun, Ratio}, W}) ->
+        ct:print("aaa ~p", [W]),
+        do_massive_test(Fun, W, AccessOpsNum, Ratio)
+    end, TestCases),
+
+    EtsProc ! kill,
+    ok.
+
+do_massive_test(Fun, Workers, Processes, Ratio) ->
+    [Worker | _] = Workers,
+    ?assert(rpc:call(Worker, ?MODULE, reset_ets_counter, [])),
+    run_fun(Fun, Workers, [], round(Processes / Ratio)),
+    ?assertEqual(Processes, rpc:call(Worker, ?MODULE, get_ets_counter, [])),
+    ok.
+
+reset_ets_counter() ->
+    ets:insert(critical_section_test_ets, {counter, 0}).
+
+get_ets_counter() ->
+    [{counter, C}] = ets:lookup(critical_section_test_ets, counter),
+    C.
+
+increment_ets_counter(Sleep) ->
+    [{counter, C}] = ets:lookup(critical_section_test_ets, counter),
+    case Sleep > 0 of
+        true ->
+            timer:sleep(Sleep);
+        _ ->
+            ok
+    end,
+    ets:insert(critical_section_test_ets, {counter, C+1}).
+
+increment_ets_counter(Worker, Method, Sleep) ->
+    apply(critical_section, Method, [<<"increment_ets_counter_key">>, fun() ->
+        rpc:call(Worker, ?MODULE, increment_ets_counter, [Sleep])
+    end]).
+
 performance_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 10},
@@ -53,7 +168,6 @@ performance_test(Config) ->
         {description, "Performs one critical section and transaction"},
         {config, [{name, basic_config}, {description, "Basic config for test"}]}
     ]).
-
 performance_test_base(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
 
@@ -140,14 +254,24 @@ run_fun(_Fun, _Workers1, _Workers2, 0) ->
 run_fun(Fun, [], Workers2, Count) ->
     run_fun(Fun, Workers2, [], Count);
 run_fun(Fun, [W | Workers1], Workers2, Count) ->
-    spawn(W, Fun),
+    spawn_link(W, Fun),
     run_fun(Fun, Workers1, [W | Workers2], Count - 1),
-    Ans = receive
-        test_fun_ok -> ok
-    after
-        30000 -> timeout
-    end,
+    Ans = receive_fun_ans(),
     ?assertEqual(ok, Ans).
+
+receive_fun_ans() ->
+    receive
+        test_fun_ok -> ok;
+        {test_fun_error, Error} ->
+            {error, Error};
+        {'EXIT', _From, normal} ->
+            receive_fun_ans();
+        {'EXIT', _From, _Reason} = Err ->
+            Err
+    after
+        30000 ->
+            timeout
+    end.
 
 run_and_update_test(Config) ->
     % given

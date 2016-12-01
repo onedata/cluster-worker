@@ -21,7 +21,7 @@
 %% model_behaviour callbacks and API
 -export([save/1, get/1, list/0, exists/1, delete/1, update/2, create/1,
     create_or_update/2, model_init/0, 'after'/5, before/4]).
--export([enqueue/3, dequeue/2, current_owner/1]).
+-export([enqueue/3, dequeue/2, current_owner/1, is_pid_alive/1]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -186,17 +186,14 @@ dequeue(Key, Pid) ->
             {ok, #document{value = #lock{queue = Q}}} ->
                 case has(Q, Pid) of
                     false ->
-                        {error, not_lock_owner};
-                    true ->
-                        NewQ = dec(Q),
-                        case length(NewQ) of
-                            0 ->
-                                delete(Key),
-                                {ok, empty};
+                        case is_pid_alive(Pid) of
+                            true ->
+                                {error, not_lock_owner};
                             _ ->
-                                {ok, Key} = update(Key, #{queue => NewQ}),
-                                {ok, owner(NewQ)}
-                        end
+                                dequeue_internal(Q, Key)
+                        end;
+                    true ->
+                        dequeue_internal(Q, Key)
                 end;
             {error, {not_found, _}} ->
                 {error, lock_does_not_exist}
@@ -218,6 +215,19 @@ current_owner(Key) ->
             {error, Reason}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if owner is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_pid_alive(pid()) -> boolean().
+is_pid_alive(Owner) ->
+    case rpc:pinfo(Owner) of
+        Info when is_list(Info) ->
+            true;
+        _ ->
+            false
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -274,3 +284,24 @@ dec([{Pid, C} | T]) when C > 1 ->
     [{Pid, C - 1} | T];
 dec([{_Pid, C} | T]) when C =:= 1 ->
     T.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Removes first Pid from queue of processes waiting for lock on Key.
+%% Returns element that is in front of the queue after operation (if any).
+%% Record is automatically deleted if queue is empty after operation.
+%% @end
+%%--------------------------------------------------------------------
+-spec dequeue_internal([queue_element()], datastore:ext_key()) ->
+    {ok, pid() | empty}.
+dequeue_internal(Q, Key) ->
+    NewQ = dec(Q),
+    case length(NewQ) of
+        0 ->
+            delete(Key),
+            {ok, empty};
+        _ ->
+            {ok, Key} = update(Key, #{queue => NewQ}),
+            {ok, owner(NewQ)}
+    end.

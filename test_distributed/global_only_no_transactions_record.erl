@@ -87,7 +87,7 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(test_bucket, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, false).
+    ?MODEL_CONFIG(test_bucket6, [{?MODULE, update}], ?GLOBAL_ONLY_LEVEL, ?GLOBAL_ONLY_LEVEL, false).
 
 %%--------------------------------------------------------------------
 %% @doc
