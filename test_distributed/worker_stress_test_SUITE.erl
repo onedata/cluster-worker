@@ -21,7 +21,7 @@
 -include_lib("ctool/include/test/performance.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
 %%tests
 -export([stress_test/1,
     datastore_mixed_db_test/1, datastore_mixed_global_store_test/1, datastore_mixed_local_store_test/1,
@@ -175,12 +175,6 @@ mixed_cast_test_base(Config) ->
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
-
-init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json")).
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) when
     Case =:= datastore_mixed_db_test;

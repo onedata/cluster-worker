@@ -22,7 +22,7 @@
 -include_lib("ctool/include/global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([simple_call_test/1, direct_cast_test/1, redirect_cast_test/1, mixed_cast_test/1]).
 -export([mixed_cast_test_core/1]).
 -export([singleton_module_test/1, simple_call_test_base/1,
@@ -247,12 +247,6 @@ mixed_cast_test_core(Config) ->
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
-
-init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json")).
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
 
 init_per_testcase(singleton_module_test, Config) ->
   Workers = ?config(cluster_worker_nodes, Config),
