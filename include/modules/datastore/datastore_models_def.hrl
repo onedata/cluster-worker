@@ -76,9 +76,21 @@
 }).
 
 % Record for various data used during node management
-%
 -record(node_management, {
     value :: term()
+}).
+
+%% Record for auxiliary_cache_controller model
+-record(auxiliary_cache_controller,{}).
+
+%% Record for entry in auxiliary_cache_controller structure
+%% key consists of:
+%%  * Key which can by any term, it must be value of a field by which
+%%    given auxiliary table is ordered
+%%  * datastore key of given entity
+-record(auxiliary_cache_entry,{
+    key :: {Key :: term(), datastore:ext_key()},
+    value % currently this field is not used
 }).
 
 -endif.
