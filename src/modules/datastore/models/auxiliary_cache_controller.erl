@@ -5,6 +5,9 @@
 %%% cited in 'LICENSE.txt'.
 %%% @doc
 %%% Model responsible for updating state of auxiliary tables.
+%%% This module doesn't use save, update, create, get, delete and exists
+%%% functions, they're only implemented because module implements model_behaviour.
+%%% Store operations are performed directly on drivers in foreach_aux_cache.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(auxiliary_cache_controller).
