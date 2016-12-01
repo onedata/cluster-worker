@@ -195,15 +195,18 @@ configure_throttling() ->
                   DefaultTimeBase
               end,
 
-              {OldFaild, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
+              {OldFailed, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
                 {ok, #document{value = #node_management{value = TD}}} ->
                   TD;
                 {error, {not_found, _}} ->
                   {0, 0, 0, 0}
               end,
 
+              TaskMultip = (TaskAction > 0) andalso
+                (NewFailed > OldFailed) or ((NewTasks + NewFailed) > (OldTasks + OldFailed)),
+              MemoryMultip = (MemAction > 0) andalso (MemoryUsage > OldMemory),
               ThrottlingTime = case
-                {(NewFailed > OldFaild) or ((NewTasks + NewFailed) > (OldTasks + OldFaild)) or (MemoryUsage > OldMemory),
+                {TaskMultip or MemoryMultip,
                 Action} of
                 {true, _} ->
                   TB2 = 2 * TimeBase,

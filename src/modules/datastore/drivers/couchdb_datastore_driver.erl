@@ -203,10 +203,11 @@ save_link_doc(ModelConfig, Doc) ->
 %%--------------------------------------------------------------------
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = #document{}) ->
+save_doc(#model_config{aggregate_db_writes = _Aggregate} = ModelConfig, ToSave = #document{}) ->
     {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave)),
     Ref = make_ref(),
 
+    Aggregate = false, % TODO - fix batch save performance
     case Aggregate of
         true ->
             Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
