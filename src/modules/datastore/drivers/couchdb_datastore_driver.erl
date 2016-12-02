@@ -50,7 +50,7 @@
 -export([init_bucket/3, healthcheck/1, init_driver/1]).
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
--export([synchronization_doc_key/2, synchronization_link_key/2]).
+%%-export([synchronization_doc_key/2, synchronization_link_key/2]).
 
 -export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1]).
 -export([save_docs/2, save_docs/3, get_docs/2]).
