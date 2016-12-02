@@ -207,24 +207,24 @@ save_doc(#model_config{aggregate_db_writes = _Aggregate} = ModelConfig, ToSave =
     {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave)),
     Ref = make_ref(),
 
-    Aggregate = false, % TODO - fix batch save performance
-    case Aggregate of
-        true ->
-            Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
-            
-            receive
-                {Ref, Response} ->
-                    Response
-            after
-                ?DOCUMENT_AGGREGATE_SAVE_TIMEOUT ->
-                    {error, gateway_loop_timeout}
-            end;
-        false ->
+    % TODO - fix batch save performance
+%%    case Aggregate of
+%%        true ->
+%%            Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+%%
+%%            receive
+%%                {Ref, Response} ->
+%%                    Response
+%%            after
+%%                ?DOCUMENT_AGGREGATE_SAVE_TIMEOUT ->
+%%                    {error, gateway_loop_timeout}
+%%            end;
+%%        false ->
             [RawDoc] = make_raw_doc(ModelConfig, [ToSave]),
             {ok, [RawRes]} = db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_docs,
                 [[RawDoc], ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3),
-            parse_response(save, RawRes)
-    end.
+            parse_response(save, RawRes).
+%%    end.
 
 
 %%--------------------------------------------------------------------
