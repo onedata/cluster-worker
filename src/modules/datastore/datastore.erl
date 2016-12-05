@@ -18,9 +18,6 @@
 -include_lib("ctool/include/logging.hrl").
 
 
-%% ETS name for local (node scope) state.
--define(LOCAL_STATE, datastore_local_state).
-
 %% #document types
 -type uuid() :: binary().
 % TODO - exclude atom (possible crash because of to large number of atoms usage) or make apropriate WARNING
@@ -51,7 +48,8 @@
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
 
--export_type([store_level/0, delete_predicate/0, list_fun/0, exists_return/0]).
+-export_type([store_level/0, delete_predicate/0, list_fun/0,
+    exists_return/0]).
 
 %% Links' types
 -type link_version() :: non_neg_integer().
@@ -63,19 +61,29 @@
 -type link_spec() :: {link_name(), link_target()}.
 -type normalized_link_spec() :: {link_name(), normalized_link_target()}.
 
-
 -export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0,
     link_final_target/0, link_version/0]).
 
+%% Types for auxiliary caches
+-type aux_cache_key() :: {term(), key()}.
+-type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
+-type aux_cache_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
+-type aux_iterator_fun() :: fun((aux_cache_key()) -> aux_cache_handle()).
+-type aux_cache_access_context() :: transaction | async_dirty.
+-type aux_cache_config() :: #aux_cache_config{}.
+
+-export_type([aux_cache_level/0, aux_cache_key/0, aux_cache_handle/0,
+    aux_iterator_fun/0, aux_cache_access_context/0, aux_cache_config/0]).
+
 %% API
 -export([save/2, save_sync/2, update/4, update_sync/4, create/2, create_sync/2, create_or_update/3,
-    get/3, list/4, list_dirty/4,delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
+    get/3, list/4, list_dirty/4, list_ordered/5, delete/4, delete/3, delete/5, delete_sync/4, delete_sync/3, exists/3]).
 -export([fetch_link/3, fetch_link/4, add_links/3, add_links/4, create_link/3, delete_links/3, delete_links/4,
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
 -export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
--export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1]).
+-export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1, models_with_aux_caches/0]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
 
 %%%===================================================================
@@ -216,6 +224,19 @@ get(Level, ModelNameOrConfig, Key) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list_dirty(Level, ModelNameOrConfig, Fun, AccIn) ->
     list(Level, level_to_driver(Level), ModelNameOrConfig, Fun, AccIn, [{mode, dirty}]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes given function for each model's record. Records are traversed according to
+%% order in auxiliary cache connected with Field.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_ordered(Level :: store_level(), ModelName :: model_behaviour:model_type(),
+    Fun :: list_fun(), Field :: atom(), AccIn :: term()) ->
+    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+list_ordered(Level, ModelName, Fun, Field, AccIn) ->
+    list(Level, level_to_driver(Level), ModelName, Fun, AccIn, [{mode, {ordered, Field}}]).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -923,6 +944,17 @@ driver_to_module(?PERSISTENCE_DRIVER) ->
 driver_to_module(Driver) ->
     Driver.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns list of models which have auxiliary caches created.
+%% @end
+%%--------------------------------------------------------------------
+-spec models_with_aux_caches() -> [model_behaviour:model_type()].
+models_with_aux_caches() ->
+    datastore_config:models_with_aux_caches().
+
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -1069,7 +1101,7 @@ run_posthooks(#model_config{name = ModelName} = ModelConfig, Method, Level, Cont
 -spec load_local_state(Models :: [model_behaviour:model_type() | model_behaviour:model_config()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
+    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = model_config(ModelName),
@@ -1174,7 +1206,8 @@ init_drivers(Configs, NodeToSync) ->
                 fun(Driver) ->
                     DriverModule = driver_to_module(Driver),
                     ok = DriverModule:init_bucket(Bucket, Models, NodeToSync)
-                end, [?PERSISTENCE_DRIVER, ?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER])
+                end, [?PERSISTENCE_DRIVER, ?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER]),
+            init_auxiliary_caches(Models, NodeToSync)
         end, maps:to_list(configs_per_bucket(Configs))).
 
 %%--------------------------------------------------------------------
@@ -1213,6 +1246,46 @@ initialize_state(NodeToSync) ->
             " ~p: ~p", [Type, Reason]),
             {error, Reason}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initialize auxiliary tables for given Models
+%% @end
+%%--------------------------------------------------------------------
+-spec init_auxiliary_caches([#model_config{}], NodeToSync :: node()) -> ok.
+init_auxiliary_caches(Models, NodeToSync) ->
+    lists:foreach(
+        fun
+            (#model_config{auxiliary_caches=AuxCaches}) when map_size(AuxCaches) == 0 ->
+                ok;
+            (M = #model_config{auxiliary_caches=AuxCaches}) ->
+                lists:foreach(fun({StoreLevel, Fields}) ->
+                    Driver = level_to_driver(StoreLevel),
+                    Driver:create_auxiliary_caches(M, Fields, NodeToSync)
+                end, maps:to_list(invert_aux_cache_config(AuxCaches)))
+        end, Models),
+    ok.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inverts map. key becomes values and  values become keys.
+%% In new map each key's (old value) value is list of keys associated with
+%% these value in original map.
+%% e.g.
+%% M = #{ k1 => v1, k2 => v1, k3 => v3 }
+%% invert(M) = #{ v1 => [k1, k2], v2 => [k3] }
+%% @end
+%%--------------------------------------------------------------------
+-spec invert_aux_cache_config(#{}) -> #{term() => [term()]}.
+invert_aux_cache_config(Map) ->
+    Inverted = maps:fold(fun(K, #aux_cache_config{level =Field}, AccIn) ->
+        CurrentValue = maps:get(Field, AccIn, []),
+        maps:put(Field, [K | CurrentValue], AccIn) %todo test
+    end, #{}, Map),
+    Inverted.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1395,5 +1468,4 @@ exec_cache_async(ModelNameOrConfig, Driver, Method, Args) when is_atom(Driver) -
         {error, Reason} ->
             run_posthooks(ModelConfig, Method, driver_to_level(Driver), Args, {error, Reason})
     end.
-
 

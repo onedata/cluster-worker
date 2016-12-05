@@ -1121,4 +1121,12 @@ get_record(globally_cached_sync_record, Field1, Field2, Field3) ->
 get_record(locally_cached_sync_record, Field1, Field2, Field3) ->
     #locally_cached_sync_record{field1 = Field1, field2 = Field2, field3 = Field3};
 get_record(global_only_no_transactions_record, Field1, Field2, Field3) ->
-    #global_only_no_transactions_record{field1 = Field1, field2 = Field2, field3 = Field3}.
+    #global_only_no_transactions_record{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(global_only_record_with_global_aux_cache_dirty, Field1, Field2, Field3) ->
+    #global_only_record_with_global_aux_cache_dirty{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(global_only_record_with_global_aux_cache_transaction, Field1, Field2, Field3) ->
+    #global_only_record_with_global_aux_cache_transaction{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(local_only_record_with_local_aux_cache, Field1, Field2, Field3) ->
+    #local_only_record_with_local_aux_cache{field1 = Field1, field2 = Field2, field3 = Field3};
+get_record(global_only_record_with_local_aux_cache, Field1, Field2, Field3) ->
+    #global_only_record_with_local_aux_cache{field1 = Field1, field2 = Field2, field3 = Field3}.
