@@ -966,10 +966,12 @@ force_save(ModelConfig, BucketOverride,
                                         {ok, _} ->
                                             % TODO - what happens if first save is ok and second fails
                                             % Delete in new task type that starts if first try fails
-                                            case OldDel of
-                                                true -> ok;
-                                                _ -> delete_doc(ModelConfig, Old)
-                                            end,
+                                            delete_doc(ModelConfig, Old),
+                                            % TODO -VFS 2971
+%%                                            case OldDel of
+%%                                                true -> ok;
+%%                                                _ -> delete_doc(ModelConfig, Old)
+%%                                            end,
                                             {ok, Key};
                                         Other ->
                                             Other
@@ -1580,109 +1582,110 @@ assert_value_size(Value, ModelConfig, Key) ->
         false -> ok
     end.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets last version of document event if it was deleted.
-%% @end
-%%--------------------------------------------------------------------
--spec get_last(model_behaviour:model_config(), datastore:ext_key()) ->
-    {ok, datastore:document()} | datastore:get_error().
-get_last(#model_config{} = ModelConfig, Key) ->
-    get_last(ModelConfig, select_bucket(ModelConfig, Key), Key).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets last version of document event if it was deleted.
-%% @end
-%%--------------------------------------------------------------------
--spec get_last(model_behaviour:model_config(), binary(), datastore:ext_key()) ->
-    {ok, datastore:document()} | datastore:get_error().
-get_last(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, BucketOverride, Key) ->
-    case get(ModelConfig, BucketOverride, Key) of
-        {error, {not_found, ModelName}} ->
-            case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key), [{<<"open_revs">>, all}]], 3) of
-                {ok,{multipart,M}} ->
-                    case collect_mp(couchbeam:stream_doc(M), []) of
-                        List when is_list(List) ->
-                            lists:foldl(fun({doc,{Proplist}}, Ans) ->
-                                DocAnc = case verify_ans(Proplist) of
-                                    true ->
-                                        {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
-                                        Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
-                                        Proplist2 = Proplist -- Proplist1,
-                                        {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
-                                        Deleted = case lists:keyfind(<<"deleted">>, 1, Proplist) of
-                                            {_, true} -> true;
-                                            _ -> false
-                                        end,
-                                        RetDoc = #document{key = Key, value = Value, rev = Rev, version = Version, deleted = Deleted},
-                                        {ok, RetDoc};
-                                    _ ->
-                                        {error, db_internal_error}
-                                end,
-                                case {Ans, DocAnc} of
-                                    {{error, empty_answer}, _} ->
-                                        DocAnc;
-                                    {{error, db_internal_error}, _} ->
-                                        {error, db_internal_error};
-                                    {_, {error, db_internal_error}} ->
-                                        {error, db_internal_error};
-                                    {{ok, #document{rev = R1} = D1}, {ok, #document{rev = R2} = D2}} ->
-                                        {R1Num, R1Id} = rev_to_info(R1),
-                                        {R2Num, R2Id} = rev_to_info(R2),
-                                        case R1Num of
-                                            R2Num ->
-                                                case R1Id > R2Id of
-                                                    true ->
-                                                        {ok, D1};
-                                                    false ->
-                                                        {ok, D2}
-                                                end;
-                                            Higher when Higher > R2Num ->
-                                                {ok, D1};
-                                            _ ->
-                                                {ok, D2}
-                                        end
-                                end
-                            end, {error, empty_answer}, List);
-                        MultipartError ->
-                            ?error("Multipart get error: ~p", [MultipartError]),
-                            {error, db_internal_error}
-                    end;
-                {error, {not_found, _}} ->
-                    {error, {not_found, ModelName}};
-                {error, not_found} ->
-                    {error, {not_found, ModelName}};
-                {error, Reason} ->
-                    {error, Reason}
-            end;
-        GetAns ->
-            GetAns
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Collects multipart answer.
-%% @end
-%%--------------------------------------------------------------------
--spec collect_mp(tuple(), list()) -> list().
-collect_mp({doc, Doc, Next}, Acc) ->
-    collect_mp(couchbeam:stream_doc(Next), [{doc, Doc} | Acc]);
-collect_mp({att, Name, Next}, Acc) ->
-    collect_mp(couchbeam:stream_doc(Next), [{Name, <<>>} | Acc]);
-collect_mp({att_body, Name, Chunk, Next}, Acc) ->
-    Buffer = proplists:get_value(Name, Acc),
-    NBuffer = << Buffer/binary, Chunk/binary >>,
-    Acc1 = lists:keystore(Name, 1, Acc, {Name, NBuffer}),
-    collect_mp(couchbeam:stream_doc(Next), Acc1);
-collect_mp({att_eof, _Name, Next}, Acc) ->
-    collect_mp(couchbeam:stream_doc(Next), Acc);
-collect_mp(eof, Acc) ->
-    Acc.
+% TODO -VFS 2971
+%%%%--------------------------------------------------------------------
+%%%% @private
+%%%% @doc
+%%%% Gets last version of document event if it was deleted.
+%%%% @end
+%%%%--------------------------------------------------------------------
+%%-spec get_last(model_behaviour:model_config(), datastore:ext_key()) ->
+%%    {ok, datastore:document()} | datastore:get_error().
+%%get_last(#model_config{} = ModelConfig, Key) ->
+%%    get_last(ModelConfig, select_bucket(ModelConfig, Key), Key).
+%%
+%%
+%%%%--------------------------------------------------------------------
+%%%% @private
+%%%% @doc
+%%%% Gets last version of document event if it was deleted.
+%%%% @end
+%%%%--------------------------------------------------------------------
+%%-spec get_last(model_behaviour:model_config(), binary(), datastore:ext_key()) ->
+%%    {ok, datastore:document()} | datastore:get_error().
+%%get_last(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, BucketOverride, Key) ->
+%%    case get(ModelConfig, BucketOverride, Key) of
+%%        {error, {not_found, ModelName}} ->
+%%            case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key), [{<<"open_revs">>, all}]], 3) of
+%%                {ok,{multipart,M}} ->
+%%                    case collect_mp(couchbeam:stream_doc(M), []) of
+%%                        List when is_list(List) ->
+%%                            lists:foldl(fun({doc,{Proplist}}, Ans) ->
+%%                                DocAnc = case verify_ans(Proplist) of
+%%                                    true ->
+%%                                        {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
+%%                                        Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+%%                                        Proplist2 = Proplist -- Proplist1,
+%%                                        {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
+%%                                        Deleted = case lists:keyfind(<<"deleted">>, 1, Proplist) of
+%%                                            {_, true} -> true;
+%%                                            _ -> false
+%%                                        end,
+%%                                        RetDoc = #document{key = Key, value = Value, rev = Rev, version = Version, deleted = Deleted},
+%%                                        {ok, RetDoc};
+%%                                    _ ->
+%%                                        {error, db_internal_error}
+%%                                end,
+%%                                case {Ans, DocAnc} of
+%%                                    {{error, empty_answer}, _} ->
+%%                                        DocAnc;
+%%                                    {{error, db_internal_error}, _} ->
+%%                                        {error, db_internal_error};
+%%                                    {_, {error, db_internal_error}} ->
+%%                                        {error, db_internal_error};
+%%                                    {{ok, #document{rev = R1} = D1}, {ok, #document{rev = R2} = D2}} ->
+%%                                        {R1Num, R1Id} = rev_to_info(R1),
+%%                                        {R2Num, R2Id} = rev_to_info(R2),
+%%                                        case R1Num of
+%%                                            R2Num ->
+%%                                                case R1Id > R2Id of
+%%                                                    true ->
+%%                                                        {ok, D1};
+%%                                                    false ->
+%%                                                        {ok, D2}
+%%                                                end;
+%%                                            Higher when Higher > R2Num ->
+%%                                                {ok, D1};
+%%                                            _ ->
+%%                                                {ok, D2}
+%%                                        end
+%%                                end
+%%                            end, {error, empty_answer}, List);
+%%                        MultipartError ->
+%%                            ?error("Multipart get error: ~p", [MultipartError]),
+%%                            {error, db_internal_error}
+%%                    end;
+%%                {error, {not_found, _}} ->
+%%                    {error, {not_found, ModelName}};
+%%                {error, not_found} ->
+%%                    {error, {not_found, ModelName}};
+%%                {error, Reason} ->
+%%                    {error, Reason}
+%%            end;
+%%        GetAns ->
+%%            GetAns
+%%    end.
+%%
+%%%%--------------------------------------------------------------------
+%%%% @private
+%%%% @doc
+%%%% Collects multipart answer.
+%%%% @end
+%%%%--------------------------------------------------------------------
+%%-spec collect_mp(tuple(), list()) -> list().
+%%collect_mp({doc, Doc, Next}, Acc) ->
+%%    collect_mp(couchbeam:stream_doc(Next), [{doc, Doc} | Acc]);
+%%collect_mp({att, Name, Next}, Acc) ->
+%%    collect_mp(couchbeam:stream_doc(Next), [{Name, <<>>} | Acc]);
+%%collect_mp({att_body, Name, Chunk, Next}, Acc) ->
+%%    Buffer = proplists:get_value(Name, Acc),
+%%    NBuffer = << Buffer/binary, Chunk/binary >>,
+%%    Acc1 = lists:keystore(Name, 1, Acc, {Name, NBuffer}),
+%%    collect_mp(couchbeam:stream_doc(Next), Acc1);
+%%collect_mp({att_eof, _Name, Next}, Acc) ->
+%%    collect_mp(couchbeam:stream_doc(Next), Acc);
+%%collect_mp(eof, Acc) ->
+%%    Acc.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
