@@ -187,6 +187,8 @@ encode_record(key, Term, integer) when is_integer(Term) ->
     integer_to_binary(Term);
 encode_record(value, Term, integer) when is_integer(Term) ->
     Term;
+encode_record(value, Term, float) when is_integer(Term) ->
+    float_to_binary(float(Term));
 encode_record(key, Term, float) when is_float(Term) ->
     float_to_binary(Term);
 encode_record(value, Term, float) when is_float(Term) ->
@@ -244,6 +246,8 @@ decode_record(Term, integer) when is_integer(Term) ->
     Term;
 decode_record(Term, integer) when is_binary(Term) ->
     binary_to_integer(Term);
+decode_record(Term, float) when is_integer(Term) ->
+    float(Term);
 decode_record(Term, float) when is_float(Term) ->
     Term;
 decode_record(Term, float) when is_binary(Term) ->
