@@ -1646,10 +1646,7 @@ get_last(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, BucketO
                                                 {ok, D2}
                                         end
                                 end
-                            end, {error, empty_answer}, List);
-                        MultipartError ->
-                            ?error("Multipart get error: ~p", [MultipartError]),
-                            {error, db_internal_error}
+                            end, {error, empty_answer}, List)
                     end;
                 {error, {not_found, _}} ->
                     {error, {not_found, ModelName}};
