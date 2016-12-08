@@ -119,6 +119,8 @@ lock(Key, Recursive) ->
                                         {ok, Pid} ->
                                             Pid ! {acquired, Key},
                                             Wait();
+                                        {error, not_lock_owner} ->
+                                            Wait();
                                         Error ->
                                             throw({?MODULE, unable_to_repair_lock_status, Error})
                                     end

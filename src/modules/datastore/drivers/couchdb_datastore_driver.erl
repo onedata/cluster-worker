@@ -203,28 +203,28 @@ save_link_doc(ModelConfig, Doc) ->
 %%--------------------------------------------------------------------
 -spec save_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_doc(#model_config{aggregate_db_writes = _Aggregate} = ModelConfig, ToSave = #document{}) ->
+save_doc(#model_config{aggregate_db_writes = Aggregate} = ModelConfig, ToSave = #document{}) ->
     {ok, {Pid, _}} = get_server(select_bucket(ModelConfig, ToSave)),
     Ref = make_ref(),
 
     % TODO - fix batch save performance
-%%    case Aggregate of
-%%        true ->
-%%            Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
-%%
-%%            receive
-%%                {Ref, Response} ->
-%%                    Response
-%%            after
-%%                ?DOCUMENT_AGGREGATE_SAVE_TIMEOUT ->
-%%                    {error, gateway_loop_timeout}
-%%            end;
-%%        false ->
+    case Aggregate of
+        true ->
+            Pid ! {save_doc, {{self(), Ref}, {ModelConfig, ToSave}}},
+
+            receive
+                {Ref, Response} ->
+                    Response
+            after
+                ?DOCUMENT_AGGREGATE_SAVE_TIMEOUT ->
+                    {error, gateway_loop_timeout}
+            end;
+        false ->
             [RawDoc] = make_raw_doc(ModelConfig, [ToSave]),
             {ok, [RawRes]} = db_run(select_bucket(ModelConfig, ToSave), couchbeam, save_docs,
                 [[RawDoc], ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3),
-            parse_response(save, RawRes).
-%%    end.
+            parse_response(save, RawRes)
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -954,7 +954,7 @@ force_save(ModelConfig, BucketOverride,
                     save_revision(ModelConfig, BucketOverride, ToSave#document{rev = {RNum, [Id]}});
                 {error, Reason} ->
                     {error, Reason};
-                {ok, #document{key = Key, rev = Rev} = Old} ->
+                {ok, #document{key = Key, rev = Rev, deleted = OldDel} = Old} ->
                     {OldRNum, OldId} = rev_to_info(Rev),
                     case RNum of
                         OldRNum ->
@@ -964,7 +964,10 @@ force_save(ModelConfig, BucketOverride,
                                         {ok, _} ->
                                             % TODO - what happens if first save is ok and second fails
                                             % Delete in new task type that starts if first try fails
-                                            delete_doc(ModelConfig, Old),
+                                            case OldDel of
+                                                true -> ok;
+                                                _ -> delete_doc(ModelConfig, Old)
+                                            end,
                                             {ok, Key};
                                         Other ->
                                             Other
@@ -1575,6 +1578,7 @@ assert_value_size(Value, ModelConfig, Key) ->
         false -> ok
     end.
 
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -1601,25 +1605,48 @@ get_last(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, BucketO
             case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key), [{<<"open_revs">>, all}]], 3) of
                 {ok,{multipart,M}} ->
                     case collect_mp(couchbeam:stream_doc(M), []) of
-                        [{doc,{Proplist}}] ->
-                            case verify_ans(Proplist) of
-                                true ->
-                                    {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
-                                    Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
-                                    Proplist2 = Proplist -- Proplist1,
-                                    {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
-                                    Deleted = case lists:keyfind(<<"deleted">>, 1, Proplist) of
-                                        {_, true} -> true;
-                                        _ -> false
-                                    end,
-                                    RetDoc = #document{key = Key, value = Value, rev = Rev, version = Version, deleted = Deleted},
-                                    {ok, RetDoc};
-                                _ ->
-                                    {error, db_internal_error}
-                            end;
-                        MultipartError ->
-                            ?error("Multipart get error: ~p", [MultipartError]),
-                            {error, db_internal_error}
+                        List when is_list(List) ->
+                            lists:foldl(fun({doc,{Proplist}}, Ans) ->
+                                DocAnc = case verify_ans(Proplist) of
+                                    true ->
+                                        {_, Rev} = lists:keyfind(<<"_rev">>, 1, Proplist),
+                                        Proplist1 = [KV || {<<"_", _/binary>>, _} = KV <- Proplist],
+                                        Proplist2 = Proplist -- Proplist1,
+                                        {_WasUpdated, Version, Value} = datastore_json:decode_record_vcs({Proplist2}),
+                                        Deleted = case lists:keyfind(<<"deleted">>, 1, Proplist) of
+                                            {_, true} -> true;
+                                            _ -> false
+                                        end,
+                                        RetDoc = #document{key = Key, value = Value, rev = Rev, version = Version, deleted = Deleted},
+                                        {ok, RetDoc};
+                                    _ ->
+                                        {error, db_internal_error}
+                                end,
+                                case {Ans, DocAnc} of
+                                    {{error, empty_answer}, _} ->
+                                        DocAnc;
+                                    {{error, db_internal_error}, _} ->
+                                        {error, db_internal_error};
+                                    {_, {error, db_internal_error}} ->
+                                        {error, db_internal_error};
+                                    {{ok, #document{rev = R1} = D1}, {ok, #document{rev = R2} = D2}} ->
+                                        {R1Num, R1Id} = rev_to_info(R1),
+                                        {R2Num, R2Id} = rev_to_info(R2),
+                                        case R1Num of
+                                            R2Num ->
+                                                case R1Id > R2Id of
+                                                    true ->
+                                                        {ok, D1};
+                                                    false ->
+                                                        {ok, D2}
+                                                end;
+                                            Higher when Higher > R2Num ->
+                                                {ok, D1};
+                                            _ ->
+                                                {ok, D2}
+                                        end
+                                end
+                            end, {error, empty_answer}, List)
                     end;
                 {error, {not_found, _}} ->
                     {error, {not_found, ModelName}};

@@ -778,7 +778,7 @@ create_table(TabName, RecordName, Attributes, RamCopiesNodes) ->
 -spec create_table(TabName :: atom(), RecordName :: atom(),
     Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom()) -> atom().
 create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type) ->
-    create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, true).
+    create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, false).
 
 
 %%--------------------------------------------------------------------
