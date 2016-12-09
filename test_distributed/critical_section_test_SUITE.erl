@@ -124,7 +124,6 @@ massive_test_base(Config) ->
     Funs = [{Fun1, 1}, {Fun2, 1}, {Fun3, 10}, {Fun4, 10}],
     TestCases = [{Fun, W} || Fun <- Funs, W <- [[Worker], Workers]],
     lists:foreach(fun({{Fun, Ratio}, W}) ->
-        ct:print("aaa ~p", [W]),
         do_massive_test(Fun, W, AccessOpsNum, Ratio)
     end, TestCases),
 
@@ -153,10 +152,11 @@ increment_ets_counter(Sleep) ->
         _ ->
             ok
     end,
-    ets:insert(critical_section_test_ets, {counter, C+1}).
+    ets:insert(critical_section_test_ets, {counter, C+1}),
+    ok.
 
 increment_ets_counter(Worker, Method, Sleep) ->
-    apply(critical_section, Method, [<<"increment_ets_counter_key">>, fun() ->
+    ok = apply(critical_section, Method, [<<"increment_ets_counter_key">>, fun() ->
         rpc:call(Worker, ?MODULE, increment_ets_counter, [Sleep])
     end]).
 
@@ -204,7 +204,7 @@ performance_test_base(Config) ->
     T3M = check_time(TestCriticalMnesia, Workers),
     T4 = check_time(TestTransaction, Workers),
 
-    ct:print("~p", [{T1, T1M, T2, T3, T3M, T4}]),
+%%    ct:print("~p", [{T1, T1M, T2, T3, T3M, T4}]),
 
     T12 = check_time(TestCritical2, [Worker]),
     T12M = check_time(TestCriticalMnesia2, [Worker]),
@@ -213,7 +213,7 @@ performance_test_base(Config) ->
     T32M = check_time(TestCriticalMnesia2, Workers),
     T42 = check_time(TestTransaction2, Workers),
 
-    ct:print("~p", [{T12, T12M, T22, T32, T32M, T42}]),
+%%    ct:print("~p", [{T12, T12M, T22, T32, T32M, T42}]),
 
     [
         #parameter{name = critical_parallel_1_node, value = T1, unit = "us",

@@ -186,14 +186,17 @@ dequeue(Key, Pid) ->
             {ok, #document{value = #lock{queue = Q}}} ->
                 case has(Q, Pid) of
                     false ->
-                        case is_pid_alive(Pid) of
-                            true ->
-                                {error, not_lock_owner};
-                            _ ->
-                                dequeue_internal(Q, Key)
-                        end;
+                        {error, not_lock_owner};
                     true ->
-                        dequeue_internal(Q, Key)
+                        NewQ = dec(Q),
+                        case length(NewQ) of
+                            0 ->
+                                delete(Key),
+                                {ok, empty};
+                            _ ->
+                                {ok, Key} = update(Key, #{queue => NewQ}),
+                                {ok, owner(NewQ)}
+                        end
                 end;
             {error, {not_found, _}} ->
                 {error, lock_does_not_exist}
@@ -284,24 +287,3 @@ dec([{Pid, C} | T]) when C > 1 ->
     [{Pid, C - 1} | T];
 dec([{_Pid, C} | T]) when C =:= 1 ->
     T.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Removes first Pid from queue of processes waiting for lock on Key.
-%% Returns element that is in front of the queue after operation (if any).
-%% Record is automatically deleted if queue is empty after operation.
-%% @end
-%%--------------------------------------------------------------------
--spec dequeue_internal([queue_element()], datastore:ext_key()) ->
-    {ok, pid() | empty}.
-dequeue_internal(Q, Key) ->
-    NewQ = dec(Q),
-    case length(NewQ) of
-        0 ->
-            delete(Key),
-            {ok, empty};
-        _ ->
-            {ok, Key} = update(Key, #{queue => NewQ}),
-            {ok, owner(NewQ)}
-    end.
