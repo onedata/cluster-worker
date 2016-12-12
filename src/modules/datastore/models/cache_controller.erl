@@ -1072,7 +1072,7 @@ before_del(Key, ModelName, Level, Op) ->
             {ok, Record#cache_controller{action = to_be_del, action_data = Op}}
         end,
         % TODO - not transactional updates in local store - add transactional create and update on ets
-        V = #cache_controller{action = to_be_del},
+        V = #cache_controller{action = to_be_del, action_data = Op},
         Doc = #document{key = Uuid, value = V},
         {ok, _} = create_or_update(Level, Doc, UpdateFun),
         ok
