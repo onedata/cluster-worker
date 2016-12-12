@@ -51,7 +51,7 @@ all() ->
 massive_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 1},
-        {success_rate, 1000},
+        {success_rate, 100},
         {parameters, [
             [{name, access_ops_num}, {value, 1000}, {description, "Number of resource access operations during single test."}],
             [{name, method}, {value, run}, {description, "Number of resource access operations during single test."}]
