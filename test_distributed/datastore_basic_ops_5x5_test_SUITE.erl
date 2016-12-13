@@ -19,7 +19,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
 %%tests
 -export([create_delete_db_test/1, save_db_test/1, update_db_test/1, get_db_test/1, exists_db_test/1, links_db_test/1,
     create_delete_global_store_test/1, no_transactions_create_delete_global_store_test/1,
@@ -311,12 +311,6 @@ mixed_local_cache_test_base(Config) ->
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
-
-init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]).
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
 
 init_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:set_env(Case, Config).

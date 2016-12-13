@@ -37,7 +37,7 @@
 -define(SCOPE_MASTER_PROC_NAME, sm_proc).
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
 %%tests
 -export([local_test/1, global_test/1, global_atomic_update_test/1, globally_cached_atomic_update_test/1,
     disk_list_test/1, global_list_test/1, persistance_test/1, local_list_test/1, globally_cached_list_test/1,
@@ -2346,13 +2346,6 @@ globally_cached_links_test(Config) ->
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
-
-init_per_suite(Config) ->
-    NewConfig = ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]),
-    NewConfig.
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
 
 init_per_testcase(links_scope_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),

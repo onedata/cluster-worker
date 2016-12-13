@@ -21,8 +21,7 @@
 -define(TIMEOUT, timer:seconds(20)).
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1,
-    init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([critical_fun_update/3, critical_fun_increment/2, failure_test_fun/1]).
 -export([
     run_and_update_test/1,
@@ -341,12 +340,6 @@ failure_in_critical_section_test(Config) ->
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
-
-init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json")).
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
 
 init_per_testcase(_, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
