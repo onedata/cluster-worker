@@ -26,7 +26,7 @@
 -define(TIMEOUT, timer:seconds(30)).
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
     view_query_test/1,
     spatial_view_query_test/1
@@ -76,12 +76,6 @@ spatial_view_query_test(Config) ->
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
-
-init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json")).
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
 
 init_per_testcase(_, Config) ->
     [P1, P2] = ?config(cluster_worker_nodes, Config),
