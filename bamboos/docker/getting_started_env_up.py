@@ -5,10 +5,19 @@
 Copyright (C) 2016 ACK CYFRONET AGH
 This software is released under the MIT license cited in 'LICENSE.txt'
 
+This file is mainly used in onedata tests.
+
 Starts scenario 2.0 from onedata's getting started.
 Runs isolated Onedata deployment consisting of:
 - a single node preconfigured Onezone instance
 - a single node preconfigured Oneprovider instance
+
+To run this script manually:
+- run script from onedata repo root dir
+- make sure there is tests/gui directory in onedata repo root dir
+- make sure you have python libraries: urllib3, certifi
+- make sure you have getting_started, onezone_swagger and onepanel_swagger submodules
+- build swagger clients running command: "make build_swaggers" from onedata repo root dir
 
 Run the script with -h flag to learn about script's running options.
 """
@@ -41,7 +50,7 @@ import json
 
 scenario_2_0_path = os.path.join('getting_started', 'scenarios', '2_0_oneprovider_onezone')
 scenario_2_0_network = '20oneprovideronezone_scenario2'
-timeout = 60 * 5
+timeout = 60 * 10
 start_onezone_args = ['--zone', '--detach', '--with-clean']
 start_oneprovider_args = ['--provider', '--detach', '--without-clean']
 PANEL_REST_PORT = 9443
@@ -74,6 +83,32 @@ def print_logs(service_name, service_docker_logs):
                     print logs.readlines()
             except IOError:
                 print 'Couldn\'t find {}'.format(os.path.join(path, dir, file))
+
+
+PERSISTENCE = ('# configuration persistance',
+               '# data persistance',
+               '# configuration persistence',
+               '# data persistence')
+
+
+def rm_persistence(path, service_name):
+    """Remove persistence of configuration/data.
+    """
+    service_path = os.path.join(path, 'docker-compose-{}.yml'
+                                      ''.format(service_name))
+    with open(service_path, 'r+') as f:
+        lines = f.readlines()
+
+        comment = False
+        for i, line in enumerate(lines):
+            if comment:
+                lines[i] = '#{}'.format(line) if line[0] != '#' else line
+                comment = False
+            if any(per in line for per in PERSISTENCE):
+                comment = True
+
+        f.seek(0)
+        f.writelines(lines)
 
 
 def start_service(start_service_path, start_service_args, service_name, timeout):
@@ -126,15 +161,17 @@ def start_service(start_service_path, start_service_args, service_name, timeout)
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--admin-credentials', action='store', default='admin1:Password1',
+parser.add_argument('--admin-credentials', action='store', default='admin:password',
                     help='Username and password for admin user', required=False)
 parser.add_argument('--docker-name', action='store', default='',
                     help='Name of docker that will be added to network', required=False)
 args = parser.parse_args()
 
 print 'Starting onezone'
+rm_persistence(scenario_2_0_path, 'onezone')
 onezone_ip = start_service(scenario_2_0_path, start_onezone_args, 'onezone', timeout)
 print 'Starting oneprovider'
+rm_persistence(scenario_2_0_path, 'oneprovider')
 oneprovider_ip = start_service(scenario_2_0_path, start_oneprovider_args, 'oneprovider', timeout)
 
 if args.docker_name:
