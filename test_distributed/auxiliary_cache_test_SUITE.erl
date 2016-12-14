@@ -23,7 +23,7 @@
 
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 %% tests
 -export([local_only_record_with_local_aux_cache_creation_test/1,
     local_only_record_with_local_aux_cache_save_test/1,
@@ -413,11 +413,7 @@ global_only_record_with_global_aux_cache_create_or_update_test(Config, AccessCon
 %%%===================================================================
 
 init_per_suite(Config) ->
-    NewConfig = ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json"), [random]),
-    NewConfig.
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
+    [{?LOAD_MODULES, [random]} | Config].
 
 init_per_testcase(Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
