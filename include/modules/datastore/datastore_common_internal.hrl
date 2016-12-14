@@ -67,7 +67,7 @@
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, false)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication),
-    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, false, #{})).
+    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication, #{})).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication, AuxiliaryCaches),
     #model_config{
         name = ?MODULE,
