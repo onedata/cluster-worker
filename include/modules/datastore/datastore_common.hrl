@@ -32,4 +32,7 @@
             {next, [Obj | Acc]}
     end).
 
+%% ETS name for local (node scope) state.
+-define(LOCAL_STATE, datastore_local_state).
+
 -endif.

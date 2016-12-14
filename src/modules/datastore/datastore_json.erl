@@ -190,12 +190,20 @@ encode_record(_, Term, string) when is_binary(Term) ->
     Term;
 encode_record(key, Term, integer) when is_integer(Term) ->
     integer_to_binary(Term);
+encode_record(key, Term, integer) when is_float(Term) andalso (Term =:= float(round(Term))) ->
+    integer_to_binary(round(Term));
 encode_record(value, Term, integer) when is_integer(Term) ->
     Term;
+encode_record(value, Term, integer) when is_float(Term) andalso (Term =:= float(round(Term))) ->
+    round(Term);
 encode_record(key, Term, float) when is_float(Term) ->
     float_to_binary(Term);
+encode_record(key, Term, float) when is_integer(Term) ->
+    float_to_binary(float(Term));
 encode_record(value, Term, float) when is_float(Term) ->
     Term;
+encode_record(value, Term, float) when is_integer(Term) ->
+    float(Term);
 encode_record(value, Term, #{} = Struct) when is_map(Term) ->
     [{KeyType, ValueType}] = maps:to_list(Struct),
     {maps:fold(
@@ -249,10 +257,14 @@ decode_record(Term, string) when is_binary(Term) ->
     Term;
 decode_record(Term, integer) when is_integer(Term) ->
     Term;
+decode_record(Term, integer) when is_float(Term) andalso (Term =:= float(round(Term))) ->
+    round(Term);
 decode_record(Term, integer) when is_binary(Term) ->
     binary_to_integer(Term);
 decode_record(Term, float) when is_float(Term) ->
     Term;
+decode_record(Term, float) when is_integer(Term) ->
+    float(Term);
 decode_record(Term, float) when is_binary(Term) ->
     binary_to_float(Term);
 decode_record({Term}, #{} = Struct) when is_list(Term) ->
