@@ -24,6 +24,7 @@
   % TODO - enable after clearing update
 %%   cache_control = true,
   cache_control = true,
+  task_control = true,
   last_cache_cleaning = {0,0,0},
   cache_cleaning_pid = undefined :: undefined | pid(),
   last_state_analysis = {0,0,0}

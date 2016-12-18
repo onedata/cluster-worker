@@ -262,6 +262,12 @@ handle_call(disable_cache_control, _From, State) ->
 handle_call(enable_cache_control, _From, State) ->
     {reply, ok, State#state{cache_control = true}};
 
+handle_call(disable_task_control, _From, State) ->
+    {reply, ok, State#state{task_control = false}};
+
+handle_call(enable_task_control, _From, State) ->
+    {reply, ok, State#state{task_control = true}};
+
 %% Generic function apply in node_manager's process
 handle_call({apply, M, F, A}, _From, State) ->
     {reply, apply(M, F, A), State};
@@ -321,8 +327,13 @@ handle_cast(check_mem, State) ->
     next_mem_check(),
     {noreply, State};
 
-handle_cast(check_tasks, State) ->
-    spawn(task_manager, check_and_rerun_all, []),
+handle_cast(check_tasks, #state{task_control = TC} = State) ->
+    case TC of
+        true ->
+            spawn(task_manager, check_and_rerun_all, []);
+        _ ->
+            ok
+    end,
     next_task_check(),
     {noreply, State};
 
@@ -848,7 +859,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                             erlang:process_info(P, total_heap_size), P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
                 ?debug("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
-                    "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
+                "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
                     TopProcesses, MergedStacks, MergedStacks2
                 ]),
 

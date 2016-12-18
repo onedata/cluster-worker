@@ -693,7 +693,8 @@ init_per_testcase(throttling_test, Config) ->
 init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_repeats, 10))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_repeats, 10)),
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_task_control))
     end, Workers),
     Config.
 
