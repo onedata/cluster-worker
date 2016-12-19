@@ -317,7 +317,7 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
             ok;
         _ ->
             lists:foreach(fun(W) ->
-                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
+                gen_server:cast({?NODE_MANAGER_NAME, W}, force_check_tasks)
             end, WorkersList),
             ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
@@ -358,10 +358,10 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     case Level of
         ?NODE_LEVEL ->
             lists:foreach(fun(W) ->
-                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
+                gen_server:cast({?NODE_MANAGER_NAME, W}, force_check_tasks)
             end, WorkersList);
         _ ->
-            gen_server:cast({?NODE_MANAGER_NAME, W1}, check_tasks)
+            gen_server:cast({?NODE_MANAGER_NAME, W1}, force_check_tasks)
     end,
 
     ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
@@ -407,10 +407,10 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     case Level of
         ?NODE_LEVEL ->
             lists:foreach(fun(W) ->
-                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
+                gen_server:cast({?NODE_MANAGER_NAME, W}, force_check_tasks)
             end, WorkersList);
         _ ->
-            gen_server:cast({?NODE_MANAGER_NAME, W1}, check_tasks)
+            gen_server:cast({?NODE_MANAGER_NAME, W1}, force_check_tasks)
     end,
 
     ?assertEqual(5, count_answers(), 1, timer:seconds(3)),

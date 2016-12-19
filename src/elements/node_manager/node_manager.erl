@@ -337,6 +337,10 @@ handle_cast(check_tasks, #state{task_control = TC} = State) ->
     next_task_check(),
     {noreply, State};
 
+handle_cast(force_check_tasks, State) ->
+    spawn(task_manager, check_and_rerun_all, []),
+    {noreply, State};
+
 handle_cast(do_heartbeat, State) ->
     spawn(fun() ->
         {NewMonState, NewLSA} = do_heartbeat(State),
