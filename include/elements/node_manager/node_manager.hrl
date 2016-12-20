@@ -21,8 +21,6 @@
   initialized = false :: boolean(),
   monitoring_state = undefined :: monitoring:node_monitoring_state(),
   scheduler_info = undefined :: undefined | list(),
-  % TODO - enable after clearing update
-%%   cache_control = true,
   cache_control = true,
   task_control = true,
   last_cache_cleaning = {0,0,0},
