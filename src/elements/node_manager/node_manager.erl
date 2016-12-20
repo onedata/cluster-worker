@@ -543,9 +543,13 @@ cm_conn_ack(State) ->
 -spec do_heartbeat(State :: #state{}) -> {monitoring:node_monitoring_state(), {integer(), integer(), integer()}}.
 do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
     scheduler_info = SchedulerInfo} = _State) ->
+    T1 = os:timestamp(),
     NewMonState = monitoring:update(MonState),
+    ?info("qqqqqqq ~p", [timer:now_diff(os:timestamp(), T1)]),
     NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
+    ?info("qqqqqqq ~p", [timer:now_diff(os:timestamp(), T1)]),
     NodeState = monitoring:get_node_state(NewMonState),
+    ?info("qqqqqqq ~p", [timer:now_diff(os:timestamp(), T1)]),
     ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     {NewMonState, NewLSA};
