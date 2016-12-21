@@ -327,11 +327,12 @@ handle_cast(check_tasks, State) ->
     {noreply, State};
 
 handle_cast(do_heartbeat, State) ->
+    Self = self(),
     spawn(fun() ->
         {NewMonState, NewLSA} = do_heartbeat(State),
         gen_server2:cast(?NODE_MANAGER_NAME, {heartbeat_state_update, {NewMonState, NewLSA}}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
-        erlang:send_after(Interval, self(), {timer, do_heartbeat})
+        erlang:send_after(Interval, Self, {timer, do_heartbeat})
     end),
     {noreply, State};
 
