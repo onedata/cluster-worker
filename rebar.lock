@@ -108,5 +108,5 @@
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.0">>},2},
  {<<"web_client">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/web-client.git",
-       {ref,"d581ec00203caa46f89073b4d2e7fe8c668da0ab"}},
+       {ref,"6e885bba61da9f483bf8936dd4b1d891356f5e74"}},
   1}].
