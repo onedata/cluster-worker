@@ -52,7 +52,8 @@
     globally_cached_many_links_test/1, create_globally_cached_test/1, disk_only_create_or_update_test/1,
     global_only_create_or_update_test/1, globally_cached_create_or_update_test/1, links_scope_test/1,
     globally_cached_foreach_link_test/1, links_scope_proc_mem_test/1,  globally_cached_consistency_test/1,
-    globally_cached_consistency_without_consistency_metadata_test/1, globally_cached_consistency_with_ambigues_link_names/1]).
+    globally_cached_consistency_without_consistency_metadata_test/1, globally_cached_consistency_with_ambigues_link_names/1,
+    test_models/1]).
 -export([utilize_memory/2, update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
 
 all() ->
@@ -72,7 +73,7 @@ all() ->
         globally_cached_create_or_update_test, links_scope_test, globally_cached_foreach_link_test,
         links_scope_proc_mem_test, globally_cached_consistency_test,
         globally_cached_consistency_without_consistency_metadata_test,
-        globally_cached_consistency_with_ambigues_link_names
+        globally_cached_consistency_with_ambigues_link_names, test_models
     ]).
 
 
@@ -82,6 +83,40 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+test_models(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Models = ?call(Worker, datastore_config, models, []),
+
+    lists:foreach(fun(ModelName) ->
+%%        ct:print("Module ~p", [ModelName]),
+
+        #model_config{store_level = SL} = MC = ?call(Worker, ModelName, model_init, []),
+        Cache = case SL of
+            ?GLOBALLY_CACHED_LEVEL -> true;
+            ?LOCALLY_CACHED_LEVEL -> true;
+            _ -> false
+        end,
+
+        Key = list_to_binary("key_tm_" ++ atom_to_list(ModelName)),
+        Doc =  #document{
+            key = Key,
+            value = MC#model_config.defaults
+        },
+        ?assertMatch({ok, _}, ?call_store(Worker, save, [SL, Doc])),
+        ?assertMatch({ok, true}, ?call_store(Worker, exists, [SL, ModelName, Key])),
+
+%%        ct:print("Module ok ~p", [ModelName]),
+
+        case Cache of
+            true ->
+                PModule = ?call_store(Worker, driver_to_module, [?PERSISTENCE_DRIVER]),
+                ?assertMatch({ok, true}, ?call(Worker, PModule, exists, [MC, Key]), 10);
+%%                ct:print("Module caching ok ~p", [ModelName]);
+            _ ->
+                ok
+        end
+    end, Models).
 
 globally_cached_consistency_with_ambigues_link_names(Config) ->
     %% given

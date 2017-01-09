@@ -1041,7 +1041,9 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                     end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
                 {op_change, NewOp, {ok, _}} ->
                     end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
-                WrongAns -> WrongAns
+                WrongAns ->
+                    ?error("Wrong ans for op: ~p, ~p", [{Key, ModelName, Op, Args, Level, Sleep}, WrongAns]),
+                    WrongAns
             end
         end,
         {task, Task}

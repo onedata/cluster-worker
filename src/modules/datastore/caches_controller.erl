@@ -436,9 +436,11 @@ cache_to_datastore_level(ModelName) ->
 %%    true -> ?GLOBAL_ONLY_LEVEL;
 %%    _ -> ?LOCAL_ONLY_LEVEL
 %%  end.
+  % TODO - repair level checking
   case ModelName of
     locally_cached_record -> ?LOCAL_ONLY_LEVEL;
     locally_cached_sync_record -> ?LOCAL_ONLY_LEVEL;
+    dbsync_state -> ?LOCAL_ONLY_LEVEL;
     _ -> ?GLOBAL_ONLY_LEVEL
   end.
 
