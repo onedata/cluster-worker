@@ -55,7 +55,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5, normalize_seq/1]).
+-export([start_gateway/5, get/3, force_save/2, force_save/3, db_run/4, db_run/5]).
 -export([save_docs/2, save_docs/3, get_docs/2]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
@@ -759,29 +759,6 @@ healthcheck(_State) ->
         _:R -> {error, R}
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Normalizes given sequence number to non negative integer.
-%% @end
-%%--------------------------------------------------------------------
--spec normalize_seq(Seq :: non_neg_integer() | binary()) -> non_neg_integer().
-normalize_seq(Seq) when is_integer(Seq) ->
-    Seq;
-normalize_seq(SeqBin) when is_binary(SeqBin) ->
-    try binary_to_integer(SeqBin, 10) of
-        Seq -> Seq
-    catch
-        _:_ ->
-            try
-                ?warning("Changes loss: ~p", [SeqBin]),
-                [_SeqStable, SeqCurrent] = binary:split(SeqBin, <<"::">>),
-                normalize_seq(SeqCurrent)
-            catch
-                _:_ ->
-                    throw({invalid_seq_format, SeqBin})
-            end
-    end.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -1386,14 +1363,14 @@ handle_change(Change, #state{callback = Callback, until = Until, last_seq = Last
     NewChanges =
         try
             RawDoc = doc(Change),
-            Seq = seq(Change),
+            Seq = normalize_seq(seq(Change)),
             Deleted = deleted(Change),
 
             RawDocOnceAgain = jiffy:decode(jsx:encode(RawDoc)),
             Document = process_raw_doc(Bucket, RawDocOnceAgain),
 
             Callback(Seq, Document#document{deleted = Deleted}, model(Document)),
-            State#state{last_seq = max(normalize_seq(Seq), LastSeq)}
+            State#state{last_seq = max(Seq, LastSeq)}
         catch
             _:{badmatch, false} ->
                 State;
@@ -1455,6 +1432,30 @@ terminate(Reason, _State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Normalizes given sequence number to non negative integer.
+%% @end
+%%--------------------------------------------------------------------
+-spec normalize_seq(Seq :: non_neg_integer() | binary()) -> non_neg_integer().
+normalize_seq(Seq) when is_integer(Seq) ->
+    Seq;
+normalize_seq(SeqBin) when is_binary(SeqBin) ->
+    try binary_to_integer(SeqBin, 10) of
+        Seq -> Seq
+    catch
+        _:_ ->
+            try
+                ?warning("Changes loss: ~p", [SeqBin]),
+                [_SeqStable, SeqCurrent] = binary:split(SeqBin, <<"::">>),
+                normalize_seq(SeqCurrent)
+            catch
+                _:_ ->
+                    throw({invalid_seq_format, SeqBin})
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
