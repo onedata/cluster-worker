@@ -45,7 +45,7 @@
     link_walk_test/1, multiple_links_creation_disk_test/1, multiple_links_creation_global_only_test/1,
     disk_only_many_links_test/1, global_only_many_links_test/1, globally_cached_many_links_test/1,
     disk_only_create_or_update_test/1, global_only_create_or_update_test/1, globally_cached_create_or_update_test/1,
-    links_scope_test/1, links_scope_proc_mem_test/1]).
+    links_scope_test/1, links_scope_proc_mem_test/1, test_models/1]).
 -export([update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
 
 all() ->
@@ -56,7 +56,7 @@ all() ->
         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
         disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
         disk_only_create_or_update_test, global_only_create_or_update_test, globally_cached_create_or_update_test,
-        links_scope_test, links_scope_proc_mem_test
+        links_scope_test, links_scope_proc_mem_test, test_models
     ]).
 
 %%%===================================================================
@@ -65,6 +65,40 @@ all() ->
 
 % TODO - add tests that clear cache_controller model and check if cache still works,
 % TODO - add tests that check time refreshing by get and fetch_link operations
+
+test_models(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Models = ?call(Worker, datastore_config, models, []),
+
+    lists:foreach(fun(ModelName) ->
+%%        ct:print("Module ~p", [ModelName]),
+
+        #model_config{store_level = SL} = MC = ?call(Worker, ModelName, model_init, []),
+        Cache = case SL of
+            ?GLOBALLY_CACHED_LEVEL -> true;
+            ?LOCALLY_CACHED_LEVEL -> true;
+            _ -> false
+        end,
+
+        Key = list_to_binary("key_tm_" ++ atom_to_list(ModelName)),
+        Doc =  #document{
+            key = Key,
+            value = MC#model_config.defaults
+        },
+        ?assertMatch({ok, _}, ?call_store(Worker, save, [SL, Doc])),
+        ?assertMatch({ok, true}, ?call_store(Worker, exists, [SL, ModelName, Key])),
+
+%%        ct:print("Module ok ~p", [ModelName]),
+
+        case Cache of
+            true ->
+                PModule = ?call_store(Worker, driver_to_module, [?PERSISTENCE_DRIVER]),
+                ?assertMatch({ok, true}, ?call(Worker, PModule, exists, [MC, Key]), 10);
+%%                ct:print("Module caching ok ~p", [ModelName]);
+            _ ->
+                ok
+        end
+    end, Models).
 
 links_scope_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
