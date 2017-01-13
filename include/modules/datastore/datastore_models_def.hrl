@@ -81,7 +81,9 @@
 }).
 
 %% Record for auxiliary_cache_controller model
--record(auxiliary_cache_controller,{}).
+-record(auxiliary_cache_controller,{
+    dummy :: undefined % never used - only for tests (this record is only saved during tests, it is used only for hooks)
+}).
 
 %% Record for entry in auxiliary_cache_controller structure
 %% key consists of:
