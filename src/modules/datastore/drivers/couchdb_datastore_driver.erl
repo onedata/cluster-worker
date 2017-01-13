@@ -66,6 +66,9 @@
 -export([default_bucket/0, sync_enabled_bucket/0]).
 -export([rev_to_number/1]).
 
+% for tests
+-export([normalize_seq/1]).
+
 %%%===================================================================
 %%% buckets
 %%%===================================================================
@@ -759,6 +762,29 @@ healthcheck(_State) ->
         _:R -> {error, R}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Normalizes given sequence number to non negative integer.
+%% @end
+%%--------------------------------------------------------------------
+-spec normalize_seq(Seq :: non_neg_integer() | binary()) -> non_neg_integer().
+normalize_seq(Seq) when is_integer(Seq) ->
+    Seq;
+normalize_seq(SeqBin) when is_binary(SeqBin) ->
+    try binary_to_integer(SeqBin, 10) of
+        Seq -> Seq
+    catch
+        _:_ ->
+            try
+                ?warning("Changes loss: ~p", [SeqBin]),
+                [_SeqStable, SeqCurrent] = binary:split(SeqBin, <<"::">>),
+                normalize_seq(SeqCurrent)
+            catch
+                _:_ ->
+                    throw({invalid_seq_format, SeqBin})
+            end
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -1432,30 +1458,6 @@ terminate(Reason, _State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Normalizes given sequence number to non negative integer.
-%% @end
-%%--------------------------------------------------------------------
--spec normalize_seq(Seq :: non_neg_integer() | binary()) -> non_neg_integer().
-normalize_seq(Seq) when is_integer(Seq) ->
-    Seq;
-normalize_seq(SeqBin) when is_binary(SeqBin) ->
-    try binary_to_integer(SeqBin, 10) of
-        Seq -> Seq
-    catch
-        _:_ ->
-            try
-                ?warning("Changes loss: ~p", [SeqBin]),
-                [_SeqStable, SeqCurrent] = binary:split(SeqBin, <<"::">>),
-                normalize_seq(SeqCurrent)
-            catch
-                _:_ ->
-                    throw({invalid_seq_format, SeqBin})
-            end
-    end.
 
 %%--------------------------------------------------------------------
 %% @private
