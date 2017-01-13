@@ -279,7 +279,7 @@ links_scope_proc_mem_test(Config) ->
         ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
         ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
-            fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
+            fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
     end,
     GetAllLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
         AccFun = fun(LinkName, LinkValue, Acc) ->
@@ -304,7 +304,7 @@ links_scope_proc_mem_test(Config) ->
         ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
             fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
         ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
-            fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
+            fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
                  end,
     DeleteLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
@@ -314,7 +314,7 @@ links_scope_proc_mem_test(Config) ->
             ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
                 fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
             ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
-                fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 6)
+                fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
         end, Links)
     end,
 
@@ -455,14 +455,14 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
-        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
 
     ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
-        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
 
     ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
     ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity2])),
@@ -470,7 +470,7 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
         ?call_store(Worker2, get, [Level,
             TestRecord, Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
-        ?call(Worker1, PModule, get, [ModelConfig, Key]), 6),
+        ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
     ok.
 
 create_or_update_test_base(Config, Level) ->

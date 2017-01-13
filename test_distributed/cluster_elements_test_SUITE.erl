@@ -281,8 +281,9 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     ?assertEqual(FirstCheckNum, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(1)),
-    ?assertEqual(5, count_answers(), 1, timer:seconds(10)),
+    timer:sleep(timer:seconds(1)),
+    ?assertEqual(0, count_answers()),
+    ?assertEqual(5, count_answers(), 2, timer:seconds(10)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
@@ -310,7 +311,8 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
     ?assertEqual(FirstCheckNum, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+    timer:sleep(timer:seconds(30)),
+    ?assertEqual(0, count_answers()),
 
     case Level of
         ?NON_LEVEL ->
@@ -319,7 +321,7 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
             lists:foreach(fun(W) ->
                 gen_server:cast({?NODE_MANAGER_NAME, W}, force_check_tasks)
             end, WorkersList),
-            ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+            ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level]))
     end,
@@ -346,7 +348,8 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     ?assertEqual(0, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+    timer:sleep(timer:seconds(30)),
+    ?assertEqual(0, count_answers()),
 
     {A1_2, A2_2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1_2, A2_2}),
@@ -364,7 +367,7 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
             gen_server:cast({?NODE_MANAGER_NAME, W1}, force_check_tasks)
     end,
 
-    ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+    ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
@@ -394,7 +397,8 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     ?assertEqual({ok, {0,0}}, rpc:call(W1, task_pool, count_tasks, [Level, undefined, 10])),
     ?assertEqual({ok, {0,SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+    timer:sleep(timer:seconds(30)),
+    ?assertEqual(0, count_answers()),
 
     {A1_2, A2_2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1_2, A2_2}),
@@ -413,7 +417,7 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
             gen_server:cast({?NODE_MANAGER_NAME, W1}, force_check_tasks)
     end,
 
-    ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+    ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
     ?assertEqual({ok, {0,0}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
@@ -665,7 +669,7 @@ get_rollback_ans(Num) ->
         {rollback, Num} -> ok;
         Other -> {error, Other}
     after
-        0 -> non
+        1000 -> non
     end.
 
 %%%===================================================================
