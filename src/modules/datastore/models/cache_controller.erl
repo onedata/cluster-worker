@@ -1012,7 +1012,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                                               NewMethod, FullArgs),
                                           catch datastore:run_posthooks(ModelConfig, NewMethod,
                                               datastore:driver_to_level(?PERSISTENCE_DRIVER), NewArgs, CallAns),
-                                          {op_change, NewMethod, CallAns};
+                                          {op_change, NewMethod, NewArgs, CallAns};
                                       ok ->
                                           FullArgs = [ModelConfig | Args],
                                           CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
@@ -1037,9 +1037,9 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                 {ok, _} ->
                     end_disk_op(Uuid, Pid, ModelName, Op, Level);
                 {error, not_last_user} -> ok;
-                {op_change, NewOp, ok} ->
+                {op_change, NewOp, _, ok} ->
                     end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
-                {op_change, NewOp, {ok, _}} ->
+                {op_change, NewOp, _, {ok, _}} ->
                     end_disk_op(Uuid, Pid, ModelName, NewOp, Level);
                 WrongAns ->
                     ?error("Wrong ans for op: ~p, ~p", [{Key, ModelName, Op, Args, Level, Sleep}, WrongAns]),
