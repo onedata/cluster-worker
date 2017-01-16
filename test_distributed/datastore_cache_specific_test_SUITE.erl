@@ -8,8 +8,8 @@
 %%% @doc Tests datastore main API.
 %%% @end
 %%%-------------------------------------------------------------------
--module(datastore_cache_specyfic_test_SUITE).
--author("Michal Wrzeszvz").
+-module(datastore_cache_specific_test_SUITE).
+-author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
