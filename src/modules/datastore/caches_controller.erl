@@ -139,14 +139,15 @@ configure_throttling() ->
     CheckInterval = try
       {MemAction, MemoryUsage} = verify_memory(),
       {TaskAction, NewFailed, NewTasks} = verify_tasks(),
-      Action = max(MemAction, TaskAction),
+      {DumpAction, DumpProcesses} = verify_ongoing_tasks(),
+      Action = max(max(MemAction, TaskAction), DumpAction),
 
       case Action of
         ?BLOCK_THROTTLING ->
           {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
             value = #node_management{value = {overloaded, MemAction =:= ?NO_THROTTLING}}}),
-          ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p",
-            [MemoryUsage, NewFailed, NewTasks]),
+          ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+            [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
           plan_next_throttling_check(true);
         _ ->
           Oldthrottling = case node_management:get(?MNESIA_THROTTLING_KEY) of
@@ -163,28 +164,28 @@ configure_throttling() ->
 
           case {Action, Oldthrottling} of
             {?NO_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
-                [MemoryUsage, NewFailed, NewTasks]),
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
               plan_next_throttling_check();
             {?NO_THROTTLING, _} ->
               ok = node_management:delete(?MNESIA_THROTTLING_KEY),
               ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
-              ?info("Throttling: stop, mem: ~p, failed tasks ~p, all tasks ~p",
-                [MemoryUsage, NewFailed, NewTasks]),
+              ?info("Throttling: stop, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
               plan_next_throttling_check();
             {?CONFIG_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p",
-                [MemoryUsage, NewFailed, NewTasks]),
+              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
               plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
                 value = #node_management{value = {overloaded, false}}}),
-              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
-                [MemoryUsage, NewFailed, NewTasks]),
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
               plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, _}} ->
-              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p",
-                [MemoryUsage, NewFailed, NewTasks]),
+              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
               plan_next_throttling_check(true);
             _ ->
               TimeBase = case Oldthrottling of
@@ -195,7 +196,8 @@ configure_throttling() ->
                   DefaultTimeBase
               end,
 
-              {OldFailed, OldTasks, OldMemory, LastInterval} = case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
+              {OldFailed, OldTasks, OldDumpProcesses, OldMemory, LastInterval} =
+                case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
                 {ok, #document{value = #node_management{value = TD}}} ->
                   TD;
                 {error, {not_found, _}} ->
@@ -205,8 +207,9 @@ configure_throttling() ->
               TaskMultip = (TaskAction > 0) andalso
                 (NewFailed > OldFailed) or ((NewTasks + NewFailed) > (OldTasks + OldFailed)),
               MemoryMultip = (MemAction > 0) andalso (MemoryUsage > OldMemory),
+              DumpMultip = (DumpAction > 0) andalso (DumpProcesses > OldDumpProcesses),
               ThrottlingTime = case
-                {TaskMultip or MemoryMultip,
+                {TaskMultip or MemoryMultip or DumpMultip,
                 Action} of
                 {true, _} ->
                   TB2 = 2 * TimeBase,
@@ -229,10 +232,10 @@ configure_throttling() ->
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
                 value = #node_management{value = {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}}}),
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
-                value = #node_management{value = {NewFailed, NewTasks, MemoryUsage, NextCheck}}}),
+                value = #node_management{value = {NewFailed, NewTasks, DumpProcesses, MemoryUsage, NextCheck}}}),
 
-              ?info("Throttling: delay ~p ms used, mem: ~p, failed tasks ~p, all tasks ~p",
-                [ThrottlingTime, MemoryUsage, NewFailed, NewTasks]),
+              ?info("Throttling: delay ~p ms used, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
+                [ThrottlingTime, MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
 
               NextCheck
           end
@@ -1260,6 +1263,75 @@ verify_tasks() ->
   end,
 
   {TaskAction, NewFailed, NewTasks}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks processes that dump data and recommends throttling action.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_ongoing_tasks() ->
+  {DumpAction :: non_neg_integer(), DumpProcesses :: non_neg_integer()}.
+verify_ongoing_tasks() ->
+  {ok, DumpProcessessNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_dump_processes_limit),
+
+  Procs = erlang:processes(),
+  DumpProcesses = verify_ongoing_tasks(Procs, DumpProcessessNumThreshold),
+
+  DumpAction = case DumpProcesses of
+    DP when DP >= DumpProcessessNumThreshold ->
+      ?BLOCK_THROTTLING;
+    DP when DP >= DumpProcessessNumThreshold/2 ->
+      ?LIMIT_THROTTLING;
+    DP when DP >= DumpProcessessNumThreshold/4 ->
+      ?CONFIG_THROTTLING;
+    _ ->
+      ?NO_THROTTLING
+  end,
+
+  {DumpAction, DumpProcesses}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Counts ongoing dump tasks.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_ongoing_tasks(Procs :: list(), DumpProcessessNumThreshold :: non_neg_integer()) ->
+  non_neg_integer().
+verify_ongoing_tasks(Procs, DumpProcessessNumThreshold) ->
+  verify_ongoing_tasks(Procs, 0, DumpProcessessNumThreshold).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Counts ongoing dump tasks.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_ongoing_tasks(Procs :: list(), TmpNum :: non_neg_integer(),
+    DumpProcessessNumThreshold :: non_neg_integer()) -> non_neg_integer().
+verify_ongoing_tasks([], TmpNum, _DumpProcessessNumThreshold) ->
+  TmpNum;
+verify_ongoing_tasks(_Procs, DumpProcessessNumThreshold, DumpProcessessNumThreshold) ->
+  DumpProcessessNumThreshold;
+verify_ongoing_tasks([P | Procs], TmpNum, DumpProcessessNumThreshold) ->
+  case erlang:process_info(P, current_stacktrace) of
+    {current_stacktrace, CS} ->
+      Check1 = fun
+        ({couchdb_datastore_driver, _, _, _}) -> true;
+        (_) -> false
+      end,
+      Check2 = fun
+        ({cache_controller, _, _, _}) -> true;
+        (_) -> false
+      end,
+      case {lists:any(Check1, CS), lists:any(Check2, CS)} of
+        {true, true} ->
+          verify_ongoing_tasks(Procs, TmpNum + 1, DumpProcessessNumThreshold);
+        _ ->
+          verify_ongoing_tasks(Procs, TmpNum, DumpProcessessNumThreshold)
+      end;
+    _ ->
+      verify_ongoing_tasks(Procs, TmpNum, DumpProcessessNumThreshold)
+  end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
