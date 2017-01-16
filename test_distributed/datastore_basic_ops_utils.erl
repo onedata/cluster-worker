@@ -117,7 +117,7 @@ links_test(Config, Level) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
     ForeachBeforeProcessing = os:timestamp(),
-    Ans = ?rpc_store(Worker1, foreach_link, Level, [Doc, ForechTestFun, #{}]),
+    ?assertMatch({ok, _}, ?rpc_store(Worker1, foreach_link, Level, [Doc, ForechTestFun, #{}])),
     ForeachAfterProcessing = os:timestamp(),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
@@ -272,7 +272,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     ListBeforeProcessing = os:timestamp(),
-    Ans = ?rpc_store(Worker1, list, Level, [TestRecord, ?GET_ALL, []]),
+    ?assertMatch({ok, _}, ?rpc_store(Worker1, list, Level, [TestRecord, ?GET_ALL, []])),
     ListAfterProcessing = os:timestamp(),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
