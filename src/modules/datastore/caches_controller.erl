@@ -201,7 +201,7 @@ configure_throttling() ->
                 {ok, #document{value = #node_management{value = TD}}} ->
                   TD;
                 {error, {not_found, _}} ->
-                  {0, 0, 0, 0}
+                  {0, 0, 0, 0, 0}
               end,
 
               TaskMultip = (TaskAction > 0) andalso
@@ -1275,7 +1275,12 @@ verify_ongoing_tasks() ->
   {ok, DumpProcessessNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_dump_processes_limit),
 
   Procs = erlang:processes(),
-  DumpProcesses = verify_ongoing_tasks(Procs, DumpProcessessNumThreshold),
+  DumpProcesses = case length(Procs) < DumpProcessessNumThreshold/4 of
+    true -> % no_throttling
+      0;
+    _ ->
+      verify_ongoing_tasks(Procs, DumpProcessessNumThreshold)
+  end,
 
   DumpAction = case DumpProcesses of
     DP when DP >= DumpProcessessNumThreshold ->
