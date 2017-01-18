@@ -123,7 +123,7 @@ handle_query(Packet, Transport) ->
             catch
                 T:M ->
                     ?error_stacktrace("Error processing DNS request ~p:~p", [T, M]),
-                    generate_answer(set_reply_code(DNSRec, server_error), OPTRR, Transport)
+                    generate_answer(set_reply_code(DNSRec, serv_fail), OPTRR, Transport)
             end;
         _ ->
             {error, uprocessable}
