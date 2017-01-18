@@ -447,33 +447,91 @@ update_usage_info(Key, ModelName, Doc, Level) ->
 -spec restore_from_disk(Key :: datastore:ext_key() | {datastore:ext_key(), datastore:link_name(), cache_controller_link_key},
     ModelName :: model_behaviour:model_type(), Doc :: datastore:document(), Level :: datastore:store_level()) ->
     boolean() | datastore:generic_error().
-restore_from_disk({Key, LinkName, cache_controller_link_key}, ModelName, Doc, Level) ->
+restore_from_disk({Key, LinkName, cache_controller_link_key} = FullKey, ModelName, Doc, Level) ->
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Key, {LinkName, Doc}],
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    CUuid = caches_controller:get_cache_uuid(FullKey, ModelName),
     caches_controller:consistency_info_lock(CCCUuid, LinkName,
         fun() ->
-            case erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs) of
-                ok ->
-                    caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
-                {error, already_exists} ->
-                    caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
-                Error ->
-                    Error
+            {Proceed, Restored} = case get(Level, CUuid) of
+                {ok, CDoc} ->
+                    Value = CDoc#document.value,
+                    ActionData = Value#cache_controller.action_data,
+                    case Value#cache_controller.action of
+                        to_be_del ->
+                            case links_utils:unpack_link_scope(ModelName, ActionData) of
+                                {LinkName, undefined, undefined} ->
+                                    {false, true};
+                                _ ->
+                                    {false, false}
+                            end;
+                        delete_links ->
+                            case links_utils:unpack_link_scope(ModelName, ActionData) of
+                                {LinkName, undefined, undefined} ->
+                                    {false, true};
+                                _ ->
+                                    {false, false}
+                            end;
+                        _ ->
+                            {true, true}
+                    end;
+                {error, {not_found, _}} ->
+                    {true, true}
+            end,
+
+            case Proceed of
+                true ->
+                    case erlang:apply(datastore:level_to_driver(Level), create_link, FullArgs) of
+                        ok ->
+                            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                        {error, already_exists} ->
+                            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                        Error ->
+                            Error
+                    end;
+                _ ->
+                    case Restored of
+                        true ->
+                            caches_controller:save_consistency_restored_info(Level, CCCUuid, LinkName);
+                        _ ->
+                            false
+                    end
             end
         end);
 restore_from_disk(Key, ModelName, Doc, Level) ->
     ModelConfig = ModelName:model_init(),
     FullArgs = [ModelConfig, Doc],
+    CUuid = caches_controller:get_cache_uuid(Key, ModelName),
     caches_controller:consistency_info_lock(ModelName, Key,
         fun() ->
-            case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of
-                {ok, _} ->
-                    caches_controller:save_consistency_restored_info(Level, ModelName, Key);
-                {error, already_exists} ->
-                    caches_controller:save_consistency_restored_info(Level, ModelName, Key);
-                Error ->
-                    Error
+            Proceed = case get(Level, CUuid) of
+                {ok, CDoc} ->
+                    Value = CDoc#document.value,
+                    case Value#cache_controller.action of
+                        to_be_del ->
+                            false;
+                        delete_links ->
+                            false;
+                        _ ->
+                            true
+                    end;
+                {error, {not_found, _}} ->
+                    true
+            end,
+
+            case Proceed of
+                true ->
+                    case erlang:apply(datastore:level_to_driver(Level), create, FullArgs) of
+                        {ok, _} ->
+                            caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+                        {error, already_exists} ->
+                            caches_controller:save_consistency_restored_info(Level, ModelName, Key);
+                        Error ->
+                            Error
+                    end;
+                _ ->
+                    caches_controller:save_consistency_restored_info(Level, ModelName, Key)
             end
         end).
 
@@ -637,11 +695,11 @@ delete_dump_info(Uuid, Owner, Level) ->
         fun() ->
             Pred = fun() ->
                 {LastUser, Action} = case get(Level, Uuid) of
-                               {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
-                                   {LU, A};
-                               {error, {not_found, _}} ->
-                                   {non, non}
-                           end,
+                    {ok, #document{value = #cache_controller{last_user = LU, action = A}}} ->
+                        {LU, A};
+                    {error, {not_found, _}} ->
+                        {non, non}
+                end,
 
                 Ans1 = case {LastUser, Action} of
                     {_, to_be_del} ->
@@ -763,7 +821,7 @@ choose_action(Op, Level, ModelName, {Key, Link, cache_controller_link_key}, Uuid
                                     _ ->
                                         {ok, SavedValue}
                                 end
-                                        end,
+                            end,
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
@@ -832,7 +890,7 @@ choose_action(Op, Level, ModelName, Key, Uuid, Flush) ->
                                     _ ->
                                         {ok, SavedValue}
                                 end
-                                        end,
+                            end,
                             case get(Level, Uuid) of
                                 {ok, Doc} ->
                                     Value = Doc#document.value,
@@ -991,7 +1049,7 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                         true ->
                             UpdateFun2 = fun(Record) ->
                                 {ok, Record#cache_controller{last_action_time = os:system_time(?CC_TIMEUNIT)}}
-                                         end,
+                            end,
                             update(Level, Uuid, UpdateFun2),
                             ok;
                         _ ->
@@ -999,36 +1057,36 @@ start_disk_op(Key, ModelName, Op, Args, Level, Sleep) ->
                     end
             end,
             Ans = case ToDo0 of
-                      ok ->
-                          links_utils:apply_context(LinksContext),
-                          critical_section:run({?MODULE, start_disk_op, Uuid},
-                              fun() ->
-                                  ToDo = choose_action(Op, Level, ModelName, Key, Uuid),
+                ok ->
+                    links_utils:apply_context(LinksContext),
+                    critical_section:run({?MODULE, start_disk_op, Uuid},
+                        fun() ->
+                            ToDo = choose_action(Op, Level, ModelName, Key, Uuid),
 
-                                  case ToDo of
-                                      {ok, NewMethod, NewArgs} ->
-                                          FullArgs = [ModelConfig | NewArgs],
-                                          CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
-                                              NewMethod, FullArgs),
-                                          catch datastore:run_posthooks(ModelConfig, NewMethod,
-                                              datastore:driver_to_level(?PERSISTENCE_DRIVER), NewArgs, CallAns),
-                                          {op_change, NewMethod, NewArgs, CallAns};
-                                      ok ->
-                                          FullArgs = [ModelConfig | Args],
-                                          CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
-                                              Op, FullArgs),
-                                          catch datastore:run_posthooks(ModelConfig, Op,
-                                              datastore:driver_to_level(?PERSISTENCE_DRIVER), Args, CallAns),
-                                          CallAns;
-                                      {ok, non} ->
-                                          ok;
-                                      Other ->
-                                          Other
-                                  end
-                              end
-                          );
-                      _ ->
-                          ToDo0
+                            case ToDo of
+                                {ok, NewMethod, NewArgs} ->
+                                    FullArgs = [ModelConfig | NewArgs],
+                                    CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
+                                        NewMethod, FullArgs),
+                                        catch datastore:run_posthooks(ModelConfig, NewMethod,
+                                        datastore:driver_to_level(?PERSISTENCE_DRIVER), NewArgs, CallAns),
+                                    {op_change, NewMethod, NewArgs, CallAns};
+                                ok ->
+                                    FullArgs = [ModelConfig | Args],
+                                    CallAns = erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER),
+                                        Op, FullArgs),
+                                        catch datastore:run_posthooks(ModelConfig, Op,
+                                        datastore:driver_to_level(?PERSISTENCE_DRIVER), Args, CallAns),
+                                    CallAns;
+                                {ok, non} ->
+                                    ok;
+                                Other ->
+                                    Other
+                            end
+                        end
+                    );
+                _ ->
+                    ToDo0
             end,
 
             ok = case Ans of
@@ -1107,13 +1165,13 @@ check_create(Key, ModelName, Level) ->
         true ->
             Uuid = caches_controller:get_cache_uuid(Key, ModelName),
             Check = case get(Level, Uuid) of
-                        {ok, Doc2} ->
-                            Value = Doc2#document.value,
-                            Action = Value#cache_controller.action,
-                            not ((Action =:= delete) orelse (Action =:= to_be_del));
-                        {error, {not_found, _}} ->
-                            true
-                    end,
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    Action = Value#cache_controller.action,
+                    not ((Action =:= delete) orelse (Action =:= to_be_del));
+                {error, {not_found, _}} ->
+                    true
+            end,
             case Check of
                 true ->
                     case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
@@ -1144,25 +1202,25 @@ check_create(Key, ModelName, Level) ->
 check_link_create(Key, LinkName, ModelName, Level) ->
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
     Proceed = case caches_controller:check_cache_consistency(Level, CCCUuid) of
-                  {ok, _, _} ->
-                      false;
-                  {monitored, ClearedList, _, _} ->
-                      lists:member(LinkName, ClearedList);
-                  _ ->
-                      true
-              end,
+        {ok, _, _} ->
+            false;
+        {monitored, ClearedList, _, _} ->
+            lists:member(LinkName, ClearedList);
+        _ ->
+            true
+    end,
 
     case Proceed of
         true ->
             Uuid = caches_controller:get_cache_uuid(link_cache_key(ModelName, Key, LinkName), ModelName),
             Check = case get(Level, Uuid) of
-                        {ok, Doc2} ->
-                            Value = Doc2#document.value,
-                            Action = Value#cache_controller.action,
-                            not ((Action =:= delete_links) orelse (Action =:= to_be_del));
-                        {error, {not_found, _}} ->
-                            true
-                    end,
+                {ok, Doc2} ->
+                    Value = Doc2#document.value,
+                    Action = Value#cache_controller.action,
+                    not ((Action =:= delete_links) orelse (Action =:= to_be_del));
+                {error, {not_found, _}} ->
+                    true
+            end,
             case Check of
                 true ->
                     case erlang:apply(datastore:driver_to_module(datastore:level_to_driver(disk_only)),
