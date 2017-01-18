@@ -144,7 +144,7 @@
             %% The reason is that a healthcheck can generate a considerable traffic.
             {nagios_caching_time, 1000},
             %% Time in ms after healthcheck is considered failed
-            {nagios_healthcheck_timeout, 30000},
+            {nagios_healthcheck_timeout, 5000},
 
 
             %% ===================================================================
