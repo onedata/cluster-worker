@@ -57,7 +57,7 @@
             %% Number of ongoing (but at least once failed) tasks to start throttling
             {throttling_start_pending_tasks_number, 10},
             %% Number of ongoing processes that dump data to start throttling
-            {throttling_dump_processes_limit, 2000},
+            {throttling_dump_processes_limit, 1000},
             %% Base time for throttling
             {throttling_base_time_ms, 16},
             %% Maximum throttling time
