@@ -335,6 +335,7 @@ list(_Level, [Driver1, Driver2], ModelNameOrConfig, Fun, AccIn, Opts) ->
                             NewAcc = case maps:find(Key, Acc) of
                                 {ok, _} -> Acc;
                                 error ->
+                                    % TODO VFS-2953 - cache consistency restoring errors
                                     cache_controller:restore_from_disk(Key, ModelName, Document, CLevel),
                                     maps:put(Key, Document, Acc)
                             end,
@@ -807,6 +808,7 @@ foreach_link(_Level, [Driver1, Driver2], Key, ModelNameOrConfig, Fun, AccIn) ->
                         case maps:find(LinkName, Acc) of
                             {ok, _} -> Acc;
                             error ->
+                                % TODO VFS-2953 - cache consistency restoring errors
                                 cache_controller:restore_from_disk(CacheKey, ModelName, LinkTarget, CLevel),
                                 maps:put(LinkName, LinkTarget, Acc)
                         end;
@@ -927,7 +929,7 @@ initialize_minimal_env() ->
 initialize_minimal_env(DBNodes) ->
     hackney:start(),
     couchbeam_sup:start_link(),
-    catch ets:new(datastore_worker, [named_table, public, set, {read_concurrency, true}]),
+        catch ets:new(datastore_worker, [named_table, public, set, {read_concurrency, true}]),
     datastore:ensure_state_loaded(node()),
     {ok, _} = datastore_worker:init(DBNodes),
     ok.
@@ -1101,7 +1103,7 @@ run_posthooks(#model_config{name = ModelName} = ModelConfig, Method, Level, Cont
 -spec load_local_state(Models :: [model_behaviour:model_type() | model_behaviour:model_config()]) ->
     [model_behaviour:model_config()].
 load_local_state(Models) ->
-    catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
+        catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = model_config(ModelName),

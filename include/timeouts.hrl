@@ -33,7 +33,8 @@
 -define(DEFAULT_DB_REQUEST_TIMEOUT_OPT, [{recv_timeout, timer:minutes(3)}]).
 
 %%mnesia cache driver
--define(MNESIA_WAIT_TIMEOUT, timer:seconds(60)).
+-define(MNESIA_WAIT_TIMEOUT, timer:seconds(5)).
+-define(MNESIA_WAIT_REPEATS, 10).
 
 -define(DEFAULT_DNS_TCP_TIMEOUT, 60).
 
