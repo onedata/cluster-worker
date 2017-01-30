@@ -180,21 +180,21 @@ performance_test_base(Config) ->
         critical_section:run(<<"key">>, TestFun)
     end,
     TestCritical2 = fun() ->
-        critical_section:run(random:uniform(), TestFun)
+        critical_section:run(rand:uniform(), TestFun)
     end,
 
     TestCriticalMnesia = fun() ->
         critical_section:run_on_mnesia(<<"key">>, TestFun)
     end,
     TestCriticalMnesia2 = fun() ->
-        critical_section:run_on_mnesia(random:uniform(), TestFun)
+        critical_section:run_on_mnesia(rand:uniform(), TestFun)
     end,
 
     TestTransaction = fun() ->
         critical_section:run_in_mnesia_transaction(<<"key">>, TestFun)
     end,
     TestTransaction2 = fun() ->
-        critical_section:run_in_mnesia_transaction(float_to_binary(random:uniform()), TestFun)
+        critical_section:run_in_mnesia_transaction(float_to_binary(rand:uniform()), TestFun)
     end,
 
     T1 = check_time(TestCritical, [Worker]),
