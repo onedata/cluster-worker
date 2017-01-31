@@ -220,7 +220,7 @@ init([]) ->
 
 handle_call(healthcheck, _From, State) ->
     Reply = case State of
-        #state{cm_con_status = registered, initialized = true} ->
+        #state{cm_con_status = registered} ->
             ok;
         _ ->
             out_of_sync
