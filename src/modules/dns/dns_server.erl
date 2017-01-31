@@ -83,41 +83,47 @@ handle_query(Packet, Transport) ->
                 [] -> undefined;
                 [#dns_rr_opt{} = OptRR] -> OptRR
             end,
-            case validate_query(DNSRec) of
-                ok ->
-                    [#dns_query{domain = Domain, type = Type, class = Class}] = QDList,
-                    case call_worker(string:to_lower(Domain), Type) of
-                        Reply when is_atom(Reply) -> % Reply :: reply_type()
-                            generate_answer(set_reply_code(DNSRec, Reply), OPTRR, Transport);
-                        {Reply, ResponseList} ->
-                            DNSRecUpdatedHeader = set_reply_code(DNSRec, Reply),
-                            %% If there was an OPT RR, it will be concated at the end of the process
-                            NewRec = lists:foldl(
-                                fun(CurrentRecord, #dns_rec{header = CurrHeader, anlist = CurrAnList, nslist = CurrNSList, arlist = CurrArList} = CurrRec) ->
-                                    case CurrentRecord of
-                                        {aa, Flag} ->
-                                            CurrRec#dns_rec{header = inet_dns:make_header(CurrHeader, aa, Flag)};
-                                        {Section, CurrDomain, CurrTTL, CurrType, CurrData} ->
-                                            RR = inet_dns:make_rr([
-                                                {data, CurrData},
-                                                {domain, CurrDomain},
-                                                {type, CurrType},
-                                                {ttl, CurrTTL},
-                                                {class, Class}]),
-                                            case Section of
-                                                answer ->
-                                                    CurrRec#dns_rec{anlist = CurrAnList ++ [RR]};
-                                                authority ->
-                                                    CurrRec#dns_rec{nslist = CurrNSList ++ [RR]};
-                                                additional ->
-                                                    CurrRec#dns_rec{arlist = CurrArList ++ [RR]}
-                                            end
-                                    end
-                                end, DNSRecUpdatedHeader, ResponseList),
-                            generate_answer(NewRec#dns_rec{arlist = NewRec#dns_rec.arlist}, OPTRR, Transport)
-                    end;
-                Error ->
-                    generate_answer(set_reply_code(DNSRec, Error), OPTRR, Transport)
+            try
+                case validate_query(DNSRec) of
+                    ok ->
+                        [#dns_query{domain = Domain, type = Type, class = Class}] = QDList,
+                        case call_worker(string:to_lower(Domain), Type) of
+                            Reply when is_atom(Reply) -> % Reply :: reply_type()
+                                generate_answer(set_reply_code(DNSRec, Reply), OPTRR, Transport);
+                            {Reply, ResponseList} ->
+                                DNSRecUpdatedHeader = set_reply_code(DNSRec, Reply),
+                                %% If there was an OPT RR, it will be concated at the end of the process
+                                NewRec = lists:foldl(
+                                    fun(CurrentRecord, #dns_rec{header = CurrHeader, anlist = CurrAnList, nslist = CurrNSList, arlist = CurrArList} = CurrRec) ->
+                                        case CurrentRecord of
+                                            {aa, Flag} ->
+                                                CurrRec#dns_rec{header = inet_dns:make_header(CurrHeader, aa, Flag)};
+                                            {Section, CurrDomain, CurrTTL, CurrType, CurrData} ->
+                                                RR = inet_dns:make_rr([
+                                                    {data, CurrData},
+                                                    {domain, CurrDomain},
+                                                    {type, CurrType},
+                                                    {ttl, CurrTTL},
+                                                    {class, Class}]),
+                                                case Section of
+                                                    answer ->
+                                                        CurrRec#dns_rec{anlist = CurrAnList ++ [RR]};
+                                                    authority ->
+                                                        CurrRec#dns_rec{nslist = CurrNSList ++ [RR]};
+                                                    additional ->
+                                                        CurrRec#dns_rec{arlist = CurrArList ++ [RR]}
+                                                end
+                                        end
+                                    end, DNSRecUpdatedHeader, ResponseList),
+                                generate_answer(NewRec#dns_rec{arlist = NewRec#dns_rec.arlist}, OPTRR, Transport)
+                        end;
+                    Error ->
+                        generate_answer(set_reply_code(DNSRec, Error), OPTRR, Transport)
+                end
+            catch
+                T:M ->
+                    ?error_stacktrace("Error processing DNS request ~p:~p", [T, M]),
+                    generate_answer(set_reply_code(DNSRec, serv_fail), OPTRR, Transport)
             end;
         _ ->
             {error, uprocessable}

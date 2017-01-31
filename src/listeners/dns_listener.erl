@@ -85,6 +85,7 @@ healthcheck() ->
     gen_udp:send(Socket, "127.0.0.1", DNSPort, Query),
     case gen_udp:recv(Socket, 65535, HealthcheckTimeout) of
         {ok, _} ->
+            % TODO VFS-2951 - check reply code in answer
             % DNS is working
             ok;
         _ ->

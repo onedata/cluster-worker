@@ -73,7 +73,12 @@ init_bucket(_BucketName, Models, NodeToSync) ->
                     Tables = [table_name(MName) || MName <- datastore_config:models()] ++
                         [links_table_name(MName) || MName <- datastore_config:models()] ++
                         [transaction_table_name(MName) || MName <- datastore_config:models()],
-                    ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [Tables, ?MNESIA_WAIT_TIMEOUT]),
+                    ok = lists:foldl(fun
+                        (_, ok) ->
+                            ok;
+                        (_, _) ->
+                            rpc:call(NodeToSync, mnesia, wait_for_tables, [Tables, ?MNESIA_WAIT_TIMEOUT])
+                    end, start, lists:seq(1, ?MNESIA_WAIT_REPEATS)),
                     expand_table(Table, Node, NodeToSync),
                     expand_table(LinkTable, Node, NodeToSync),
                     expand_table(TransactionTable, Node, NodeToSync)
