@@ -49,6 +49,17 @@ stop(_State) ->
     test_node_starter:maybe_stop_cover(),
     ok.
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits until cache is dumped to db.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_for_cache() -> ok.
 wait_for_cache() ->
     case caches_controller:wait_for_cache_dump() of
         ok ->
