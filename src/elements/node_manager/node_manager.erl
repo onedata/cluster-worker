@@ -218,14 +218,10 @@ init([]) ->
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
 
+handle_call(healthcheck, _From, #state{cm_con_status = registered} = State) ->
+    {reply, ok, State};
 handle_call(healthcheck, _From, State) ->
-    Reply = case State of
-        #state{cm_con_status = registered} ->
-            ok;
-        _ ->
-            out_of_sync
-    end,
-    {reply, Reply, State};
+    {reply, out_of_sync, State};
 
 handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
     {reply, IPAddress, State};
