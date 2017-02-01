@@ -21,7 +21,7 @@
 -type init() :: #tp_init{}.
 -type mod() :: module().
 -type args() :: list().
--type key() :: binary().
+-type key() :: term().
 -type data() :: any().
 -type server() :: pid().
 -type changes() :: any().
@@ -37,7 +37,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes request processing to the transaction process server and waits for
+%% Delegates request processing to the transaction process server and waits for
 %% the response with default 5 seconds timeout.
 %% @end
 %%--------------------------------------------------------------------
@@ -48,7 +48,7 @@ run_sync(Module, Args, Key, Request) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes request processing to the transaction process server and waits for
+%% Delegates request processing to the transaction process server and waits for
 %% the response with custom timeout.
 %% @end
 %%--------------------------------------------------------------------
@@ -62,7 +62,7 @@ run_sync(Module, Args, Key, Request, Timeout) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes request processing to the transaction process server and returns
+%% Delegates request processing to the transaction process server and returns
 %% a reference in which a response will be wrapped ({Ref, Msg}).
 %% @end
 %%--------------------------------------------------------------------
@@ -83,7 +83,8 @@ run_async(Module, Args, Key, Request) ->
 %% timeout retires 'Attempts' times.
 %% @end
 %%--------------------------------------------------------------------
--spec run_async(module(), args(), key(), request(), Attempts :: non_neg_integer()) ->
+-spec run_async(module(), args(), key(), request(),
+    Attempts :: non_neg_integer()) ->
     {ok, reference()} | {error, Reason :: term()}.
 run_async(_Module, _Args, _Key, _Request, 0) ->
     {error, timeout};

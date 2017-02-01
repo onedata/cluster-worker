@@ -31,15 +31,21 @@
     module :: tp:mod(),
     key :: tp:key(),
     data :: tp:data(),
-    changes :: undefined | tp:changes(),
+    changes = undefined :: undefined | tp:changes(),
     requests = [] :: [{pid(), reference(), tp:request()}],
+    % a reference to the monitor watching modify handler process
     modify_handler_ref :: undefined | reference(),
+    % a reference to the monitor watching commit handler process
     commit_handler_ref :: undefined | reference(),
+    % a reference to the message expected to trigger commit
     commit_msg_ref :: undefined | reference(),
+    % a reference to the message expected to trigger terminate
     terminate_msg_ref :: undefined | reference(),
     commit_delay :: timeout(),
     idle_timeout :: timeout()
 }).
+
+-type state() :: state().
 
 %%%===================================================================
 %%% API
@@ -53,7 +59,7 @@
 -spec start_link(tp:mod(), tp:args(), tp:key()) ->
     {ok, pid()} | ignore | {error, Reason :: term()}.
 start_link(Module, Args, Key) ->
-    gen_server:start_link(?MODULE, [Module, Args, Key], []).
+    gen_server2:start_link(?MODULE, [Module, Args, Key], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -66,7 +72,7 @@ start_link(Module, Args, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
+    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Module, Args, Key]) ->
     case tp_router:create(Key, self()) of
@@ -78,7 +84,7 @@ init([Module, Args, Key]) ->
                         module = Module,
                         key = Key,
                         data = Init#tp_init.data,
-                        commit_delay = Init#tp_init.commit_delay,
+                        commit_delay = Init#tp_init.max_commit_delay,
                         idle_timeout = Init#tp_init.idle_timeout
                     })};
                 {error, Reason} ->
@@ -95,13 +101,13 @@ init([Module, Args, Key]) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}.
+    State :: state()) ->
+    {reply, Reply :: term(), NewState :: state()} |
+    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
+    {stop, Reason :: term(), NewState :: state()}.
 handle_call(Request, {Pid, _Tag}, #state{requests = Requests} = State) ->
     Ref = make_ref(),
     State2 = State#state{
@@ -116,10 +122,10 @@ handle_call(Request, {Pid, _Tag}, #state{requests = Requests} = State) ->
 %% Handles cast messages.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_cast(Request :: term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}.
+-spec handle_cast(Request :: term(), State :: state()) ->
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: state()}.
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -130,13 +136,17 @@ handle_cast(Request, #state{} = State) ->
 %% Handles all non call/cast messages.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_info(Info :: timeout() | term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}.
-handle_info({'DOWN', Ref, _, _, Exit}, #state{modify_handler_ref = Ref} = State) ->
+-spec handle_info(Info :: timeout() | term(), State :: state()) ->
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: state()}.
+handle_info({'DOWN', Ref, _, _, Exit}, #state{
+    modify_handler_ref = Ref
+} = State) ->
     {noreply, handle_modified(Exit, State)};
-handle_info({'DOWN', Ref, _, _, Exit}, #state{commit_handler_ref = Ref} = State) ->
+handle_info({'DOWN', Ref, _, _, Exit}, #state{
+    commit_handler_ref = Ref
+} = State) ->
     {noreply, handle_committed(Exit, State)};
 handle_info({Ref, {commit, Delay}}, #state{commit_msg_ref = Ref} = State) ->
     {noreply, commit_async(Delay, State#state{commit_msg_ref = undefined})};
@@ -164,7 +174,7 @@ handle_info(Info, #state{} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #state{}) -> term().
+    State :: state()) -> term().
 terminate(Reason, #state{module = Module, key = Key} = State) ->
     State2 = modify_sync(State),
     #state{data = Data} = State3 = commit_sync(State2),
@@ -178,8 +188,8 @@ terminate(Reason, #state{module = Module, key = Key} = State) ->
 %% Converts process state when code is changed.
 %% @end
 %%--------------------------------------------------------------------
--spec code_change(OldVsn :: term() | {down, term()}, State :: #state{},
-    Extra :: term()) -> {ok, NewState :: #state{}} | {error, Reason :: term()}.
+-spec code_change(OldVsn :: term() | {down, term()}, State :: state(),
+    Extra :: term()) -> {ok, NewState :: state()} | {error, Reason :: term()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -193,7 +203,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Synchronously modifies transaction process data.
 %% @end
 %%--------------------------------------------------------------------
--spec modify_sync(#state{}) -> #state{}.
+-spec modify_sync(state()) -> state().
 modify_sync(#state{requests = [], modify_handler_ref = undefined} = State) ->
     State;
 modify_sync(#state{} = State) ->
@@ -203,11 +213,11 @@ modify_sync(#state{} = State) ->
 %% @private
 %% @doc
 %% Asynchronously modifies transaction process data by spawning a handling
-%% process. The process is spawned only if there are pending requests and 
+%% process. The process is spawned only if there are pending requests and
 %% there is no other handler already spawned.
 %% @end
 %%--------------------------------------------------------------------
--spec modify_async(#state{}) -> #state{}.
+-spec modify_async(state()) -> state().
 modify_async(#state{requests = []} = State) ->
     State;
 modify_async(#state{
@@ -238,7 +248,7 @@ modify_async(#state{} = State) ->
 %% Waits for the modify handler completion.
 %% @end
 %%--------------------------------------------------------------------
--spec wait_modify(#state{}) -> #state{}.
+-spec wait_modify(state()) -> state().
 wait_modify(#state{modify_handler_ref = undefined} = State) ->
     State;
 wait_modify(#state{modify_handler_ref = Ref} = State) ->
@@ -252,7 +262,7 @@ wait_modify(#state{modify_handler_ref = Ref} = State) ->
 %% Handles the outcome of the modify handler.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_modified(Exit :: any(), #state{}) -> #state{}.
+-spec handle_modified(Exit :: any(), state()) -> state().
 handle_modified({modified, NextChanges, Data}, #state{
     module = Module,
     changes = Changes,
@@ -276,8 +286,11 @@ handle_modified(Exit, #state{commit_delay = Delay} = State) ->
 %% Synchronously commits transaction process changes.
 %% @end
 %%--------------------------------------------------------------------
--spec commit_sync(#state{}) -> #state{}.
-commit_sync(#state{changes = undefined, commit_handler_ref = undefined} = State) ->
+-spec commit_sync(state()) -> state().
+commit_sync(#state{
+    changes = undefined,
+    commit_handler_ref = undefined
+} = State) ->
     State;
 commit_sync(#state{} = State) ->
     commit_sync(wait_commit(State)).
@@ -290,7 +303,7 @@ commit_sync(#state{} = State) ->
 %% there is no other handler already spawned.
 %% @end
 %%--------------------------------------------------------------------
--spec commit_async(timeout(), #state{}) -> #state{}.
+-spec commit_async(timeout(), state()) -> state().
 commit_async(_Delay, #state{changes = undefined} = State) ->
     State;
 commit_async(Delay, #state{
@@ -316,7 +329,7 @@ commit_async(_Delay, #state{} = State) ->
 %% Waits for the commit handler completion or a trigger commit message.
 %% @end
 %%--------------------------------------------------------------------
--spec wait_commit(#state{}) -> #state{}.
+-spec wait_commit(state()) -> state().
 wait_commit(#state{
     commit_handler_ref = undefined,
     commit_msg_ref = undefined
@@ -339,7 +352,7 @@ wait_commit(#state{
 %% Handles the outcome of the commit handler.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_committed(Exit :: any(), #state{}) -> #state{}.
+-spec handle_committed(Exit :: any(), state()) -> state().
 handle_committed({committed, true, _}, #state{commit_delay = Delay} = State) ->
     schedule_terminate(schedule_commit(Delay, State#state{
         commit_handler_ref = undefined
@@ -379,7 +392,7 @@ merge_changes(Module, Changes, NextChanges) ->
 %% trigger message is no already awaited.
 %% @end
 %%--------------------------------------------------------------------
--spec schedule_commit(timeout(), #state{}) -> #state{}.
+-spec schedule_commit(timeout(), state()) -> state().
 schedule_commit(_Delay, #state{changes = undefined} = State) ->
     State;
 schedule_commit(Delay, #state{commit_msg_ref = undefined} = State) ->
@@ -394,7 +407,7 @@ schedule_commit(_Delay, #state{} = State) ->
 %% changes and modify/commit handlers running.
 %% @end
 %%--------------------------------------------------------------------
--spec schedule_terminate(#state{}) -> #state{}.
+-spec schedule_terminate(state()) -> state().
 schedule_terminate(#state{
     requests = [],
     changes = undefined,
@@ -414,6 +427,8 @@ schedule_terminate(#state{} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_msg(timeout(), any()) -> reference().
+schedule_msg(infinity, _Msg) ->
+    make_ref();
 schedule_msg(Delay, Msg) ->
     Ref = make_ref(),
     erlang:send_after(Delay, self(), {Ref, Msg}),

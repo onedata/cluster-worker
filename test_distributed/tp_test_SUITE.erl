@@ -335,7 +335,8 @@ init_per_testcase(_Case, Config) ->
     test_utils:mock_expect(Workers, ?TP_MODULE, init, fun
         (Args) -> {ok, #tp_init{
             data = Args,
-            commit_delay = CommitDelay,
+            min_commit_delay = CommitDelay,
+            max_commit_delay = CommitDelay,
             idle_timeout = IdleTimeout
         }}
     end),

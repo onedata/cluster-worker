@@ -7,7 +7,8 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module implements {@link worker_plugin_behaviour} and is responsible
-%%% for mapping transaction process key to a pid of a handling process (tp_server).
+%%% for mapping transaction process key to a pid of a handling process
+%%% (tp_server).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(tp_router).
@@ -34,8 +35,8 @@
 %% {@link worker_plugin_behaviour} callback init/1.
 %% @end
 %%--------------------------------------------------------------------
--spec init(Args :: term()) -> Result when
-    Result :: {ok, State :: worker_host:plugin_state()} | {error, Reason :: term()}.
+-spec init(Args :: term()) -> {ok, worker_host:plugin_state()} |
+    {error, Reason :: term()}.
 init(_Args) ->
     ets:new(?TP_ROUTING_TABLE, [
         set,

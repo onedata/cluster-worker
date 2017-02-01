@@ -19,7 +19,8 @@
 -record(tp_init, {
     data :: tp:data(),
     idle_timeout :: timeout(),
-    commit_delay :: timeout()
+    min_commit_delay :: timeout(),
+    max_commit_delay :: timeout()
 }).
 
 -define(TP_ROUTER_SUP, tp_router_sup).

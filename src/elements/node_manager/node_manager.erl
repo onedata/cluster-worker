@@ -30,12 +30,12 @@
 %% all workers that need datastore_worker shall be after datastore_worker on
 %% the list below.
 -define(CLUSTER_WORKER_MODULES, [
-    {datastore_worker, []},
-    {dns_worker, []},
     {tp_router, [
         {supervisor_flags, tp_router:supervisor_flags()},
         {supervisor_children_spec, tp_router:supervisor_children_spec()}
-    ]}
+    ]},
+    {datastore_worker, []},
+    {dns_worker, []}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
     dns_listener,

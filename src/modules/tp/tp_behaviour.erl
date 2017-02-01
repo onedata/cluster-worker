@@ -37,7 +37,7 @@
 %% Merges changes from calls to modify/2 or commit/2 callbacks.
 %% @end
 %%--------------------------------------------------------------------
--callback merge_changes(Current :: tp:changes(), Next :: tp:changes()) ->
+-callback merge_changes(Previous :: tp:changes(), Next :: tp:changes()) ->
     tp:changes().
 
 %%--------------------------------------------------------------------
@@ -61,7 +61,9 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Called on transaction process termination.
+%% Called on transaction process termination. It is guaranteed that this
+%% callback will be called when there are no pending requests and all
+%% modifications have been applied and committed.
 %% @end
 %%--------------------------------------------------------------------
 -callback terminate(tp:data()) -> any().
