@@ -262,12 +262,10 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 %%--------------------------------------------------------------------
 -spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
 check_cm(Timeout) ->
-    try
-        {ok, Nodes} = gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout),
-        Nodes
-    catch
-        Type:Error ->
-            ?error("Cluster manager error during healthcheck: ~p:~p", [Type, Error]),
+    case gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout) of
+        {ok, Nodes} ->
+            Nodes;
+        {error, invalid_worker_num} ->
             error
     end.
 
