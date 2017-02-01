@@ -29,7 +29,8 @@
             etls,
             hackney,
             web_client,
-            cowboy
+            cowboy,
+            sighandler
         ]},
         {mod, {cluster_worker_app, []}},
         {env, [
