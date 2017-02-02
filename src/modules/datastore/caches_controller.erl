@@ -1129,7 +1129,7 @@ safe_delete(Level, ModelName, Key) ->
           fun() ->
             {ok, #document{value = DiskValue}} = erlang:apply(get_driver_module(?DISK_ONLY_LEVEL), get, [ModelConfig, Key]),
             Pred = fun() ->
-              {ok, #document{value = MemValue}} = erlang:apply(Driver, fetch_link, [ModelConfig, Key]),
+              {ok, #document{value = MemValue}} = erlang:apply(Driver, get, [ModelConfig, Key]),
               case MemValue of
                 DiskValue ->
                   case save_high_mem_clear_info(Level, Uuid) of
