@@ -29,7 +29,7 @@
   2},
  {<<"ctool">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/ctool.git",
-       {ref,"893c8b10e6885c008517ae321ab590fa9f7aa1a5"}},
+       {ref,"6a6b76ba5fb4ede9a95d5c1cfa9c822bcbf2bf3f"}},
   0},
  {<<"dht_ring">>,
   {git,"git://github.com/RoXeon/dht_ring.git",
@@ -108,5 +108,7 @@
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.0">>},2},
  {<<"web_client">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/web-client.git",
-       {ref,"86736eb5ff7c8eb38acab96b9cc9956557ba6204"}},
+       {ref,"497968c9c393a8662f6bbccdd0a8a367593ccf81"}},
   1}].
+
+

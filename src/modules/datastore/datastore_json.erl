@@ -23,20 +23,20 @@
 -type field_name() :: atom().
 -type record_key() :: binary | atom | integer | term | string.
 -type record_value() :: json %% Raw JSON binary
-    %% or simple types
-    | record_key() | boolean | [record_struct()] | {record_struct()} | #{record_key() => record_struct()}
-    %% or custom value - executes Mod:Encoder(GivenTerm) while encoding and Mod:Decoder(SavedJSON) while decoding.
-    %% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
-    | {custom_value, {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}
-    %% or custom value - executes Mod:Encoder(TypeName, GivenTerm) while encoding and Mod:Decoder(TypeName, SavedJSON) while decoding.
-    %% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
-    %% You can specify only module name, Decoder defaults to 'encode_value', Decoder defaults to 'decode_value'
-    | {custom_type, TypeName :: atom(), Mod :: atom()} | {custom_type, TypeName :: atom(), {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}.
+%% or simple types
+| record_key() | boolean | [record_struct()] | {record_struct()} | #{record_key() => record_struct()}
+%% or custom value - executes Mod:Encoder(GivenTerm) while encoding and Mod:Decoder(SavedJSON) while decoding.
+%% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
+| {custom_value, {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}
+%% or custom value - executes Mod:Encoder(TypeName, GivenTerm) while encoding and Mod:Decoder(TypeName, SavedJSON) while decoding.
+%% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
+%% You can specify only module name, Decoder defaults to 'encode_value', Decoder defaults to 'decode_value'
+| {custom_type, TypeName :: atom(), Mod :: atom()} | {custom_type, TypeName :: atom(), {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}.
 -type record_version() :: non_neg_integer().
 -type record_struct() :: record_value()
-    | {record, record_version(), [{field_name(), record_value()}]} %% Used only internally
-    | {record, [{field_name(), record_value()}]} %% For defining model structure
-    | {record, model_behaviour:model_type()}. %% For referencing nasted model
+| {record, record_version(), [{field_name(), record_value()}]} %% Used only internally
+| {record, [{field_name(), record_value()}]} %% For defining model structure
+| {record, model_behaviour:model_type()}. %% For referencing nasted model
 -type ejson() :: term(). %% eJSON
 
 
