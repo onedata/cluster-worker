@@ -30,6 +30,10 @@
 %% all workers that need datastore_worker shall be after datastore_worker on
 %% the list below.
 -define(CLUSTER_WORKER_MODULES, [
+    {tp_router, [
+        {supervisor_flags, tp_router:supervisor_flags()},
+        {supervisor_children_spec, tp_router:supervisor_children_spec()}
+    ]},
     {datastore_worker, []},
     {dns_worker, []}
 ]).
@@ -824,23 +828,26 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
         true ->
             spawn(fun() ->
                 ?debug("Erlang ets mem usage: ~p", [
-                    lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
+                    lists:reverse(lists:sort(lists:map(fun(N) ->
+                        {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
 
                 Procs = erlang:processes(),
-                SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
+                SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) ->
+                    {erlang:process_info(P, memory), P} end, Procs))),
                 MergedStacksMap = lists:foldl(fun(P, Map) ->
                     case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
                         {{current_stacktrace, K}, {memory, M}} ->
                             {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
-                            maps:put(K, {M+M2, Num +1, K}, Map);
+                            maps:put(K, {M + M2, Num + 1, K}, Map);
                         _ ->
                             Map
                     end
                 end, #{}, Procs),
                 MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
 
-                MergedStacksMap2 = maps:map(fun(K, {M, N, K}) -> {N, M, K} end, MergedStacksMap),
+                MergedStacksMap2 = maps:map(fun(K, {M, N, K}) ->
+                    {N, M, K} end, MergedStacksMap),
                 MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
 
                 GetName = fun(P) ->
@@ -878,11 +885,11 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                         case is_list(SchedulerInfo) of
                             true ->
                                 Percent = lists:map(fun({{I, A0, T0}, {I, A1, T1}}) ->
-                                    {I, (A1 - A0)/(T1 - T0)} end, lists:zip(SchedulerInfo,NewSchedulerInfo)),
-                                {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai,Ti}) ->
-                                    {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo,NewSchedulerInfo)),
-                                Aggregated = A/T,
-                                ?debug("Schedulers utilization percent: ~p, aggregated: ~p", [Percent,Aggregated]);
+                                    {I, (A1 - A0) / (T1 - T0)} end, lists:zip(SchedulerInfo, NewSchedulerInfo)),
+                                {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai, Ti}) ->
+                                    {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo, NewSchedulerInfo)),
+                                Aggregated = A / T,
+                                ?debug("Schedulers utilization percent: ~p, aggregated: ~p", [Percent, Aggregated]);
                             _ ->
                                 ok
                         end;

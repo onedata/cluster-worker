@@ -54,10 +54,10 @@ start_link(Name, Args) ->
 -spec init(Args :: term()) ->
     {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 init(Args) ->
-    SupervisorSpec = proplists:get_value(supervisor_spec, Args, #{
+    SupervisorSpec = proplists:get_value(supervisor_flags, Args, #{
         strategy => one_for_all, intensity => 1000, period => 3600
     }),
-    ChildrenSpec = proplists:get_value(supervisor_child_spec, Args, []),
+    ChildrenSpec = proplists:get_value(supervisor_children_spec, Args, []),
 
     {ok, {SupervisorSpec, ChildrenSpec}}.
 
