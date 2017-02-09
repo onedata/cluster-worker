@@ -228,12 +228,21 @@ modify_async(#state{
 } = State) ->
     {_, Ref} = spawn_monitor(fun() ->
         {Pids, Refs, TpRequests} = lists:unzip3(lists:reverse(Requests)),
-        {TpResponses, Changes, Data2} = Module:modify(TpRequests, Data),
-        Responses = lists:zip3(Pids, Refs, TpResponses),
-        lists:foreach(fun({Pid, Ref, TpResponse}) ->
-            Pid ! {Ref, TpResponse}
-        end, Responses),
-        exit(self(), {modified, Changes, Data2})
+        try
+            {TpResponses, Changes, Data2} = Module:modify(TpRequests, Data),
+            Responses = lists:zip3(Pids, Refs, TpResponses),
+            lists:foreach(fun({Pid, Ref, TpResponse}) ->
+                Pid ! {Ref, TpResponse}
+            end, Responses),
+            exit(self(), {modified, Changes, Data2})
+        catch
+            _:Reason ->
+                Stacktrace = erlang:get_stacktrace(),
+                lists:foreach(fun({Pid, Ref}) ->
+                    Pid ! {Ref, {error, Reason, Stacktrace}}
+                end, lists:zip(Pids, Refs)),
+                exit(self(), {Reason, Stacktrace})
+        end
     end),
     State#state{
         requests = [],
