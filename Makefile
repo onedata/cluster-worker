@@ -73,7 +73,7 @@ eunit:
 	@for tout in `find test -name "TEST-*.xml"`; do awk '/testcase/{gsub("_[0-9]+\"", "_" ++i "\"")}1' $$tout > $$tout.tmp; mv $$tout.tmp $$tout; done
 
 coverage:
-	$(BASE_DIR)/bamboos/docker/coverage.escript $(BASE_DIR)
+	$(BASE_DIR)/bamboos/docker/coverage.escript $(BASE_DIR) $(on_bamboo)
 
 ##
 ## Dialyzer targets local
