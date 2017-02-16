@@ -371,7 +371,8 @@ list(_Level, [Driver1, Driver2], ModelNameOrConfig, Fun, AccIn, Opts) ->
                                 throw({abort, NAcc})
                         end
                     end, AccIn, Ans2),
-                {ok, AccOut}
+                {abort, NAcc2} = Fun('$end_of_table', AccOut),
+                {ok, NAcc2}
             catch
                 {abort, AccOut0} ->
                     {ok, AccOut0};

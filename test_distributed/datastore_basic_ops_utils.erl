@@ -955,7 +955,7 @@ get_random_string() ->
 
 get_random_string(Length, AllowedChars) ->
     lists:foldl(fun(_, Acc) ->
-        [lists:nth(random:uniform(length(AllowedChars)),
+        [lists:nth(rand:uniform(length(AllowedChars)),
             AllowedChars)]
         ++ Acc
     end, [], lists:seq(1, Length)).
