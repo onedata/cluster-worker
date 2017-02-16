@@ -298,6 +298,10 @@ handle_cast(cm_conn_ack, State) ->
     NewState = cm_conn_ack(State),
     {noreply, NewState};
 
+handle_cast(cluster_init_finished, State) ->
+    NewState = cluster_init_finished(State),
+    {noreply, NewState};
+
 handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
     last_cache_cleaning = Last, cache_cleaning_pid = LastCleaningPid} = State) when CacheControl =:= true ->
     MemUsage = monitoring:mem_usage(MonState),
@@ -548,6 +552,18 @@ cm_conn_ack(State) ->
     ?warning("node_manager received redundant cm_conn_ack"),
     State.
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Receives information that cluster has been successfully initialized.
+%% @end
+%%--------------------------------------------------------------------
+-spec cluster_init_finished(State :: term()) -> #state{}.
+cluster_init_finished(State) ->
+    ?info("Cluster sucessfully initialized"),
+    %todo implement
+    State.
 
 %%--------------------------------------------------------------------
 %% @private
