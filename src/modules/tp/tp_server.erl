@@ -33,10 +33,10 @@
     data :: tp:data(),
     changes = undefined :: undefined | tp:changes(),
     requests = [] :: [{pid(), reference(), tp:request()}],
-    % a reference to the monitor watching modify handler process
-    modify_handler_ref :: undefined | reference(),
-    % a reference to the monitor watching commit handler process
-    commit_handler_ref :: undefined | reference(),
+    % a pid of the modify handler process
+    modify_handler_pid :: undefined | pid(),
+    % a pid of the commit handler process
+    commit_handler_pid :: undefined | pid(),
     % a reference to the message expected to trigger commit
     commit_msg_ref :: undefined | reference(),
     % a reference to the message expected to trigger terminate
@@ -78,7 +78,7 @@ init([Module, Args, Key]) ->
     case tp_router:create(Key, self()) of
         ok ->
             process_flag(trap_exit, true),
-            case Module:init(Args) of
+            case exec(Module, init, [Args]) of
                 {ok, #tp_init{} = Init} ->
                     {ok, schedule_terminate(#state{
                         module = Module,
@@ -140,12 +140,12 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_info({'DOWN', Ref, _, _, Exit}, #state{
-    modify_handler_ref = Ref
+handle_info({'EXIT', Pid, Exit}, #state{
+    modify_handler_pid = Pid
 } = State) ->
     {noreply, handle_modified(Exit, State)};
-handle_info({'DOWN', Ref, _, _, Exit}, #state{
-    commit_handler_ref = Ref
+handle_info({'EXIT', Pid, Exit}, #state{
+    commit_handler_pid = Pid
 } = State) ->
     {noreply, handle_committed(Exit, State)};
 handle_info({Ref, {commit, Delay}}, #state{commit_msg_ref = Ref} = State) ->
@@ -153,8 +153,8 @@ handle_info({Ref, {commit, Delay}}, #state{commit_msg_ref = Ref} = State) ->
 handle_info({Ref, terminate}, #state{
     requests = [],
     changes = undefined,
-    modify_handler_ref = undefined,
-    commit_handler_ref = undefined,
+    modify_handler_pid = undefined,
+    commit_handler_pid = undefined,
     terminate_msg_ref = Ref
 } = State) ->
     {stop, normal, State};
@@ -175,11 +175,17 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{module = Module, key = Key} = State) ->
+terminate(Reason, #state{module = Module, key = Key} = State) when
+    Reason == normal;
+    Reason == shutdown ->
     State2 = modify_sync(State),
-    #state{data = Data} = State3 = commit_sync(State2),
-    ?log_terminate(Reason, State3),
-    Module:terminate(Data),
+    #state{data = Data} = commit_sync(State2),
+    exec(Module, terminate, [Data]),
+    tp_router:delete(Key, self());
+terminate({shutdown, _}, State) ->
+    terminate(shutdown, State);
+terminate(Reason, #state{key = Key} = State) ->
+    ?log_terminate(Reason, State),
     tp_router:delete(Key, self()).
 
 %%--------------------------------------------------------------------
@@ -204,7 +210,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec modify_sync(state()) -> state().
-modify_sync(#state{requests = [], modify_handler_ref = undefined} = State) ->
+modify_sync(#state{requests = [], modify_handler_pid = undefined} = State) ->
     State;
 modify_sync(#state{} = State) ->
     modify_sync(wait_modify(State)).
@@ -224,29 +230,22 @@ modify_async(#state{
     module = Module,
     data = Data,
     requests = Requests,
-    modify_handler_ref = undefined
+    modify_handler_pid = undefined
 } = State) ->
-    {_, Ref} = spawn_monitor(fun() ->
+    Pid = spawn_link(fun() ->
         {Pids, Refs, TpRequests} = lists:unzip3(lists:reverse(Requests)),
-        try
-            {TpResponses, Changes, Data2} = Module:modify(TpRequests, Data),
-            Responses = lists:zip3(Pids, Refs, TpResponses),
-            lists:foreach(fun({Pid, Ref, TpResponse}) ->
-                Pid ! {Ref, TpResponse}
-            end, Responses),
-            exit(self(), {modified, Changes, Data2})
-        catch
-            _:Reason ->
-                Stacktrace = erlang:get_stacktrace(),
-                lists:foreach(fun({Pid, Ref}) ->
-                    Pid ! {Ref, {error, Reason, Stacktrace}}
-                end, lists:zip(Pids, Refs)),
-                exit(self(), {Reason, Stacktrace})
+        case exec_noexcept(Module, modify, [TpRequests, Data]) of
+            {ok, {TpResponses, Changes, Data2}} ->
+                notify(Pids, Refs, TpResponses),
+                return({modified, Changes, Data2});
+            {error, Reason, Stacktrace} ->
+                notify(Pids, Refs, {error, Reason, Stacktrace}),
+                return({Reason, Stacktrace})
         end
     end),
     State#state{
         requests = [],
-        modify_handler_ref = Ref
+        modify_handler_pid = Pid
     };
 modify_async(#state{} = State) ->
     State.
@@ -258,11 +257,11 @@ modify_async(#state{} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec wait_modify(state()) -> state().
-wait_modify(#state{modify_handler_ref = undefined} = State) ->
+wait_modify(#state{modify_handler_pid = undefined} = State) ->
     State;
-wait_modify(#state{modify_handler_ref = Ref} = State) ->
+wait_modify(#state{modify_handler_pid = Pid} = State) ->
     receive
-        {'DOWN', Ref, _, _, Exit} -> handle_modified(Exit, State)
+        {'EXIT', Pid, Exit} -> handle_modified(Exit, State)
     end.
 
 %%--------------------------------------------------------------------
@@ -272,7 +271,11 @@ wait_modify(#state{modify_handler_ref = Ref} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_modified(Exit :: any(), state()) -> state().
-handle_modified({modified, NextChanges, Data}, #state{
+handle_modified({modified, false, Data}, #state{} = State) ->
+    schedule_terminate(handle_modified(
+        {modified, {true, undefined}, Data}, State
+    ));
+handle_modified({modified, {true, NextChanges}, Data}, #state{
     module = Module,
     changes = Changes,
     commit_delay = Delay
@@ -280,13 +283,13 @@ handle_modified({modified, NextChanges, Data}, #state{
     schedule_commit(Delay, modify_async(State#state{
         data = Data,
         changes = merge_changes(Module, Changes, NextChanges),
-        modify_handler_ref = undefined
+        modify_handler_pid = undefined
     }));
 handle_modified(Exit, #state{commit_delay = Delay} = State) ->
     ?error("Modify handler of a transaction process terminated abnormally: ~p",
         [Exit]),
     schedule_commit(Delay, modify_async(State#state{
-        modify_handler_ref = undefined
+        modify_handler_pid = undefined
     })).
 
 %%--------------------------------------------------------------------
@@ -298,7 +301,7 @@ handle_modified(Exit, #state{commit_delay = Delay} = State) ->
 -spec commit_sync(state()) -> state().
 commit_sync(#state{
     changes = undefined,
-    commit_handler_ref = undefined
+    commit_handler_pid = undefined
 } = State) ->
     State;
 commit_sync(#state{} = State) ->
@@ -319,15 +322,15 @@ commit_async(Delay, #state{
     module = Module,
     data = Data,
     changes = Changes,
-    commit_handler_ref = undefined
+    commit_handler_pid = undefined
 } = State) ->
-    {_, Ref} = spawn_monitor(fun() ->
-        Response = Module:commit(Changes, Data),
-        exit(self(), {committed, Response, Delay})
+    Pid = spawn_link(fun() ->
+        Response = exec(Module, commit, [Changes, Data]),
+        return({committed, Response, Delay})
     end),
     State#state{
         changes = undefined,
-        commit_handler_ref = Ref
+        commit_handler_pid = Pid
     };
 commit_async(_Delay, #state{} = State) ->
     State.
@@ -340,18 +343,18 @@ commit_async(_Delay, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec wait_commit(state()) -> state().
 wait_commit(#state{
-    commit_handler_ref = undefined,
+    commit_handler_pid = undefined,
     commit_msg_ref = undefined
 } = State) ->
     State;
 wait_commit(#state{
-    commit_handler_ref = HandlerRef,
-    commit_msg_ref = MsgRef
+    commit_handler_pid = Pid,
+    commit_msg_ref = Ref
 } = State) ->
     receive
-        {'DOWN', HandlerRef, _, _, Exit} ->
+        {'EXIT', Pid, Exit} ->
             handle_committed(Exit, State);
-        {MsgRef, {commit, Delay}} ->
+        {Ref, {commit, Delay}} ->
             commit_async(Delay, State#state{commit_msg_ref = undefined})
     end.
 
@@ -364,21 +367,21 @@ wait_commit(#state{
 -spec handle_committed(Exit :: any(), state()) -> state().
 handle_committed({committed, true, _}, #state{commit_delay = Delay} = State) ->
     schedule_terminate(schedule_commit(Delay, State#state{
-        commit_handler_ref = undefined
+        commit_handler_pid = undefined
     }));
 handle_committed({committed, {false, Changes}, Delay}, #state{
     module = Module,
     changes = Changes2
 } = State) ->
-    Delay2 = Module:commit_backoff(Delay),
+    Delay2 = exec(Module, commit_backoff, [Delay]),
     schedule_commit(Delay2, State#state{
         changes = merge_changes(Module, Changes, Changes2),
-        commit_handler_ref = undefined
+        commit_handler_pid = undefined
     });
 handle_committed(Exit, #state{commit_delay = Delay} = State) ->
     ?error("Commit handler of a transaction process terminated abnormally: ~p",
         [Exit]),
-    schedule_commit(Delay, State#state{commit_handler_ref = undefined}).
+    schedule_commit(Delay, State#state{commit_handler_pid = undefined}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -392,7 +395,7 @@ merge_changes(_Module, Changes, undefined) ->
 merge_changes(_Module, undefined, NextChanges) ->
     NextChanges;
 merge_changes(Module, Changes, NextChanges) ->
-    Module:merge_changes(Changes, NextChanges).
+    exec(Module, merge_changes, [Changes, NextChanges]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -420,8 +423,8 @@ schedule_commit(_Delay, #state{} = State) ->
 schedule_terminate(#state{
     requests = [],
     changes = undefined,
-    modify_handler_ref = undefined,
-    commit_handler_ref = undefined,
+    modify_handler_pid = undefined,
+    commit_handler_pid = undefined,
     idle_timeout = IdleTimeout
 } = State) ->
     State#state{terminate_msg_ref = schedule_msg(IdleTimeout, terminate)};
@@ -435,10 +438,62 @@ schedule_terminate(#state{} = State) ->
 %% process. Returns reference tag.
 %% @end
 %%--------------------------------------------------------------------
--spec schedule_msg(timeout(), any()) -> reference().
+-spec schedule_msg(timeout(), any()) -> undefined | reference().
 schedule_msg(infinity, _Msg) ->
-    make_ref();
+    undefined;
 schedule_msg(Delay, Msg) ->
     Ref = make_ref(),
     erlang:send_after(Delay, self(), {Ref, Msg}),
     Ref.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns the result of applying Function in Module to Args.
+%% @end
+%%--------------------------------------------------------------------
+-spec exec(tp:mod(), atom(), list()) -> Result :: term().
+exec(Module, Function, Args) ->
+    erlang:apply(Module, Function, Args).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Calls {@link exec/3} and catches exceptions.
+%% @end
+%%--------------------------------------------------------------------
+-spec exec_noexcept(tp:mod(), atom(), list()) ->
+    {ok, Result :: term()} | {error, Reason :: term(), Stacktrace :: term()}.
+exec_noexcept(Module, Function, Args) ->
+    try
+        {ok, exec(Module, Function, Args)}
+    catch
+        _:Reason -> {error, Reason, erlang:get_stacktrace()}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends responses to the tp_server callers.
+%% @end
+%%--------------------------------------------------------------------
+-spec notify([pid()], [reference()], term() | [tp:response()]) -> ok.
+notify(Pids, Refs, TpResponses) when is_list(TpResponses) ->
+    Responses = lists:zip3(Pids, Refs, TpResponses),
+    lists:foreach(fun({Pid, Ref, TpResponse}) ->
+        Pid ! {Ref, TpResponse}
+    end, Responses);
+notify(Pids, Refs, Response) ->
+    Responses = lists:duplicate(length(Pids), Response),
+    notify(Pids, Refs, Responses).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Stops the execution of the calling process with exit response.
+%% @end
+%%--------------------------------------------------------------------
+-spec return(Response :: term()) -> ok.
+return(Response) ->
+    exit(self(), Response),
+    receive _ -> ok end.

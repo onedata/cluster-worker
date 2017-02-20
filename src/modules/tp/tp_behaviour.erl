@@ -30,7 +30,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback modify([tp:request()], tp:data()) ->
-    {[tp:response()], tp:changes(), tp:data()}.
+    {[tp:response()], {true, tp:changes()} | false, tp:data()}.
 
 %%--------------------------------------------------------------------
 %% @doc
