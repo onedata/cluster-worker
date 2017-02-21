@@ -26,7 +26,9 @@
 %% called in a separate process, however it is guaranteed that there will be
 %% only one process at the time running modify/2 callback. Next handling process
 %% will be spawned after completion of a currently running and only if there are
-%% pending requests.
+%% pending requests. Second returned value denotes modification changes. If no
+%% changes have been created this value should equal 'false', otherwise a tuple
+%% 'true' and generated changes.
 %% @end
 %%--------------------------------------------------------------------
 -callback modify([tp:request()], tp:data()) ->
