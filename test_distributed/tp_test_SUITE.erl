@@ -35,12 +35,15 @@
     tp_router_should_not_delete_routing_entry_when_mismatch/1,
     tp_server_should_call_init_callback_on_init/1,
     tp_server_should_call_modify_callback_on_request/1,
+    tp_server_should_forward_modify_exception/1,
+    tp_server_should_ignore_modify/1,
     tp_server_should_commit_changes/1,
     tp_server_should_retry_commit_changes/1,
     tp_server_should_commit_changes_on_terminate/1,
     tp_server_should_call_terminate_callback_on_terminate/1,
     tp_server_should_delete_routing_entry_on_terminate/1,
-    tp_server_should_terminate_when_idle_timeout_exceeded/1
+    tp_server_should_terminate_when_idle_timeout_exceeded/1,
+    tp_server_should_terminate_on_exception/1
 ]).
 
 %% test_bases
@@ -63,12 +66,15 @@ all() ->
         tp_router_should_not_delete_routing_entry_when_mismatch,
         tp_server_should_call_init_callback_on_init,
         tp_server_should_call_modify_callback_on_request,
+        tp_server_should_forward_modify_exception,
+        tp_server_should_ignore_modify,
         tp_server_should_commit_changes,
         tp_server_should_retry_commit_changes,
         tp_server_should_commit_changes_on_terminate,
         tp_server_should_call_terminate_callback_on_terminate,
         tp_server_should_delete_routing_entry_on_terminate,
-        tp_server_should_terminate_when_idle_timeout_exceeded
+        tp_server_should_terminate_when_idle_timeout_exceeded,
+        tp_server_should_terminate_on_exception
     ], [
         run_multiple_parallel_requests_for_same_key_should_return_responses
     ]).
@@ -211,6 +217,20 @@ tp_server_should_call_modify_callback_on_request(Config) ->
     ?assertReceivedEqual({Ref, request}, ?TIMEOUT),
     stop_tp_server(Worker, Pid).
 
+tp_server_should_forward_modify_exception(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertMatch({error, unexpected_error, _}, rpc:call(
+        Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]
+    )).
+
+tp_server_should_ignore_modify(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(request,
+        rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request])),
+    ?assertEqual({error, not_found}, rpc:call(
+        Worker, tp_router, get, [?TP_KEY]
+    ), 3, ?config(idle_timeout, Config)).
+
 tp_server_should_commit_changes(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     CommitDelay = ?config(commit_delay, Config),
@@ -282,6 +302,14 @@ tp_server_should_terminate_when_idle_timeout_exceeded(Config) ->
         Worker, meck, num_calls, [?TP_MODULE, terminate, [?TP_ARGS]]
     ), 3, ?config(idle_timeout, Config)).
 
+tp_server_should_terminate_on_exception(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]),
+    rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]),
+    ?assertEqual({error, not_found}, rpc:call(
+        Worker, tp_router, get, [?TP_KEY]
+    ), 3, ?config(idle_timeout, Config)).
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -298,7 +326,18 @@ init_per_testcase(Case, Config) when
         {mock_opts, [no_history]}
         | Config
     ]);
-
+init_per_testcase(tp_server_should_forward_modify_exception = Case, Config) ->
+    init_per_testcase(?DEFAULT_CASE(Case), [
+        {modify_fun, fun(_, _) ->
+            meck:exception(error, unexpected_error)
+        end} | Config
+    ]);
+init_per_testcase(tp_server_should_ignore_modify = Case, Config) ->
+    init_per_testcase(?DEFAULT_CASE(Case), [
+        {modify_fun, fun(Requests, Data) ->
+            {Requests, false, Data}
+        end} | Config
+    ]);
 init_per_testcase(tp_server_should_retry_commit_changes = Case, Config) ->
     Self = self(),
     init_per_testcase(?DEFAULT_CASE(Case), [
@@ -315,7 +354,12 @@ init_per_testcase(tp_server_should_retry_commit_changes = Case, Config) ->
         end}
         | Config
     ]);
-
+init_per_testcase(tp_server_should_terminate_on_exception = Case, Config) ->
+    init_per_testcase(?DEFAULT_CASE(Case), [
+        {merge_changes_fun, fun(_, _) ->
+            meck:exception(error, unexpected_error)
+        end} | Config
+    ]);
 init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     CommitDelay = timer:seconds(1),
@@ -325,10 +369,13 @@ init_per_testcase(_Case, Config) ->
             (Request) when is_function(Request, 0) -> Request();
             (Request) -> Request
         end, Requests),
-        {Responses, Responses, Data}
+        {Responses, {true, Responses}, Data}
     end,
     CommitFun = fun(_Changes, _Data) -> true end,
     CommitBackoffFun = fun(NextCommitDelay) -> 2 * NextCommitDelay end,
+    MergeChangesFun = fun(TpChanges, NextTpChanges) ->
+        TpChanges ++ NextTpChanges
+    end,
 
     test_utils:mock_new(Workers, ?TP_MODULE, [passthrough, non_strict |
         proplists:get_value(mock_opts, Config, [])]),
@@ -342,9 +389,8 @@ init_per_testcase(_Case, Config) ->
     end),
     test_utils:mock_expect(Workers, ?TP_MODULE, modify,
         proplists:get_value(modify_fun, Config, ModifyFun)),
-    test_utils:mock_expect(Workers, ?TP_MODULE, merge_changes, fun
-        (TpChanges, NextTpChanges) -> TpChanges ++ NextTpChanges
-    end),
+    test_utils:mock_expect(Workers, ?TP_MODULE, merge_changes,
+        proplists:get_value(merge_changes_fun, Config, MergeChangesFun)),
     test_utils:mock_expect(Workers, ?TP_MODULE, commit,
         proplists:get_value(commit_fun, Config, CommitFun)),
     test_utils:mock_expect(Workers, ?TP_MODULE, commit_backoff,
