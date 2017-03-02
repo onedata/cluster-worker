@@ -54,7 +54,11 @@ view_query_test(Config) ->
     {ok, Id2} = ?assertMatch({ok, _}, rpc:call(W, datastore, create, [disk_only, #document{value = #test_record_1{}}])),
 
     {ok, Ids} = ?assertMatch({ok, _}, rpc:call(W, couchdb_datastore_driver, query_view, [test_record_1, ViewId, [{stale, false}]])),
-    ?assertEqual(lists:sort([Id1, Id2]), lists:sort(Ids)).
+    ?assertEqual(lists:sort([Id1, Id2]), lists:sort(Ids)),
+
+    %remove
+    ?assertEqual(ok, rpc:call(W, couchdb_datastore_driver, delete_view, [test_record_1, ViewId])),
+    ?assertMatch({error, _}, rpc:call(W, couchdb_datastore_driver, query_view, [test_record_1, ViewId, [{stale, false}]])).
 
 spatial_view_query_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
@@ -71,7 +75,11 @@ spatial_view_query_test(Config) ->
         [test_record_1, ViewId, [{stale, false}, {start_range, [1,1]}, {end_range, [2,2]}, spatial]])),
     ?assertMatch([_|_], Ids),
     ?assert(lists:member(Id1, Ids)),
-    ?assert(lists:member(Id2, Ids)).
+    ?assert(lists:member(Id2, Ids)),
+
+    %remove
+    ?assertEqual(ok, rpc:call(W, couchdb_datastore_driver, delete_view, [test_record_1, ViewId])),
+    ?assertMatch({error, _}, rpc:call(W, couchdb_datastore_driver, query_view, [test_record_1, ViewId, [{stale, false}]])).
 
 %%%===================================================================
 %%% SetUp and TearDown functions
