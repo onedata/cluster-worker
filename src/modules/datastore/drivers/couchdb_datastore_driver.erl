@@ -1859,20 +1859,14 @@ query_view(ModelName, Id, Options) ->
             Error
     end.
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Delete view and design doc with given Id
 %% @end
-%% @TODO TODO
 %%--------------------------------------------------------------------
 -spec delete_view(ModelName :: model_behaviour:model_type(), binary()) -> ok.
-delete_view(_ModelName, _Id) ->
-%%    DesignId = <<"_design/", Id/binary>>,
-    % TODO - verify ans
-%%    {ok, _} = couchdb_datastore_driver:db_run(select_bucket(ModelName:model_init()), couchbeam, delete_doc, [{[<<"_id">>, DesignId]}], 5),
-    ok.
-
+delete_view(ModelName, Id) ->
+    db_run_direct(select_bucket(ModelName:model_init()), couchbeam, delete_design, [Id], 5).
 
 %%--------------------------------------------------------------------
 %% @doc
