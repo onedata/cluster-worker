@@ -30,8 +30,11 @@
 %% all workers that need datastore_worker shall be after datastore_worker on
 %% the list below.
 -define(CLUSTER_WORKER_MODULES, [
-    {datastore_worker, []},
-    {tp_router, [
+    {early_init, datastore_worker, [
+        {supervisor_flags, datastore_worker:supervisor_flags()},
+        {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
+    ]},
+    {early_init, tp_router, [
         {supervisor_flags, tp_router:supervisor_flags()},
         {supervisor_children_spec, tp_router:supervisor_children_spec()}
     ]},
@@ -42,10 +45,15 @@
     nagios_listener,
     redirector_listener
 ]).
+-define(MODULES_HOOKS, [
+    {{datastore_worker, early_init}, {datastore, ensure_state_loaded, []}},
+    {{datastore_worker, init}, {datastore, cluster_initialized, []}}
+]).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
-    modules/0, listeners/0, cluster_worker_modules/0, cluster_worker_listeners/0]).
+    modules/0, listeners/0, cluster_worker_modules/0,
+    cluster_worker_listeners/0, modules_hooks/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -63,8 +71,19 @@
 %% Use in plugins when specifying modules_with_args.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_worker_modules() -> Models :: [{atom(), [any()]}].
+-spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
+    | {singleton | early_init, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of modules' hooks executed after module initialization (early or standard).
+%% Use in plugins when specifying modules_hooks.
+%% @end
+%%--------------------------------------------------------------------
+-spec modules_hooks() -> Hooks :: [{{Module :: atom(), early_init | init},
+    {HookedModule :: atom(), Fun :: atom(), Args :: list()}}].
+modules_hooks() -> ?MODULES_HOOKS.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -85,7 +104,8 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 modules() ->
     lists:map(fun
         ({Module, _}) -> Module;
-        ({singleton, Module, _}) -> Module
+        ({singleton, Module, _}) -> Module;
+        ({early_init, Module, _}) -> Module
     end, plugins:apply(node_manager_plugin, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
@@ -562,7 +582,7 @@ cm_conn_ack(State) ->
 -spec cluster_init_finished(State :: term()) -> #state{}.
 cluster_init_finished(State) ->
     ?info("Cluster sucessfully initialized"),
-    %todo implement
+    init_workers(),
     State.
 
 %%--------------------------------------------------------------------
@@ -639,34 +659,62 @@ init_net_connection([Node | Nodes]) ->
 %%--------------------------------------------------------------------
 -spec init_node() -> ok.
 init_node() ->
-    init_workers().
+    early_init_workers().
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts all workers on node, and notifies
-%% cluster manager about successfull init
+%% Starts workers that must be initialized before init of cluster ring.
+%% @end
+%%--------------------------------------------------------------------
+-spec early_init_workers() -> ok.
+early_init_workers() ->
+    Hooks = plugins:apply(node_manager_plugin, modules_hooks, []),
+
+    lists:foreach(fun
+        ({early_init, Module, Args}) ->
+            ok = start_worker(Module, Args),
+            case proplists:get_value({Module, early_init}, Hooks) of
+                {HookedModule, Fun, HookedArgs} ->
+                    ok = apply(HookedModule, Fun, HookedArgs);
+                _ -> ok
+            end;
+        (_) ->
+            ok
+    end, plugins:apply(node_manager_plugin, modules_with_args, [])),
+    ?info("Early init finished"),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts all workers on node.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    lists:foreach(fun
-        ({Module, Args}) ->
-            ok = start_worker(Module, Args),
-            case Module of
-                datastore_worker ->
-                    {ok, NodeToSync} = gen_server2:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
-                    ok = datastore:ensure_state_loaded(NodeToSync),
-                    ?info("Datastore synchronized");
-                _ -> ok
-            end;
-        ({singleton, Module, Args}) ->
-            case gen_server2:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
-                ok ->
-                    ok = start_worker(Module, Args),
-                    ?info("Singleton module ~p started", [Module]);
-                already_started ->
-                    ok
-            end
+    Hooks = plugins:apply(node_manager_plugin, modules_hooks, []),
+
+    lists:foreach(fun(ModuleDesc) ->
+        InitializedModul = case ModuleDesc of
+            {early_init, Module, _Args} ->
+                Module;
+            {Module, Args} ->
+                ok = start_worker(Module, Args),
+                Module;
+            {singleton, Module, Args} ->
+                case gen_server2:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
+                    ok ->
+                        ok = start_worker(Module, Args),
+                        ?info("Singleton module ~p started", [Module]);
+                    already_started ->
+                        ok
+                end,
+                Module
+        end,
+        case proplists:get_value({InitializedModul, init}, Hooks) of
+            {HookedModule, Fun, HookedArgs} ->
+                ok = apply(HookedModule, Fun, HookedArgs);
+            _ -> ok
+        end
     end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.
@@ -829,21 +877,26 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
-    {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_min),
+    {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
     {ok, MaxInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, max_analysis_interval_min),
     {ok, MemThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_analysis_treshold),
     {ok, ProcThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, procs_num_analysis_treshold),
+    {ok, MemToStartCleaning} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
 
     {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME, schedulers_monitoring),
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
 
+    MemUsage = monitoring:mem_usage(MonState),
+
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
     case (TimeDiff >= timer:minutes(MaxInterval)) orelse
-        ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
+        ((TimeDiff >= timer:seconds(MinInterval)) andalso
+            ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold) orelse (MemUsage >= MemToStartCleaning))) of
         true ->
             spawn(fun() ->
-                ?debug("Erlang ets mem usage: ~p", [
+                ?info("Monitoring state: ~p", [MonState]),
+                ?info("Erlang ets mem usage: ~p", [
                     lists:reverse(lists:sort(lists:map(fun(N) ->
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
@@ -884,7 +937,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                             erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
                             erlang:process_info(P, total_heap_size), P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
-                ?debug("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
+                ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
                 "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
                     TopProcesses, MergedStacks, MergedStacks2
                 ]),

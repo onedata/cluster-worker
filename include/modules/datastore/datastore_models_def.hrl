@@ -40,7 +40,8 @@
 }).
 
 % Max size of cleared_list in cache_consistency_controller
--define(CLEAR_MONITOR_MAX_SIZE, 32).
+% TODO - new cache_consistency_controller for new datastore
+-define(CLEAR_MONITOR_MAX_SIZE, 0).
 %% Model that controls consistency of cache
 -record(cache_consistency_controller, {
     cleared_list = [] :: [datastore:key() | datastore:link_name()],

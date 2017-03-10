@@ -806,6 +806,19 @@ set_env(Case, Config) ->
     ok = test_node_starter:load_modules(Workers, [?MODULE]),
     TestRecord = get_record_name(Case),
     test_utils:enable_datastore_models(Workers, [TestRecord]),
+
+    case performance:is_standard_test() of
+        false ->
+            ok;
+        _ ->
+            lists:foreach(fun(W) ->
+                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, timer:seconds(3))),
+                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(3))),
+                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, 1000)),
+                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory, false))
+            end, Workers)
+    end,
+
     [{test_record, TestRecord} | Config].
 
 clear_env(Config) ->

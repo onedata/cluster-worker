@@ -40,11 +40,13 @@
     bucket :: datastore:bucket(),
     store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
+    % TODO - delete transactional_global_cache and sync_cache if possible
     transactional_global_cache = true :: boolean(),
     sync_cache = false :: boolean(),
     link_replica_scope = ?DEFAULT_LINK_REPLICA_SCOPE :: links_utils:link_replica_scope(),
     link_duplication = false :: boolean(),
     sync_enabled = false :: boolean(),
+    % TODO - delete aggregate_db_writes
     aggregate_db_writes = false :: boolean(),
     disable_remote_link_delete = false :: boolean(),
     auxiliary_caches = #{} :: #{Field :: atom() => datastore:aux_cache_config()}

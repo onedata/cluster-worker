@@ -16,6 +16,7 @@
 -include("modules/datastore/datastore_engine.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("ctool/include/global_definitions.hrl").
 
 
 %% #document types
@@ -43,12 +44,13 @@
 -export_type([generic_error/0, not_found_error/1, update_error/0, create_error/0, get_error/0, link_error/0]).
 
 %% API utility types
+-type db_node() :: {Host :: binary(), Port :: integer()}.
 -type store_level() :: ?DISK_ONLY_LEVEL | ?LOCAL_ONLY_LEVEL | ?GLOBAL_ONLY_LEVEL | ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
 -type delete_predicate() :: fun(() -> boolean()).
 -type list_fun() :: fun((Obj :: term(), AccIn :: term()) -> {next, Acc :: term()} | {abort, Acc :: term()}).
 -type exists_return() :: boolean() | no_return().
 
--export_type([store_level/0, delete_predicate/0, list_fun/0,
+-export_type([db_node/0, store_level/0, delete_predicate/0, list_fun/0,
     exists_return/0]).
 
 %% Links' types
@@ -82,7 +84,7 @@
     foreach_link/4, foreach_link/5, fetch_link_target/3, fetch_link_target/4,
     link_walk/4, link_walk/5, set_links/3, set_links/4]).
 -export([fetch_full_link/3, fetch_full_link/4, exists_link_doc/3, exists_link_doc/4]).
--export([configs_per_bucket/1, ensure_state_loaded/1, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
+-export([configs_per_bucket/1, ensure_state_loaded/0, cluster_initialized/0, healthcheck/0, level_to_driver/1, driver_to_module/1, initialize_state/1]).
 -export([run_transaction/1, run_transaction/3, normalize_link_target/2, run_posthooks/5, driver_to_level/1, models_with_aux_caches/0]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
 
@@ -164,8 +166,8 @@ create_sync(Level, #document{} = Document) ->
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(?LOCALLY_CACHED_LEVEL, Document, Diff) ->
     create_or_update_cache(?LOCALLY_CACHED_LEVEL, Document, Diff);
-create_or_update(?GLOBALLY_CACHED_LEVEL, #document{} = Document, Diff) ->
-    create_or_update_cache(?GLOBALLY_CACHED_LEVEL, Document, Diff);
+%%create_or_update(?GLOBALLY_CACHED_LEVEL, #document{} = Document, Diff) ->
+%%    create_or_update_cache(?GLOBALLY_CACHED_LEVEL, Document, Diff);
 create_or_update(Level, #document{} = Document, Diff) ->
     exec_driver(model_config(Document), level_to_driver(Level), create_or_update, [Document, Diff]).
 
@@ -382,8 +384,9 @@ list(_Level, [Driver1, Driver2], ModelNameOrConfig, Fun, AccIn, Opts) ->
         FinalAns ->
             FinalAns
     end;
-list(_Level, Drivers, ModelNameOrConfig, Fun, AccIn, Mode) ->
-    exec_driver(model_config(ModelNameOrConfig), Drivers, list, [Fun, AccIn, Mode]).
+list(Level, Drivers, ModelNameOrConfig, Fun, AccIn, Mode) ->
+    MC = model_config(ModelNameOrConfig),
+    exec_driver(MC#model_config{store_level = Level}, Drivers, list, [Fun, AccIn, Mode]).
 
 
 %%--------------------------------------------------------------------
@@ -408,6 +411,7 @@ delete(Level, ModelNameOrConfig, Key, Pred, Opts) ->
     ModelConfig = model_config(ModelNameOrConfig),
     case exec_driver_async(ModelConfig, Level, delete, [Key, Pred]) of
         ok ->
+            % TODO - analyse if we should do it by default
             case lists:member(ignore_links, Opts) of
                 true -> ok;
                 false ->
@@ -1169,11 +1173,17 @@ init_caches_consistency(Models) ->
         end,
         case Check of
             true ->
-                case erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), is_model_empty, [ModelConfig]) of
+                % TODO - fix performance issue!!!
+                case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
                     {ok, true} ->
-                        caches_controller:init_consistency_info(InfoLevel, ModelName);
+                        ok;
                     _ ->
-                        ok
+                        case erlang:apply(datastore:driver_to_module(?PERSISTENCE_DRIVER), is_model_empty, [ModelConfig]) of
+                            {ok, true} ->
+                                caches_controller:init_consistency_info(InfoLevel, ModelName);
+                            _ ->
+                                ok
+                        end
                 end;
             _ ->
                 ok
@@ -1216,6 +1226,18 @@ init_drivers(Configs, NodeToSync) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% If needed - loads local state, initializes datastore drivers and fetches active config.
+%% @end
+%%--------------------------------------------------------------------
+-spec ensure_state_loaded() -> ok | {error, Reason :: term()}.
+ensure_state_loaded() ->
+    {ok, NodeToSync} = gen_server2:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
+    ensure_state_loaded(NodeToSync),
+    ?info("Datastore synchronized").
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% If needed - loads local state, initializes datastore drivers and fetches active config
 %% from NodeToSync if needed.
 %% @end
@@ -1241,14 +1263,25 @@ initialize_state(NodeToSync) ->
     try
         Models = datastore_config:models(),
         Configs = load_local_state(Models),
-        init_drivers(Configs, NodeToSync),
-        init_caches_consistency(Models)
+        init_drivers(Configs, NodeToSync)
     catch
         Type:Reason ->
             ?error_stacktrace("Cannot initialize datastore local state due to"
             " ~p: ~p", [Type, Reason]),
             {error, Reason}
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Ends datastore initialization after whole cluster is set-up.
+%% @end
+%%--------------------------------------------------------------------
+-spec cluster_initialized() -> ok.
+cluster_initialized() ->
+    {ok, MaxNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
+    tp:set_processes_limit(MaxNum),
+    Models = datastore_config:models(),
+    init_caches_consistency(Models).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1306,7 +1339,7 @@ level_to_driver(?GLOBAL_ONLY_LEVEL) ->
 level_to_driver(?LOCALLY_CACHED_LEVEL) ->
     [?LOCAL_CACHE_DRIVER, ?PERSISTENCE_DRIVER];
 level_to_driver(?GLOBALLY_CACHED_LEVEL) ->
-    [?DISTRIBUTED_CACHE_DRIVER, ?PERSISTENCE_DRIVER].
+    [?DISTRIBUTED_CACHE_DRIVER].
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1397,8 +1430,8 @@ exec_driver(ModelNameOrConfig, Driver, Method, Args) when is_atom(Driver) ->
     ok | {ok, term()} | {error, term()}.
 exec_driver_async(ModelNameOrConfig, ?LOCALLY_CACHED_LEVEL, Method, Args) ->
     exec_cache_async(ModelNameOrConfig, level_to_driver(?LOCALLY_CACHED_LEVEL), Method, Args);
-exec_driver_async(ModelNameOrConfig, ?GLOBALLY_CACHED_LEVEL, Method, Args) ->
-    exec_cache_async(ModelNameOrConfig, level_to_driver(?GLOBALLY_CACHED_LEVEL), Method, Args);
+%%exec_driver_async(ModelNameOrConfig, ?GLOBALLY_CACHED_LEVEL, Method, Args) ->
+%%    exec_cache_async(ModelNameOrConfig, level_to_driver(?GLOBALLY_CACHED_LEVEL), Method, Args);
 exec_driver_async(ModelNameOrConfig, Level, Method, Args) ->
     exec_driver(ModelNameOrConfig, level_to_driver(Level), Method, Args).
 

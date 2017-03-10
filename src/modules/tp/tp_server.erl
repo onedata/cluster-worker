@@ -45,7 +45,7 @@
     idle_timeout :: timeout()
 }).
 
--type state() :: state().
+-type state() :: #state{}.
 
 %%%===================================================================
 %%% API
@@ -59,7 +59,7 @@
 -spec start_link(tp:mod(), tp:args(), tp:key()) ->
     {ok, pid()} | ignore | {error, Reason :: term()}.
 start_link(Module, Args, Key) ->
-    gen_server2:start_link(?MODULE, [Module, Args, Key], []).
+    gen_server:start_link(?MODULE, [Module, Args, Key], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -91,7 +91,9 @@ init([Module, Args, Key]) ->
                     {error, Reason}
             end;
         {error, already_exists} ->
-            ignore
+            ignore;
+        {error, Reason} ->
+            {stop, Reason}
     end.
 
 %%--------------------------------------------------------------------
@@ -304,8 +306,8 @@ commit_sync(#state{
     commit_handler_pid = undefined
 } = State) ->
     State;
-commit_sync(#state{} = State) ->
-    commit_sync(wait_commit(State)).
+commit_sync(#state{commit_delay = Delay} = State) ->
+    commit_sync(commit_async(Delay, wait_commit(State))).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -342,20 +344,11 @@ commit_async(_Delay, #state{} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec wait_commit(state()) -> state().
-wait_commit(#state{
-    commit_handler_pid = undefined,
-    commit_msg_ref = undefined
-} = State) ->
+wait_commit(#state{commit_handler_pid = undefined} = State) ->
     State;
-wait_commit(#state{
-    commit_handler_pid = Pid,
-    commit_msg_ref = Ref
-} = State) ->
+wait_commit(#state{commit_handler_pid = Pid} = State) ->
     receive
-        {'EXIT', Pid, Exit} ->
-            handle_committed(Exit, State);
-        {Ref, {commit, Delay}} ->
-            commit_async(Delay, State#state{commit_msg_ref = undefined})
+        {'EXIT', Pid, Exit} -> handle_committed(Exit, State)
     end.
 
 %%--------------------------------------------------------------------

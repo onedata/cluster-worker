@@ -23,6 +23,8 @@
 %% tests
 -export([
     run_should_create_tp_server/1,
+    run_should_increase_number_of_active_processes/1,
+    run_should_fail_with_limit_exceeded_error/1,
     run_with_same_key_should_not_create_tp_server/1,
     run_should_process_requests_in_order/1,
     run_multiple_parallel_requests_for_same_key_should_return_responses/1,
@@ -42,6 +44,7 @@
     tp_server_should_commit_changes_on_terminate/1,
     tp_server_should_call_terminate_callback_on_terminate/1,
     tp_server_should_delete_routing_entry_on_terminate/1,
+    tp_server_should_decrease_number_of_active_processes_on_terminate/1,
     tp_server_should_terminate_when_idle_timeout_exceeded/1,
     tp_server_should_terminate_on_exception/1
 ]).
@@ -54,6 +57,8 @@
 all() ->
     ?ALL([
         run_should_create_tp_server,
+        run_should_increase_number_of_active_processes,
+        run_should_fail_with_limit_exceeded_error,
         run_with_same_key_should_not_create_tp_server,
         run_should_process_requests_in_order,
         run_multiple_parallel_requests_for_same_key_should_return_responses,
@@ -73,6 +78,7 @@ all() ->
         tp_server_should_commit_changes_on_terminate,
         tp_server_should_call_terminate_callback_on_terminate,
         tp_server_should_delete_routing_entry_on_terminate,
+        tp_server_should_decrease_number_of_active_processes_on_terminate,
         tp_server_should_terminate_when_idle_timeout_exceeded,
         tp_server_should_terminate_on_exception
     ], [
@@ -110,6 +116,21 @@ run_should_create_tp_server(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]),
     ?assertMatch({ok, _}, rpc:call(Worker, tp_router, get, [?TP_KEY])).
+
+run_should_increase_number_of_active_processes(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(request,
+        rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, key1, request])),
+    ?assertEqual(1, rpc:call(Worker, tp, get_processes_number, [])).
+
+run_should_fail_with_limit_exceeded_error(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, tp, set_processes_limit, [1]),
+    ?assertEqual(request,
+        rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, key1, request])),
+    ?assertEqual({error, limit_exceeded},
+        rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, key2, request])),
+    ?assertEqual(1, rpc:call(Worker, tp, get_processes_number, [])).
 
 run_with_same_key_should_not_create_tp_server(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -294,6 +315,13 @@ tp_server_should_delete_routing_entry_on_terminate(Config) ->
     ?assertEqual({error, not_found}, rpc:call(Worker, tp_router, get, [?TP_KEY]),
         3, ?config(idle_timeout, Config)).
 
+tp_server_should_decrease_number_of_active_processes_on_terminate(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]),
+    ?assertEqual(1, rpc:call(Worker, tp, get_processes_number, [])),
+    ?assertEqual(0, rpc:call(Worker, tp, get_processes_number, []),
+        3, ?config(idle_timeout, Config)).
+
 tp_server_should_terminate_when_idle_timeout_exceeded(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]),
@@ -377,6 +405,7 @@ init_per_testcase(_Case, Config) ->
         TpChanges ++ NextTpChanges
     end,
 
+    rpc:multicall(Workers, tp, set_processes_limit, [200]),
     test_utils:mock_new(Workers, ?TP_MODULE, [passthrough, non_strict |
         proplists:get_value(mock_opts, Config, [])]),
     test_utils:mock_expect(Workers, ?TP_MODULE, init, fun

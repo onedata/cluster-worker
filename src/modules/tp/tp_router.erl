@@ -23,7 +23,7 @@
 -export([init/1, handle/1, cleanup/0]).
 
 %% API
--export([create/2, get/1, delete/2]).
+-export([create/2, get/1, delete/2, size/0]).
 -export([supervisor_flags/0, supervisor_children_spec/0]).
 
 %%%===================================================================
@@ -35,8 +35,8 @@
 %% {@link worker_plugin_behaviour} callback init/1.
 %% @end
 %%--------------------------------------------------------------------
--spec init(Args :: term()) -> {ok, worker_host:plugin_state()} |
-    {error, Reason :: term()}.
+-spec init(Args :: term()) ->
+    {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
     ets:new(?TP_ROUTING_TABLE, [
         set,
@@ -79,14 +79,21 @@ cleanup() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds routing entry if missing.
+%% Adds routing entry if missing and if it does not exceed the limit
+%% for the number of active processes.
 %% @end
 %%--------------------------------------------------------------------
--spec create(tp:key(), tp:server()) -> ok | {error, already_exists}.
+-spec create(tp:key(), tp:server()) -> ok | {error, Reason :: term()}.
 create(Key, Pid) ->
-    case ets:insert_new(?TP_ROUTING_TABLE, {Key, Pid}) of
-        true -> ok;
-        false -> {error, already_exists}
+    case update_size(1) > tp:get_processes_limit() of
+        true ->
+            update_size(-1),
+            {error, limit_exceeded};
+        false ->
+            case ets:insert_new(?TP_ROUTING_TABLE, {Key, Pid}) of
+                true -> ok;
+                false -> {error, already_exists}
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -108,8 +115,23 @@ get(Key) ->
 %%--------------------------------------------------------------------
 -spec delete(tp:key(), tp:server()) -> ok.
 delete(Key, Pid) ->
-    ets:delete_object(?TP_ROUTING_TABLE, {Key, Pid}),
+    case ets:select_delete(?TP_ROUTING_TABLE, [{{Key, Pid}, [], [true]}]) of
+        0 -> ok;
+        1 -> update_size(-1)
+    end,
     ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns routing table size.
+%% @end
+%%--------------------------------------------------------------------
+-spec size() -> Size :: non_neg_integer().
+size() ->
+    case ets:lookup(?TP_ROUTING_TABLE, ?TP_ROUTING_TABLE_SIZE) of
+        [] -> 0;
+        [{?TP_ROUTING_TABLE_SIZE, Size}] -> Size
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -135,3 +157,18 @@ supervisor_children_spec() ->
         type => worker,
         modules => [tp_server]
     }].
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Updates the routing table size by a difference.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_size(integer()) -> integer().
+update_size(Diff) ->
+    ets:update_counter(?TP_ROUTING_TABLE, ?TP_ROUTING_TABLE_SIZE,
+        {2, Diff}, {?TP_ROUTING_TABLE_SIZE, 0}).

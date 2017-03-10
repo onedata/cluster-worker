@@ -41,6 +41,8 @@
     revision_numbering_test/1,
     multiple_records_saving_test/1,
     force_save_test/1,
+    force_save_gc_test/1,
+    force_save_gc_link_test/1,
     finite_stream_test/1,
     record_deletion_test/1,
     delete_conflict_test/1,
@@ -56,6 +58,8 @@ all() ->
         revision_numbering_test,
         multiple_records_saving_test,
         force_save_test,
+        force_save_gc_test,
+        force_save_gc_link_test,
         finite_stream_test,
         delete_conflict_test,
         delete_force_save_test,
@@ -184,7 +188,7 @@ multiple_records_saving_test(Config) ->
 force_save_test(Config) ->
     [W1, W2] = ?config(cluster_worker_nodes, Config),
 
-    Key = <<"key">>,
+    Key = <<"key_fst">>,
     Docs = lists:map(
         fun(N) ->
             Val = #test_record_1{field1 = N, field2 = N, field3 = N},
@@ -200,8 +204,8 @@ force_save_test(Config) ->
 
     lists:map(
         fun(Doc) ->
-            ?assertEqual(
-                {ok, Key},
+            ?assertMatch(
+                {{ok, Key}, Doc},
                 rpc:call(W2, couchdb_datastore_driver, force_save,
                     [ModelConfig, Doc])
             )
@@ -209,10 +213,87 @@ force_save_test(Config) ->
         Docs
     ),
 
+    [#document{value = Check} | _] = lists:reverse(Docs),
+    ?assertMatch({{ok, #document{value = Check}}, {ok, #document{value = Check}}},
+        {rpc:call(W1, couchdb_datastore_driver, get, [ModelConfig, Key]),
+        rpc:call(W2, couchdb_datastore_driver, get, [ModelConfig, Key])}),
+
     ?assertEqual(
         rpc:call(W1, couchdb_datastore_driver, get, [ModelConfig, Key]),
         rpc:call(W2, couchdb_datastore_driver, get, [ModelConfig, Key])
     ),
+
+    ok.
+
+force_save_gc_test(Config) ->
+    [W1, W2] = ?config(cluster_worker_nodes, Config),
+
+    Key = <<"key_gc">>,
+    Docs = lists:map(
+        fun(N) ->
+            Val = #globally_cached_record{field1 = N, field2 = N, field3 = N},
+            Doc = #document{key = Key, value = Val},
+            ?assertEqual({ok, Key}, rpc:call(W1, globally_cached_record, save, [Doc])),
+            {_, {_, DocR, _}} = ?assertReceivedMatch({force_save_gc_test,
+                {_, #document{key = Key, value = Val}, globally_cached_record}}, ?TIMEOUT),
+            DocR
+        end,
+        lists:seq(1, 10)
+    ),
+    ModelConfig = globally_cached_record:model_init(),
+
+    lists:map(
+        fun(Doc) ->
+            ?assertEqual(
+                ok,
+                rpc:call(W2, mnesia_cache_driver, force_save,
+                    [ModelConfig, Doc])
+            )
+        end,
+        Docs
+    ),
+
+    [#document{value = Check} | _] = lists:reverse(Docs),
+    ?assertMatch({{ok, #document{value = Check}}, {ok, #document{value = Check}}},
+        {rpc:call(W1, mnesia_cache_driver, get, [ModelConfig, Key]),
+        rpc:call(W2, mnesia_cache_driver, get, [ModelConfig, Key])}),
+
+    ?assertEqual(
+        rpc:call(W1, mnesia_cache_driver, get, [ModelConfig, Key]),
+        rpc:call(W2, mnesia_cache_driver, get, [ModelConfig, Key])
+    ),
+    ok.
+
+force_save_gc_link_test(Config) ->
+    [W1, W2] = ?config(cluster_worker_nodes, Config),
+
+    Key = <<"key_l">>,
+    Docs = lists:map(
+        fun(N) ->
+            ?assertEqual(ok, rpc:call(W1, datastore, add_links,
+                [?DISK_ONLY_LEVEL, Key, globally_cached_record, {N, {Key, globally_cached_record}}])),
+            {_, {_, DocR, _}} = ?assertReceivedMatch({force_save_gc_link_test,
+                {_, #document{}, globally_cached_record}}, ?TIMEOUT),
+            DocR
+        end,
+        lists:seq(1, 10)
+    ),
+    ModelConfig = globally_cached_record:model_init(),
+
+    lists:map(
+        fun(Doc) ->
+            ?assertEqual(
+                ok,
+                rpc:call(W2, mnesia_cache_driver, force_link_save, [globally_cached_record:model_init(), Doc, Key])
+            )
+        end,
+        Docs
+    ),
+
+    [#document{key = CheckKey, value = Check} | _] = lists:reverse(Docs),
+    ?assertMatch({ok, #document{value = Check}},
+        rpc:call(W2, mnesia_cache_driver_internal, get_link_doc, [ModelConfig, CheckKey])),
+
     ok.
 
 %% Test stream with finite until value
@@ -285,7 +366,8 @@ delete_force_save_test(Config) ->
     ?assertMatch({ok, #document{rev = RevCheck}}, rpc:call(W, test_record_1, get, [Doc1Key])),
 
     Doc1_3 = #document{key = Doc1Key, value = Doc1Val2, rev = {RNum + 1, [<<"0">> | H]}, deleted = true},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
+    ?assertMatch({{ok, Doc1Key}, #document{}},
+        rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
 
     %% then
     ?assertMatch({error, {not_found, _}}, rpc:call(W, test_record_1, get, [Doc1Key])),
@@ -331,7 +413,7 @@ delete_conflict_test(Config) ->
 
     Doc1Val3 = #test_record_1{field1 = 3, field2 = 2, field3 = 3},
     Doc1_3 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum, [<<"0">>, H2]}},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
+    ?assertEqual({{ok, Doc1Key}, not_changed}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
 
     ?assertEqual(timeout, receive
                               {delete_conflict_test,
@@ -345,7 +427,7 @@ delete_conflict_test(Config) ->
 
     Doc1Val4 = #test_record_1{field1 = 4, field2 = 2, field3 = 3},
     Doc1_4 = #document{key = Doc1Key, value = Doc1Val4, rev = {RNum, [<<"z">>, H2]}},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_4])),
+    ?assertMatch({{ok, Doc1Key}, #document{}}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_4])),
 
     {_, {_, DocR1_4, ModR1_4}} = ?assertReceivedMatch({delete_conflict_test,
         {_, #document{}, _}}, ?TIMEOUT),
@@ -418,7 +500,7 @@ delete_double_conflict_test(Config) ->
 
     Doc1Val3 = #test_record_1{field1 = 3, field2 = 2, field3 = 3},
     Doc1_3 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum, [<<"001">>, <<"002">>, H3]}},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
+    ?assertEqual({{ok, Doc1Key}, not_changed}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
 
     ?assertEqual(timeout, receive
                               {delete_double_conflict_test,
@@ -429,7 +511,7 @@ delete_double_conflict_test(Config) ->
                           end),
 
     Doc1_33 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum, [<<"001">>, <<"zzz">>, H3]}},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_33])),
+    ?assertEqual({{ok, Doc1Key}, not_changed}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_33])),
 
     ?assertEqual(timeout, receive
                               {delete_double_conflict_test,
@@ -443,7 +525,7 @@ delete_double_conflict_test(Config) ->
 
     Doc1Val4 = #test_record_1{field1 = 4, field2 = 2, field3 = 3},
     Doc1_4 = #document{key = Doc1Key, value = Doc1Val4, rev = {RNum, [<<"zz1">>, <<"zz2">>, H3]}},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_4])),
+    ?assertMatch({{ok, Doc1Key}, #document{}}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_4])),
 
     {_, {_, DocR1_4, ModR1_4}} = ?assertReceivedMatch({delete_double_conflict_test,
         {_, #document{}, _}}, ?TIMEOUT),
@@ -513,7 +595,7 @@ force_save_after_delete_test(Config) ->
 
     Doc1Val3 = #test_record_1{field1 = 3, field2 = 2, field3 = 3},
     Doc1_3 = #document{key = Doc1Key, value = Doc1Val3, rev = {RNum - 1, [<<"z">>, H3]}, deleted = false},
-    ?assertEqual({ok, Doc1Key}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
+    ?assertEqual({{ok, Doc1Key}, not_changed}, rpc:call(W, couchdb_datastore_driver, force_save, [test_record_1:model_init(), Doc1_3])),
 
     %% then
     ?assertMatch({error, {not_found, _}}, rpc:call(W, test_record_1, get, [Doc1Key])),
@@ -532,9 +614,9 @@ force_save_after_delete_test(Config) ->
 
 
 init_per_testcase(CaseName, Config) ->
-    [W | _] = ?config(cluster_worker_nodes, Config),
+    [W | _] = Workers = ?config(cluster_worker_nodes, Config),
     [P1, P2] = ?config(cluster_worker_nodes, Config),
-    Models = [test_record_1, test_record_2],
+    Models = [test_record_1, test_record_2, globally_cached_record],
 
     timer:sleep(3000), % tmp solution until mocking is repaired (VFS-1851)
     test_utils:enable_datastore_models([P1], Models),
@@ -554,6 +636,11 @@ init_per_testcase(CaseName, Config) ->
             ]
         )
     ),
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(3))),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, 1000))
+    end, Workers),
 
     [{driver_pid, DriverPid} | Config].
 

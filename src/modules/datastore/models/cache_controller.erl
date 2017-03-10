@@ -405,7 +405,8 @@ link_cache_key(ModelName, Key, Link) ->
 %%--------------------------------------------------------------------
 -spec get_hooks_config() -> list().
 get_hooks_config() ->
-    caches_controller:get_hooks_config(datastore_config:global_caches() ++ datastore_config:local_caches()).
+%%    caches_controller:get_hooks_config(datastore_config:global_caches() ++ datastore_config:local_caches()).
+    caches_controller:get_hooks_config(datastore_config:local_caches()).
 
 %%--------------------------------------------------------------------
 %% @private

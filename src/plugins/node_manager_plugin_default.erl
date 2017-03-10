@@ -23,7 +23,8 @@
 %% node_manager_plugin_behaviour callbacks
 -export([before_init/1, after_init/1, on_terminate/2, on_code_change/3,
   handle_call_extension/3, handle_cast_extension/2, handle_info_extension/2, renamed_models/0,
-  modules_with_args/0, listeners/0, cm_nodes/0, db_nodes/0, check_node_ip_address/0, app_name/0, clear_memory/1]).
+  modules_with_args/0, modules_hooks/0, listeners/0, cm_nodes/0, db_nodes/0, check_node_ip_address/0,
+  app_name/0, clear_memory/1]).
 
 %%%===================================================================
 %%% node_manager_plugin_behaviour callbacks
@@ -79,8 +80,17 @@ listeners() -> node_manager:cluster_worker_listeners().
 %% {@link node_manager_plugin_behaviour} callback modules_with_args/0.
 %% @end
 %%--------------------------------------------------------------------
--spec modules_with_args() -> Models :: [{atom(), [any()]}].
+-spec modules_with_args() -> Models :: [{atom(), [any()]} | {singleton | early_init, atom(), [any()]}].
 modules_with_args() -> node_manager:cluster_worker_modules().
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link node_manager_plugin_behaviour} callback modules_hooks/0.
+%% @end
+%%--------------------------------------------------------------------
+-spec modules_hooks() -> Hooks :: [{{Module :: atom(), early_init | init},
+  {HookedModule :: atom(), Fun :: atom(), Args :: list()}}].
+modules_hooks() -> node_manager:modules_hooks().
 
 %%--------------------------------------------------------------------
 %% @doc
