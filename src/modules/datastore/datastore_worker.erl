@@ -21,6 +21,7 @@
 %% worker_plugin_behaviour callbacks
 -export([init/1, handle/1, cleanup/0]).
 -export([state_get/1, state_put/2]).
+-export([supervisor_flags/0, supervisor_children_spec/0]).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -33,36 +34,23 @@
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
-init(Args) ->
+init(_Args) ->
+    DBNodes = datastore_config:db_nodes(),
 
-    %% Get DB nodes
-    DBNodes =
-        case plugins:apply(node_manager_plugin, db_nodes, []) of
-            {ok, Nodes} ->
-                lists:map(
-                    fun(NodeString) ->
-                        [HostName, Port] = string:tokens(atom_to_list(NodeString), ":"),
-                        {list_to_binary(HostName), list_to_integer(Port)}
-                    end, Nodes);
-            _ ->
-                Args
-        end,
+    State = #{db_nodes => DBNodes},
+    lists:foreach(fun(Driver) ->
+        DriverMod = datastore:driver_to_module(Driver),
+        DriverMod:init_driver(State)
+    end, [
+        ?LOCAL_CACHE_DRIVER,
+        ?DISTRIBUTED_CACHE_DRIVER,
+        ?PERSISTENCE_DRIVER
+    ]),
 
-    State0 = #{db_nodes => DBNodes},
-    lists:foldl(
-        fun(Driver, _) ->
-            DriverMod = datastore:driver_to_module(Driver),
-            {ok, NState} = DriverMod:init_driver(State0),
-            [state_put(Key, Value) || {Key, Value} <- maps:to_list(NState)],
-            ok = wait_for(fun() -> DriverMod:healthcheck(NState) end, ?DATASTORE_DRIVER_INIT_TIMEOUT),
-            NState
-        end, State0, [?LOCAL_CACHE_DRIVER, ?DISTRIBUTED_CACHE_DRIVER, ?PERSISTENCE_DRIVER]),
-
-    State2 = lists:foldl(
-        fun(Model, StateAcc) ->
-            #model_config{name = RecordName} = ModelConfig = Model:model_init(),
-            maps:put(RecordName, ModelConfig, StateAcc)
-        end, State0, datastore_config:models()),
+    State2 = lists:foldl(fun(Model, StateAcc) ->
+        #model_config{name = RecordName} = ModelConfig = Model:model_init(),
+        maps:put(RecordName, ModelConfig, StateAcc)
+    end, State, datastore_config:models()),
 
     {ok, State2}.
 
@@ -86,26 +74,25 @@ handle(healthcheck) ->
     PersistenceModule = datastore:driver_to_module(?PERSISTENCE_DRIVER),
     LocalCacheModule = datastore:driver_to_module(?LOCAL_CACHE_DRIVER),
     GlobalCacheModule = datastore:driver_to_module(?DISTRIBUTED_CACHE_DRIVER),
-    HC = #{
-        datastore_state_init => datastore:healthcheck(),
-        ?PERSISTENCE_DRIVER => catch PersistenceModule:healthcheck(State),
-        ?LOCAL_CACHE_DRIVER => catch LocalCacheModule:healthcheck(State),
-        ?DISTRIBUTED_CACHE_DRIVER => catch GlobalCacheModule:healthcheck(State)
-    },
 
-    maps:fold(
-        fun
-            (_, ok, AccIn) ->
-                AccIn;
-            (K, {error, Reason}, _AccIn) when is_atom(K) ->
-                ?error("Driver ~p healthcheck error: ~p", [K, Reason]),
-                {error, K};
-            (K, Reason, _AccIn) ->
-                ?error("Unknown status of driver ~p, healthcheck error: ~p", [K, Reason]),
-                {error, unknown_driver_status}
-        end, ok, HC);
+    lists:foldl(fun
+        (_, {error, Reason}) ->
+            {error, Reason};
+        ({_Driver, ok}, ok) ->
+            ok;
+        ({Driver, {error, Reason}}, ok) ->
+            ?error("Driver ~p healthcheck error: ~p", [Driver, Reason]),
+            {error, {Driver, Reason}};
+        ({Driver, Error}, ok) ->
+            ?error("Driver ~p unexpected healthcheck error: ~p", [Driver, Error]),
+            {error, {Driver, Error}}
+    end, ok, [
+        {datastore_state_init, datastore:healthcheck()},
+        {?PERSISTENCE_DRIVER, catch PersistenceModule:healthcheck(State)},
+        {?LOCAL_CACHE_DRIVER, catch LocalCacheModule:healthcheck(State)},
+        {?DISTRIBUTED_CACHE_DRIVER, catch GlobalCacheModule:healthcheck(State)}
+    ]);
 
-%% Proxy call to given datastore driver
 handle({driver_call, Module, Method, Args}) ->
     try erlang:apply(Module, Method, Args) of
         ok -> ok;
@@ -113,11 +100,11 @@ handle({driver_call, Module, Method, Args}) ->
         {error, Reason} -> {error, Reason}
     catch
         _:Reason ->
-            ?error_stacktrace("datastore request ~p failed due to ~p", [{Module, Method, Args}, Reason]),
+            ?error_stacktrace("datastore request ~p failed due to ~p",
+                [{Module, Method, Args}, Reason]),
             {error, Reason}
     end;
 
-%% Unknown request
 handle(_Request) ->
     ?log_bad_request(_Request).
 
@@ -133,7 +120,7 @@ cleanup() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Puts given Value in datastore worker's state
+%% Stores key-value pair in the datastore worker's state.
 %% @end
 %%--------------------------------------------------------------------
 -spec state_put(Key :: term(), Value :: term()) -> ok.
@@ -142,29 +129,52 @@ state_put(Key, Value) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Puts Value from datastore worker's state
+%% Returns value associated with a key from the datastore worker's state.
 %% @end
 %%--------------------------------------------------------------------
 -spec state_get(Key :: term()) -> Value :: term().
 state_get(Key) ->
     worker_host:state_get(?MODULE, Key).
 
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a datastore supervisor flags.
+%% @end
+%%--------------------------------------------------------------------
+-spec supervisor_flags() -> supervisor:sup_flags().
+supervisor_flags() ->
+    #{strategy => one_for_one, intensity => 1, period => 5}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Waits up to specified time until given function return 'ok'.
+%% Returns a children spec for a datastore supervisor.
 %% @end
 %%--------------------------------------------------------------------
--spec wait_for(fun(() -> ok | term()), Timeout :: non_neg_integer()) ->
-    ok | {error, wait_timeout}.
-wait_for(Fun, Timeout) when Timeout > 0 ->
-    case catch Fun() of
-        ok -> ok;
-        Error ->
-            ?error("Error ~p", [Error]),
-            timer:sleep(timer:seconds(1)),
-            wait_for(Fun, Timeout - timer:seconds(1))
-    end;
-wait_for(_Fun, _Timeout) ->
-    {error, wait_timeout}.
+-spec supervisor_children_spec() -> [supervisor:child_spec()].
+supervisor_children_spec() ->
+    [
+        #{
+            id => couchbase_gateway_sup,
+            start => {couchbase_gateway_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [couchbase_gateway_sup]
+        },
+        #{
+            id => datastore_pool,
+            start => {datastore_pool, start_link, []},
+            restart => permanent,
+            shutdown => timer:seconds(10),
+            type => worker,
+            modules => [datastore_pool]
+        },
+        #{
+            id => datastore_pool_sup,
+            start => {datastore_pool_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [datastore_pool_sup]
+        }
+    ].

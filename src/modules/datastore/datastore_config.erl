@@ -33,11 +33,25 @@
 ]).
 
 %% datastore_config_behaviour callbacks
--export([models/0, throttled_models/0, global_caches/0, local_caches/0, models_with_aux_caches/0]).
+-export([db_nodes/0, models/0, throttled_models/0, global_caches/0,
+    local_caches/0, models_with_aux_caches/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of models used.
+%% Returns list of datastore nodes.
+%% @end
+%%--------------------------------------------------------------------
+-spec db_nodes() -> [datastore:db_node()].
+db_nodes() ->
+    {ok, Nodes} = plugins:apply(node_manager_plugin, db_nodes, []),
+    lists:map(fun(NodeString) ->
+        [HostName, Port] = string:tokens(atom_to_list(NodeString), ":"),
+        {list_to_binary(HostName), list_to_integer(Port)}
+    end, Nodes).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a list of models.
 %% @end
 %%--------------------------------------------------------------------
 -spec models() -> Models :: [model_behaviour:model_type()].
@@ -46,15 +60,16 @@ models() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of throttled models.
+%% Returns a list of throttled models.
 %% @end
 %%--------------------------------------------------------------------
 -spec throttled_models() -> Models :: [model_behaviour:model_type()].
-throttled_models() -> plugins:apply(?DATASTORE_CONFIG_PLUGIN, throttled_models, []).
+throttled_models() ->
+    plugins:apply(?DATASTORE_CONFIG_PLUGIN, throttled_models, []).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of models cached globally.
+%% Returns a list of models cached globally.
 %% @end
 %%--------------------------------------------------------------------
 -spec global_caches() -> Models :: [model_behaviour:model_type()].
@@ -63,7 +78,7 @@ global_caches() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of models cached locally.
+%% Returns a list of models cached locally.
 %% @end
 %%--------------------------------------------------------------------
 -spec local_caches() -> Models :: [model_behaviour:model_type()].
@@ -72,7 +87,7 @@ local_caches() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns list of models with defined auxiliary caches.
+%% Returns a list of models with defined auxiliary caches.
 %% @end
 %%--------------------------------------------------------------------
 -spec models_with_aux_caches() -> Models :: [model_behaviour:model_type()].
@@ -114,7 +129,7 @@ filter_models_by_level(Level, Models) ->
 %% @end
 %%--------------------------------------------------------------------
 models_potentially_cached() ->
-    models() -- [cache_controller, auxiliary_cache_controller].
+    models() -- [cache_controller, auxiliary_cache_controller, node_management].
 
 
 %%--------------------------------------------------------------------

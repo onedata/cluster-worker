@@ -24,18 +24,22 @@
 
 %% API
 -export([clear_local_cache/1, clear_global_cache/1]).
--export([clear_cache/2, should_clear_cache/2, get_hooks_config/1, wait_for_cache_dump/0]).
+-export([clear_cache/2, should_clear_cache/2, get_hooks_config/1, get_hooks_throttling_config/1, wait_for_cache_dump/0]).
 -export([delete_old_keys/2, delete_all_keys/1]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
--export([flush_all/2, flush/3, flush/4, clear/3, clear/4]).
--export([save_consistency_restored_info/3, begin_consistency_restoring/2, end_consistency_restoring/2,
-  check_cache_consistency/2, consistency_info_lock/3, init_consistency_info/2]).
--export([throttle/1, throttle/2, throttle_del/2, configure_throttling/0, plan_next_throttling_check/0]).
+-export([flush_all/2, flush/3, flush/4, clear/3, clear/4, clear_links/3]).
+-export([save_consistency_info/3, save_consistency_info_direct/3, consistency_restored/2, save_consistency_restored_info/3,
+  begin_consistency_restoring/2, begin_consistency_restoring/3, end_consistency_restoring/2, end_consistency_restoring/3,
+  end_consistency_restoring/4, check_cache_consistency/2, check_cache_consistency/3, check_cache_consistency_direct/2,
+  check_cache_consistency_direct/3, consistency_info_lock/3, init_consistency_info/2]).
+-export([throttle/1, throttle/2, throttle_del/1, throttle_del/2, get_idle_timeout/0,
+  configure_throttling/0, plan_next_throttling_check/0]).
 % for tests
 -export([send_after/3]).
 
 -define(CLEAR_BATCH_SIZE, 50).
--define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(MNESIA_THROTTLING_KEY, mnesia_throttling).
+-define(MEMORY_PROC_IDLE_KEY, throttling_idle_time).
 -define(MNESIA_THROTTLING_DATA_KEY, <<"mnesia_throttling_data">>).
 -define(THROTTLING_ERROR, {error, load_to_high}).
 
@@ -57,8 +61,8 @@
 throttle(ModelName) ->
   case lists:member(ModelName, datastore_config:throttled_models()) of
     true ->
-      case node_management:get(?MNESIA_THROTTLING_KEY) of
-        {ok, #document{value = #node_management{value = V}}} ->
+      case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+        {ok, V} ->
           case V of
             ok ->
               ok;
@@ -68,11 +72,8 @@ throttle(ModelName) ->
             {overloaded, _} ->
               ?THROTTLING_ERROR
           end;
-        {error, {not_found, _}} ->
-          ok;
-        Error ->
-          ?error("throttling error: ~p", [Error]),
-          ?THROTTLING_ERROR
+        _ ->
+          ok
       end;
     _ ->
       ok
@@ -85,6 +86,7 @@ throttle(ModelName) ->
 %%--------------------------------------------------------------------
 -spec throttle(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
   TmpAns :: term().
+% TODO - delete when local cache is refactored
 throttle(ModelName, ok) ->
   throttle(ModelName);
 throttle(_ModelName, TmpAns) ->
@@ -95,13 +97,12 @@ throttle(_ModelName, TmpAns) ->
 %% Limits delete operation performance if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle_del(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
-  TmpAns :: term().
-throttle_del(ModelName, ok) ->
+-spec throttle_del(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
+throttle_del(ModelName) ->
   case lists:member(ModelName, datastore_config:throttled_models()) of
     true ->
-      case node_management:get(?MNESIA_THROTTLING_KEY) of
-        {ok, #document{value = #node_management{value = V}}} ->
+      case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+        {ok, V} ->
           case V of
             ok ->
               ok;
@@ -115,17 +116,40 @@ throttle_del(ModelName, ok) ->
             {overloaded, _} ->
               ok
           end;
-        {error, {not_found, _}} ->
-          ok;
-        Error ->
-          ?error("throttling error: ~p", [Error]),
-          ?THROTTLING_ERROR
+        _ ->
+          ok
       end;
     _ ->
       ok
-  end;
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits delete operation performance if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle_del(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
+  TmpAns :: term().
+% TODO - delete when local cache is refactored
+throttle_del(ModelName, ok) ->
+  throttle_del(ModelName);
 throttle_del(_ModelName, TmpAns) ->
   TmpAns.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns timeout after which memory store will be terminated.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_idle_timeout() -> non_neg_integer().
+get_idle_timeout() ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY) of
+    {ok, IdleTimeout} ->
+      IdleTimeout;
+    _ ->
+      {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
+      Timeout
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -137,55 +161,67 @@ configure_throttling() ->
   Self = self(),
   spawn(fun() ->
     CheckInterval = try
+      % TODO - use info abut failed batch saves and length of queue to pool of processes dumping to disk
       {MemAction, MemoryUsage} = verify_memory(),
-      {TaskAction, NewFailed, NewTasks} = verify_tasks(),
-      {DumpAction, DumpProcesses} = verify_ongoing_tasks(),
-      Action = max(max(MemAction, TaskAction), DumpAction),
+      {TPAction, ProcNum} = verify_tp(),
+      {DBAction, QueueSize} = verify_db(),
+      Action = max(max(MemAction, TPAction), DBAction),
 
       case Action of
         ?BLOCK_THROTTLING ->
-          {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
-            value = #node_management{value = {overloaded, MemAction =:= ?NO_THROTTLING}}}),
-          ?info("Throttling: overload mode started, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-            [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+          application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
+            {overloaded, MemAction =:= ?NO_THROTTLING}),
+
+          {ok, NewProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_memory_proc_number),
+          tp:set_processes_limit(NewProcNum),
+
+          ?info("Throttling: overload mode started, mem: ~p, tp proc num ~p, couch queue size: ~p",
+            [MemoryUsage, ProcNum, QueueSize]),
           plan_next_throttling_check(true);
         _ ->
-          Oldthrottling = case node_management:get(?MNESIA_THROTTLING_KEY) of
-            {ok, #document{value = #node_management{value = V}}} ->
+          Oldthrottling = case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+            {ok, V} ->
               case V of
                 {throttle, Time, _} ->
                   Time;
                 Other ->
                   Other
               end;
-            {error, {not_found, _}} ->
+            _ ->
+              ok
+          end,
+
+          case {Action, Oldthrottling} of
+            {A, {overloaded, _}} when A < ?LIMIT_THROTTLING ->
+              {ok, NewProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
+              tp:set_processes_limit(NewProcNum);
+            _ ->
               ok
           end,
 
           case {Action, Oldthrottling} of
             {?NO_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p, couch queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize]),
               plan_next_throttling_check();
             {?NO_THROTTLING, _} ->
-              ok = node_management:delete(?MNESIA_THROTTLING_KEY),
+              application:unset_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY),
               ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
-              ?info("Throttling: stop, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+              ?info("Throttling: stop, mem: ~p, tp proc num ~p, couch queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize]),
               plan_next_throttling_check();
             {?CONFIG_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p, couch queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize]),
               plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
-              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
-                value = #node_management{value = {overloaded, false}}}),
-              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+              application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY, {overloaded, false}),
+              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p, couch queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize]),
               plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, _}} ->
-              ?info("Throttling: continue overload, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-                [MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p, couch queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize]),
               plan_next_throttling_check(true);
             _ ->
               TimeBase = case Oldthrottling of
@@ -196,20 +232,19 @@ configure_throttling() ->
                   DefaultTimeBase
               end,
 
-              {OldFailed, OldTasks, OldDumpProcesses, OldMemory, LastInterval} =
+              {OldProcNum, OldQueueSize, OldMemory, LastInterval} =
                 case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
                 {ok, #document{value = #node_management{value = TD}}} ->
                   TD;
                 {error, {not_found, _}} ->
-                  {0, 0, 0, 0, 0}
+                  {0, 0, 0, 0}
               end,
 
-              TaskMultip = (TaskAction > 0) andalso
-                (NewFailed > OldFailed) or ((NewTasks + NewFailed) > (OldTasks + OldFailed)),
+              TPMultip = (TPAction > 0) andalso (ProcNum > OldProcNum),
               MemoryMultip = (MemAction > 0) andalso (MemoryUsage > OldMemory),
-              DumpMultip = (DumpAction > 0) andalso (DumpProcesses > OldDumpProcesses),
+              DumpMultip = (DBAction > 0) andalso (QueueSize > OldQueueSize),
               ThrottlingTime = case
-                {TaskMultip or MemoryMultip or DumpMultip,
+                {TPMultip or MemoryMultip or DumpMultip,
                 Action} of
                 {true, _} ->
                   TB2 = 2 * TimeBase,
@@ -229,20 +264,20 @@ configure_throttling() ->
               {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
               NextCheck = plan_next_throttling_check(MemoryUsage-OldMemory, MemRatioThreshold-MemoryUsage, LastInterval),
 
-              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_KEY,
-                value = #node_management{value = {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}}}),
+              application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
+                {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}),
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
-                value = #node_management{value = {NewFailed, NewTasks, DumpProcesses, MemoryUsage, NextCheck}}}),
+                value = #node_management{value = {ProcNum, QueueSize, MemoryUsage, NextCheck}}}),
 
-              ?info("Throttling: delay ~p ms used, mem: ~p, failed tasks ~p, all tasks ~p, dumping processes: ~p",
-                [ThrottlingTime, MemoryUsage, NewFailed, NewTasks, DumpProcesses]),
+              ?info("Throttling: delay ~p ms used, mem: ~p, tp proc num ~p, couch queue size: ~p",
+                [ThrottlingTime, MemoryUsage, ProcNum, QueueSize]),
 
               NextCheck
           end
       end
     catch
       E1:E2 ->
-        ?error_stacktrace("Error during throtling configuration: ~p:~p", [E1, E2]),
+        ?error_stacktrace("Error during throttling configuration: ~p:~p", [E1, E2]),
         plan_next_throttling_check()
     end,
     caches_controller:send_after(CheckInterval, Self, {timer, configure_throttling})
@@ -313,7 +348,11 @@ clear_cache_by_time_windows(_StoreType, []) ->
 
 clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   caches_controller:delete_old_keys(StoreType, TimeWindow),
-  timer:sleep(1000), % time for system for mem info update
+  {ok, DumpDelay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
+  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay),
+  {ok, CTTRS} = application:get_env(?CLUSTER_WORKER_APP_NAME, clearing_time_to_refresh_stats),
+  SleepTime = DumpDelay + AggTime + CTTRS,
+  timer:sleep(SleepTime),
   case monitoring:get_memory_stats() of
     [{<<"mem">>, MemUsage}] ->
       ErlangMemUsage = erlang:memory(),
@@ -337,6 +376,22 @@ clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
 get_hooks_config(Models) ->
   Methods = [save, get, exists, delete, update, create, create_or_update,
     fetch_link, add_links, set_links, create_link, delete_links],
+  lists:foldl(fun(Model, Ans) ->
+    ModelConfig = lists:map(fun(Method) ->
+      {Model, Method}
+    end, Methods),
+    ModelConfig ++ Ans
+  end, [], Models).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Provides hooks configuration on the basis of models list.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_hooks_throttling_config(Models :: list()) -> list().
+get_hooks_throttling_config(Models) ->
+  Methods = [save, delete, update, create, create_or_update,
+    add_links, set_links, create_link, delete_links],
   lists:foldl(fun(Model, Ans) ->
     ModelConfig = lists:map(fun(Method) ->
       {Model, Method}
@@ -395,6 +450,7 @@ delete_all_keys(locally_cached) ->
 %%--------------------------------------------------------------------
 -spec wait_for_cache_dump() ->
   ok | dump_error.
+% TODO - use info from tp_servers
 wait_for_cache_dump() ->
   {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms),
   wait_for_cache_dump(round(Delay/1000) + 10, {0, 0}).
@@ -443,7 +499,8 @@ cache_to_datastore_level(ModelName) ->
   case ModelName of
     locally_cached_record -> ?LOCAL_ONLY_LEVEL;
     locally_cached_sync_record -> ?LOCAL_ONLY_LEVEL;
-    dbsync_state -> ?LOCAL_ONLY_LEVEL;
+    % TODO - change dbsync to GLOBALLY_CACHED
+%%    dbsync_state -> ?LOCAL_ONLY_LEVEL;
     _ -> ?GLOBAL_ONLY_LEVEL
   end.
 
@@ -544,7 +601,7 @@ flush(Level, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec clear(Level :: datastore:store_level(), ModelName :: atom(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear(Level, ModelName, Key) ->
+clear(?LOCAL_ONLY_LEVEL = Level, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(Key, ModelName),
 
@@ -559,7 +616,21 @@ clear(Level, ModelName, Key) ->
         end
       end,
       erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
-    end).
+    end);
+clear(?GLOBAL_ONLY_LEVEL, ModelName, Key) ->
+  ModelConfig = ModelName:model_init(),
+  mnesia_cache_driver:clear(ModelConfig, Key).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears link documents from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear_links(Level :: datastore:store_level(), ModelName :: atom(),
+    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
+clear_links(?GLOBAL_ONLY_LEVEL, ModelName, Key) ->
+  ModelConfig = ModelName:model_init(),
+  mnesia_cache_driver:clear_links(ModelConfig, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -568,7 +639,7 @@ clear(Level, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec clear(Level :: datastore:store_level(), ModelName :: atom(),
     Key :: datastore:ext_key(), datastore:link_name() | all) -> ok | datastore:generic_error().
-clear(Level, ModelName, Key, all) ->
+clear(?LOCAL_ONLY_LEVEL = Level, ModelName, Key, all) ->
   ModelConfig = ModelName:model_init(),
   AccFun = fun(LinkName, _, Acc) ->
     [LinkName | Acc]
@@ -585,7 +656,7 @@ clear(Level, ModelName, Key, all) ->
     end
   end, ok, Links);
 
-clear(Level, ModelName, Key, Link) ->
+clear(?LOCAL_ONLY_LEVEL = Level, ModelName, Key, Link) ->
   ModelConfig = ModelName:model_init(),
   Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
   CCCUuid = get_cache_uuid(Key, ModelName),
@@ -601,7 +672,9 @@ clear(Level, ModelName, Key, Link) ->
         end
       end,
       erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
-    end).
+    end);
+clear(?GLOBAL_ONLY_LEVEL, _ModelName, _Key, _Link) ->
+  throw(not_supporter).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -612,24 +685,29 @@ clear(Level, ModelName, Key, Link) ->
     ClearedName :: datastore:key() | datastore:link_name()) ->
   boolean() | datastore:create_error().
 save_consistency_restored_info(Level, Key, ClearedName) ->
-  UpdateFun = fun
-                (#cache_consistency_controller{status = not_monitored}) ->
-                  {error, clearing_not_monitored};
-                (#cache_consistency_controller{cleared_list = CL, restore_counter = RC} = Record) ->
-                  {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL),
-                    restore_counter = RC + 1}}
-              end,
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      true;
+    _ ->
+      UpdateFun = fun
+        (#cache_consistency_controller{status = not_monitored}) ->
+          {error, clearing_not_monitored};
+        (#cache_consistency_controller{cleared_list = CL, restore_counter = RC} = Record) ->
+          {ok, Record#cache_consistency_controller{cleared_list = lists:delete(ClearedName, CL),
+            restore_counter = RC + 1}}
+      end,
 
-  case cache_consistency_controller:update(Level, Key, UpdateFun) of
-    {ok, _} ->
-      true;
-    {error, clearing_not_monitored} ->
-      true;
-    {error, {not_found, _}} ->
-      true;
-    Other ->
-      ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
-      false
+      case cache_consistency_controller:update(Level, Key, UpdateFun) of
+        {ok, _} ->
+          true;
+        {error, clearing_not_monitored} ->
+          true;
+        {error, {not_found, _}} ->
+          true;
+        Other ->
+          ?error_stacktrace("Cannot save consistency_restored_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+          false
+      end
   end.
 
 %%--------------------------------------------------------------------
@@ -660,27 +738,41 @@ init_consistency_info(Level, Key) ->
 -spec begin_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 begin_consistency_restoring(Level, Key) ->
-  Pid = self(),
-  UpdateFun = fun
-                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid},
-                  restore_counter = RC} = Record) ->
-                  case is_process_alive(RPid) of
-                    true ->
-                      {error, restoring_process_in_progress};
-                    _ ->
+  begin_consistency_restoring(Level, Key, self()).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency will be restored
+%% @end
+%%--------------------------------------------------------------------
+-spec begin_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key(), Pid :: pid()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+begin_consistency_restoring(Level, Key, Pid) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      {ok, Key};
+    _ ->
+      UpdateFun = fun
+                    (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid},
+                      restore_counter = RC} = Record) ->
+                      case process_alive(RPid) of
+                        true ->
+                          {error, restoring_process_in_progress};
+                        _ ->
+                          {ok, Record#cache_consistency_controller{status = {restoring, Pid},
+                            restore_counter = RC + 1}}
+                      end;
+                    (#cache_consistency_controller{cleared_list = [], status = ok}) ->
+                      {error, consistency_ok};
+                    (Record = #cache_consistency_controller{restore_counter = RC}) ->
                       {ok, Record#cache_consistency_controller{status = {restoring, Pid},
                         restore_counter = RC + 1}}
-                  end;
-                (#cache_consistency_controller{cleared_list = [], status = ok}) ->
-                  {error, consistency_ok};
-                (Record = #cache_consistency_controller{restore_counter = RC}) ->
-                  {ok, Record#cache_consistency_controller{status = {restoring, Pid},
-                    restore_counter = RC + 1}}
-              end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid},
-    restore_counter = 1}},
+                  end,
+      Doc = #document{key = Key, value = #cache_consistency_controller{status = {restoring, Pid},
+        restore_counter = 1}},
 
-  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+      cache_consistency_controller:create_or_update(Level, Doc, UpdateFun)
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -690,28 +782,72 @@ begin_consistency_restoring(Level, Key) ->
 -spec end_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key()) ->
   {ok, datastore:ext_key()} | datastore:create_error().
 end_consistency_restoring(Level, Key) ->
-  Pid = self(),
-  UpdateFun = fun
-                (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}} = Record) ->
-                  case RPid of
-                    Pid ->
-                      {ok, Record#cache_consistency_controller{status = ok}};
-                    _ ->
-                      {error, interupted}
-                  end;
-                (#cache_consistency_controller{status = {restoring, RPid}} = Record) ->
-                  case RPid of
-                    Pid ->
-                      {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
-                    _ ->
-                      {error, interupted}
-                  end;
-                (_) ->
-                  {error, interupted}
-              end,
-  Doc = #document{key = Key, value = #cache_consistency_controller{}},
+  end_consistency_restoring(Level, Key, self()).
 
-  cache_consistency_controller:create_or_update(Level, Doc, UpdateFun).
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency restoring has ended
+%% @end
+%%--------------------------------------------------------------------
+-spec end_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key(), Pid :: pid()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+end_consistency_restoring(Level, Key, Pid) ->
+  end_consistency_restoring(Level, Key, Pid, ok).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency restoring has ended
+%% @end
+%%--------------------------------------------------------------------
+-spec end_consistency_restoring(Level :: datastore:store_level(), Key :: datastore:ext_key(), Pid :: pid(),
+    V :: ok | not_monitored) -> {ok, datastore:ext_key()} | datastore:create_error().
+end_consistency_restoring(Level, Key, Pid, V) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      {ok, Key};
+    _ ->
+      UpdateFun = fun
+                    (#cache_consistency_controller{cleared_list = [], status = {restoring, RPid}} = Record) ->
+                      case RPid of
+                        Pid ->
+                          {ok, Record#cache_consistency_controller{status = V}};
+                        _ ->
+                          {error, interupted}
+                      end;
+                    (#cache_consistency_controller{status = {restoring, RPid}} = Record) ->
+                      case RPid of
+                        Pid ->
+                          {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored}};
+                        _ ->
+                          {error, interupted}
+                      end;
+                    (_) ->
+                      {error, interupted}
+                  end,
+      Doc = #document{key = Key, value = #cache_consistency_controller{status = not_monitored}},
+
+      cache_consistency_controller:create_or_update(Level, Doc, UpdateFun)
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks that consistency restoring has ended
+%% @end
+%%--------------------------------------------------------------------
+-spec consistency_restored(Driver :: atom(), Key :: datastore:ext_key()) ->
+  {ok, datastore:ext_key()} | datastore:create_error().
+consistency_restored(Driver, Key) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      {ok, Key};
+    _ ->
+      UpdateFun = fun(Record) ->
+          {ok, Record#cache_consistency_controller{status = ok}}
+      end,
+      Doc = #document{key = Key, value = #cache_consistency_controller{restore_counter = 1}},
+
+      Driver:create_or_update(cache_consistency_controller:model_init(), Doc, UpdateFun)
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -723,18 +859,128 @@ end_consistency_restoring(Level, Key) ->
   | {monitored, [datastore:key() | datastore:link_name()], non_neg_integer(), non_neg_integer()}
   | not_monitored | no_return().
 check_cache_consistency(Level, Key) ->
-  case cache_consistency_controller:get(Level, Key) of
-    {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, clearing_counter = CC,
-      restore_counter = RC}}} ->
-      {ok, CC, RC};
-    {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, clearing_counter = CC,
-      restore_counter = RC}}} ->
-      {monitored, CL, CC, RC};
-    {ok, _} ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
       not_monitored;
-    {error, {not_found, _}} ->
-      not_monitored
+    _ ->
+      case cache_consistency_controller:get(Level, Key) of
+        % TODO - use clear time instead of counter
+        {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {ok, CC, RC};
+        {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {monitored, CL, CC, RC};
+        {ok, _} ->
+          not_monitored;
+        {error, {not_found, _}} ->
+          not_monitored
+      end
   end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks consistency status of Key.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_cache_consistency_direct(Driver :: atom(), Key :: datastore:ext_key()) ->
+  {ok, non_neg_integer(), non_neg_integer()}
+  | {monitored, [datastore:key() | datastore:link_name()], non_neg_integer(), non_neg_integer()}
+  | not_monitored | no_return().
+check_cache_consistency_direct(Driver, Key) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      not_monitored;
+    _ ->
+      case Driver:get(cache_consistency_controller:model_init(), Key) of
+        % TODO - use clear time instead of counter
+        {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {ok, CC, RC};
+        {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {monitored, CL, CC, RC};
+        {ok, _} ->
+          not_monitored;
+        {error, {not_found, _}} ->
+          not_monitored
+      end
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks consistency status of Key. If consistency document is not found, seeks document for whole model to analyse.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_cache_consistency(Level :: datastore:store_level(), Key :: datastore:ext_key(),
+    NotFoundCheck :: datastore:ext_key()) -> {ok, non_neg_integer(), non_neg_integer()}
+  | {monitored, [datastore:key() | datastore:link_name()], non_neg_integer(), non_neg_integer()}
+  | not_monitored | no_return().
+% TODO - cache consistency is not save through datastore (it is part of management mechanism ad should be managed
+% only by memory_store_driver), only exception - data for models
+check_cache_consistency(Level, Key, NotFoundCheck) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      not_monitored;
+    _ ->
+      case cache_consistency_controller:get(Level, Key) of
+        {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {ok, CC, RC};
+        {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {monitored, CL, CC, RC};
+        {ok, _} ->
+          not_monitored;
+        {error, {not_found, _}} ->
+          ModelNode = consistent_hasing:get_node(NotFoundCheck),
+          case rpc:call(ModelNode, caches_controller, check_cache_consistency, [Level, NotFoundCheck]) of
+            {ok, 0, 0} ->
+              init_consistency_info(Level, Key),
+              {ok, 0, 0};
+            _ ->
+              not_monitored
+          end
+      end
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks consistency status of Key. If consistency document is not found, seeks document for whole model to analyse.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_cache_consistency_direct(Driver :: atom(), Key :: datastore:ext_key(),
+    NotFoundCheck :: datastore:ext_key()) -> {ok, non_neg_integer(), non_neg_integer()}
+| {monitored, [datastore:key() | datastore:link_name()], non_neg_integer(), non_neg_integer()}
+| not_monitored | no_return().
+% TODO - cache consistency is not save through datastore (it is part of management mechanism ad should be managed
+% only by memory_store_driver), only exception - data for models
+check_cache_consistency_direct(Driver, Key, NotFoundCheck) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      not_monitored;
+    _ ->
+      case Driver:get(cache_consistency_controller:model_init(), Key) of
+        {ok, #document{value = #cache_consistency_controller{cleared_list = [], status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {ok, CC, RC};
+        {ok, #document{value = #cache_consistency_controller{cleared_list = CL, status = ok, clearing_counter = CC,
+          restore_counter = RC}}} ->
+          {monitored, CL, CC, RC};
+        {ok, _} ->
+          not_monitored;
+        {error, {not_found, _}} ->
+          Level = memory_store_driver:driver_to_level(Driver),
+          case caches_controller:check_cache_consistency(Level, NotFoundCheck) of
+            {ok, 0, 0} ->
+              init_consistency_info(Level, Key),
+              {ok, 0, 0};
+            _ ->
+              not_monitored
+          end
+      end
+  end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -816,8 +1062,8 @@ save_high_mem_clear_info(Level, Uuid) ->
   cache_controller:create_or_update(Level, Doc, UpdateFun).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
+%% @private
 %% Saves information about clearing doc from memory
 %% @end
 %%--------------------------------------------------------------------
@@ -825,37 +1071,64 @@ save_high_mem_clear_info(Level, Uuid) ->
     ClearedName :: datastore:key() | datastore:link_name()) ->
   boolean() | datastore:create_error().
 save_consistency_info(Level, Key, ClearedName) ->
-  UpdateFun = fun
-    (#cache_consistency_controller{status = not_monitored}) ->
-      {error, clearing_not_monitored};
-    (#cache_consistency_controller{cleared_list = CL, clearing_counter = CC} = Record) ->
-      case length(CL) >= ?CLEAR_MONITOR_MAX_SIZE of
-        true ->
-          {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored,
-            clearing_counter = CC + 1}};
-        _ ->
-          case lists:member(ClearedName, CL) of
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
+      true;
+    _ ->
+      UpdateFun = fun
+        (#cache_consistency_controller{status = not_monitored}) ->
+          {error, clearing_not_monitored};
+        (#cache_consistency_controller{cleared_list = CL, clearing_counter = CC} = Record) ->
+          case length(CL) >= ?CLEAR_MONITOR_MAX_SIZE of
             true ->
-              {error, already_cleared};
-            _ ->
-              {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL],
+              {ok, Record#cache_consistency_controller{cleared_list = [], status = not_monitored,
                 clearing_counter = CC + 1}}
+    %%        ;
+    %%        _ ->
+    %%          case lists:member(ClearedName, CL) of
+    %%            true ->
+    %%              {error, already_cleared};
+    %%            _ ->
+    %%              {ok, Record#cache_consistency_controller{cleared_list = [ClearedName | CL],
+    %%                clearing_counter = CC + 1}}
+    %%          end
           end
-      end
-  end,
+      end,
 
-  case cache_consistency_controller:update(Level, Key, UpdateFun) of
-    {ok, _} ->
+      Doc = #document{key = Key, value = #cache_consistency_controller{status = not_monitored, clearing_counter = 1}},
+      case cache_consistency_controller:create_or_update(Level, Doc, UpdateFun) of
+        {ok, _} ->
+          true;
+        {error, clearing_not_monitored} ->
+          true;
+    %%    {error, already_cleared} ->
+    %%      true;
+        Other ->
+          ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
+          false
+      end
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves information about clearing doc from memory
+%% @end
+%%--------------------------------------------------------------------
+-spec save_consistency_info_direct(Driver :: atom(), Key :: datastore:ext_key(),
+    ClearedName :: datastore:key() | datastore:link_name()) ->
+  boolean() | datastore:create_error().
+save_consistency_info_direct(Driver, Key, ClearedName) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory) of
+    {ok, true} ->
       true;
-    {error, clearing_not_monitored} ->
-      true;
-    {error, already_cleared} ->
-      true;
-    {error, {not_found, _}} ->
-      true;
-    Other ->
-      ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Level, Key, ClearedName}, Other]),
-      false
+    _ ->
+      case Driver:delete(cache_consistency_controller:model_init(), Key, ?PRED_ALWAYS) of
+        ok ->
+          true;
+        Other ->
+          ?error_stacktrace("Cannot save consistency_info ~p, error: ~p", [{Driver, Key, ClearedName}, Other]),
+          false
+      end
   end.
 
 %%--------------------------------------------------------------------
@@ -865,7 +1138,7 @@ save_consistency_info(Level, Key, ClearedName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_old_keys(Level :: global_only | local_only, Caches :: list(), TimeWindow :: integer()) -> ok.
-delete_old_keys(Level, Caches, TimeWindow) ->
+delete_old_keys(?LOCAL_ONLY_LEVEL = Level, Caches, TimeWindow) ->
   Now = os:system_time(?CC_TIMEUNIT),
   ClearFun = fun
     ('$end_of_table', {0, _, undefined}) ->
@@ -986,7 +1259,51 @@ delete_old_keys(Level, Caches, TimeWindow) ->
     Other ->
       ?error("Error during cache cleaning: ~p", [Other]),
       ok
-  end.
+  end;
+% TODO - clear links
+delete_old_keys(Level, Caches, _TimeWindow) ->
+  lists:foreach(fun(Cache) ->
+    ClearFun = fun
+      ('$end_of_table', {0, _, undefined}) ->
+        {abort, 0};
+      ('$end_of_table', {Count, BatchNum, UuidToDel}) ->
+        Master = self(),
+        spawn(fun() ->
+          clear(Level, Cache, UuidToDel),
+          clear_links(Level, Cache, UuidToDel),
+          Master ! {doc_cleared, BatchNum}
+        end),
+        ToCount = case Count rem ?CLEAR_BATCH_SIZE of
+          0 ->
+            ?CLEAR_BATCH_SIZE;
+          TC ->
+            TC
+        end,
+        count_clear_acc(ToCount, BatchNum),
+        {abort, Count};
+      (#document{key = Uuid}, {0, BatchNum, undefined}) ->
+        {next, {1, BatchNum, Uuid}};
+      (#document{key = Uuid}, {Count, BatchNum0, UuidToDel}) ->
+        Master = self(),
+        spawn(fun() ->
+          clear(Level, Cache, UuidToDel),
+          clear_links(Level, Cache, UuidToDel),
+          Master ! {doc_cleared, BatchNum0}
+        end),
+        BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
+          0 ->
+            count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
+            BatchNum0 + 1;
+          _ ->
+            BatchNum0
+        end,
+        {next, {Count + 1, BatchNum, Uuid}}
+    end,
+    {ok, _} = list_old_keys(Level, ClearFun, Cache)
+  end, Caches),
+
+  % TODO - clear cache_consistency_controller
+  ok.
 
  %%--------------------------------------------------------------------
 %% @private
@@ -1015,6 +1332,7 @@ list_old_keys(Level, ClearFun, Model) ->
 %%--------------------------------------------------------------------
 -spec delete_old_key(Level :: global_only | local_only, Uuid :: binary(), BatchNum :: integer()) -> ok.
 delete_old_key(Level, Uuid, BatchNum) ->
+  % TODO - delete per model (small models at the end)
   Master = self(),
   spawn(fun() ->
     {ModelName, Key} = decode_uuid(Uuid),
@@ -1233,110 +1551,66 @@ value_delete(Level, ModelName, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Checks tasks poll and recommends throttling action.
+%% Checks poll of tp processes and recommends throttling action.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_tasks() ->
-  {TaskAction :: non_neg_integer(), NewFailed :: non_neg_integer(), NewTasks :: non_neg_integer()}.
-verify_tasks() ->
-  {ok, FailedTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number),
-  {ok, PendingTasksNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number),
+-spec verify_tp() ->
+  {TPAction :: non_neg_integer(), ProcNum :: non_neg_integer()}.
+verify_tp() ->
+  {ok, StartNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
+  {ok, DelayNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number),
 
-  {ok, {NewFailed, NewTasks}} =
-    task_pool:count_tasks(?CLUSTER_LEVEL, cache_dump, FailedTasksNumThreshold+PendingTasksNumThreshold),
+  ProcNum = tp:get_processes_number(),
+  {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
 
-  TaskAction = case {NewFailed, NewTasks} of
-    {NF, _} when NF >= FailedTasksNumThreshold ->
-      ?BLOCK_THROTTLING;
-    {NF, NT} when NT-NF >= PendingTasksNumThreshold ->
-      ?BLOCK_THROTTLING;
-    {NF, _} when NF >= FailedTasksNumThreshold/2 ->
-      ?LIMIT_THROTTLING;
-    {NF, NT} when NT-NF >= PendingTasksNumThreshold/2 ->
-      ?LIMIT_THROTTLING;
-    {NF, _} when NF > 0 ->
-      ?CONFIG_THROTTLING;
-    {_, NT} when NT > 0 ->
-      ?CONFIG_THROTTLING;
+  NewIdleTimeout = case ProcNum < StartNum of
+    true ->
+      ?debug("Throttling: idle timeout: ~p", [IdleTimeout]),
+      IdleTimeout;
     _ ->
-      ?NO_THROTTLING
+      {ok, MinIdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms),
+      NID = round(max(IdleTimeout * (DelayNum * 9 / 10 - ProcNum) / DelayNum, MinIdleTimeout)),
+      ?info("Throttling: idle timeout: ~p", [NID]),
+      NID
   end,
+  application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
 
-  {TaskAction, NewFailed, NewTasks}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks processes that dump data and recommends throttling action.
-%% @end
-%%--------------------------------------------------------------------
--spec verify_ongoing_tasks() ->
-  {DumpAction :: non_neg_integer(), DumpProcesses :: non_neg_integer()}.
-verify_ongoing_tasks() ->
-  {ok, DumpProcessessNumThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_dump_processes_limit),
-
-  Procs = erlang:processes(),
-  DumpProcesses = case length(Procs) < DumpProcessessNumThreshold/4 of
-    true -> % no_throttling
-      0;
-    _ ->
-      verify_ongoing_tasks(Procs, DumpProcessessNumThreshold)
-  end,
-
-  DumpAction = case DumpProcesses of
-    DP when DP >= DumpProcessessNumThreshold ->
-      ?BLOCK_THROTTLING;
-    DP when DP >= DumpProcessessNumThreshold/2 ->
+  TPAction = case ProcNum of
+    PN when PN >= DelayNum ->
       ?LIMIT_THROTTLING;
-    DP when DP >= DumpProcessessNumThreshold/4 ->
+    DP when DP >= (DelayNum * 4 / 5) ->
       ?CONFIG_THROTTLING;
     _ ->
       ?NO_THROTTLING
   end,
 
-  {DumpAction, DumpProcesses}.
+  {TPAction, ProcNum}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Counts ongoing dump tasks.
+%% Checks queue fo datastore_pool and recommends throttling action.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_ongoing_tasks(Procs :: list(), DumpProcessessNumThreshold :: non_neg_integer()) ->
-  non_neg_integer().
-verify_ongoing_tasks(Procs, DumpProcessessNumThreshold) ->
-  verify_ongoing_tasks(Procs, 0, DumpProcessessNumThreshold).
+-spec verify_db() ->
+  {DBAction :: non_neg_integer(), QueueSize :: non_neg_integer()}.
+verify_db() ->
+  {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit),
+  {ok, Start} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size),
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Counts ongoing dump tasks.
-%% @end
-%%--------------------------------------------------------------------
--spec verify_ongoing_tasks(Procs :: list(), TmpNum :: non_neg_integer(),
-    DumpProcessessNumThreshold :: non_neg_integer()) -> non_neg_integer().
-verify_ongoing_tasks([], TmpNum, _DumpProcessessNumThreshold) ->
-  TmpNum;
-verify_ongoing_tasks(_Procs, DumpProcessessNumThreshold, DumpProcessessNumThreshold) ->
-  DumpProcessessNumThreshold;
-verify_ongoing_tasks([P | Procs], TmpNum, DumpProcessessNumThreshold) ->
-  case erlang:process_info(P, current_stacktrace) of
-    {current_stacktrace, CS} ->
-      Check1 = fun
-        ({couchdb_datastore_driver, _, _, _}) -> true;
-        (_) -> false
-      end,
-      Check2 = fun
-        ({cache_controller, _, _, _}) -> true;
-        (_) -> false
-      end,
-      case {lists:any(Check1, CS), lists:any(Check2, CS)} of
-        {true, true} ->
-          verify_ongoing_tasks(Procs, TmpNum + 1, DumpProcessessNumThreshold);
-        _ ->
-          verify_ongoing_tasks(Procs, TmpNum, DumpProcessessNumThreshold)
-      end;
+  QueueSize = datastore_pool:queue_size(),
+
+  DBAction = case QueueSize of
+    DP when DP >= Limit ->
+      ?BLOCK_THROTTLING;
+    DP when DP >= Start ->
+      ?LIMIT_THROTTLING;
+    DP when DP >= Start/2 ->
+      ?CONFIG_THROTTLING;
     _ ->
-      verify_ongoing_tasks(Procs, TmpNum, DumpProcessessNumThreshold)
-  end.
+      ?NO_THROTTLING
+  end,
 
+  {DBAction, QueueSize}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1410,3 +1684,14 @@ plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
 -spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().
 send_after(CheckInterval, Master, Message) ->
   erlang:send_after(CheckInterval, Master, Message).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if process is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec process_alive(Pid :: pid()) -> boolean().
+process_alive(P) when node(P) == node() ->
+  is_process_alive(P);
+process_alive(P) ->
+  rpc:call(node(P), erlang, is_process_alive, [P]).

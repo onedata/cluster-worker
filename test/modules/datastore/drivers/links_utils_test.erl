@@ -72,45 +72,45 @@ diff_test() ->
 
     ?assert(true).
 
-deduplicate_targets_test() ->
-
-    %% Second tuple field shall be ignored while comparing link targets
-    ?assertMatch([], links_utils:deduplicate_targets([])),
-    ?assertMatch([{1,2,3,4}], links_utils:deduplicate_targets([{1,2,3,4}])),
-    ?assertMatch([{1,2,3,4}], links_utils:deduplicate_targets([
-        {1,2,3,4},
-        {1,2,3,4}
-    ])),
-
-    ?assertMatch([{1,2,3,4}], links_utils:deduplicate_targets(lists:usort([
-        {1,2,3,4},
-        {1,2,3,4},
-        {1,2,3,4},
-        {1,2,3,4}
-    ]))),
-
-
-    ?assertMatch([{1,2,3,4}, {1,2,3,5}], links_utils:deduplicate_targets(lists:usort([
-        {1,2,3,4},
-        {1,2,3,4},
-        {1,2,3,4},
-        {1,2,3,5},
-        {1,2,3,4}
-    ]))),
-
-
-    ?assertMatch([{1,1,3,4}, {1,1,4,4}, {1,9,3,4}], links_utils:deduplicate_targets(lists:usort([
-        {1,1,3,4},
-        {1,1,4,4},
-        {1,3,3,4},
-        {1,2,3,4},
-        {1,2,3,4},
-        {1,8,3,4},
-        {1,9,3,4},
-        {1,2,3,4}
-    ]))),
-
-    ok.
+%%deduplicate_targets_test() ->
+%%
+%%    %% Second tuple field shall be ignored while comparing link targets
+%%    ?assertMatch([], links_utils:deduplicate_targets([])),
+%%    ?assertMatch([{1,2,3,4}], links_utils:deduplicate_targets([{1,2,3,4}])),
+%%    ?assertMatch([{1,2,3,4}], links_utils:deduplicate_targets([
+%%        {1,2,3,4},
+%%        {1,2,3,4}
+%%    ])),
+%%
+%%    ?assertMatch([{1,2,3,4}], links_utils:deduplicate_targets(lists:usort([
+%%        {1,2,3,4},
+%%        {1,2,3,4},
+%%        {1,2,3,4},
+%%        {1,2,3,4}
+%%    ]))),
+%%
+%%
+%%    ?assertMatch([{1,2,3,4}, {1,2,3,5}], links_utils:deduplicate_targets(lists:usort([
+%%        {1,2,3,4},
+%%        {1,2,3,4},
+%%        {1,2,3,4},
+%%        {1,2,3,5},
+%%        {1,2,3,4}
+%%    ]))),
+%%
+%%
+%%    ?assertMatch([{1,1,3,4}, {1,1,4,4}, {1,9,3,4}], links_utils:deduplicate_targets(lists:usort([
+%%        {1,1,3,4},
+%%        {1,1,4,4},
+%%        {1,3,3,4},
+%%        {1,2,3,4},
+%%        {1,2,3,4},
+%%        {1,8,3,4},
+%%        {1,9,3,4},
+%%        {1,2,3,4}
+%%    ]))),
+%%
+%%    ok.
 
 
 make_scoped_link_name_test() ->

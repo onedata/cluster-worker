@@ -396,6 +396,7 @@ set_link_replica_scope(LinkReplicaScope) ->
 scope_master_loop() ->
     scope_master_loop(<<"scope1">>, []).
 
+% TODO - delete other scopes?
 scope_master_loop(LinkReplicaScope, OtherScopes) ->
     Todo = receive
                {get_link_replica_scope, Sender} ->
@@ -1098,14 +1099,14 @@ globally_cached_links_test(Config) ->
 %%% SetUp and TearDown functions
 %%%===================================================================
 
-init_per_testcase(links_scope_test, Config) ->
+init_per_testcase(links_scope_test = Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:enable_datastore_models(Workers, [link_scopes_test_record]),
-    Config;
-init_per_testcase(links_scope_proc_mem_test, Config) ->
+    datastore_basic_ops_utils:set_env(Case, Config);
+init_per_testcase(links_scope_proc_mem_test = Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:enable_datastore_models(Workers, [link_scopes_test_record2]),
-    Config;
+    datastore_basic_ops_utils:set_env(Case, Config);
 init_per_testcase(Case, Config) ->
     datastore_basic_ops_utils:set_env(Case, Config).
 

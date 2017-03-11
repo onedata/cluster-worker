@@ -107,7 +107,16 @@
 %% List of modules (accompanied by their configs) to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
--callback modules_with_args() -> Models :: [{atom(), [any()]} | {singleton, atom(), [any()]}].
+-callback modules_with_args() -> Models :: [{atom(), [any()]}
+    | {singleton | early_init, atom(), [any()]}].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of modules' hooks executed after module initialization (early or standard).
+%% @end
+%%--------------------------------------------------------------------
+-callback modules_hooks() -> Hooks :: [{{Module :: atom(), early_init | init},
+    {HookedModule :: atom(), Fun :: atom(), Args :: list()}}].
 
 %%--------------------------------------------------------------------
 %% @doc

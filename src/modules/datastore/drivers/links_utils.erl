@@ -60,7 +60,10 @@ deduplicate_targets([T]) ->
     [T];
 deduplicate_targets([]) ->
     [];
-deduplicate_targets([{S, _, M, K}, {S, _, M, K} = T | R]) ->
+%%deduplicate_targets([{S, _, M, K}, {S, _, M, K} = T | R]) ->
+% TODO - check why it is possible to create more than one link in scope
+% during multi_provider_file_ops_test_SUITE performance
+deduplicate_targets([{S, _, _, _}, {S, _, _, _} = T | R]) ->
     deduplicate_targets([T | R]);
 deduplicate_targets([T | R]) ->
     [T | deduplicate_targets(R)].

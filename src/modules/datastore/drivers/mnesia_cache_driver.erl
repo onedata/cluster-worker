@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Mnesia database driver.
+%%% @doc High Level Mnesia database driver.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mnesia_cache_driver).
@@ -22,20 +22,23 @@
 
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
-%% TODO Add non_transactional updates (each update creates tmp ets!)
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
--export([add_links/3, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
+-export([add_links/3, add_links/4, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_transation/1, run_transation/2, run_transation/3]).
+-export([clear/2, clear_links/2, force_save/2, force_link_save/3, force_link_save/4]).
 
--export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
+% TODO - internal link implementation - delete from datastore API
+-export([get_link_doc/4, exists_link_doc/3]).
 
 %% auxiliary ordered_store behaviour
 -export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3,
-    aux_create/3, aux_first/2, list_ordered/4, aux_next/3]).
+    aux_create/3, aux_first/2, aux_next/3]).
 
-%% Batch size for list operation
--define(LIST_BATCH_SIZE, 100).
+%% for rpc
+-export([direct_call_internal/5, direct_link_call_internal/5, foreach_link_internal/4]).
 
+%% Module that handle direct operations on mnesia
+-define(SLAVE_DRIVER, mnesia_cache_driver_internal).
 
 %%%===================================================================
 %%% store_driver_behaviour callbacks
@@ -57,34 +60,8 @@ init_driver(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
-init_bucket(_BucketName, Models, NodeToSync) ->
-    Node = node(),
-    lists:foreach( %% model
-        fun(#model_config{name = ModelName, fields = Fields}) ->
-            Table = table_name(ModelName),
-            LinkTable = links_table_name(ModelName),
-            TransactionTable = transaction_table_name(ModelName),
-            case NodeToSync == Node of
-                true -> %% No mnesia nodes -> create new table
-                    create_table(Table, ModelName, [key | Fields], [Node]),
-                    create_table(LinkTable, links, [key | record_info(fields, links)], [Node]),
-                    create_table(TransactionTable, ModelName, [key | Fields], [Node]);
-                _ -> %% there is at least one mnesia node -> join cluster
-                    Tables = [table_name(MName) || MName <- datastore_config:models()] ++
-                        [links_table_name(MName) || MName <- datastore_config:models()] ++
-                        [transaction_table_name(MName) || MName <- datastore_config:models()],
-                    ok = lists:foldl(fun
-                        (_, ok) ->
-                            ok;
-                        (_, _) ->
-                            rpc:call(NodeToSync, mnesia, wait_for_tables, [Tables, ?MNESIA_WAIT_TIMEOUT])
-                    end, start, lists:seq(1, ?MNESIA_WAIT_REPEATS)),
-                    expand_table(Table, Node, NodeToSync),
-                    expand_table(LinkTable, Node, NodeToSync),
-                    expand_table(TransactionTable, Node, NodeToSync)
-            end
-        end, Models),
-    ok.
+init_bucket(BucketName, Models, NodeToSync) ->
+    ?SLAVE_DRIVER:init_bucket(BucketName, Models, NodeToSync).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -93,24 +70,8 @@ init_bucket(_BucketName, Models, NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value} = _Document) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:save(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:save(~p, ~p)", [TrxType, ModelName, Key, Value]),
-        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
-        {ok, Key}
-    end).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Saves document that describes links, not using transactions (used by links utils).
-%% @end
-%%--------------------------------------------------------------------
--spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
-save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
-    ok = mnesia:write(links_table_name(ModelConfig), inject_key(Key, Value), write),
-    {ok, Key}.
+save(ModelConfig, Document) ->
+    deletage_call(save, ModelConfig, Document#document.key, [Document]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -119,29 +80,8 @@ save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
 %%--------------------------------------------------------------------
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
-update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:update(~p)", [TrxType, ModelName, Key]),
-        case mnesia:read(table_name(ModelConfig), Key, write) of
-            [] ->
-                {error, {not_found, ModelName}};
-            [Value] when is_map(Diff) ->
-                NewValue = maps:merge(datastore_utils:shallow_to_map(strip_key(Value)), Diff),
-                log(verbose, "~p -> ~p:update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
-                ok = mnesia:write(table_name(ModelConfig),
-                    inject_key(Key, datastore_utils:shallow_to_record(NewValue)), write),
-                {ok, Key};
-            [Value] when is_function(Diff) ->
-                case Diff(strip_key(Value)) of
-                    {ok, NewValue} ->
-                        log(verbose, "~p -> ~p:update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
-                        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
-                        {ok, Key};
-                    {error, Reason} ->
-                        {error, Reason}
-                end
-        end
-    end).
+update(ModelConfig, Key, Diff) ->
+    deletage_call(update, ModelConfig, Key, [Key, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -150,18 +90,8 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value}) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:create(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:create(~p, ~p)", [TrxType, ModelName, Key, Value]),
-        case mnesia:read(table_name(ModelConfig), Key) of
-            [] ->
-                ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
-                {ok, Key};
-            [_Record] ->
-                {error, already_exists}
-        end
-    end).
+create(ModelConfig, Document) ->
+    deletage_call(create, ModelConfig, Document#document.key, [Document]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -170,31 +100,8 @@ create(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = Key, value = Value}, Diff) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:create_or_update(~p)", [TrxType, ModelName, Key]),
-        case mnesia:read(table_name(ModelConfig), Key, write) of
-            [] ->
-                log(verbose, "~p -> ~p:create_or_update(~p, ~p)", [TrxType, ModelName, Key, Value]),
-                ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
-                {ok, Key};
-            [OldValue] when is_map(Diff) ->
-                NewValue = maps:merge(datastore_utils:shallow_to_map(strip_key(OldValue)), Diff),
-                log(verbose, "~p -> ~p:create_or_update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
-                ok = mnesia:write(table_name(ModelConfig),
-                    inject_key(Key, datastore_utils:shallow_to_record(NewValue)), write),
-                {ok, Key};
-            [OldValue] when is_function(Diff) ->
-                case Diff(strip_key(OldValue)) of
-                    {ok, NewValue} ->
-                        log(verbose, "~p -> ~p:create_or_update(~p, ~p)", [TrxType, ModelName, Key, NewValue]),
-                        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
-                        {ok, Key};
-                    {error, Reason} ->
-                        {error, Reason}
-                end
-        end
-    end).
+create_or_update(ModelConfig, Document, Diff) ->
+    deletage_call(create_or_update, ModelConfig, Document#document.key, [Document, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -203,69 +110,10 @@ create_or_update(#model_config{name = ModelName} = ModelConfig, #document{key = 
 %%--------------------------------------------------------------------
 -spec get(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
-get(#model_config{name = ModelName} = ModelConfig, Key) ->
-    TmpAns = case mnesia:is_transaction() of
-        true ->
-            log(normal, "transaction -> ~p:get(~p)", [ModelName, Key]),
-            mnesia:read(table_name(ModelConfig), Key);
-        _ ->
-            log(normal, "dirty -> ~p:get(~p)", [ModelName, Key]),
-            mnesia:activity(ets, fun() ->
-                mnesia:read(table_name(ModelConfig), Key)
-            end)
-    end,
-    case TmpAns of
-        [] -> {error, {not_found, ModelName}};
-        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Gets document that describes links (used by links utils).
-%% @end
-%%--------------------------------------------------------------------
--spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
-    {ok, datastore:document()} | datastore:get_error().
-get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
-    TmpAns = case mnesia:is_transaction() of
-        true ->
-            log(normal, "transaction -> ~p:get_link_doc(~p)", [ModelName, Key]),
-            mnesia:read(links_table_name(ModelConfig), Key);
-        _ ->
-            log(normal, "dirty -> ~p:get_link_doc(~p)", [ModelName, Key]),
-            mnesia:activity(ets, fun() ->
-                mnesia:read(links_table_name(ModelConfig), Key)
-            end)
-    end,
-    case TmpAns of
-        [] -> {error, {not_found, ModelName}};
-        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks if document that describes links from scope exists.
-%% @end
-%%--------------------------------------------------------------------
--spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
-    {ok, boolean()} | datastore:generic_error().
-exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
-    Key = links_utils:links_doc_key(DocKey, Scope),
-    LNT = links_table_name(ModelConfig),
-    TmpAns = case mnesia:is_transaction() of
-        true ->
-            log(normal, "transaction -> ~p:exists_link_doc(~p)", [ModelName, Key]),
-            mnesia:read(LNT, Key);
-        _ ->
-            log(normal, "dirty -> ~p:exists_link_doc(~p)", [ModelName, Key]),
-            mnesia:activity(ets, fun() ->
-                mnesia:read(LNT, Key)
-            end)
-    end,
-    case TmpAns of
-        [] -> {ok, false};
-        [_Record] -> {ok, true}
-    end.
+get(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key) ->
+    direct_call(get, ModelConfig, Key, [Key]);
+get(#model_config{name = MN} = ModelConfig, Key) ->
+    direct_call(get, ModelConfig, Key, [Key], {error, {not_found, MN}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -275,12 +123,104 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
-    case proplists:get_value(mode, Opts, undefined) of
-        dirty -> list_dirty(ModelConfig, Fun, AccIn);
-        {ordered, Field} ->
-            list_ordered(ModelConfig, Fun, AccIn, Field);
-        _ -> list(ModelConfig, Fun, AccIn)
+% TODO - implementation base on old implementation from datastore - refactor when local cache is finished
+list(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, Opts) ->
+    Nodes = consistent_hasing:get_all_nodes(),
+
+    % TODO - use user function and catch last element not to save all docs in memory
+    HelperFun = fun
+        (#document{} = Document, Acc) ->
+            {next, [Document | Acc]};
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+
+    ListAns = lists:foldl(fun
+        (N, {ok, Acc}) ->
+            rpc:call(N, ?SLAVE_DRIVER, list, [ModelConfig, HelperFun, Acc, Opts]);
+        (_, Error) ->
+            Error
+    end, {ok, []}, Nodes),
+
+    case ListAns of
+        {ok, LA} ->
+            execute_list_fun(Fun, LA, AccIn);
+        Other ->
+            Other
+    end;
+list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
+    Nodes = consistent_hasing:get_all_nodes(),
+
+    HelperFun = fun
+        (#document{key = Key} = Document, Acc) ->
+            {next, maps:put(Key, Document, Acc)};
+        (_, Acc) ->
+            {abort, Acc}
+    end,
+
+    % TODO - one consistency check (after migration from counter to times)
+    try
+        ConsistencyCheck1 = caches_controller:check_cache_consistency(?GLOBAL_ONLY_LEVEL, MN),
+        MemMapAns = lists:foldl(fun
+            (N, {ok, Acc}) ->
+                rpc:call(N, ?SLAVE_DRIVER, list, [ModelConfig, HelperFun, Acc, Opts]);
+            (_, Error) ->
+                throw(Error)
+        end, {ok, #{}}, Nodes),
+
+        {ok, MemMap} = MemMapAns,
+        FirstPhaseAns = case ConsistencyCheck1 of
+            {ok, ClearCounter, _} ->
+                case caches_controller:check_cache_consistency(?GLOBAL_ONLY_LEVEL, MN) of
+                    {ok, ClearCounter, _} ->
+                        {ok, maps:values(MemMap)};
+                    _ ->
+                        restore
+                end;
+            _ ->
+                restore
+        end,
+
+        case FirstPhaseAns of
+            {ok, List} ->
+                execute_list_fun(Fun, List, AccIn);
+            restore ->
+                Pid = self(),
+                caches_controller:begin_consistency_restoring(?GLOBAL_ONLY_LEVEL, MN, Pid),
+
+                HelperFun2 = fun
+                    (#document{key = Key}, Acc) ->
+                        {next, [Key | Acc]};
+                    (_, Acc) ->
+                        {abort, Acc}
+                end,
+
+                case couchdb_datastore_driver:list(ModelConfig, HelperFun2, [], Opts) of
+                    {ok, DiskList} ->
+                        DiskOnlyKeys = DiskList -- maps:keys(MemMap),
+                        DiskOnlyValues = lists:foldl(fun(K, Acc) ->
+                            case deletage_call(get, ModelConfig, K, [K]) of
+                                {ok, D} -> [D | Acc];
+                                {error, {not_found, _}} -> Acc;
+                                Err ->
+                                    throw({restore_from_disk_error, Err})
+                            end
+                        end, [], DiskOnlyKeys),
+
+                        caches_controller:end_consistency_restoring(?GLOBAL_ONLY_LEVEL, MN, Pid),
+                        execute_list_fun(Fun, maps:values(MemMap) ++ DiskOnlyValues, AccIn);
+                    Other ->
+                        throw({restore_from_disk_error, Other})
+                end
+        end
+    catch
+        throw:{restore_from_disk_error, Err} ->
+            caches_controller:end_consistency_restoring(?GLOBAL_ONLY_LEVEL, MN, self(), not_monitored),
+            ?error("Listing error ~p", [{restore_from_disk_error, Err}]),
+            {error, {restore_from_disk, Err}};
+        throw:Error ->
+            ?error("Listing error ~p", [Error]),
+            Error
     end.
 
 %%--------------------------------------------------------------------
@@ -292,7 +232,6 @@ list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
 is_model_empty(_ModelConfig) ->
     error(not_supported).
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link store_driver_behaviour} callback add_links/3.
@@ -300,12 +239,18 @@ is_model_empty(_ModelConfig) ->
 %%--------------------------------------------------------------------
 -spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
-add_links(#model_config{name = ModelName} = ModelConfig, Key, Links) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:add_links(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:add_links(~p, ~p)", [TrxType, ModelName, Key, Links]),
-        links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, add)
-    end).
+add_links(ModelConfig, Key, Links) ->
+    deletage_link_call(add_links, ModelConfig, Key, [Key, Links]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Add links with override of link replica scope.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()],
+    ReplicaScopeOverride :: links_utils:link_replica_scope()) -> ok | datastore:generic_error().
+add_links(ModelConfig, Key, Links, LinkReplicaScope) ->
+    deletage_link_call(add_links, ModelConfig, Key, [Key, Links, LinkReplicaScope]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -314,12 +259,8 @@ add_links(#model_config{name = ModelName} = ModelConfig, Key, Links) ->
 %%--------------------------------------------------------------------
 -spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
     ok | datastore:generic_error().
-set_links(#model_config{name = ModelName} = ModelConfig, Key, Links) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:add_links(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:add_links(~p, ~p)", [TrxType, ModelName, Key, Links]),
-        links_utils:save_links_maps(?MODULE, ModelConfig, Key, Links, set)
-    end).
+set_links(ModelConfig, Key, Links) ->
+    deletage_link_call(set_links, ModelConfig, Key, [Key, Links]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -328,12 +269,8 @@ set_links(#model_config{name = ModelName} = ModelConfig, Key, Links) ->
 %%--------------------------------------------------------------------
 -spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
     ok | datastore:create_error().
-create_link(#model_config{name = ModelName} = ModelConfig, Key, Link) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:create_link(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:create_link(~p, ~p)", [TrxType, ModelName, Key, Link]),
-        links_utils:create_link_in_map(?MODULE, ModelConfig, Key, Link)
-    end).
+create_link(ModelConfig, Key, Link) ->
+    deletage_link_call(create_link, ModelConfig, Key, [Key, Link]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -342,8 +279,8 @@ create_link(#model_config{name = ModelName} = ModelConfig, Key, Link) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
-delete_links(#model_config{} = ModelConfig, Key, LinkNames) ->
-    delete_links(#model_config{} = ModelConfig, Key, LinkNames, ?PRED_ALWAYS).
+delete_links(ModelConfig, Key, LinkNames) ->
+    delete_links(ModelConfig, Key, LinkNames, ?PRED_ALWAYS).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -352,28 +289,8 @@ delete_links(#model_config{} = ModelConfig, Key, LinkNames) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all,
     datastore:delete_predicate()) -> ok | datastore:generic_error().
-delete_links(#model_config{name = ModelName} = ModelConfig, Key, all, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:delete_links(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:delete_links(~p, ~p)", [TrxType, ModelName, Key, all]),
-        case Pred() of
-            true ->
-                ok = links_utils:delete_links(?MODULE, ModelConfig, Key);
-            false ->
-                ok
-        end
-    end);
-delete_links(#model_config{name = ModelName} = ModelConfig, Key, Links, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(brief, "~p -> ~p:delete_links(~p)", [TrxType, ModelName, Key]),
-        log(verbose, "~p -> ~p:delete_links(~p, ~p)", [TrxType, ModelName, Key, Links]),
-        case Pred() of
-            true ->
-                ok = links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
-            false ->
-                ok
-        end
-    end).
+delete_links(ModelConfig, Key, Links, Pred) ->
+    deletage_link_call(delete_links, ModelConfig, Key, [Key, Links, Pred]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -382,8 +299,10 @@ delete_links(#model_config{name = ModelName} = ModelConfig, Key, Links, Pred) ->
 %%--------------------------------------------------------------------
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
-fetch_link(#model_config{} = ModelConfig, Key, LinkName) ->
-    links_utils:fetch_link(?MODULE, ModelConfig, LinkName, Key).
+fetch_link(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key, LinkName) ->
+    direct_link_call(fetch_link, ModelConfig, Key, [Key, LinkName]);
+fetch_link(ModelConfig, Key, LinkName) ->
+    direct_link_call(fetch_link, ModelConfig, Key, [Key, LinkName], {error, link_not_found}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -393,40 +312,41 @@ fetch_link(#model_config{} = ModelConfig, Key, LinkName) ->
 -spec foreach_link(model_behaviour:model_config(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
-foreach_link(#model_config{} = ModelConfig, Key, Fun, AccIn) ->
-    links_utils:foreach_link(?MODULE, ModelConfig, Key, Fun, AccIn).
+% TODO - implementation base on old implementation from datastore - refactor when local cache is finished
+foreach_link(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key, Fun, AccIn) ->
+    direct_call(foreach_link, ModelConfig, Key, [Key, Fun, AccIn]);
+foreach_link(#model_config{name = ModelName} = MC, Key, Fun, AccIn) ->
+    CHKey = get_hashing_key(ModelName, Key),
+    Node = consistent_hasing:get_node(CHKey),
 
+    rpc:call(Node, ?MODULE, foreach_link_internal, [MC, Key, Fun, AccIn]).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Internal helper - accumulator for list/3.
+%% {@link store_driver_behaviour} foreach_link/4 internal implementation
+%% (to be executed at node that hosts links process).
 %% @end
 %%--------------------------------------------------------------------
--spec list_next([term()] | '$end_of_table', term(), datastore:list_fun(), term()) ->
-    {ok, Acc :: term()} | datastore:generic_error().
-list_next([Obj | R], Handle, Fun, AccIn) ->
-    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
-    case Fun(Doc, AccIn) of
-        {next, NewAcc} ->
-            list_next(R, Handle, Fun, NewAcc);
-        {abort, NewAcc} ->
-            {ok, NewAcc}
-    end;
-list_next('$end_of_table' = EoT, Handle, Fun, AccIn) ->
-    case Fun(EoT, AccIn) of
-        {next, NewAcc} ->
-            list_next(EoT, Handle, Fun, NewAcc);
-        {abort, NewAcc} ->
-            {ok, NewAcc}
-    end;
-list_next([], Handle, Fun, AccIn) ->
-    case mnesia:select(Handle) of
-        {Objects, NewHandle} ->
-            list_next(Objects, NewHandle, Fun, AccIn);
-        '$end_of_table' ->
-            list_next('$end_of_table', undefined, Fun, AccIn)
+-spec foreach_link_internal(model_behaviour:model_config(), Key :: datastore:ext_key(),
+    fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
+    {ok, Acc :: term()} | datastore:link_error().
+foreach_link_internal(#model_config{name = ModelName} = MC, Key, Fun, AccIn) ->
+    CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+    % TODO - one consistency check (after migration from counter to times)
+    case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, CCCUuid, ModelName) of
+        {ok, ClearingCounter, _} ->
+            % TODO - foreach link returns error when doc is not found, and should be
+            RPCAns = apply(?SLAVE_DRIVER, foreach_link, [MC, Key, Fun, AccIn]),
+            % TODO - check directly in SLAVE_DRIVER
+            case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, CCCUuid) of
+                {ok, ClearingCounter, _} ->
+                    RPCAns;
+                _ ->
+                    deletage_link_call(foreach_link, MC, Key, [Key, Fun, AccIn])
+            end;
+        _ ->
+            deletage_link_call(foreach_link, MC, Key, [Key, Fun, AccIn])
     end.
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -435,27 +355,8 @@ list_next([], Handle, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
-delete(#model_config{name = ModelName} = ModelConfig, Key, Pred) ->
-    mnesia_run(maybe_transaction(ModelConfig, sync_transaction), fun(TrxType) ->
-        log(normal, "~p -> ~p:delete(~p)", [TrxType, ModelName, Key]),
-        case Pred() of
-            true ->
-                ok = mnesia:delete(table_name(ModelConfig), Key, write);
-            false ->
-                ok
-        end
-    end).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Deletes document that describes links, not using transactions (used by links utils).
-%% @end
-%%--------------------------------------------------------------------
--spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
-    ok | datastore:generic_error().
-delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document) ->
-    mnesia:delete(links_table_name(ModelConfig), Key, write).
-
+delete(ModelConfig, Key, Pred) ->
+    deletage_call(delete, ModelConfig, Key, [Key, Pred]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -464,21 +365,34 @@ delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document)
 %%--------------------------------------------------------------------
 -spec exists(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, boolean()} | datastore:generic_error().
-exists(#model_config{name = ModelName} = ModelConfig, Key) ->
-    TmpAns = case mnesia:is_transaction() of
-        true ->
-            log(normal, "transaction -> ~p:exists(~p)", [ModelName, Key]),
-            mnesia:read(table_name(ModelConfig), Key);
-        _ ->
-            log(normal, "dirty -> ~p:exists(~p)", [ModelName, Key]),
-            mnesia:activity(ets, fun() ->
-                mnesia:read(table_name(ModelConfig), Key)
-            end)
-    end,
-    case TmpAns of
-        [] -> {ok, false};
-        [_Record] -> {ok, true}
-    end.
+exists(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key) ->
+    direct_call(exists, ModelConfig, Key, [Key]);
+exists(ModelConfig, Key) ->
+    direct_call(exists, ModelConfig, Key, [Key], {ok, false}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
+    {ok, boolean()} | datastore:generic_error().
+exists_link_doc(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, DocKey, Scope) ->
+    direct_link_call(exists_link_doc, ModelConfig, DocKey, [DocKey, Scope]);
+exists_link_doc(ModelConfig, DocKey, Scope) ->
+    direct_link_call(exists_link_doc, ModelConfig, DocKey, [DocKey, Scope], {ok, false}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets link document. Allows override bucket.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_doc(model_behaviour:model_config(), binary(), DocKey :: datastore:ext_key(),
+    MainDocKey :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:generic_error().
+get_link_doc(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, BucketOverride, DocKey, MainDocKey) ->
+    direct_link_call(get_link_doc, ModelConfig, MainDocKey, [BucketOverride, DocKey]);
+get_link_doc(#model_config{name = ModelName} = ModelConfig, BucketOverride, DocKey, MainDocKey) ->
+    direct_link_call(get_link_doc, ModelConfig, MainDocKey, [BucketOverride, DocKey], {error, {not_found, ModelName}}).
 
 
 %%--------------------------------------------------------------------
@@ -488,21 +402,7 @@ exists(#model_config{name = ModelName} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
 healthcheck(State) ->
-    maps:fold(
-        fun
-            (_, #model_config{name = ModelName}, ok) ->
-                case mnesia:table_info(table_name(ModelName), where_to_write) of
-                    Nodes when is_list(Nodes) ->
-                        case lists:member(node(), Nodes) of
-                            true -> ok;
-                            false ->
-                                {error, {no_active_mnesia_table, table_name(ModelName)}}
-                        end;
-                    {error, Error} -> {error, Error};
-                    Error -> {error, Error}
-                end;
-            (_, _, Acc) -> Acc
-        end, ok, State).
+    ?SLAVE_DRIVER:healthcheck(State).
 
 
 %%--------------------------------------------------------------------
@@ -513,23 +413,9 @@ healthcheck(State) ->
 %%--------------------------------------------------------------------
 -spec run_transation(model_behaviour:model_config(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
-run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
-    mnesia_run(sync_transaction,
-        fun(TrxType) ->
-            log(normal, "~p -> ~p:run_transation(~p)", [TrxType, ModelName, ResourceID]),
-            Nodes = lists:usort(mnesia:table_info(table_name(ModelName), where_to_write)),
-            case mnesia:lock({global, ResourceID, Nodes}, write) of
-                ok ->
-                    Fun();
-                Nodes0 ->
-                    case lists:usort(Nodes0) of
-                        Nodes ->
-                            Fun();
-                        LessNodes ->
-                            {error, {lock_error, Nodes -- LessNodes}}
-                    end
-            end
-        end).
+run_transation(ModelConfig, ResourceID, Fun) ->
+    ?SLAVE_DRIVER:run_transation(ModelConfig, ResourceID, Fun).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -540,22 +426,8 @@ run_transation(#model_config{name = ModelName}, ResourceID, Fun) ->
 -spec run_transation(ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
 run_transation(ResourceID, Fun) ->
-    mnesia_run(sync_transaction,
-        fun(TrxType) ->
-            log(normal, "~p -> run_transation(~p)", [TrxType, ResourceID]),
-            Nodes = lists:usort(mnesia:table_info(table_name(lock), where_to_write)),
-            case mnesia:lock({global, ResourceID, Nodes}, write) of
-                ok ->
-                    Fun();
-                Nodes0 ->
-                    case lists:usort(Nodes0) of
-                        Nodes ->
-                            Fun();
-                        LessNodes ->
-                            {error, {lock_error, Nodes -- LessNodes}}
-                    end
-            end
-        end).
+    ?SLAVE_DRIVER:run_transation(ResourceID, Fun).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -565,13 +437,63 @@ run_transation(ResourceID, Fun) ->
 -spec run_transation(fun(() -> Result)) -> Result
     when Result :: term().
 run_transation(Fun) ->
-    NewFun = fun(TrxType) ->
-        log(normal, "~p ->run_transation", [TrxType]),
-        Fun()
-    end,
-    mnesia_run(sync_transaction, NewFun).
+    ?SLAVE_DRIVER:run_transation(Fun).
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears document from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear(MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
+clear(ModelConfig, Key) ->
+    execute(ModelConfig, Key, false, {clear, []}, [100]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears document from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear_links(MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
+clear_links(ModelConfig, Key) ->
+    execute(ModelConfig, Key, true, {clear, []}, [100]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts given document to database while preserving revision number.
+%% Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec force_save(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
+% TODO - return doc for dbsync
+force_save(ModelConfig, #document{key = Key} = ToSave) ->
+    deletage_call(force_save, ModelConfig, Key, [ToSave]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts given document to database while preserving revision number.
+%% Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec force_link_save(model_behaviour:model_config(), datastore:document(),
+    MainDocKey :: datastore:ext_key()) -> ok | datastore:generic_error().
+% TODO - use main doc key
+force_link_save(ModelConfig, #document{key = Key} = ToSave, MainDocKey) ->
+    deletage_link_call(force_save, ModelConfig, MainDocKey, [ToSave]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts given document to database while preserving revision number.
+%% Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec force_link_save(model_behaviour:model_config(), binary(), datastore:document(),
+    MainDocKey :: datastore:ext_key()) -> ok | datastore:generic_error().
+force_link_save(ModelConfig, BucketOverride, ToSave, MainDocKey) ->
+    deletage_link_call(force_save, ModelConfig, MainDocKey, [BucketOverride, ToSave]).
 
 %%%===================================================================
 %%% auxiliary_cache_behaviour callbacks
@@ -586,19 +508,8 @@ run_transation(Fun) ->
 -spec create_auxiliary_caches(
     model_behaviour:model_config(), Fields :: [atom()], NodeToSync :: node()) ->
     ok | datastore:generic_error() | no_return().
-create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
-    Node = node(),
-    lists:foreach(fun(Field) ->
-        TabName = aux_table_name(ModelConfig, Field),
-        case NodeToSync == Node of
-            true ->
-                create_table(TabName, auxiliary_cache_entry, [], [Node], ordered_set);
-            _ ->
-                ok = rpc:call(NodeToSync, mnesia, wait_for_tables, [[TabName], ?MNESIA_WAIT_TIMEOUT]),
-                expand_table(TabName, Node, NodeToSync)
-        end
-    end, Fields),
-    ok.
+create_auxiliary_caches(ModelConfig, Fields, NodeToSync) ->
+    ?SLAVE_DRIVER:create_auxiliary_caches(ModelConfig, Fields, NodeToSync).
 
 
 %%--------------------------------------------------------------------
@@ -608,13 +519,8 @@ create_auxiliary_caches(#model_config{}=ModelConfig, Fields, NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec aux_first(model_behaviour:model_config(), Field :: atom()) ->
     datastore:aux_cache_handle().
-aux_first(#model_config{}=ModelConfig, Field) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    Action = fun(TrxType) ->
-        log(normal, "~p -> aux_first(~p, ~p)", [TrxType, ModelConfig, Field]),
-        mnesia:first(AuxTableName)
-    end,
-    mnesia_run(aux_cache_context(ModelConfig, Field), Action).
+aux_first(ModelConfig, Field) ->
+    direct_local_call(aux_first, [ModelConfig, Field]).
 
 
 %%--------------------------------------------------------------------
@@ -625,13 +531,8 @@ aux_first(#model_config{}=ModelConfig, Field) ->
 -spec aux_next(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
 aux_next(_, _, '$end_of_table') -> '$end_of_table';
-aux_next(#model_config{}=ModelConfig, Field, Handle) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    Action = fun(TrxType) ->
-        log(normal, "~p -> aux_next(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Handle]),
-        mnesia:next(AuxTableName, Handle)
-    end,
-    mnesia_run(aux_cache_context(ModelConfig, Field), Action).
+aux_next(ModelConfig, Field, Handle) ->
+    direct_local_call(aux_next, [ModelConfig, Field, Handle]).
 
 
 %%--------------------------------------------------------------------
@@ -642,16 +543,7 @@ aux_next(#model_config{}=ModelConfig, Field, Handle) ->
 -spec aux_delete(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Key :: datastore:ext_key()) -> ok.
 aux_delete(ModelConfig, Field, [Key]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    Action = fun(TrxType) ->
-        log(normal, "~p -> aux_delete(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-        Selected = mnesia:select(AuxTableName, ets:fun2ms(
-            fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end)),
-        lists:foreach(fun(#auxiliary_cache_entry{key=K}) ->
-            mnesia:delete({AuxTableName, K})
-        end, Selected)
-    end,
-    ok = mnesia_run(aux_cache_context(ModelConfig, Field), Action).
+    deletage_local_call(aux_delete, [ModelConfig, Field, [Key]]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -661,23 +553,7 @@ aux_delete(ModelConfig, Field, [Key]) ->
 -spec aux_save(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_save(ModelConfig, Field, [Key, Doc]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    Action = case is_aux_field_value_updated(ModelConfig, Field, Key, CurrentFieldValue) of
-        {true, AuxKey} ->
-            fun(TrxType) ->
-                log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-                ok = mnesia:delete({AuxTableName, AuxKey}),
-                ok = mnesia:write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}}, write)
-            end;
-        true ->
-            fun(TrxType) ->
-                log(normal, "~p -> aux_save(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-                mnesia:write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}}, write)
-            end;
-        _ -> ok
-    end,
-    ok = mnesia_run(aux_cache_context(ModelConfig, Field), Action).
+    deletage_local_call(aux_save, [ModelConfig, Field, [Key, Doc]]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -686,9 +562,8 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
 %%--------------------------------------------------------------------
 -spec aux_update(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
-aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
-    {ok, Doc} = datastore:get(Level, ModelName, Key),
-    aux_save(ModelConfig, Field, [Key, Doc]).
+aux_update(ModelConfig, Field, [Key, Level]) ->
+    deletage_local_call(aux_update, [ModelConfig, Field, [Key, Level]]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -698,13 +573,7 @@ aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
 -spec aux_create(Model :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_create(ModelConfig, Field, [Key, Doc]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    Action = fun(TrxType) ->
-        log(normal, "~p -> aux_create(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-        mnesia:write(AuxTableName, #auxiliary_cache_entry{key={CurrentFieldValue, Key}}, write)
-    end,
-    ok = mnesia_run(aux_cache_context(ModelConfig, Field), Action).
+    deletage_local_call(aux_create, [ModelConfig, Field, [Key, Doc]]).
 
 %%%===================================================================
 %%% Internal functions
@@ -713,403 +582,227 @@ aux_create(ModelConfig, Field, [Key, Doc]) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets Mnesia table name for given model.
+%% Delegates call to appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec table_name(model_behaviour:model_config() | atom()) -> atom().
-table_name(#model_config{name = ModelName}) ->
-    table_name(ModelName);
-table_name(TabName) when is_atom(TabName) ->
-    binary_to_atom(<<"dc_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
-
+-spec deletage_call(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list()) -> term().
+deletage_call(Op, MC, Key, Args) ->
+    execute(MC, Key, false, {Op, Args}).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets Mnesia auxiliary table name for given model and field.
+%% Delegates call to appropriate link handling process.
 %% @end
 %%--------------------------------------------------------------------
--spec aux_table_name(model_behaviour:model_config() | atom(), atom()) -> atom().
-aux_table_name(#model_config{name = ModelName}, Field) ->
-    aux_table_name(ModelName, Field);
-aux_table_name(TabName, Field) when is_atom(TabName) and is_atom(Field) ->
-    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, "_",
-        (atom_to_binary(Field, utf8))/binary>>, utf8).
+-spec deletage_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list()) -> term().
+deletage_link_call(Op, MC, Key, Args) ->
+    execute(MC, Key, true, {Op, Args}).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets Mnesia links table name for given model.
+%% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec links_table_name(model_behaviour:model_config() | atom()) -> atom().
-links_table_name(#model_config{name = ModelName}) ->
-    links_table_name(ModelName);
-links_table_name(TabName) when is_atom(TabName) ->
-    binary_to_atom(<<"dc_links_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
+-spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list()) -> term().
+direct_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
+    CHKey = get_hashing_key(ModelName, Key),
+    Node = consistent_hasing:get_node(CHKey),
 
+    rpc:call(Node, ?SLAVE_DRIVER, Op, [MC | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets Mnesia transaction table name for given model.
+%% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec transaction_table_name(atom()) -> atom().
-transaction_table_name(TabName) when is_atom(TabName) ->
-    binary_to_atom(<<"dc_transaction_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
+-spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
+direct_call(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
+    CHKey = get_hashing_key(ModelName, Key),
+    Node = consistent_hasing:get_node(CHKey),
 
+    rpc:call(Node, ?MODULE, direct_call_internal, [Op, MC, Key, Args, CheckAns]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Create Mnesia table of default type 'set'.
-%% RamCopiesNodes is list of nodes where the table is supposed to have
-%% RAM copies
+%% Executes operation (to be executed appropriate node).
 %% @end
 %%--------------------------------------------------------------------
--spec create_table(TabName :: atom(), RecordName :: atom(),
-    Attributes :: [atom()], RamCopiesNodes :: [atom()]) -> atom().
-create_table(TabName, RecordName, Attributes, RamCopiesNodes) ->
-    create_table(TabName, RecordName, Attributes, RamCopiesNodes, set).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Create Mnesia table with default majority parameter value set to true.
-%% @end
-%%--------------------------------------------------------------------
--spec create_table(TabName :: atom(), RecordName :: atom(),
-    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom()) -> atom().
-create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type) ->
-    create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, false).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Create Mnesia table of type Type.
-%% RamCopiesNodes is list of nodes where the table is supposed to have
-%% RAM copies
-%% @end
-%%--------------------------------------------------------------------
--spec create_table(TabName :: atom(), RecordName :: atom(),
-    Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom(), Majority :: boolean()) -> ok.
-create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, Majority) ->
-    AttributesArg = case Attributes of
-        [] -> [];
-        [key] -> [];
-        _ -> [{attributes, Attributes}]
-    end,
-
-    Ans = case mnesia:create_table(TabName, [
-            {record_name, RecordName},
-            {ram_copies, RamCopiesNodes},
-            {type, Type},
-            {majority, Majority} | AttributesArg
-        ]) of
-
-        {atomic, ok} ->
-            ok;
-        {aborted, {already_exists, TabName}} ->
-            ok;
-        {aborted, Reason} ->
-            ?error("Cannot init mnesia cluster (table ~p) on node ~p due to ~p", [TabName, node(), Reason]),
-            throw(Reason)
-    end,
-    ?info("Creating mnesia table: ~p, result: ~p", [TabName, Ans]).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Expand mnesia table
-%% @end
-%%--------------------------------------------------------------------
--spec expand_table(TabName :: atom(), Node :: atom(), NodeToSync :: atom()) -> atom().
-expand_table(TabName, Node, NodeToSync) ->
-    case rpc:call(NodeToSync, mnesia, change_config, [extra_db_nodes, [Node]]) of
-        {ok, [Node]} ->
-            case rpc:call(NodeToSync, mnesia, add_table_copy, [TabName, Node, ram_copies]) of
-                {atomic, ok} ->
-                    ?info("Expanding mnesia cluster (table ~p) from ~p to ~p", [TabName, NodeToSync, node()]);
-                {aborted, Reason} ->
-                    ?error("Cannot replicate mnesia table ~p to node ~p due to: ~p", [TabName, node(), Reason])
-            end,
-            ok;
-        {error, Reason} ->
-            ?error("Cannot expand mnesia cluster (table ~p) on node ~p due to ~p", [TabName, node(), Reason]),
-            throw(Reason)
+-spec direct_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
+direct_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
+    case apply(?SLAVE_DRIVER, Op, [MC | Args]) of
+        CheckAns ->
+            % TODO - better consistency info management for models
+            case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, ModelName) of
+                {ok, _, _} ->
+                    CheckAns; % TODO - check time (if consistency wasn't restored a moment ago)
+                % TODO - simplify monitoring
+                {monitored, ClearedList, _, _} ->
+                    case lists:member(Key, ClearedList) of
+                        true ->
+                            deletage_call(Op, MC, Key, Args);
+                        _ ->
+                            CheckAns
+                    end;
+                _ ->
+                    deletage_call(Op, MC, Key, Args)
+            end;
+        RPCAns ->
+            RPCAns
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Executes operation at appropriate node.
+%% @end
+%%--------------------------------------------------------------------
+-spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list()) -> term().
+direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
+    CHKey = get_hashing_key(ModelName, Key),
+    Node = consistent_hasing:get_node(CHKey),
+
+    rpc:call(Node, ?SLAVE_DRIVER, Op, [MC | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Inserts given key as second element of given tuple.
+%% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec inject_key(Key :: datastore:ext_key(), Tuple :: tuple()) -> NewTuple :: tuple().
-inject_key(Key, Tuple) when is_tuple(Tuple) ->
-    [RecordName | Fields] = tuple_to_list(Tuple),
-    list_to_tuple([RecordName | [Key | Fields]]).
+-spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
+% TODO - link_utils return appripriate error when link doc not found.
+direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
+    CHKey = get_hashing_key(ModelName, Key),
+    Node = consistent_hasing:get_node(CHKey),
+
+    rpc:call(Node, ?MODULE, direct_link_call_internal, [Op, MC, Key, Args, CheckAns]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Strips second element of given tuple (reverses inject_key/2).
+%% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec strip_key(Tuple :: tuple()) -> NewTuple :: tuple().
-strip_key(Tuple) when is_tuple(Tuple) ->
-    [RecordName, _Key | Fields] = tuple_to_list(Tuple),
-    list_to_tuple([RecordName | Fields]).
+-spec direct_link_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
+    Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
+direct_link_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
+    case apply(?SLAVE_DRIVER, Op, [MC | Args]) of
+        CheckAns ->
+            CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
+            case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, CCCUuid, ModelName) of
+                {ok, _, _} ->
+                    CheckAns; % TODO - check time (if consistency wasn't restored a moment ago)
+                _ ->
+                    deletage_link_call(Op, MC, Key, Args)
+            end;
+        RPCAns2 ->
+            RPCAns2
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns key of a tuple.
+%% Executes operation at local node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_key(Tuple :: tuple()) -> Key :: term().
-get_key(Tuple) when is_tuple(Tuple) ->
-    [_RecordName, Key | _Fields] = tuple_to_list(Tuple),
-    Key.
+-spec deletage_local_call(Op :: atom(), Args :: list()) -> term().
+deletage_local_call(Op, Args) ->
+    % TODO - send to local tree for transactional aux
+    rpc:call(node(), ?SLAVE_DRIVER, Op, Args).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Convenience function for executing given Mnesia's transaction-like function and normalizing Result.
-%% Available methods: sync_dirty, async_dirty, sync_transaction, transaction.
+%% Executes operation at local node.
 %% @end
 %%--------------------------------------------------------------------
--spec mnesia_run(Method :: atom(), Fun :: fun((atom()) -> term())) -> term().
-mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
-    case mnesia:is_transaction() of
-        true ->
-            Fun(Method);
+-spec direct_local_call(Op :: atom(), Args :: list()) -> term().
+direct_local_call(Op, Args) ->
+    rpc:call(node(), ?SLAVE_DRIVER, Op, Args).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Executes operation in appropriate process.
+%% @end
+%%--------------------------------------------------------------------
+-spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
+    Link :: boolean(), {Op :: atom(), Args :: list()}) -> term().
+execute(MC, Key, Link, Msg) ->
+    execute(MC, Key, Link, Msg, []).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Executes operation in appropriate process.
+%% @end
+%%--------------------------------------------------------------------
+-spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
+    Link :: boolean(), {Op :: atom(), Args :: list()}, InitExtension :: list()) -> term().
+% TODO - allow node specification (for fallbacks from direct operations)
+execute(#model_config{name = ModelName} = MC, Key, Link, Msg, InitExtension) ->
+    TPMod = memory_store_driver,
+
+    Persist = case MC#model_config.store_level of
+        ?GLOBALLY_CACHED_LEVEL ->
+            couchdb_datastore_driver;
         _ ->
-            try mnesia:Method(fun() -> Fun(Method) end) of
-                Result ->
-                    Result
-            catch
-                _:Reason ->
-                    {error, Reason}
-            end
-    end;
-mnesia_run(Method, Fun) when Method =:= sync_transaction; Method =:= transaction ->
-    case mnesia:is_transaction() of
-        true ->
-            Fun(Method);
-        _ ->
-            case mnesia:Method(fun() -> Fun(Method) end) of
-                {atomic, Result} ->
-                    Result;
-                {aborted, Reason} ->
-                    {error, Reason}
-            end
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% If transactions are enabled in #model_config{} returns given TransactionType.
-%% If transactions are disabled in #model_config{} returns corresponding dirty mode.
-%% @end
-%%--------------------------------------------------------------------
--spec maybe_transaction(model_behaviour:model_config(), atom()) -> atom().
-maybe_transaction(#model_config{transactional_global_cache = false}, TransactionType) ->
-    case TransactionType of
-        sync_transaction -> sync_dirty
-    end;
-maybe_transaction(#model_config{transactional_global_cache = true}, TransactionType) ->
-    TransactionType.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Logs mnesia cache driver operation if logging type equals 'normal' or match
-%% the settings.
-%% @end
-%%--------------------------------------------------------------------
--spec log(Type :: brief | verbose | normal, Format :: string(), Args :: list()) -> ok.
-log(normal, Format, Args) ->
-    do_log(Format, Args);
-log(Type, Format, Args) ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, mnesia_cache_driver_log_type) of
-        {ok, Type} -> do_log(Format, Args);
-        _ -> ok
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Logs mnesia cache driver operation on given level.
-%% @end
-%%--------------------------------------------------------------------
--spec do_log(Format :: string(), Args :: list()) -> ok.
-do_log(Format, Args) ->
-    LogLevel = application:get_env(?CLUSTER_WORKER_APP_NAME, mnesia_cache_driver_log_level, 0),
-    ?do_log(LogLevel, "[~p] " ++ Format, [?MODULE | Args], false).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Helper function for list/4
-%% @end
-%%--------------------------------------------------------------------
--spec list(model_behaviour:model_config(), Fun :: datastore:list_fun(),
-    AccIn :: term()) -> {ok, Acc :: term()} | datastore:generic_error() | no_return().
-list(#model_config{name=ModelName} = ModelConfig, Fun, AccIn) ->
-    SelectAll = [{'_', [], ['$_']}],
-    ToExec = fun(TrxType) ->
-        log(normal, "~p -> ~p:list()", [TrxType, ModelName]),
-        case mnesia:select(table_name(ModelConfig), SelectAll, ?LIST_BATCH_SIZE, none) of
-            {Obj, Handle} ->
-                list_next(Obj, Handle, Fun, AccIn);
-            '$end_of_table' ->
-                list_next('$end_of_table', undefined, Fun, AccIn)
-        end
+            undefined
     end,
-    case mnesia:is_transaction() of
-        true ->
-            ToExec(transaction);
-        _ ->
-            mnesia_run(async_dirty, ToExec)
-end.
 
+    TMInit = [?SLAVE_DRIVER, MC, Key, Persist, Link],
+    TPKey = {ModelName, Key, Link},
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Dirty alternative of list/3
-%% @end
-%%--------------------------------------------------------------------
--spec list_dirty(model_behaviour:model_config(), Fun :: datastore:list_fun(),
-    AccIn :: term()) ->
-    {ok, Acc :: term()} | datastore:generic_error() | no_return().
-list_dirty(#model_config{} = ModelConfig, Fun, AccIn) ->
-    Table = table_name(ModelConfig),
-    First = mnesia:dirty_first(Table),
-    list_dirty_next(Table, First, Fun, AccIn).
-
+    CHKey = get_hashing_key(ModelName, Key),
+    Node = consistent_hasing:get_node(CHKey),
+    rpc:call(Node, tp, run_sync, [TPMod, TMInit, TPKey, Msg | InitExtension]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function acts similar to list_dirty/4 but records are traversed in order
-%% by field Field, basing on auxiliary cache connected with that field
+%% Execute list fun on local memory.
 %% @end
 %%--------------------------------------------------------------------
--spec list_ordered(model_behaviour:model_config(), Fun :: datastore:list_fun(),
-    AccIn :: term(), Field :: atom()) ->
-    {ok, Acc :: term()} | datastore:generic_error() | no_return().
-list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, AccIn, Field) ->
-    AuxCacheLevel = datastore_utils:get_aux_cache_level(AuxCaches, Field),
-    AuxDriver = datastore:level_to_driver(AuxCacheLevel),
-    First = AuxDriver:aux_first(ModelConfig, Field),
-    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field,  Handle) end,
-    TableName = table_name(ModelConfig),
-    list_ordered_next(TableName, First, Fun , IteratorFun, AccIn).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Accumulator helper function for dirty_list
-%% @end
-%%--------------------------------------------------------------------
--spec list_dirty_next(atom(), atom(), Fun :: datastore:list_fun(), AccIn :: term())
- -> {ok, Acc :: term()} | datastore:generic_error().
-list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
-    {abort, NewAcc} = Fun(EoT, AccIn),
-    {ok, NewAcc};
-list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
-    [Obj] = mnesia:dirty_read(Table, CurrentKey),
-    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
-    case Fun(Doc, AccIn) of
-        {next, NewAcc} ->
-            Next = mnesia:dirty_next(Table, CurrentKey),
-            list_dirty_next(Table, Next, Fun, NewAcc);
-        {abort, NewAcc} ->
-            {ok, NewAcc}
+-spec execute_list_fun(Fun :: datastore:list_fun(), List :: list(), AccIn :: term()) ->
+    {ok, term()} | datastore:generic_error().
+execute_list_fun(Fun, List, AccIn) ->
+    try
+        AccOut =
+            lists:foldr(fun(Doc, OAcc) ->
+                case Fun(Doc, OAcc) of
+                    {next, NAcc} ->
+                        NAcc;
+                    {abort, NAcc} ->
+                        throw({abort, NAcc})
+                end
+            end, AccIn, List),
+        {abort, NAcc2} = Fun('$end_of_table', AccOut),
+        {ok, NAcc2}
+    catch
+        {abort, AccOut0} ->
+            {ok, AccOut0};
+        _:Reason ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Accumulator helper function for list_ordered
+%% Gets key for consistent hashing algorithm.
 %% @end
 %%--------------------------------------------------------------------
--spec list_ordered_next(atom(), term(), Fun :: datastore:list_fun(),
-    IteratorFun :: datastore:aux_iterator_fun(), AccIn :: term()) ->
-    {ok, Acc :: term()} | datastore:generic_error().
-list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
-    {abort, NewAcc} = Fun(EoT, AccIn),
-    {ok, NewAcc};
-list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
-    [Obj] = mnesia:dirty_read(Table, datastore_utils:aux_key_to_key(CurrentKey)),
-    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
-    case Fun(Doc, AccIn) of
-        {next, NewAcc} ->
-            Next = IteratorFun(CurrentKey),
-            list_ordered_next(Table, Next, Fun, IteratorFun, NewAcc);
-        {abort, NewAcc} ->
-            {ok, NewAcc}
-    end.
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Determines whether value of field Field has changed. Old value is checked
-%% in auxiliary cache table.
-%% If it exists and is different than current value
-%% tuple {true, {OldFieldValue, Key}} is returned.
-%% If it doesn't exist true is returned.
-%% If it exists and it's value hasn't changed, false is returned.
-%% @end
-%%%--------------------------------------------------------------------
--spec is_aux_field_value_updated(
-    ModelConfig :: model_behaviour:model_config(),
-    Field :: atom(), datastore:ext_key(), term()) ->
-    boolean() | {true, OldAuxKey :: {term(), datastore:ext_key()}}.
-is_aux_field_value_updated(ModelConfig, Field, Key, CurrentFieldValue) ->
-    case aux_get(ModelConfig, Field, Key) of
-        [] -> true;
-        [#auxiliary_cache_entry{key={CurrentFieldValue, Key}}] -> false;
-        [#auxiliary_cache_entry{key=AuxKey}] -> {true, AuxKey}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns entry from auxiliary table of Model connected with Field,
-%% matching the Key.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_get(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> [#auxiliary_cache_entry{}].
-aux_get(ModelConfig, Field, Key) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    Action = fun(TrxType) ->
-        log(normal, "~p -> aux_get(~p, ~p, ~p)", [TrxType, ModelConfig, Field, Key]),
-        mnesia:select(AuxTableName, ets:fun2ms(
-            fun(#auxiliary_cache_entry{key={_, K}} = R) when K == Key -> R end))
-    end,
-    mnesia_run(aux_cache_context(ModelConfig, Field), Action).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns access context defined for auxiliary cache associated with
-%% given field.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_cache_context(model_behaviour:model_config(), atom()) ->
-    datastore:aux_cache_access_context().
-aux_cache_context(#model_config{auxiliary_caches = AuxCaches}, Field) ->
-    #aux_cache_config{context = Context} = maps:get(Field, AuxCaches),
-    Context.
+-spec get_hashing_key(ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key()) -> term().
+get_hashing_key(ModelName, Key) ->
+    {ModelName, Key}.

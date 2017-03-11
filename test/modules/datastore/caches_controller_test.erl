@@ -33,6 +33,9 @@ mem_clearing_test_() ->
 
             application:set_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, MemTarget),
             application:set_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb, 1),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, 0),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, 0),
+            application:set_env(?CLUSTER_WORKER_APP_NAME, clearing_time_to_refresh_stats, 1000),
 
             OneMB = list_to_binary(prepare_list(1024*1024)),
             ets:new(test, [named_table, public, set]),

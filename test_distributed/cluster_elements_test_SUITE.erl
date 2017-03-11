@@ -12,6 +12,8 @@
 -module(cluster_elements_test_SUITE).
 -author("Michal Wrzeszcz").
 
+% TODO - change couchbase to couchdb in all env_desc.json
+
 -include("global_definitions.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -44,7 +46,8 @@ all() ->
 -define(call_cc(N, F, A), rpc:call(N, caches_controller, F, A, ?TIMEOUT)).
 -define(call_test(N, F, A), rpc:call(N, ?MODULE, F, A, ?TIMEOUT)).
 
--define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(MNESIA_THROTTLING_KEY, mnesia_throttling).
+-define(MEMORY_PROC_IDLE_KEY, throttling_idle_time).
 -define(THROTTLING_ERROR, {error, load_to_high}).
 
 %%%===================================================================
@@ -53,14 +56,18 @@ all() ->
 
 throttling_test(Config) ->
     [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
-    MockUsage = fun(FailedTasks, AllTasks, MemUsage) ->
-        test_utils:mock_expect(Workers, task_pool, count_tasks,
-            fun (_, _, _) -> {ok, {FailedTasks, AllTasks}} end),
+    MockUsage = fun(DBQueue, TPSize, MemUsage) ->
+        test_utils:mock_expect(Workers, datastore_pool, queue_size,
+            fun () -> DBQueue end),
+        test_utils:mock_expect(Workers, tp, get_processes_number,
+            fun () -> TPSize end),
         test_utils:mock_expect(Workers, monitoring, get_memory_stats,
             fun () -> [{<<"mem">>, MemUsage}] end)
     end,
 
     {ok,TBT} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+    {ok,TMMPC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
+    {ok,TBMPC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_memory_proc_number),
     TCI = 60,
     TOCI = 30,
     TMT = 4*TBT,
@@ -88,8 +95,8 @@ throttling_test(Config) ->
         {A1, A2} = ?call_test(Worker1, configure_throttling, []),
         ?assertMatch({ok, _}, {A1, A2}),
 
-        NMConfig = case ?call(Worker1, node_management, get, [?MNESIA_THROTTLING_KEY]) of
-            {ok, #document{value = #node_management{value = V}}} ->
+        NMConfig = case test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+            {ok, V} ->
                 V;
             OtherConfig ->
                 OtherConfig
@@ -104,62 +111,91 @@ throttling_test(Config) ->
     end,
 
     CheckThrottlingDefault = fun() ->
-        CheckThrottling(VerifyInterval, ok, {error, {not_found, node_management}})
+        CheckThrottling(VerifyInterval, ok, undefined)
     end,
 
     CheckThrottlingAns = fun(Ans, C) ->
         CheckThrottling(VerifyIntervalTh, Ans, C)
     end,
 
+    VerifyIdle = fun(Ans) ->
+        {ok, Idle} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY),
+        ?assertEqual(Idle, Ans)
+    end,
+
+    VerifyTPLimit = fun(Ans) ->
+        Idle = ?call(Worker1, tp, get_processes_limit, []),
+        ?assertEqual(Idle, Ans)
+    end,
+
     MockUsage(0,0,10),
     CheckThrottlingDefault(),
+    VerifyTPLimit(TMMPC),
 
-    TSFTN = 50,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number, 2*TSFTN),
-    TSPTN = 500,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number, 2*TSPTN),
+    DBLimit = 200,
+    DBLimitStartTh = DBLimit/2,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit, DBLimit),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size, DBLimitStartTh),
 
-    MockUsage(TSFTN + 10,0,10.0),
+    MockUsage(DBLimitStartTh + 10,0,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
-    MockUsage(TSFTN + 2,0,10.0),
+    MockUsage(DBLimitStartTh + 2,0,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
-    MockUsage(TSFTN - 10,0,10.0),
+    MockUsage(DBLimitStartTh - 10,0,10.0),
     CheckThrottlingAns(ok, {throttle, TBT, true}),
 
-    MockUsage(TSFTN - 9,0,10.0),
+    MockUsage(DBLimitStartTh - 9,0,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
-    MockUsage(TSFTN - 8,0,10.0),
+    MockUsage(DBLimitStartTh - 8,0,10.0),
     CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
-    MockUsage(TSFTN - 7,0,10.0),
+    MockUsage(DBLimitStartTh - 7,0,10.0),
     CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
-    MockUsage(TSFTN - 9,0,10.0),
+    MockUsage(DBLimitStartTh - 9,0,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    VerifyTPLimit(TMMPC),
 
-    MockUsage(2*TSFTN,0,10.0),
+    MockUsage(DBLimit,0,10.0),
     CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
+    VerifyTPLimit(TBMPC),
 
     MockUsage(0,0,10.0),
     CheckThrottlingDefault(),
+    VerifyTPLimit(TMMPC),
 
-    MockUsage(0, TSPTN + 10,10.0),
+    TPLimit = 200,
+    TPStopLimit = DBLimit*4/5,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number, TPLimit),
+    IdleStart = 100,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number, IdleStart),
+    MaxIdle = 10000,
+    MinIdle = 1000,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms, MaxIdle),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms, MinIdle),
+
+    CheckThrottlingDefault(),
+    VerifyIdle(MaxIdle),
+    MockUsage(0, TPLimit + 10,10.0),
+    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    VerifyIdle(MinIdle),
+
+    MockUsage(0, TPLimit + 20,10.0),
+    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+
+    MockUsage(0, TPLimit - 2,10.0),
     CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
-    MockUsage(0, TSPTN + 20,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
-
-    MockUsage(0, TSPTN + 2,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
-
-    MockUsage(0,2*TSPTN,10.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
+    MockUsage(0,TPStopLimit-10,10.0),
+    CheckThrottlingDefault(),
+    VerifyIdle(1500),
 
     MockUsage(0,0,10.0),
     CheckThrottlingDefault(),
+    VerifyIdle(MaxIdle),
 
     TBMER = 95,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio, TBMER),
@@ -194,7 +230,7 @@ throttling_test(Config) ->
     MockUsage(0,0,MemTh - 1.0),
     CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
 
-    MockUsage(TSFTN + 10,0,10.0),
+    MockUsage(DBLimitStartTh + 10,0,10.0),
     CheckThrottlingAns(ok, {throttle, round(TBT), true}),
 
     MockUsage(0,0,MemTh + 1.0),
@@ -322,7 +358,7 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
                 gen_server:cast({?NODE_MANAGER_NAME, W}, force_check_tasks)
             end, WorkersList),
             ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
-            ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
+            ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level]), 2),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level]))
     end,
 
@@ -680,7 +716,9 @@ get_rollback_ans(Num) ->
 
 init_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]),
+%%    test_utils:mock_new(Workers, [monitoring, datastore_pool, tp, caches_controller, datastore_config_plugin_default]),
+    test_utils:mock_new(Workers, [datastore_pool], [non_strict, no_history]),
+    test_utils:mock_new(Workers, [monitoring, tp, caches_controller, datastore_config_plugin_default]),
 
     test_utils:mock_expect(Workers, datastore_config_plugin_default, throttled_models,
         fun () -> [throttled_model] end),
@@ -704,7 +742,7 @@ init_per_testcase(_Case, Config) ->
 
 end_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]);
+    test_utils:mock_unload(Workers, [monitoring, datastore_pool, tp, caches_controller, datastore_config_plugin_default]);
 
 end_per_testcase(_Case, _Config) ->
     ok.

@@ -13,10 +13,12 @@
 -module(tp).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
 -include("modules/tp/tp.hrl").
 
 %% API
 -export([run_async/4, run_sync/4, run_sync/5]).
+-export([get_processes_limit/0, set_processes_limit/1, get_processes_number/0]).
 
 -type init() :: #tp_init{}.
 -type mod() :: module().
@@ -72,6 +74,39 @@ run_async(Module, Args, Key, Request) ->
     run_async(Module, Args, Key, Request, 3).
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns limit for the number of active tp processes.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_processes_limit() -> Limit :: non_neg_integer().
+get_processes_limit() ->
+    {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        ?TP_PROCESSES_LIMIT),
+    Limit.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets limit for the number of active tp processes.
+%% NOTE! If the new limit is less than the current number of active tp processes
+%% it does not force termination and deletion of any process. It is only
+%% guaranteed that new tp processes will not be created as long as it would
+%% exceed the limit.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_processes_limit(non_neg_integer()) -> ok.
+set_processes_limit(Limit) ->
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ?TP_PROCESSES_LIMIT, Limit).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns number of active tp processes.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_processes_number() -> non_neg_integer().
+get_processes_number() ->
+    tp_router:size().
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -95,6 +130,9 @@ run_async(Module, Args, Key, Request, Attempts) ->
                 gen_server:call(Pid, Request)
             catch
                 _:{noproc, _} ->
+                    tp_router:delete(Key, Pid),
+                    run_async(Module, Args, Key, Request);
+                exit:{normal, _} ->
                     tp_router:delete(Key, Pid),
                     run_async(Module, Args, Key, Request);
                 _:{timeout, _} ->
