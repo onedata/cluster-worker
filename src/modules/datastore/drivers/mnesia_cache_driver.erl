@@ -16,12 +16,12 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include("timeouts.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
 %% store_driver_behaviour callbacks
--export([init_driver/1, init_bucket/3, healthcheck/1]).
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, add_links/4, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_transation/1, run_transation/2, run_transation/3]).
@@ -37,31 +37,9 @@
 %% for rpc
 -export([direct_call_internal/5, direct_link_call_internal/5, foreach_link_internal/4]).
 
-%% Module that handle direct operations on mnesia
--define(SLAVE_DRIVER, mnesia_cache_driver_internal).
-
 %%%===================================================================
 %%% store_driver_behaviour callbacks
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback init_driver/1.
-%% @end
-%%--------------------------------------------------------------------
--spec init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
-init_driver(State) ->
-    {ok, State}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback init_bucket/2.
-%% @end
-%%--------------------------------------------------------------------
--spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
-init_bucket(BucketName, Models, NodeToSync) ->
-    ?SLAVE_DRIVER:init_bucket(BucketName, Models, NodeToSync).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -137,7 +115,7 @@ list(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, 
 
     ListAns = lists:foldl(fun
         (N, {ok, Acc}) ->
-            rpc:call(N, ?SLAVE_DRIVER, list, [ModelConfig, HelperFun, Acc, Opts]);
+            rpc:call(N, get_slave_driver(false, ModelConfig), list, [ModelConfig, HelperFun, Acc, Opts]);
         (_, Error) ->
             Error
     end, {ok, []}, Nodes),
@@ -163,7 +141,7 @@ list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
         ConsistencyCheck1 = caches_controller:check_cache_consistency(?GLOBAL_ONLY_LEVEL, MN),
         MemMapAns = lists:foldl(fun
             (N, {ok, Acc}) ->
-                rpc:call(N, ?SLAVE_DRIVER, list, [ModelConfig, HelperFun, Acc, Opts]);
+                rpc:call(N, get_slave_driver(false, ModelConfig), list, [ModelConfig, HelperFun, Acc, Opts]);
             (_, Error) ->
                 throw(Error)
         end, {ok, #{}}, Nodes),
@@ -333,12 +311,13 @@ foreach_link(#model_config{name = ModelName} = MC, Key, Fun, AccIn) ->
 foreach_link_internal(#model_config{name = ModelName} = MC, Key, Fun, AccIn) ->
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
     % TODO - one consistency check (after migration from counter to times)
-    case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, CCCUuid, ModelName) of
+    SlaveDriver = get_slave_driver(true, MC),
+    case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid, ModelName) of
         {ok, ClearingCounter, _} ->
             % TODO - foreach link returns error when doc is not found, and should be
-            RPCAns = apply(?SLAVE_DRIVER, foreach_link, [MC, Key, Fun, AccIn]),
+            RPCAns = apply(SlaveDriver, foreach_link, [MC, Key, Fun, AccIn]),
             % TODO - check directly in SLAVE_DRIVER
-            case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, CCCUuid) of
+            case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid) of
                 {ok, ClearingCounter, _} ->
                     RPCAns;
                 _ ->
@@ -397,16 +376,6 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, BucketOverride, DocK
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback healthcheck/1.
-%% @end
-%%--------------------------------------------------------------------
--spec healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
-healthcheck(State) ->
-    ?SLAVE_DRIVER:healthcheck(State).
-
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
 %% run at the same time.
 %% @end
@@ -414,7 +383,7 @@ healthcheck(State) ->
 -spec run_transation(model_behaviour:model_config(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
 run_transation(ModelConfig, ResourceID, Fun) ->
-    ?SLAVE_DRIVER:run_transation(ModelConfig, ResourceID, Fun).
+    ?GLOBAL_SLAVE_DRIVER:run_transation(ModelConfig, ResourceID, Fun).
 
 
 %%--------------------------------------------------------------------
@@ -426,7 +395,7 @@ run_transation(ModelConfig, ResourceID, Fun) ->
 -spec run_transation(ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
 run_transation(ResourceID, Fun) ->
-    ?SLAVE_DRIVER:run_transation(ResourceID, Fun).
+    ?GLOBAL_SLAVE_DRIVER:run_transation(ResourceID, Fun).
 
 
 %%--------------------------------------------------------------------
@@ -437,7 +406,7 @@ run_transation(ResourceID, Fun) ->
 -spec run_transation(fun(() -> Result)) -> Result
     when Result :: term().
 run_transation(Fun) ->
-    ?SLAVE_DRIVER:run_transation(Fun).
+    ?GLOBAL_SLAVE_DRIVER:run_transation(Fun).
 
 
 %%--------------------------------------------------------------------
@@ -509,7 +478,8 @@ force_link_save(ModelConfig, BucketOverride, ToSave, MainDocKey) ->
     model_behaviour:model_config(), Fields :: [atom()], NodeToSync :: node()) ->
     ok | datastore:generic_error() | no_return().
 create_auxiliary_caches(ModelConfig, Fields, NodeToSync) ->
-    ?SLAVE_DRIVER:create_auxiliary_caches(ModelConfig, Fields, NodeToSync).
+    SlaveDriver = get_slave_driver(false, ModelConfig),
+    SlaveDriver:create_auxiliary_caches(ModelConfig, Fields, NodeToSync).
 
 
 %%--------------------------------------------------------------------
@@ -520,7 +490,7 @@ create_auxiliary_caches(ModelConfig, Fields, NodeToSync) ->
 -spec aux_first(model_behaviour:model_config(), Field :: atom()) ->
     datastore:aux_cache_handle().
 aux_first(ModelConfig, Field) ->
-    direct_local_call(aux_first, [ModelConfig, Field]).
+    direct_local_call(aux_first, ModelConfig, [Field]).
 
 
 %%--------------------------------------------------------------------
@@ -532,7 +502,7 @@ aux_first(ModelConfig, Field) ->
     Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
 aux_next(_, _, '$end_of_table') -> '$end_of_table';
 aux_next(ModelConfig, Field, Handle) ->
-    direct_local_call(aux_next, [ModelConfig, Field, Handle]).
+    direct_local_call(aux_next, ModelConfig, [Field, Handle]).
 
 
 %%--------------------------------------------------------------------
@@ -543,7 +513,7 @@ aux_next(ModelConfig, Field, Handle) ->
 -spec aux_delete(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Key :: datastore:ext_key()) -> ok.
 aux_delete(ModelConfig, Field, [Key]) ->
-    deletage_local_call(aux_delete, [ModelConfig, Field, [Key]]).
+    direct_local_call(aux_delete, ModelConfig, [Field, [Key]]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -553,7 +523,7 @@ aux_delete(ModelConfig, Field, [Key]) ->
 -spec aux_save(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_save(ModelConfig, Field, [Key, Doc]) ->
-    deletage_local_call(aux_save, [ModelConfig, Field, [Key, Doc]]).
+    direct_local_call(aux_save, ModelConfig, [Field, [Key, Doc]]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -563,7 +533,7 @@ aux_save(ModelConfig, Field, [Key, Doc]) ->
 -spec aux_update(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_update(ModelConfig, Field, [Key, Level]) ->
-    deletage_local_call(aux_update, [ModelConfig, Field, [Key, Level]]).
+    direct_local_call(aux_update, ModelConfig, [Field, [Key, Level]]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -573,7 +543,7 @@ aux_update(ModelConfig, Field, [Key, Level]) ->
 -spec aux_create(Model :: model_behaviour:model_config(), Field :: atom(),
     Args :: [term()]) -> ok.
 aux_create(ModelConfig, Field, [Key, Doc]) ->
-    deletage_local_call(aux_create, [ModelConfig, Field, [Key, Doc]]).
+    direct_local_call(aux_create, ModelConfig, [Field, [Key, Doc]]).
 
 %%%===================================================================
 %%% Internal functions
@@ -613,7 +583,7 @@ direct_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
     CHKey = get_hashing_key(ModelName, Key),
     Node = consistent_hasing:get_node(CHKey),
 
-    rpc:call(Node, ?SLAVE_DRIVER, Op, [MC | Args]).
+    rpc:call(Node, get_slave_driver(false, MC), Op, [MC | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -638,10 +608,11 @@ direct_call(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
 -spec direct_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 direct_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
-    case apply(?SLAVE_DRIVER, Op, [MC | Args]) of
+    SlaveDriver = get_slave_driver(false, MC),
+    case apply(SlaveDriver, Op, [MC | Args]) of
         CheckAns ->
             % TODO - better consistency info management for models
-            case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, ModelName) of
+            case caches_controller:check_cache_consistency_direct(SlaveDriver, ModelName) of
                 {ok, _, _} ->
                     CheckAns; % TODO - check time (if consistency wasn't restored a moment ago)
                 % TODO - simplify monitoring
@@ -671,7 +642,7 @@ direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
     CHKey = get_hashing_key(ModelName, Key),
     Node = consistent_hasing:get_node(CHKey),
 
-    rpc:call(Node, ?SLAVE_DRIVER, Op, [MC | Args]).
+    rpc:call(Node, get_slave_driver(true, MC), Op, [MC | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -697,10 +668,11 @@ direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) 
 -spec direct_link_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 direct_link_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
-    case apply(?SLAVE_DRIVER, Op, [MC | Args]) of
+    SlaveDriver = get_slave_driver(true, MC),
+    case apply(SlaveDriver, Op, [MC | Args]) of
         CheckAns ->
             CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
-            case caches_controller:check_cache_consistency_direct(?SLAVE_DRIVER, CCCUuid, ModelName) of
+            case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid, ModelName) of
                 {ok, _, _} ->
                     CheckAns; % TODO - check time (if consistency wasn't restored a moment ago)
                 _ ->
@@ -716,20 +688,9 @@ direct_link_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, C
 %% Executes operation at local node.
 %% @end
 %%--------------------------------------------------------------------
--spec deletage_local_call(Op :: atom(), Args :: list()) -> term().
-deletage_local_call(Op, Args) ->
-    % TODO - send to local tree for transactional aux
-    rpc:call(node(), ?SLAVE_DRIVER, Op, Args).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Executes operation at local node.
-%% @end
-%%--------------------------------------------------------------------
--spec direct_local_call(Op :: atom(), Args :: list()) -> term().
-direct_local_call(Op, Args) ->
-    rpc:call(node(), ?SLAVE_DRIVER, Op, Args).
+-spec direct_local_call(Op :: atom(), MC :: model_behaviour:model_config(), Args :: list()) -> term().
+direct_local_call(Op, MC, Args) ->
+    apply(get_slave_driver(false, MC), Op, [MC | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -761,7 +722,7 @@ execute(#model_config{name = ModelName} = MC, Key, Link, Msg, InitExtension) ->
             undefined
     end,
 
-    TMInit = [?SLAVE_DRIVER, MC, Key, Persist, Link],
+    TMInit = [get_slave_driver(Link, MC), MC, Key, Persist, Link],
     TPKey = {ModelName, Key, Link},
 
     CHKey = get_hashing_key(ModelName, Key),
@@ -796,13 +757,15 @@ execute_list_fun(Fun, List, AccIn) ->
             {error, Reason}
     end.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets key for consistent hashing algorithm.
-%% @end
-%%--------------------------------------------------------------------
--spec get_hashing_key(ModelName :: model_behaviour:model_type(),
-    Key :: datastore:ext_key()) -> term().
-get_hashing_key(ModelName, Key) ->
-    {ModelName, Key}.
+get_slave_driver(true, #model_config{link_store_level = ?GLOBAL_ONLY_LEVEL}) ->
+    ?GLOBAL_SLAVE_DRIVER;
+get_slave_driver(true, #model_config{link_store_level = ?GLOBALLY_CACHED_LEVEL}) ->
+    ?GLOBAL_SLAVE_DRIVER;
+get_slave_driver(true, _) ->
+    ?LOCAL_SLAVE_DRIVER;
+get_slave_driver(_, #model_config{store_level = ?GLOBAL_ONLY_LEVEL}) ->
+    ?GLOBAL_SLAVE_DRIVER;
+get_slave_driver(_, #model_config{store_level = ?GLOBALLY_CACHED_LEVEL}) ->
+    ?GLOBAL_SLAVE_DRIVER;
+get_slave_driver(_, _) ->
+    ?LOCAL_SLAVE_DRIVER.

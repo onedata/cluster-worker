@@ -22,7 +22,7 @@
 %% store_driver_behaviour callbacks
 -export([init_bucket/3, healthcheck/1]).
 %% TODO Add non_transactional updates (each update creates tmp ets!)
--export([save/2, update/3, update/2, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
+-export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_transation/1, run_transation/2, run_transation/3]).
 
@@ -138,7 +138,7 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
             [] ->
                 {error, {not_found, ModelName}};
             [Value] ->
-                case update(strip_key(Value), Diff) of
+                case memory_store_driver_docs:update(strip_key(Value), Diff) of
                     {ok, NewValue} ->
                         ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
                         {ok, Key};
@@ -147,19 +147,6 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
                 end
         end
     end).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback update/2.
-%% @end
-%%--------------------------------------------------------------------
--spec update(OldValue :: datastore:value(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:value()} | datastore:update_error().
-update(OldValue, Diff) when is_map(Diff) ->
-    NewValue = maps:merge(datastore_utils:shallow_to_map(OldValue), Diff),
-    {ok, datastore_utils:shallow_to_record(NewValue)};
-update(OldValue, Diff) when is_function(Diff) ->
-    Diff(OldValue).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -193,7 +180,7 @@ create_or_update(ModelConfig, #document{key = Key, value = Value}, Diff) ->
                 ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
                 {ok, Key};
             [OldValue] ->
-                case update(strip_key(OldValue), Diff) of
+                case memory_store_driver_docs:update(strip_key(OldValue), Diff) of
                     {ok, NewValue} ->
                         ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
                         {ok, Key};

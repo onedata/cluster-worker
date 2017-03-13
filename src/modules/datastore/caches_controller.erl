@@ -26,8 +26,8 @@
 -export([clear_local_cache/1, clear_global_cache/1]).
 -export([clear_cache/2, should_clear_cache/2, get_hooks_config/1, get_hooks_throttling_config/1, wait_for_cache_dump/0]).
 -export([delete_old_keys/2, delete_all_keys/1]).
--export([get_cache_uuid/2, decode_uuid/1, cache_to_datastore_level/1, cache_to_task_level/1]).
--export([flush_all/2, flush/3, flush/4, clear/3, clear/4, clear_links/3]).
+-export([get_cache_uuid/2, decode_uuid/1, cache_to_task_level/1]).
+-export([flush_all/2, flush/3, flush/4, clear/3, clear_links/3]).
 -export([save_consistency_info/3, save_consistency_info_direct/3, consistency_restored/2, save_consistency_restored_info/3,
   begin_consistency_restoring/2, begin_consistency_restoring/3, end_consistency_restoring/2, end_consistency_restoring/3,
   end_consistency_restoring/4, check_cache_consistency/2, check_cache_consistency/3, check_cache_consistency_direct/2,
@@ -466,43 +466,25 @@ wait_for_cache_dump() ->
 wait_for_cache_dump(0, _) ->
   dump_error;
 wait_for_cache_dump(N, {GSize, LSize}) ->
-  case {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
-    cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)} of
-    {{ok, []}, {ok, []}} ->
-      ok;
-    {{ok, L1}, {ok, L2}} ->
-      case {length(L1), length(L2)} of
-        {GSize, LSize} ->
-          timer:sleep(timer:seconds(1)),
-          wait_for_cache_dump(N-1, {GSize, LSize});
-        {GSize2, LSize2} ->
-          timer:sleep(timer:seconds(1)),
-          wait_for_cache_dump(N, {GSize2, LSize2})
-      end;
-    _ ->
-      timer:sleep(timer:seconds(1)),
-      wait_for_cache_dump(N-1, {GSize, LSize})
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Translates cache name to store level.
-%% @end
-%%--------------------------------------------------------------------
--spec cache_to_datastore_level(ModelName :: atom()) -> datastore:store_level().
-cache_to_datastore_level(ModelName) ->
-%%  case lists:member(ModelName, datastore_config:global_caches()) of
-%%    true -> ?GLOBAL_ONLY_LEVEL;
-%%    _ -> ?LOCAL_ONLY_LEVEL
+%%  case {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
+%%    cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)} of
+%%    {{ok, []}, {ok, []}} ->
+%%      ok;
+%%    {{ok, L1}, {ok, L2}} ->
+%%      case {length(L1), length(L2)} of
+%%        {GSize, LSize} ->
+%%          timer:sleep(timer:seconds(1)),
+%%          wait_for_cache_dump(N-1, {GSize, LSize});
+%%        {GSize2, LSize2} ->
+%%          timer:sleep(timer:seconds(1)),
+%%          wait_for_cache_dump(N, {GSize2, LSize2})
+%%      end;
+%%    _ ->
+%%      timer:sleep(timer:seconds(1)),
+%%      wait_for_cache_dump(N-1, {GSize, LSize})
 %%  end.
-  % TODO - repair level checking
-  case ModelName of
-    locally_cached_record -> ?LOCAL_ONLY_LEVEL;
-    locally_cached_sync_record -> ?LOCAL_ONLY_LEVEL;
-    % TODO - change dbsync to GLOBALLY_CACHED
-%%    dbsync_state -> ?LOCAL_ONLY_LEVEL;
-    _ -> ?GLOBAL_ONLY_LEVEL
-  end.
+  % TODO - implementation for new cache
+  ok.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -601,23 +583,7 @@ flush(Level, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec clear(Level :: datastore:store_level(), ModelName :: atom(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear(?LOCAL_ONLY_LEVEL = Level, ModelName, Key) ->
-  ModelConfig = ModelName:model_init(),
-  Uuid = get_cache_uuid(Key, ModelName),
-
-  consistency_info_lock(ModelName, Key,
-    fun() ->
-      Pred = fun() ->
-        case save_clear_info(Level, Uuid) of
-          {ok, _} ->
-            save_consistency_info(Level, ModelName, Key);
-          _ ->
-            false
-        end
-      end,
-      erlang:apply(get_driver_module(Level), delete, [ModelConfig, Key, Pred])
-    end);
-clear(?GLOBAL_ONLY_LEVEL, ModelName, Key) ->
+clear(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   mnesia_cache_driver:clear(ModelConfig, Key).
 
@@ -628,53 +594,9 @@ clear(?GLOBAL_ONLY_LEVEL, ModelName, Key) ->
 %%--------------------------------------------------------------------
 -spec clear_links(Level :: datastore:store_level(), ModelName :: atom(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear_links(?GLOBAL_ONLY_LEVEL, ModelName, Key) ->
+clear_links(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
   mnesia_cache_driver:clear_links(ModelConfig, Key).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Clears links from memory.
-%% @end
-%%--------------------------------------------------------------------
--spec clear(Level :: datastore:store_level(), ModelName :: atom(),
-    Key :: datastore:ext_key(), datastore:link_name() | all) -> ok | datastore:generic_error().
-clear(?LOCAL_ONLY_LEVEL = Level, ModelName, Key, all) ->
-  ModelConfig = ModelName:model_init(),
-  AccFun = fun(LinkName, _, Acc) ->
-    [LinkName | Acc]
-  end,
-  FullArgs = [ModelConfig, Key, AccFun, []],
-  {ok, Links} = erlang:apply(datastore:level_to_driver(Level), foreach_link, FullArgs),
-  lists:foldl(fun(Link, Acc) ->
-    Ans = clear(Level, ModelName, Key, Link),
-    case Ans of
-      ok ->
-        Acc;
-      _ ->
-        Ans
-    end
-  end, ok, Links);
-
-clear(?LOCAL_ONLY_LEVEL = Level, ModelName, Key, Link) ->
-  ModelConfig = ModelName:model_init(),
-  Uuid = get_cache_uuid(cache_controller:link_cache_key(ModelName, Key, Link), ModelName),
-  CCCUuid = get_cache_uuid(Key, ModelName),
-
-  consistency_info_lock(CCCUuid, Link,
-    fun() ->
-      Pred = fun() ->
-        case save_clear_info(Level, Uuid) of
-          {ok, _} ->
-            save_consistency_info(Level, CCCUuid, Link);
-          _ ->
-            false
-        end
-      end,
-      erlang:apply(get_driver_module(Level), delete_links, [ModelConfig, Key, [Link], Pred])
-    end);
-clear(?GLOBAL_ONLY_LEVEL, _ModelName, _Key, _Link) ->
-  throw(not_supporter).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1138,128 +1060,6 @@ save_consistency_info_direct(Driver, Key, ClearedName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_old_keys(Level :: global_only | local_only, Caches :: list(), TimeWindow :: integer()) -> ok.
-delete_old_keys(?LOCAL_ONLY_LEVEL = Level, Caches, TimeWindow) ->
-  Now = os:system_time(?CC_TIMEUNIT),
-  ClearFun = fun
-    ('$end_of_table', {0, _, undefined}) ->
-      {abort, 0};
-    ('$end_of_table', {Count0, BatchNum, {Uuid, V}}) ->
-      T = V#cache_controller.timestamp,
-      U = V#cache_controller.last_user,
-      Age = Now - T,
-      Count = case U of
-        non when Age >= 1000 * TimeWindow ->
-          delete_old_key(Level, Uuid, BatchNum),
-          Count0 + 1;
-        _ ->
-          Count0
-      end,
-      case Count of
-        0 ->
-          ok;
-        _ ->
-          ToCount = case Count rem ?CLEAR_BATCH_SIZE of
-            0 ->
-              ?CLEAR_BATCH_SIZE;
-            TC ->
-              TC
-          end,
-          count_clear_acc(ToCount, BatchNum)
-      end,
-      {abort, Count};
-    (#document{key = Uuid, value = V}, {0, BatchNum, undefined}) ->
-      {next, {0, BatchNum, {Uuid, V}}};
-    (#document{key = NewUuid, value = NewV}, {Count0, BatchNum0, {Uuid, V}}) ->
-      T = V#cache_controller.timestamp,
-      U = V#cache_controller.last_user,
-      Age = Now - T,
-      {Stop, BatchNum, Count} = case U of
-        non when Age >= 1000 * TimeWindow ->
-          delete_old_key(Level, Uuid, BatchNum0),
-          NewCount = Count0 + 1,
-          case NewCount rem ?CLEAR_BATCH_SIZE of
-            0 ->
-              count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
-
-              case monitoring:get_memory_stats() of
-                [{<<"mem">>, MemUsage}] ->
-                  ErlangMemUsage = erlang:memory(),
-                  {should_stop_clear_cache(MemUsage, ErlangMemUsage), BatchNum0 + 1, NewCount};
-                _ ->
-                  ?warning("Not able to check memory usage"),
-                  {false, BatchNum0 + 1, NewCount}
-              end;
-            _ ->
-              {false, BatchNum0, NewCount}
-          end;
-        _ ->
-          {false, BatchNum0, Count0}
-      end,
-
-      case Stop of
-        true ->
-          {abort, Count};
-        _ ->
-          {next, {Count, BatchNum, {NewUuid, NewV}}}
-      end
-  end,
-
-  ClearAns = case TimeWindow of
-    0 ->
-      list_old_keys(Level, ClearFun, cache_controller);
-    _ ->
-      cache_controller:list_dirty(Level, ClearFun, {0, 0, undefined})
-  end,
-
-  case ClearAns of
-    {ok, _} ->
-      case TimeWindow of
-        0 ->
-          % TODO - the same for links
-          lists:foreach(fun(Cache) ->
-            ClearFun2 = fun
-              ('$end_of_table', {0, _, undefined}) ->
-                {abort, 0};
-              ('$end_of_table', {Count, BatchNum, UuidToDel}) ->
-                Master = self(),
-                spawn(fun() ->
-                  safe_delete(Level, Cache, UuidToDel),
-                  Master ! {doc_cleared, BatchNum}
-                end),
-                ToCount = case Count rem ?CLEAR_BATCH_SIZE of
-                  0 ->
-                    ?CLEAR_BATCH_SIZE;
-                  TC ->
-                    TC
-                end,
-                count_clear_acc(ToCount, BatchNum),
-                {abort, Count};
-              (#document{key = Uuid}, {0, BatchNum, undefined}) ->
-                {next, {1, BatchNum, Uuid}};
-              (#document{key = Uuid}, {Count, BatchNum0, UuidToDel}) ->
-                Master = self(),
-                spawn(fun() ->
-                  safe_delete(Level, Cache, UuidToDel),
-                  Master ! {doc_cleared, BatchNum0}
-                end),
-                BatchNum = case Count rem ?CLEAR_BATCH_SIZE of
-                  0 ->
-                    count_clear_acc(?CLEAR_BATCH_SIZE, BatchNum0),
-                    BatchNum0 + 1;
-                  _ ->
-                    BatchNum0
-                end,
-                {next, {Count + 1, BatchNum, Uuid}}
-            end,
-            {ok, _} = list_old_keys(Level, ClearFun2, Cache)
-          end, Caches);
-        _ ->
-          ok
-      end;
-    Other ->
-      ?error("Error during cache cleaning: ~p", [Other]),
-      ok
-  end;
 % TODO - clear links
 delete_old_keys(Level, Caches, _TimeWindow) ->
   lists:foreach(fun(Cache) ->

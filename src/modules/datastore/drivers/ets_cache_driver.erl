@@ -87,27 +87,18 @@ save(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
 %%--------------------------------------------------------------------
 -spec update(model_behaviour:model_config(), datastore:ext_key(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
-update(#model_config{name = ModelName} = ModelConfig, Key, Diff) when is_function(Diff) ->
+update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
     case ets:lookup(table_name(ModelConfig), Key) of
         [] ->
             {error, {not_found, ModelName}};
         [{_, Value}] ->
-            case Diff(Value) of
+            case memory_store_driver_docs:update(Value, Diff) of
                 {ok, NewValue} ->
-                    true = ets:insert(table_name(ModelConfig), {Key, datastore_utils:shallow_to_record(NewValue)}),
+                    true = ets:insert(table_name(ModelConfig), {Key, NewValue}),
                     {ok, Key};
                 {error, Reason} ->
                     {error, Reason}
             end
-    end;
-update(#model_config{name = ModelName} = ModelConfig, Key, Diff) when is_map(Diff) ->
-    case ets:lookup(table_name(ModelConfig), Key) of
-        [] ->
-            {error, {not_found, ModelName}};
-        [{_, Value}] ->
-            NewValue = maps:merge(datastore_utils:shallow_to_map(Value), Diff),
-            true = ets:insert(table_name(ModelConfig), {Key, datastore_utils:shallow_to_record(NewValue)}),
-            {ok, Key}
     end.
 
 %%--------------------------------------------------------------------
@@ -130,7 +121,7 @@ create(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Value}, Diff) when is_function(Diff) ->
+create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Value}, Diff) ->
     case ets:lookup(table_name(ModelConfig), Key) of
         [] ->
             case ets:insert_new(table_name(ModelConfig), {Key, Value}) of
@@ -138,25 +129,13 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
                 true -> {ok, Key}
             end;
         [{_, OldValue}] ->
-            case Diff(OldValue) of
+            case memory_store_driver_docs:update(OldValue, Diff) of
                 {ok, NewValue} ->
-                    true = ets:insert(table_name(ModelConfig), {Key, datastore_utils:shallow_to_record(NewValue)}),
+                    true = ets:insert(table_name(ModelConfig), {Key, NewValue}),
                     {ok, Key};
                 {error, Reason} ->
                     {error, Reason}
             end
-    end;
-create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Value}, Diff) when is_map(Diff) ->
-    case ets:lookup(table_name(ModelConfig), Key) of
-        [] ->
-            case ets:insert_new(table_name(ModelConfig), {Key, Value}) of
-                false -> update(ModelConfig, Key, Diff);
-                true -> {ok, Key}
-            end;
-        [{_, OldValue}] ->
-            NewValue = maps:merge(datastore_utils:shallow_to_map(OldValue), Diff),
-            true = ets:insert(table_name(ModelConfig), {Key, datastore_utils:shallow_to_record(NewValue)}),
-            {ok, Key}
     end.
 
 %%--------------------------------------------------------------------
