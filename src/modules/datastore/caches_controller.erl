@@ -500,7 +500,7 @@ cache_to_task_level(ModelName) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
-  mnesia_cache_driver:clear(ModelConfig, Key).
+  ?MEMORY_DRIVER:clear(ModelConfig, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -511,7 +511,7 @@ clear(_, ModelName, Key) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear_links(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
-  mnesia_cache_driver:clear_links(ModelConfig, Key).
+  ?MEMORY_DRIVER:clear_links(ModelConfig, Key).
 
 %%--------------------------------------------------------------------
 %% @doc

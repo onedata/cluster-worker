@@ -20,6 +20,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 -include("datastore_test_models_def.hrl").
 
 -define(getFirstSeq(W, Config),
@@ -246,7 +247,7 @@ force_save_gc_test(Config) ->
         fun(Doc) ->
             ?assertEqual(
                 ok,
-                rpc:call(W2, mnesia_cache_driver, force_save,
+                rpc:call(W2, ?MEMORY_DRIVER, force_save,
                     [ModelConfig, Doc])
             )
         end,
@@ -255,12 +256,12 @@ force_save_gc_test(Config) ->
 
     [#document{value = Check} | _] = lists:reverse(Docs),
     ?assertMatch({{ok, #document{value = Check}}, {ok, #document{value = Check}}},
-        {rpc:call(W1, mnesia_cache_driver, get, [ModelConfig, Key]),
-        rpc:call(W2, mnesia_cache_driver, get, [ModelConfig, Key])}),
+        {rpc:call(W1, ?MEMORY_DRIVER, get, [ModelConfig, Key]),
+        rpc:call(W2, ?MEMORY_DRIVER, get, [ModelConfig, Key])}),
 
     ?assertEqual(
-        rpc:call(W1, mnesia_cache_driver, get, [ModelConfig, Key]),
-        rpc:call(W2, mnesia_cache_driver, get, [ModelConfig, Key])
+        rpc:call(W1, ?MEMORY_DRIVER, get, [ModelConfig, Key]),
+        rpc:call(W2, ?MEMORY_DRIVER, get, [ModelConfig, Key])
     ),
     ok.
 
@@ -284,7 +285,7 @@ force_save_gc_link_test(Config) ->
         fun(Doc) ->
             ?assertEqual(
                 ok,
-                rpc:call(W2, mnesia_cache_driver, force_link_save, [globally_cached_record:model_init(), Doc, Key])
+                rpc:call(W2, ?MEMORY_DRIVER, force_link_save, [globally_cached_record:model_init(), Doc, Key])
             )
         end,
         Docs

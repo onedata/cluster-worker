@@ -538,7 +538,7 @@ run_transaction(ModelNameOrConfig, ResourceId, Fun) ->
 -spec run_transaction(fun(() -> Result)) -> Result
     when Result :: term().
 run_transaction(Fun) ->
-    mnesia_cache_driver:run_transation(Fun).
+    ?MEMORY_DRIVER:run_transation(Fun).
 
 %%--------------------------------------------------------------------
 %% @doc

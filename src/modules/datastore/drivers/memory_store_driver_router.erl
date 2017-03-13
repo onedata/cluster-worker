@@ -293,9 +293,8 @@ fetch_link(ModelConfig, Key, LinkName) ->
 % TODO - implementation base on old implementation from datastore - refactor when local cache is finished
 foreach_link(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key, Fun, AccIn) ->
     direct_call(foreach_link, ModelConfig, Key, [Key, Fun, AccIn]);
-foreach_link(#model_config{name = ModelName} = MC, Key, Fun, AccIn) ->
-    CHKey = get_hashing_key(ModelName, Key),
-    Node = consistent_hasing:get_node(CHKey),
+foreach_link(MC, Key, Fun, AccIn) ->
+    Node = get_hashing_node(MC, Key),
 
     rpc:call(Node, ?MODULE, foreach_link_internal, [MC, Key, Fun, AccIn]).
 
@@ -579,9 +578,8 @@ deletage_link_call(Op, MC, Key, Args) ->
 %%--------------------------------------------------------------------
 -spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
-direct_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
-    CHKey = get_hashing_key(ModelName, Key),
-    Node = consistent_hasing:get_node(CHKey),
+direct_call(Op, MC, Key, Args) ->
+    Node = get_hashing_node(MC, Key),
 
     rpc:call(Node, get_slave_driver(false, MC), Op, [MC | Args]).
 
@@ -593,9 +591,8 @@ direct_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
 %%--------------------------------------------------------------------
 -spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
-direct_call(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
-    CHKey = get_hashing_key(ModelName, Key),
-    Node = consistent_hasing:get_node(CHKey),
+direct_call(Op, MC, Key, Args, CheckAns) ->
+    Node = get_hashing_node(MC, Key),
 
     rpc:call(Node, ?MODULE, direct_call_internal, [Op, MC, Key, Args, CheckAns]).
 
@@ -638,9 +635,8 @@ direct_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckA
 %%--------------------------------------------------------------------
 -spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
-direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
-    CHKey = get_hashing_key(ModelName, Key),
-    Node = consistent_hasing:get_node(CHKey),
+direct_link_call(Op, MC, Key, Args) ->
+    Node = get_hashing_node(MC, Key),
 
     rpc:call(Node, get_slave_driver(true, MC), Op, [MC | Args]).
 
@@ -653,9 +649,8 @@ direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args) ->
 -spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 % TODO - link_utils return appripriate error when link doc not found.
-direct_link_call(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
-    CHKey = get_hashing_key(ModelName, Key),
-    Node = consistent_hasing:get_node(CHKey),
+direct_link_call(Op, MC, Key, Args, CheckAns) ->
+    Node = get_hashing_node(MC, Key),
 
     rpc:call(Node, ?MODULE, direct_link_call_internal, [Op, MC, Key, Args, CheckAns]).
 
@@ -725,8 +720,7 @@ execute(#model_config{name = ModelName} = MC, Key, Link, Msg, InitExtension) ->
     TMInit = [get_slave_driver(Link, MC), MC, Key, Persist, Link],
     TPKey = {ModelName, Key, Link},
 
-    CHKey = get_hashing_key(ModelName, Key),
-    Node = consistent_hasing:get_node(CHKey),
+    Node = get_hashing_node(MC, Key),
     rpc:call(Node, tp, run_sync, [TPMod, TMInit, TPKey, Msg | InitExtension]).
 
 %%--------------------------------------------------------------------
@@ -763,10 +757,14 @@ execute_list_fun(Fun, List, AccIn) ->
 %% Gets key for consistent hashing algorithm.
 %% @end
 %%--------------------------------------------------------------------
--spec get_hashing_key(ModelName :: model_behaviour:model_type(),
+-spec get_hashing_node(ModelName :: model_behaviour:model_type(),
     Key :: datastore:ext_key()) -> term().
-get_hashing_key(ModelName, Key) ->
-    {ModelName, Key}.
+get_hashing_node(#model_config{store_level = ?LOCAL_ONLY_LEVEL}, _Key) ->
+    node();
+get_hashing_node(#model_config{store_level = ?LOCALLY_CACHED_LEVEL}, _Key) ->
+    node();
+get_hashing_node(#model_config{name = ModelName}, Key) ->
+    consistent_hasing:get_node({ModelName, Key}).
 
 get_slave_driver(true, #model_config{link_store_level = ?GLOBAL_ONLY_LEVEL}) ->
     ?GLOBAL_SLAVE_DRIVER;
