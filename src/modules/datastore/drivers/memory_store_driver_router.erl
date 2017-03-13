@@ -126,7 +126,7 @@ list(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, 
         Other ->
             Other
     end;
-list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
+list(#model_config{name = MN, store_level = Level} = ModelConfig, Fun, AccIn, Opts) ->
     Nodes = consistent_hasing:get_all_nodes(),
 
     HelperFun = fun
@@ -138,7 +138,8 @@ list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
 
     % TODO - one consistency check (after migration from counter to times)
     try
-        ConsistencyCheck1 = caches_controller:check_cache_consistency(?GLOBAL_ONLY_LEVEL, MN),
+        ConsistencyCheck1 = caches_controller:check_cache_consistency(
+            memory_store_driver:main_level(Level), MN),
         MemMapAns = lists:foldl(fun
             (N, {ok, Acc}) ->
                 rpc:call(N, get_slave_driver(false, ModelConfig), list, [ModelConfig, HelperFun, Acc, Opts]);
@@ -149,7 +150,8 @@ list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
         {ok, MemMap} = MemMapAns,
         FirstPhaseAns = case ConsistencyCheck1 of
             {ok, ClearCounter, _} ->
-                case caches_controller:check_cache_consistency(?GLOBAL_ONLY_LEVEL, MN) of
+                case caches_controller:check_cache_consistency(
+                    memory_store_driver:main_level(Level), MN) of
                     {ok, ClearCounter, _} ->
                         {ok, maps:values(MemMap)};
                     _ ->
@@ -164,7 +166,8 @@ list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
                 execute_list_fun(Fun, List, AccIn);
             restore ->
                 Pid = self(),
-                caches_controller:begin_consistency_restoring(?GLOBAL_ONLY_LEVEL, MN, Pid),
+                caches_controller:begin_consistency_restoring(
+                    memory_store_driver:main_level(Level), MN, Pid),
 
                 HelperFun2 = fun
                     (#document{key = Key}, Acc) ->
@@ -185,7 +188,8 @@ list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
                             end
                         end, [], DiskOnlyKeys),
 
-                        caches_controller:end_consistency_restoring(?GLOBAL_ONLY_LEVEL, MN, Pid),
+                        caches_controller:end_consistency_restoring(
+                            memory_store_driver:main_level(Level), MN, Pid),
                         execute_list_fun(Fun, maps:values(MemMap) ++ DiskOnlyValues, AccIn);
                     Other ->
                         throw({restore_from_disk_error, Other})
@@ -193,7 +197,8 @@ list(#model_config{name = MN} = ModelConfig, Fun, AccIn, Opts) ->
         end
     catch
         throw:{restore_from_disk_error, Err} ->
-            caches_controller:end_consistency_restoring(?GLOBAL_ONLY_LEVEL, MN, self(), not_monitored),
+            caches_controller:end_consistency_restoring(
+                memory_store_driver:main_level(Level), MN, self(), not_monitored),
             ?error("Listing error ~p", [{restore_from_disk_error, Err}]),
             {error, {restore_from_disk, Err}};
         throw:Error ->

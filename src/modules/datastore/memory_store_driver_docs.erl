@@ -78,7 +78,7 @@ handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear(Driver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
   % TODO - race at delete
-  case caches_controller:save_consistency_info(Level, MN, Key) of
+  case caches_controller:save_consistency_info(memory_store_driver:main_level(Level), MN, Key) of
     true ->
       apply(Driver, delete, [ModelConfig, Key, ?PRED_ALWAYS]);
     _ ->
@@ -192,7 +192,7 @@ get_from_memory(Driver, undefined, ModelConfig, Key) ->
 get_from_memory(Driver, FlushDriver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
   case apply(Driver, get, [ModelConfig, Key]) of
     {error, {not_found, _}} ->
-      case caches_controller:check_cache_consistency(Level, MN) of
+      case caches_controller:check_cache_consistency(memory_store_driver:main_level(Level), MN) of
         {ok, _, _} ->
           {not_found, false};
         % TODO - simplify memory monitoring

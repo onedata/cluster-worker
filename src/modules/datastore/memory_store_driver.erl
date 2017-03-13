@@ -29,6 +29,7 @@
 %% API
 -export([modify/2, init/1, terminate/1, commit/2, merge_changes/2,
   commit_backoff/1]).
+-export([main_level/1]).
 
 % Types
 -type state() :: #state{}.
@@ -306,3 +307,10 @@ get_flush_max_interval(FlushDriver) ->
         cache_to_disk_force_delay_ms),
       Interval
   end.
+
+main_level(?GLOBALLY_CACHED_LEVEL) ->
+  ?GLOBAL_ONLY_LEVEL;
+main_level(?LOCALLY_CACHED_LEVEL) ->
+  ?LOCAL_ONLY_LEVEL;
+main_level(Level) ->
+  Level.
