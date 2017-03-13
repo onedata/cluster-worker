@@ -1102,7 +1102,7 @@ restoring_cache_from_disk_global_cache_test(Config) ->
 
     ModelConfig = TestRecord:model_init(),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    CModule = ?call_store(Worker1, driver_to_module, [?MEMORY_DRIVER]),
     Key = <<"key_rcfdr">>,
     Doc =  #document{
         key = Key,
@@ -1220,7 +1220,7 @@ old_keys_cleaning_global_cache_test(Config) ->
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     CorruptedUuid = caches_controller:get_cache_uuid(CorruptedKey, TestRecord),
     ModelConfig = TestRecord:model_init(),
-    DModule = ?call(Worker1, datastore, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    DModule = ?call(Worker1, datastore, driver_to_module, [?MEMORY_DRIVER]),
     PModule = ?call(Worker1, datastore, driver_to_module, [?PERSISTENCE_DRIVER]),
     ?assertMatch(ok, ?call(Worker2, cache_controller, delete, [?GLOBAL_ONLY_LEVEL, CorruptedUuid])),
 
@@ -1243,9 +1243,10 @@ check_clearing(TestRecord, [{K, TimeWindow} | R] = KeysWithTimes, Worker1, Worke
     lists:foreach(fun({K2, T}) ->
         Uuid = caches_controller:get_cache_uuid(K2, TestRecord),
         UpdateFun = fun(Record) ->
-            {ok, Record#cache_controller{
-                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
-            }}
+            {ok, Record}
+%%            {ok, Record#cache_controller{
+%%                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
+%%            }}
         end,
         ?assertMatch({ok, _}, ?call(Worker1, cache_controller, update, [?GLOBAL_ONLY_LEVEL, Uuid, UpdateFun]), 10)
     end, KeysWithTimes),

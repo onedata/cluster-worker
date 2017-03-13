@@ -738,7 +738,7 @@ multiple_links_creation_disk_test(Config) ->
 
 multiple_links_creation_global_only_test(Config) ->
     [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
-    PModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    PModule = ?call_store(Worker1, driver_to_module, [?MEMORY_DRIVER]),
     multiple_links_creation_test_base(Config, PModule).
 
 multiple_links_creation_test_base(Config, PModule) ->
