@@ -111,7 +111,7 @@ handle_message({force_save, Args}, CurrentValue, FD, ModelConfig) ->
     {Error, _} ->
       Error
   end;
-handle_message({create, [Document]}, nil, _FD, _ModelConfig) ->
+handle_message({create, [Document]}, not_found, _FD, _ModelConfig) ->
   {ok, Document};
 handle_message({create, [_Document]}, _CurrentValue, _FD, _ModelConfig) ->
   {error, already_exists};
@@ -120,7 +120,7 @@ handle_message({update, [_Key, _Diff]}, not_found, _FD,
   {error, {not_found, ModelName}};
 handle_message({update, [_Key, Diff]}, CurrentValue, _FD, _ModelConfig) ->
   try
-    case update(CurrentValue#document.value, Diff) of
+    case ?MODULE:update(CurrentValue#document.value, Diff) of
       {ok, V2} ->
         {ok, CurrentValue#document{value = V2}};
       Error ->
@@ -136,7 +136,7 @@ handle_message({create_or_update, [Document, _Diff]}, not_found, _FD,
   {ok, Document};
 handle_message({create_or_update, [_Document, Diff]}, CurrentValue, _FD, _ModelConfig) ->
   try
-    case update(CurrentValue#document.value, Diff) of
+    case ?MODULE:update(CurrentValue#document.value, Diff) of
       {ok, V2} ->
         {ok, CurrentValue#document{value = V2}};
       Error ->
