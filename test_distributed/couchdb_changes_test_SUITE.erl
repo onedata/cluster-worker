@@ -293,7 +293,7 @@ force_save_gc_link_test(Config) ->
 
     [#document{key = CheckKey, value = Check} | _] = lists:reverse(Docs),
     ?assertMatch({ok, #document{value = Check}},
-        rpc:call(W2, mnesia_cache_driver_internal, get_link_doc, [ModelConfig, CheckKey])),
+        rpc:call(W2, ?GLOBAL_SLAVE_DRIVER, get_link_doc, [ModelConfig, CheckKey])),
 
     ok.
 

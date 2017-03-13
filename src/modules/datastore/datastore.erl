@@ -962,7 +962,9 @@ level_to_driver(_) ->
     Method :: store_driver_behaviour:driver_action(), [term()]) ->
     ok | {ok, term()} | {error, term()} | term() when Driver :: atom().
 exec_driver(ModelNameOrConfig, Level, Method, Args) ->
-    ModelConfig = model_config(ModelNameOrConfig),
+    ModelConfig0 = model_config(ModelNameOrConfig),
+    ModelConfig = ModelConfig0#model_config{store_level = Level,
+        link_store_level = Level},
     Driver = level_to_driver(Level),
     Return =
         case run_prehooks(ModelConfig, Method, Level, Args) of
