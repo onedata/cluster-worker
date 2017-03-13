@@ -836,7 +836,7 @@ init_drivers(Configs, NodeToSync) ->
         fun({Bucket, Models}) ->
             ok = apply(driver_to_module(?PERSISTENCE_DRIVER), init_bucket, [Bucket, Models, NodeToSync]),
             ok = apply(?LOCAL_SLAVE_DRIVER, init_bucket, [Bucket, Models, NodeToSync]),
-            ok = apply(?GLOBAL_SLAVE_DRIVER, init_bucket, [?GLOBAL_SLAVE_DRIVER, Bucket, Models, NodeToSync]),
+            ok = apply(?GLOBAL_SLAVE_DRIVER, init_bucket, [Bucket, Models, NodeToSync]),
             init_auxiliary_caches(Models, NodeToSync)
         end, maps:to_list(configs_per_bucket(Configs))).
 

@@ -76,10 +76,9 @@ handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec clear(Driver :: atom(), ModelConfig :: model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
+clear(Driver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
   % TODO - race at delete
-  case caches_controller:save_consistency_info(
-    memory_store_driver:driver_to_level(Driver), MN, Key) of
+  case caches_controller:save_consistency_info(Level, MN, Key) of
     true ->
       apply(Driver, delete, [ModelConfig, Key, ?PRED_ALWAYS]);
     _ ->
@@ -100,9 +99,9 @@ clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
     CurrentValue :: model_behaviour:value_doc(), FD :: atom(),
     ModelConfig :: model_behaviour:model_config()) -> {ok | disk_save| memory_restore,
   NewCurrentValue :: model_behaviour:value_doc()} | {error, term()}.
-handle_message({save, [Document]}, _CurrentValue, _Driver, _FD, _ModelConfig) ->
+handle_message({save, [Document]}, _CurrentValue, _FD, _ModelConfig) ->
   {ok, Document};
-handle_message({force_save, Args}, CurrentValue, _Driver, FD, ModelConfig) ->
+handle_message({force_save, Args}, CurrentValue, FD, ModelConfig) ->
   case apply(FD, force_save, [ModelConfig | Args]) of
     {{ok, _}, not_changed} ->
       {ok, CurrentValue};
@@ -190,11 +189,10 @@ get_from_memory(Driver, undefined, ModelConfig, Key) ->
     Other ->
       Other
   end;
-get_from_memory(Driver, FlushDriver, #model_config{name = MN} = ModelConfig, Key) ->
+get_from_memory(Driver, FlushDriver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
   case apply(Driver, get, [ModelConfig, Key]) of
     {error, {not_found, _}} ->
-      case caches_controller:check_cache_consistency(
-        memory_store_driver:driver_to_level(Driver), MN) of
+      case caches_controller:check_cache_consistency(Level, MN) of
         {ok, _, _} ->
           {not_found, false};
         % TODO - simplify memory monitoring

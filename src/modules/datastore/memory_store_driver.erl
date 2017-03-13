@@ -29,7 +29,6 @@
 %% API
 -export([modify/2, init/1, terminate/1, commit/2, merge_changes/2,
   commit_backoff/1]).
--export([driver_to_level/1]).
 
 % Types
 -type state() :: #state{}.
@@ -269,21 +268,6 @@ commit_backoff(_T) ->
   {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
     memory_store_flush_error_suspension_ms),
   Interval.
-
-%%%===================================================================
-%%% Helper functions
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets level for driver.
-%% @end
-%%--------------------------------------------------------------------
--spec driver_to_level(atom()) -> datastore:store_level().
-% TODO - also local only level
-driver_to_level(_Driver) ->
-  ?GLOBAL_ONLY_LEVEL.
 
 %%%===================================================================
 %%% Internal functions

@@ -29,16 +29,6 @@
     version :: non_neg_integer() | undefined
 }).
 
-%% Model that controls utilization of cache
--define(CC_TIMEUNIT, 1000000).
--record(cache_controller, {
-    timestamp = 0 :: integer(),
-    action = non :: atom(),
-    last_user = non :: pid() | non,
-    last_action_time = 0 :: integer(),
-    action_data :: term()
-}).
-
 % Max size of cleared_list in cache_consistency_controller
 % TODO - new cache_consistency_controller for new datastore
 -define(CLEAR_MONITOR_MAX_SIZE, 0).

@@ -757,6 +757,17 @@ execute_list_fun(Fun, List, AccIn) ->
             {error, Reason}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets key for consistent hashing algorithm.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_hashing_key(ModelName :: model_behaviour:model_type(),
+    Key :: datastore:ext_key()) -> term().
+get_hashing_key(ModelName, Key) ->
+    {ModelName, Key}.
+
 get_slave_driver(true, #model_config{link_store_level = ?GLOBAL_ONLY_LEVEL}) ->
     ?GLOBAL_SLAVE_DRIVER;
 get_slave_driver(true, #model_config{link_store_level = ?GLOBALLY_CACHED_LEVEL}) ->
