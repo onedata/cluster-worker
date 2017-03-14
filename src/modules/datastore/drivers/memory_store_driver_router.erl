@@ -133,7 +133,7 @@ list(#model_config{store_level = ?LOCAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, O
 list(#model_config{name = MN, store_level = Level} = ModelConfig, Fun, AccIn, Opts) ->
     Nodes = case Level of
         ?LOCALLY_CACHED_LEVEL ->
-            node();
+            [node()];
         _ ->
             consistent_hasing:get_all_nodes()
     end,
