@@ -528,7 +528,8 @@ exists_link_doc(Level, Key, ModelNameOrConfig, Scope) ->
 -spec run_transaction(ModelNameOrConfig :: model_behaviour:model_type() | model_behaviour:model_config(), ResourceId :: binary(), fun(() -> Result)) -> Result
     when Result :: term().
 run_transaction(ModelNameOrConfig, ResourceId, Fun) ->
-    exec_driver(model_config(ModelNameOrConfig), ?MEMORY_DRIVER, run_transation, [ResourceId, Fun]).
+    ModelConfig = model_config(ModelNameOrConfig),
+    ?GLOBAL_SLAVE_DRIVER:run_transation(ModelConfig, ResourceId, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -538,7 +539,7 @@ run_transaction(ModelNameOrConfig, ResourceId, Fun) ->
 -spec run_transaction(fun(() -> Result)) -> Result
     when Result :: term().
 run_transaction(Fun) ->
-    ?MEMORY_DRIVER:run_transation(Fun).
+    ?GLOBAL_SLAVE_DRIVER:run_transation(Fun).
 
 %%--------------------------------------------------------------------
 %% @doc
