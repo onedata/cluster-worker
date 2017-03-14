@@ -112,10 +112,11 @@ list(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, 
         (_, Acc) ->
             {abort, Acc}
     end,
+    SlaveDriver = get_slave_driver(false, ModelConfig),
 
     ListAns = lists:foldl(fun
         (N, {ok, Acc}) ->
-            rpc:call(N, get_slave_driver(false, ModelConfig), list, [ModelConfig, HelperFun, Acc, Opts]);
+            rpc:call(N, SlaveDriver, list, [ModelConfig, HelperFun, Acc, Opts]);
         (_, Error) ->
             Error
     end, {ok, []}, Nodes),
@@ -126,8 +127,16 @@ list(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, 
         Other ->
             Other
     end;
+list(#model_config{store_level = ?LOCAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, Opts) ->
+    SlaveDriver = get_slave_driver(false, ModelConfig),
+    SlaveDriver:list(ModelConfig, Fun, AccIn, Opts);
 list(#model_config{name = MN, store_level = Level} = ModelConfig, Fun, AccIn, Opts) ->
-    Nodes = consistent_hasing:get_all_nodes(),
+    Nodes = case Level of
+        ?LOCALLY_CACHED_LEVEL ->
+            node();
+        _ ->
+            consistent_hasing:get_all_nodes()
+    end,
 
     HelperFun = fun
         (#document{key = Key} = Document, Acc) ->
