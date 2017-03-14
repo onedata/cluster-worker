@@ -808,7 +808,8 @@ check_cache_consistency_direct(Driver, Key, NotFoundCheck) ->
           not_monitored;
         {error, {not_found, _}} ->
           % TODO - use more universal method
-          #model_config{link_store_level = Level} = NotFoundCheck:model_init(),
+          #model_config{link_store_level = Level0} = NotFoundCheck:model_init(),
+          Level = memory_store_driver:main_level(Level0),
           case caches_controller:check_cache_consistency(Level, NotFoundCheck) of
             {ok, 0, 0} ->
               init_consistency_info(Level, Key),
@@ -833,30 +834,6 @@ consistency_info_lock(Key, ClearedName, Fun) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @private
-%% Checks if memory clearing should be stopped.
-%% @end
-%%--------------------------------------------------------------------
--spec should_stop_clear_cache(MemUsage :: float(), ErlangMemUsage :: [{atom(), non_neg_integer()}]) -> boolean().
-should_stop_clear_cache(MemUsage, ErlangMemUsage) ->
-  {ok, TargetMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
-  {ok, TargetErlangMemUse} = application:get_env(?CLUSTER_WORKER_APP_NAME, erlang_mem_to_clear_cache_mb),
-  {ok, StopRatio} = application:get_env(?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop),
-  MemToCompare = proplists:get_value(system, ErlangMemUsage, 0),
-  (MemUsage < TargetMemUse * StopRatio / 100) orelse (MemToCompare < TargetErlangMemUse * 1024 * 1024  * StopRatio / 100).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @private
-%% Translates datastore level to module name.
-%% @end
-%%--------------------------------------------------------------------
--spec get_driver_module(Level :: datastore:store_level()) -> atom().
-get_driver_module(Level) ->
-  datastore:driver_to_module(datastore:level_to_driver(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc

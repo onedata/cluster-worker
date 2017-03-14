@@ -24,7 +24,7 @@
 %% store_driver_behaviour callbacks
 -export([init_driver/1, init_bucket/3, healthcheck/1]).
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
--export([add_links/3, set_links/3, create_link/3, delete_links/3, fetch_link/3, foreach_link/4]).
+-export([add_links/3, set_links/3, create_link/3, delete_links/4, fetch_link/3, foreach_link/4]).
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
 
@@ -261,12 +261,23 @@ create_link(ModelConfig, Key, Link) ->
 %% {@link store_driver_behaviour} callback delete_links/3.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
-    no_return().
-delete_links(ModelConfig, Key, all) ->
-    links_utils:delete_links(?MODULE, ModelConfig, Key);
-delete_links(ModelConfig, Key, Links) ->
-    links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links).
+-spec delete_links(model_behaviour:model_config(), datastore:ext_key(),
+    [datastore:link_name()] | all, datastore:delete_predicate()) ->
+    ok | datastore:generic_error().
+delete_links(ModelConfig, Key, all, Pred) ->
+    case Pred() of
+        true ->
+            links_utils:delete_links(?MODULE, ModelConfig, Key);
+        false ->
+            ok
+    end;
+delete_links(ModelConfig, Key, Links, Pred) ->
+    case Pred() of
+        true ->
+            links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
+        false ->
+            ok
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

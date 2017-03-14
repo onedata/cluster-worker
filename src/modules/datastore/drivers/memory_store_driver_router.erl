@@ -712,7 +712,7 @@ execute(MC, Key, Link, Msg) ->
 -spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}, InitExtension :: list()) -> term().
 % TODO - allow node specification (for fallbacks from direct operations)
-execute(#model_config{name = ModelName} = MC, Key, Link, Msg, InitExtension) ->
+execute(#model_config{name = ModelName, store_level = Level} = MC, Key, Link, Msg, InitExtension) ->
     TPMod = memory_store_driver,
 
     Persist = case MC#model_config.store_level of
@@ -720,6 +720,13 @@ execute(#model_config{name = ModelName} = MC, Key, Link, Msg, InitExtension) ->
             couchdb_datastore_driver;
         _ ->
             undefined
+    end,
+
+    case {ModelName, Level} of
+        {cache_consistency_controller, ?GLOBALLY_CACHED_LEVEL} ->
+            ?info("jjjjj ~p", [erlang:process_info(self(), current_stacktrace)]);
+        _ ->
+            ok
     end,
 
     TMInit = [get_slave_driver(Link, MC), MC, Key, Persist, Link],
