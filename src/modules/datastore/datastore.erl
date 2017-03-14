@@ -553,10 +553,21 @@ healthcheck() ->
         _ -> ok
     end.
 
-% TODO doc and spec
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes minimal environment to run test.
+%% @end
+%%--------------------------------------------------------------------
+-spec initialize_minimal_env() -> ok.
 initialize_minimal_env() ->
     initialize_minimal_env([]).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes minimal environment to run test.
+%% @end
+%%--------------------------------------------------------------------
+-spec initialize_minimal_env([datastore:db_node()]) -> ok.
 initialize_minimal_env(DBNodes) ->
     hackney:start(),
     couchbeam_sup:start_link(),
@@ -958,9 +969,9 @@ level_to_driver(_) ->
 %% Executes given model action on given driver(s).
 %% @end
 %%--------------------------------------------------------------------
--spec exec_driver(model_behaviour:model_type() | model_behaviour:model_config(), [Driver] | Driver,
-    Method :: store_driver_behaviour:driver_action(), [term()]) ->
-    ok | {ok, term()} | {error, term()} | term() when Driver :: atom().
+-spec exec_driver(model_behaviour:model_type() | model_behaviour:model_config(),
+    Level :: store_level(), Method :: store_driver_behaviour:driver_action(),
+    [term()]) -> ok | {ok, term()} | {error, term()} | term().
 exec_driver(ModelNameOrConfig, Level, Method, Args) ->
     ModelConfig0 = model_config(ModelNameOrConfig),
     ModelConfig = ModelConfig0#model_config{store_level = Level,
@@ -970,20 +981,6 @@ exec_driver(ModelNameOrConfig, Level, Method, Args) ->
         case run_prehooks(ModelConfig, Method, Level, Args) of
             ok ->
                 FullArgs = [ModelConfig | Args],
-                % TODO consider which method is better when file_meta will be able to handle proxy calls in datastore
-                % TODO VFS-2025
-%%                case Driver of
-%%                    ?PERSISTENCE_DRIVER ->
-%%                        case worker_proxy:call(datastore_worker,
-%%                            {driver_call, driver_to_module(Driver), Method, FullArgs}) of
-%%                            {error, dispatcher_out_of_sync} ->
-%%                                erlang:apply(driver_to_module(Driver), Method, FullArgs);
-%%                            ProxyAns ->
-%%                                ProxyAns
-%%                        end;
-%%                    _ ->
-%%                        erlang:apply(Driver, Method, FullArgs)
-%%                end;
                 erlang:apply(driver_to_module(Driver), Method, FullArgs);
             {ok, Value} ->
                 {ok, Value};

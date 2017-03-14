@@ -11,7 +11,6 @@
 %%%-------------------------------------------------------------------
 -module(ets_cache_driver).
 -author("Rafal Slota").
--behaviour(store_driver_behaviour).
 -behaviour(auxiliary_cache_behaviour).
 
 

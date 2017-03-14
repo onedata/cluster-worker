@@ -778,7 +778,7 @@ execute_list_fun(Fun, List, AccIn) ->
 %% Gets key for consistent hashing algorithm.
 %% @end
 %%--------------------------------------------------------------------
--spec get_hashing_node(ModelName :: model_behaviour:model_type(),
+-spec get_hashing_node(MC :: model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> term().
 get_hashing_node(#model_config{store_level = ?LOCAL_ONLY_LEVEL}, _Key) ->
     node();
@@ -787,6 +787,14 @@ get_hashing_node(#model_config{store_level = ?LOCALLY_CACHED_LEVEL}, _Key) ->
 get_hashing_node(#model_config{name = ModelName}, Key) ->
     consistent_hasing:get_node({ModelName, Key}).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns slave driver for model
+%% @end
+%%--------------------------------------------------------------------
+-spec get_slave_driver(Link :: boolean(), MC :: model_behaviour:model_config()) ->
+    atom().
 get_slave_driver(true, #model_config{link_store_level = ?GLOBAL_ONLY_LEVEL}) ->
     ?GLOBAL_SLAVE_DRIVER;
 get_slave_driver(true, #model_config{link_store_level = ?GLOBALLY_CACHED_LEVEL}) ->

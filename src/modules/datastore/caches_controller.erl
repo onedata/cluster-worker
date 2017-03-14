@@ -24,7 +24,7 @@
 
 %% API
 -export([clear_local_cache/1, clear_global_cache/1]).
--export([clear_cache/2, should_clear_cache/2, get_hooks_config/1, get_hooks_throttling_config/1, wait_for_cache_dump/0]).
+-export([clear_cache/2, should_clear_cache/2, get_hooks_throttling_config/1, wait_for_cache_dump/0]).
 -export([delete_old_keys/2]).
 -export([get_cache_uuid/2, decode_uuid/1, cache_to_task_level/1]).
 -export([clear/3, clear_links/3]).
@@ -366,22 +366,6 @@ clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
       ?warning("Not able to check memory usage"),
       cannot_check_mem_usage
   end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Provides hooks configuration on the basis of models list.
-%% @end
-%%--------------------------------------------------------------------
--spec get_hooks_config(Models :: list()) -> list().
-get_hooks_config(Models) ->
-  Methods = [save, get, exists, delete, update, create, create_or_update,
-    fetch_link, add_links, set_links, create_link, delete_links],
-  lists:foldl(fun(Model, Ans) ->
-    ModelConfig = lists:map(fun(Method) ->
-      {Model, Method}
-    end, Methods),
-    ModelConfig ++ Ans
-  end, [], Models).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -271,6 +271,23 @@ commit_backoff(_T) ->
   Interval.
 
 %%%===================================================================
+%%% Helper functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Translates cached levels to memory store levels.
+%% @end
+%%--------------------------------------------------------------------
+-spec main_level(datastore:store_level()) -> datastore:store_level().
+main_level(?GLOBALLY_CACHED_LEVEL) ->
+  ?GLOBAL_ONLY_LEVEL;
+main_level(?LOCALLY_CACHED_LEVEL) ->
+  ?LOCAL_ONLY_LEVEL;
+main_level(Level) ->
+  Level.
+
+%%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
@@ -307,10 +324,3 @@ get_flush_max_interval(FlushDriver) ->
         cache_to_disk_force_delay_ms),
       Interval
   end.
-
-main_level(?GLOBALLY_CACHED_LEVEL) ->
-  ?GLOBAL_ONLY_LEVEL;
-main_level(?LOCALLY_CACHED_LEVEL) ->
-  ?LOCAL_ONLY_LEVEL;
-main_level(Level) ->
-  Level.
