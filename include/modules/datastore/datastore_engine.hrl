@@ -12,7 +12,6 @@
 -ifndef(DATASTORE_ENGINE_HRL).
 -define(DATASTORE_ENGINE_HRL, 1).
 
--include("modules/datastore/datastore_common_internal.hrl").
 -include("global_definitions.hrl").
 
 %% Drivers' names

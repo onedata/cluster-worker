@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("timeouts.hrl").
+-include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 

@@ -63,7 +63,7 @@
             %% Number of tp processes to start throttling
             {throttling_max_memory_proc_number, 100000},
             %% Number of tp processes allowed when throttling blocks actions
-            {throttling_block_memory_proc_number, 500},
+            {throttling_block_memory_proc_number, 50000},
             %% Size of couch queue to start throttling
             {throttling_db_queue_limit, 10000},
             %% Size of couch queue to introduce delay
@@ -78,8 +78,8 @@
             {throttling_check_interval_seconds, 5},
 
             % Thresholds to start node analysis
-            {node_mem_analysis_treshold, 500000000}, % 500 MB
-            {procs_num_analysis_treshold, 2000},
+            {node_mem_analysis_treshold, 2000000000}, % 2 GB
+            {procs_num_analysis_treshold, 20000},
             {min_analysis_interval_sek, 10},
             {max_analysis_interval_min, 15},
             %% Additional monitoring of erlang schedulers

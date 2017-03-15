@@ -13,6 +13,7 @@
 
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
+-include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_engine.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -978,8 +979,10 @@ exec_driver(ModelNameOrConfig, Level, Method, Args) ->
     ModelConfig = ModelConfig0#model_config{store_level = Level,
         link_store_level = Level},
     Driver = level_to_driver(Level),
+    % TODO - use cached levels in hooks
+    HooksLevel = memory_store_driver:main_level(Level),
     Return =
-        case run_prehooks(ModelConfig, Method, Level, Args) of
+        case run_prehooks(ModelConfig, Method, HooksLevel, Args) of
             ok ->
                 FullArgs = [ModelConfig | Args],
                 erlang:apply(driver_to_module(Driver), Method, FullArgs);
@@ -992,4 +995,4 @@ exec_driver(ModelNameOrConfig, Level, Method, Args) ->
             {error, Reason} ->
                 {error, Reason}
         end,
-    run_posthooks(ModelConfig, Method, Level, Args, Return).
+    run_posthooks(ModelConfig, Method, HooksLevel, Args, Return).
