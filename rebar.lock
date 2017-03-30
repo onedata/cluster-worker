@@ -25,7 +25,7 @@
   2},
  {<<"ctool">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/ctool.git",
-       {ref,"e459d6c74c7fd644cd2aa5e77e0ba69751c63ea0"}},
+       {ref,"f891a6d1c524ab6d26fd540d7e8f6c6772e89cab"}},
   0},
  {<<"dht_ring">>,
   {git,"git://github.com/RoXeon/dht_ring.git",
@@ -105,4 +105,8 @@
  {<<"web_client">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/web-client.git",
        {ref,"d1ebf99ad747f154ba13ec5fa61c55e9615aa447"}},
+  1},
+ {<<"worker_pool">>,
+  {git,"https://github.com/inaka/worker_pool.git",
+       {ref,"facfc7b2c2320cba576a2dcdd12c85c583017bec"}},
   1}].
