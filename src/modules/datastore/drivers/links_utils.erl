@@ -27,7 +27,7 @@
 -export_type([scope/0, link_replica_scope/0, vhash/0]).
 
 %% API
--export([create_link_in_map/4, save_links_maps/5, delete_links/4,
+-export([create_link_in_map/4, save_links_maps/5, delete_links/3, delete_links/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
 -export([make_scoped_link_name/4, unpack_link_scope/2, select_scope_related_link/4]).
 -export([get_context_to_propagate/1, apply_context/1, get_scopes/2, gen_vhash/0, deduplicate_targets/1]).
@@ -395,6 +395,17 @@ save_links_maps(Driver, #model_config{bucket = _Bucket, name = ModelName} = Mode
                     {error, Reason}
             end
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes all links from all documents connected with key.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_links(Driver :: atom(), model_behaviour:model_config(),
+    datastore:ext_key()) -> ok | datastore:generic_error().
+delete_links(Driver, ModelConfig, Key) ->
+    delete_links(Driver, ModelConfig, Key, all).
 
 %%--------------------------------------------------------------------
 %% @doc
