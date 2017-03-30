@@ -437,24 +437,7 @@ wait_for_cache_dump() ->
   ok | dump_error.
 wait_for_cache_dump(0, _) ->
   dump_error;
-wait_for_cache_dump(N, {GSize, LSize}) ->
-%%  case {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
-%%    cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)} of
-%%    {{ok, []}, {ok, []}} ->
-%%      ok;
-%%    {{ok, L1}, {ok, L2}} ->
-%%      case {length(L1), length(L2)} of
-%%        {GSize, LSize} ->
-%%          timer:sleep(timer:seconds(1)),
-%%          wait_for_cache_dump(N-1, {GSize, LSize});
-%%        {GSize2, LSize2} ->
-%%          timer:sleep(timer:seconds(1)),
-%%          wait_for_cache_dump(N, {GSize2, LSize2})
-%%      end;
-%%    _ ->
-%%      timer:sleep(timer:seconds(1)),
-%%      wait_for_cache_dump(N-1, {GSize, LSize})
-%%  end.
+wait_for_cache_dump(_N, {_GSize, _LSize}) ->
   % TODO - implementation for new cache
   ok.
 
@@ -465,10 +448,6 @@ wait_for_cache_dump(N, {GSize, LSize}) ->
 %%--------------------------------------------------------------------
 -spec cache_to_task_level(ModelName :: atom()) -> task_manager:level().
 cache_to_task_level(ModelName) ->
-%%  case lists:member(ModelName, datastore_config:global_caches()) of
-%%    true -> ?CLUSTER_LEVEL;
-%%    _ -> ?NODE_LEVEL
-%%  end.
   case ModelName of
     locally_cached_record -> ?NODE_LEVEL;
     locally_cached_sync_record -> ?NODE_LEVEL;

@@ -26,7 +26,6 @@
 -export([add_links/3, set_links/3, create_link/3, delete_links/4, fetch_link/3, foreach_link/4]).
 -export([run_transation/1, run_transation/2, run_transation/3]).
 
-%% TODO zmienic na wywolania do memory_store_driver ktory pisze bezposrednio tutaj
 -export([save_link_doc/2, get_link_doc/2, get_link_doc/3, delete_link_doc/2, exists_link_doc/3]).
 
 %% auxiliary ordered_store behaviour
@@ -58,7 +57,6 @@ init_driver(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
-% TODO - inicjalizowac tak zeby przechowywac tez numery rewizji (albo ostatni numer revizji - pytanie co wystarczy)
 init_bucket(_BucketName, Models, NodeToSync) ->
     Node = node(),
 
@@ -66,7 +64,7 @@ init_bucket(_BucketName, Models, NodeToSync) ->
         true ->
             ok;
         _ ->
-            % TODO - umozliwic replikacje na wszystkie nody innych wybranych tabel (zadko pisane, czesto czytane np user)
+            % TODO - allow replication of chosen tables to all nodes (rarely written, often read, e.g. user)
             LockMN = lock,
             LockTable = table_name(LockMN),
             LockLinkTable = links_table_name(LockMN),
@@ -230,7 +228,7 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 -spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
-    % TODO - sprawdzic is_transaction - jak dziala w innych typach activity (trzeba by zrobic cos ala is_activity?)
+    % TODO - check is_transaction - how it works in other activity types (do we need is_activity?)
     TmpAns = case mnesia:is_transaction() of
         true ->
             log(brief, "transaction -> ~p:get_link_doc(~p)", [ModelName, Key]),
@@ -350,20 +348,12 @@ create_link(ModelConfig, Key, Link) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all,
     datastore:delete_predicate()) -> ok | datastore:generic_error().
-delete_links(ModelConfig, Key, all, Pred) ->
-    mnesia_run(?SAVE_ACTIVITY_TYPE, fun(_TrxType) ->
-        case Pred() of
-            true ->
-                ok = links_utils:delete_links(memory_store_driver_links, ModelConfig, Key);
-            false ->
-                ok
-        end
-    end);
 delete_links(ModelConfig, Key, Links, Pred) ->
     mnesia_run(?SAVE_ACTIVITY_TYPE, fun(_TrxType) ->
         case Pred() of
             true ->
-                ok = links_utils:delete_links_from_maps(memory_store_driver_links, ModelConfig, Key, Links);
+                ok = links_utils:delete_links(memory_store_driver_links,
+                    ModelConfig, Key, Links);
             false ->
                 ok
         end
@@ -896,7 +886,7 @@ get_key(Tuple) when is_tuple(Tuple) ->
 %%--------------------------------------------------------------------
 -spec mnesia_run(Method :: atom(), Fun :: fun((atom()) -> term())) -> term().
 % TODO - refactor - checking transaction probably not needed; maybe delete arg from FUN?
-% TODO ta funkcja moze odpowiadac za zla wydajnosc - moze wystarczy activity ets
+% TODO - performance issie - is activity ets enough
 mnesia_run(Method, Fun) when Method =:= sync_dirty; Method =:= async_dirty ->
     case mnesia:is_transaction() of
         true ->

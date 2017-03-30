@@ -263,17 +263,10 @@ create_link(ModelConfig, Key, Link) ->
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(),
     [datastore:link_name()] | all, datastore:delete_predicate()) ->
     ok | datastore:generic_error().
-delete_links(ModelConfig, Key, all, Pred) ->
-    case Pred() of
-        true ->
-            links_utils:delete_links(?MODULE, ModelConfig, Key);
-        false ->
-            ok
-    end;
 delete_links(ModelConfig, Key, Links, Pred) ->
     case Pred() of
         true ->
-            links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links);
+            links_utils:delete_links(?MODULE, ModelConfig, Key, Links);
         false ->
             ok
     end.

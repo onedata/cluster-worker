@@ -1239,6 +1239,7 @@ check_clearing(TestRecord, [{K, TimeWindow} | R] = KeysWithTimes, Worker1, Worke
         Uuid = caches_controller:get_cache_uuid(K2, TestRecord),
         UpdateFun = fun(Record) ->
             {ok, Record}
+        % TODO - we cannot make value in cache older now - refactor test
 %%            {ok, Record#cache_controller{
 %%                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
 %%            }}

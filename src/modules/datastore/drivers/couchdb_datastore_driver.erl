@@ -721,16 +721,10 @@ create_or_update_link(ModelConfig, Key, {LinkName, _} = Link, UpdateFun) ->
 %%--------------------------------------------------------------------
 -spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
     ok | datastore:generic_error().
-delete_links(ModelConfig, Key, all) ->
-    critical_section:run(synchronization_link_key(ModelConfig, Key),
-        fun() ->
-            links_utils:delete_links(?MODULE, ModelConfig, Key)
-        end
-    );
 delete_links(ModelConfig, Key, Links) ->
     critical_section:run(synchronization_link_key(ModelConfig, Key),
         fun() ->
-            links_utils:delete_links_from_maps(?MODULE, ModelConfig, Key, Links)
+            links_utils:delete_links(?MODULE, ModelConfig, Key, Links)
         end
     ).
 

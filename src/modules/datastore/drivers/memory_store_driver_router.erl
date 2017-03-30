@@ -731,13 +731,6 @@ execute(#model_config{name = ModelName, store_level = Level} = MC, Key, Link, Ms
             undefined
     end,
 
-    case {ModelName, Level} of
-        {cache_consistency_controller, ?GLOBALLY_CACHED_LEVEL} ->
-            ?info("jjjjj ~p", [erlang:process_info(self(), current_stacktrace)]);
-        _ ->
-            ok
-    end,
-
     TMInit = [get_slave_driver(Link, MC), MC, Key, Persist, Link],
     TPKey = {ModelName, Key, Link},
 
@@ -790,7 +783,7 @@ get_hashing_node(#model_config{name = ModelName}, Key) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns slave driver for model
+%% Returns slave driver for model.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_slave_driver(Link :: boolean(), MC :: model_behaviour:model_config()) ->

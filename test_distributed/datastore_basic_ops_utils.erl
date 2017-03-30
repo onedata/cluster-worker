@@ -831,9 +831,8 @@ clear_env(Config) ->
             end
     end.
 
-clear_cache(W) ->
-%%    ?call(W, caches_controller, wait_for_cache_dump, []),
-%%    gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
+clear_cache(_W) ->
+    % TODO - clear new cache
     ok.
 
 %%%===================================================================
