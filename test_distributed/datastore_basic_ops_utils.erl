@@ -811,10 +811,14 @@ set_env(Case, Config) ->
         false ->
             ok;
         _ ->
+            FlushDelay = case TestRecord of
+                disk_only_record -> 50;
+                _ -> 1000
+            end,
             lists:foreach(fun(W) ->
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, timer:seconds(3))),
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(3))),
-                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, 1000)),
+                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, FlushDelay)),
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory, false))
             end, Workers)
     end,

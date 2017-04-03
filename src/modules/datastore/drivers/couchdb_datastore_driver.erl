@@ -56,7 +56,8 @@
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([get/3, force_save/2, force_save/3, db_run/4, db_run/5]).
--export([save_docs/2, save_docs/3, save_doc_asynch/2, save_doc_asynch_response/1, get_docs/2]).
+-export([save_docs/2, save_docs/3, save_doc_asynch/2, save_doc_asynch_response/1,
+    get_docs/2, delete_doc_sync/2]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -223,7 +224,7 @@ save_doc_asynch(ModelConfig, Doc) ->
 -spec save_doc_asynch_response(reference()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_doc_asynch_response(Ref) ->
-    datastore_pool:save_doc_asynch_response(Ref).
+    datastore_pool:receive_response(Ref).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -602,12 +603,22 @@ delete_link_doc(ModelConfig, Doc) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes document not using transactions.
+%% Deletes document without transaction using worker pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
-delete_doc(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, rev = Rev} = ToDel) ->
+delete_doc(ModelConfig = #model_config{}, #document{} = Doc) ->
+    datastore_pool:delete_doc(?MODULE, ModelConfig, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes document without transaction.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_doc_sync(model_behaviour:model_config(), datastore:document()) ->
+    ok | datastore:generic_error().
+delete_doc_sync(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, rev = Rev} = ToDel) ->
     {Props} = datastore_json:encode_record(ToDel),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
     case db_run(select_bucket(ModelConfig, ToDel), couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of

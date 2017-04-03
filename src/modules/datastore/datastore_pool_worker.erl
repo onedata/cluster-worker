@@ -103,7 +103,12 @@ handle_cast({flush, Bucket}, #state{
 } = State) ->
     {From, ModelConfigAndDocs} = lists:unzip(Requests),
     Responses = try
-        Driver:Action(Bucket, ModelConfigAndDocs)
+        case Action of
+            save_docs -> Driver:save_docs(Bucket, ModelConfigAndDocs);
+            delete_doc -> lists:map(fun({ModelConfig, Doc}) ->
+                Driver:delete_doc_sync(ModelConfig, Doc)
+            end, ModelConfigAndDocs)
+        end
     catch
         _:Reason -> [{error, Reason} || _ <- lists:seq(1, length(From))]
     end,

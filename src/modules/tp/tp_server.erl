@@ -32,7 +32,9 @@
     key :: tp:key(),
     data :: tp:data(),
     changes = undefined :: undefined | tp:changes(),
+    changes_in_commit = undefined :: undefined | tp:changes(),
     requests = [] :: [{pid(), reference(), tp:request()}],
+    requests_in_modify = [] :: [{pid(), reference(), tp:request()}],
     % a pid of the modify handler process
     modify_handler_pid :: undefined | pid(),
     % a pid of the commit handler process
@@ -113,8 +115,7 @@ init([Module, Args, Key]) ->
 handle_call(Request, {Pid, _Tag}, #state{requests = Requests} = State) ->
     Ref = make_ref(),
     State2 = State#state{
-        requests = [{Pid, Ref, Request} | Requests],
-        terminate_msg_ref = Ref
+        requests = [{Pid, Ref, Request} | Requests]
     },
     {reply, {ok, Ref}, modify_async(State2)}.
 
@@ -154,14 +155,14 @@ handle_info({Ref, {commit, Delay}}, #state{commit_msg_ref = Ref} = State) ->
     {noreply, commit_async(Delay, State#state{commit_msg_ref = undefined})};
 handle_info({Ref, terminate}, #state{
     requests = [],
+    requests_in_modify = [],
     changes = undefined,
-    modify_handler_pid = undefined,
-    commit_handler_pid = undefined,
+    changes_in_commit = undefined,
     terminate_msg_ref = Ref
 } = State) ->
     {stop, normal, State};
-handle_info({_Ref, terminate}, #state{} = State) ->
-    {noreply, State};
+handle_info({Ref, terminate}, #state{terminate_msg_ref = Ref} = State) ->
+    {noreply, schedule_terminate(State)};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -212,10 +213,40 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec modify_sync(state()) -> state().
-modify_sync(#state{requests = [], modify_handler_pid = undefined} = State) ->
+modify_sync(#state{requests = [], requests_in_modify = []} = State) ->
     State;
-modify_sync(#state{} = State) ->
-    modify_sync(wait_modify(State)).
+modify_sync(#state{
+    module = Module,
+    data = Data,
+    changes = Changes,
+    requests = Requests,
+    requests_in_modify = []
+} = State) ->
+    {Pids, Refs, TpRequests} = lists:unzip3(lists:reverse(Requests)),
+    case exec_noexcept(Module, modify, [TpRequests, Data]) of
+        {ok, {TpResponses, NextChanges, Data2}} ->
+            notify(Pids, Refs, TpResponses),
+            State#state{
+                data = Data2,
+                changes = merge_changes(Module, Changes, NextChanges),
+                modify_handler_pid = undefined,
+                requests = []
+            };
+        {error, Reason, Stacktrace} ->
+            notify(Pids, Refs, {error, Reason, Stacktrace}),
+            State#state{
+                modify_handler_pid = undefined,
+                requests = []
+            }
+    end;
+modify_sync(#state{
+    requests = Requests,
+    requests_in_modify = RequestsInModify
+} = State) ->
+    modify_sync(State#state{
+        requests = Requests ++ RequestsInModify,
+        requests_in_modify = []
+    }).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -247,24 +278,11 @@ modify_async(#state{
     end),
     State#state{
         requests = [],
+        requests_in_modify = Requests,
         modify_handler_pid = Pid
     };
 modify_async(#state{} = State) ->
     State.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Waits for the modify handler completion.
-%% @end
-%%--------------------------------------------------------------------
--spec wait_modify(state()) -> state().
-wait_modify(#state{modify_handler_pid = undefined} = State) ->
-    State;
-wait_modify(#state{modify_handler_pid = Pid} = State) ->
-    receive
-        {'EXIT', Pid, Exit} -> handle_modified(Exit, State)
-    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -274,9 +292,9 @@ wait_modify(#state{modify_handler_pid = Pid} = State) ->
 %%--------------------------------------------------------------------
 -spec handle_modified(Exit :: any(), state()) -> state().
 handle_modified({modified, false, Data}, #state{} = State) ->
-    schedule_terminate(handle_modified(
+    handle_modified(
         {modified, {true, undefined}, Data}, State
-    ));
+    );
 handle_modified({modified, {true, NextChanges}, Data}, #state{
     module = Module,
     changes = Changes,
@@ -284,13 +302,20 @@ handle_modified({modified, {true, NextChanges}, Data}, #state{
 } = State) ->
     schedule_commit(Delay, modify_async(State#state{
         data = Data,
+        requests_in_modify = [],
         changes = merge_changes(Module, Changes, NextChanges),
         modify_handler_pid = undefined
     }));
-handle_modified(Exit, #state{commit_delay = Delay} = State) ->
+handle_modified(Exit, #state{
+    requests = Requests,
+    requests_in_modify = RequestsInModify,
+    commit_delay = Delay
+} = State) ->
     ?error("Modify handler of a transaction process terminated abnormally: ~p",
         [Exit]),
     schedule_commit(Delay, modify_async(State#state{
+        requests = Requests ++ RequestsInModify,
+        requests_in_modify = [],
         modify_handler_pid = undefined
     })).
 
@@ -303,11 +328,42 @@ handle_modified(Exit, #state{commit_delay = Delay} = State) ->
 -spec commit_sync(state()) -> state().
 commit_sync(#state{
     changes = undefined,
-    commit_handler_pid = undefined
+    changes_in_commit = undefined
 } = State) ->
     State;
-commit_sync(#state{commit_delay = Delay} = State) ->
-    commit_sync(commit_async(Delay, wait_commit(State))).
+commit_sync(#state{
+    module = Module,
+    data = Data,
+    changes = Changes,
+    changes_in_commit = undefined,
+    commit_delay = Delay
+} = State) ->
+    case exec_noexcept(Module, commit, [Changes, Data]) of
+        {ok, true} ->
+            State#state{changes = undefined};
+        {ok, {false, Changes2}} ->
+            Delay2 = exec(Module, commit_backoff, [Delay]),
+            timer:sleep(Delay2),
+            commit_sync(State#state{
+                changes = Changes2,
+                commit_delay = Delay2
+            });
+        {error, Reason, Stacktrace} ->
+            ?error("Synchronous commit handler of a transaction process
+            terminated abnormally: ~p~nStacktrace: ~p", [Reason, Stacktrace]),
+            Delay2 = exec(Module, commit_backoff, [Delay]),
+            timer:sleep(Delay2),
+            commit_sync(State#state{commit_delay = Delay2})
+    end;
+commit_sync(#state{
+    module = Module,
+    changes = Changes,
+    changes_in_commit = ChangesInCommit
+} = State) ->
+    commit_sync(State#state{
+        changes = merge_changes(Module, ChangesInCommit, Changes),
+        changes_in_commit = undefined
+    }).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -332,24 +388,11 @@ commit_async(Delay, #state{
     end),
     State#state{
         changes = undefined,
+        changes_in_commit = Changes,
         commit_handler_pid = Pid
     };
 commit_async(_Delay, #state{} = State) ->
     State.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Waits for the commit handler completion or a trigger commit message.
-%% @end
-%%--------------------------------------------------------------------
--spec wait_commit(state()) -> state().
-wait_commit(#state{commit_handler_pid = undefined} = State) ->
-    State;
-wait_commit(#state{commit_handler_pid = Pid} = State) ->
-    receive
-        {'EXIT', Pid, Exit} -> handle_committed(Exit, State)
-    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -359,9 +402,10 @@ wait_commit(#state{commit_handler_pid = Pid} = State) ->
 %%--------------------------------------------------------------------
 -spec handle_committed(Exit :: any(), state()) -> state().
 handle_committed({committed, true, _}, #state{commit_delay = Delay} = State) ->
-    schedule_terminate(schedule_commit(Delay, State#state{
+    schedule_commit(Delay, State#state{
+        changes_in_commit = undefined,
         commit_handler_pid = undefined
-    }));
+    });
 handle_committed({committed, {false, Changes}, Delay}, #state{
     module = Module,
     changes = Changes2
@@ -369,12 +413,22 @@ handle_committed({committed, {false, Changes}, Delay}, #state{
     Delay2 = exec(Module, commit_backoff, [Delay]),
     schedule_commit(Delay2, State#state{
         changes = merge_changes(Module, Changes, Changes2),
+        changes_in_commit = undefined,
         commit_handler_pid = undefined
     });
-handle_committed(Exit, #state{commit_delay = Delay} = State) ->
+handle_committed(Exit, #state{
+    module = Module,
+    changes = Changes,
+    changes_in_commit = ChangesInCommit,
+    commit_delay = Delay
+} = State) ->
     ?error("Commit handler of a transaction process terminated abnormally: ~p",
         [Exit]),
-    schedule_commit(Delay, State#state{commit_handler_pid = undefined}).
+    schedule_commit(Delay, State#state{
+        changes = merge_changes(Module, ChangesInCommit, Changes),
+        changes_in_commit = undefined,
+        commit_handler_pid = undefined
+    }).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -408,21 +462,12 @@ schedule_commit(_Delay, #state{} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Schedules terminate operation if there are no pending requests, uncommitted
-%% changes and modify/commit handlers running.
+%% Schedules terminate operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_terminate(state()) -> state().
-schedule_terminate(#state{
-    requests = [],
-    changes = undefined,
-    modify_handler_pid = undefined,
-    commit_handler_pid = undefined,
-    idle_timeout = IdleTimeout
-} = State) ->
-    State#state{terminate_msg_ref = schedule_msg(IdleTimeout, terminate)};
-schedule_terminate(#state{} = State) ->
-    State.
+schedule_terminate(#state{idle_timeout = IdleTimeout} = State) ->
+    State#state{terminate_msg_ref = schedule_msg(IdleTimeout, terminate)}.
 
 %%--------------------------------------------------------------------
 %% @private
