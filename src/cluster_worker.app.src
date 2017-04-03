@@ -63,7 +63,7 @@
             %% Number of tp processes to start throttling
             {throttling_max_memory_proc_number, 150000},
             %% Number of tp processes allowed when throttling blocks actions
-            {throttling_block_memory_proc_number, 20000},
+            {throttling_block_memory_proc_number, 150000},
             %% Size of couch queue to start throttling
             {throttling_db_queue_limit, 10000},
             %% Size of couch queue to introduce delay
