@@ -88,7 +88,8 @@ create_or_update(ModelConfig, Document, Diff) ->
 %%--------------------------------------------------------------------
 -spec get(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
-get(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key) ->
+get(#model_config{store_level = L} = ModelConfig, Key)
+    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
     direct_call(get, ModelConfig, Key, [Key]);
 get(#model_config{name = MN} = ModelConfig, Key) ->
     direct_call(get, ModelConfig, Key, [Key], {error, {not_found, MN}}).
@@ -291,7 +292,8 @@ delete_links(ModelConfig, Key, Links, Pred) ->
 %%--------------------------------------------------------------------
 -spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
-fetch_link(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key, LinkName) ->
+fetch_link(#model_config{link_store_level = L} = ModelConfig, Key, LinkName)
+    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
     direct_link_call(fetch_link, ModelConfig, Key, [Key, LinkName]);
 fetch_link(ModelConfig, Key, LinkName) ->
     direct_link_call(fetch_link, ModelConfig, Key, [Key, LinkName], {error, link_not_found}).
@@ -305,7 +307,8 @@ fetch_link(ModelConfig, Key, LinkName) ->
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 % TODO - implementation base on old implementation from datastore - refactor when local cache is finished
-foreach_link(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key, Fun, AccIn) ->
+foreach_link(#model_config{link_store_level = L} = ModelConfig, Key, Fun, AccIn)
+    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
     direct_call(foreach_link, ModelConfig, Key, [Key, Fun, AccIn]);
 foreach_link(MC, Key, Fun, AccIn) ->
     Node = get_hashing_node(MC, Key),
@@ -357,7 +360,8 @@ delete(ModelConfig, Key, Pred) ->
 %%--------------------------------------------------------------------
 -spec exists(model_behaviour:model_config(), datastore:ext_key()) ->
     {ok, boolean()} | datastore:generic_error().
-exists(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Key) ->
+exists(#model_config{link_store_level = L} = ModelConfig, Key)
+    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
     direct_call(exists, ModelConfig, Key, [Key]);
 exists(ModelConfig, Key) ->
     direct_call(exists, ModelConfig, Key, [Key], {ok, false}).
@@ -369,7 +373,8 @@ exists(ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, DocKey, Scope) ->
+exists_link_doc(#model_config{link_store_level = L} = ModelConfig, DocKey, Scope)
+    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
     direct_link_call(exists_link_doc, ModelConfig, DocKey, [DocKey, Scope]);
 exists_link_doc(ModelConfig, DocKey, Scope) ->
     direct_link_call(exists_link_doc, ModelConfig, DocKey, [DocKey, Scope], {ok, false}).
@@ -381,7 +386,8 @@ exists_link_doc(ModelConfig, DocKey, Scope) ->
 %%--------------------------------------------------------------------
 -spec get_link_doc(model_behaviour:model_config(), binary(), DocKey :: datastore:ext_key(),
     MainDocKey :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:generic_error().
-get_link_doc(#model_config{link_store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, BucketOverride, DocKey, MainDocKey) ->
+get_link_doc(#model_config{link_store_level = L} = ModelConfig, BucketOverride, DocKey, MainDocKey)
+    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
     direct_link_call(get_link_doc, ModelConfig, MainDocKey, [BucketOverride, DocKey]);
 get_link_doc(#model_config{name = ModelName} = ModelConfig, BucketOverride, DocKey, MainDocKey) ->
     direct_link_call(get_link_doc, ModelConfig, MainDocKey, [BucketOverride, DocKey], {error, {not_found, ModelName}}).
@@ -724,13 +730,18 @@ execute(MC, Key, Link, Msg) ->
 execute(#model_config{name = ModelName, store_level = Level} = MC, Key, Link, Msg, InitExtension) ->
     TPMod = memory_store_driver,
 
-    Persist = case MC#model_config.store_level of
+    Persist = case Level of
         ?GLOBALLY_CACHED_LEVEL ->
+            couchdb_datastore_driver;
+        ?LOCALLY_CACHED_LEVEL ->
             couchdb_datastore_driver;
         _ ->
             undefined
     end,
 
+    SD = get_slave_driver(Link, MC),
+    TMInit = [SD, MC, Key, Persist, Link],
+    TPKey = {ModelName, Key, Link, SD},
     TMInit = [get_slave_driver(Link, MC), MC, Key, Persist, Link],
     TPKey = {ModelName, Key, Link},
 
