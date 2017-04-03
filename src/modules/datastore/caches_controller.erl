@@ -1559,6 +1559,7 @@ value_delete(Level, ModelName, Key) ->
 verify_tp() ->
   {ok, StartNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
   {ok, DelayNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number),
+  {ok, MaxProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
 
   ProcNum = tp:get_processes_number(),
   {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
@@ -1576,6 +1577,8 @@ verify_tp() ->
   application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
 
   TPAction = case ProcNum of
+    PN when PN >= (MaxProcNum * 4 / 5) ->
+      ?BLOCK_THROTTLING;
     PN when PN >= DelayNum ->
       ?LIMIT_THROTTLING;
     DP when DP >= (DelayNum * 4 / 5) ->
