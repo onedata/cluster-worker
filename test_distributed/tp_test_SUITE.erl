@@ -301,7 +301,6 @@ tp_server_should_commit_changes_on_terminate(Config) ->
     stop_tp_server(Worker, Pid2),
 
     ?assertReceivedNextEqual(1, 3 * CommitDelay),
-    ?assertReceivedNextEqual(1, 3 * CommitDelay),
     ?assertReceivedNextEqual(2, 3 * CommitDelay).
 
 tp_server_should_call_terminate_callback_on_terminate(Config) ->

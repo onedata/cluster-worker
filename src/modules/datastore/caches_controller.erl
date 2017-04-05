@@ -349,7 +349,7 @@ clear_cache_by_time_windows(_StoreType, []) ->
 clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   caches_controller:delete_old_keys(StoreType, TimeWindow),
   {ok, DumpDelay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay),
+  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay),
   {ok, CTTRS} = application:get_env(?CLUSTER_WORKER_APP_NAME, clearing_time_to_refresh_stats),
   SleepTime = DumpDelay + AggTime + CTTRS,
   timer:sleep(SleepTime),
@@ -1600,7 +1600,7 @@ verify_db() ->
   {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit),
   {ok, Start} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size),
 
-  QueueSize = datastore_pool:queue_size(),
+  QueueSize = datastore_pool:request_queue_size(),
 
   DBAction = case QueueSize of
     DP when DP >= Limit ->
