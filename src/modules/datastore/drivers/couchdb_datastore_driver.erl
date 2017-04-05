@@ -56,8 +56,10 @@
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([get/3, save_revision/3, get_last/2, get_last/3, db_run/4, db_run/5]).
--export([save_docs/2, save_docs/3, save_doc_asynch/2, delete_doc_asynch/2,
-    asynch_response/1, get_docs/2, delete_doc_sync/2]).
+-export([save_docs/2, save_docs/3, save_docs_direct/2, save_docs_direct/3,
+    save_doc_asynch/2, delete_doc_asynch/2, asynch_response/1, get_docs/2,
+    get_docs_direct/2, delete_doc_direct/2, save_revision_direct/3,
+    delete_doc_sync/2]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -198,7 +200,7 @@ save_link_doc(ModelConfig, Doc) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 % TODO - also for locally cached, check link_store_level
 save_doc(#model_config{store_level = ?GLOBALLY_CACHED_LEVEL} = ModelConfig, Doc) ->
-    datastore_pool:save_doc(?MODULE, ModelConfig, Doc);
+    datastore_pool:post_sync(write, {save_doc, [ModelConfig, Doc]});
 save_doc(ModelConfig, Doc) ->
     [RawDoc] = make_raw_doc(ModelConfig, [Doc]),
     {ok, [RawRes]} = db_run(select_bucket(ModelConfig, Doc), couchbeam, save_docs,
@@ -214,7 +216,7 @@ save_doc(ModelConfig, Doc) ->
 -spec save_doc_asynch(model_behaviour:model_config(), datastore:document()) ->
     reference().
 save_doc_asynch(ModelConfig, Doc) ->
-    datastore_pool:save_doc_asynch(?MODULE, ModelConfig, Doc).
+    datastore_pool:post_async(write, {save_doc, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -225,7 +227,7 @@ save_doc_asynch(ModelConfig, Doc) ->
 -spec delete_doc_asynch(model_behaviour:model_config(), datastore:document()) ->
     reference().
 delete_doc_asynch(ModelConfig, Doc) ->
-    datastore_pool:delete_doc_asynch(?MODULE, ModelConfig, Doc).
+    datastore_pool:post_async(write, {delete_doc_direct, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -235,7 +237,7 @@ delete_doc_asynch(ModelConfig, Doc) ->
 -spec asynch_response(reference()) ->
     ok | {ok, datastore:ext_key()} | datastore:generic_error().
 asynch_response(Ref) ->
-    datastore_pool:receive_response(Ref).
+    datastore_pool:wait(Ref).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -246,11 +248,23 @@ asynch_response(Ref) ->
     [{ok, datastore:ext_key()} | datastore:generic_error()].
 save_docs(DBBucketOrModelConfig, Documents) ->
     save_docs(DBBucketOrModelConfig, Documents, []).
-save_docs(#model_config{} = ModelConfig, Documents, Opts) ->
-    save_docs(select_bucket(ModelConfig), Documents, Opts);
-save_docs(_DBBucket, [], _Opts) ->
+save_docs(DBBucketOrModelConfig, Documents, Opts) ->
+    datastore_pool:post_sync(write, {save_docs_direct, [DBBucketOrModelConfig, Documents, Opts]}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves documents in batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_docs_direct(model_behaviour:model_config() | couchdb_bucket(), [{model_behaviour:model_config(), datastore:ext_key()}]) ->
+    [{ok, datastore:ext_key()} | datastore:generic_error()].
+save_docs_direct(DBBucketOrModelConfig, Documents) ->
+    save_docs_direct(DBBucketOrModelConfig, Documents, []).
+save_docs_direct(#model_config{} = ModelConfig, Documents, Opts) ->
+    save_docs_direct(select_bucket(ModelConfig), Documents, Opts);
+save_docs_direct(_DBBucket, [], _Opts) ->
     [];
-save_docs(DBBucket, Documents, Opts) ->
+save_docs_direct(DBBucket, Documents, Opts) ->
     Docs = [make_raw_doc(MC, Doc) || {MC, Doc} <- Documents],
     case db_run(DBBucket, couchbeam, save_docs, [Docs, Opts], 3) of
         {ok, Res} ->
@@ -267,8 +281,18 @@ save_docs(DBBucket, Documents, Opts) ->
 -spec get_docs(model_behaviour:model_config() | couchdb_bucket(), [{model_behaviour:model_config(), datastore:ext_key()}]) ->
     [{ok, datastore:ext_key()} | datastore:generic_error()].
 get_docs(#model_config{} = ModelConfig, KeysWithModelConfig) ->
-    get_docs(select_bucket(ModelConfig), KeysWithModelConfig);
-get_docs(DBBucket, KeysWithModelConfig) ->
+    datastore_pool:post_sync(read, {get_docs_direct, [ModelConfig, KeysWithModelConfig]}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets documents in batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_docs_direct(model_behaviour:model_config() | couchdb_bucket(), [{model_behaviour:model_config(), datastore:ext_key()}]) ->
+    [{ok, datastore:ext_key()} | datastore:generic_error()].
+get_docs_direct(#model_config{} = ModelConfig, KeysWithModelConfig) ->
+    get_docs_direct(select_bucket(ModelConfig), KeysWithModelConfig);
+get_docs_direct(DBBucket, KeysWithModelConfig) ->
     DriverKeys = [to_driver_key(Bucket, Key) || {#model_config{bucket = Bucket}, Key} <- KeysWithModelConfig],
     case db_run(DBBucket, couchbeam_view, all, [[
         {keys, DriverKeys}, include_docs
@@ -620,16 +644,16 @@ delete_link_doc(ModelConfig, Doc) ->
 -spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
 delete_doc(ModelConfig = #model_config{}, #document{} = Doc) ->
-    datastore_pool:delete_doc(?MODULE, ModelConfig, Doc).
+    datastore_pool:post_sync(write, {delete_doc_direct, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Deletes document without transaction.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_doc_sync(model_behaviour:model_config(), datastore:document()) ->
+-spec delete_doc_direct(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
-delete_doc_sync(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, rev = Rev} = ToDel) ->
+delete_doc_direct(ModelConfig = #model_config{bucket = Bucket}, #document{key = Key, rev = Rev} = ToDel) ->
     {Props} = datastore_json:encode_record(ToDel),
     Doc = {[{<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_rev">>, Rev} | Props]},
     case db_run(select_bucket(ModelConfig, ToDel), couchbeam, delete_doc, [Doc, ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
@@ -842,32 +866,6 @@ to_binary(Term) when is_integer(Term) ->
 to_binary(Term) ->
     Base = base64:encode(term_to_binary(Term)),
     <<?OBJ_PREFIX, Base/binary>>.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Inserts given revision of document to database. Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
-save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value} = ToSave) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-    {Props} = datastore_json:encode_record(ToSave),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
-        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
-    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveAns}} ->
-            case verify_ans(SaveAns) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -1140,6 +1138,44 @@ terminate(Reason, _State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inserts given revision of document to database. Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_revision(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSave) ->
+    datastore_pool:post_sync(write, {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inserts given revision of document to database. Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_revision_direct(model_behaviour:model_config(), binary(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_revision_direct(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
+    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value} = ToSave) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
+    {Props} = datastore_json:encode_record(ToSave),
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
+    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+        {ok, {SaveAns}} ->
+            case verify_ans(SaveAns) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @private

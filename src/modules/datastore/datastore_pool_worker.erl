@@ -6,8 +6,9 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module implements gen_server behaviour and is responsible
-%%% for requests aggregation and batch processing.
+%%% This module implements gen_server behaviour and represents single connection
+%%% to the CouchBase database. It is responsible for requests aggregation and
+%%% batch processing.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_pool_worker).
@@ -15,23 +16,18 @@
 
 -behaviour(gen_server).
 
--include("modules/datastore/datastore_common.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
 -record(state, {
-    driver :: undefined | module(),
-    action :: undefined | datastore_pool:action(),
-    requests = [] :: [{
-        {pid(), reference()},
-        {model_behaviour:model_config(), datastore:document()}
-    }]
+    pool :: pid()
 }).
 
 -type state() :: #state{}.
@@ -42,13 +38,12 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts the transaction process.
+%% Starts the datastore pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link() ->
-    {ok, pid()} | ignore | {error, Reason :: term()}.
-start_link() ->
-    gen_server2:start_link(?MODULE, [], []).
+-spec start_link(pid()) -> {ok, pid()} | {error, Reason :: term()}.
+start_link(Pool) ->
+    gen_server2:start_link(?MODULE, [Pool], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -57,16 +52,14 @@ start_link() ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Initializes the transaction process.
+%% Initializes the datastore pool worker.
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([]) ->
-    process_flag(trap_exit, true),
-    gen_server:cast(?DATASTORE_POOL_MANAGER, {register, self()}),
-    {ok, #state{}}.
+init([Pool]) ->
+    {ok, #state{pool = Pool}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -96,35 +89,45 @@ handle_call(Request, _From, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_cast({flush, Bucket}, #state{
-    driver = Driver,
-    action = Action,
-    requests = Requests
-} = State) ->
-    {From, ModelConfigAndDocs} = lists:unzip(Requests),
-    Responses = try
-        case Action of
-            save_docs -> Driver:save_docs(Bucket, ModelConfigAndDocs);
-            delete_doc -> lists:map(fun({ModelConfig, Doc}) ->
-                Driver:delete_doc_sync(ModelConfig, Doc)
-            end, ModelConfigAndDocs)
+handle_cast({post, Requests}, #state{pool = Pool} = State) ->
+    {SaveDocRequests, OtherRequests} = lists:partition(fun
+        ({_, _, {save_doc, _}}) -> true;
+        (_) -> false
+    end, Requests),
+    {SaveRefs, SaveDocs} = lists:foldl(fun
+        ({Ref, From, {save_doc, [MC, Doc]}}, {Acc1, Acc2}) ->
+            {[{Ref, From} | Acc1], [{MC, Doc} | Acc2]}
+    end, {[], []}, SaveDocRequests),
+
+    SaveDocResponses = try
+        SaveDocs2 = lists:reverse(SaveDocs),
+        case SaveDocs2 of
+            [{MC, _} | _] ->
+                couchdb_datastore_driver:save_docs_direct(MC, SaveDocs);
+            _ ->
+                []
         end
     catch
-        _:Reason -> [{error, Reason} || _ <- lists:seq(1, length(From))]
+        _:Reason ->
+            [{error, Reason} || _ <- lists:seq(1, length(SaveDocRequests))]
     end,
-    lists:foreach(fun({{Pid, Ref}, Response}) ->
-        Pid ! {Ref, Response}
-    end, lists:zip(From, Responses)),
-    gen_server:cast(?DATASTORE_POOL_MANAGER, {register, self()}),
-    {noreply, State#state{requests = []}};
-handle_cast({Pid, Ref, {Action, Driver, ModelConfig, Doc}}, #state{
-    requests = Requests
-} = State) ->
-    {noreply, State#state{
-        driver = Driver,
-        action = Action,
-        requests = [{{Pid, Ref}, {ModelConfig, Doc}} | Requests]
-    }}.
+    lists:foreach(fun({{Ref, From}, Response}) ->
+        From ! {Ref, Response}
+    end, lists:zip(SaveRefs, SaveDocResponses)),
+
+    lists:foreach(fun({Ref, From, {Function, Args}}) ->
+        Response = try
+            apply(couchdb_datastore_driver, Function, Args)
+        catch
+            _:Reason2 -> {error, Reason2}
+        end,
+        From ! {Ref, Response}
+    end, OtherRequests),
+    gen_server2:cast(Pool, {worker, self()}),
+    {noreply, State};
+handle_cast(Request, #state{} = State) ->
+    ?log_bad_request(Request),
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -152,7 +155,6 @@ handle_info(Info, #state{} = State) ->
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
 terminate(Reason, #state{} = State) ->
-    gen_server:cast(?DATASTORE_POOL_MANAGER, {unregister, self()}),
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------
@@ -165,3 +167,7 @@ terminate(Reason, #state{} = State) ->
     Extra :: term()) -> {ok, NewState :: state()} | {error, Reason :: term()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================

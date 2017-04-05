@@ -818,7 +818,7 @@ set_env(Case, Config) ->
             lists:foreach(fun(W) ->
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, timer:seconds(3))),
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(3))),
-                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, FlushDelay)),
+                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay, FlushDelay)),
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory, false))
             end, Workers)
     end,

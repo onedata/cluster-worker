@@ -639,7 +639,7 @@ init_per_testcase(CaseName, Config) ->
 
     lists:foreach(fun(W) ->
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(3))),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, 1000))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay, 1000))
     end, Workers),
 
     [{driver_pid, DriverPid} | Config].

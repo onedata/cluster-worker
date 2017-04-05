@@ -201,9 +201,9 @@
             %% Size of a datastore worker pool
             {datastore_pool_size, 5},
             %% Max number of requests a pool worker may aggregate
-            {datastore_pool_queue_size, 25},
+            {datastore_pool_batch_size, 25},
             %% Max delay in milliseconds before a pool worker queue is flushed
-            {datastore_pool_queue_flush_delay, 5000},
+            {datastore_pool_batch_delay, 500},
             %% Range of port numbers for a CouchBase gateway API port
             {couchbase_gateway_api_port_range, {12000, 12999}},
             %% Range of port numbers for a CouchBase gateway admin port
