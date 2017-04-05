@@ -1762,6 +1762,7 @@ parse_response(OpType, {_} = JSONTerm) ->
 
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Checks if revision list provided to force_save can be written.
 %% @end

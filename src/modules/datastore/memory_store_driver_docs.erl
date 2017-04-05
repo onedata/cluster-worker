@@ -35,7 +35,7 @@
     CurrentValue :: model_behaviour:value_doc(), Driver :: atom(), FD :: atom(),
     ModelConfig :: model_behaviour:model_config(), Key :: datastore:ext_key()) ->
   {AnsList :: list(), NewCurrentValue :: model_behaviour:value_doc(),
-    Status :: ok | to_save} | no_return().
+    Status :: memory_store_driver:change()} | no_return().
 handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
   {CurrentValue, Restored} = case CurrentValue0 of
     undefined ->
@@ -120,7 +120,7 @@ handle_message({force_save, Args}, CurrentValue, _Driver, FD, ModelConfig) ->
       {ok, CurrentValue};
     {#document{} = Document, ToDel} ->
       {disk_save, Document#document{rev = undefined}, {Document, Bucket, ToDel}};
-    {Error, _} ->
+    Error ->
       Error
   end;
 handle_message({create, [Document]}, not_found, _Driver, _FD, _ModelConfig) ->

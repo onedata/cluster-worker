@@ -236,7 +236,7 @@ handle_link_message({force_save, Args}, _Driver, FD, ModelConfig) ->
     {#document{key = Key} = Document, ToDel} ->
       save_link_doc(ModelConfig, Document),
       add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
-    {Error, _} ->
+    Error ->
       Error
   end;
 handle_link_message({get_link_doc, [DocKey]}, _Driver, _FD, ModelConfig) ->

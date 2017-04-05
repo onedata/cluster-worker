@@ -37,7 +37,7 @@
 -type value_doc() :: datastore:document() | undefined | not_found.
 -type value_link() :: list().
 -type message() :: {atom(), list()}.
--type change() :: ok | to_save | list().
+-type change() :: ok | to_save | {to_save, datastore:document()} | {list(), list()}.
 
 -export_type([value_doc/0, value_link/0, message/0]).
 
@@ -323,6 +323,14 @@ commit_backoff(_T) ->
 driver_to_level(_Driver) ->
   ?GLOBAL_ONLY_LEVEL.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Resolves conflict between new document and current document.
+%% @end
+%%--------------------------------------------------------------------
+-spec resolve_conflict(model_behaviour:model_config(), atom(), datastore:document()) ->
+  datastore:generic_error() | not_changed | {ResolvedDoc :: datastore:document(),
+    DeleteOldRev :: datastore:document() | false}.
 resolve_conflict(ModelConfig, Driver,
     #document{key = Key, rev = {RNum, [Id | _]}} = ToSave) ->
 
@@ -334,11 +342,19 @@ resolve_conflict(ModelConfig, Driver,
       FinalDoc = ToSave#document{rev = {RNum, [Id]}},
       {FinalDoc, false};
     {error, Reason} ->
-      {{error, Reason}, false};
+      {error, Reason};
     {ok, OldDoc} ->
       resolve_docs_conflict(OldDoc, ToSave)
   end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Resolves conflict between two documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec resolve_docs_conflict(datastore:document(), datastore:document()) ->
+  not_changed | {ResolvedDoc :: datastore:document(),
+    DeleteOldRev :: datastore:document() | false}.
 resolve_docs_conflict(#document{key = Key, rev = Rev, deleted = OldDel} = Old,
     #document{key = Key, rev = {RNum, [Id | IdsTail]}} = ToSave) ->
   {OldRNum, OldId} = rev_to_info(Rev),
@@ -362,18 +378,33 @@ resolve_docs_conflict(#document{key = Key, rev = Rev, deleted = OldDel} = Old,
       not_changed
   end.
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Converts given binary into tuple {revision_num, hash}.
+%% @end
+%%--------------------------------------------------------------------
+-spec rev_to_info(binary()) ->
+  {Num :: non_neg_integer() | binary(), Hash :: binary()}.
 rev_to_info(Rev) ->
   [Num, ID] = binary:split(Rev, <<"-">>),
   {binary_to_integer(Num), ID}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if revision list provided to force_save can be written.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_revisions_list(term(), list(), integer(), integer()) -> list().
 check_revisions_list(OldID, [OldID | _] = NewIDs, OldNum, NewNum) when NewNum =:= OldNum + 1 ->
   NewIDs;
 check_revisions_list(_, _, _, _) ->
   [].
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private
@@ -409,6 +440,14 @@ get_flush_max_interval(FlushDriver) ->
       Interval
   end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Dumps to disk.
+%% @end
+%%--------------------------------------------------------------------
+-spec dump_docs(model_behaviour:model_config(), atom(), ModifiedList :: list()) ->
+  [datastore:ext_key()].
 dump_docs(MC, Driver, ModifiedList) ->
   Refs = lists:foldl(fun
   % TODO - handle batch delete
@@ -466,6 +505,14 @@ dump_docs(MC, Driver, ModifiedList) ->
       end
   end, [], Refs).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if resolved doc is equal to doc voalue in memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_resolved_doc(value_doc() | datastore:value(), datastore:document()) ->
+  boolean().
 check_resolved_doc(not_found, #document{deleted = true}) ->
   true;
 check_resolved_doc(#document{value = V}, #document{value = V}) ->
