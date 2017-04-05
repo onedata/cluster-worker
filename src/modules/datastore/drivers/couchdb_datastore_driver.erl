@@ -56,8 +56,8 @@
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
 -export([get/3, force_save/2, force_save/3, db_run/4, db_run/5]).
--export([save_docs/2, save_docs/3, save_doc_asynch/2, save_doc_asynch_response/1,
-    get_docs/2, delete_doc_sync/2]).
+-export([save_docs/2, save_docs/3, save_doc_asynch/2, delete_doc_asynch/2,
+    asynch_response/1, get_docs/2, delete_doc_sync/2]).
 
 -export([changes_start_link/3, changes_start_link/4, get_with_revs/2]).
 -export([init/1, handle_call/3, handle_info/2, handle_change/2, handle_cast/2, terminate/2]).
@@ -218,12 +218,23 @@ save_doc_asynch(ModelConfig, Doc) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Waits and returns answer of asynch save operation.
+%% Deletes document not using transactions and not waiting for answer.
+%% Returns ref to receive answer asynch.
 %% @end
 %%--------------------------------------------------------------------
--spec save_doc_asynch_response(reference()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
-save_doc_asynch_response(Ref) ->
+-spec delete_doc_asynch(model_behaviour:model_config(), datastore:document()) ->
+    reference().
+delete_doc_asynch(ModelConfig, Doc) ->
+    datastore_pool:delete_doc_asynch(?MODULE, ModelConfig, Doc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits and returns answer of asynch save or delete operation.
+%% @end
+%%--------------------------------------------------------------------
+-spec asynch_response(reference()) ->
+    ok | {ok, datastore:ext_key()} | datastore:generic_error().
+asynch_response(Ref) ->
     datastore_pool:receive_response(Ref).
 
 %%--------------------------------------------------------------------
@@ -1358,7 +1369,7 @@ get_last(#model_config{} = ModelConfig, Key) ->
     {ok, datastore:document()} | datastore:get_error().
 get_last(#model_config{bucket = Bucket, name = ModelName} = ModelConfig, BucketOverride, Key) ->
     case get(ModelConfig, BucketOverride, Key) of
-        {error, {not_found, ModelName}} ->
+        {error, NF} when NF =:= {not_found, ModelName}; NF =:= not_found->
             case db_run(BucketOverride, couchbeam, open_doc, [to_driver_key(Bucket, Key), [{<<"open_revs">>, all}]], 3) of
                 {ok, {multipart, M}} ->
                     case collect_mp(couchbeam:stream_doc(M), []) of

@@ -21,8 +21,8 @@
 
 %% API
 -export([start_link/0]).
--export([save_doc/3, save_doc_asynch/3, delete_doc/3, receive_response/1,
-    queue_size/0]).
+-export([save_doc/3, save_doc_asynch/3, delete_doc/3, delete_doc_asynch/3,
+    receive_response/1, queue_size/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -88,6 +88,19 @@ delete_doc(Driver, ModelConfig, Doc) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Forwards document deletion request to a worker pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_doc_asynch(module(), model_behaviour:model_config(), datastore:document()) ->
+    reference().
+delete_doc_asynch(Driver, ModelConfig, Doc) ->
+    Ref = make_ref(),
+    Request = {delete_doc, Driver, ModelConfig, Doc},
+    gen_server:cast(?DATASTORE_POOL_MANAGER, {self(), Ref, Request}),
+    Ref.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Saves document not using transactions and not waiting for answer.
 %% Returns ref to receive answer asynch.
 %% @end
@@ -106,7 +119,7 @@ save_doc_asynch(Driver, ModelConfig, Doc) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec receive_response(reference()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
+    ok | {ok, datastore:ext_key()} | datastore:generic_error().
 receive_response(Ref) ->
     receive
         {Ref, Response} -> Response

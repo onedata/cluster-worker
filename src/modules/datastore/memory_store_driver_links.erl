@@ -80,7 +80,7 @@ handle_link_messages(Messages, CurrentValue, Driver, FD,
   end,
 
   % TODO - revers changes applied to mnesia or ets
-  {DumpAns, Changes0} = lists:foldl(fun
+  {DumpAns, Changes} = lists:foldl(fun
     ({K, delete_link_doc}, {ok, TmpChanges}) ->
       case apply(Driver, delete_link_doc, [ModelConfig, K]) of
         ok ->
@@ -101,16 +101,16 @@ handle_link_messages(Messages, CurrentValue, Driver, FD,
     (_, Acc) ->
       Acc
   end, {ok, []}, NewOps),
-  Changes = Changes0 -- get_value(dump_cache),
+  ResolveCache = get_value(dump_cache),
 
   NewCV = get_value(doc_cache),
   erase(),
 
   case DumpAns of
     ok ->
-      {lists:reverse(Ans), NewCV, Changes};
+      {lists:reverse(Ans), NewCV, {Changes, ResolveCache}};
     _ ->
-      {lists:map(fun(_) -> DumpAns end, Messages), NewCV, Changes}
+      {lists:map(fun(_) -> DumpAns end, Messages), NewCV, {Changes, ResolveCache}}
   end.
 
 %%--------------------------------------------------------------------
@@ -221,17 +221,21 @@ exists_link_doc(MC, DocKey, Scope) ->
     Driver :: atom(), FD :: atom(),
     ModelConfig :: model_behaviour:model_config()) -> ok | {error, term()}.
 handle_link_message({force_save, Args}, _Driver, FD, ModelConfig) ->
-  case apply(FD, force_save, [ModelConfig | Args]) of
-    {{ok, _}, not_changed} ->
+  [Bucket, ToSave] = case Args of
+    [TS] ->
+      [FD:select_bucket(ModelConfig, TS), TS];
+    _ ->
+      Args
+  end,
+  case memory_store_driver:resolve_conflict(ModelConfig, FD, ToSave) of
+    not_changed ->
       ok;
-    {{ok, _}, #document{key = Key, deleted = true} = Document} ->
+    {#document{key = Key, deleted = true} = Document, ToDel} ->
       delete_link_doc(ModelConfig, Document),
-      add_change_to_dump_memory(Key),
-      ok;
-    {{ok, _}, #document{key = Key} = Document} ->
+      add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
+    {#document{key = Key} = Document, ToDel} ->
       save_link_doc(ModelConfig, Document),
-      add_change_to_dump_memory(Key),
-      ok;
+      add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
     {Error, _} ->
       Error
   end;
@@ -343,11 +347,11 @@ add_change_to_memory(Key, Op) ->
 %% Saves key to be dumped to store in memory.
 %% @end
 %%--------------------------------------------------------------------
--spec add_change_to_dump_memory(datastore:ext_key()) ->
+-spec add_change_to_dump_memory(datastore:ext_key(), term()) ->
   ok.
-add_change_to_dump_memory(Key) ->
+add_change_to_dump_memory(Key, Change) ->
   Value = get_value(dump_cache),
-  put(dump_cache, [Key | (Value -- [Key])]),
+  put(dump_cache, [{Key, Change} | proplists:delete(Key, Value)]),
   ok.
 
 %%--------------------------------------------------------------------
