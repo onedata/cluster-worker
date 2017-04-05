@@ -159,8 +159,8 @@ handle_info({Ref, terminate}, #state{
     terminate_msg_ref = Ref
 } = State) ->
     {stop, normal, State};
-handle_info({Ref, terminate}, #state{terminate_msg_ref = Ref} = State) ->
-    {noreply, schedule_terminate(State)};
+handle_info({_Ref, terminate}, #state{} = State) ->
+    {noreply, State};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -358,9 +358,9 @@ wait_commit(#state{commit_handler_pid = Pid} = State) ->
 %%--------------------------------------------------------------------
 -spec handle_committed(Exit :: any(), state()) -> state().
 handle_committed({committed, true, _}, #state{commit_delay = Delay} = State) ->
-    schedule_commit(Delay, State#state{
+    schedule_terminate(schedule_commit(Delay, State#state{
         commit_handler_pid = undefined
-    });
+    }));
 handle_committed({committed, {false, Changes}, Delay}, #state{
     module = Module,
     changes = Changes2
@@ -373,7 +373,9 @@ handle_committed({committed, {false, Changes}, Delay}, #state{
 handle_committed(Exit, #state{commit_delay = Delay} = State) ->
     ?error("Commit handler of a transaction process terminated abnormally: ~p",
         [Exit]),
-    schedule_commit(Delay, State#state{commit_handler_pid = undefined}).
+    schedule_terminate(schedule_commit(Delay, State#state{
+        commit_handler_pid = undefined
+    })).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -407,12 +409,21 @@ schedule_commit(_Delay, #state{} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Schedules terminate operation.
+%% Schedules terminate operation if there are no pending requests, uncommitted
+%% changes and modify/commit handlers running.
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_terminate(state()) -> state().
-schedule_terminate(#state{idle_timeout = IdleTimeout} = State) ->
-    State#state{terminate_msg_ref = schedule_msg(IdleTimeout, terminate)}.
+schedule_terminate(#state{
+    requests = [],
+    changes = undefined,
+    modify_handler_pid = undefined,
+    commit_handler_pid = undefined,
+    idle_timeout = IdleTimeout
+} = State) ->
+    State#state{terminate_msg_ref = schedule_msg(IdleTimeout, terminate)};
+schedule_terminate(#state{} = State) ->
+    State.
 
 %%--------------------------------------------------------------------
 %% @private
