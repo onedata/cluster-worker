@@ -246,8 +246,7 @@ commit({to_save, ResolvedConflicts} = TS, #state{model_config = MC, key = Key,
         false ->
           ok;
         _ ->
-          Ref = apply(Driver, delete_doc_asynch, [MC, ToDel]),
-          apply(Driver, asynch_response, [Ref])
+          apply(Driver, delete_doc, [MC, ToDel])
       end;
     Other ->
       Other
@@ -425,13 +424,7 @@ dump_docs(MC, Driver, ModifiedList) ->
       end,
       [{K, not_found, RefOrError} | Acc];
     ({K, {Document, Bucket, _ToDel} = V}, Acc) ->
-      % TODO - asynch save_revision
-      RefOrError = case Driver:save_revision(MC, Bucket, Document) of
-        {ok, _} ->
-          ok;
-        Other ->
-          Other
-      end,
+      RefOrError = Driver:save_revision_asynch(MC, Bucket, Document),
       [{K, V, RefOrError} | Acc];
     ({K, {delete_doc_asynch, ToDel} = V}, Acc) ->
       RefOrError = case ToDel of
