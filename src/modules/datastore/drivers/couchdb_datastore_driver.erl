@@ -55,7 +55,7 @@
 -export([save/2, create/2, update/3, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, create_or_update_link/4, delete_links/3, fetch_link/3, foreach_link/4]).
 
--export([get/3, force_save/2, force_save/3, db_run/4, db_run/5]).
+-export([get/3, save_revision/3, get_last/2, get_last/3, db_run/4, db_run/5]).
 -export([save_docs/2, save_docs/3, save_doc_asynch/2, delete_doc_asynch/2,
     asynch_response/1, get_docs/2, delete_doc_sync/2]).
 
@@ -843,6 +843,32 @@ to_binary(Term) ->
     Base = base64:encode(term_to_binary(Term)),
     <<?OBJ_PREFIX, Base/binary>>.
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts given revision of document to database. Used only for document replication.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
+save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
+    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value} = ToSave) ->
+    ok = assert_value_size(Value, ModelConfig, Key),
+    {Props} = datastore_json:encode_record(ToSave),
+    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
+        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
+    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
+        {ok, {SaveAns}} ->
+            case verify_ans(SaveAns) of
+                true ->
+                    {ok, Key};
+                _ ->
+                    {error, db_internal_error}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -933,84 +959,6 @@ db_run_internal(Bucket, Mod, Fun, Args, Retry, Opts) ->
             db_run(Bucket, Mod, Fun, Args, Retry - 1);
         Other ->
             Other
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Inserts given document to database while preserving revision number.
-%% Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec force_save(model_behaviour:model_config(), datastore:document()) ->
-    {{ok, datastore:ext_key()} | datastore:generic_error(),
-        ChangedDoc :: datastore:document() | not_changed}.
-force_save(#model_config{} = ModelConfig, ToSave) ->
-    force_save(ModelConfig, select_bucket(ModelConfig, ToSave), ToSave).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Inserts given document to database while preserving revision number.
-%% Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec force_save(model_behaviour:model_config(), binary(), datastore:document()) ->
-    {{ok, datastore:ext_key()} | datastore:generic_error(),
-        ChangedDoc :: datastore:document() | not_changed}.
-force_save(ModelConfig, BucketOverride,
-    #document{key = Key, rev = {RNum, [Id | IdsTail]}} = ToSave) ->
-    case get_last(ModelConfig, Key) of
-        {error, {not_found, _}} ->
-            FinalDoc = ToSave#document{rev = {RNum, [Id]}},
-            case save_revision(ModelConfig, BucketOverride, FinalDoc) of
-                {ok, _} ->
-                    {{ok, Key}, FinalDoc};
-                Other ->
-                    {Other, not_changed}
-            end;
-        {error, not_found} ->
-            FinalDoc = ToSave#document{rev = {RNum, [Id]}},
-            case save_revision(ModelConfig, BucketOverride, FinalDoc) of
-                {ok, _} ->
-                    {{ok, Key}, FinalDoc};
-                Other ->
-                    {Other, not_changed}
-            end;
-        {error, Reason} ->
-            {{error, Reason}, not_changed};
-        {ok, #document{key = Key, rev = Rev, deleted = OldDel} = Old} ->
-            {OldRNum, OldId} = rev_to_info(Rev),
-            case RNum of
-                OldRNum ->
-                    case Id > OldId of
-                        true ->
-                            case save_revision(ModelConfig, BucketOverride, ToSave) of
-                                {ok, _} ->
-                                    % TODO - what happens if first save is ok and second fails
-                                    % Delete in new task type that starts if first try fails
-                                    case OldDel of
-                                        true -> ok;
-                                        _ -> delete_doc(ModelConfig, Old)
-                                    end,
-                                    {{ok, Key}, ToSave};
-                                Other ->
-                                    {Other, not_changed}
-                            end;
-                        false ->
-                            {{ok, Key}, not_changed}
-                    end;
-                Higher when Higher > OldRNum ->
-                    NewIDs = check_revisions_list(OldId, IdsTail, OldRNum, Higher),
-                    FinalDoc = ToSave#document{rev = {RNum, [Id | NewIDs]}},
-                    case save_revision(ModelConfig, BucketOverride, FinalDoc) of
-                        {ok, _} ->
-                            {{ok, Key}, FinalDoc};
-                        Other ->
-                            {Other, not_changed}
-                    end;
-                _ ->
-                    {{ok, Key}, not_changed}
-            end
     end.
 
 %% @todo: VFS-2825 Use this functions to optimize dbsync performance
@@ -1192,33 +1140,6 @@ terminate(Reason, _State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Inserts given revision of document to database. Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
-save_revision(#model_config{bucket = Bucket} = ModelConfig, BucketOverride,
-    #document{deleted = Del, key = Key, rev = {Start, Ids} = Revs, value = Value} = ToSave) ->
-    ok = assert_value_size(Value, ModelConfig, Key),
-    {Props} = datastore_json:encode_record(ToSave),
-    Doc = {[{<<"_revisions">>, {[{<<"ids">>, Ids}, {<<"start">>, Start}]}}, {<<"_rev">>, rev_info_to_rev(Revs)},
-        {<<"_id">>, to_driver_key(Bucket, Key)}, {<<"_deleted">>, Del} | Props]},
-    case db_run(BucketOverride, couchbeam, save_doc, [Doc, [{<<"new_edits">>, <<"false">>}] ++ ?DEFAULT_DB_REQUEST_TIMEOUT_OPT], 3) of
-        {ok, {SaveAns}} ->
-            case verify_ans(SaveAns) of
-                true ->
-                    {ok, Key};
-                _ ->
-                    {error, db_internal_error}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1714,15 +1635,3 @@ parse_response(OpType, {_} = JSONTerm) ->
         Error ->
             {error, binary_to_atom(Error, utf8)}
     end.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks if revision list provided to force_save can be written.
-%% @end
-%%--------------------------------------------------------------------
--spec check_revisions_list(term(), list(), integer(), integer()) -> list().
-check_revisions_list(OldID, [OldID | _] = NewIDs, OldNum, NewNum) when NewNum =:= OldNum + 1 ->
-    NewIDs;
-check_revisions_list(_, _, _, _) ->
-    [].

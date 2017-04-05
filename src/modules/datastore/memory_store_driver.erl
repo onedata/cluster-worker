@@ -175,8 +175,18 @@ commit({ModifiedKeys, ResolvedChanges}, #state{model_config = MC, current_value 
   flush_driver = Driver, link_proc = true} = State) ->
   NotSaved = dump_docs(MC, Driver, ResolvedChanges),
 
-  case NotSaved of
-    [] ->
+  RevsToDel = lists:foldl(fun({K, {_Document, _Bucket, ToDel}}, Acc) ->
+    case lists:member(K, NotSaved) of
+      true ->
+        Acc;
+      _ ->
+        [{K, {delete_doc_asynch, ToDel}} | Acc]
+    end
+  end, [], ResolvedChanges),
+  NotSaved2 = dump_docs(MC, Driver, RevsToDel),
+
+  case {NotSaved, NotSaved2} of
+    {[], []} ->
       ModifiedKeys2 = lists:foldl(fun(K, Acc) ->
         V = proplists:get_value(K, CV),
         {ToCheck, _, _} = proplists:get_value(K, ResolvedChanges),
@@ -193,7 +203,12 @@ commit({ModifiedKeys, ResolvedChanges}, #state{model_config = MC, current_value 
       ResolvedChanges2 = lists:foldl(fun(K, Acc) ->
         [proplists:get_value(K, ResolvedChanges) | Acc]
       end, [], NotSaved),
-      {false, {ModifiedKeys, ResolvedChanges2}}
+
+      ResolvedChanges2_2 = lists:foldl(fun(K, Acc) ->
+        [proplists:get_value(K, RevsToDel) | Acc]
+      end, [], NotSaved2),
+      % TODO - delete old rev even if new revision appears before successful del
+      {false, {ModifiedKeys, ResolvedChanges2 ++ ResolvedChanges2_2}}
   end;
 commit(ok, _State)->
   true;
@@ -409,16 +424,19 @@ dump_docs(MC, Driver, ModifiedList) ->
           {get_error, E}
       end,
       [{K, not_found, RefOrError} | Acc];
-    ({K, {Document, Bucket, ToDel} = V}, Acc) ->
+    ({K, {Document, Bucket, _ToDel} = V}, Acc) ->
       % TODO - asynch save_revision
       RefOrError = case Driver:save_revision(MC, Bucket, Document) of
         {ok, _} ->
-          case ToDel of
-            false -> ok;
-            _ -> apply(Driver, delete_doc_asynch, [MC, ToDel])
-          end;
+          ok;
         Other ->
           Other
+      end,
+      [{K, V, RefOrError} | Acc];
+    ({K, {delete_doc_asynch, ToDel} = V}, Acc) ->
+      RefOrError = case ToDel of
+        false -> ok;
+        _ -> apply(Driver, delete_doc_asynch, [MC, ToDel])
       end,
       [{K, V, RefOrError} | Acc];
     ({K, V}, Acc) ->
