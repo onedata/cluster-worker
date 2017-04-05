@@ -42,7 +42,7 @@
     FD :: atom(), ModelConfig :: model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> {AnsList :: list(),
     NewCurrentValue :: memory_store_driver:value_link(),
-    Changes :: [memory_store_driver:change()]}.
+    Changes :: memory_store_driver:change()}.
 handle_link_messages(Messages, CurrentValue, Driver, FD,
     #model_config{name = MN} = ModelConfig, Key) ->
   put(doc_cache, CurrentValue),

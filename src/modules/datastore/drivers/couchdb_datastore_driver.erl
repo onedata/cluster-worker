@@ -224,7 +224,7 @@ save_doc_asynch(ModelConfig, Doc) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
-    reference().
+    ok | datastore:generic_error().
 delete_doc(ModelConfig, Doc) ->
     datastore_pool:post_sync(write, {delete_doc_direct, [ModelConfig, Doc]}).
 
@@ -884,7 +884,7 @@ save_revision(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSav
 %% @end
 %%--------------------------------------------------------------------
 -spec save_revision_asynch(model_behaviour:model_config(), binary(), datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
+    reference().
 save_revision_asynch(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSave) ->
     datastore_pool:post_async(write, {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
 

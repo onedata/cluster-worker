@@ -37,7 +37,10 @@
 -type value_doc() :: datastore:document() | undefined | not_found.
 -type value_link() :: list().
 -type message() :: {atom(), list()}.
--type change() :: ok | to_save | {to_save, datastore:document()} | {list(), list()}.
+-type resolved_conflict() :: {Document :: datastore:document(),
+  Bucket :: datastore:bucket(), ToDel :: false | datastore:document()}.
+-type change() :: ok | to_save | {to_save, resolved_conflict()} |
+  {[datastore:ext_key()], [{datastore:ext_key(), resolved_conflict()}]}.
 
 -export_type([value_doc/0, value_link/0, message/0]).
 
