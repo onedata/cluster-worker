@@ -672,6 +672,8 @@ delete_doc_direct(ModelConfig = #model_config{bucket = Bucket}, #document{key = 
             case verify_ans(DelAns) of
                 true ->
                     ok;
+                conflict ->
+                    {error, conflict};
                 _ ->
                     {error, db_internal_error}
             end;
@@ -1268,6 +1270,8 @@ save_revision_direct(#model_config{bucket = Bucket} = ModelConfig, BucketOverrid
             case verify_ans(SaveAns) of
                 true ->
                     {ok, Key};
+                conflict ->
+                    {error, conflict};
                 _ ->
                     {error, db_internal_error}
             end;
@@ -1715,17 +1719,25 @@ select_bucket(#model_config{}, _Key) ->
 %% Check if ans is ok
 %% @end
 %%--------------------------------------------------------------------
--spec verify_ans(term()) -> boolean().
+-spec verify_ans(term()) -> boolean() | conflict.
 verify_ans(Ans) when is_list(Ans) ->
     lists:foldl(fun(E, Acc) ->
         case Acc of
             false ->
                 false;
-
             _ ->
-                verify_ans(E)
+                case verify_ans(E) of
+                    false ->
+                        false;
+                    conflict ->
+                        conflict;
+                    _ ->
+                        Acc
+                end
         end
     end, true, Ans);
+verify_ans({<<"error">>, <<"conflict">>} = Ans) ->
+    conflict;
 verify_ans({<<"error">>, _} = Ans) ->
     ?error("Couch db error: ~p", [Ans]),
     false;

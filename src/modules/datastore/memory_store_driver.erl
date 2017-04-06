@@ -237,6 +237,9 @@ commit(to_save, #state{model_config = MC, key = Key, current_value = CV,
     {error, already_exists} -> % conflict with force_save
       ?debug("Dump doc canceled for key ~p, value ~p: already exists", [Key, CV]),
       true;
+    {error, conflict} -> % conflict with force_save
+      ?debug("Dump doc canceled for key ~p, value ~p: conflict", [Key, CV]),
+      true;
     Err ->
       ?error("Dump doc error ~p for key ~p, value ~p", [Err, Key, CV]),
       {false, to_save}
@@ -262,8 +265,11 @@ commit({to_save, ResolvedConflicts} = TS, #state{model_config = MC, key = Key,
   Ans = case SRAns of
     ok ->
       true;
-    {error, already_exists} -> % conflict with force_save
+    {error, already_exists} ->
       ?debug("Dump doc canceled for key ~p, value ~p: already exists", [Key, CV]),
+      true;
+    {error, conflict} ->
+      ?debug("Dump doc canceled for key ~p, value ~p: conflict", [Key, CV]),
       true;
     Err ->
       ?error("Dump doc error ~p for key ~p, value ~p", [Err, Key, CV]),
