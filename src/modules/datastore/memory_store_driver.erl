@@ -193,9 +193,14 @@ commit({ModifiedKeys, ResolvedChanges}, #state{model_config = MC, current_value 
       ModifiedKeys2 = lists:foldl(fun(K, Acc) ->
         V = proplists:get_value(K, CV),
         {ToCheck, _, _} = proplists:get_value(K, ResolvedChanges),
-        case check_resolved_doc(V, ToCheck) of
-          true ->
-            Acc;
+        case proplists:get_value(K, ResolvedChanges) of
+          {ToCheck, _, _} ->
+            case check_resolved_doc(V, ToCheck) of
+              true ->
+                Acc;
+              _ ->
+                [K | Acc]
+            end;
           _ ->
             [K | Acc]
         end
