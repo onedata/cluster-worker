@@ -90,39 +90,10 @@ handle_call(Request, _From, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_cast({post, Requests}, #state{pool = Pool} = State) ->
-    {SaveDocRequests, OtherRequests} = lists:partition(fun
-        ({_, _, {save_doc, _}}) -> true;
-        (_) -> false
-    end, Requests),
-    {SaveRefs, SaveDocs} = lists:foldl(fun
-        ({Ref, From, {save_doc, [MC, Doc]}}, {Acc1, Acc2}) ->
-            {[{Ref, From} | Acc1], [{MC, Doc} | Acc2]}
-    end, {[], []}, SaveDocRequests),
-
-    SaveDocResponses = try
-        SaveDocs2 = lists:reverse(SaveDocs),
-        case SaveDocs2 of
-            [{MC, _} | _] ->
-                couchdb_datastore_driver:save_docs_direct(MC, SaveDocs);
-            _ ->
-                []
-        end
-    catch
-        _:Reason ->
-            [{error, Reason} || _ <- lists:seq(1, length(SaveDocRequests))]
-    end,
-    lists:foreach(fun({{Ref, From}, Response}) ->
-        From ! {Ref, Response}
-    end, lists:zip(SaveRefs, SaveDocResponses)),
-
-    lists:foreach(fun({Ref, From, {Function, Args}}) ->
-        Response = try
-            apply(couchdb_datastore_driver, Function, Args)
-        catch
-            _:Reason2 -> {error, Reason2}
-        end,
-        From ! {Ref, Response}
-    end, OtherRequests),
+    {Requesters, Requests2} = split_requests(Requests),
+    Requests3 = aggregate_save_requests(Requests2),
+    Responses = handle_requests(Requests3, []),
+    send_responses(Requesters, Responses),
     gen_server2:cast(Pool, {worker, self()}),
     {noreply, State};
 handle_cast(Request, #state{} = State) ->
@@ -171,3 +142,82 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Splits requests into requesters and actual requests.
+%% @end
+%%--------------------------------------------------------------------
+-spec split_requests([{reference(), pid(), term()}]) ->
+    {[{reference(), pid()}], [{reference(), term()}]}.
+split_requests(Requests) ->
+    {Requesters, Requests2} = lists:foldl(fun
+        ({Ref, From, Requests}, {Acc1, Acc2}) ->
+            {[{Ref, From} | Acc1], [{Ref, Requests} | Acc2]}
+    end, {[], []}, Requests),
+    {lists:reverse(Requesters), lists:reverse(Requests2)}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Aggregates save requests.
+%% @end
+%%--------------------------------------------------------------------
+-spec aggregate_save_requests([{reference(), term()}]) ->
+    [{reference() | [reference()], term()}].
+aggregate_save_requests(Requests) ->
+    {SaveRequests, OtherRequests} = lists:partition(fun
+        ({_, {save_doc, _}}) -> true;
+        (_) -> false
+    end, Requests),
+    {Refs, Docs} = lists:foldl(fun({Ref, {save_doc, [MC, Doc]}}, {Acc1, Acc2}) ->
+        {[Ref | Acc1], [{MC, Doc} | Acc2]}
+    end, {[], []}, SaveRequests),
+    Refs2 = lists:reverse(Refs),
+    Docs2 = lists:reverse(Docs),
+    case Docs2 of
+        [{MC, _} | _] ->
+            [{Refs2, {save_docs_direct, [MC, Docs2]}} | OtherRequests];
+        _ ->
+            OtherRequests
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handles requests and returns responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_requests([{reference() | [reference()], term()}],
+    [{reference(), term()}]) -> [{reference(), term()}].
+handle_requests([], Responses) ->
+    Responses;
+handle_requests([{[_ | _] = Refs, {Function, Args}} | Requests], Responses) ->
+    Responses2 = try
+        apply(couchdb_datastore_driver, Function, Args)
+    catch
+        _:Reason -> [{error, Reason} || _ <- lists:seq(1, length(Refs))]
+    end,
+    Responses3 = lists:zip(Refs, Responses2),
+    handle_requests(Requests, Responses ++ Responses3);
+handle_requests([{Ref, {Function, Args}} | Requests], Responses) ->
+    Response = try
+        apply(couchdb_datastore_driver, Function, Args)
+    catch
+        _:Reason -> {error, Reason}
+    end,
+    handle_requests(Requests, [{Ref, Response} | Responses]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends responses to requesters.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_responses([{reference(), pid()}], [{reference(), term()}]) -> ok.
+send_responses(Requesters, Responses) ->
+    lists:foreach(fun({Ref, From}) ->
+        {Ref, Response} = lists:keyfind(Ref, 1, Responses),
+        From ! {Ref, Response}
+    end, Requesters).
