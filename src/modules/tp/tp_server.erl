@@ -37,9 +37,11 @@
     modify_handler_pid :: undefined | pid(),
     % a pid of the commit handler process
     commit_handler_pid :: undefined | pid(),
-    % a reference to the message expected to trigger commit
+    % a reference to a timer expected to trigger terminate
+    terminate_timer_ref :: undefined | reference(),
+    % a reference to a message expected to trigger commit
     commit_msg_ref :: undefined | reference(),
-    % a reference to the message expected to trigger terminate
+    % a reference to a message expected to trigger terminate
     terminate_msg_ref :: undefined | reference(),
     commit_delay :: timeout(),
     idle_timeout :: timeout()
@@ -273,9 +275,9 @@ wait_modify(#state{modify_handler_pid = Pid} = State) ->
 %%--------------------------------------------------------------------
 -spec handle_modified(Exit :: any(), state()) -> state().
 handle_modified({modified, false, Data}, #state{} = State) ->
-    handle_modified(
+    schedule_terminate(handle_modified(
         {modified, {true, undefined}, Data}, State
-    );
+    ));
 handle_modified({modified, {true, NextChanges}, Data}, #state{
     module = Module,
     changes = Changes,
@@ -289,9 +291,9 @@ handle_modified({modified, {true, NextChanges}, Data}, #state{
 handle_modified(Exit, #state{commit_delay = Delay} = State) ->
     ?error("Modify handler of a transaction process terminated abnormally: ~p",
         [Exit]),
-    schedule_commit(Delay, modify_async(State#state{
+    schedule_terminate(schedule_commit(Delay, modify_async(State#state{
         modify_handler_pid = undefined
-    })).
+    }))).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -402,43 +404,32 @@ merge_changes(Module, Changes, NextChanges) ->
 schedule_commit(_Delay, #state{changes = undefined} = State) ->
     State;
 schedule_commit(Delay, #state{commit_msg_ref = undefined} = State) ->
-    State#state{commit_msg_ref = schedule_msg(Delay, {commit, Delay})};
+    Ref = make_ref(),
+    erlang:send_after(Delay, self(), {Ref, {commit, Delay}}),
+    State#state{commit_msg_ref = Ref};
 schedule_commit(_Delay, #state{} = State) ->
     State.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Schedules terminate operation if there are no pending requests, uncommitted
-%% changes and modify/commit handlers running.
+%% Schedules terminate operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_terminate(state()) -> state().
 schedule_terminate(#state{
-    requests = [],
-    changes = undefined,
-    modify_handler_pid = undefined,
-    commit_handler_pid = undefined,
-    idle_timeout = IdleTimeout
+    idle_timeout = IdleTimeout,
+    terminate_timer_ref = undefined
 } = State) ->
-    State#state{terminate_msg_ref = schedule_msg(IdleTimeout, terminate)};
-schedule_terminate(#state{} = State) ->
-    State.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Wraps message with a reference tag and sends after delay to the calling
-%% process. Returns reference tag.
-%% @end
-%%--------------------------------------------------------------------
--spec schedule_msg(timeout(), any()) -> undefined | reference().
-schedule_msg(infinity, _Msg) ->
-    undefined;
-schedule_msg(Delay, Msg) ->
-    Ref = make_ref(),
-    erlang:send_after(Delay, self(), {Ref, Msg}),
-    Ref.
+    MsgRef = make_ref(),
+    TimerRef = erlang:send_after(IdleTimeout, self(), {MsgRef, terminate}),
+    State#state{
+        terminate_timer_ref = TimerRef,
+        terminate_msg_ref = MsgRef
+    };
+schedule_terminate(#state{terminate_timer_ref = Ref} = State) ->
+    erlang:cancel_timer(Ref),
+    schedule_terminate(State#state{terminate_timer_ref = undefined}).
 
 %%--------------------------------------------------------------------
 %% @private
