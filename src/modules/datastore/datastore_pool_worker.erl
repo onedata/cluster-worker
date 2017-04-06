@@ -20,13 +20,14 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([start_link/1]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
 -record(state, {
+    bucket :: binary(),
     pool :: pid()
 }).
 
@@ -41,9 +42,9 @@
 %% Starts the datastore pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid()) -> {ok, pid()} | {error, Reason :: term()}.
-start_link(Pool) ->
-    gen_server2:start_link(?MODULE, [Pool], []).
+-spec start_link(binary(), pid()) -> {ok, pid()} | {error, Reason :: term()}.
+start_link(Bucket, Pool) ->
+    gen_server2:start_link(?MODULE, [Bucket, Pool], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -58,8 +59,8 @@ start_link(Pool) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Pool]) ->
-    {ok, #state{pool = Pool}}.
+init([Bucket, Pool]) ->
+    {ok, #state{bucket = Bucket, pool = Pool}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -89,9 +90,9 @@ handle_call(Request, _From, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_cast({post, Requests}, #state{pool = Pool} = State) ->
+handle_cast({post, Requests}, #state{bucket = Bucket, pool = Pool} = State) ->
     {Requesters, Requests2} = split_requests(Requests),
-    Requests3 = aggregate_save_requests(Requests2),
+    Requests3 = aggregate_save_requests(Bucket, Requests2),
     Responses = handle_requests(Requests3, []),
     send_responses(Requesters, Responses),
     gen_server2:cast(Pool, {worker, self()}),
@@ -164,9 +165,9 @@ split_requests(Requests) ->
 %% Aggregates save requests.
 %% @end
 %%--------------------------------------------------------------------
--spec aggregate_save_requests([{reference(), term()}]) ->
+-spec aggregate_save_requests(binary(), [{reference(), term()}]) ->
     [{reference() | [reference()], term()}].
-aggregate_save_requests(Requests) ->
+aggregate_save_requests(Bucket, Requests) ->
     {SaveRequests, OtherRequests} = lists:partition(fun
         ({_, {save_doc, _}}) -> true;
         (_) -> false
@@ -177,8 +178,8 @@ aggregate_save_requests(Requests) ->
     Refs2 = lists:reverse(Refs),
     Docs2 = lists:reverse(Docs),
     case Docs2 of
-        [{MC, _} | _] ->
-            [{Refs2, {save_docs_direct, [MC, Docs2]}} | OtherRequests];
+        [_ | _] ->
+            [{Refs2, {save_docs_direct, [Bucket, Docs2]}} | OtherRequests];
         _ ->
             OtherRequests
     end.
