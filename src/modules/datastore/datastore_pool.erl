@@ -19,8 +19,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/3]).
--export([post_async/2, post_sync/2, post_sync/3]).
+-export([start_link/4]).
+-export([post_async/3, post_sync/3, post_sync/4]).
 -export([wait/1, wait/2]).
 -export([modes/0, request_queue_size/0]).
 
@@ -34,6 +34,7 @@
 }).
 
 -record(state, {
+    bucket :: binary(),
     mode :: mode(),
     worker_queue :: queue(),
     request_queue :: queue(),
@@ -59,10 +60,10 @@
 %% Starts CouchBase worker pool manager.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(mode(), non_neg_integer(), non_neg_integer()) ->
+-spec start_link(binary(), mode(), non_neg_integer(), non_neg_integer()) ->
     {ok, pid()} | {error, Reason :: term()}.
-start_link(Mode, Size, Delay) ->
-    gen_server2:start_link(?MODULE, [Mode, Size, Delay], []).
+start_link(Bucket, Mode, Size, Delay) ->
+    gen_server2:start_link(?MODULE, [Bucket, Mode, Size, Delay], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -70,10 +71,10 @@ start_link(Mode, Size, Delay) ->
 %% to a future response.
 %% @end
 %%--------------------------------------------------------------------
--spec post_async(mode(), request()) -> reference().
-post_async(Mode, Request) ->
+-spec post_async(binary(), mode(), request()) -> reference().
+post_async(Bucket, Mode, Request) ->
     Ref = make_ref(),
-    Pool = datastore_pool_sup:get_pool(Mode),
+    Pool = datastore_pool_sup:get_pool(Bucket, Mode),
     gen_server2:cast(Pool, {post, Ref, self(), Request}),
     Ref.
 
@@ -81,18 +82,18 @@ post_async(Mode, Request) ->
 %% @equiv post_sync(Bucket, Mode, Request, 300000)
 %% @end
 %%--------------------------------------------------------------------
--spec post_sync(mode(), request()) -> response().
-post_sync(Mode, Request) ->
-    post_sync(Mode, Request, timer:minutes(5)).
+-spec post_sync(binary(), mode(), request()) -> response().
+post_sync(Bucket, Mode, Request) ->
+    post_sync(Bucket, Mode, Request, timer:minutes(5)).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Schedules request execution on a worker pool and awaits response.
 %% @end
 %%--------------------------------------------------------------------
--spec post_sync(mode(), request(), timeout()) -> response().
-post_sync(Mode, Request, Timeout) ->
-    Ref = post_async(Mode, Request),
+-spec post_sync(binary(), mode(), request(), timeout()) -> response().
+post_sync(Bucket, Mode, Request, Timeout) ->
+    Ref = post_async(Bucket, Mode, Request),
     wait(Ref, Timeout).
 
 %%--------------------------------------------------------------------
@@ -136,10 +137,13 @@ modes() ->
 %%--------------------------------------------------------------------
 -spec request_queue_size() -> non_neg_integer().
 request_queue_size() ->
-    lists:foldl(fun({Mode, _}, Size) ->
-        Pool = datastore_pool_sup:get_pool(Mode),
-        Size + gen_server2:call(Pool, request_queue_size)
-    end, 0, modes()).
+    Buckets = couchdb_datastore_driver:get_buckets(),
+    lists:foldl(fun(Bucket, Size) ->
+        lists:foldl(fun({Mode, _}, Size2) ->
+            Pool = datastore_pool_sup:get_pool(Bucket, Mode),
+            Size2 + gen_server2:call(Pool, request_queue_size)
+        end, Size, modes())
+    end, 0, Buckets).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -154,12 +158,13 @@ request_queue_size() ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Mode, Size, Delay]) ->
+init([Bucket, Mode, Size, Delay]) ->
     process_flag(trap_exit, true),
-    datastore_pool_sup:register_pool(Mode, self()),
+    datastore_pool_sup:register_pool(Bucket, Mode, self()),
     {ok, schedule_flush(#state{
+        bucket = Bucket,
         mode = Mode,
-        worker_queue = start_workers(Size),
+        worker_queue = start_workers(Bucket, Size),
         request_queue = #queue{},
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             datastore_pool_batch_size, 25),
@@ -281,9 +286,9 @@ handle_info(flush, #state{
     }};
 handle_info({'EXIT', _Worker, normal}, #state{} = State) ->
     {noreply, State};
-handle_info({'EXIT', Worker, Reason}, #state{} = State) ->
+handle_info({'EXIT', Worker, Reason}, #state{bucket = Bucket} = State) ->
     ?error("Couchbase pool worker ~p exited with reason: ~p", [Worker, Reason]),
-    Worker2 = start_worker(),
+    Worker2 = start_worker(Bucket),
     gen_server2:cast(self(), {worker, Worker2}),
     {noreply, State};
 handle_info(Info, #state{} = State) ->
@@ -301,8 +306,8 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{mode = Mode} = State) ->
-    datastore_pool_sup:unregister_pool(Mode),
+terminate(Reason, #state{bucket = Bucket, mode = Mode} = State) ->
+    datastore_pool_sup:unregister_pool(Bucket, Mode),
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------
@@ -326,9 +331,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% Starts CouchBase pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker() -> pid().
-start_worker() ->
-    {ok, Worker} = datastore_pool_worker:start_link(self()),
+-spec start_worker(binary()) -> pid().
+start_worker(Bucket) ->
+    {ok, Worker} = datastore_pool_worker:start_link(Bucket, self()),
     Worker.
 
 %%--------------------------------------------------------------------
@@ -337,10 +342,10 @@ start_worker() ->
 %% Initializes worker pool by starting given amount of workers.
 %% @end
 %%--------------------------------------------------------------------
--spec start_workers(non_neg_integer()) -> queue().
-start_workers(Size) ->
+-spec start_workers(binary(), non_neg_integer()) -> queue().
+start_workers(Bucket, Size) ->
     lists:foldl(fun(_, WorkerQueue) ->
-        Worker = start_worker(),
+        Worker = start_worker(Bucket),
         queue(Worker, WorkerQueue)
     end, #queue{}, lists:seq(1, Size)).
 

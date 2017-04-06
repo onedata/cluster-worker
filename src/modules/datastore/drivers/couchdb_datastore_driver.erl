@@ -65,7 +65,7 @@
 -export([save_link_doc/2, get_link_doc/2, get_link_doc/3, delete_link_doc/2, exists_link_doc/3]).
 -export([to_binary/1]).
 -export([add_view/4, query_view/3, delete_view/2, stream_view/3]).
--export([default_bucket/0, sync_enabled_bucket/0, select_bucket/2, get_buckets/0]).
+-export([default_bucket/0, sync_enabled_bucket/0, select_bucket/1, select_bucket/2, get_buckets/0]).
 -export([rev_to_number/1]).
 
 % for tests
@@ -199,7 +199,8 @@ save_link_doc(ModelConfig, Doc) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 % TODO - also for locally cached, check link_store_level
 save_doc(#model_config{store_level = ?GLOBALLY_CACHED_LEVEL} = ModelConfig, Doc) ->
-    datastore_pool:post_sync(write, {save_doc, [ModelConfig, Doc]});
+    Bucket = select_bucket(ModelConfig, Doc),
+    datastore_pool:post_sync(Bucket, write, {save_doc, [ModelConfig, Doc]});
 save_doc(ModelConfig, Doc) ->
     [RawDoc] = make_raw_doc(ModelConfig, [Doc]),
     {ok, [RawRes]} = db_run(select_bucket(ModelConfig, Doc), couchbeam, save_docs,
@@ -215,7 +216,8 @@ save_doc(ModelConfig, Doc) ->
 -spec save_doc_asynch(model_behaviour:model_config(), datastore:document()) ->
     reference().
 save_doc_asynch(ModelConfig, Doc) ->
-    datastore_pool:post_async(write, {save_doc, [ModelConfig, Doc]}).
+    Bucket = select_bucket(ModelConfig, Doc),
+    datastore_pool:post_async(Bucket, write, {save_doc, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -237,7 +239,9 @@ save_doc_asynch_response(Ref) ->
 save_docs(DBBucketOrModelConfig, Documents) ->
     save_docs(DBBucketOrModelConfig, Documents, []).
 save_docs(DBBucketOrModelConfig, Documents, Opts) ->
-    datastore_pool:post_sync(write, {save_docs_direct, [DBBucketOrModelConfig, Documents, Opts]}).
+    Bucket = select_bucket(DBBucketOrModelConfig),
+    datastore_pool:post_sync(Bucket, write,
+        {save_docs_direct, [DBBucketOrModelConfig, Documents, Opts]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -269,7 +273,8 @@ save_docs_direct(DBBucket, Documents, Opts) ->
 -spec get_docs(model_behaviour:model_config() | couchdb_bucket(), [{model_behaviour:model_config(), datastore:ext_key()}]) ->
     [{ok, datastore:ext_key()} | datastore:generic_error()].
 get_docs(#model_config{} = ModelConfig, KeysWithModelConfig) ->
-    datastore_pool:post_sync(read, {get_docs_direct, [ModelConfig, KeysWithModelConfig]}).
+    Bucket = select_bucket(ModelConfig),
+    datastore_pool:post_sync(Bucket, read, {get_docs_direct, [ModelConfig, KeysWithModelConfig]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -632,7 +637,8 @@ delete_link_doc(ModelConfig, Doc) ->
 -spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
 delete_doc(ModelConfig = #model_config{}, #document{} = Doc) ->
-    datastore_pool:post_sync(write, {delete_doc_direct, [ModelConfig, Doc]}).
+    Bucket = select_bucket(ModelConfig, Doc),
+    datastore_pool:post_sync(Bucket, write, {delete_doc_direct, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1214,7 +1220,8 @@ terminate(Reason, _State) ->
 -spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_revision(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSave) ->
-    datastore_pool:post_sync(write, {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
+    datastore_pool:post_sync(BucketOverride, write,
+        {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
 
 %%--------------------------------------------------------------------
 %% @private
