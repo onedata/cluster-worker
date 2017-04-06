@@ -228,7 +228,9 @@ save_doc_asynch(ModelConfig, Doc) ->
 -spec delete_doc(model_behaviour:model_config(), datastore:document()) ->
     ok | datastore:generic_error().
 delete_doc(ModelConfig, Doc) ->
-    datastore_pool:post_sync(write, {delete_doc_direct, [ModelConfig, Doc]}).
+    Bucket = select_bucket(ModelConfig, Doc),
+    datastore_pool:post_sync(Bucket, write,
+        {delete_doc_direct, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -239,7 +241,9 @@ delete_doc(ModelConfig, Doc) ->
 -spec delete_doc_asynch(model_behaviour:model_config(), datastore:document()) ->
     reference().
 delete_doc_asynch(ModelConfig, Doc) ->
-    datastore_pool:post_async(write, {delete_doc_direct, [ModelConfig, Doc]}).
+    Bucket = select_bucket(ModelConfig, Doc),
+    datastore_pool:post_async(Bucket, write,
+        {delete_doc_direct, [ModelConfig, Doc]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -880,7 +884,8 @@ to_binary(Term) ->
 -spec save_revision(model_behaviour:model_config(), binary(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save_revision(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSave) ->
-    datastore_pool:post_sync(write, {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
+    datastore_pool:post_sync(BucketOverride, write,
+        {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -891,7 +896,8 @@ save_revision(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSav
 -spec save_revision_asynch(model_behaviour:model_config(), binary(), datastore:document()) ->
     reference().
 save_revision_asynch(#model_config{} = ModelConfig, BucketOverride, #document{} = ToSave) ->
-    datastore_pool:post_async(write, {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
+    datastore_pool:post_async(BucketOverride, write,
+        {save_revision_direct, [ModelConfig, BucketOverride, ToSave]}).
 
 %%%===================================================================
 %%% Internal functions
