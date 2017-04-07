@@ -172,7 +172,7 @@ commit({ModifiedKeys, []}, #state{model_config = MC, current_value = CV,
     [] ->
       true;
     _ ->
-      {false, NotSaved}
+      {false, {NotSaved, []}}
   end;
 commit({ModifiedKeys, ResolvedChanges}, #state{model_config = MC, current_value = CV,
   flush_driver = Driver, link_proc = true} = State) ->
