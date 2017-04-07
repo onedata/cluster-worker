@@ -66,7 +66,7 @@ handle_link_messages(Messages, CurrentValue, Driver, FD,
         {ok, _} ->
           ok;
         RErr ->
-          throw({{restore, K,  V, RErr}, CurrentValue, []})
+          throw({{restore, K,  V, RErr}, CurrentValue, {[], []}})
       end
   end, Restored),
 
