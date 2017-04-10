@@ -502,7 +502,7 @@ flush_links() ->
     put(get_flush_response, {error, {not_found, mc}}),
 
     ?assert(memory_store_driver:commit(MChanges2, NewState4)),
-    ?assertMatch({false, [{x, V6}]}, memory_store_driver:commit(MChanges2,
+    ?assertMatch({false, {[{x, V6}], []}}, memory_store_driver:commit(MChanges2,
         NewState4#state{current_value = [Check7, {{x, V6}, [error]}, Check5]})),
 
     put(get_last_response, {error, {not_found, model}}),
