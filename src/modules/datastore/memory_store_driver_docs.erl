@@ -35,7 +35,7 @@
     CurrentValue :: model_behaviour:value_doc(), Driver :: atom(), FD :: atom(),
     ModelConfig :: model_behaviour:model_config(), Key :: datastore:ext_key()) ->
   {AnsList :: list(), NewCurrentValue :: model_behaviour:value_doc(),
-    Status :: ok | to_save} | no_return().
+    Status :: memory_store_driver:change()} | no_return().
 handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
   {CurrentValue, Restored} = case CurrentValue0 of
     undefined ->
@@ -62,9 +62,14 @@ handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
 
   AnsList = map_ans_list(Key, lists:reverse(OpAnsReversed)),
 
-  case NewValue =/= DiskValue of
+  case NewValue =/= CurrentValue of
     true ->
-      {AnsList, NewValue, to_save};
+      case DiskValue =/= CurrentValue of
+        true ->
+          {AnsList, NewValue, {to_save, DiskValue}};
+        _ ->
+          {AnsList, NewValue, to_save}
+      end;
     _ ->
       {AnsList, NewValue, ok}
   end.
@@ -98,18 +103,24 @@ clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec handle_message(Messages :: model_behaviour:message(),
     CurrentValue :: model_behaviour:value_doc(), Driver :: atom(), FD :: atom(),
-    ModelConfig :: model_behaviour:model_config()) -> {ok | disk_save| memory_restore,
-  NewCurrentValue :: model_behaviour:value_doc()} | {error, term()}.
+    ModelConfig :: model_behaviour:model_config()) -> {ok | memory_restore,
+  NewCurrentValue :: model_behaviour:value_doc()} | {disk_save,
+  NewCurrentValue :: model_behaviour:value_doc(), DiskAction :: term()} |{error, term()}.
 handle_message({save, [Document]}, _CurrentValue, _Driver, _FD, _ModelConfig) ->
   {ok, Document};
 handle_message({force_save, Args}, CurrentValue, _Driver, FD, ModelConfig) ->
-  case apply(FD, force_save, [ModelConfig | Args]) of
-    {{ok, _}, not_changed} ->
+  [Bucket, ToSave] = case Args of
+    [TS] ->
+      [FD:select_bucket(ModelConfig, TS), TS];
+    _ ->
+      Args
+  end,
+  case memory_store_driver:resolve_conflict(ModelConfig, FD, ToSave) of
+    not_changed ->
       {ok, CurrentValue};
-    {{ok, _}, Document} ->
-      % TODO - memory store driver understands revisions
-      {disk_save, Document#document{rev = undefined}};
-    {Error, _} ->
+    {#document{} = Document, ToDel} ->
+      {disk_save, Document#document{rev = undefined}, {Document, Bucket, ToDel}};
+    Error ->
       Error
   end;
 handle_message({create, [Document]}, not_found, _Driver, _FD, _ModelConfig) ->
@@ -251,8 +262,8 @@ translate_handle_ans(OpAns, TmpValue, TmpDiskValue, TmpRestoreMem) ->
     {ok, false} -> {TmpValue, TmpDiskValue, TmpRestoreMem};
     {ok, NewTmpValue} -> {NewTmpValue, TmpDiskValue, TmpRestoreMem};
     {error, {not_found, _}} -> {not_found, TmpDiskValue, TmpRestoreMem};
-    {disk_save, #document{deleted = true}} -> {not_found, not_found, TmpRestoreMem};
-    {disk_save, SavedValue} -> {SavedValue, SavedValue, TmpRestoreMem};
+    % Newer forceSave will override disk action (its has newer revisions)
+    {disk_save, SavedValue, DiskAction} -> {SavedValue, DiskAction, TmpRestoreMem};
     {memory_restore, RestoredValue} -> {RestoredValue, TmpDiskValue, true};
     _ -> {TmpValue, TmpDiskValue, TmpRestoreMem}
   end.
@@ -273,7 +284,7 @@ map_ans_list(Key, List) ->
     ({{get, _}, {memory_restore, GetAns}}) -> {ok, GetAns};
     ({{force_save, _}, {ok, _}}) -> ok;
     ({_, {ok, _}}) -> {ok, Key};
-    ({_, {disk_save, _}}) -> ok;
+    ({_, {disk_save, _, _}}) -> ok;
     ({_, Err}) -> Err
   end, List).
 
