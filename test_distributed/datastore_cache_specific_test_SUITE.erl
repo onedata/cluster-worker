@@ -1432,7 +1432,7 @@ disable_cache_control_and_set_dump_delay(Workers, Delay) ->
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, Delay)),
         % TODO - delete next line
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, Delay)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay, 1000)),
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay, 1000)),
         ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop, 0))
     end, Workers).
 

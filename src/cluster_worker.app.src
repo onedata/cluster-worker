@@ -45,8 +45,8 @@
             %% Memory size which stores information about worker load
             {worker_load_memory_size, 1000},
             %% Memory usage level above which caches will be cleared
-            {node_mem_ratio_to_clear_cache, 50},
-            {erlang_mem_to_clear_cache_mb, 500},
+            {node_mem_ratio_to_clear_cache, 90},
+            {erlang_mem_to_clear_cache_mb, 5000},
             %% Memory clearing will be stopped if memory usage less than {mem_clearing_ratio_to_stop}% clearing levels
             {mem_clearing_ratio_to_stop, 75},
             %% Time to wait before memory check during clearing procedure
@@ -55,15 +55,15 @@
             {tp_proc_terminate_clear_memory, true},
 
             %% Memory percent that results in blocking operations on mnesia
-            {throttling_block_mem_error_ratio, 80},
+            {throttling_block_mem_error_ratio, 95},
             %% Number of tp processes to reduce tp process idle time
             {throttling_reduce_idle_time_memory_proc_number, 1000},
             %% Number of tp processes to introduce delay
             {throttling_start_memory_proc_number, 30000},
             %% Number of tp processes to start throttling
-            {throttling_max_memory_proc_number, 100000},
+            {throttling_max_memory_proc_number, 150000},
             %% Number of tp processes allowed when throttling blocks actions
-            {throttling_block_memory_proc_number, 50000},
+            {throttling_block_memory_proc_number, 150000},
             %% Size of couch queue to start throttling
             {throttling_db_queue_limit, 10000},
             %% Size of couch queue to introduce delay
@@ -201,9 +201,9 @@
             %% Size of a datastore worker pool
             {datastore_pool_size, 5},
             %% Max number of requests a pool worker may aggregate
-            {datastore_pool_queue_size, 25},
+            {datastore_pool_batch_size, 25},
             %% Max delay in milliseconds before a pool worker queue is flushed
-            {datastore_pool_queue_flush_delay, 5000},
+            {datastore_pool_batch_delay, 500},
             %% Range of port numbers for a CouchBase gateway API port
             {couchbase_gateway_api_port_range, {12000, 12999}},
             %% Range of port numbers for a CouchBase gateway admin port
