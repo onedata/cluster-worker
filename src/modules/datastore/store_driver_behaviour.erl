@@ -23,7 +23,9 @@
 %% Initializes given driver locally (this method is executed per-node).
 %% @end
 %%--------------------------------------------------------------------
--callback init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
+% TODO - new behaviour for such operation
+% TODO - new behaviour for memory store drivers (mnesia, ets)
+%%-callback init_driver(worker_host:plugin_state()) -> {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 
 
 %%--------------------------------------------------------------------
@@ -31,7 +33,7 @@
 %% Initializes given bucket locally (this method is executed per-node).
 %% @end
 %%--------------------------------------------------------------------
--callback init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
+%%-callback init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
 
 
 %%--------------------------------------------------------------------
@@ -115,7 +117,7 @@
 %% Checks driver state.
 %% @end
 %%--------------------------------------------------------------------
--callback healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
+%%-callback healthcheck(WorkerState :: term()) -> ok | {error, Reason :: term()}.
 
 
 %%--------------------------------------------------------------------

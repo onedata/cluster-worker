@@ -20,7 +20,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([handle_messages/6, clear/3]).
+-export([handle_messages/6, clear/3, update/2]).
 
 %%%===================================================================
 %%% API functions
@@ -51,7 +51,7 @@ handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
 
   {NewValue, DiskValue, RestoreMem, OpAnsReversed} =
     lists:foldl(fun(M, {TmpValue, TmpDiskValue, TmpRestoreMem, AnsList}) ->
-    OpAns = handle_message(M, TmpValue, Driver, FD, ModelConfig),
+    OpAns = handle_message(M, TmpValue, FD, ModelConfig),
     {NTV, NDV, NRM} =
       translate_handle_ans(OpAns, TmpValue, TmpDiskValue, TmpRestoreMem),
     {NTV, NDV, NRM, [{M, OpAns} | AnsList]}
@@ -81,10 +81,9 @@ handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec clear(Driver :: atom(), ModelConfig :: model_behaviour:model_config(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
+clear(Driver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
   % TODO - race at delete
-  case caches_controller:save_consistency_info(
-    memory_store_driver:driver_to_level(Driver), MN, Key) of
+  case caches_controller:save_consistency_info(memory_store_driver:main_level(Level), MN, Key) of
     true ->
       apply(Driver, delete, [ModelConfig, Key, ?PRED_ALWAYS]);
     _ ->
@@ -102,13 +101,13 @@ clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_message(Messages :: model_behaviour:message(),
-    CurrentValue :: model_behaviour:value_doc(), Driver :: atom(), FD :: atom(),
+    CurrentValue :: model_behaviour:value_doc(), FD :: atom(),
     ModelConfig :: model_behaviour:model_config()) -> {ok | memory_restore,
   NewCurrentValue :: model_behaviour:value_doc()} | {disk_save,
   NewCurrentValue :: model_behaviour:value_doc(), DiskAction :: term()} |{error, term()}.
-handle_message({save, [Document]}, _CurrentValue, _Driver, _FD, _ModelConfig) ->
+handle_message({save, [Document]}, _CurrentValue, _FD, _ModelConfig) ->
   {ok, Document};
-handle_message({force_save, Args}, CurrentValue, _Driver, FD, ModelConfig) ->
+handle_message({force_save, Args}, CurrentValue, FD, ModelConfig) ->
   [Bucket, ToSave] = case Args of
     [TS] ->
       [FD:select_bucket(ModelConfig, TS), TS];
@@ -123,16 +122,16 @@ handle_message({force_save, Args}, CurrentValue, _Driver, FD, ModelConfig) ->
     Error ->
       Error
   end;
-handle_message({create, [Document]}, not_found, _Driver, _FD, _ModelConfig) ->
+handle_message({create, [Document]}, not_found, _FD, _ModelConfig) ->
   {ok, Document};
-handle_message({create, [_Document]}, _CurrentValue, _Driver, _FD, _ModelConfig) ->
+handle_message({create, [_Document]}, _CurrentValue, _FD, _ModelConfig) ->
   {error, already_exists};
-handle_message({update, [_Key, _Diff]}, not_found, _Driver, _FD,
+handle_message({update, [_Key, _Diff]}, not_found, _FD,
     #model_config{name = ModelName}) ->
   {error, {not_found, ModelName}};
-handle_message({update, [_Key, Diff]}, CurrentValue, Driver, _FD, _ModelConfig) ->
+handle_message({update, [_Key, Diff]}, CurrentValue, _FD, _ModelConfig) ->
   try
-    case apply(Driver, update, [CurrentValue#document.value, Diff]) of
+    case ?MODULE:update(CurrentValue#document.value, Diff) of
       {ok, V2} ->
         {ok, CurrentValue#document{value = V2}};
       Error ->
@@ -143,13 +142,12 @@ handle_message({update, [_Key, Diff]}, CurrentValue, Driver, _FD, _ModelConfig) 
     throw:Thrown ->
       {throw, Thrown}
   end;
-handle_message({create_or_update, [Document, _Diff]}, not_found, _Driver, _FD,
+handle_message({create_or_update, [Document, _Diff]}, not_found, _FD,
     _ModelConfig) ->
   {ok, Document};
-handle_message({create_or_update, [_Document, Diff]}, CurrentValue, Driver, _FD,
-    _ModelConfig) ->
+handle_message({create_or_update, [_Document, Diff]}, CurrentValue, _FD, _ModelConfig) ->
   try
-    case apply(Driver, update, [CurrentValue#document.value, Diff]) of
+    case ?MODULE:update(CurrentValue#document.value, Diff) of
       {ok, V2} ->
         {ok, CurrentValue#document{value = V2}};
       Error ->
@@ -160,9 +158,9 @@ handle_message({create_or_update, [_Document, Diff]}, CurrentValue, Driver, _FD,
     throw:Thrown ->
       {throw, Thrown}
   end;
-handle_message({delete, [_Key, _Pred]}, not_found, _Driver, _FD, _ModelConfig) ->
+handle_message({delete, [_Key, _Pred]}, not_found, _FD, _ModelConfig) ->
   {ok, not_found};
-handle_message({delete, [_Key, Pred]}, CurrentValue, _Driver, _FD, _ModelConfig) ->
+handle_message({delete, [_Key, Pred]}, CurrentValue, _FD, _ModelConfig) ->
   try
     case Pred() of
       true ->
@@ -175,13 +173,13 @@ handle_message({delete, [_Key, Pred]}, CurrentValue, _Driver, _FD, _ModelConfig)
     throw:Thrown ->
       {throw, Thrown}
   end;
-handle_message({get, [_Key]}, not_found, _Driver, _FD, #model_config{name = ModelName}) ->
+handle_message({get, [_Key]}, not_found, _FD, #model_config{name = ModelName}) ->
   {error, {not_found, ModelName}};
-handle_message({get, [_Key]}, CurrentValue, _Driver, _FD, _ModelConfig) ->
+handle_message({get, [_Key]}, CurrentValue, _FD, _ModelConfig) ->
   {memory_restore, CurrentValue};
-handle_message({exists, [_Key]}, not_found, _Driver, _FD, _ModelConfig) ->
+handle_message({exists, [_Key]}, not_found, _FD, _ModelConfig) ->
   {ok, false};
-handle_message({exists, [_Key]}, CurrentValue, _Driver, _FD, _ModelConfig) ->
+handle_message({exists, [_Key]}, CurrentValue, _FD, _ModelConfig) ->
   {memory_restore, CurrentValue}.
 
 %%--------------------------------------------------------------------
@@ -202,11 +200,10 @@ get_from_memory(Driver, undefined, ModelConfig, Key) ->
     Other ->
       Other
   end;
-get_from_memory(Driver, FlushDriver, #model_config{name = MN} = ModelConfig, Key) ->
+get_from_memory(Driver, FlushDriver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
   case apply(Driver, get, [ModelConfig, Key]) of
     {error, {not_found, _}} ->
-      case caches_controller:check_cache_consistency(
-        memory_store_driver:driver_to_level(Driver), MN) of
+      case caches_controller:check_cache_consistency(memory_store_driver:main_level(Level), MN) of
         {ok, _, _} ->
           {not_found, false};
         % TODO - simplify memory monitoring
@@ -329,3 +326,17 @@ apply_at_memory_store(ModelConfig, Driver, Key,
           end
       end
   end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Updates documents value.
+%% @end
+%%--------------------------------------------------------------------
+-spec update(OldValue :: datastore:value(), Diff :: datastore:document_diff()) ->
+  {ok, datastore:value()} | datastore:update_error().
+update(OldValue, Diff) when is_map(Diff) ->
+  NewValue = maps:merge(datastore_utils:shallow_to_map(OldValue), Diff),
+  {ok, datastore_utils:shallow_to_record(NewValue)};
+update(OldValue, Diff) when is_function(Diff) ->
+  Diff(OldValue).

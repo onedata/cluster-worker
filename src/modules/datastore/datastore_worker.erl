@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("timeouts.hrl").
+-include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -38,14 +39,10 @@ init(_Args) ->
     DBNodes = datastore_config:db_nodes(),
 
     State = #{db_nodes => DBNodes},
-    lists:foreach(fun(Driver) ->
-        DriverMod = datastore:driver_to_module(Driver),
-        DriverMod:init_driver(State)
-    end, [
-        ?LOCAL_CACHE_DRIVER,
-        ?DISTRIBUTED_CACHE_DRIVER,
-        ?PERSISTENCE_DRIVER
-    ]),
+    PersistenceDriverMod = datastore:driver_to_module(?PERSISTENCE_DRIVER),
+    PersistenceDriverMod:init_driver(State),
+    ?LOCAL_SLAVE_DRIVER:init_driver(State),
+    ?GLOBAL_SLAVE_DRIVER:init_driver(State),
 
     State2 = lists:foldl(fun(Model, StateAcc) ->
         #model_config{name = RecordName} = ModelConfig = Model:model_init(),
@@ -72,8 +69,6 @@ handle(ping) ->
 handle(healthcheck) ->
     State = worker_host:state_to_map(?MODULE),
     PersistenceModule = datastore:driver_to_module(?PERSISTENCE_DRIVER),
-    LocalCacheModule = datastore:driver_to_module(?LOCAL_CACHE_DRIVER),
-    GlobalCacheModule = datastore:driver_to_module(?DISTRIBUTED_CACHE_DRIVER),
 
     lists:foldl(fun
         (_, {error, Reason}) ->
@@ -89,8 +84,8 @@ handle(healthcheck) ->
     end, ok, [
         {datastore_state_init, datastore:healthcheck()},
         {?PERSISTENCE_DRIVER, catch PersistenceModule:healthcheck(State)},
-        {?LOCAL_CACHE_DRIVER, catch LocalCacheModule:healthcheck(State)},
-        {?DISTRIBUTED_CACHE_DRIVER, catch GlobalCacheModule:healthcheck(State)}
+        {?LOCAL_SLAVE_DRIVER, catch ?LOCAL_SLAVE_DRIVER:healthcheck(State)},
+        {?GLOBAL_SLAVE_DRIVER, catch ?GLOBAL_SLAVE_DRIVER:healthcheck(State)}
     ]);
 
 handle({driver_call, Module, Method, Args}) ->

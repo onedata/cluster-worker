@@ -21,7 +21,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 % Driver mock functions
--export([save/2, update/2, get/2, delete/3]).
+-export([save/2, get/2, delete/3]).
 -export([add_links/3, delete_links/4, get_link_doc/2, save_link_doc/2, delete_link_doc/2]).
 
 %%%===================================================================
@@ -549,11 +549,15 @@ setup() ->
     meck:new(consistent_hasing),
     meck:expect(consistent_hasing, get_node, fun(_) -> node() end),
 
+    meck:new(memory_store_driver_docs, [passthrough]),
+    meck:expect(memory_store_driver_docs, update, fun(OldValue, _Diff) -> {ok, OldValue ++ "u"} end),
+
     ok.
 
 teardown(_) ->
     meck:unload(consistent_hasing),
     meck:unload(caches_controller),
+    meck:unload(memory_store_driver_docs),
     ok.
 
 %%%===================================================================
@@ -564,9 +568,6 @@ save(_ModelConfig, #document{value = "error"}) ->
     {error, error};
 save(_ModelConfig, Document) ->
     {ok, Document#document.key}.
-
-update(OldValue, _Diff) ->
-    {ok, OldValue ++ "u"}.
 
 get(_ModelConfig, _Key) ->
     get(get_response).

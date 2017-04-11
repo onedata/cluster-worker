@@ -12,13 +12,14 @@
 -ifndef(DATASTORE_ENGINE_HRL).
 -define(DATASTORE_ENGINE_HRL, 1).
 
--include("modules/datastore/datastore_common_internal.hrl").
 -include("global_definitions.hrl").
 
 %% Drivers' names
 -define(PERSISTENCE_DRIVER, persistence_driver_module).
--define(LOCAL_CACHE_DRIVER, ets_cache_driver).
--define(DISTRIBUTED_CACHE_DRIVER, mnesia_cache_driver).
+-define(MEMORY_DRIVER, memory_store_driver_router).
 
+%% Module that handle direct operations on memory stores
+-define(GLOBAL_SLAVE_DRIVER, mnesia_cache_driver).
+-define(LOCAL_SLAVE_DRIVER, ets_cache_driver).
 
 -endif.

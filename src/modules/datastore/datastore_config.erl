@@ -23,7 +23,6 @@
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
     auxiliary_cache_controller,
-    cache_controller,
     task_pool,
     cache_consistency_controller,
     cached_identity,
@@ -129,7 +128,7 @@ filter_models_by_level(Level, Models) ->
 %% @end
 %%--------------------------------------------------------------------
 models_potentially_cached() ->
-    models() -- [cache_controller, auxiliary_cache_controller, node_management].
+    models() -- [auxiliary_cache_controller, node_management].
 
 
 %%--------------------------------------------------------------------
