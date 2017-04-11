@@ -349,7 +349,7 @@ clear_cache_by_time_windows(_StoreType, []) ->
 clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   caches_controller:delete_old_keys(StoreType, TimeWindow),
   {ok, DumpDelay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay),
+  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay),
   {ok, CTTRS} = application:get_env(?CLUSTER_WORKER_APP_NAME, clearing_time_to_refresh_stats),
   SleepTime = DumpDelay + AggTime + CTTRS,
   timer:sleep(SleepTime),
@@ -968,6 +968,7 @@ count_clear_acc(Count, BatchNum) ->
 verify_tp() ->
   {ok, StartNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
   {ok, DelayNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number),
+  {ok, MaxProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
 
   ProcNum = tp:get_processes_number(),
   {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
@@ -985,6 +986,8 @@ verify_tp() ->
   application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
 
   TPAction = case ProcNum of
+    PN when PN >= (MaxProcNum * 4 / 5) ->
+      ?BLOCK_THROTTLING;
     PN when PN >= DelayNum ->
       ?LIMIT_THROTTLING;
     DP when DP >= (DelayNum * 4 / 5) ->
@@ -1006,7 +1009,7 @@ verify_db() ->
   {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit),
   {ok, Start} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size),
 
-  QueueSize = datastore_pool:queue_size(),
+  QueueSize = datastore_pool:request_queue_size(),
 
   DBAction = case QueueSize of
     DP when DP >= Limit ->

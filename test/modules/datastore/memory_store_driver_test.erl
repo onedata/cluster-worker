@@ -221,7 +221,7 @@ single_op_link() ->
     Msg = {add_links, [Key, V]},
     Ans2 = memory_store_driver:modify([Msg], State),
     Check = {{x, V}, V},
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans2),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans2),
     {_, _, #state{current_value = CV} = NewState} = Ans2,
     ?assertEqual([Check], CV),
 
@@ -229,7 +229,7 @@ single_op_link() ->
     Msg2 = {add_links, [Key, V2]},
     Ans3 = memory_store_driver:modify([Msg2], NewState),
     Check2 = {{x, V2}, V2},
-    ?assertMatch({[ok], {true, [{x, V2}]}, _}, Ans3),
+    ?assertMatch({[ok], {true, {[{x, V2}], []}}, _}, Ans3),
     {_, _, #state{current_value = CV2} = NewState2} = Ans3,
     ?assertEqual([Check2, Check], CV2),
 
@@ -237,7 +237,7 @@ single_op_link() ->
     Msg3 = {delete_links, [Key, V3, fun() -> true end]},
     Ans4 = memory_store_driver:modify([Msg3], NewState2),
     Check3 = {{y, V3}, not_found},
-    ?assertMatch({[ok], {true, [{y, V3}]}, _}, Ans4),
+    ?assertMatch({[ok], {true, {[{y, V3}], []}}, _}, Ans4),
     {_, _, #state{current_value = CV3} = NewState3} = Ans4,
     ?assertEqual([Check3, Check2, Check], CV3),
 
@@ -251,12 +251,12 @@ single_op_link() ->
     Msg5 = {add_links, [Key, V5]},
     Ans6 = memory_store_driver:modify([Msg5], NewState4),
     Check6 = {{x, V5}, V5},
-    ?assertMatch({[ok], {true, [{x, V5}]}, _}, Ans6),
+    ?assertMatch({[ok], {true, {[{x, V5}], []}}, _}, Ans6),
     {_, _, #state{current_value = CV5} = NewState5} = Ans6,
     ?assertEqual([Check6, Check3, Check2, Check], CV5),
 
     Ans7 = memory_store_driver:modify([Msg], NewState5),
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans7),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans7),
     {_, _, #state{current_value = CV6} = NewState6} = Ans7,
     ?assertEqual([Check, Check6, Check3, Check2], CV6),
 
@@ -291,7 +291,7 @@ many_op_link() ->
 
     Ans2 = memory_store_driver:modify(Msgs, State),
     Check = [{x, [l1,l2,l4,l5]}, {y, [l2, l4]}, {y, [l2,l6]}, {x, [l1,l7]}],
-    ?assertMatch({[ok, ok, ok, {error, error}, {error, error}, ok, ok, ok, ok], {true, Check}, _}, Ans2),
+    ?assertMatch({[ok, ok, ok, {error, error}, {error, error}, ok, ok, ok, ok], {true, {Check, []}}, _}, Ans2),
     {_, _, #state{current_value = CV} = NewState} = Ans2,
     CheckV = [{{x, [l1,l2,l4,l5]}, [l1,l2,l4,l5]}, {{y, [l2, l4]}, not_found}, {{y, [l2,l6]}, not_found}, {{x, [l1,l7]}, [l1,l7]}],
     ?assertEqual(lists:reverse(CheckV), CV), % reverse due to del error value
@@ -310,7 +310,7 @@ many_op_link() ->
 
     Ans4 = memory_store_driver:modify(Msgs3, State),
     ?assertMatch({[{error, error2}, {error, error2}, {error, error2}, {error, error2}, {error, error2}, {error, error2},
-        {error, error2}, {error, error2}, {error, error2}], {true, Check}, _}, Ans4),
+        {error, error2}, {error, error2}, {error, error2}], {true, {Check, []}}, _}, Ans4),
     {_, _, #state{current_value = CV3}} = Ans4,
 % TODO - check
 %%    ?assertEqual(CheckV, CV3),
@@ -384,7 +384,30 @@ flush_doc() ->
 
     ?assert(memory_store_driver:commit(Changes4, NewState5)),
 
-    ?assertEqual(ok, memory_store_driver:terminate(NewState5)).
+    ?assertEqual(ok, memory_store_driver:terminate(NewState5)),
+
+    put(get_last_response, {error, {not_found, model}}),
+    Msg15 = {force_save, [#document{key = Key, value = "fsv", rev = {1, [1]}}]},
+    Ans16 = memory_store_driver:modify([Msg15], State),
+    ?assertMatch({[ok], {true, {to_save,
+        {#document{key = Key, value = "fsv"}, b, false}}}, _}, Ans16),
+    {_, {true, Changes16}, #state{current_value = CV15} = FlushState16} = Ans16,
+    ?assertEqual("fsv", CV15#document.value),
+    ?assert(memory_store_driver:commit(Changes16, FlushState16)),
+
+    put(get_last_response, {ok, #document{key = Key, value = "fgu", rev = <<"2-2">>}}),
+    Ans17 = memory_store_driver:modify([Msg15], NewState2),
+    ?assertMatch({[ok], false, _}, Ans17),
+    {_, _, #state{current_value = CV16}} = Ans17,
+    ?assertEqual("fgu", CV16#document.value),
+
+    Msg17 = {force_save, [#document{key = Key, value = "fsv", rev = {2, [<<"3">>]}}]},
+    Ans18 = memory_store_driver:modify([Msg17], NewState2),
+    ?assertMatch({[ok], {true, {to_save, {#document{key = Key, value = "fsv"},
+        b, #document{key = Key, value = "fgu", rev = <<"2-2">>}}}}, _}, Ans18),
+    {_, {true, Changes18}, #state{current_value = CV17} = FlushState18} = Ans18,
+    ?assertEqual("fsv", CV17#document.value),
+    ?assert(memory_store_driver:commit(Changes18, FlushState18)).
 
 flush_links() ->
     MC = #model_config{},
@@ -402,7 +425,7 @@ flush_links() ->
     Msg = {add_links, [Key, V]},
     Ans2 = memory_store_driver:modify([Msg], State),
     Check = {{x, V}, V},
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans2),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans2),
     {_, _, #state{current_value = CV}} = Ans2,
     ?assertEqual([Check], CV),
 
@@ -413,7 +436,7 @@ flush_links() ->
     V2 = [l1, l2, ggg],
     Ans3 = memory_store_driver:modify([Msg], State),
     Check2 = {{x, V}, V2},
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans3),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans3),
     {_, _, #state{current_value = CV2}} = Ans3,
     ?assertEqual([Check2], CV2),
 
@@ -422,7 +445,7 @@ flush_links() ->
     put(get_flush_response, {ok, #document{value = [ggg2]}}),
 
     Ans4 = memory_store_driver:modify([Msg], State),
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans4),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans4),
     {_, _, #state{current_value = CV3}} = Ans4,
     ?assertEqual([Check], CV3),
 
@@ -435,7 +458,7 @@ flush_links() ->
     V4 = [l1, l2, ggg2],
     Ans5 = memory_store_driver:modify([Msg], State),
     Check4 = {{x, V}, V4},
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans5),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans5),
     {_, {true, Changes}, #state{current_value = CV4} = NewState} = Ans5,
     ?assertEqual([Check4], CV4),
 
@@ -444,7 +467,7 @@ flush_links() ->
     V5 = [l1, l2, l1, l2, ggg2],
     Ans6 = memory_store_driver:modify([Msg], NewState),
     Check5 = {{x, V}, V5},
-    ?assertMatch({[ok], {true, [{x, V}]}, _}, Ans6),
+    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans6),
     {_, {true, Changes2}, #state{current_value = CV5} = NewState2} = Ans6,
     ?assertEqual([Check5], CV5),
 
@@ -458,31 +481,54 @@ flush_links() ->
     Msg6 = {add_links, [Key, V6]},
     Ans7 = memory_store_driver:modify([Msg6], NewState2),
     Check6 = {{x, V6}, V6},
-    ?assertMatch({[ok], {true, [{x, V6}]}, _}, Ans7),
+    ?assertMatch({[ok], {true, {[{x, V6}], []}}, _}, Ans7),
     {_, {true, Changes3}, #state{current_value = CV6} = NewState3} = Ans7,
     ?assertEqual([Check6, Check5], CV6),
 
-    ?assertMatch([{x, V6}, {x, V}], memory_store_driver:merge_changes(Changes2, Changes3)),
+    ?assertMatch({[{x, V6}, {x, V}], []}, memory_store_driver:merge_changes(Changes2, Changes3)),
     MChanges = memory_store_driver:merge_changes(Changes2, Changes3),
 
     V7 = [l2, l4],
     Msg7 = {delete_links, [Key, V7, fun() -> true end]},
     Ans8 = memory_store_driver:modify([Msg7], NewState3),
     Check7 = {{y, V7}, not_found},
-    ?assertMatch({[ok], {true, [{y, V7}]}, _}, Ans8),
+    ?assertMatch({[ok], {true, {[{y, V7}], []}}, _}, Ans8),
     {_, {true, Changes4}, #state{current_value = CV7} = NewState4} = Ans8,
     ?assertEqual([Check7, Check6, Check5], CV7),
 
-    ?assertMatch([{y, V7}, {x, V6}, {x, V}], memory_store_driver:merge_changes(MChanges, Changes4)),
+    ?assertMatch({[{y, V7}, {x, V6}, {x, V}], []}, memory_store_driver:merge_changes(MChanges, Changes4)),
     MChanges2 = memory_store_driver:merge_changes(MChanges, Changes4),
 
     put(get_flush_response, {error, {not_found, mc}}),
 
     ?assert(memory_store_driver:commit(MChanges2, NewState4)),
-    ?assertMatch({false, [{x, V6}]}, memory_store_driver:commit(MChanges2,
+    ?assertMatch({false, {[{x, V6}], []}}, memory_store_driver:commit(MChanges2,
         NewState4#state{current_value = [Check7, {{x, V6}, [error]}, Check5]})),
 
-    ok.
+    put(get_last_response, {error, {not_found, model}}),
+    V15 = [llll],
+    Msg15 = {force_save, [#document{key = Key, value = V15, rev = {1, [1]}}]},
+    Ans16 = memory_store_driver:modify([Msg15], State),
+    ?assertMatch({[ok], {true, {[Key], [{Key,
+        {#document{key = Key, value = V15}, b, false}}]}}, _}, Ans16),
+    {_, {true, Changes16}, #state{current_value = CV15} = FlushState16} = Ans16,
+    ?assertEqual([{k, V15}], CV15),
+    ?assert(memory_store_driver:commit(Changes16, FlushState16)),
+
+    put(get_last_response, {ok, #document{key = Key, value = "fgu", rev = <<"2-2">>}}),
+    Ans17 = memory_store_driver:modify([Msg15], NewState2),
+    ?assertMatch({[ok], false, _}, Ans17),
+    {_, _, #state{current_value = CV16}} = Ans17,
+    ?assertEqual([Check5], CV16),
+
+    put(get_last_response, {ok, #document{key = Key, value = "fgu", rev = <<"2-2">>}}),
+    Msg17 = {force_save, [#document{key = Key, value = V15, rev = {2, [<<"3">>]}}]},
+    Ans18 = memory_store_driver:modify([Msg17], NewState2),
+    ?assertMatch({[ok], {true, {[Key], [{Key, {#document{key = Key, value = V15},
+        b, #document{key = Key, value = "fgu", rev = <<"2-2">>}}}]}}, _}, Ans18),
+    {_, {true, Changes18}, #state{current_value = CV17} = FlushState18} = Ans18,
+    ?assertEqual([{k, V15}, Check5], CV17),
+    ?assert(memory_store_driver:commit(Changes18, FlushState18)).
 
 %%%===================================================================
 %%% Setup/teardown functions

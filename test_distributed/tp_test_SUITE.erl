@@ -183,7 +183,10 @@ run_multiple_parallel_requests_for_same_key_should_return_responses_base(Config)
         end, OpTimeout])
     end, Ids)),
 
-    receive_commit(Ids, ?config(commit_delay, Config)).
+    receive_commit(Ids, ?config(commit_delay, Config)),
+    {ok, Pid} = ?assertMatch({ok, _}, rpc:call(Worker, tp_router, get,
+        [?TP_KEY])),
+    stop_tp_server(Worker, Pid).
 
 tp_router_should_create_routing_entry(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),

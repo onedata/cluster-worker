@@ -21,7 +21,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 % Driver mock functions
--export([save/2, get/2, delete/3, get_link_doc/2, save_doc_asynch/2, save_doc_asynch_response/1, delete_link_doc/2]).
+-export([save/2, get/2, delete/3, get_link_doc/2, save_doc_asynch/2, asynch_response/1,
+    delete_doc_asynch/2, delete_doc/2, select_bucket/2, get_last/2, save_revision/3,
+    save_revision_asynch/3]).
 
 
 %%%===================================================================
@@ -46,12 +48,29 @@ get_link_doc(_ModelConfig, _Key) ->
 save_doc_asynch(_ModelConfig, Document) ->
     Document.
 
-save_doc_asynch_response(#document{value = [error]}) ->
+asynch_response(#document{value = [error]}) ->
     {error, error};
-save_doc_asynch_response(Document) ->
-    {ok, Document#document.key}.
+asynch_response(#document{} = Document) ->
+    {ok, Document#document.key};
+asynch_response(_) ->
+    ok.
 
-delete_link_doc(_ModelConfig, _Key) ->
+delete_doc_asynch(_ModelConfig, _Key) ->
     get(get_flush_response).
+
+delete_doc(_ModelConfig, _Key) ->
+    ok.
+
+select_bucket(_, _) ->
+    b.
+
+get_last(_, _) ->
+    get(get_last_response).
+
+save_revision(_, _, #document{key = Key}) ->
+    {ok, Key}.
+
+save_revision_asynch(_, _, #document{key = Key}) ->
+    {ok, Key}.
 
 -endif.

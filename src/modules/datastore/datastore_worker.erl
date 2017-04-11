@@ -157,14 +157,6 @@ supervisor_children_spec() ->
             modules => [couchbase_gateway_sup]
         },
         #{
-            id => datastore_pool,
-            start => {datastore_pool, start_link, []},
-            restart => permanent,
-            shutdown => timer:seconds(10),
-            type => worker,
-            modules => [datastore_pool]
-        },
-        #{
             id => datastore_pool_sup,
             start => {datastore_pool_sup, start_link, []},
             restart => permanent,
