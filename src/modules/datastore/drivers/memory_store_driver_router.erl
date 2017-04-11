@@ -469,7 +469,7 @@ force_save(ModelConfig, #document{key = Key} = ToSave) ->
 -spec force_link_save(model_behaviour:model_config(), datastore:document(),
     MainDocKey :: datastore:ext_key()) -> ok | datastore:generic_error().
 % TODO - use main doc key
-force_link_save(ModelConfig, #document{key = Key} = ToSave, MainDocKey) ->
+force_link_save(ModelConfig, ToSave, MainDocKey) ->
     deletage_link_call(force_save, ModelConfig, MainDocKey, [ToSave]).
 
 %%--------------------------------------------------------------------
@@ -742,8 +742,6 @@ execute(#model_config{name = ModelName, store_level = Level} = MC, Key, Link, Ms
     SD = get_slave_driver(Link, MC),
     TMInit = [SD, MC, Key, Persist, Link],
     TPKey = {ModelName, Key, Link, SD},
-    TMInit = [get_slave_driver(Link, MC), MC, Key, Persist, Link],
-    TPKey = {ModelName, Key, Link},
 
     Node = get_hashing_node(MC, Key),
     rpc:call(Node, tp, run_sync, [TPMod, TMInit, TPKey, Msg | InitExtension]).
