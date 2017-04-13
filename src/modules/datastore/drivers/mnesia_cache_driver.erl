@@ -88,9 +88,9 @@ init_bucket(_BucketName, Models, NodeToSync) ->
             TransactionTable = transaction_table_name(ModelName),
             case NodeToSync == Node of
                 true -> %% No mnesia nodes -> create new table
-                    create_table(Table, ModelName, [key | Fields], [Node]),
-                    create_table(LinkTable, links, [key | record_info(fields, links)], [Node]),
-                    create_table(TransactionTable, ModelName, [key | Fields], [Node]);
+                    create_table(Table, ModelName, get_fields(Fields), [Node]),
+                    create_table(LinkTable, links, get_fields(record_info(fields, links)), [Node]),
+                    create_table(TransactionTable, ModelName, get_fields(Fields), [Node]);
                 _ -> %% there is at least one mnesia node -> join cluster
                     expand_table(Table, Node, NodeToSync),
                     expand_table(LinkTable, Node, NodeToSync),
@@ -100,9 +100,9 @@ init_bucket(_BucketName, Models, NodeToSync) ->
                 Table = table_name(ModelName),
                 LinkTable = links_table_name(ModelName),
                 TransactionTable = transaction_table_name(ModelName),
-                create_table(Table, ModelName, [key | Fields], [Node]),
-                create_table(LinkTable, links, [key | record_info(fields, links)], [Node]),
-                create_table(TransactionTable, ModelName, [key | Fields], [Node])
+                create_table(Table, ModelName, get_fields(Fields), [Node]),
+                create_table(LinkTable, links, get_fields(record_info(fields, links)), [Node]),
+                create_table(TransactionTable, ModelName, get_fields(Fields), [Node])
         end, Models),
     ok.
 
@@ -113,9 +113,9 @@ init_bucket(_BucketName, Models, NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save(ModelConfig, #document{key = Key, value = Value} = _Document) ->
+save(ModelConfig, #document{key = Key} = Document) ->
     mnesia_run(?SAVE_ACTIVITY_TYPE, fun(_TrxType) ->
-        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write)
+        ok = mnesia:write(table_name(ModelConfig), translate_to_tuple(Document), write)
     end),
     {ok, Key}.
 
@@ -126,9 +126,9 @@ save(ModelConfig, #document{key = Key, value = Value} = _Document) ->
 %%--------------------------------------------------------------------
 -spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_link_doc(ModelConfig, #document{key = Key, value = Value}) ->
+save_link_doc(ModelConfig, #document{key = Key} = Document) ->
     mnesia_run(?SAVE_ACTIVITY_TYPE, fun(_TrxType) ->
-        ok = mnesia:write(links_table_name(ModelConfig), inject_key(Key, Value), write)
+        ok = mnesia:write(links_table_name(ModelConfig), translate_to_tuple(Document), write)
     end),
     {ok, Key}.
 
@@ -145,9 +145,9 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
             [] ->
                 {error, {not_found, ModelName}};
             [Value] ->
-                case memory_store_driver_docs:update(strip_key(Value), Diff) of
+                case memory_store_driver_docs:update(strip(Value), Diff) of
                     {ok, NewValue} ->
-                        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
+                        ok = mnesia:write(table_name(ModelConfig), update_value(Value, NewValue), write),
                         {ok, Key};
                     {error, Reason} ->
                         {error, Reason}
@@ -162,11 +162,11 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(ModelConfig, #document{key = Key, value = Value}) ->
+create(ModelConfig, #document{key = Key} = Document) ->
     mnesia_run(?SAVE_ACTIVITY_TYPE, fun(_TrxType) ->
         case mnesia:read(table_name(ModelConfig), Key) of
             [] ->
-                ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
+                ok = mnesia:write(table_name(ModelConfig), translate_to_tuple(Document), write),
                 {ok, Key};
             [_Record] ->
                 {error, already_exists}
@@ -180,16 +180,16 @@ create(ModelConfig, #document{key = Key, value = Value}) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(ModelConfig, #document{key = Key, value = Value}, Diff) ->
+create_or_update(ModelConfig, #document{key = Key} = Document, Diff) ->
     mnesia_run(?SAVE_ACTIVITY_TYPE, fun(_TrxType) ->
         case mnesia:read(table_name(ModelConfig), Key, write) of
             [] ->
-                ok = mnesia:write(table_name(ModelConfig), inject_key(Key, Value), write),
+                ok = mnesia:write(table_name(ModelConfig), translate_to_tuple(Document), write),
                 {ok, Key};
             [OldValue] ->
-                case memory_store_driver_docs:update(strip_key(OldValue), Diff) of
+                case memory_store_driver_docs:update(strip(OldValue), Diff) of
                     {ok, NewValue} ->
-                        ok = mnesia:write(table_name(ModelConfig), inject_key(Key, NewValue), write),
+                        ok = mnesia:write(table_name(ModelConfig), update_value(OldValue, NewValue), write),
                         {ok, Key};
                     {error, Reason} ->
                         {error, Reason}
@@ -217,7 +217,7 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
     end,
     case TmpAns of
         [] -> {error, {not_found, ModelName}};
-        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
+        [Value] -> {ok, translate_to_doc(Value)}
     end.
 
 %%--------------------------------------------------------------------
@@ -241,7 +241,7 @@ get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
     end,
     case TmpAns of
         [] -> {error, {not_found, ModelName}};
-        [Value] -> {ok, #document{key = Key, value = strip_key(Value)}}
+        [Value] -> {ok, translate_to_doc(Value)}
     end.
 
 %%--------------------------------------------------------------------
@@ -391,7 +391,7 @@ foreach_link(#model_config{} = ModelConfig, Key, Fun, AccIn) ->
 -spec list_next([term()] | '$end_of_table', term(), datastore:list_fun(), term()) ->
     {ok, Acc :: term()} | datastore:generic_error().
 list_next([Obj | R], Handle, Fun, AccIn) ->
-    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
+    Doc = translate_to_doc(Obj),
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
             list_next(R, Handle, Fun, NewAcc);
@@ -847,35 +847,58 @@ expand_table(TabName, Node, NodeToSync) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Inserts given key as second element of given tuple.
+%% Returns names of fields.
 %% @end
 %%--------------------------------------------------------------------
--spec inject_key(Key :: datastore:ext_key(), Tuple :: tuple()) -> NewTuple :: tuple().
-inject_key(Key, Tuple) when is_tuple(Tuple) ->
-    [RecordName | Fields] = tuple_to_list(Tuple),
-    list_to_tuple([RecordName | [Key | Fields]]).
+-spec get_fields(BasicFields :: [atom()]) -> [atom()].
+get_fields(BasicFields) ->
+    [key, rev | BasicFields].
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Strips second element of given tuple (reverses inject_key/2).
+%% Inserts additional fields to given tuple.
 %% @end
 %%--------------------------------------------------------------------
--spec strip_key(Tuple :: tuple()) -> NewTuple :: tuple().
-strip_key(Tuple) when is_tuple(Tuple) ->
-    [RecordName, _Key | Fields] = tuple_to_list(Tuple),
-    list_to_tuple([RecordName | Fields]).
+-spec translate_to_tuple(Doc :: datastore:document()) -> Tuple :: tuple().
+translate_to_tuple(#document{key = Key, rev = Rev, value = Value}) ->
+    [RecordName | Fields] = tuple_to_list(Value),
+    list_to_tuple([RecordName | [Key, Rev | Fields]]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns key of a tuple.
+%% Translates given tuple to doc (reverses inject/2) to doc.
+%% Returns doc.
 %% @end
 %%--------------------------------------------------------------------
--spec get_key(Tuple :: tuple()) -> Key :: term().
-get_key(Tuple) when is_tuple(Tuple) ->
-    [_RecordName, Key | _Fields] = tuple_to_list(Tuple),
-    Key.
+-spec translate_to_doc(Tuple :: tuple()) -> NewTuple :: tuple().
+translate_to_doc(Tuple) when is_tuple(Tuple) ->
+    [RecordName, Key, Rev | Fields] = tuple_to_list(Tuple),
+    #document{key = Key, rev = Rev, value = list_to_tuple([RecordName | Fields])}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Strips additional elements of given tuple (reverses inject/2).
+%% Returns value.
+%% @end
+%%--------------------------------------------------------------------
+-spec strip(Tuple :: tuple()) -> NewTuple :: tuple().
+strip(Tuple) when is_tuple(Tuple) ->
+    #document{value = V} = translate_to_doc(Tuple),
+    V.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Update fileds in tuple that describe whole doc.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_value(OldTuple :: tuple(), NewValue :: tuple()) -> NewTuple :: tuple().
+update_value(Tuple, NewValue) when is_tuple(Tuple) ->
+    Doc = translate_to_doc(Tuple),
+    translate_to_tuple(Doc#document{value = NewValue}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -1016,7 +1039,7 @@ list_dirty_next(_Table, '$end_of_table' = EoT, Fun, AccIn) ->
     {ok, NewAcc};
 list_dirty_next(Table, CurrentKey, Fun, AccIn) ->
     [Obj] = mnesia:dirty_read(Table, CurrentKey),
-    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
+    Doc = translate_to_doc(Obj),
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
             Next = mnesia:dirty_next(Table, CurrentKey),
@@ -1039,7 +1062,7 @@ list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
     {ok, NewAcc};
 list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
     [Obj] = mnesia:dirty_read(Table, datastore_utils:aux_key_to_key(CurrentKey)),
-    Doc = #document{key = get_key(Obj), value = strip_key(Obj)},
+    Doc = translate_to_doc(Obj),
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
             Next = IteratorFun(CurrentKey),

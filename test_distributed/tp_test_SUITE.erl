@@ -307,7 +307,7 @@ tp_server_should_call_terminate_callback_on_terminate(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, Pid} = start_tp_server(Worker),
     ?assertEqual(1, rpc:call(
-        Worker, meck, num_calls, [?TP_MODULE, terminate, [?TP_ARGS]]
+        Worker, meck, num_calls, [?TP_MODULE, terminate, [?TP_ARGS, '_']]
     ), 3, ?config(idle_timeout, Config)),
     stop_tp_server(Worker, Pid).
 
@@ -330,7 +330,7 @@ tp_server_should_terminate_when_idle_timeout_exceeded(Config) ->
     rpc:call(Worker, tp, run_sync, [?TP_MODULE, ?TP_ARGS, ?TP_KEY, request]),
     ?assertMatch({ok, _}, rpc:call(Worker, tp_router, get, [?TP_KEY])),
     ?assertEqual(1, rpc:call(
-        Worker, meck, num_calls, [?TP_MODULE, terminate, [?TP_ARGS]]
+        Worker, meck, num_calls, [?TP_MODULE, terminate, [?TP_ARGS, '_']]
     ), 3, ?config(idle_timeout, Config)).
 
 tp_server_should_terminate_on_exception(Config) ->
@@ -352,20 +352,20 @@ init_per_testcase(Case, Config) when
     init_per_testcase(?DEFAULT_CASE(Case), [
         {commit_fun, fun(Changes, _) ->
             Self ! {committed, Changes},
-            true
+            {true, []}
         end},
         {mock_opts, [no_history]}
         | Config
     ]);
 init_per_testcase(tp_server_should_forward_modify_exception = Case, Config) ->
     init_per_testcase(?DEFAULT_CASE(Case), [
-        {modify_fun, fun(_, _) ->
+        {modify_fun, fun(_Requests, _Data, _Rev) ->
             meck:exception(error, unexpected_error)
         end} | Config
     ]);
 init_per_testcase(tp_server_should_ignore_modify = Case, Config) ->
     init_per_testcase(?DEFAULT_CASE(Case), [
-        {modify_fun, fun(Requests, Data) ->
+        {modify_fun, fun(Requests, Data, _Rev) ->
             {Requests, false, Data}
         end} | Config
     ]);
@@ -375,8 +375,8 @@ init_per_testcase(tp_server_should_retry_commit_changes = Case, Config) ->
         {commit_fun, fun(Changes, _) ->
             Self ! {not_committed, Changes},
             case Changes of
-                [_] -> true;
-                _ -> {false, tl(Changes)}
+                [_] -> {true, []};
+                _ -> {{false, tl(Changes)}, []}
             end
         end},
         {commit_backoff_fun, fun(CommitDelay) ->
@@ -395,14 +395,14 @@ init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     CommitDelay = timer:seconds(1),
     IdleTimeout = timer:seconds(3),
-    ModifyFun = fun(Requests, Data) ->
+    ModifyFun = fun(Requests, Data, _Rev) ->
         Responses = lists:map(fun
             (Request) when is_function(Request, 0) -> Request();
             (Request) -> Request
         end, Requests),
         {Responses, {true, Responses}, Data}
     end,
-    CommitFun = fun(_Changes, _Data) -> true end,
+    CommitFun = fun(_Changes, _Data) -> {true, []} end,
     CommitBackoffFun = fun(NextCommitDelay) -> 2 * NextCommitDelay end,
     MergeChangesFun = fun(TpChanges, NextTpChanges) ->
         TpChanges ++ NextTpChanges
@@ -414,6 +414,7 @@ init_per_testcase(_Case, Config) ->
     test_utils:mock_expect(Workers, ?TP_MODULE, init, fun
         (Args) -> {ok, #tp_init{
             data = Args,
+            rev = [],
             min_commit_delay = CommitDelay,
             max_commit_delay = CommitDelay,
             idle_timeout = IdleTimeout
@@ -428,7 +429,7 @@ init_per_testcase(_Case, Config) ->
     test_utils:mock_expect(Workers, ?TP_MODULE, commit_backoff,
         proplists:get_value(commit_backoff_fun, Config, CommitBackoffFun)),
     test_utils:mock_expect(Workers, ?TP_MODULE, terminate, fun
-        (Data) -> Data
+        (Data, _Rev) -> Data
     end),
     [{commit_delay, CommitDelay}, {idle_timeout, IdleTimeout} | Config].
 

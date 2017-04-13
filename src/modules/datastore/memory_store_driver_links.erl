@@ -61,8 +61,7 @@ handle_link_messages(Messages, CurrentValue, Driver, FD,
   Restored = get_value(restore_cache),
 
   lists:foreach(fun({K,  V}) ->
-      case apply(Driver, save_link_doc, [ModelConfig,
-        #document{key = K, value = V}]) of
+      case apply(Driver, save_link_doc, [ModelConfig, V]) of
         {ok, _} ->
           ok;
         RErr ->
@@ -90,8 +89,7 @@ handle_link_messages(Messages, CurrentValue, Driver, FD,
           {Err, TmpChanges}
       end;
     ({K,  {_, ToSave}}, {ok, TmpChanges}) ->
-      case apply(Driver, save_link_doc, [ModelConfig,
-        #document{key = K, value = ToSave}]) of
+      case apply(Driver, save_link_doc, [ModelConfig, ToSave]) of
         {ok, _} ->
           {ok, [K | TmpChanges]};
         Err ->
@@ -142,9 +140,9 @@ clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
 %%--------------------------------------------------------------------
 -spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
   {ok, datastore:ext_key()} | datastore:generic_error().
-save_link_doc(_MC, #document{key = Key, value = Value}) ->
-  add_doc_to_memory(Key, Value),
-  add_change_to_memory(Key, {save_link_doc, Value}),
+save_link_doc(_MC, #document{key = Key} = Doc) ->
+  add_doc_to_memory(Key, Doc),
+  add_change_to_memory(Key, {save_link_doc, Doc}),
   {ok, Key}.
 
 %%--------------------------------------------------------------------
@@ -174,7 +172,7 @@ get_link_doc(#model_config{name = MN} = ModelConfig, BucketOverride, Key) ->
       {error, {not_found, MN}};
     Cached ->
       add_restore_to_memory(Key, Cached, true),
-      {ok, #document{key = Key, value = Cached}}
+      {ok, Cached}
   end.
 
 %%--------------------------------------------------------------------
@@ -231,10 +229,10 @@ handle_link_message({force_save, Args}, _Driver, FD, ModelConfig) ->
     not_changed ->
       ok;
     {#document{key = Key, deleted = true} = Document, ToDel} ->
-      delete_link_doc(ModelConfig, Document),
+      delete_link_doc(ModelConfig, Document#document{rev = undefined}),
       add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
     {#document{key = Key} = Document, ToDel} ->
-      save_link_doc(ModelConfig, Document),
+      save_link_doc(ModelConfig, Document#document{rev = undefined}),
       add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
     Error ->
       Error
@@ -360,7 +358,7 @@ add_change_to_dump_memory(Key, Change) ->
 %% Saves document to be restored from disk to memory.
 %% @end
 %%--------------------------------------------------------------------
--spec add_restore_to_memory(datastore:ext_key(), datastore:value(),
+-spec add_restore_to_memory(datastore:ext_key(), memory_store_driver:value(),
     FetchFilter :: boolean()) -> ok.
 add_restore_to_memory(Key, V, FetchFilter) ->
   Message = get(current_message),
@@ -372,7 +370,7 @@ add_restore_to_memory(Key, V, FetchFilter) ->
 %% Saves document to be restored from disk to memory.
 %% @end
 %%--------------------------------------------------------------------
--spec add_restore_to_memory(datastore:ext_key(), datastore:value(),
+-spec add_restore_to_memory(datastore:ext_key(), memory_store_driver:value(),
     Op :: atom(), FetchFilter :: boolean()) -> ok.
 add_restore_to_memory(_Key, _V, clear, _FetchFilter) ->
   ok;
@@ -391,7 +389,7 @@ add_restore_to_memory(Key, V, _, _) ->
 %% Saves document to be restored from disk to memory.
 %% @end
 %%--------------------------------------------------------------------
--spec add_restore_to_memory(datastore:ext_key(), datastore:value()) ->
+-spec add_restore_to_memory(datastore:ext_key(), memory_store_driver:value()) ->
   ok.
 add_restore_to_memory(Key, V) ->
   Value = get_value(restore_cache),
@@ -404,7 +402,7 @@ add_restore_to_memory(Key, V) ->
 %% Saves document in process memory to be cached by tp process.
 %% @end
 %%--------------------------------------------------------------------
--spec add_doc_to_memory(datastore:ext_key(), datastore:value()) ->
+-spec add_doc_to_memory(datastore:ext_key(), memory_store_driver:value()) ->
   ok.
 add_doc_to_memory(Key, Doc) ->
   Value = get_value(doc_cache),
@@ -417,7 +415,7 @@ add_doc_to_memory(Key, Doc) ->
 %% Revers document change in memory after failure.
 %% @end
 %%--------------------------------------------------------------------
--spec reverse_doc_change_in_memory(datastore:ext_key(), datastore:value()) ->
+-spec reverse_doc_change_in_memory(datastore:ext_key(), memory_store_driver:value()) ->
   ok.
 reverse_doc_change_in_memory(Key, OldValue) ->
   Value = get_value(doc_cache),
@@ -435,7 +433,7 @@ reverse_doc_change_in_memory(Key, OldValue) ->
 %% Gets document from process memory.
 %% @end
 %%--------------------------------------------------------------------
--spec get_doc_from_memory(datastore:ext_key()) -> datastore:value() | undefined.
+-spec get_doc_from_memory(datastore:ext_key()) -> memory_store_driver:value() | undefined.
 get_doc_from_memory(Key) ->
   case get(doc_cache) of
     undefined -> undefined;
@@ -469,7 +467,7 @@ get_from_stores(#model_config{name = MN} = ModelConfig, Key, BucketOverride) ->
   Ans = apply(MemDriver, get_link_doc, [ModelConfig, Key]),
 
   case {Ans, get(flush_driver)} of
-    {{ok, #document{value = V}}, _} ->
+    {{ok, V}, _} ->
       add_doc_to_memory(Key, V),
       Ans;
     {{error, {not_found, _}}, undefined} ->
@@ -489,8 +487,8 @@ get_from_stores(#model_config{name = MN} = ModelConfig, Key, BucketOverride) ->
               [ModelConfig, BucketOverride, Key])
           end,
           case Ans2 of
-            {ok, #document{value = V2}} ->
-              add_doc_to_memory(Key, V2),
+            {ok, V2} ->
+              add_doc_to_memory(Key, V2#document{rev = undefined}),
               add_restore_to_memory(Key, V2, false),
               Ans2;
             {error, {not_found, _}} ->

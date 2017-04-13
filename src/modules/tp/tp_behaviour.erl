@@ -31,7 +31,7 @@
 %% 'true' and generated changes.
 %% @end
 %%--------------------------------------------------------------------
--callback modify([tp:request()], tp:data()) ->
+-callback modify([tp:request()], tp:data(), tp:rev()) ->
     {[tp:response()], {true, tp:changes()} | false, tp:data()}.
 
 %%--------------------------------------------------------------------
@@ -51,7 +51,8 @@
 %% at the time running commit/2 callback.
 %% @end
 %%--------------------------------------------------------------------
--callback commit(tp:changes(), tp:data()) -> true | {false, tp:changes()}.
+-callback commit(tp:changes(), tp:data()) ->
+    {true | {false, tp:changes()}, tp:rev()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,4 +69,4 @@
 %% modifications have been applied and committed.
 %% @end
 %%--------------------------------------------------------------------
--callback terminate(tp:data()) -> any().
+-callback terminate(tp:data(), tp:rev()) -> any().

@@ -27,10 +27,11 @@
 -type data() :: any().
 -type server() :: pid().
 -type changes() :: any().
+-type rev() :: any().
 -type request() :: any().
 -type response() :: any().
 
--export_type([init/0, mod/0, args/0, key/0, data/0, server/0, changes/0,
+-export_type([init/0, mod/0, args/0, key/0, data/0, server/0, changes/0, rev/0,
     request/0, response/0]).
 
 %%%===================================================================

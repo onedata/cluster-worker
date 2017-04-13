@@ -75,8 +75,8 @@ init_bucket(_Bucket, Models, _NodeToSync) ->
 %%--------------------------------------------------------------------
 -spec save(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
-    true = ets:insert(table_name(ModelConfig), {Key, Value}),
+save(#model_config{} = ModelConfig, #document{key = Key} = Doc) ->
+    true = ets:insert(table_name(ModelConfig), translate_to_tuple(Doc)),
     {ok, Key}.
 
 %%--------------------------------------------------------------------
@@ -90,10 +90,12 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
     case ets:lookup(table_name(ModelConfig), Key) of
         [] ->
             {error, {not_found, ModelName}};
-        [{_, Value}] ->
+        [Old] ->
+            #document{value = Value} = OldDoc = translate_to_doc(Old),
             case memory_store_driver_docs:update(Value, Diff) of
                 {ok, NewValue} ->
-                    true = ets:insert(table_name(ModelConfig), {Key, NewValue}),
+                    true = ets:insert(table_name(ModelConfig),
+                        translate_to_tuple(OldDoc#document{value = NewValue})),
                     {ok, Key};
                 {error, Reason} ->
                     {error, Reason}
@@ -107,8 +109,8 @@ update(#model_config{name = ModelName} = ModelConfig, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec create(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
-    case ets:insert_new(table_name(ModelConfig), {Key, Value}) of
+create(#model_config{} = ModelConfig, #document{key = Key} = Doc) ->
+    case ets:insert_new(table_name(ModelConfig), translate_to_tuple(Doc)) of
         false -> {error, already_exists};
         true -> {ok, Key}
     end.
@@ -120,17 +122,19 @@ create(#model_config{} = ModelConfig, #document{key = Key, value = Value}) ->
 %%--------------------------------------------------------------------
 -spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Value}, Diff) ->
+create_or_update(#model_config{} = ModelConfig, #document{key = Key} = InitDoc, Diff) ->
     case ets:lookup(table_name(ModelConfig), Key) of
         [] ->
-            case ets:insert_new(table_name(ModelConfig), {Key, Value}) of
+            case ets:insert_new(table_name(ModelConfig), translate_to_tuple(InitDoc)) of
                 false -> update(ModelConfig, Key, Diff);
                 true -> {ok, Key}
             end;
-        [{_, OldValue}] ->
+        [Old] ->
+            #document{value = OldValue} = OldDoc = translate_to_doc(Old),
             case memory_store_driver_docs:update(OldValue, Diff) of
                 {ok, NewValue} ->
-                    true = ets:insert(table_name(ModelConfig), {Key, NewValue}),
+                    true = ets:insert(table_name(ModelConfig),
+                        translate_to_tuple(OldDoc#document{value = NewValue})),
                     {ok, Key};
                 {error, Reason} ->
                     {error, Reason}
@@ -146,8 +150,9 @@ create_or_update(#model_config{} = ModelConfig, #document{key = Key, value = Val
     {ok, datastore:document()} | datastore:get_error().
 get(#model_config{name = ModelName} = ModelConfig, Key) ->
     case ets:lookup(table_name(ModelConfig), Key) of
-        [{_, Value}] ->
-            {ok, #document{key = Key, value = Value}};
+        [Value] ->
+            Doc = translate_to_doc(Value),
+            {ok, Doc};
         [] ->
             {error, {not_found, ModelName}}
     end.
@@ -300,8 +305,8 @@ foreach_link(ModelConfig, Key, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
-save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
-    true = ets:insert(links_table_name(ModelConfig), {Key, Value}),
+save_link_doc(ModelConfig, #document{key = Key} = Doc) ->
+    true = ets:insert(links_table_name(ModelConfig), translate_to_tuple(Doc)),
     {ok, Key}.
 
 %%--------------------------------------------------------------------
@@ -313,8 +318,9 @@ save_link_doc(ModelConfig, #document{key = Key, value = Value} = _Document) ->
     {ok, datastore:document()} | datastore:get_error().
 get_link_doc(#model_config{name = ModelName} = ModelConfig, Key) ->
     case ets:lookup(links_table_name(ModelConfig), Key) of
-        [{_, Value}] ->
-            {ok, #document{key = Key, value = Value}};
+        [Value] ->
+            Doc = translate_to_doc(Value),
+            {ok, Doc};
         [] ->
             {error, {not_found, ModelName}}
     end.
@@ -477,14 +483,6 @@ list(#model_config{} = ModelConfig, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 -spec list_next([term()] | '$end_of_table', term(), datastore:list_fun(), term()) ->
     {ok, Acc :: term()} | datastore:generic_error().
-list_next([{Key, Obj} | R], Handle, Fun, AccIn) ->
-    Doc = #document{key = Key, value = Obj},
-    case Fun(Doc, AccIn) of
-        {next, NewAcc} ->
-            list_next(R, Handle, Fun, NewAcc);
-        {abort, NewAcc} ->
-            {ok, NewAcc}
-    end;
 list_next('$end_of_table' = EoT, Handle, Fun, AccIn) ->
     case Fun(EoT, AccIn) of
         {next, NewAcc} ->
@@ -498,6 +496,14 @@ list_next([], Handle, Fun, AccIn) ->
             list_next(Objects, NewHandle, Fun, AccIn);
         '$end_of_table' ->
             list_next('$end_of_table', undefined, Fun, AccIn)
+    end;
+list_next([Tuple | R], Handle, Fun, AccIn) ->
+    Doc = translate_to_doc(Tuple),
+    case Fun(Doc, AccIn) of
+        {next, NewAcc} ->
+            list_next(R, Handle, Fun, NewAcc);
+        {abort, NewAcc} ->
+            {ok, NewAcc}
     end.
 
 
@@ -533,8 +539,8 @@ list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
     {abort, NewAcc} = Fun(EoT, AccIn),
     {ok, NewAcc};
 list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
-    [{Key, Obj}] = ets:lookup(Table, datastore_utils:aux_key_to_key(CurrentKey)),
-    Doc = #document{key = Key, value = Obj},
+    [Tuple] = ets:lookup(Table, datastore_utils:aux_key_to_key(CurrentKey)),
+    Doc = Doc = translate_to_doc(Tuple),
     case Fun(Doc, AccIn) of
         {next, NewAcc} ->
             Next = IteratorFun(CurrentKey),
@@ -647,3 +653,24 @@ aux_get(AuxTableName, Key) ->
     ets:select(AuxTableName,
         ets:fun2ms(fun(T = {{_, K}, _}) when K == Key -> T end)).
 
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inserts additional fields to given tuple.
+%% @end
+%%--------------------------------------------------------------------
+-spec translate_to_tuple(Doc :: datastore:document()) -> Tuple :: tuple().
+translate_to_tuple(#document{key = Key, rev = Rev, value = Value}) ->
+    {Key, Rev, Value}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Translates given tuple to doc (reverses inject/2) to doc.
+%% Returns doc.
+%% @end
+%%--------------------------------------------------------------------
+-spec translate_to_doc(Tuple :: tuple()) -> NewTuple :: tuple().
+translate_to_doc({Key, Rev, Value}) ->
+    #document{key = Key, rev = Rev, value = Value}.

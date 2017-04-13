@@ -198,6 +198,9 @@
             {persistence_driver_module, 'couchdb_datastore_driver'},
             %% Limit for the number of active tp processes.
             {tp_processes_limit, 200},
+            %% Delay in ms between consecutive calls to tp_server logic
+            %% terminate callback in case of an error
+            {tp_server_terminate_retry_delay, 1000},
             %% Size of a datastore worker pool
             {datastore_pool_size, 5},
             %% Max number of requests a pool worker may aggregate
