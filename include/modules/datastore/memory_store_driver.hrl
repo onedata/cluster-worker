@@ -18,7 +18,8 @@
   model_config :: model_behaviour:model_config(),
   key :: datastore:ext_key(),
   current_value :: memory_store_driver:value_doc() | memory_store_driver:value_link(),
-  link_proc = false :: boolean()
+  link_proc = false :: boolean(),
+  revisions_to_save :: memory_store_driver:revision_info()
 }).
 
 -endif.

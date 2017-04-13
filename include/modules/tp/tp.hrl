@@ -18,6 +18,7 @@
 % commit_delay   - minimal delay between consecutive commit operations
 -record(tp_init, {
     data :: tp:data(),
+    rev :: tp:rev(),
     idle_timeout :: timeout(),
     min_commit_delay :: timeout(),
     max_commit_delay :: timeout()
