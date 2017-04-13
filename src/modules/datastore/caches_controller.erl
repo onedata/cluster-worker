@@ -349,7 +349,7 @@ clear_cache_by_time_windows(_StoreType, []) ->
 clear_cache_by_time_windows(StoreType, [TimeWindow | Windows]) ->
   caches_controller:delete_old_keys(StoreType, TimeWindow),
   {ok, DumpDelay} = application:get_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms),
-  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay),
+  {ok, AggTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_pool_queue_flush_delay),
   {ok, CTTRS} = application:get_env(?CLUSTER_WORKER_APP_NAME, clearing_time_to_refresh_stats),
   SleepTime = DumpDelay + AggTime + CTTRS,
   timer:sleep(SleepTime),
@@ -437,7 +437,24 @@ wait_for_cache_dump() ->
   ok | dump_error.
 wait_for_cache_dump(0, _) ->
   dump_error;
-wait_for_cache_dump(_N, {_GSize, _LSize}) ->
+wait_for_cache_dump(N, {GSize, LSize}) ->
+%%  case {cache_controller:list_docs_to_be_dumped(?GLOBAL_ONLY_LEVEL),
+%%    cache_controller:list_docs_to_be_dumped(?LOCAL_ONLY_LEVEL)} of
+%%    {{ok, []}, {ok, []}} ->
+%%      ok;
+%%    {{ok, L1}, {ok, L2}} ->
+%%      case {length(L1), length(L2)} of
+%%        {GSize, LSize} ->
+%%          timer:sleep(timer:seconds(1)),
+%%          wait_for_cache_dump(N-1, {GSize, LSize});
+%%        {GSize2, LSize2} ->
+%%          timer:sleep(timer:seconds(1)),
+%%          wait_for_cache_dump(N, {GSize2, LSize2})
+%%      end;
+%%    _ ->
+%%      timer:sleep(timer:seconds(1)),
+%%      wait_for_cache_dump(N-1, {GSize, LSize})
+%%  end.
   % TODO - implementation for new cache
   ok.
 
@@ -448,6 +465,10 @@ wait_for_cache_dump(_N, {_GSize, _LSize}) ->
 %%--------------------------------------------------------------------
 -spec cache_to_task_level(ModelName :: atom()) -> task_manager:level().
 cache_to_task_level(ModelName) ->
+%%  case lists:member(ModelName, datastore_config:global_caches()) of
+%%    true -> ?CLUSTER_LEVEL;
+%%    _ -> ?NODE_LEVEL
+%%  end.
   case ModelName of
     locally_cached_record -> ?NODE_LEVEL;
     locally_cached_sync_record -> ?NODE_LEVEL;
@@ -968,7 +989,6 @@ count_clear_acc(Count, BatchNum) ->
 verify_tp() ->
   {ok, StartNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
   {ok, DelayNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number),
-  {ok, MaxProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
 
   ProcNum = tp:get_processes_number(),
   {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
@@ -985,9 +1005,9 @@ verify_tp() ->
   end,
   application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
 
+  % TODO - block throttling if it is close to tp limit (to allow create tp processes for get operations)
+  % !!!
   TPAction = case ProcNum of
-    PN when PN >= (MaxProcNum * 4 / 5) ->
-      ?BLOCK_THROTTLING;
     PN when PN >= DelayNum ->
       ?LIMIT_THROTTLING;
     DP when DP >= (DelayNum * 4 / 5) ->
@@ -1009,7 +1029,7 @@ verify_db() ->
   {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit),
   {ok, Start} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size),
 
-  QueueSize = datastore_pool:request_queue_size(),
+  QueueSize = datastore_pool:queue_size(),
 
   DBAction = case QueueSize of
     DP when DP >= Limit ->
