@@ -163,5 +163,21 @@ supervisor_children_spec() ->
             shutdown => infinity,
             type => supervisor,
             modules => [datastore_pool_sup]
+        },
+        #{
+            id => couchbase_pool_sup,
+            start => {couchbase_pool_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [couchbase_pool_sup]
+        },
+        #{
+            id => couchbase_changes_sup,
+            start => {couchbase_changes_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [couchbase_changes_sup]
         }
     ].

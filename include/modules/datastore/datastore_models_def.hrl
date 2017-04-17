@@ -29,6 +29,17 @@
     version :: non_neg_integer() | undefined
 }).
 
+-record(document2, {
+    key :: datastore:key(),
+    value :: datastore:value(),
+    scope = <<>> :: datastore:scope(),
+    mutator = [] :: [datastore:mutator()],
+    rev = [] :: [datastore:rev()],
+    seq :: datastore:seq(),
+    deleted = false :: boolean(),
+    version = 1 :: datastore_version2:version()
+}).
+
 % Max size of cleared_list in cache_consistency_controller
 % TODO - new cache_consistency_controller for new datastore
 -define(CLEAR_MONITOR_MAX_SIZE, 0).
