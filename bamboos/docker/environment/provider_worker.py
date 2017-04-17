@@ -66,23 +66,30 @@ class ProviderWorkerConfigurator:
             if isinstance(config['os_config']['storages'][0], basestring):
                 posix_storages = config['os_config']['storages']
             else:
-                posix_storages = [s['name'] for s in
-                                  config['os_config']['storages']
-                                  if s['type'] == 'posix']
+                posix_storages = [{
+                                      'name': s['name'],
+                                      'readonly': s.get('readonly', False)
+                                  } for s in config['os_config']['storages'] if s['type'] == 'posix']
         else:
             posix_storages = []
 
         extra_volumes = []
         for s in posix_storages:
-            if not (storages_dockers and s in storages_dockers['posix'].keys()):
-                v = common.volume_for_storage(s)
+            name = s['name']
+            readonly = s['readonly']
+            if not storages_dockers:
+                storages_dockers = {'posix': {}}
+            if name not in storages_dockers['posix'].keys():
+                v = common.volume_for_storage(name, readonly)
                 (host_path, docker_path, mode) = v
-                if not storages_dockers:
-                    storages_dockers = {'posix': {}}
-                storages_dockers['posix'][s] = {"host_path": host_path, "docker_path": docker_path}
+                storages_dockers['posix'][name] = {
+                    "host_path": host_path,
+                    "docker_path": docker_path,
+                    "mode": mode
+                }
             else:
-                d = storages_dockers['posix'][s]
-                v = (d['host_path'], d['docker_path'], 'rw')
+                d = storages_dockers['posix'][name]
+                v = (d['host_path'], d['docker_path'], d['mode'])
 
             extra_volumes.append(v)
 
@@ -146,9 +153,9 @@ def create_storages(storages, op_nodes, op_config, bindir, storages_dockers):
             config = storages_dockers['ceph'][storage['name']]
             pool = storage['pool'].split(':')[0]
             command = ['escript', script_paths['ceph'], cookie,
-                       first_node, storage['name'], "ceph",
+                       first_node, storage['name'], 'ceph',
                        config['host_name'], pool, config['username'],
-                       config['key']]
+                       config['key'], 'true']
             assert 0 is docker.exec_(container, command, tty=True,
                                      stdout=sys.stdout, stderr=sys.stderr)
         elif storage['type'] == 's3':
@@ -156,9 +163,7 @@ def create_storages(storages, op_nodes, op_config, bindir, storages_dockers):
             command = ['escript', script_paths['s3'], cookie,
                        first_node, storage['name'], config['host_name'],
                        config.get('scheme', 'http'), storage['bucket'],
-                       config['access_key'], config['secret_key'],
-                       config.get('iam_request_scheme', 'https'),
-                       config.get('iam_host', 'iam.amazonaws.com')]
+                       config['access_key'], config['secret_key'], 'true']
             assert 0 is docker.exec_(container, command, tty=True,
                                      stdout=sys.stdout, stderr=sys.stderr)
 
@@ -169,7 +174,7 @@ def create_storages(storages, op_nodes, op_config, bindir, storages_dockers):
                        'http://{0}:{1}/v2.0/tokens'.format(config['host_name'],
                                                     config['keystone_port']),
                        storage['container'], config['tenant_name'],
-                       config['user_name'], config['password']]
+                       config['user_name'], config['password'], 'true']
             assert 0 is docker.exec_(container, command, tty=True,
                                      stdout=sys.stdout, stderr=sys.stderr)
 
