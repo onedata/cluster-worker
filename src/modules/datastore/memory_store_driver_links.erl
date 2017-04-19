@@ -259,6 +259,10 @@ handle_link_message({add_links, [Key, Links, LinkReplicaScope]}, Driver, FD,
     ModelConfig) ->
   handle_link_message({add_links, [Key, Links]}, Driver, FD,
     ModelConfig#model_config{link_replica_scope = LinkReplicaScope});
+handle_link_message({delete_links, [Key, LinkNames]}, Driver, FD,
+    ModelConfig) ->
+  handle_link_message({delete_links, [Key, LinkNames, ?PRED_ALWAYS]}, Driver, FD,
+    ModelConfig);
 handle_link_message({Op, Args}, Driver, _FD, ModelConfig) ->
   put(mcd_driver, ?MODULE),
   apply(Driver, Op, [ModelConfig | Args]).

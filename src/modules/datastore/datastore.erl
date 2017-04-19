@@ -30,10 +30,11 @@
 -type document_diff() :: #{term() => term()} | fun((OldValue :: value()) ->
     {ok, NewValue :: value()} | {error, Reason :: term()}).
 -type bucket() :: atom() | binary().
--type opt_ctx() :: #{}.
+-type opt_ctx() :: datastore_context:ctx(0).
 -type option() :: ignore_links.
 
--export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0, opt_ctx/0, option/0]).
+-export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0,
+    bucket/0, opt_ctx/0, option/0]).
 
 %% Error types
 -type generic_error() :: {error, Reason :: term()}.
@@ -68,26 +69,15 @@
 -export_type([link_target/0, link_name/0, link_spec/0, normalized_link_spec/0, normalized_link_target/0,
     link_final_target/0, link_version/0]).
 
-%% Types for auxiliary caches
--type aux_cache_key() :: {term(), key()}.
--type aux_cache_handle() :: aux_cache_key() | '$end_of_table'.
--type aux_cache_level() :: ?LOCALLY_CACHED_LEVEL | ?GLOBALLY_CACHED_LEVEL.
--type aux_iterator_fun() :: fun((aux_cache_key()) -> aux_cache_handle()).
--type aux_cache_access_context() :: transaction | async_dirty.
--type aux_cache_config() :: #aux_cache_config{}.
-
--export_type([aux_cache_level/0, aux_cache_key/0, aux_cache_handle/0,
-    aux_iterator_fun/0, aux_cache_access_context/0, aux_cache_config/0]).
-
 %% API
 -export([save/2, update/3, create/2, create_or_update/3,
-    get/2, list/3, list/4, list_dirty/3, delete/4, delete/3, delete/4, exists/2]).
+    get/2, list/3, list/4, list_dirty/3, delete/2, delete/4, exists/2]).
 -export([fetch_link/3, add_links/3, create_link/3, delete_links/3,
     foreach_link/4, fetch_link_target/3, link_walk/4, set_links/3]).
 -export([fetch_full_link/3]).
 -export([configs_per_bucket/1, ensure_state_loaded/0, cluster_initialized/0, healthcheck/0, level_to_driver/1,
     driver_to_module/1, initialize_state/1]).
--export([run_transaction/1, run_transaction/2, normalize_link_target/2, models_with_aux_caches/0]).
+-export([run_transaction/1, run_transaction/2, normalize_link_target/2]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
 
 %%%===================================================================
@@ -99,7 +89,7 @@
 %% Saves given #document.
 %% @end
 %%--------------------------------------------------------------------
--spec save(datastore:opt_ctx(), Document :: datastore:document()) ->
+-spec save(opt_ctx(), Document :: datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(Ctx, #document{} = Document) ->
     exec_driver(Ctx, save, [maybe_gen_uuid(Document)]).
@@ -109,7 +99,7 @@ save(Ctx, #document{} = Document) ->
 %% Updates given by key document by replacing given fields with new values.
 %% @end
 %%--------------------------------------------------------------------
--spec update(datastore:opt_ctx(), Key :: datastore:ext_key(), Diff :: datastore:document_diff()) ->
+-spec update(opt_ctx(), Key :: datastore:ext_key(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:update_error().
 update(Ctx, Key, Diff) ->
     exec_driver(Ctx, update, [Key, Diff]).
@@ -119,7 +109,7 @@ update(Ctx, Key, Diff) ->
 %% Creates new #document.
 %% @end
 %%--------------------------------------------------------------------
--spec create(datastore:opt_ctx(), Document :: datastore:document()) ->
+-spec create(opt_ctx(), Document :: datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create(Ctx, #document{} = Document) ->
     exec_driver(Ctx, create, [maybe_gen_uuid(Document)]).
@@ -130,7 +120,7 @@ create(Ctx, #document{} = Document) ->
 %% creates new one if not exists.
 %% @end
 %%--------------------------------------------------------------------
--spec create_or_update(datastore:opt_ctx(), Document :: datastore:document(),
+-spec create_or_update(opt_ctx(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(Ctx, #document{} = Document, Diff) ->
     exec_driver(Ctx, create_or_update, [Document, Diff]).
@@ -140,7 +130,7 @@ create_or_update(Ctx, #document{} = Document, Diff) ->
 %% Gets #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec get(datastore:opt_ctx(),
+-spec get(opt_ctx(),
     Key :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
 get(Ctx, Key) ->
     exec_driver(Ctx, get, [Key]).
@@ -151,7 +141,7 @@ get(Ctx, Key) ->
 %% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
--spec list_dirty(datastore:opt_ctx(), Fun :: list_fun(), AccIn :: term()) ->
+-spec list_dirty(opt_ctx(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list_dirty(Ctx, Fun, AccIn) ->
     list(Ctx, Fun, AccIn, [{mode, dirty}]).
@@ -162,7 +152,7 @@ list_dirty(Ctx, Fun, AccIn) ->
 %% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
--spec list(datastore:opt_ctx(), Fun :: list_fun(), AccIn :: term()) ->
+-spec list(opt_ctx(), Fun :: list_fun(), AccIn :: term()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 list(Ctx, Fun, AccIn) ->
     list(Ctx, Fun, AccIn, [{mode, transaction}]).
@@ -173,7 +163,7 @@ list(Ctx, Fun, AccIn) ->
 %% Executes given function for each model's record. After each record function may interrupt operation.
 %% @end
 %%--------------------------------------------------------------------
--spec list(datastore:opt_ctx(),
+-spec list(opt_ctx(),
     Fun :: list_fun(), AccIn :: term(),
     Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
@@ -186,7 +176,7 @@ list(Ctx, Fun, AccIn, Mode) ->
 %% Deletes #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(datastore:opt_ctx(),
+-spec delete(opt_ctx(),
     Key :: datastore:ext_key(), Pred :: delete_predicate()) -> ok | datastore:generic_error().
 delete(Ctx, Key, Pred) ->
     delete(Ctx, Key, Pred, []).
@@ -197,7 +187,7 @@ delete(Ctx, Key, Pred) ->
 %% You can specify 'ignore_links' option, if links should not be deleted with the document.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(datastore:opt_ctx(),
+-spec delete(opt_ctx(),
     Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [option()]) -> ok | datastore:generic_error().
 delete(Ctx, Key, Pred, Opts) ->
     case exec_driver(Ctx, delete, [Key, Pred]) of
@@ -221,7 +211,7 @@ delete(Ctx, Key, Pred, Opts) ->
 %% Deletes #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(datastore:opt_ctx(),
+-spec delete(opt_ctx(),
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 delete(Ctx, Key) ->
     delete(Ctx, Key, ?PRED_ALWAYS).
@@ -233,7 +223,7 @@ delete(Ctx, Key) ->
 %% multiple drivers at once - use *_only levels.
 %% @end
 %%--------------------------------------------------------------------
--spec exists(datastore:opt_ctx(),
+-spec exists(opt_ctx(),
     Key :: datastore:ext_key()) -> {ok, boolean()} | datastore:generic_error().
 exists(Ctx, Key) ->
     exec_driver(Ctx, exists, [Key]).
@@ -244,13 +234,13 @@ exists(Ctx, Key) ->
 %% Adds given links to the document with given key. Allows for link duplication when model is configured this way.
 %% @end
 %%--------------------------------------------------------------------
--spec add_links(datastore:opt_ctx(), ext_key(), link_spec() | [link_spec()]) ->
+-spec add_links(opt_ctx(), ext_key(), link_spec() | [link_spec()]) ->
     ok | generic_error().
 add_links(Ctx, Key, {_LinkName, _LinkTarget} = LinkSpec) ->
     add_links(Ctx, Key, [LinkSpec]);
 add_links(Ctx, Key, Links) when is_list(Links) ->
     NormalizedLinks = normalize_link_target(Ctx, Links),
-    Method = case link_duplication(Ctx) of
+    Method = case datastore_context:get_link_duplication(Ctx) of
         true -> add_links;
         false -> set_links
     end,
@@ -262,7 +252,7 @@ add_links(Ctx, Key, Links) when is_list(Links) ->
 %% Sets given links to the document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec set_links(datastore:opt_ctx(), ext_key(), link_spec() | [link_spec()]) ->
+-spec set_links(opt_ctx(), ext_key(), link_spec() | [link_spec()]) ->
     ok | generic_error().
 set_links(Ctx, Key, {_LinkName, _LinkTarget} = LinkSpec) ->
     set_links(Ctx, Key, [LinkSpec]);
@@ -276,7 +266,7 @@ set_links(Ctx, Key, Links) when is_list(Links) ->
 %% Adds given links to the document with given key if link does not exist.
 %% @end
 %%--------------------------------------------------------------------
--spec create_link(datastore:opt_ctx(), ext_key(), link_spec()) ->
+-spec create_link(opt_ctx(), ext_key(), link_spec()) ->
     ok | create_error().
 create_link(Ctx, Key, Link) ->
     exec_driver(Ctx, create_link, [Key, normalize_link_target(Ctx, Link)]).
@@ -287,7 +277,7 @@ create_link(Ctx, Key, Link) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_links(datastore:opt_ctx(), ext_key(),
+-spec delete_links(opt_ctx(), ext_key(),
     link_name() | [link_name()] | all) -> ok | generic_error().
 delete_links(Ctx, Key, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
     exec_driver(Ctx, delete_links, [Key, LinkNames]);
@@ -300,7 +290,7 @@ delete_links(Ctx, Key, LinkName) ->
 %% Gets specified link from the document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link(datastore:opt_ctx(), ext_key(), link_name()) ->
+-spec fetch_link(opt_ctx(), ext_key(), link_name()) ->
     {ok, simple_link_target()} | link_error().
 fetch_link(Ctx, Key, LinkName) ->
     {RawLinkName, RequestedScope, VHash} = links_utils:unpack_link_scope(undefined, LinkName),
@@ -314,7 +304,8 @@ fetch_link(Ctx, Key, LinkName) ->
                                 case lists:filter(
                                     fun
                                         ({Scope, _, _, _}) ->
-                                            Scope == links_utils:get_scopes(link_replica_scope(Ctx), undefined)
+                                            Scope == links_utils:get_scopes(
+                                                datastore_context:get_link_replica_scope(Ctx), undefined)
                                     end, Targets) of
                                     [] -> H;
                                     [L | _] ->
@@ -342,7 +333,7 @@ fetch_link(Ctx, Key, LinkName) ->
 %% Gets specified link from the document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_full_link(datastore:opt_ctx(), ext_key(), link_name()) ->
+-spec fetch_full_link(opt_ctx(), ext_key(), link_name()) ->
     {ok, normalized_link_target()} | generic_error().
 fetch_full_link(Ctx, Key, LinkName) ->
     exec_driver(Ctx, fetch_link, [Key, LinkName]).
@@ -353,7 +344,7 @@ fetch_full_link(Ctx, Key, LinkName) ->
 %% Gets document pointed by given link of document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link_target(datastore:opt_ctx(), ext_key(), link_name()) ->
+-spec fetch_link_target(opt_ctx(), ext_key(), link_name()) ->
     {ok, document()} | generic_error().
 fetch_link_target(Ctx, Key, LinkName) ->
     case fetch_link(Ctx, Key, LinkName) of
@@ -369,7 +360,7 @@ fetch_link_target(Ctx, Key, LinkName) ->
 %% Executes given function for each link of the document given by key - similar to 'foldl'.
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link(datastore:opt_ctx(), Key :: ext_key(),
+-spec foreach_link(opt_ctx(), Key :: ext_key(),
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
 foreach_link(Ctx, Key, Fun, AccIn) ->
@@ -383,7 +374,7 @@ foreach_link(Ctx, Key, Fun, AccIn) ->
 %% In case of Mode == get_leaf, list of all link's uuids is also returned.
 %% @end
 %%--------------------------------------------------------------------
--spec link_walk(datastore:opt_ctx(), Key :: ext_key(), [link_name()], get_leaf | get_all) ->
+-spec link_walk(opt_ctx(), Key :: ext_key(), [link_name()], get_leaf | get_all) ->
     {ok, {document(), [ext_key()]} | [document()]} | link_error() | get_error().
 link_walk(Ctx, #document{key = StartKey}, LinkNames, Mode) ->
     link_walk(Ctx, StartKey, LinkNames, Mode);
@@ -461,16 +452,6 @@ driver_to_module(Driver) ->
     Driver.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of models which have auxiliary caches created.
-%% @end
-%%--------------------------------------------------------------------
--spec models_with_aux_caches() -> [model_behaviour:model_type()].
-models_with_aux_caches() ->
-    datastore_config:models_with_aux_caches().
-
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -488,7 +469,8 @@ link_walk7(Ctx, Key, [LastLink], Acc, get_leaf) ->
 link_walk7(Ctx, Key, [NextLink | R], Acc, get_leaf) ->
     case fetch_link(Ctx, Key, NextLink) of
         {ok, {TargetKey, TargetMod}} ->
-            link_walk7(update_model(Ctx, TargetMod), TargetKey, R, [TargetKey | Acc], get_leaf);
+            % TODO - links refactoring - what we need inside link_walk?
+            link_walk7(model:create_datastore_context(link_walk, TargetMod), TargetKey, R, [TargetKey | Acc], get_leaf);
         {error, Reason} ->
             {error, Reason}
     end.
@@ -503,10 +485,10 @@ normalize_link_target(Ctx, [{_, {V, []}} | R]) when is_integer(V) ->
 normalize_link_target(Ctx, [Link | R]) ->
     [normalize_link_target(Ctx, Link) | normalize_link_target(Ctx, R)];
 normalize_link_target(Ctx, {LinkName, #document{key = TargetKey} = Doc}) ->
-    MScope = link_replica_scope(Ctx),
+    MScope = datastore_context:get_link_replica_scope(Ctx),
     normalize_link_target(Ctx, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, model_name(Doc)}});
 normalize_link_target(Ctx, {LinkName, {TargetKey, ModelName}}) when is_atom(ModelName) ->
-    MScope = link_replica_scope(Ctx),
+    MScope = datastore_context:get_link_replica_scope(Ctx),
     normalize_link_target(Ctx, {LinkName, {links_utils:get_scopes(MScope, undefined), links_utils:gen_vhash(), TargetKey, ModelName}});
 normalize_link_target(Ctx, {LinkName, {_ScopeId, _VHash, _TargetKey, _ModelName} = Target}) ->
     normalize_link_target(Ctx, {LinkName, {1, [Target]}}).
@@ -548,22 +530,27 @@ model_name(ModelName) when is_atom(ModelName) ->
 %% Runs all pre-hooks for given model, method and context.
 %% @end
 %%--------------------------------------------------------------------
--spec run_prehooks(datastore:opt_ctx(),
+-spec run_prehooks(opt_ctx(),
     Method :: model_behaviour:model_action(), Context :: term()) ->
     ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
-% TODO - check for errors before accepting task
 run_prehooks(Ctx, Method, Args) ->
-    ModelName = model_name(Ctx),
-    Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
-    HooksRes =
-        lists:map(
-            fun({_, HookedModule}) ->
-                HookedModule:before(Ctx, ModelName, Method, Args)
-            end, Hooked),
-    case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
-        [] -> ok;
-        [Interrupt | _] ->
-            Interrupt
+    HooksConfig = datastore_context:get_hooks_config(Ctx),
+    case HooksConfig of
+        run_hooks ->
+           ModelName = model_name(Ctx),
+           Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
+           HooksRes =
+               lists:map(
+                   fun({_, HookedModule}) ->
+                       HookedModule:before(Ctx, ModelName, Method, Args)
+                   end, Hooked),
+           case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
+               [] -> ok;
+               [Interrupt | _] ->
+                   Interrupt
+           end;
+        _ ->
+            ok
     end.
 
 %%--------------------------------------------------------------------
@@ -573,26 +560,32 @@ run_prehooks(Ctx, Method, Args) ->
 %% return value. Returns given return value.
 %% @end
 %%--------------------------------------------------------------------
--spec run_posthooks(datastore:opt_ctx(),
+-spec run_posthooks(opt_ctx(),
     Model :: model_behaviour:model_action(),
     Context :: term(), ReturnValue) -> ReturnValue when ReturnValue :: term().
 run_posthooks(Ctx, Method, Args, Return) ->
-    ModelName = model_name(Ctx),
-    Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
-    % TODO - delete context_to_propagate
-    LinksContext = links_utils:get_context_to_propagate(Ctx),
-    lists:foreach(
-        fun({_, HookedModule}) ->
-            spawn(fun() ->
-                case HookedModule of
-                    ModelName ->
-                        links_utils:apply_context(LinksContext);
-                    _ ->
-                        ok
-                end,
-                HookedModule:'after'(Ctx, ModelName, Method, Args, Return) end)
-        end, Hooked),
-    Return.
+    HooksConfig = datastore_context:get_hooks_config(Ctx),
+    case HooksConfig of
+        run_hooks ->
+            ModelName = model_name(Ctx),
+            Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
+            % TODO - delete context_to_propagate
+            LinksContext = links_utils:get_context_to_propagate(Ctx),
+            lists:foreach(
+                fun({_, HookedModule}) ->
+                    spawn(fun() ->
+                        case HookedModule of
+                            ModelName ->
+                                links_utils:apply_context(LinksContext);
+                            _ ->
+                                ok
+                        end,
+                        HookedModule:'after'(Ctx, ModelName, Method, Args, Return) end)
+                end, Hooked),
+            Return;
+        _ ->
+            ok
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -608,49 +601,13 @@ load_local_state(Models) ->
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = model_config(ModelName),
-            ok = validate_model_config(Config),
+            ok = model:validate_model_config(Config),
             lists:foreach(
                 fun(Hook) ->
                     ets:insert(?LOCAL_STATE, {Hook, ModelName})
                 end, Hooks),
             Config
         end, Models).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Validates model's configuration.
-%% @end
-%%--------------------------------------------------------------------
--spec validate_model_config(model_behaviour:model_config()) -> ok | no_return().
-validate_model_config(#model_config{version = CurrentVersion, name = ModelName, store_level = StoreLevel}) ->
-    case lists:member(?PERSISTENCE_DRIVER, lists:flatten([level_to_driver(StoreLevel)])) of
-        false -> ok;
-        true ->
-            case lists:member({record_struct, 1}, ModelName:module_info(exports)) of
-                true ->
-                    try
-                        %% Check all versions up to CurrentVersion
-                        [datastore_json:validate_struct(ModelName:record_struct(Version))
-                            || Version <- lists:seq(1, CurrentVersion)],
-                        HasUpdater = lists:member({record_upgrade, 2}, ModelName:module_info(exports))
-                            orelse CurrentVersion == 1,
-                        case HasUpdater of
-                            true -> ok;
-                            false ->
-                                error({no_record_updater, CurrentVersion, ModelName})
-                        end,
-                        ok
-                    catch
-                        _:Reason ->
-                            ?error_stacktrace("Unable to validate record version for model ~p due to ~p", [ModelName, Reason]),
-                            error({invalid_record_version, CurrentVersion, ModelName})
-                    end;
-                false ->
-                    error({no_struct_def, ModelName})
-            end
-    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -796,14 +753,14 @@ level_to_driver(_) ->
 %% Executes given model action on given driver(s).
 %% @end
 %%--------------------------------------------------------------------
--spec exec_driver(datastore:opt_ctx(), Method :: store_driver_behaviour:driver_action(),
+-spec exec_driver(opt_ctx(), Method :: store_driver_behaviour:driver_action(),
     [term()]) -> ok | {ok, term()} | {error, term()} | term().
 exec_driver(OptCtx, Method, Args) ->
-    Driver = get_driver(OptCtx),
+    Driver = datastore_context:get_driver(OptCtx),
     Return =
         case run_prehooks(OptCtx, Method, Args) of
             ok ->
-                {FinalMethod, FinalArgs} = final_method_with_args(OptCtx, Method, Args),
+                {FinalMethod, FinalArgs} = final_method_with_args(Driver, OptCtx, Method, Args),
                 erlang:apply(driver_to_module(Driver), FinalMethod, FinalArgs);
             {ok, Value} ->
                 {ok, Value};
@@ -812,17 +769,10 @@ exec_driver(OptCtx, Method, Args) ->
         end,
     run_posthooks(OptCtx, Method, Args, Return).
 
-get_driver(OptCtx) ->
-    ok.
-
-link_duplication(OptCtx) ->
-    ok.
-
-link_replica_scope(OptCtx) ->
-    ok.
-
-update_model(OptCtx, TargetMod) ->
-    ok.
-
-final_method_with_args(OptCtx, Method, Args) ->
-    {ok, ok}.
+final_method_with_args(?PERSISTENCE_DRIVER, OptCtx, Method, Args) ->
+    DriverContext = datastore_context:get_driver_context(OptCtx,
+        ?PERSISTENCE_DRIVER),
+    {Method, [DriverContext | Args]};
+final_method_with_args(Driver, OptCtx, Method, Args) ->
+    DriverContext = datastore_context:get_driver_context(OptCtx, Driver),
+    {call, [Method, DriverContext, Args]}.
