@@ -286,8 +286,6 @@ exists_link_doc(#model_config{name = ModelName} = ModelConfig, DocKey, Scope) ->
 list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
     case proplists:get_value(mode, Opts, undefined) of
         dirty -> list_dirty(ModelConfig, Fun, AccIn);
-        {ordered, Field} ->
-            list_ordered(ModelConfig, Fun, AccIn, Field);
         _ -> list(ModelConfig, Fun, AccIn)
     end.
 

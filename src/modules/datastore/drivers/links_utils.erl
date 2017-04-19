@@ -30,7 +30,7 @@
 -export([create_link_in_map/4, save_links_maps/5, delete_links/3, delete_links/4,
     fetch_link/4, foreach_link/5, links_doc_key/2, diff/2]).
 -export([make_scoped_link_name/4, unpack_link_scope/2, select_scope_related_link/4]).
--export([get_context_to_propagate/1, apply_context/1, get_scopes/2, gen_vhash/0, deduplicate_targets/1]).
+-export([get_scopes/2, gen_vhash/0, deduplicate_targets/1]).
 
 %%%===================================================================
 %%% API
@@ -683,34 +683,6 @@ select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
             L;
         _ -> undefined
     end.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Gets link context to be applied in another process.
-%% @end
-%%--------------------------------------------------------------------
--spec get_context_to_propagate(model_behaviour:model_config()) ->
-    {ok | skip, link_replica_scope() | skip, scope() | skip}.
-get_context_to_propagate(#model_config{link_replica_scope = MS}) ->
-    A1 = case is_atom(MS) of
-        true -> {ok, MS, get(MS)};
-        _ -> {skip, skip, skip}
-    end,
-    A1.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Sets link context from another process.
-%% @end
-%%--------------------------------------------------------------------
--spec apply_context({ok | skip, link_replica_scope() | skip, scope() | skip}) -> ok.
-apply_context(MS) ->
-    case MS of
-        {ok, MSK, MSV} -> put(MSK, MSV);
-        _ -> ok
-    end,
-    ok.
 
 %%%===================================================================
 %%% Internal functions

@@ -49,8 +49,7 @@
     sync_enabled = false :: boolean(),
     % TODO - delete aggregate_db_writes
     aggregate_db_writes = false :: boolean(),
-    disable_remote_link_delete = false :: boolean(),
-    auxiliary_caches = #{} :: #{Field :: atom() => datastore:aux_cache_config()}
+    disable_remote_link_delete = false :: boolean()
 }).
 
 %% Helper macro for instantiating #model_config record.
@@ -70,8 +69,6 @@
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope),
     ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, false)).
 -define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication),
-    ?MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication, #{})).
--define(MODEL_CONFIG(Bucket, Hooks, StoreLevel, LinkStoreLevel, Transactions, SyncCache, LinkReplicaScope, LinkDuplication, AuxiliaryCaches),
     #model_config{
         name = ?MODULE,
         size = record_info(size, ?MODULE),
@@ -85,11 +82,7 @@
         sync_cache = SyncCache,
         link_replica_scope = LinkReplicaScope,
         link_duplication = LinkDuplication, % Allows for multiple link targets via datastore:add_links function
-        sync_enabled = false, % Models with sync enabled will be stored in non-default bucket to reduce DB load.
-        auxiliary_caches = AuxiliaryCaches
-        % Map describing auxiliary caches for given model
-        % it has form of #{Field => #aux_cache_config{level=Level} which means that auxiliary cache
-        % ordered by Field will be created on level Level
+        sync_enabled = false % Models with sync enabled will be stored in non-default bucket to reduce DB load.
     }
 ).
 
@@ -105,15 +98,6 @@
     link_map = #{},
     children = #{},
     origin = ?LOCAL_ONLY_LINK_SCOPE %% Scope that is an origin to this link record
-}).
-
-%% Record describing config for auxiliary cache
--record(aux_cache_config, {
-    % store level of auxiliary cache
-    level :: datastore:aux_cache_level(),
-    % mnesia context in which operations on aux_cache will be performed
-    % if level=local_only context field will be ignored
-    context = async_dirty :: datastore:aux_cache_access_context()
 }).
 
 %% Separator for link name and its scope

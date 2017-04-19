@@ -20,6 +20,8 @@
 -include("timeouts.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
+-type opt_ctx() :: datastore_context:ctx().
+
 %% API
 -export([call/3, get_default_context/2]).
 
@@ -36,6 +38,13 @@
 %%% API
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Routes call to appropriate node/tp process.
+%% @end
+%%--------------------------------------------------------------------
+-spec call(Function :: atom(), opt_ctx(), Args :: [term()]) ->
+    term().
 % TODO - refactor force_link_save
 call(force_link_save, OptCtx, [ToSave, MainDocKey]) ->
     deletage_call(force_link_save, OptCtx, MainDocKey, [ToSave]);
@@ -63,6 +72,13 @@ call(Method, OptCtx, Args) ->
             end
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets default config user by memory store driver.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_default_context(Operation :: atom(), model_behaviour:model_config()) ->
+    opt_ctx().
 get_default_context(_Op, Config) ->
     Config.
 
@@ -75,7 +91,7 @@ get_default_context(_Op, Config) ->
 %% {@link store_driver_behaviour} callback get/2.
 %% @end
 %%--------------------------------------------------------------------
--spec get(model_behaviour:model_config(), datastore:ext_key()) ->
+-spec get(opt_ctx(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
 get(OptCtx, Key) ->
     case get_level(OptCtx, false) of
@@ -93,7 +109,7 @@ get(OptCtx, Key) ->
 %% {@link store_driver_behaviour} callback exists/2.
 %% @end
 %%--------------------------------------------------------------------
--spec exists(model_behaviour:model_config(), datastore:ext_key()) ->
+-spec exists(opt_ctx(), datastore:ext_key()) ->
     {ok, boolean()} | datastore:generic_error().
 exists(OptCtx, Key) ->
     case get_level(OptCtx, false) of
@@ -110,7 +126,7 @@ exists(OptCtx, Key) ->
 %% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
--spec list(model_behaviour:model_config(),
+-spec list(opt_ctx(),
     Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 % TODO - implementation base on old implementation from datastore - refactor when local cache is finished
@@ -237,7 +253,7 @@ list(OptCtx, Fun, AccIn, Opts) ->
 %% {@link store_driver_behaviour} callback fetch_link/3.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
+-spec fetch_link(opt_ctx(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
 fetch_link(OptCtx, Key, LinkName) ->
     case get_level(OptCtx, true) of
@@ -255,7 +271,7 @@ fetch_link(OptCtx, Key, LinkName) ->
 %% {@link store_driver_behaviour} callback foreach_link/4.
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link(model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec foreach_link(opt_ctx(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 % TODO - implementation base on old implementation from datastore - refactor when local cache is finished
@@ -277,7 +293,7 @@ foreach_link(OptCtx, Key, Fun, AccIn) ->
 %% (to be executed at node that hosts links process).
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link_internal(model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec foreach_link_internal(opt_ctx(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 foreach_link_internal(OptCtx, Key, Fun, AccIn) ->
@@ -305,7 +321,7 @@ foreach_link_internal(OptCtx, Key, Fun, AccIn) ->
 %% Checks if document that describes links from scope exists.
 %% @end
 %%--------------------------------------------------------------------
--spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
+-spec exists_link_doc(opt_ctx(), datastore:ext_key(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
 exists_link_doc(OptCtx, DocKey, Scope) ->
     case get_level(OptCtx, true) of
@@ -323,7 +339,7 @@ exists_link_doc(OptCtx, DocKey, Scope) ->
 %% Gets link document. Allows override bucket.
 %% @end
 %%--------------------------------------------------------------------
--spec get_link_doc(model_behaviour:model_config(), binary(), DocKey :: datastore:ext_key(),
+-spec get_link_doc(opt_ctx(), binary(), DocKey :: datastore:ext_key(),
     MainDocKey :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:generic_error().
 get_link_doc(OptCtx, BucketOverride, DocKey, MainDocKey) ->
     case get_level(OptCtx, true) of
@@ -347,7 +363,7 @@ get_link_doc(OptCtx, BucketOverride, DocKey, MainDocKey) ->
 %% Delegates call to appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec deletage_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec deletage_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
 deletage_call(Op, OptCtx, Key, Args) ->
     execute(OptCtx, Key, false, {Op, Args}).
@@ -358,7 +374,7 @@ deletage_call(Op, OptCtx, Key, Args) ->
 %% Delegates call to appropriate link handling process.
 %% @end
 %%--------------------------------------------------------------------
--spec deletage_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec deletage_link_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
 deletage_link_call(Op, OptCtx, Key, Args) ->
     execute(OptCtx, Key, true, {Op, Args}).
@@ -369,7 +385,7 @@ deletage_link_call(Op, OptCtx, Key, Args) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
 direct_call(Op, OptCtx, Key, Args) ->
     Node = get_hashing_node(OptCtx, Key, false),
@@ -382,7 +398,7 @@ direct_call(Op, OptCtx, Key, Args) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 direct_call(Op, OptCtx, Key, Args, CheckAns) ->
     Node = get_hashing_node(OptCtx, Key, false),
@@ -395,10 +411,11 @@ direct_call(Op, OptCtx, Key, Args, CheckAns) ->
 %% Executes operation (to be executed appropriate node).
 %% @end
 %%--------------------------------------------------------------------
--spec direct_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_call_internal(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 direct_call_internal(Op, OptCtx, Key, Args, CheckAns) ->
     SlaveDriver = get_slave_driver(false, OptCtx),
+    ModelName = get_model_name(OptCtx),
     case apply(SlaveDriver, Op, [OptCtx | Args]) of
         CheckAns ->
             % TODO - better consistency info management for models
@@ -426,7 +443,7 @@ direct_call_internal(Op, OptCtx, Key, Args, CheckAns) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_link_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
 direct_link_call(Op, OptCtx, Key, Args) ->
     Node = get_hashing_node(OptCtx, Key, true),
@@ -439,7 +456,7 @@ direct_link_call(Op, OptCtx, Key, Args) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_link_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 % TODO - link_utils return appripriate error when link doc not found.
 direct_link_call(Op, OptCtx, Key, Args, CheckAns) ->
@@ -453,12 +470,13 @@ direct_link_call(Op, OptCtx, Key, Args, CheckAns) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_link_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_link_call_internal(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 direct_link_call_internal(Op, OptCtx, Key, Args, CheckAns) ->
     SlaveDriver = get_slave_driver(true, OptCtx),
     case apply(SlaveDriver, Op, [OptCtx | Args]) of
         CheckAns ->
+            ModelName = get_model_name(OptCtx),
             CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
             case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid, ModelName) of
                 {ok, _, _} ->
@@ -477,7 +495,7 @@ direct_link_call_internal(Op, OptCtx, Key, Args, CheckAns) ->
 %% Executes operation in appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec execute(opt_ctx(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}) -> term().
 execute(OptCtx, Key, Link, Msg) ->
     execute(OptCtx, Key, Link, Msg, []).
@@ -488,7 +506,7 @@ execute(OptCtx, Key, Link, Msg) ->
 %% Executes operation in appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec execute(opt_ctx(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}, InitExtension :: list()) -> term().
 % TODO - allow node specification (for fallbacks from direct operations)
 execute(OptCtx, Key, Link, Msg, InitExtension) ->
@@ -507,15 +525,36 @@ execute(OptCtx, Key, Link, Msg, InitExtension) ->
 %%% Context functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets model_name from config.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_model_name(opt_ctx()) ->
+    model_behaviour:model_type().
 get_model_name(#model_config{name = Name} = _OptCtx) ->
     Name.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets model_name from config.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_level(opt_ctx(), LinkOp :: boolean()) ->
+    datastore:store_level().
 % TODO - delete second arg
 get_level(#model_config{store_level = Level} = _OptCtx, false) ->
     Level;
 get_level(#model_config{link_store_level = Level} = _OptCtx, _LinkOp) ->
     Level.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets persistance driver from config.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_persistance_driver(opt_ctx()) ->
+    atom().
 get_persistance_driver(#model_config{store_level = Level} = _OptCtx) ->
     case Level of
         ?GLOBALLY_CACHED_LEVEL ->
@@ -564,8 +603,8 @@ execute_list_fun(Fun, List, AccIn) ->
 %% Gets key for consistent hashing algorithm.
 %% @end
 %%--------------------------------------------------------------------
--spec get_hashing_node(MC :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) -> term().
+-spec get_hashing_node(opt_ctx(), Key :: datastore:ext_key(),
+    Link :: boolean()) -> term().
 % TODO - delete third arg
 get_hashing_node(OptCtx, Key, Link) ->
     case get_level(OptCtx, Link) of
@@ -584,8 +623,7 @@ get_hashing_node(OptCtx, Key, Link) ->
 %% Returns slave driver for model.
 %% @end
 %%--------------------------------------------------------------------
--spec get_slave_driver(Link :: boolean(), MC :: model_behaviour:model_config()) ->
-    atom().
+-spec get_slave_driver(Link :: boolean(), opt_ctx()) -> atom().
 get_slave_driver(Link, OptCtx) ->
     case get_level(OptCtx, Link) of
         ?GLOBAL_ONLY_LEVEL ->

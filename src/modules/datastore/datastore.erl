@@ -30,7 +30,7 @@
 -type document_diff() :: #{term() => term()} | fun((OldValue :: value()) ->
     {ok, NewValue :: value()} | {error, Reason :: term()}).
 -type bucket() :: atom() | binary().
--type opt_ctx() :: datastore_context:ctx(0).
+-type opt_ctx() :: datastore_context:ctx().
 -type option() :: ignore_links.
 
 -export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0,
@@ -369,7 +369,8 @@ foreach_link(Ctx, Key, Fun, AccIn) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% "Walks" from link to link and fetches either all encountered documents (for Mode == get_all - not yet implemted),
+%% "Walks" from link to link and fetches either all encountered documents
+%% (for Mode == get_all - not yet implemented),
 %% or just last document (for Mode == get_leaf). Starts on the document given by key.
 %% In case of Mode == get_leaf, list of all link's uuids is also returned.
 %% @end
@@ -456,7 +457,18 @@ driver_to_module(Driver) ->
 %%% Internal functions
 %%%===================================================================
 
-% TODO - spec
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% "Walks" from link to link and fetches either all encountered documents
+%% (for Mode == get_all - not yet implemented),
+%% or just last document (for Mode == get_leaf). Starts on the document given by key.
+%% In case of Mode == get_leaf, list of all link's uuids is also returned.
+%% @end
+%%--------------------------------------------------------------------
+-spec link_walk7(opt_ctx(), Key :: ext_key(), [link_name()], Acc :: [ext_key()],
+    get_leaf | get_all) ->
+    {ok, {document(), [ext_key()]} | [document()]} | link_error() | get_error().
 link_walk7(_Ctx, _Key, _Links, _Acc, get_all) ->
     erlang:error(not_inplemented);
 link_walk7(Ctx, Key, [LastLink], Acc, get_leaf) ->
@@ -475,7 +487,14 @@ link_walk7(Ctx, Key, [NextLink | R], Acc, get_leaf) ->
             {error, Reason}
     end.
 
-% TODO - spec
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Normalize targets of links.
+%% @end
+%%--------------------------------------------------------------------
+-spec normalize_link_target(opt_ctx(), [link_spec()]) ->
+    [{link_name(), normalized_link_target()}].
 normalize_link_target(_, {_LinkName, {_Version, [{_ScopeId, _VHash, _TargetKey, ModelName} | _]}} = ValidLink) when is_atom(ModelName) ->
     ValidLink;
 normalize_link_target(_, []) ->
@@ -513,7 +532,6 @@ maybe_gen_uuid(#document{} = Doc) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec model_name(tuple() | document() | model_behaviour:model_config() | model_behaviour:model_type()) -> model_behaviour:model_type().
-% TODO - model_name(CTX)
 model_name(#document{value = Record}) ->
     model_name(Record);
 model_name(#model_config{name = ModelName}) ->
@@ -521,7 +539,23 @@ model_name(#model_config{name = ModelName}) ->
 model_name(Record) when is_tuple(Record) ->
     element(1, Record);
 model_name(ModelName) when is_atom(ModelName) ->
-    ModelName.
+    ModelName;
+model_name(OptCtx) ->
+    datastore_context:get_model_name(OptCtx).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets model config for given document/record/model name.
+%% @end
+%%--------------------------------------------------------------------
+-spec model_config(tuple() | document() | model_behaviour:model_type()) -> model_behaviour:model_config().
+model_config(#model_config{} = MC) ->
+    MC;
+model_config(ModelNameOrConfig) ->
+    ModelName = model_name(ModelNameOrConfig),
+    ModelName:model_init().
 
 
 %%--------------------------------------------------------------------
@@ -569,17 +603,9 @@ run_posthooks(Ctx, Method, Args, Return) ->
         run_hooks ->
             ModelName = model_name(Ctx),
             Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
-            % TODO - delete context_to_propagate
-            LinksContext = links_utils:get_context_to_propagate(Ctx),
             lists:foreach(
                 fun({_, HookedModule}) ->
                     spawn(fun() ->
-                        case HookedModule of
-                            ModelName ->
-                                links_utils:apply_context(LinksContext);
-                            _ ->
-                                ok
-                        end,
                         HookedModule:'after'(Ctx, ModelName, Method, Args, Return) end)
                 end, Hooked),
             Return;
@@ -670,8 +696,7 @@ init_drivers(Configs, NodeToSync) ->
         fun({Bucket, Models}) ->
             ok = apply(driver_to_module(?PERSISTENCE_DRIVER), init_bucket, [Bucket, Models, NodeToSync]),
             ok = apply(?LOCAL_SLAVE_DRIVER, init_bucket, [Bucket, Models, NodeToSync]),
-            ok = apply(?GLOBAL_SLAVE_DRIVER, init_bucket, [Bucket, Models, NodeToSync]),
-            init_auxiliary_caches(Models, NodeToSync)
+            ok = apply(?GLOBAL_SLAVE_DRIVER, init_bucket, [Bucket, Models, NodeToSync])
         end, maps:to_list(configs_per_bucket(Configs))).
 
 %%--------------------------------------------------------------------
@@ -769,10 +794,18 @@ exec_driver(OptCtx, Method, Args) ->
         end,
     run_posthooks(OptCtx, Method, Args, Return).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Provides method to be called for the driver and its args.
+%% @end
+%%--------------------------------------------------------------------
+-spec final_method_with_args(Driver :: atom(), opt_ctx(),
+    Method :: store_driver_behaviour:driver_action(),
+    Args :: [term()]) -> {Fun :: atom(), FinalArgs :: [term()]}.
 final_method_with_args(?PERSISTENCE_DRIVER, OptCtx, Method, Args) ->
-    DriverContext = datastore_context:get_driver_context(OptCtx,
-        ?PERSISTENCE_DRIVER),
+    DriverContext = datastore_context:get_driver_context(OptCtx),
     {Method, [DriverContext | Args]};
-final_method_with_args(Driver, OptCtx, Method, Args) ->
-    DriverContext = datastore_context:get_driver_context(OptCtx, Driver),
+final_method_with_args(_Driver, OptCtx, Method, Args) ->
+    DriverContext = datastore_context:get_driver_context(OptCtx),
     {call, [Method, DriverContext, Args]}.

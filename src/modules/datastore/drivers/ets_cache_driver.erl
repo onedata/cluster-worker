@@ -161,13 +161,8 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
-    case proplists:get_value(mode, Opts, undefined) of
-        {ordered, Field} ->
-            list_ordered(ModelConfig, Fun, AccIn, Field);
-        _ ->
-            list(ModelConfig, Fun, AccIn)
-        end.
+list(#model_config{} = ModelConfig, Fun, AccIn, _Opts) ->
+    list(ModelConfig, Fun, AccIn).
 
 %%--------------------------------------------------------------------
 %% @doc
