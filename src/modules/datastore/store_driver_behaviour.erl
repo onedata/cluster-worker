@@ -29,7 +29,7 @@
 %% Initializes given bucket locally (this method is executed per-node).
 %% @end
 %%--------------------------------------------------------------------
--callback init_buckets(Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
+-callback init_bucket(Bucket :: datastore:bucket(), Models :: [model_behaviour:model_config()], NodeToSync :: node()) -> ok.
 
 
 %%--------------------------------------------------------------------

@@ -148,7 +148,7 @@ before(_ModelName, _Method, _Level, _Context) ->
 -spec enqueue(datastore:ext_key(), pid(), boolean()) ->
     {ok, acquired | wait} | {error, already_acquired}.
 enqueue(Key, Pid, Recursive) ->
-    datastore:run_transaction(?MODULE, Key, fun() ->
+    datastore:run_transaction(Key, fun() ->
         case get(Key) of
             {ok, #document{value = #lock{queue = Q}}} ->
                 case has(Q, Pid) of
@@ -180,7 +180,7 @@ enqueue(Key, Pid, Recursive) ->
 -spec dequeue(datastore:ext_key(), pid()) ->
     {ok, pid() | empty} | {error, not_lock_owner | lock_does_not_exist}.
 dequeue(Key, Pid) ->
-    datastore:run_transaction(?MODULE, Key, fun() ->
+    datastore:run_transaction(Key, fun() ->
         case get(Key) of
             {ok, #document{value = #lock{queue = Q}}} ->
                 case has(Q, Pid) of

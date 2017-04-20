@@ -493,8 +493,9 @@ link_walk7(Ctx, Key, [NextLink | R], Acc, get_leaf) ->
 %% Normalize targets of links.
 %% @end
 %%--------------------------------------------------------------------
--spec normalize_link_target(opt_ctx(), [link_spec()]) ->
-    [{link_name(), normalized_link_target()}].
+% TODO - spec
+%%-spec normalize_link_target(opt_ctx(), [link_spec()]) ->
+%%    [{link_name(), normalized_link_target()}].
 normalize_link_target(_, {_LinkName, {_Version, [{_ScopeId, _VHash, _TargetKey, ModelName} | _]}} = ValidLink) when is_atom(ModelName) ->
     ValidLink;
 normalize_link_target(_, []) ->
@@ -531,7 +532,8 @@ maybe_gen_uuid(#document{} = Doc) ->
 %% Gets model name for given document/record.
 %% @end
 %%--------------------------------------------------------------------
--spec model_name(tuple() | document() | model_behaviour:model_config() | model_behaviour:model_type()) -> model_behaviour:model_type().
+-spec model_name(opt_ctx() | tuple() | document() | model_behaviour:model_config()
+    | model_behaviour:model_type()) -> model_behaviour:model_type().
 model_name(#document{value = Record}) ->
     model_name(Record);
 model_name(#model_config{name = ModelName}) ->
@@ -567,16 +569,18 @@ model_config(ModelNameOrConfig) ->
 -spec run_prehooks(opt_ctx(),
     Method :: model_behaviour:model_action(), Context :: term()) ->
     ok | {error, Reason :: term()}.
+% TODO - new concept for hooks
 run_prehooks(Ctx, Method, Args) ->
     HooksConfig = datastore_context:get_hooks_config(Ctx),
     case HooksConfig of
         run_hooks ->
            ModelName = model_name(Ctx),
+           Level = datastore_context:get_level(Ctx),
            Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
            HooksRes =
                lists:map(
                    fun({_, HookedModule}) ->
-                       HookedModule:before(Ctx, ModelName, Method, Args)
+                       HookedModule:before(ModelName, Method, Level, Args)
                    end, Hooked),
            case [Filtered || Filtered <- HooksRes, Filtered /= ok] of
                [] -> ok;
@@ -602,11 +606,12 @@ run_posthooks(Ctx, Method, Args, Return) ->
     case HooksConfig of
         run_hooks ->
             ModelName = model_name(Ctx),
+            Level = datastore_context:get_level(Ctx),
             Hooked = ets:lookup(?LOCAL_STATE, {ModelName, Method}),
             lists:foreach(
                 fun({_, HookedModule}) ->
                     spawn(fun() ->
-                        HookedModule:'after'(Ctx, ModelName, Method, Args, Return) end)
+                        HookedModule:'after'(ModelName, Method, Level, Args, Return) end)
                 end, Hooked),
             Return;
         _ ->

@@ -54,7 +54,7 @@ create_datastore_context(Operation, #model_config{name = Name, store_level = SL,
   Driver = datastore:level_to_driver(Level),
   DriverContext = get_default_driver_context(Driver, Operation, Config),
   Ctx = datastore_context:create_context(Name, Level, Driver, DriverContext,
-    LRS, LD, DRLD, true),
+    LRS, LD, DRLD, run_hooks),
 
   lists:foldl(fun({K, V}, Acc) ->
     datastore_context:override(K, V, Acc)

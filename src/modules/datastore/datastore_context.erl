@@ -19,6 +19,7 @@
 -type ctx() :: #{atom() => term()}.
 % TODO - change to map
 -type driver_ctx() :: term().
+-type hooks_config() :: run_hooks | no_hooks.
 
 -export_type([ctx/0]).
 
@@ -34,7 +35,7 @@
 -spec create_context(ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level(), Driver :: atom(), DriverCtx :: driver_ctx(),
     LRS :: links_utils:link_replica_scope(), LD :: boolean(), DRLD :: boolean(),
-    Hooks :: boolean()) -> ctx().
+    Hooks :: hooks_config()) -> ctx().
 create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks) ->
   C0 = maps:put(model_name, ModelName, #{}),
   C1 = maps:put(level, Level, C0),
@@ -50,7 +51,7 @@ create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks) ->
 %% Overrides context parameter. To be used only by model.erl.
 %% @end
 %%--------------------------------------------------------------------
--spec override(Key :: atom(), Value :: term(), ctx) -> ctx().
+-spec override(Key :: atom(), Value :: term(), ctx()) -> ctx().
 override(Key, Value, Ctx) ->
   maps:put(Key, Value, Ctx).
 
@@ -86,7 +87,7 @@ get_driver(OptCtx) ->
 %% Returns hooks config.
 %% @end
 %%--------------------------------------------------------------------
--spec get_hooks_config(ctx()) -> boolean().
+-spec get_hooks_config(ctx()) -> hooks_config().
 get_hooks_config(OptCtx) ->
   maps:get(hooks_config, OptCtx).
 

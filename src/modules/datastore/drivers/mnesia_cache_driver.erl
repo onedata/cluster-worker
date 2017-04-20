@@ -24,7 +24,7 @@
 %% TODO Add non_transactional updates (each update creates tmp ets!)
 -export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
 -export([add_links/3, set_links/3, create_link/3, delete_links/4, fetch_link/3, foreach_link/4]).
--export([run_transation/1, run_transation/2, run_transation/3]).
+-export([run_transation/1, run_transation/2]).
 
 -export([save_link_doc/2, get_link_doc/2, get_link_doc/3, delete_link_doc/2, exists_link_doc/3]).
 
@@ -488,35 +488,6 @@ healthcheck(State) ->
             (_, _, Acc) -> Acc
         end, ok, State).
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
-%% run at the same time.
-%% @end
-%%--------------------------------------------------------------------
--spec run_transation(model_behaviour:model_config(), ResourceId :: binary(), fun(() -> Result)) -> Result
-    when Result :: term().
-run_transation(#model_config{name = _ModelName}, ResourceID, Fun) ->
-    % TODO - configure per model
-    ModelName = lock,
-    mnesia_run(sync_transaction,
-        fun(TrxType) ->
-            log(normal, "~p -> ~p:run_transation(~p)", [TrxType, ModelName, ResourceID]),
-            Nodes = lists:usort(mnesia:table_info(table_name(ModelName), where_to_write)),
-            case mnesia:lock({global, ResourceID, Nodes}, write) of
-                ok ->
-                    Fun();
-                Nodes0 ->
-                    case lists:usort(Nodes0) of
-                        Nodes ->
-                            Fun();
-                        LessNodes ->
-                            {error, {lock_error, Nodes -- LessNodes}}
-                    end
-            end
-        end).
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
@@ -652,7 +623,7 @@ create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type) ->
     Attributes :: [atom()], RamCopiesNodes :: [atom()], Type :: atom(), Majority :: boolean()) -> ok.
 create_table(TabName, RecordName, Attributes, RamCopiesNodes, Type, Majority) ->
     AttributesArg = case Attributes of
-        [] -> [];
+%%        [] -> []; % for dialyzer - currently there are no calls with Attributes = []
         [key] -> [];
         _ -> [{attributes, Attributes}]
     end,
