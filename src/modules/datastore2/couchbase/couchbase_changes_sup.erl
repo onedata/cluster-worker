@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module implements supervisor behaviour and is responsible
-%%% for supervising and restarting CouchBase changes workers.
+%%% for supervising and restarting CouchBase changes processors.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(couchbase_changes_sup).
@@ -39,17 +39,18 @@ start_link() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts CouchBase changes worker.
+%% Starts CouchBase changes processor.
 %% @end
 %%--------------------------------------------------------------------
 -spec start_worker(couchbase_driver:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_worker(Bucket, Scope) ->
-    supervisor:start_child(?MODULE, couchbase_changes_spec(Bucket, Scope)).
+    Spec = couchbase_changes_processor_spec(Bucket, Scope),
+    supervisor:start_child(?MODULE, Spec).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Stops CouchBase changes worker.
+%% Stops CouchBase changes processor.
 %% @end
 %%--------------------------------------------------------------------
 -spec stop_worker(couchbase_driver:bucket(), datastore:scope()) ->
@@ -87,22 +88,22 @@ init([]) ->
 %% Returns a supervisor child_spec for a CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec couchbase_changes_spec(couchbase_driver:bucket(), datastore:scope()) ->
-    supervisor:child_spec().
-couchbase_changes_spec(Bucket, Scope) ->
+-spec couchbase_changes_processor_spec(couchbase_driver:bucket(),
+    datastore:scope()) -> supervisor:child_spec().
+couchbase_changes_processor_spec(Bucket, Scope) ->
     #{
         id => {Bucket, Scope},
-        start => {couchbase_changes, start_link, [Bucket, Scope]},
+        start => {couchbase_changes_processor, start_link, [Bucket, Scope]},
         restart => transient,
         shutdown => timer:seconds(10),
         type => worker,
-        modules => [couchbase_changes]
+        modules => [couchbase_changes_processor]
     }.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns a supervisor child_spec for a CouchBase changes supervisor.
+%% Returns a supervisor child_spec for a CouchBase changes streamer supervisor.
 %% @end
 %%--------------------------------------------------------------------
 -spec couchbase_changes_stream_sup_spec() -> supervisor:child_spec().

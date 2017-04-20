@@ -8,11 +8,11 @@
 %%% @doc
 %%% This module is responsible for streaming CouchBase documents changes in
 %%% range [Since, Until] (inclusive except for infinity). It should be used by
-%%% clients. There may be many couchbase_changes_stream gen_server processes,
-%%% as they work in readonly mode.
+%%% clients. There may be many couchbase_changes_streamer processes, as they
+%%% work in a readonly mode.
 %%% @end
 %%%-------------------------------------------------------------------
--module(couchbase_changes_stream).
+-module(couchbase_changes_streamer).
 -author("Krzysztof Trzepla").
 
 -behaviour(gen_server).
