@@ -71,7 +71,7 @@
 
 %% API
 -export([save/2, update/3, create/2, create_or_update/3,
-    get/2, list/3, list/4, list_dirty/3, delete/2, delete/4, exists/2]).
+    get/2, list/3, list/4, list_dirty/3, delete/2, delete/3, delete/4, exists/2]).
 -export([fetch_link/3, add_links/3, create_link/3, delete_links/3,
     foreach_link/4, fetch_link_target/3, link_walk/4, set_links/3]).
 -export([fetch_full_link/3]).
