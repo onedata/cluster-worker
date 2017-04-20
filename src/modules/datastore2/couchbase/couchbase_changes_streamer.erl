@@ -29,7 +29,7 @@
     code_change/3]).
 
 -record(state, {
-    bucket :: couchbase_driver:bucket(),
+    bucket :: couchbase_config:bucket(),
     scope :: datastore:scope(),
     callback :: couchbase_changes:callback(),
     since :: couchbase_changes:since(),
@@ -50,7 +50,7 @@
 %% Starts CouchBase changes stream.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_driver:bucket(), datastore:scope(),
+-spec start_link(couchbase_config:bucket(), datastore:scope(),
     couchbase_changes:callback(), proplists:proplist()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope, Callback, Opts) ->

@@ -73,7 +73,7 @@ worker_should_handle_malformed_request(Config) ->
 
 worker_should_connect_to_first_active_database_node(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    DbHosts = rpc:call(Worker, datastore_config2, get_db_hosts, []),
+    DbHosts = rpc:call(Worker, couchbase_config, get_hosts, []),
     DbHosts2 = [<<"127.0.0.1">> | DbHosts],
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_pool_worker, start_link,
         [?BUCKET, read, 1, DbHosts2]

@@ -42,7 +42,7 @@ start_link() ->
 %% Starts CouchBase changes processor.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker(couchbase_driver:bucket(), datastore:scope()) ->
+-spec start_worker(couchbase_config:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_worker(Bucket, Scope) ->
     Spec = couchbase_changes_processor_spec(Bucket, Scope),
@@ -53,7 +53,7 @@ start_worker(Bucket, Scope) ->
 %% Stops CouchBase changes processor.
 %% @end
 %%--------------------------------------------------------------------
--spec stop_worker(couchbase_driver:bucket(), datastore:scope()) ->
+-spec stop_worker(couchbase_config:bucket(), datastore:scope()) ->
     ok | {error, Reason :: term()}.
 stop_worker(Bucket, Scope) ->
     supervisor:terminate_child(?MODULE, {Bucket, Scope}).
@@ -88,7 +88,7 @@ init([]) ->
 %% Returns a supervisor child_spec for a CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec couchbase_changes_processor_spec(couchbase_driver:bucket(),
+-spec couchbase_changes_processor_spec(couchbase_config:bucket(),
     datastore:scope()) -> supervisor:child_spec().
 couchbase_changes_processor_spec(Bucket, Scope) ->
     #{

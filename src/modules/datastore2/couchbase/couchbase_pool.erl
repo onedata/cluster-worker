@@ -46,7 +46,7 @@
 %% Schedules request execution on a worker pool.
 %% @end
 %%--------------------------------------------------------------------
--spec post_async(couchbase_driver:bucket(), mode(), request()) -> reference().
+-spec post_async(couchbase_config:bucket(), mode(), request()) -> reference().
 post_async(Bucket, Mode, Request) ->
     Ref = make_ref(),
     Id = get_next_worker_id(Bucket, Mode),
@@ -60,7 +60,7 @@ post_async(Bucket, Mode, Request) ->
 %% Schedules request execution on a worker pool and awaits response.
 %% @end
 %%--------------------------------------------------------------------
--spec post(couchbase_driver:bucket(), mode(), request()) -> response().
+-spec post(couchbase_config:bucket(), mode(), request()) -> response().
 post(Bucket, Mode, Request) ->
     wait(post_async(Bucket, Mode, Request)).
 
@@ -104,7 +104,7 @@ get_size(Mode) ->
 %% Returns requests queue size for given bucket and all modes.
 %% @end
 %%--------------------------------------------------------------------
--spec get_request_queue_size(couchbase_driver:bucket()) -> non_neg_integer().
+-spec get_request_queue_size(couchbase_config:bucket()) -> non_neg_integer().
 get_request_queue_size(Bucket) ->
     lists:foldl(fun(Mode, Size) ->
         Size + get_request_queue_size(Bucket, Mode)
@@ -115,7 +115,7 @@ get_request_queue_size(Bucket) ->
 %% Returns requests queue size for given bucket and mode.
 %% @end
 %%--------------------------------------------------------------------
--spec get_request_queue_size(couchbase_driver:bucket(), mode()) ->
+-spec get_request_queue_size(couchbase_config:bucket(), mode()) ->
     non_neg_integer().
 get_request_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
@@ -128,7 +128,7 @@ get_request_queue_size(Bucket, Mode) ->
 %% Set worker's requests queue size to zero.
 %% @end
 %%--------------------------------------------------------------------
--spec reset_request_queue_size(couchbase_driver:bucket(), mode(),
+-spec reset_request_queue_size(couchbase_config:bucket(), mode(),
     couchbase_pool_worker:id()) -> ok.
 reset_request_queue_size(Bucket, Mode, Id) ->
     Key = {request_queue_size, Bucket, Mode, Id},
@@ -141,7 +141,7 @@ reset_request_queue_size(Bucket, Mode, Id) ->
 %% getting below zero.
 %% @end
 %%--------------------------------------------------------------------
--spec update_request_queue_size(couchbase_driver:bucket(), mode(),
+-spec update_request_queue_size(couchbase_config:bucket(), mode(),
     couchbase_pool_worker:id(), integer()) -> ok.
 update_request_queue_size(Bucket, Mode, Id, Delta) when Delta < 0 ->
     Key = {request_queue_size, Bucket, Mode, Id},
@@ -162,7 +162,7 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
 %% Returns next worker ID.
 %% @end
 %%--------------------------------------------------------------------
--spec get_next_worker_id(couchbase_driver:bucket(), mode()) ->
+-spec get_next_worker_id(couchbase_config:bucket(), mode()) ->
     couchbase_pool_worker:id().
 get_next_worker_id(Bucket, Mode) ->
     Key = {next_worker_id, Bucket, Mode},

@@ -39,7 +39,7 @@
 -export_type([id/0]).
 
 -record(state, {
-    bucket :: couchbase_driver:bucket(),
+    bucket :: couchbase_config:bucket(),
     mode :: couchbase_pool:mode(),
     id :: id(),
     requests_queue :: queue:queue(request()),
@@ -58,7 +58,7 @@
 %% Starts CouchBase pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_driver:bucket(), couchbase_pool:mode(), id(),
+-spec start_link(couchbase_config:bucket(), couchbase_pool:mode(), id(),
     couchbase_driver:db_host()) -> {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Mode, Id, DbHosts) ->
     gen_server:start_link(?MODULE, [Bucket, Mode, Id, DbHosts], []).

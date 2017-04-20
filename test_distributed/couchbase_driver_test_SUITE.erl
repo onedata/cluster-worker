@@ -442,7 +442,7 @@ query_view_should_parse_all_opts(Config) ->
 
 get_buckets_should_return_all_buckets(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual([?BUCKET], rpc:call(Worker, couchbase_driver, get_buckets,
+    ?assertEqual([?BUCKET], rpc:call(Worker, couchbase_config, get_buckets,
         []
     )).
 

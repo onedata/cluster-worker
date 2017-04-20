@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides an interface to a CouchBase database.
+%%% This module provides an interface to a CouchBase store.
 %%% All exposed operations are executed using a dedicated worker pool.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -20,13 +20,15 @@
 -export([save/2, get/2, delete/2, purge/2]).
 -export([get_counter/3, update_counter/4]).
 -export([save_design_doc/3, delete_design_doc/2, query_view/4]).
--export([get_buckets/0]).
 
--type ctx() :: #{atom() => term()}.
--type key() :: cberl:key().
--type value() :: datastore:doc() | datastore_json2:ejson().
+-type ctx() :: #{bucket => couchbase_config:bucket(),
+                 no_rev => boolean(),
+                 no_seq => boolean(),
+                 no_durability => boolean()}.
+-type key() :: datastore:key().
+-type value() :: datastore:doc() | cberl:value().
+-type item() :: datastore:doc() | {cberl:key(), cberl:value()}.
 -type rev() :: [couchbase_doc:hash()].
--type bucket() :: binary().
 -type design() :: binary().
 -type view() :: binary().
 -type view_opt() :: {descending, boolean()} |
@@ -48,7 +50,7 @@
 -opaque future() :: {bulk, reference()} | {single, future()}.
 -type one_or_many(Type) :: Type | list(Type).
 
--export_type([ctx/0, key/0, value/0, rev/0, bucket/0, design/0, view/0,
+-export_type([ctx/0, key/0, value/0, item/0, rev/0, design/0, view/0,
     view_opt/0, future/0]).
 
 %%%===================================================================
@@ -98,7 +100,7 @@ delete_async(Ctx, Docs) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Asynchronously removes value/values associated with key/keys in a database.
+%% Asynchronously removes value/values associated with key/keys from a database.
 %% @end
 %%--------------------------------------------------------------------
 -spec purge_async(ctx(), one_or_many(key())) -> future().
@@ -155,7 +157,7 @@ delete(Ctx, Docs) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes value/values associated with key/keys in a database.
+%% Removes value/values associated with key/keys from a database.
 %% @end
 %%--------------------------------------------------------------------
 -spec purge(ctx(), one_or_many(key())) -> one_or_many(ok | {error, term()}).
@@ -212,17 +214,3 @@ delete_design_doc(#{bucket := Bucket}, DesignName) ->
     {ok, datastore_json2:ejson()} | {error, term()}.
 query_view(#{bucket := Bucket}, DesignName, ViewName, Opts) ->
     couchbase_pool:post(Bucket, read, {query_view, DesignName, ViewName, Opts}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of database buckets.
-%% @end
-%%--------------------------------------------------------------------
--spec get_buckets() -> [bucket()].
-get_buckets() ->
-    DbHost = utils:random_element(datastore_config2:get_db_hosts()),
-    Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
-    {ok, 200, _, Body} = http_client:get(Url),
-    lists:map(fun(BucketMap) ->
-        maps:get(<<"name">>, BucketMap)
-    end, jiffy:decode(Body, [return_maps])).

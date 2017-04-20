@@ -30,7 +30,7 @@
     code_change/3]).
 
 -record(state, {
-    bucket :: couchbase_driver:bucket(),
+    bucket :: couchbase_config:bucket(),
     scope :: datastore:scope(),
     seq :: couchbase_changes:since(),
     seq_safe :: couchbase_changes:until(),
@@ -49,7 +49,7 @@
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_driver:bucket(), datastore:scope()) ->
+-spec start_link(couchbase_config:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope) ->
     gen_server2:start_link(?MODULE, [Bucket, Scope], []).
@@ -182,8 +182,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% Sets safe sequence number to the last acknowledge sequence number.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_changes(couchbase_changes:seq(), couchbase_changes:seq(), state()) ->
-    state().
+-spec fetch_changes(couchbase_changes:seq(), couchbase_changes:seq(),
+    state()) -> state().
 fetch_changes(Seq, Seq, #state{interval = Interval} = State) ->
     erlang:send_after(Interval, self(), update),
     State;

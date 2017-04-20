@@ -42,7 +42,7 @@ start_link() ->
 %% Registers CouchBase worker pool manager.
 %% @end
 %%--------------------------------------------------------------------
--spec register_worker(couchbase_driver:bucket(), couchbase_pool:mode(),
+-spec register_worker(couchbase_config:bucket(), couchbase_pool:mode(),
     couchbase_pool_worker:id(), pid()) -> ok.
 register_worker(Bucket, Mode, Id, Worker) ->
     ets:insert(couchbase_pool_workers, {{Bucket, Mode, Id}, Worker}),
@@ -61,7 +61,7 @@ get_worker(Bucket, Mode, Id) ->
 %% Unregisters CouchBase pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec unregister_worker(couchbase_driver:bucket(), couchbase_pool:mode(),
+-spec unregister_worker(couchbase_config:bucket(), couchbase_pool:mode(),
     couchbase_pool_worker:id(), pid()) -> ok.
 unregister_worker(Bucket, Mode, Id, Worker) ->
     ets:delete_object(couchbase_pool_workers, {{Bucket, Mode, Id}, Worker}),
@@ -90,7 +90,7 @@ init([]) ->
         public, named_table, {write_concurrency, true}
     ]),
 
-    DbHosts = datastore_config2:get_db_hosts(),
+    DbHosts = couchbase_config:get_hosts(),
     {ok, {#{strategy => one_for_one, intensity => 3, period => 1},
         lists:foldl(fun(Bucket, Specs) ->
             lists:foldl(fun(Mode, Specs2) ->
@@ -98,7 +98,7 @@ init([]) ->
                     [worker_spec(Bucket, Mode, Id, DbHosts) | Specs3]
                 end, Specs2, lists:seq(1, couchbase_pool:get_size(Mode)))
             end, Specs, couchbase_pool:get_modes())
-        end, [], couchbase_driver:get_buckets())
+        end, [], couchbase_config:get_buckets())
     }}.
 
 %%%===================================================================
@@ -111,7 +111,7 @@ init([]) ->
 %% Returns a worker child_spec for a CouchBase worker pool manager.
 %% @end
 %%--------------------------------------------------------------------
--spec worker_spec(couchbase_driver:bucket(), couchbase_pool:type(),
+-spec worker_spec(couchbase_config:bucket(), couchbase_pool:type(),
     couchbase_pool_worker:id(), [couchbase_driver:db_host()]) ->
     supervisor:child_spec().
 worker_spec(Bucket, Mode, Id, DbHosts) ->
