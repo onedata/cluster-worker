@@ -31,8 +31,10 @@
     clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
 
 -define(TIMEOUT, timer:minutes(5)).
--define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
--define(rpc_store(W, Fun, Level, CustomArgs), rpc:call(W, datastore, Fun, [Level] ++ CustomArgs)).
+-define(call_store(Model, Fun, CustomArgs),
+    erlang:apply(model, execute_with_default_context, [Model, Fun, CustomArgs])).
+-define(rpc_store(W, Model, Fun, CustomArgs),
+    rpc:call(W, model, execute_with_default_context, [Model, Fun, CustomArgs])).
 -define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
 
 %%%===================================================================
@@ -64,7 +66,7 @@ links_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(add_links, Level, [Doc,
+                Ans = ?call_store(TestRecord, add_links, [Doc,
                     [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                         {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                 AfterProcessing = os:timestamp(),
@@ -82,7 +84,7 @@ links_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(fetch_link, Level, [
+                Ans = ?call_store(TestRecord, fetch_link, [
                     Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -98,7 +100,7 @@ links_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(delete_links, Level, [
+                Ans = ?call_store(TestRecord, delete_links, [
                     Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -111,13 +113,13 @@ links_test(Config, Level) ->
     ?assertEqual([], ErrorsList2),
     ?assertEqual(OpsNum, OkNum2),
 
-    test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
+    test_with_fetch(TestRecord, Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, false),
 
     ForechTestFun = fun(LinkName, LinkTarget, Acc) ->
         maps:put(LinkName, LinkTarget, Acc)
     end,
     ForeachBeforeProcessing = os:timestamp(),
-    ?assertMatch({ok, _}, ?rpc_store(Worker1, foreach_link, Level, [Doc, ForechTestFun, #{}])),
+    ?assertMatch({ok, _}, ?rpc_store(Worker1, TestRecord, foreach_link, [Doc, ForechTestFun, #{}])),
     ForeachAfterProcessing = os:timestamp(),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
@@ -153,7 +155,7 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(Fun, Level, [
+                Ans = ?call_store(TestRecord, Fun, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
                         value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
@@ -194,8 +196,8 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(Fun2, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
+                Ans = ?call_store(TestRecord, Fun2, [
+                    list_to_binary(DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
             end)
@@ -246,7 +248,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(Fun, Level, [
+                Ans = ?call_store(TestRecord, Fun, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
                         value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
@@ -266,7 +268,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     ListBeforeProcessing = os:timestamp(),
-    ?assertMatch({ok, _}, ?rpc_store(Worker1, list, Level, [TestRecord, ?GET_ALL, []])),
+    ?assertMatch({ok, _}, ?rpc_store(Worker1, TestRecord, list, [TestRecord, ?GET_ALL, []])),
     ListAfterProcessing = os:timestamp(),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
@@ -297,8 +299,8 @@ update_test_base(Config, Level, Fun, Fun2, Fun3) ->
         for(1, DocsPerThead, fun(I) ->
             for(1, OpsPerDoc, fun(J) ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(Fun, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I)),
+                Ans = ?call_store(TestRecord, Fun, [
+                    list_to_binary(DocsSet ++ integer_to_list(I)),
                     #{field1 => I + J}
                 ]),
                 AfterProcessing = os:timestamp(),
@@ -352,8 +354,8 @@ get_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(get, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
+                Ans = ?call_store(TestRecord, get, [
+                    list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -404,8 +406,8 @@ exists_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(exists, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
+                Ans = ?call_store(TestRecord, exists, [
+                    list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -465,7 +467,7 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(create, Level, [
+                Ans = ?call_store(TestRecord, create, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
                         value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
@@ -480,7 +482,7 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(save, Level, [
+                Ans = ?call_store(TestRecord, save, [
                     #document{
                         key = list_to_binary(DocsSet ++ integer_to_list(I)),
                         value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
@@ -495,8 +497,8 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(1, OpsPerDoc, fun(J) ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(update, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I)),
+                Ans = ?call_store(TestRecord, update, [
+                    list_to_binary(DocsSet ++ integer_to_list(I)),
                     #{field1 => I + J}
                 ]),
                 AfterProcessing = os:timestamp(),
@@ -531,7 +533,7 @@ mixed_test(Config, Level) ->
                                      for(1, DocsPerThead, fun(I) ->
                                          for(OpsPerDoc, fun() ->
                                              BeforeProcessing = os:timestamp(),
-                                             Ans = ?call_store(add_links, Level, [D,
+                                             Ans = ?call_store(TestRecord, add_links, [D,
                                                  [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                                                      {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                                              AfterProcessing = os:timestamp(),
@@ -552,8 +554,8 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(get, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
+                Ans = ?call_store(TestRecord, get, [
+                    list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -565,8 +567,8 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(1, OpsPerDoc, fun(_J) ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(exists, Level, [
-                    TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))
+                Ans = ?call_store(TestRecord, exists, [
+                    list_to_binary(DocsSet ++ integer_to_list(I))
                 ]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -578,7 +580,7 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(fetch_link, Level, [
+                Ans = ?call_store(TestRecord, fetch_link, [
                     Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -629,7 +631,7 @@ mixed_test(Config, Level) ->
                       ClearManyLinks = fun(DocsSet) ->
                           for(1, DocsPerThead, fun(I) ->
                               BeforeProcessing = os:timestamp(),
-                              Ans = ?call_store(delete_links, Level, [
+                              Ans = ?call_store(TestRecord, delete_links, [
                                   Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
                               AfterProcessing = os:timestamp(),
                               Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -651,7 +653,7 @@ mixed_test(Config, Level) ->
     ClearMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete, Level, [
+            Ans = ?call_store(TestRecord, delete, [
                 TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -720,7 +722,7 @@ links_number_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(add_links, Level, [Doc,
+                Ans = ?call_store(TestRecord, add_links, [Doc,
                     [{list_to_binary("link" ++ DocsSet ++ integer_to_list(I)),
                         {list_to_binary(DocsSet ++ integer_to_list(I)), TestRecord}}]]),
                 AfterProcessing = os:timestamp(),
@@ -738,7 +740,7 @@ links_number_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             for(OpsPerDoc, fun() ->
                 BeforeProcessing = os:timestamp(),
-                Ans = ?call_store(fetch_link, Level, [
+                Ans = ?call_store(TestRecord, fetch_link, [
                     Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
                 AfterProcessing = os:timestamp(),
                 Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -760,7 +762,7 @@ links_number_test(Config, Level) ->
     ClearManyLinks = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(delete_links, Level, [
+            Ans = ?call_store(TestRecord, delete_links, [
                 Doc, [list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
@@ -973,8 +975,8 @@ test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedTh
     GetMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(get, Level, [
-                TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
+            Ans = ?call_store(TestRecord, get, [
+                list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             FinalAns = case {Exists, Ans} of
                            {false, {error, {not_found, _}}} ->
@@ -1004,11 +1006,12 @@ test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedTh
     ?assertEqual([], ErrorsList),
     ?assertEqual(OpsNum, OkNum).
 
-test_with_fetch(Doc, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Exists) ->
+test_with_fetch(TestRecord, Doc, Level, Workers, DocsPerThead, ThreadsNum,
+    ConflictedThreads, Master, AnswerDesc, Exists) ->
     FetchMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(fetch_link, Level, [
+            Ans = ?call_store(TestRecord, fetch_link, [
                 Doc, list_to_binary("link" ++ DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             FinalAns = case {Exists, Ans} of
@@ -1046,8 +1049,8 @@ clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedT
     ClearMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(ClearFun, Level, [
-                TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
+            Ans = ?call_store(TestRecord, ClearFun, [
+                list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
@@ -1078,7 +1081,7 @@ save_many(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThread
     SaveMany = fun(DocsSet) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
-            Ans = ?call_store(SaveFun, Level, [
+            Ans = ?call_store(TestRecord, SaveFun, [
                 #document{
                     key = list_to_binary(DocsSet ++ integer_to_list(I)),
                     value = get_record(TestRecord, I, <<"abc">>, {test, tuple})

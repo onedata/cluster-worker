@@ -51,7 +51,7 @@ call(force_link_save, OptCtx, [ToSave, MainDocKey]) ->
 call(force_link_save, OptCtx, [BucketOverride, ToSave, MainDocKey]) ->
     deletage_call(force_link_save, OptCtx, MainDocKey, [BucketOverride, ToSave]);
 % delegate document changes to tp
-call(Method, OptCtx, [#document{key = Key}] = Args) ->
+call(Method, OptCtx, [#document{key = Key} | _] = Args) ->
     deletage_call(Method, OptCtx, Key, Args);
 call(clear, OptCtx, [Key]) ->
     execute(OptCtx, Key, false, {clear, []}, [100]);
