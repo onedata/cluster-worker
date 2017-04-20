@@ -17,7 +17,7 @@
 
 %% API
 -export([create_datastore_context/2, is_link_op/1, validate_model_config/1,
-  execute/3, execute_with_default_context/3]).
+  execute/3, execute_with_default_context/3, execute_with_default_context/4]).
 
 %%%===================================================================
 %%% API
@@ -29,11 +29,22 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec create_datastore_context(Operation :: atom(), model_behaviour:model_type()
-  | model_behaviour:model_config()) ->
+| model_behaviour:model_config()) ->
+  datastore:opt_ctx().
+create_datastore_context(Operation, TargetMod) ->
+  create_datastore_context(Operation, TargetMod, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates datastore context using model_config..
+%% @end
+%%--------------------------------------------------------------------
+-spec create_datastore_context(Operation :: atom(), model_behaviour:model_type()
+  | model_behaviour:model_config(), DefaultsOverride :: list()) ->
   datastore:opt_ctx().
 create_datastore_context(Operation, #model_config{name = Name, store_level = SL,
   link_store_level = LSL, link_replica_scope = LRS, link_duplication = LD,
-  disable_remote_link_delete = DRLD} = Config) ->
+  disable_remote_link_delete = DRLD} = Config, DefaultsOverride) ->
   % TODO - single level for model
   Level = case is_link_op(Operation) of
     true -> LSL;
@@ -42,10 +53,14 @@ create_datastore_context(Operation, #model_config{name = Name, store_level = SL,
 
   Driver = datastore:level_to_driver(Level),
   DriverContext = get_default_driver_context(Driver, Operation, Config),
-  datastore_context:create_context(Name, Level, Driver, DriverContext,
-    LRS, LD, DRLD, true);
-create_datastore_context(Operation, TargetMod) ->
-  create_datastore_context(Operation, TargetMod:model_init()).
+  Ctx = datastore_context:create_context(Name, Level, Driver, DriverContext,
+    LRS, LD, DRLD, true),
+
+  lists:foldl(fun({K, V}, Acc) ->
+    datastore_context:override(K, V, Acc)
+  end, Ctx, DefaultsOverride);
+create_datastore_context(Operation, TargetMod, DefaultsOverride) ->
+  create_datastore_context(Operation, TargetMod:model_init(), DefaultsOverride).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -67,6 +82,18 @@ execute(Context, Fun, Args) ->
   term().
 execute_with_default_context(Model, Fun, Args) ->
   Context = create_datastore_context(Fun, Model),
+  execute(Context, Fun, Args).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes function with default context.
+%% @end
+%%--------------------------------------------------------------------
+-spec execute_with_default_context(model_behaviour:model_type()
+  | model_behaviour:model_config(), Fun :: atom(), [term()],
+  DefaultsOverride :: list()) -> term().
+execute_with_default_context(Model, Fun, Args, DefaultsOverride) ->
+  Context = create_datastore_context(Fun, Model, DefaultsOverride),
   execute(Context, Fun, Args).
 
 %%--------------------------------------------------------------------

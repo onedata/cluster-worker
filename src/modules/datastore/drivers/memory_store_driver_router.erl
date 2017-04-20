@@ -20,7 +20,7 @@
 -include("timeouts.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
--type opt_ctx() :: datastore_context:ctx().
+-type opt_ctx() :: datastore_context:driver_ctx().
 
 %% API
 -export([call/3, get_default_context/2]).

@@ -90,7 +90,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec save(opt_ctx(), Document :: datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
+    {ok, ext_key()} | generic_error().
 save(Ctx, #document{} = Document) ->
     exec_driver(Ctx, save, [maybe_gen_uuid(Document)]).
 
@@ -99,8 +99,8 @@ save(Ctx, #document{} = Document) ->
 %% Updates given by key document by replacing given fields with new values.
 %% @end
 %%--------------------------------------------------------------------
--spec update(opt_ctx(), Key :: datastore:ext_key(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:ext_key()} | datastore:update_error().
+-spec update(opt_ctx(), Key :: ext_key(), Diff :: datastore:document_diff()) ->
+    {ok, ext_key()} | datastore:update_error().
 update(Ctx, Key, Diff) ->
     exec_driver(Ctx, update, [Key, Diff]).
 
@@ -110,7 +110,7 @@ update(Ctx, Key, Diff) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create(opt_ctx(), Document :: datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:create_error().
+    {ok, ext_key()} | datastore:create_error().
 create(Ctx, #document{} = Document) ->
     exec_driver(Ctx, create, [maybe_gen_uuid(Document)]).
 
@@ -121,7 +121,7 @@ create(Ctx, #document{} = Document) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(opt_ctx(), Document :: datastore:document(),
-    Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
+    Diff :: datastore:document_diff()) -> {ok, ext_key()} | datastore:create_error().
 create_or_update(Ctx, #document{} = Document, Diff) ->
     exec_driver(Ctx, create_or_update, [Document, Diff]).
 
@@ -131,7 +131,7 @@ create_or_update(Ctx, #document{} = Document, Diff) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get(opt_ctx(),
-    Key :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
+    Key :: ext_key()) -> {ok, datastore:document()} | datastore:get_error().
 get(Ctx, Key) ->
     exec_driver(Ctx, get, [Key]).
 
@@ -142,7 +142,7 @@ get(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list_dirty(opt_ctx(), Fun :: list_fun(), AccIn :: term()) ->
-    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+    {ok, Handle :: term()} | generic_error() | no_return().
 list_dirty(Ctx, Fun, AccIn) ->
     list(Ctx, Fun, AccIn, [{mode, dirty}]).
 
@@ -153,7 +153,7 @@ list_dirty(Ctx, Fun, AccIn) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list(opt_ctx(), Fun :: list_fun(), AccIn :: term()) ->
-    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+    {ok, Handle :: term()} | generic_error() | no_return().
 list(Ctx, Fun, AccIn) ->
     list(Ctx, Fun, AccIn, [{mode, transaction}]).
 
@@ -166,7 +166,7 @@ list(Ctx, Fun, AccIn) ->
 -spec list(opt_ctx(),
     Fun :: list_fun(), AccIn :: term(),
     Opts :: store_driver_behaviour:list_options()) ->
-    {ok, Handle :: term()} | datastore:generic_error() | no_return().
+    {ok, Handle :: term()} | generic_error() | no_return().
 list(Ctx, Fun, AccIn, Mode) ->
     exec_driver(Ctx, list, [Fun, AccIn, Mode]).
 
@@ -177,7 +177,7 @@ list(Ctx, Fun, AccIn, Mode) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(opt_ctx(),
-    Key :: datastore:ext_key(), Pred :: delete_predicate()) -> ok | datastore:generic_error().
+    Key :: ext_key(), Pred :: delete_predicate()) -> ok | generic_error().
 delete(Ctx, Key, Pred) ->
     delete(Ctx, Key, Pred, []).
 
@@ -188,7 +188,7 @@ delete(Ctx, Key, Pred) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(opt_ctx(),
-    Key :: datastore:ext_key(), Pred :: delete_predicate(), Options :: [option()]) -> ok | datastore:generic_error().
+    Key :: ext_key(), Pred :: delete_predicate(), Options :: [option()]) -> ok | generic_error().
 delete(Ctx, Key, Pred, Opts) ->
     case exec_driver(Ctx, delete, [Key, Pred]) of
         ok ->
@@ -212,7 +212,7 @@ delete(Ctx, Key, Pred, Opts) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(opt_ctx(),
-    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
+    Key :: ext_key()) -> ok | generic_error().
 delete(Ctx, Key) ->
     delete(Ctx, Key, ?PRED_ALWAYS).
 
@@ -224,7 +224,7 @@ delete(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec exists(opt_ctx(),
-    Key :: datastore:ext_key()) -> {ok, boolean()} | datastore:generic_error().
+    Key :: ext_key()) -> {ok, boolean()} | generic_error().
 exists(Ctx, Key) ->
     exec_driver(Ctx, exists, [Key]).
 
@@ -566,7 +566,7 @@ model_config(ModelNameOrConfig) ->
 %%--------------------------------------------------------------------
 -spec run_prehooks(opt_ctx(),
     Method :: model_behaviour:model_action(), Context :: term()) ->
-    ok | {ok, term()} | {task, task_manager:task()} | {tasks, [task_manager:task()]} | {error, Reason :: term()}.
+    ok | {error, Reason :: term()}.
 run_prehooks(Ctx, Method, Args) ->
     HooksConfig = datastore_context:get_hooks_config(Ctx),
     case HooksConfig of
@@ -610,7 +610,7 @@ run_posthooks(Ctx, Method, Args, Return) ->
                 end, Hooked),
             Return;
         _ ->
-            ok
+            Return
     end.
 
 %%--------------------------------------------------------------------
@@ -779,7 +779,7 @@ level_to_driver(_) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec exec_driver(opt_ctx(), Method :: store_driver_behaviour:driver_action(),
-    [term()]) -> ok | {ok, term()} | {error, term()} | term().
+    [term()]) -> ok | {ok, term()} | generic_error().
 exec_driver(OptCtx, Method, Args) ->
     Driver = datastore_context:get_driver(OptCtx),
     Return =
@@ -787,8 +787,6 @@ exec_driver(OptCtx, Method, Args) ->
             ok ->
                 {FinalMethod, FinalArgs} = final_method_with_args(Driver, OptCtx, Method, Args),
                 erlang:apply(driver_to_module(Driver), FinalMethod, FinalArgs);
-            {ok, Value} ->
-                {ok, Value};
             {error, Reason} ->
                 {error, Reason}
         end,

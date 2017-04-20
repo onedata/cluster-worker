@@ -21,29 +21,31 @@
 %% API
 -export([count_tasks/3]).
 
+-define(LEVEL_OVERRIDE(Level), [{level, Level}]).
+
 %%%===================================================================
 %%% model_behaviour callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback save/1. 
+%% {@link model_behaviour} callback save/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec save(datastore:document()) ->
-    {ok, datastore:key()} | datastore:generic_error().
+    {ok, datastore:ext_key()} | datastore:generic_error().
 save(Document) ->
-    datastore:save(?STORE_LEVEL, Document).
+    model:execute_with_default_context(?MODULE, save, [Document]).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback update/2. 
+%% {@link model_behaviour} callback update/2.
 %% @end
 %%--------------------------------------------------------------------
--spec update(datastore:key(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:key()} | datastore:update_error().
+-spec update(datastore:ext_key(), Diff :: datastore:document_diff()) ->
+    {ok, datastore:ext_key()} | datastore:update_error().
 update(Key, Diff) ->
-    datastore:update(?STORE_LEVEL, ?MODULE, Key, Diff).
+    model:execute_with_default_context(?MODULE, update, [Key, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -57,17 +59,18 @@ update(?NON_LEVEL, _Key, _Diff) ->
     {ok, non};
 
 update(Level, Key, Diff) ->
-    datastore:update(task_to_db_level(Level), ?MODULE, Key, Diff).
+    model:execute_with_default_context(?MODULE, update, [Key, Diff],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback create/1. 
+%% {@link model_behaviour} callback create/1.
 %% @end
 %%--------------------------------------------------------------------
 -spec create(datastore:document()) ->
-    {ok, datastore:key()} | datastore:create_error().
+    {ok, datastore:ext_key()} | datastore:create_error().
 create(Document) ->
-    datastore:create(?STORE_LEVEL, Document).
+    model:execute_with_default_context(?MODULE, create, [Document]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -81,16 +84,17 @@ create(?NON_LEVEL, _Document) ->
     {ok, non};
 
 create(Level, Document) ->
-    datastore:create(task_to_db_level(Level), Document).
+    model:execute_with_default_context(?MODULE, create, [Document],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link model_behaviour} callback get/1.
 %% @end
 %%--------------------------------------------------------------------
--spec get(datastore:key()) -> {ok, datastore:document()} | datastore:get_error().
+-spec get(datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
 get(Key) ->
-    datastore:get(?STORE_LEVEL, ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, get, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -99,7 +103,7 @@ get(Key) ->
 %%--------------------------------------------------------------------
 -spec list() -> {ok, [datastore:document()]} | datastore:generic_error() | no_return().
 list() ->
-    datastore:list(?STORE_LEVEL, ?MODEL_NAME, ?GET_ALL, []).
+    model:execute_with_default_context(?MODULE, list, [?GET_ALL, []]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -112,7 +116,8 @@ list(?NON_LEVEL) ->
     {ok, []};
 
 list(Level) ->
-    datastore:list(task_to_db_level(Level), ?MODEL_NAME, ?GET_ALL, []).
+    model:execute_with_default_context(?MODULE, list, [?GET_ALL, []],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -137,7 +142,8 @@ list_failed(?NODE_LEVEL = Level) ->
                     {next, Acc}
             end
     end,
-    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, []);
+    model:execute_with_default_context(?MODULE, list, [Filter, []],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level)));
 
 list_failed(Level) ->
     Filter = fun
@@ -151,16 +157,17 @@ list_failed(Level) ->
                     {next, Acc}
             end
     end,
-    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, []).
+    model:execute_with_default_context(?MODULE, list, [Filter, []],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link model_behaviour} callback delete/1.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(datastore:key()) -> ok | datastore:generic_error().
+-spec delete(datastore:ext_key()) -> ok | datastore:generic_error().
 delete(Key) ->
-    datastore:delete(?STORE_LEVEL, ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, delete, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -173,16 +180,17 @@ delete(?NON_LEVEL, _Key) ->
     ok;
 
 delete(Level, Key) ->
-    datastore:delete(task_to_db_level(Level), ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, delete, [Key],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback exists/1. 
+%% {@link model_behaviour} callback exists/1.
 %% @end
 %%--------------------------------------------------------------------
--spec exists(datastore:key()) -> datastore:exists_return().
+-spec exists(datastore:ext_key()) -> datastore:exists_return().
 exists(Key) ->
-    ?RESPONSE(datastore:exists(?STORE_LEVEL, ?MODULE, Key)).
+    ?RESPONSE(model:execute_with_default_context(?MODULE, exists, [Key])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -259,7 +267,8 @@ count_tasks(Level, Type, Limit) ->
                              {next, {Failed, All}}
                      end
              end,
-    datastore:list(task_to_db_level(Level), ?MODEL_NAME, Filter, {0,0}).
+    model:execute_with_default_context(?MODULE, list, [Filter, {0,0}],
+        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
 
 %%%===================================================================
 %%% Internal functions

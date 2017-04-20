@@ -22,6 +22,7 @@
     save/2, get/2, exists/2, delete/3, update/3, create/2,
     create_or_update/2, create_or_update/3, model_init/0, 'after'/5, before/4]).
 
+-define(LEVEL_OVERRIDE(Level), [{level, Level}]).
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -35,7 +36,7 @@
 -spec save(datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(Document) ->
-    datastore:save(?STORE_LEVEL, Document).
+    model:execute_with_default_context(?MODULE, save, [Document]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -46,7 +47,8 @@ save(Document) ->
 -spec save(Level :: datastore:store_level(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:generic_error().
 save(Level, Document) ->
-    datastore:save(Level, Document).
+    model:execute_with_default_context(?MODULE, save, [Document],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -56,7 +58,7 @@ save(Level, Document) ->
 -spec update(datastore:ext_key(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:update_error().
 update(Key, Diff) ->
-    datastore:update(?STORE_LEVEL, ?MODULE, Key, Diff).
+    model:execute_with_default_context(?MODULE, update, [Key, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -67,7 +69,8 @@ update(Key, Diff) ->
 -spec update(Level :: datastore:store_level(), datastore:ext_key(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:update_error().
 update(Level, Key, Diff) ->
-    datastore:update(Level, ?MODULE, Key, Diff).
+    model:execute_with_default_context(?MODULE, update, [Key, Diff],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -77,7 +80,7 @@ update(Level, Key, Diff) ->
 -spec create(datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create(Document) ->
-    datastore:create(?STORE_LEVEL, Document).
+    model:execute_with_default_context(?MODULE, create, [Document]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -88,7 +91,8 @@ create(Document) ->
 -spec create(Level :: datastore:store_level(), datastore:document()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create(Level, Document) ->
-    datastore:create(Level, Document).
+    model:execute_with_default_context(?MODULE, create, [Document],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -99,7 +103,7 @@ create(Level, Document) ->
 -spec create_or_update(Document :: datastore:document(), Diff :: datastore:document_diff()) ->
     {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(Document, Diff) ->
-    datastore:create_or_update(?STORE_LEVEL, Document, Diff).
+    model:execute_with_default_context(?MODULE, create_or_update, [Document, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -110,7 +114,8 @@ create_or_update(Document, Diff) ->
 -spec create_or_update(Level :: datastore:store_level(), Document :: datastore:document(),
     Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
 create_or_update(Level, Document, Diff) ->
-    datastore:create_or_update(Level, Document, Diff).
+    model:execute_with_default_context(?MODULE, create_or_update,
+        [Document, Diff], ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -119,7 +124,7 @@ create_or_update(Level, Document, Diff) ->
 %%--------------------------------------------------------------------
 -spec get(datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
 get(Key) ->
-    datastore:get(?STORE_LEVEL, ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, get, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -129,7 +134,8 @@ get(Key) ->
 %%--------------------------------------------------------------------
 -spec get(Level :: datastore:store_level(), datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
 get(Level, Key) ->
-    datastore:get(Level, ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, get, [Key],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -138,7 +144,7 @@ get(Level, Key) ->
 %%--------------------------------------------------------------------
 -spec list() -> {ok, [datastore:document()]} | datastore:generic_error() | no_return().
 list() ->
-    datastore:list(?STORE_LEVEL, ?MODEL_NAME, ?GET_ALL, []).
+    model:execute_with_default_context(?MODULE, list, [?GET_ALL, []]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -147,7 +153,8 @@ list() ->
 %%--------------------------------------------------------------------
 -spec list(Level :: datastore:store_level()) -> {ok, [datastore:document()]} | datastore:generic_error() | no_return().
 list(Level) ->
-    datastore:list(Level, ?MODEL_NAME, ?GET_ALL, []).
+    model:execute_with_default_context(?MODULE, list, [?GET_ALL, []],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -156,7 +163,7 @@ list(Level) ->
 %%--------------------------------------------------------------------
 -spec delete(datastore:ext_key()) -> ok | datastore:generic_error().
 delete(Key) ->
-    datastore:delete(?STORE_LEVEL, ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, delete, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -167,7 +174,8 @@ delete(Key) ->
 -spec delete(Level :: datastore:store_level(), datastore:ext_key()) ->
     ok | datastore:generic_error().
 delete(Level, Key) ->
-    datastore:delete(Level, ?MODULE, Key).
+    model:execute_with_default_context(?MODULE, delete, [Key],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -177,7 +185,8 @@ delete(Level, Key) ->
 -spec delete(datastore:store_level(), datastore:ext_key(), datastore:delete_predicate()) ->
     ok | datastore:generic_error().
 delete(Level, Key, Pred) ->
-    datastore:delete(Level, ?MODULE, Key, Pred).
+    model:execute_with_default_context(?MODULE, delete, [Key, Pred],
+        ?LEVEL_OVERRIDE(Level)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -186,7 +195,7 @@ delete(Level, Key, Pred) ->
 %%--------------------------------------------------------------------
 -spec exists(datastore:ext_key()) -> datastore:exists_return().
 exists(Key) ->
-    ?RESPONSE(datastore:exists(?STORE_LEVEL, ?MODULE, Key)).
+    ?RESPONSE(model:execute_with_default_context(?MODULE, exists, [Key])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -196,7 +205,8 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec exists(Level :: datastore:store_level(), datastore:ext_key()) -> datastore:exists_return().
 exists(Level, Key) ->
-    ?RESPONSE(datastore:exists(Level, ?MODULE, Key)).
+    ?RESPONSE(model:execute_with_default_context(?MODULE, exists, [Key],
+        ?LEVEL_OVERRIDE(Level))).
 
 %%--------------------------------------------------------------------
 %% @doc

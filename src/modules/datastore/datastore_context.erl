@@ -14,10 +14,11 @@
 %% API
 -export([get_model_name/1, get_level/1, get_driver/1, get_hooks_config/1,
   get_link_duplication/1, get_link_replica_scope/1, get_disable_remote_link_delete/1,
-  get_driver_context/1, create_context/8]).
+  get_driver_context/1, create_context/8, override/3]).
 
--type ctx() :: #{}.
--type driver_ctx() :: ctx().
+-type ctx() :: #{atom() => term()}.
+% TODO - change to map
+-type driver_ctx() :: term().
 
 -export_type([ctx/0]).
 
@@ -43,6 +44,15 @@ create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks) ->
   C5 = maps:put(link_duplication, LD, C4),
   C6 = maps:put(disable_remote_link_delete, DRLD, C5),
   maps:put(hooks_config, Hooks, C6).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Overrides context parameter. To be used only by model.erl.
+%% @end
+%%--------------------------------------------------------------------
+-spec override(Key :: atom(), Value :: term(), ctx) -> ctx().
+override(Key, Value, Ctx) ->
+  maps:put(Key, Value, Ctx).
 
 %%--------------------------------------------------------------------
 %% @doc

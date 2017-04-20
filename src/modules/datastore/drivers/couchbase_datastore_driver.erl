@@ -10,7 +10,7 @@
 %%%-------------------------------------------------------------------
 -module(couchbase_datastore_driver).
 -author("Rafal Slota").
--behaviour(store_driver_behaviour).
+%%-behaviour(store_driver_behaviour).
 
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").

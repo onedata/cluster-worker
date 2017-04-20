@@ -463,7 +463,7 @@ cache_to_task_level(ModelName) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
-  ?MEMORY_DRIVER:clear(ModelConfig, Key).
+  ?MEMORY_DRIVER:call(clear, ModelConfig, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -474,7 +474,7 @@ clear(_, ModelName, Key) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear_links(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
-  ?MEMORY_DRIVER:clear_links(ModelConfig, Key).
+  ?MEMORY_DRIVER:call(clear_links, ModelConfig, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc

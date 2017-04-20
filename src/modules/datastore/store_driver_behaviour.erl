@@ -38,7 +38,7 @@
 %% @end
 %%--------------------------------------------------------------------
 % TODO - opcja czy operacja linkowa w ctx
--callback save(datastore:opt_ctx(), datastore:document()) -> {ok, datastore:ext_key()} | datastore:generic_error().
+-callback save(datastore_context:driver_ctx(), datastore:document()) -> {ok, datastore:ext_key()} | datastore:generic_error().
 
 
 %%--------------------------------------------------------------------
@@ -46,7 +46,7 @@
 %% Gets #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--callback get(datastore:opt_ctx(), datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
+-callback get(datastore_context:driver_ctx(), datastore:ext_key()) -> {ok, datastore:document()} | datastore:get_error().
 
 
 %%--------------------------------------------------------------------
@@ -54,7 +54,7 @@
 %% Deletes #document with given key.
 %% @end
 %%--------------------------------------------------------------------
--callback delete(datastore:opt_ctx(), datastore:ext_key(), datastore:delete_predicate()) -> ok | datastore:generic_error().
+-callback delete(datastore_context:driver_ctx(), datastore:ext_key(), datastore:delete_predicate()) -> ok | datastore:generic_error().
 
 
 %%--------------------------------------------------------------------
