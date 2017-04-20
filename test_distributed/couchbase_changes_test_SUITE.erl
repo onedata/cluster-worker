@@ -103,8 +103,8 @@ seq_safe_should_be_incremented_on_doc_save(Config) ->
 
 seq_safe_should_be_incremented_on_multiple_same_doc_save(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    DocNum = 100,
-    utils:pforeach(fun(_) ->
+    DocNum = 10,
+    lists:foreach(fun(_) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
     end, lists:seq(1, DocNum)),
     ?assertEqual({ok, DocNum}, rpc:call(Worker, couchbase_driver, get_counter,

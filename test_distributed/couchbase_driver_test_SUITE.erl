@@ -36,6 +36,7 @@
     delete_should_mark_doc_as_deleted/1,
     purge_should_delete_doc/1,
     purge_should_return_missing_error/1,
+    save_get_purge_should_return_success/1,
     get_counter_should_return_default_value/1,
     update_counter_should_return_default_value/1,
     get_counter_should_return_value/1,
@@ -49,6 +50,11 @@
     query_view_should_parse_empty_opts/1,
     query_view_should_parse_all_opts/1,
     get_buckets_should_return_all_buckets/1
+]).
+
+%% test_bases
+-export([
+    save_get_purge_should_return_success_base/1
 ]).
 
 all() ->
@@ -66,6 +72,7 @@ all() ->
         delete_should_mark_doc_as_deleted,
         purge_should_delete_doc,
         purge_should_return_missing_error,
+        save_get_purge_should_return_success,
         get_counter_should_return_default_value,
         update_counter_should_return_default_value,
         get_counter_should_return_value,
@@ -79,6 +86,8 @@ all() ->
         query_view_should_parse_empty_opts,
         query_view_should_parse_all_opts,
         get_buckets_should_return_all_buckets
+    ], [
+        save_get_purge_should_return_success
     ]).
 
 -record(test_model, {
@@ -119,6 +128,21 @@ all() ->
         }]}
     }]}
 }]})).
+-define(PERF_PARAM(Name, Value, Unit, Description), [
+    {name, Name},
+    {value, Value},
+    {description, Description},
+    {unit, Unit}
+]).
+-define(PERF_CFG(Name, Params), {config, [
+    {name, Name},
+    {description, atom_to_list(Name)},
+    {parameters, Params}
+]}).
+-define(OPS_NUM(Value), ?PERF_PARAM(ops_num, Value, "",
+    "Number of operations.")).
+-define(DURABLE(Value), ?PERF_PARAM(durable, Value, "",
+    "Perform save operation with durability check.")).
 
 %%%===================================================================
 %%% Test functions
@@ -245,6 +269,54 @@ purge_should_return_missing_error(Config) ->
     ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, purge,
         [?CTX, ?KEY]
     )).
+
+save_get_purge_should_return_success(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, 1},
+        {success_rate, 100},
+        {parameters, [?OPS_NUM(100), ?DURABLE(true)]},
+        {description, "Multiple cycles of parallel save/get/purge operations."},
+        ?PERF_CFG(small_memory, [?OPS_NUM(1000), ?DURABLE(false)]),
+        ?PERF_CFG(small_disk, [?OPS_NUM(1000), ?DURABLE(true)]),
+        ?PERF_CFG(medium_memory, [?OPS_NUM(10000), ?DURABLE(false)]),
+        ?PERF_CFG(medium_disk, [?OPS_NUM(10000), ?DURABLE(true)]),
+        ?PERF_CFG(large_memory, [?OPS_NUM(100000), ?DURABLE(false)]),
+        ?PERF_CFG(largs_disk, [?OPS_NUM(100000), ?DURABLE(true)])
+    ]).
+save_get_purge_should_return_success_base(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    OpsNum = ?config(ops_num, Config),
+    Durable = ?config(durable, Config),
+    Self = self(),
+
+    spawn_link(Worker, fun() ->
+        Futures = lists:map(fun(N) ->
+            Ctx = ?CTX#{no_durability => not Durable},
+            couchbase_driver:save_async(Ctx, ?DOC(N))
+        end, lists:seq(1, OpsNum)),
+        lists:foreach(fun(Future) ->
+            ?assertMatch({ok, #document2{}}, couchbase_driver:wait(Future))
+        end, Futures),
+        ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, write)),
+
+        Futures2 = lists:map(fun(N) ->
+            couchbase_driver:get_async(?CTX, ?KEY(N))
+        end, lists:seq(1, OpsNum)),
+        lists:foreach(fun(Future) ->
+            ?assertMatch({ok, #document2{}}, couchbase_driver:wait(Future))
+        end, Futures2),
+        ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, read)),
+
+        Futures3 = lists:map(fun(N) ->
+            couchbase_driver:purge_async(?CTX, ?KEY(N))
+        end, lists:seq(1, OpsNum)),
+        lists:foreach(fun(Future) ->
+            ?assertEqual(ok, couchbase_driver:wait(Future))
+        end, Futures3),
+        ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, write)),
+        Self ! done
+    end),
+    receive done -> ok end.
 
 get_counter_should_return_default_value(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),

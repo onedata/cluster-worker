@@ -1,0 +1,154 @@
+%%%-------------------------------------------------------------------
+%%% @author Krzysztof Trzepla
+%%% @copyright (C) 2017 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
+%%% @end
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% This module provides CouchBase views management functions.
+%%% They should be used only by CouchBase pool workers.
+%%% @end
+%%%-------------------------------------------------------------------
+-module(couchbase_view).
+-author("Krzysztof Trzepla").
+
+-include("global_definitions.hrl").
+-include("modules/datastore/datastore_models_def.hrl").
+
+%% API
+-export([save_design_doc/3, delete_design_doc/2, query/4]).
+
+-define(TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
+    couchbase_request_timeout, 60000)).
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves design document in a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_design_doc(cberl:connection(), couchbase_driver:design(),
+    datastore_json2:ejson()) -> ok | {error, term()}.
+save_design_doc(Connection, DesignName, EJson) ->
+    Path = <<"_design/", DesignName/binary>>,
+    Body = jiffy:encode(EJson),
+    ContentType = <<"application/json">>,
+    parse_design_doc_response(
+        cberl:http(Connection, view, put, Path, ContentType, Body, ?TIMEOUT)
+    ).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Removes design document from a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_design_doc(cberl:connection(), couchbase_driver:design()) ->
+    ok | {error, term()}.
+delete_design_doc(Connection, DesignName) ->
+    Path = <<"_design/", DesignName/binary>>,
+    ContentType = <<"application/json">>,
+    parse_design_doc_response(
+        cberl:http(Connection, view, delete, Path, ContentType, <<>>, ?TIMEOUT)
+    ).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns view response from a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec query(cberl:connection(), couchbase_driver:design(),
+    couchbase_driver:view(), [couchbase_dirver:view_opt()]) ->
+    {ok, datastore_json2:ejson()} | {error, term()}.
+query(Connection, DesignName, ViewName, Opts) ->
+    Path = <<"_design/", DesignName/binary, "/_view/", ViewName/binary,
+        (get_query_params(Opts))/binary>>,
+    ContentType = <<"application/json">>,
+    case cberl:http(Connection, view, get, Path, ContentType, <<>>, ?TIMEOUT) of
+        {ok, _Code, Response} ->
+            case jiffy:decode(Response) of
+                {[{<<"total_rows">>, _TotalRows}, {<<"rows">>, Rows}]} ->
+                    {ok, {lists:map(fun({Row}) -> Row end, Rows)}};
+                {[{<<"rows">>, Rows}]} ->
+                    {ok, {lists:map(fun({Row}) -> Row end, Rows)}};
+                {[{<<"error">>, Error}, {<<"reason">>, Reason}]} ->
+                    {error, {Error, Reason}}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Parses add/delete design document response.
+%% @end
+%%--------------------------------------------------------------------
+-spec parse_design_doc_response({ok, cberl:http_status(), cberl:http_body()} |
+    {error, term()}) -> ok | {error, term()}.
+parse_design_doc_response({ok, Code, _Response})
+    when 200 =< Code andalso Code < 300 ->
+    ok;
+parse_design_doc_response({ok, _Code, Response}) ->
+    case jiffy:decode(Response) of
+        {[{<<"error">>, Error}, {<<"reason">>, Reason}]} ->
+            {error, {Error, Reason}};
+        _ ->
+            {error, {unknown_error, Response}}
+    end;
+parse_design_doc_response({error, Reason}) ->
+    {error, Reason}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Converts view arguments to query parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_query_params([couchbase_dirver:view_opt()]) -> binary().
+get_query_params([]) ->
+    <<>>;
+get_query_params([Opt | Opts]) ->
+    lists:foldl(fun(Opt2, Prefix) ->
+        <<Prefix/binary, "&", (get_query_param(Opt2))/binary>>
+    end, <<"?", (get_query_param(Opt))/binary>>, Opts).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Converts view argument to query parameter.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_query_param(couchbase_dirver:view_opt()) -> binary().
+get_query_param({descending, true}) -> <<"descending=true">>;
+get_query_param({descending, false}) -> <<"descending=false">>;
+get_query_param({endkey, Key}) -> <<"endkey=", Key/binary>>;
+get_query_param({endkey_docid, Id}) -> <<"endkey_docid=", Id/binary>>;
+get_query_param({full_set, true}) -> <<"full_set=true">>;
+get_query_param({full_set, false}) -> <<"full_set=false">>;
+get_query_param({inclusive_end, true}) -> <<"inclusive_end=true">>;
+get_query_param({inclusive_end, false}) -> <<"inclusive_end=false">>;
+get_query_param({key, Key}) -> <<"key=", (jiffy:encode(Key))/binary>>;
+get_query_param({keys, Keys}) -> <<"keys=", (jiffy:encode(Keys))/binary>>;
+get_query_param({limit, L}) -> <<"limit=", (integer_to_binary(L))/binary>>;
+get_query_param({on_error, continue}) -> <<"on_error=continue">>;
+get_query_param({on_error, stop}) -> <<"on_error=stop">>;
+get_query_param({reduce, true}) -> <<"reduce=true">>;
+get_query_param({reduce, false}) -> <<"reduce=false">>;
+get_query_param({skip, Skip}) -> <<"skip=", (integer_to_binary(Skip))/binary>>;
+get_query_param({stale, ok}) -> <<"stale=ok">>;
+get_query_param({stale, false}) -> <<"stale=false">>;
+get_query_param({stale, update_after}) -> <<"stale=update_after">>;
+get_query_param({startkey, Key}) -> <<"startkey=", Key/binary>>;
+get_query_param({startkey_docid, Id}) -> <<"startkey_docid=", Id/binary>>;
+get_query_param({group, true}) -> <<"group=true">>;
+get_query_param({group, false}) -> <<"group=false">>;
+get_query_param({group_level, L}) ->
+    <<"group_level=", (integer_to_binary(L))/binary>>.

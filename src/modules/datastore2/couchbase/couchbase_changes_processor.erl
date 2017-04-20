@@ -207,12 +207,12 @@ fetch_changes(SeqSafe, Seq, #state{
 
     SeqSafe3 = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    ok = couchbase_driver:save(Ctx, SeqSafeKey, SeqSafe3),
+    ok = couchbase_driver:save(Ctx, {SeqSafeKey, SeqSafe3}),
 
-    lists:foreach(fun(S) ->
-        ChangeKey = couchbase_changes:get_change_key(Scope, S),
-        couchbase_driver:purge(Ctx, ChangeKey)
+    ChangeKeys = lists:map(fun(S) ->
+        couchbase_changes:get_change_key(Scope, S)
     end, lists:seq(SeqSafe2, SeqSafe3)),
+    couchbase_driver:purge(Ctx, ChangeKeys),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);

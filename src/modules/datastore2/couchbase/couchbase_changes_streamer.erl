@@ -54,7 +54,7 @@
     couchbase_changes:callback(), proplists:proplist()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope, Callback, Opts) ->
-    gen_server2:start_link(?MODULE, [Bucket, Scope, Callback, Opts], []).
+    gen_server:start_link(?MODULE, [Bucket, Scope, Callback, Opts], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -228,7 +228,7 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
             {true, Doc};
         ({{ok, #document2{}}, _Rev}) ->
             false
-    end, lists:zip(couchbase_driver:mget(Ctx, Keys), Revs)).
+    end, lists:zip(couchbase_driver:get(Ctx, Keys), Revs)).
 
 %%--------------------------------------------------------------------
 %% @private

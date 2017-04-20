@@ -32,7 +32,7 @@
                          {custom, atom(), module()} |
                          {custom, atom(), {module(), encoder(), decoder()}}.
 -type record_struct() :: {record, [{field_name(), record_value()}]}.
--type ejson() :: {term()}.
+-type ejson() :: jiffy:json_value().
 
 -export_type([record_struct/0, ejson/0]).
 
