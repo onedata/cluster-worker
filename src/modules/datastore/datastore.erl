@@ -26,12 +26,18 @@
 -type key() :: undefined | uuid() | atom() | integer().
 -type ext_key() :: key() | term().
 -type document() :: #document{}.
+-type doc() :: #document2{}.
+-type rev() ::  couchbase_driver:rev().
+-type seq() ::  couchbase_changes:seq().
+-type scope() :: binary().
+-type mutator() :: binary().
 -type value() :: term().
 -type document_diff() :: #{term() => term()} | fun((OldValue :: value()) ->
     {ok, NewValue :: value()} | {error, Reason :: term()}).
 -type bucket() :: atom() | binary().
 -type option() :: ignore_links.
 
+-export_type([doc/0, rev/0, seq/0, scope/0, mutator/0]).
 -export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0, option/0]).
 
 %% Error types
