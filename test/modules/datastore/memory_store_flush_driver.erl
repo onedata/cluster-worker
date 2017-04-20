@@ -48,7 +48,7 @@ get_link_doc(_ModelConfig, _Key) ->
 save_doc_asynch(_ModelConfig, Document) ->
     Document.
 
-asynch_response(#document{value = [error]}) ->
+asynch_response(#document{value = error}) ->
     {error, error};
 asynch_response(#document{} = Document) ->
     {ok, Document#document.key};

@@ -79,8 +79,8 @@
             {throttling_check_interval_seconds, 5},
 
             % Thresholds to start node analysis
-            {node_mem_analysis_treshold, 500000000}, % 500 MB
-            {procs_num_analysis_treshold, 2000},
+            {node_mem_analysis_treshold, 2000000000}, % 2 GB
+            {procs_num_analysis_treshold, 20000},
             {min_analysis_interval_sek, 10},
             {max_analysis_interval_min, 15},
             %% Additional monitoring of erlang schedulers
@@ -199,6 +199,9 @@
             {persistence_driver_module, 'couchdb_datastore_driver'},
             %% Limit for the number of active tp processes.
             {tp_processes_limit, 200},
+            %% Delay in ms between consecutive calls to tp_server logic
+            %% terminate callback in case of an error
+            {tp_server_terminate_retry_delay, 1000},
             %% Size of a datastore worker pool
             {datastore_pool_size, 5},
             %% Max number of requests a pool worker may aggregate

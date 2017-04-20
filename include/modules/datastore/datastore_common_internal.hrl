@@ -39,6 +39,7 @@
     hooks = [] :: [{model_behaviour:model_type(), model_behaviour:model_action()}],
     bucket :: datastore:bucket(),
     store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
+    % TODO - do we need link_store_level?
     link_store_level = ?DEFAULT_STORE_LEVEL :: datastore:store_level(),
     % TODO - delete transactional_global_cache and sync_cache if possible
     transactional_global_cache = true :: boolean(),

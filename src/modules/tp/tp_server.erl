@@ -17,6 +17,7 @@
 
 -behaviour(gen_server).
 
+-include("global_definitions.hrl").
 -include("modules/tp/tp.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -31,6 +32,7 @@
     module :: tp:mod(),
     key :: tp:key(),
     data :: tp:data(),
+    rev :: tp:rev(),
     changes = undefined :: undefined | tp:changes(),
     requests = [] :: [{pid(), reference(), tp:request()}],
     % a pid of the modify handler process
@@ -86,6 +88,7 @@ init([Module, Args, Key]) ->
                         module = Module,
                         key = Key,
                         data = Init#tp_init.data,
+                        rev = Init#tp_init.rev,
                         commit_delay = Init#tp_init.max_commit_delay,
                         idle_timeout = Init#tp_init.idle_timeout
                     })};
@@ -178,12 +181,14 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{module = Module, key = Key} = State) when
+terminate(Reason, #state{module = Module, key = Key, rev = Rev} = State) when
     Reason == normal;
     Reason == shutdown ->
     State2 = modify_sync(State),
     #state{data = Data} = commit_sync(State2),
-    exec(Module, terminate, [Data]),
+    {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        tp_server_terminate_retry_delay),
+    exec_retry(Module, terminate, [Data, Rev], Delay),
     tp_router:delete(Key, self());
 terminate({shutdown, _}, State) ->
     terminate(shutdown, State);
@@ -232,12 +237,13 @@ modify_async(#state{requests = []} = State) ->
 modify_async(#state{
     module = Module,
     data = Data,
+    rev = Rev,
     requests = Requests,
     modify_handler_pid = undefined
 } = State) ->
     Pid = spawn_link(fun() ->
         {Pids, Refs, TpRequests} = lists:unzip3(lists:reverse(Requests)),
-        case exec_noexcept(Module, modify, [TpRequests, Data]) of
+        case exec_noexcept(Module, modify, [TpRequests, Data, Rev]) of
             {ok, {TpResponses, Changes, Data2}} ->
                 notify(Pids, Refs, TpResponses),
                 return({modified, Changes, Data2});
@@ -359,16 +365,20 @@ wait_commit(#state{commit_handler_pid = Pid} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_committed(Exit :: any(), state()) -> state().
-handle_committed({committed, true, _}, #state{commit_delay = Delay} = State) ->
+handle_committed({committed, {true, Rev}, _}, #state{
+    commit_delay = Delay
+} = State) ->
     schedule_terminate(schedule_commit(Delay, State#state{
+        rev = Rev,
         commit_handler_pid = undefined
     }));
-handle_committed({committed, {false, Changes}, Delay}, #state{
+handle_committed({committed, {{false, Changes}, Rev}, Delay}, #state{
     module = Module,
     changes = Changes2
 } = State) ->
     Delay2 = exec(Module, commit_backoff, [Delay]),
     schedule_commit(Delay2, State#state{
+        rev = Rev,
         changes = merge_changes(Module, Changes, Changes2),
         commit_handler_pid = undefined
     });
@@ -454,6 +464,25 @@ exec_noexcept(Module, Function, Args) ->
         {ok, exec(Module, Function, Args)}
     catch
         _:Reason -> {error, Reason, erlang:get_stacktrace()}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Calls {@link exec/3} as long as it fails with an exception.
+%% Waits 'RetryDelay' milliseconds between consecutive attempts.
+%% @end
+%%--------------------------------------------------------------------
+-spec exec_retry(tp:mod(), atom(), list(), timeout()) -> term().
+exec_retry(Module, Function, Args, RetryDelay) ->
+    try
+        exec(Module, Function, Args)
+    catch
+        _:Reason ->
+            ?error_stacktrace("Tp server encountered unexpected error: ~p. "
+            "Retrying after ~p...", [Reason, RetryDelay]),
+            timer:sleep(RetryDelay),
+            exec_retry(Module, Function, Args, RetryDelay)
     end.
 
 %%--------------------------------------------------------------------

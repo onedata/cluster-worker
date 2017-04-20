@@ -28,10 +28,8 @@
     create_delete_local_store_test/1, save_local_store_test/1, update_local_store_test/1,
     get_local_store_test/1, exists_local_store_test/1, links_local_store_test/1,
     create_delete_global_cache_test/1, save_global_cache_test/1, update_global_cache_test/1,
-    create_sync_delete_global_cache_test/1, save_sync_global_cache_test/1, update_sync_global_cache_test/1,
     get_global_cache_test/1, exists_global_cache_test/1, links_global_cache_test/1,
     create_delete_local_cache_test/1, save_local_cache_test/1, update_local_cache_test/1,
-    create_sync_delete_local_cache_test/1, save_sync_local_cache_test/1, update_sync_local_cache_test/1,
     get_local_cache_test/1, exists_local_cache_test/1, links_local_cache_test/1,
     mixed_db_test/1, mixed_global_store_test/1, mixed_local_store_test/1,
     mixed_global_cache_test/1, mixed_local_cache_test/1
@@ -46,12 +44,10 @@
     save_local_store_test_base/1, update_local_store_test_base/1,
     get_local_store_test_base/1, exists_local_store_test_base/1, links_local_store_test_base/1,
     create_delete_global_cache_test_base/1, save_global_cache_test_base/1,
-    update_global_cache_test_base/1, create_sync_delete_global_cache_test_base/1,
-    save_sync_global_cache_test_base/1, update_sync_global_cache_test_base/1,
+    update_global_cache_test_base/1,
     get_global_cache_test_base/1, exists_global_cache_test_base/1, links_global_cache_test_base/1,
     create_delete_local_cache_test_base/1, save_local_cache_test_base/1,
-    update_local_cache_test_base/1, create_sync_delete_local_cache_test_base/1,
-    save_sync_local_cache_test_base/1, update_sync_local_cache_test_base/1,
+    update_local_cache_test_base/1,
     get_local_cache_test_base/1, exists_local_cache_test_base/1, links_local_cache_test_base/1,
     mixed_db_test_base/1, mixed_global_store_test_base/1, mixed_local_store_test_base/1,
     mixed_global_cache_test_base/1, mixed_local_cache_test_base/1
@@ -65,10 +61,8 @@
     create_delete_local_store_test, save_local_store_test, update_local_store_test,
     get_local_store_test, exists_local_store_test,
     create_delete_global_cache_test, save_global_cache_test, update_global_cache_test,
-    create_sync_delete_global_cache_test, save_sync_global_cache_test, update_sync_global_cache_test,
     get_global_cache_test, exists_global_cache_test, links_global_cache_test,
     create_delete_local_cache_test, save_local_cache_test, update_local_cache_test,
-    create_sync_delete_local_cache_test, save_sync_local_cache_test, update_sync_local_cache_test,
     get_local_cache_test, exists_local_cache_test,
     % Uncomment when links at local level will be supported
 %	links_local_store_test, links_local_cache_test,
@@ -204,21 +198,6 @@ update_global_cache_test(Config) ->
 update_global_cache_test_base(Config) ->
     datastore_basic_ops_utils:update_test(Config, globally_cached).
 
-create_sync_delete_global_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?create_sync_delete_test_def).
-create_sync_delete_global_cache_test_base(Config) ->
-    datastore_basic_ops_utils:create_sync_delete_test(Config, globally_cached).
-
-save_sync_global_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?save_sync_test_def).
-save_sync_global_cache_test_base(Config) ->
-    datastore_basic_ops_utils:save_sync_test(Config, globally_cached).
-
-update_sync_global_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?update_sync_test_def).
-update_sync_global_cache_test_base(Config) ->
-    datastore_basic_ops_utils:update_sync_test(Config, globally_cached).
-
 get_global_cache_test(Config) ->
     ?PERFORMANCE(Config, ?get_test_def).
 get_global_cache_test_base(Config) ->
@@ -250,21 +229,6 @@ update_local_cache_test(Config) ->
     ?PERFORMANCE(Config, ?update_test_def).
 update_local_cache_test_base(Config) ->
     datastore_basic_ops_utils:update_test(Config, locally_cached).
-
-create_sync_delete_local_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?create_sync_delete_test_def).
-create_sync_delete_local_cache_test_base(Config) ->
-    datastore_basic_ops_utils:create_sync_delete_test(Config, locally_cached).
-
-save_sync_local_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?save_sync_test_def).
-save_sync_local_cache_test_base(Config) ->
-    datastore_basic_ops_utils:save_sync_test(Config, locally_cached).
-
-update_sync_local_cache_test(Config) ->
-    ?PERFORMANCE(Config, ?update_sync_test_def).
-update_sync_local_cache_test_base(Config) ->
-    datastore_basic_ops_utils:update_sync_test(Config, locally_cached).
 
 get_local_cache_test(Config) ->
     ?PERFORMANCE(Config, ?get_test_def).

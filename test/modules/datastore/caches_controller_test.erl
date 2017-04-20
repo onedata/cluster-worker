@@ -102,17 +102,6 @@ mem_clearing_test_() ->
             ok = meck:unload(caches_controller)
         end}.
 
-get_hooks_config_test() ->
-    Methods = [save, get, exists, delete, update, create, create_or_update,
-        fetch_link, add_links, set_links, create_link, delete_links],
-    XConfig = lists:map(fun(Method) ->
-        {x, Method}
-    end, Methods),
-    YConfig = lists:map(fun(Method) ->
-        {y, Method}
-    end, Methods),
-    ?assertEqual(YConfig ++ XConfig, caches_controller:get_hooks_config([x, y])).
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================

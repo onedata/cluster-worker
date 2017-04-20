@@ -14,6 +14,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -41,7 +42,7 @@ run(RawKey, Fun) ->
 -spec run_in_mnesia_transaction(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run_in_mnesia_transaction(Key, Fun) ->
-    mnesia_cache_driver:run_transation(Key, Fun).
+    ?MEMORY_DRIVER:run_transation(Key, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc

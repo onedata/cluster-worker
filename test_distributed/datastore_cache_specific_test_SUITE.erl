@@ -277,12 +277,6 @@ globally_cached_consistency_without_consistency_metadata_test(Config) ->
         end),
         ClearLinks(),
 
-        {_, AllKeys1} = AllKeysAns1 = ?call_store(Worker1, list, [?GLOBAL_ONLY_LEVEL, cache_controller, GetAllKeys, []]),
-        ?assertMatch({ok, _}, AllKeysAns1),
-        lists:foreach(fun(Uuid) ->
-            ?assertEqual(ok, ?call_store(Worker1, delete, [?GLOBAL_ONLY_LEVEL, cache_controller, Uuid]))
-        end, AllKeys1),
-
         {_, AllKeys2} = AllKeysAns2 =
             ?call_store(Worker2, list, [?GLOBAL_ONLY_LEVEL, cache_consistency_controller, GetAllKeys, []]),
         ?assertMatch({ok, _}, AllKeysAns2),
@@ -356,7 +350,7 @@ globally_cached_consistency_test(Config) ->
 
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller, check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller, check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid, TestRecord])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid, TestRecord])),
 
     GetLinkName = fun(I) ->
         list_to_atom("linked_key_gcct" ++ integer_to_list(I))
@@ -415,7 +409,7 @@ globally_cached_consistency_test(Config) ->
     CheckLinksByFetch(1, 200),
 
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     CheckFlushLinks(1, 200),
@@ -426,12 +420,12 @@ globally_cached_consistency_test(Config) ->
     end),
 
     ?assertMatch(not_monitored, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     CheckLinks(1, 2, 198),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     for(32, 33, fun(I) ->
@@ -441,12 +435,12 @@ globally_cached_consistency_test(Config) ->
     ClearLinks(),
 
     ?assertMatch(not_monitored, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     CheckLinks(1, 2, 196),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
 
@@ -480,7 +474,7 @@ globally_cached_consistency_test(Config) ->
     CheckDocsByGet(1, 200),
 
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
 
     for(10, 20, fun(I) ->
@@ -493,12 +487,12 @@ globally_cached_consistency_test(Config) ->
 
     ?assertMatch(not_monitored, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
 
     CheckDocs(1, 2, 199),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
 
     for(32, 33, fun(I) ->
         ?assertMatch(ok, ?call_store(Worker1, delete, [?GLOBALLY_CACHED_LEVEL, TestRecord, GetLinkKey(I)]))
@@ -510,12 +504,12 @@ globally_cached_consistency_test(Config) ->
 
     ?assertMatch(not_monitored, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
 
     CheckDocs(1, 2, 197),
     ?assertMatch({ok, _, _}, ?call(Worker2, caches_controller,check_cache_consistency, [?GLOBAL_ONLY_LEVEL, TestRecord])),
     ?assertMatch({ok, _, _}, ?call(CCCNode, caches_controller,check_cache_consistency_direct,
-        [mnesia_cache_driver_internal, CCCUuid])),
+        [?GLOBAL_SLAVE_DRIVER, CCCUuid])),
 
     ok.
 
@@ -677,9 +671,10 @@ interupt_global_cache_clearing_test(Config) ->
 %%    Uuid2 = caches_controller:get_cache_uuid({Key, link, cache_controller_link_key}, TestRecord),
 %%    ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid])),
 %%    ?assertMatch(true, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid2])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
+    % TODO - GLOBALLY_CACHED_LEVEL -> GLOBAL_ONLY_LEVEL when interruption is possible
+    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [?GLOBALLY_CACHED_LEVEL, TestRecord, Key])),
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key])),
-    ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, link])),
+    ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, link])),
     ?assertMatch({ok, _}, ?call(Worker2, PModule, fetch_link, [ModelConfig, Key, link])),
 
 
@@ -689,7 +684,7 @@ interupt_global_cache_clearing_test(Config) ->
 
 %%    ?assertMatch(false, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid])),
 %%    ?assertMatch(false, ?call(Worker2, cache_controller, exists, [?GLOBAL_ONLY_LEVEL, Uuid2])),
-    CModuleInternal = mnesia_cache_driver_internal,
+    CModuleInternal = ?GLOBAL_SLAVE_DRIVER,
     ?assertMatch({ok, false}, ?call(Worker2, CModuleInternal, exists, [ModelConfig, Key])),
     ?assertMatch({ok, true}, ?call(Worker2, PModule, exists, [ModelConfig, Key])),
     ?assertMatch({error,link_not_found}, ?call(Worker2, CModuleInternal, fetch_link, [ModelConfig, Key, link])),
@@ -848,7 +843,7 @@ clear_and_flush_global_cache_test(Config) ->
     ModelConfig = TestRecord:model_init(),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
 %%    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
-    CModuleInternal = mnesia_cache_driver_internal,
+    CModuleInternal = ?GLOBAL_SLAVE_DRIVER,
 
     Key = <<"key_caft">>,
     Doc =  #document{
@@ -1102,7 +1097,7 @@ restoring_cache_from_disk_global_cache_test(Config) ->
 
     ModelConfig = TestRecord:model_init(),
     PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    CModule = ?call_store(Worker1, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    CModule = ?call_store(Worker1, driver_to_module, [?MEMORY_DRIVER]),
     Key = <<"key_rcfdr">>,
     Doc =  #document{
         key = Key,
@@ -1220,7 +1215,7 @@ old_keys_cleaning_global_cache_test(Config) ->
     ?assertEqual(ok, ?call(Worker1, caches_controller, wait_for_cache_dump, []), 10),
     CorruptedUuid = caches_controller:get_cache_uuid(CorruptedKey, TestRecord),
     ModelConfig = TestRecord:model_init(),
-    DModule = ?call(Worker1, datastore, driver_to_module, [?DISTRIBUTED_CACHE_DRIVER]),
+    DModule = ?call(Worker1, datastore, driver_to_module, [?MEMORY_DRIVER]),
     PModule = ?call(Worker1, datastore, driver_to_module, [?PERSISTENCE_DRIVER]),
     ?assertMatch(ok, ?call(Worker2, cache_controller, delete, [?GLOBAL_ONLY_LEVEL, CorruptedUuid])),
 
@@ -1243,9 +1238,11 @@ check_clearing(TestRecord, [{K, TimeWindow} | R] = KeysWithTimes, Worker1, Worke
     lists:foreach(fun({K2, T}) ->
         Uuid = caches_controller:get_cache_uuid(K2, TestRecord),
         UpdateFun = fun(Record) ->
-            {ok, Record#cache_controller{
-                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
-            }}
+            {ok, Record}
+        % TODO - we cannot make value in cache older now - refactor test
+%%            {ok, Record#cache_controller{
+%%                timestamp = to_timestamp(from_timestamp(os:system_time(?CC_TIMEUNIT)) - T - timer:minutes(5))
+%%            }}
         end,
         ?assertMatch({ok, _}, ?call(Worker1, cache_controller, update, [?GLOBAL_ONLY_LEVEL, Uuid, UpdateFun]), 10)
     end, KeysWithTimes),

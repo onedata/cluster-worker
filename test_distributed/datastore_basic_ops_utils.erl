@@ -26,9 +26,9 @@
 
 -define(REQUEST_TIMEOUT, timer:minutes(5)).
 
--export([create_delete_test/2, create_sync_delete_test/2, save_test/2, save_sync_test/2, update_test/2,
-    update_sync_test/2, get_test/2, exists_test/2, mixed_test/2, links_test/2, links_number_test/2,
-    set_env/2, clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
+-export([create_delete_test/2, save_test/2, update_test/2, get_test/2,
+    exists_test/2, mixed_test/2, links_test/2, links_number_test/2, set_env/2,
+    clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
 
 -define(TIMEOUT, timer:minutes(5)).
 -define(call_store(Fun, Level, CustomArgs), erlang:apply(datastore, Fun, [Level] ++ CustomArgs)).
@@ -137,9 +137,6 @@ links_test(Config, Level) ->
 create_delete_test(Config, Level) ->
     create_delete_test_base(Config, Level, create, delete).
 
-create_sync_delete_test(Config, Level) ->
-    create_delete_test_base(Config, Level, create_sync, delete_sync).
-
 create_delete_test_base(Config, Level, Fun, Fun2) ->
     Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
@@ -233,9 +230,6 @@ create_delete_test_base(Config, Level, Fun, Fun2) ->
 save_test(Config, Level) ->
     save_test_base(Config, Level, save, delete).
 
-save_sync_test(Config, Level) ->
-    save_test_base(Config, Level, save_sync, delete_sync).
-
 save_test_base(Config, Level, Fun, Fun2) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
     ThreadsNum = ?config(threads_num, Config),
@@ -286,9 +280,6 @@ save_test_base(Config, Level, Fun, Fun2) ->
 
 update_test(Config, Level) ->
     update_test_base(Config, Level, update, save, delete).
-
-update_sync_test(Config, Level) ->
-    update_test_base(Config, Level, update_sync, save_sync, delete_sync).
 
 update_test_base(Config, Level, Fun, Fun2, Fun3) ->
     Workers = ?config(cluster_worker_nodes, Config),
@@ -844,10 +835,8 @@ clear_env(Config) ->
             end
     end.
 
-clear_cache(W) ->
-    ?call(W, caches_controller, wait_for_cache_dump, []),
-    gen_server:call({?NODE_MANAGER_NAME, W}, clear_mem_synch, 60000),
-    gen_server:call({?NODE_MANAGER_NAME, W}, force_clear_node, 60000),
+clear_cache(_W) ->
+    % TODO - clear new cache
     ok.
 
 %%%===================================================================
