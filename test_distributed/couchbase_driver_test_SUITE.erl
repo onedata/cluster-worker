@@ -33,13 +33,13 @@
     get_should_return_missing_error/1,
     update_should_change_doc/1,
     multiple_update_should_not_overfill_revision_history/1,
-    delete_should_mark_doc_as_deleted/1,
-    purge_should_delete_doc/1,
-    purge_should_return_missing_error/1,
-    save_get_purge_should_return_success/1,
-    get_counter_should_return_default_value/1,
-    update_counter_should_return_default_value/1,
+    delete_should_remove_doc/1,
+    delete_should_return_missing_error/1,
+    save_get_delete_should_return_success/1,
     get_counter_should_return_value/1,
+    get_counter_should_return_default_value/1,
+    get_counter_should_return_missing_error/1,
+    update_counter_should_return_default_value/1,
     update_counter_should_update_value/1,
     save_design_doc_should_return_success/1,
     delete_design_doc_should_return_success/1,
@@ -54,7 +54,7 @@
 
 %% test_bases
 -export([
-    save_get_purge_should_return_success_base/1
+    save_get_delete_should_return_success_base/1
 ]).
 
 all() ->
@@ -69,13 +69,13 @@ all() ->
         get_should_return_missing_error,
         update_should_change_doc,
         multiple_update_should_not_overfill_revision_history,
-        delete_should_mark_doc_as_deleted,
-        purge_should_delete_doc,
-        purge_should_return_missing_error,
-        save_get_purge_should_return_success,
-        get_counter_should_return_default_value,
-        update_counter_should_return_default_value,
+        delete_should_remove_doc,
+        delete_should_return_missing_error,
+        save_get_delete_should_return_success,
         get_counter_should_return_value,
+        get_counter_should_return_default_value,
+        get_counter_should_return_missing_error,
+        update_counter_should_return_default_value,
         update_counter_should_update_value,
         save_design_doc_should_return_success,
         delete_design_doc_should_return_success,
@@ -87,7 +87,7 @@ all() ->
         query_view_should_parse_all_opts,
         get_buckets_should_return_all_buckets
     ], [
-        save_get_purge_should_return_success
+        save_get_delete_should_return_success
     ]).
 
 -record(test_model, {
@@ -166,7 +166,7 @@ save_should_increment_seq_counter(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_key(?SCOPE), 0]
+        [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
 
 save_should_not_increment_seq_counter(Config) ->
@@ -175,8 +175,8 @@ save_should_not_increment_seq_counter(Config) ->
         [?CTX#{no_seq => true}, ?DOC]
     )),
     ?assertEqual(undefined, Doc#document2.seq),
-    ?assertEqual({ok, 0}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_key(?SCOPE), 0]
+    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver,
+        get_counter, [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
 
 save_should_not_set_mutator(Config) ->
@@ -247,35 +247,28 @@ multiple_update_should_not_overfill_revision_history(Config) ->
     end, ?DOC, lists:seq(1, 21)),
     ?assertEqual(20, length(Doc3#document2.rev)).
 
-delete_should_mark_doc_as_deleted(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_driver, delete,
-        [?CTX, ?DOC]
-    )),
-    ?assertEqual(true, Doc#document2.deleted).
-
-purge_should_delete_doc(Config) ->
+delete_should_remove_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_driver, save,
         [?CTX, ?DOC]
     )),
-    ?assertEqual(ok, rpc:call(Worker, couchbase_driver, purge, [?CTX, ?KEY])),
+    ?assertEqual(ok, rpc:call(Worker, couchbase_driver, delete, [?CTX, ?KEY])),
     ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, ?KEY]
     )).
 
-purge_should_return_missing_error(Config) ->
+delete_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, purge,
+    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, delete,
         [?CTX, ?KEY]
     )).
 
-save_get_purge_should_return_success(Config) ->
+save_get_delete_should_return_success(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 1},
         {success_rate, 100},
         {parameters, [?OPS_NUM(100), ?DURABLE(true)]},
-        {description, "Multiple cycles of parallel save/get/purge operations."},
+        {description, "Multiple cycles of parallel save/get/delete operations."},
         ?PERF_CFG(small_memory, [?OPS_NUM(1000), ?DURABLE(false)]),
         ?PERF_CFG(small_disk, [?OPS_NUM(1000), ?DURABLE(true)]),
         ?PERF_CFG(medium_memory, [?OPS_NUM(10000), ?DURABLE(false)]),
@@ -283,7 +276,7 @@ save_get_purge_should_return_success(Config) ->
         ?PERF_CFG(large_memory, [?OPS_NUM(100000), ?DURABLE(false)]),
         ?PERF_CFG(largs_disk, [?OPS_NUM(100000), ?DURABLE(true)])
     ]).
-save_get_purge_should_return_success_base(Config) ->
+save_get_delete_should_return_success_base(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     OpsNum = ?config(ops_num, Config),
     Durable = ?config(durable, Config),
@@ -308,7 +301,7 @@ save_get_purge_should_return_success_base(Config) ->
         ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, read)),
 
         Futures3 = lists:map(fun(N) ->
-            couchbase_driver:purge_async(?CTX, ?KEY(N))
+            couchbase_driver:delete_async(?CTX, ?KEY(N))
         end, lists:seq(1, OpsNum)),
         lists:foreach(fun(Future) ->
             ?assertEqual(ok, couchbase_driver:wait(Future))
@@ -318,23 +311,29 @@ save_get_purge_should_return_success_base(Config) ->
     end),
     receive done -> ok end.
 
+get_counter_should_return_value(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, couchbase_driver, update_counter, [?CTX, ?KEY, 0, 10]),
+    ?assertMatch({ok, 10}, rpc:call(Worker, couchbase_driver, get_counter,
+        [?CTX, ?KEY]
+    )).
+
 get_counter_should_return_default_value(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, 0}, rpc:call(Worker, couchbase_driver, get_counter,
         [?CTX, ?KEY, 0]
     )).
 
+get_counter_should_return_missing_error(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertMatch({error, key_enoent}, rpc:call(Worker, couchbase_driver,
+        get_counter, [?CTX, ?KEY]
+    )).
+
 update_counter_should_return_default_value(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, 0}, rpc:call(Worker, couchbase_driver, update_counter,
         [?CTX, ?KEY, 1, 0]
-    )).
-
-get_counter_should_return_value(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    rpc:call(Worker, couchbase_driver, update_counter, [?CTX, ?KEY, 0, 10]),
-    ?assertMatch({ok, 10}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, ?KEY, 0]
     )).
 
 update_counter_should_update_value(Config) ->

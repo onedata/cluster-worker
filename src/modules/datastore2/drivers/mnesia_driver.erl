@@ -23,9 +23,8 @@
 -type key() :: datastore:key().
 -type value() :: datastore:doc().
 -type init_opt() :: {type, set | ordered_set | bag}.
--type one_or_many(Type) :: Type | list(Type).
 
--export_type([table/0, ctx/0, key/0, value/0]).
+-export_type([table/0, ctx/0]).
 
 %%%===================================================================
 %%% API
@@ -52,45 +51,42 @@ init(#{table := Table}, Opts) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves document/documents in Mnesia.
+%% Saves value in Mnesia.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), one_or_many(value())) -> one_or_many({ok, value()}).
-save(Ctx, #document2{} = Doc) ->
-    hd(save(Ctx, [Doc]));
-save(#{table := Table}, Docs) ->
-    lists:map(fun(#document2{} = Doc) ->
+-spec save(ctx(), value()) -> {ok, value()}.
+save(#{table := Table}, Doc) ->
+    try
         mnesia:dirty_write(Table, Doc),
         {ok, Doc}
-    end, Docs).
+    catch
+        _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Retrieves document/documents associated with key/keys from Mnesia.
+%% Retrieves value from Mnesia.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), one_or_many(key())) ->
-    one_or_many({ok, value()} | {error, term()}).
-get(Ctx, <<_/binary>> = Key) ->
-    hd(get(Ctx, [Key]));
-get(#{table := Table}, Keys) ->
-    lists:map(fun(Key) ->
-        case mnesia:dirty_read(Table, Key) of
-            [Doc] -> {ok, Doc};
-            [] -> {error, key_enoent}
-        end
-    end, Keys).
+-spec get(ctx(), key()) -> {ok, value()} | {error, term()}.
+get(#{table := Table}, Key) ->
+    try mnesia:dirty_read(Table, Key) of
+        [Doc] -> {ok, Doc};
+        [] -> {error, key_enoent}
+    catch
+        _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes document/documents associated with key/keys from a database.
+%% Removes value from Mnesia.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(ctx(), one_or_many(key())) -> one_or_many(ok).
-delete(Ctx, <<_/binary>> = Key) ->
-    hd(delete(Ctx, [Key]));
-delete(#{table := Table}, Keys) ->
-    lists:map(fun(Key) ->
+-spec delete(ctx(), key()) -> ok.
+delete(#{table := Table}, Key) ->
+    try
         mnesia:dirty_delete(Table, Key),
         ok
-    end, Keys).
+    catch
+        _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+    end.

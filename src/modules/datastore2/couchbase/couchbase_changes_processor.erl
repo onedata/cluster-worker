@@ -135,7 +135,7 @@ handle_info(update, #state{
 } = State) ->
     Ctx = #{bucket => Bucket},
     SeqKey = couchbase_changes:get_seq_key(Scope),
-    Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey, 0) of
+    Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey) of
         {ok, Seq2} -> Seq2;
         {error, _Reason} -> Seq
     end,
@@ -212,7 +212,7 @@ fetch_changes(SeqSafe, Seq, #state{
     ChangeKeys = lists:map(fun(S) ->
         couchbase_changes:get_change_key(Scope, S)
     end, lists:seq(SeqSafe2, SeqSafe3)),
-    couchbase_driver:purge(Ctx, ChangeKeys),
+    couchbase_driver:delete(Ctx, ChangeKeys),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);

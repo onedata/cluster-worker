@@ -16,9 +16,9 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([save_async/2, get_async/2, delete_async/2, purge_async/2, wait/1]).
--export([save/2, get/2, delete/2, purge/2]).
--export([get_counter/3, update_counter/4]).
+-export([save_async/2, get_async/2, delete_async/2, wait/1]).
+-export([save/2, get/2, delete/2]).
+-export([get_counter/2, get_counter/3, update_counter/4]).
 -export([save_design_doc/3, delete_design_doc/2, query_view/4]).
 
 -type ctx() :: #{bucket => couchbase_config:bucket(),
@@ -47,11 +47,9 @@
                     {stale, false | ok | update_after} |
                     {startkey, binary()} |
                     {startkey_docid, binary()}.
--opaque future() :: {bulk, reference()} | {single, future()}.
--type one_or_many(Type) :: Type | list(Type).
 
 -export_type([ctx/0, key/0, value/0, item/0, rev/0, design/0, view/0,
-    view_opt/0, future/0]).
+    view_opt/0]).
 
 %%%===================================================================
 %%% API
@@ -59,110 +57,94 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Asynchronously saves raw key-value pair/pairs or document/documents
-%% in a database.
+%% Asynchronously saves value in CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec save_async(ctx(), one_or_many(value())) -> future().
-save_async(Ctx, #document2{} = Doc) ->
-    {single, save_async(Ctx, [Doc])};
-save_async(Ctx, {Key, Value}) ->
-    {single, save_async(Ctx, [{Key, Value}])};
-save_async(#{bucket := Bucket} = Ctx, Values) when is_list(Values) ->
-    Requests = lists:map(fun(Value) -> {Ctx, Value} end, Values),
-    {bulk, couchbase_pool:post_async(Bucket, write, {save, Requests})}.
+-spec save_async(ctx(), item()) -> couchbase_pool:future().
+save_async(#{bucket := Bucket} = Ctx, #document2{} = Doc) ->
+    couchbase_pool:post_async(Bucket, write, {save, Ctx, Doc});
+save_async(#{bucket := Bucket} = Ctx, {Key, Value}) ->
+    couchbase_pool:post_async(Bucket, write, {save, Ctx, {Key, Value}}).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Asynchronously retrieves value/values associated with key/keys
-%% from a database.
+%% Asynchronously retrieves value from CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec get_async(ctx(), one_or_many(key())) -> future().
-get_async(Ctx, <<_/binary>> = Key) ->
-    {single, get_async(Ctx, [Key])};
-get_async(#{bucket := Bucket}, Keys) when is_list(Keys) ->
-    {bulk, couchbase_pool:post_async(Bucket, read, {get, Keys})}.
+-spec get_async(ctx(), key()) -> couchbase_pool:future().
+get_async(#{bucket := Bucket}, Key) ->
+    couchbase_pool:post_async(Bucket, read, {get, Key}).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Asynchronously marks document/documents as deleted in a database.
+%% Asynchronously removes value from CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_async(ctx(), one_or_many(datastore:doc())) -> future().
-delete_async(Ctx, #document2{} = Doc) ->
-    {single, delete_async(Ctx, [Doc])};
-delete_async(Ctx, Docs) ->
-    Docs2 = lists:map(fun(#document2{} = Doc) ->
-        Doc#document2{deleted = true}
-    end, Docs),
-    save_async(Ctx, Docs2).
+-spec delete_async(ctx(), key()) -> couchbase_pool:future().
+delete_async(#{bucket := Bucket}, Key) ->
+    couchbase_pool:post_async(Bucket, write, {delete, Key}).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Asynchronously removes value/values associated with key/keys from a database.
+%% Waits for completion of an asynchronous operation.
+%% Fails with a timeout error if awaited operation takes too long.
 %% @end
 %%--------------------------------------------------------------------
--spec purge_async(ctx(), one_or_many(key())) -> future().
-purge_async(Ctx, <<_/binary>> = Key) ->
-    {single, purge_async(Ctx, [Key])};
-purge_async(#{bucket := Bucket}, Keys) when is_list(Keys) ->
-    {bulk, couchbase_pool:post_async(Bucket, write, {remove, Keys})}.
+-spec wait(couchbase_pool:future()) -> couchbase_pool:response();
+    ([couchbase_pool:future()]) -> [couchbase_pool:response()].
+wait(Futures) when is_list(Futures) ->
+    [wait(Future) || Future <- Futures];
+wait(Future) ->
+    couchbase_pool:wait(Future).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Waits for completion of an asynchronous operation. Fails with a timeout error
-%% if awaited operation takes too long.
+%% Saves values in CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(future()) -> couchbase_pool:response().
-wait({single, Ref}) ->
-    case wait(Ref) of
-        {error, Reason} -> {error, Reason};
-        Response when is_list(Response) -> hd(Response);
-        Response -> Response
-    end;
-wait({bulk, Ref}) ->
-    couchbase_pool:wait(Ref).
+-spec save(ctx(), value() | [value()]) -> ok | {ok, datastore:doc()} |
+    {error, term()} | [ok | {ok, datastore:doc()} | {error, term()}].
+save(Ctx, Values) when is_list(Values) ->
+    wait([save_async(Ctx, Value) || Value <- Values]);
+save(Ctx, Value) ->
+    hd(save(Ctx, [Value])).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves key-value pair/pairs or document/documents in a database.
+%% Retrieves values from CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), one_or_many(value())) ->
-    one_or_many(ok | {ok, datastore:doc()} | {error, term()}).
-save(Ctx, Values) ->
-    wait(save_async(Ctx, Values)).
+-spec get(ctx(), key()) -> {ok, value()} | {error, term()};
+    (ctx(), [key()]) -> [{ok, value()} | {error, term()}].
+get(Ctx, Keys) when is_list(Keys) ->
+    wait([get_async(Ctx, Key) || Key <- Keys]);
+get(Ctx, Key) ->
+    hd(get(Ctx, [Key])).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Retrieves value/values associated with key/keys from a database.
+%% Removes value from CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), one_or_many(key())) ->
-    one_or_many({ok, value()} | {error, term()}).
-get(Ctx, Keys) ->
-    wait(get_async(Ctx, Keys)).
+-spec delete(ctx(), key()) -> ok | {error, term()};
+    (ctx(), [key()]) -> [ok | {error, term()}].
+delete(Ctx, Keys) when is_list(Keys) ->
+    wait([delete_async(Ctx, Key) || Key <- Keys]);
+delete(Ctx, Key) ->
+    hd(delete(Ctx, [Key])).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Marks document/documents as deleted in a database.
+%% Returns counter value from a database.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(ctx(), one_or_many(datastore:doc())) ->
-    one_or_many({ok, datastore:doc()} | {error, term()}).
-delete(Ctx, Docs) ->
-    wait(delete_async(Ctx, Docs)).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Removes value/values associated with key/keys from a database.
-%% @end
-%%--------------------------------------------------------------------
--spec purge(ctx(), one_or_many(key())) -> one_or_many(ok | {error, term()}).
-purge(Ctx, Keys) ->
-    wait(purge_async(Ctx, Keys)).
+-spec get_counter(ctx(), key()) -> {ok, non_neg_integer()} | {error, term()}.
+get_counter(Ctx, Key) ->
+    case get(Ctx, Key) of
+        {ok, Value} when is_integer(Value) -> {ok, Value};
+        {ok, Value} when is_binary(Value) -> {ok, binary_to_integer(Value)};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

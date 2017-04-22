@@ -29,12 +29,12 @@
 
 -type id() :: non_neg_integer().
 -type request() :: {reference(), pid(), couchbase_pool:request()}.
--type batch_requests() :: #{save := [couchbase_lowlevel:save_request()],
-                           get := [couchbase_lowlevel:get_request()],
-                           remove := [couchbase_lowlevel:remove_request()]}.
--type batch_responses() :: #{save := [couchbase_lowlevel:save_response()],
-                            get := [couchbase_lowlevel:get_response()],
-                            remove := [couchbase_lowlevel:remove_response()]}.
+-type batch_requests() :: #{save := [couchbase_crud:save_request()],
+                            get := [couchbase_crud:get_request()],
+                            delete := [couchbase_crud:delete_request()]}.
+-type batch_responses() :: #{save := [couchbase_crud:save_response()],
+                             get := [couchbase_crud:get_response()],
+                             delete := [couchbase_crud:delete_response()]}.
 
 -export_type([id/0]).
 
@@ -245,7 +245,7 @@ handle_requests(Requests, #state{} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Creates batch requests for save, get and remove operations.
+%% Creates batch requests for save, get and delete operations.
 %% @end
 %%--------------------------------------------------------------------
 -spec batch_requests([request()]) -> batch_requests().
@@ -255,11 +255,11 @@ batch_requests(Requests) ->
     end, #{
         save => [],
         get => gb_sets:new(),
-        remove => gb_sets:new()
+        delete => gb_sets:new()
     }, Requests),
     RequestsBatch2#{
         get => gb_sets:to_list(maps:get(get, RequestsBatch2)),
-        remove => gb_sets:to_list(maps:get(remove, RequestsBatch2))
+        delete => gb_sets:to_list(maps:get(delete, RequestsBatch2))
     }.
 
 %%--------------------------------------------------------------------
@@ -270,24 +270,18 @@ batch_requests(Requests) ->
 %%--------------------------------------------------------------------
 -spec batch_request(couchbase_pool:request(), maps:map()) ->
     batch_requests().
-batch_request({save, Items}, #{save := SaveRequests} = RequestsBatch) ->
-    SaveRequests3 = lists:foldl(fun
-        ({Ctx, #document2{key = Key} = Doc}, SaveRequests2) ->
-            lists:keystore(Key, 2, SaveRequests2, {Ctx, Key, Doc});
-        ({Ctx, {Key, Value}}, SaveRequests2) ->
-            lists:keystore(Key, 2, SaveRequests2, {Ctx, Key, Value})
-    end, SaveRequests, Items),
-    RequestsBatch#{save => SaveRequests3};
-batch_request({get, Keys}, #{get := GetRequests} = RequestsBatch) ->
-    GetRequests3 = lists:foldl(fun(Key, GetRequests2) ->
-        gb_sets:add(Key, GetRequests2)
-    end, GetRequests, Keys),
-    RequestsBatch#{get => GetRequests3};
-batch_request({remove, Keys}, #{remove := RemoveRequests} = RequestsBatch) ->
-    RemoveRequests3 = lists:foldl(fun(Key, RemoveRequests2) ->
-        gb_sets:add(Key, RemoveRequests2)
-    end, RemoveRequests, Keys),
-    RequestsBatch#{remove => RemoveRequests3};
+batch_request({save, Ctx, #document2{key = Key} = Doc}, RequestsBatch) ->
+    #{save := SaveRequests} = RequestsBatch,
+    SaveRequests2 = lists:keystore(Key, 2, SaveRequests, {Ctx, Key, Doc}),
+    RequestsBatch#{save => SaveRequests2};
+batch_request({save, Ctx, {Key, Value}}, RequestsBatch) ->
+    #{save := SaveRequests} = RequestsBatch,
+    SaveRequests2 = lists:keystore(Key, 2, SaveRequests, {Ctx, Key, Value}),
+    RequestsBatch#{save => SaveRequests2};
+batch_request({get, Key}, #{get := GetRequests} = RequestsBatch) ->
+    RequestsBatch#{get => gb_sets:add(Key, GetRequests)};
+batch_request({delete, Key}, #{delete := RemoveRequests} = RequestsBatch) ->
+    RequestsBatch#{delete => gb_sets:add(Key, RemoveRequests)};
 batch_request(_Request, RequestsBatch) ->
     RequestsBatch.
 
@@ -302,11 +296,11 @@ batch_request(_Request, RequestsBatch) ->
 handle_batch_requests(Connection, RequestsBatch) ->
     SaveRequests = maps:get(save, RequestsBatch),
     GetRequests = maps:get(get, RequestsBatch),
-    RemoveRequests = maps:get(remove, RequestsBatch),
+    RemoveRequests = maps:get(delete, RequestsBatch),
     #{
         save => couchbase_crud:save(Connection, SaveRequests),
         get => couchbase_crud:get(Connection, GetRequests),
-        remove => couchbase_crud:remove(Connection, RemoveRequests)
+        delete => couchbase_crud:delete(Connection, RemoveRequests)
     }.
 
 %%--------------------------------------------------------------------
@@ -318,18 +312,18 @@ handle_batch_requests(Connection, RequestsBatch) ->
 %%--------------------------------------------------------------------
 -spec handle_request(cberl:connection(), couchbase_pool:request(),
     batch_responses()) -> couchbase_pool:response().
-handle_request(_Connection, {save, Items}, ResponsesBatch) ->
+handle_request(_Connection, {save, _, #document2{} = Doc}, ResponsesBatch) ->
     SaveResponses = maps:get(save, ResponsesBatch),
-    lists:map(fun
-        ({_, #document2{key = Key}}) -> get_response(Key, SaveResponses);
-        ({_, {Key, _Value}}) -> get_response(Key, SaveResponses)
-    end, Items);
-handle_request(_Connection, {get, Keys}, ResponsesBatch) ->
+    get_response(Doc#document2.key, SaveResponses);
+handle_request(_Connection, {save, _, {Key, _Value}}, ResponsesBatch) ->
+    SaveResponses = maps:get(save, ResponsesBatch),
+    get_response(Key, SaveResponses);
+handle_request(_Connection, {get, Key}, ResponsesBatch) ->
     GetResponses = maps:get(get, ResponsesBatch),
-    lists:map(fun(Key) -> get_response(Key, GetResponses) end, Keys);
-handle_request(_Connection, {remove, Keys}, ResponsesBatch) ->
-    RemoveResponses = maps:get(remove, ResponsesBatch),
-    lists:map(fun(Key) -> get_response(Key, RemoveResponses) end, Keys);
+    get_response(Key, GetResponses);
+handle_request(_Connection, {delete, Key}, ResponsesBatch) ->
+    RemoveResponses = maps:get(delete, ResponsesBatch),
+    get_response(Key, RemoveResponses);
 handle_request(Connection, {get_counter, Key, Default}, _) ->
     couchbase_crud:get_counter(Connection, Key, Default);
 handle_request(Connection, {update_counter, Key, Delta, Default}, _) ->

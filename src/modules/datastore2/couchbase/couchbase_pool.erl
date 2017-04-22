@@ -21,9 +21,9 @@
     reset_request_queue_size/3, update_request_queue_size/4]).
 
 -type mode() :: read | write.
--type request() :: {save, [{couchbase_driver:ctx(), couchbase_driver:item()}]} |
-                   {get, [datastore:key()]} |
-                   {remove, [datastore:key()]} |
+-type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
+                   {get, datastore:key()} |
+                   {delete, datastore:key()} |
                    {get_counter, datastore:key(), cberl:arithmetic_default()} |
                    {update_counter, datastore:key(), cberl:arithmetic_delta(),
                        cberl:arithmetic_default()} |
@@ -32,10 +32,10 @@
                    {delete_design_doc, couchbase_driver:design()} |
                    {query_view, couchbase_driver:design(),
                        couchbase_driver:view(), [couchbase_driver:view_opt()]}.
--type response() :: ok | {ok, Result :: term()} | {error, Reason :: term()} |
-                    list(response()).
+-type response() :: ok | {ok, term()} | {error, term()}.
+-type future() :: reference().
 
--export_type([mode/0, request/0, response/0]).
+-export_type([mode/0, request/0, response/0, future/0]).
 
 %%%===================================================================
 %%% API
@@ -46,7 +46,7 @@
 %% Schedules request execution on a worker pool.
 %% @end
 %%--------------------------------------------------------------------
--spec post_async(couchbase_config:bucket(), mode(), request()) -> reference().
+-spec post_async(couchbase_config:bucket(), mode(), request()) -> future().
 post_async(Bucket, Mode, Request) ->
     Ref = make_ref(),
     Id = get_next_worker_id(Bucket, Mode),
@@ -69,12 +69,12 @@ post(Bucket, Mode, Request) ->
 %% Waits for response associated with a reference.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(reference()) -> response().
-wait(Ref) ->
+-spec wait(future()) -> response().
+wait(Future) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_request_timeout, 60000),
     receive
-        {Ref, Response} -> Response
+        {Future, Response} -> Response
     after
         Timeout -> {error, timeout}
     end.

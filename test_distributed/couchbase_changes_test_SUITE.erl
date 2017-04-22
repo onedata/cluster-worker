@@ -85,17 +85,17 @@ all() ->
 seq_counters_should_be_initialized_on_start(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual({ok, 0}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )),
     ?assertEqual({ok, 0}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     )).
 
 seq_safe_should_be_incremented_on_doc_save(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     ), 20),
     ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, couchbase_changes:get_change_key(?SCOPE, 1)]
@@ -108,7 +108,7 @@ seq_safe_should_be_incremented_on_multiple_same_doc_save(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
     end, lists:seq(1, DocNum)),
     ?assertEqual({ok, DocNum}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     ), 60),
     lists:foreach(fun(N) ->
         ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
@@ -123,7 +123,7 @@ seq_safe_should_be_incremented_on_multiple_diff_docs_save(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     ?assertEqual({ok, DocNum}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     ), 60),
     lists:foreach(fun(N) ->
         ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
@@ -137,7 +137,7 @@ seq_safe_should_be_incremented_on_missing_change_doc(Config) ->
         [?CTX, couchbase_changes:get_seq_key(?SCOPE), 1, 0]
     ),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     ), 30).
 
 seq_safe_should_be_incremented_on_missing_doc(Config) ->
@@ -149,7 +149,7 @@ seq_safe_should_be_incremented_on_missing_doc(Config) ->
         [?CTX, couchbase_changes:get_change_key(?SCOPE, 1), <<"someId">>]
     ),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     ), 20).
 
 stream_should_return_all_changes(Config) ->

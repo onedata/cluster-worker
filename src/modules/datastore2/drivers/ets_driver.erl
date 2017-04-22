@@ -24,9 +24,8 @@
 -type value() :: datastore:doc().
 -type init_opt() :: {type, ets:type()} | {read_concurrency, boolean()} |
                     {write_concurrency, boolean()}.
--type one_or_many(Type) :: Type | list(Type).
 
--export_type([table/0, ctx/0, key/0, value/0]).
+-export_type([table/0, ctx/0]).
 
 %%%===================================================================
 %%% API
@@ -55,45 +54,32 @@ init(#{table := Table}, Opts) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves document/documents in ETS.
+%% Saves value in ETS.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), one_or_many(value())) -> one_or_many({ok, value()}).
-save(Ctx, #document2{} = Doc) ->
-    hd(save(Ctx, [Doc]));
-save(#{table := Table}, Docs) ->
-    lists:map(fun(#document2{key = Key} = Doc) ->
-        ets:insert(Table, {Key, Doc}),
-        {ok, Doc}
-    end, Docs).
+-spec save(ctx(), value()) -> {ok, value()}.
+save(#{table := Table}, #document2{key = Key} = Doc) ->
+    ets:insert(Table, {Key, Doc}),
+    {ok, Doc}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Retrieves document/documents associated with key/keys from ETS.
+%% Retrieves value from ETS.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), one_or_many(key())) ->
-    one_or_many({ok, value()} | {error, term()}).
-get(Ctx, <<_/binary>> = Key) ->
-    hd(get(Ctx, [Key]));
-get(#{table := Table}, Keys) ->
-    lists:map(fun(Key) ->
-        case ets:lookup(Table, Key) of
-            [{Key, Doc}] -> {ok, Doc};
-            [] -> {error, key_enoent}
-        end
-    end, Keys).
+-spec get(ctx(), key()) -> {ok, value()} | {error, term()}.
+get(#{table := Table}, Key) ->
+    case ets:lookup(Table, Key) of
+        [{Key, Doc}] -> {ok, Doc};
+        [] -> {error, key_enoent}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes document/documents associated with key/keys from a database.
+%% Removes value from ETS.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(ctx(), one_or_many(key())) -> one_or_many(ok).
-delete(Ctx, <<_/binary>> = Key) ->
-    hd(delete(Ctx, [Key]));
-delete(#{table := Table}, Keys) ->
-    lists:map(fun(Key) ->
-        ets:delete(Table, Key),
-        ok
-    end, Keys).
+-spec delete(ctx(), key()) -> ok.
+delete(#{table := Table}, Key) ->
+    ets:delete(Table, Key),
+    ok.

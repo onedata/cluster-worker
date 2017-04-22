@@ -11,7 +11,7 @@
 %%% precedence over disc, as long as memory limit is not reached. For each
 %%% successful operation along with result a durability level is returned.
 %%% It denotes which layer, memory or disc, has been used. An exception
-%%% constitute {@link get/2} and {@link flush/2} operations, which are meant
+%%% constitute {@link get/2} and {@link flush/2} functions, which are meant
 %%% to operate in memory and on disc accordingly and therefore do not return
 %%% durability level.
 %%% @end

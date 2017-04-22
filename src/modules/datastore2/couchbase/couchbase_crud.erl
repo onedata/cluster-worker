@@ -17,20 +17,22 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([save/2, get/2, remove/2]).
+-export([save/2, get/2, delete/2]).
 -export([get_counter/3, update_counter/4]).
 
 -type save_request() :: {couchbase_driver:ctx(), couchbase_driver:key(),
                          couchbase_driver:value()}.
 -type get_request() :: couchbase_driver:key().
--type remove_request() :: couchbase_driver:key().
--export_type([save_request/0, get_request/0, remove_request/0]).
+-type delete_request() :: couchbase_driver:key().
+
+-export_type([save_request/0, get_request/0, delete_request/0]).
 
 -type response(R) :: {couchbase_driver:key(), R | {error, term()}}.
 -type save_response() :: response(ok | {ok, datastore:doc()}).
 -type get_response() :: response({ok, couchbase_driver:value()}).
--type remove_response() :: response(ok).
--export_type([save_response/0, get_response/0, remove_response/0]).
+-type delete_response() :: response(ok).
+
+-export_type([save_response/0, get_response/0, delete_response/0]).
 
 -define(TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_request_timeout, 60000)).
@@ -88,10 +90,10 @@ get(Connection, Keys) ->
 %% Removes values associated with keys in a database.
 %% @end
 %%--------------------------------------------------------------------
--spec remove(cberl:connection(), [remove_request()]) -> [remove_response()].
-remove(_Connection, []) ->
+-spec delete(cberl:connection(), [delete_request()]) -> [delete_response()].
+delete(_Connection, []) ->
     [];
-remove(Connection, Keys) ->
+delete(Connection, Keys) ->
     Requests = lists:map(fun(Key) -> {Key, 0} end, Keys),
     case cberl:bulk_remove(Connection, Requests, ?TIMEOUT) of
         {ok, Responses} ->

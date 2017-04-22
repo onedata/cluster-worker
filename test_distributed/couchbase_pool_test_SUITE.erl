@@ -84,5 +84,5 @@ request_should_timeout_on_database_connection_crash(Config) ->
     test_utils:set_env(Worker, cluster_worker, couchbase_request_timeout,
         timer:seconds(1)),
     ?assertEqual({error, timeout}, rpc:call(Worker, couchbase_pool, post,
-        [?BUCKET, write, {save, [{#{}, key, value}]}]
+        [?BUCKET, write, {save, #{}, {key, value}}]
     )).

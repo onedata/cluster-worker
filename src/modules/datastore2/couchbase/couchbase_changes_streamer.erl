@@ -185,7 +185,7 @@ get_changes(Since, Until, #state{} = State) ->
     } = State,
     Ctx = #{bucket => Bucket},
     Key = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, Until2} = couchbase_driver:get_counter(Ctx, Key, 0),
+    {ok, Until2} = couchbase_driver:get_counter(Ctx, Key),
     Until3 = min(Since + BatchSize, min(Until, Until2)),
 
     case Since > Until3 of
