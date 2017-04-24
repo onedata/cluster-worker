@@ -42,9 +42,12 @@ create_datastore_context(Operation, TargetMod) ->
 -spec create_datastore_context(Operation :: atom(), model_behaviour:model_type()
   | model_behaviour:model_config(), DefaultsOverride :: list()) ->
   datastore:opt_ctx().
-create_datastore_context(Operation, #model_config{name = Name, store_level = SL,
-  link_store_level = LSL, link_replica_scope = LRS, link_duplication = LD,
-  disable_remote_link_delete = DRLD} = Config, DefaultsOverride) ->
+create_datastore_context(Operation, #model_config{} = Config0, DefaultsOverride) ->
+  #model_config{name = Name, store_level = SL, link_store_level = LSL,
+    link_replica_scope = LRS, link_duplication = LD,
+    disable_remote_link_delete = DRLD} = Config =
+    overide_model(Config0, DefaultsOverride),
+
   % TODO - single level for model
   Level = case is_link_op(Operation) of
     true -> LSL;
@@ -55,10 +58,10 @@ create_datastore_context(Operation, #model_config{name = Name, store_level = SL,
   DriverContext = get_default_driver_context(Driver, Operation, Config),
   Ctx = datastore_context:create_context(Name, Level, Driver, DriverContext,
     LRS, LD, DRLD, run_hooks),
-
-  lists:foldl(fun({K, V}, Acc) ->
-    datastore_context:override(K, V, Acc)
-  end, Ctx, DefaultsOverride);
+  Ctx;
+%%  lists:foldl(fun({K, V}, Acc) ->
+%%    datastore_context:override(K, V, Acc)
+%%  end, Ctx, DefaultsOverride);
 create_datastore_context(Operation, TargetMod, DefaultsOverride) ->
   create_datastore_context(Operation, TargetMod:model_init(), DefaultsOverride).
 
@@ -148,6 +151,17 @@ get_default_driver_context(?PERSISTENCE_DRIVER, _Op, Config) ->
 get_default_driver_context(Driver, Op, Config) ->
   Module = datastore:driver_to_module(Driver),
   apply(Module, get_default_context, [Op, Config]).
+
+overide_model(ModelConfig, []) ->
+  ModelConfig;
+overide_model(ModelConfig, [{level, L} | Override]) ->
+  overide_model(ModelConfig#model_config{store_level = L, link_store_level = L}, Override);
+overide_model(ModelConfig, [{link_replica_scope, LRS} | Override]) ->
+  overide_model(ModelConfig#model_config{link_replica_scope = LRS}, Override);
+overide_model(ModelConfig, [{link_duplication, LD} | Override]) ->
+  overide_model(ModelConfig#model_config{link_duplication = LD}, Override);
+overide_model(ModelConfig, [{disable_remote_link_delete, DRLD} | Override]) ->
+  overide_model(ModelConfig#model_config{disable_remote_link_delete = DRLD}, Override).
 
 % couch ctx
 %%make_ctx(ModelConfig) ->

@@ -472,8 +472,7 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
     ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update,
         [Doc, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
 
@@ -1336,9 +1335,9 @@ generic_links_test(Config, Level) ->
         Worker2, TestRecord, fetch_link, [Doc1, link2]
     ), 10),
 
-    ok = ?call_store(Worker2, TestRecord, delete, [TestRecord, Key1]),
-    ok = ?call_store(Worker2, TestRecord, delete, [TestRecord, Key2]),
-    ok = ?call_store(Worker2, TestRecord, delete, [TestRecord, Key3]),
+    ok = ?call_store(Worker2, TestRecord, delete, [Key1]),
+    ok = ?call_store(Worker2, TestRecord, delete, [Key2]),
+    ok = ?call_store(Worker2, TestRecord, delete, [Key3]),
 
     ok.
 

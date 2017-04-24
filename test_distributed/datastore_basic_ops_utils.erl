@@ -268,7 +268,7 @@ save_test_base(Config, Level, Fun, Fun2) ->
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     ListBeforeProcessing = os:timestamp(),
-    ?assertMatch({ok, _}, ?rpc_store(Worker1, TestRecord, list, [TestRecord, ?GET_ALL, []])),
+    ?assertMatch({ok, _}, ?rpc_store(Worker1, TestRecord, list, [?GET_ALL, []])),
     ListAfterProcessing = os:timestamp(),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
@@ -654,7 +654,7 @@ mixed_test(Config, Level) ->
         for(1, DocsPerThead, fun(I) ->
             BeforeProcessing = os:timestamp(),
             Ans = ?call_store(TestRecord, delete, [
-                TestRecord, list_to_binary(DocsSet ++ integer_to_list(I))]),
+                list_to_binary(DocsSet ++ integer_to_list(I))]),
             AfterProcessing = os:timestamp(),
             Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
         end)
