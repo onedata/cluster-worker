@@ -82,9 +82,10 @@ init([Bucket, Mode, Id, DbHosts]) ->
     Host = lists:foldl(fun(DbHost, Acc) ->
         <<Acc/binary, ";", DbHost/binary>>
     end, hd(DbHosts), tl(DbHosts)),
+    Opts = get_connect_opts(),
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_connect_timeout, timer:seconds(5)),
-    {ok, Connection} = cberl:connect(Host, <<>>, <<>>, Bucket, Timeout),
+        couchbase_config_total_timeout, timer:seconds(30)),
+    {ok, Connection} = cberl:connect(Host, <<>>, <<>>, Bucket, Opts, Timeout),
 
     couchbase_pool:reset_request_queue_size(Bucket, Mode, Id),
     couchbase_pool_sup:register_worker(Bucket, Mode, Id, self()),
@@ -177,6 +178,27 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns CouchBase server configuration.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_connect_opts() -> [cberl:connect_opt()].
+get_connect_opts() ->
+    lists:map(fun({OptName, EnvName, OptDefault}) ->
+        OptValue = application:get_env(
+            ?CLUSTER_WORKER_APP_NAME, EnvName, OptDefault
+        ),
+        {OptName, 1000 * OptValue}
+    end, [
+        {operation_timeout, couchbase_operation_timeout, timer:seconds(60)},
+        {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
+        {view_timeout, couchbase_view_timeout, timer:seconds(120)},
+        {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
+        {http_timeout, couchbase_http_timeout, timer:seconds(60)}
+    ]).
 
 %%--------------------------------------------------------------------
 %% @private

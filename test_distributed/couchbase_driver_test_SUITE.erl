@@ -143,6 +143,7 @@ all() ->
     "Number of operations.")).
 -define(DURABLE(Value), ?PERF_PARAM(durable, Value, "",
     "Perform save operation with durability check.")).
+-define(ATTEMPTS, 60).
 
 %%%===================================================================
 %%% Test functions
@@ -267,7 +268,7 @@ save_get_delete_should_return_success(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 1},
         {success_rate, 100},
-        {parameters, [?OPS_NUM(100), ?DURABLE(true)]},
+        {parameters, [?OPS_NUM(10), ?DURABLE(true)]},
         {description, "Multiple cycles of parallel save/get/delete operations."},
         ?PERF_CFG(small_memory, [?OPS_NUM(1000), ?DURABLE(false)]),
         ?PERF_CFG(small_disk, [?OPS_NUM(1000), ?DURABLE(true)]),
@@ -290,7 +291,9 @@ save_get_delete_should_return_success_base(Config) ->
         lists:foreach(fun(Future) ->
             ?assertMatch({ok, #document2{}}, couchbase_driver:wait(Future))
         end, Futures),
-        ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, write)),
+        ?assertEqual(
+            0, couchbase_pool:get_request_queue_size(?BUCKET, write), ?ATTEMPTS
+        ),
 
         Futures2 = lists:map(fun(N) ->
             couchbase_driver:get_async(?CTX, ?KEY(N))
@@ -298,7 +301,9 @@ save_get_delete_should_return_success_base(Config) ->
         lists:foreach(fun(Future) ->
             ?assertMatch({ok, #document2{}}, couchbase_driver:wait(Future))
         end, Futures2),
-        ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, read)),
+        ?assertEqual(
+            0, couchbase_pool:get_request_queue_size(?BUCKET, read), ?ATTEMPTS
+        ),
 
         Futures3 = lists:map(fun(N) ->
             couchbase_driver:delete_async(?CTX, ?KEY(N))
@@ -306,7 +311,9 @@ save_get_delete_should_return_success_base(Config) ->
         lists:foreach(fun(Future) ->
             ?assertEqual(ok, couchbase_driver:wait(Future))
         end, Futures3),
-        ?assertEqual(0, couchbase_pool:get_request_queue_size(?BUCKET, write)),
+        ?assertEqual(
+            0, couchbase_pool:get_request_queue_size(?BUCKET, write), ?ATTEMPTS
+        ),
         Self ! done
     end),
     receive done -> ok end.

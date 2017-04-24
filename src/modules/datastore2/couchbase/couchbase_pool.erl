@@ -71,12 +71,14 @@ post(Bucket, Mode, Request) ->
 %%--------------------------------------------------------------------
 -spec wait(future()) -> response().
 wait(Future) ->
-    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_request_timeout, 60000),
+    OpTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_operation_timeout, 60000),
+    DurTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_durability_timeout, 60000),
     receive
         {Future, Response} -> Response
     after
-        Timeout -> {error, timeout}
+        OpTimeout + DurTimeout -> {error, timeout}
     end.
 
 %%--------------------------------------------------------------------

@@ -20,7 +20,7 @@
 -export([save_design_doc/3, delete_design_doc/2, query/4]).
 
 -define(TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_request_timeout, 60000)).
+    couchbase_view_timeout, 120000)).
 
 %%%===================================================================
 %%% API

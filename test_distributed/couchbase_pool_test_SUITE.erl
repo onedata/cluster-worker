@@ -81,7 +81,9 @@ worker_should_connect_to_first_active_database_node(Config) ->
 
 request_should_timeout_on_database_connection_crash(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    test_utils:set_env(Worker, cluster_worker, couchbase_request_timeout,
+    test_utils:set_env(Worker, cluster_worker, couchbase_operation_timeout,
+        timer:seconds(1)),
+    test_utils:set_env(Worker, cluster_worker, couchbase_durability_timeout,
         timer:seconds(1)),
     ?assertEqual({error, timeout}, rpc:call(Worker, couchbase_pool, post,
         [?BUCKET, write, {save, #{}, {key, value}}]

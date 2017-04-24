@@ -34,8 +34,10 @@
 
 -export_type([save_response/0, get_response/0, delete_response/0]).
 
--define(TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_request_timeout, 60000)).
+-define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
+    couchbase_operation_timeout, 60000)).
+-define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
+    couchbase_durability_timeout, 60000)).
 
 %%%===================================================================
 %%% API
@@ -66,7 +68,7 @@ get(_Connection, []) ->
     [];
 get(Connection, Keys) ->
     Requests = lists:map(fun(Key) -> {Key, 0, false} end, Keys),
-    case cberl:bulk_get(Connection, Requests, ?TIMEOUT) of
+    case cberl:bulk_get(Connection, Requests, ?OP_TIMEOUT) of
         {ok, Responses} ->
             lists:map(fun
                 ({Key, {ok, _, {_} = EJson}}) ->
@@ -95,7 +97,7 @@ delete(_Connection, []) ->
     [];
 delete(Connection, Keys) ->
     Requests = lists:map(fun(Key) -> {Key, 0} end, Keys),
-    case cberl:bulk_remove(Connection, Requests, ?TIMEOUT) of
+    case cberl:bulk_remove(Connection, Requests, ?OP_TIMEOUT) of
         {ok, Responses} ->
             Responses;
         {error, Reason} ->
@@ -123,7 +125,7 @@ get_counter(Connection, Key, Default) ->
     cberl:arithmetic_delta(), cberl:arithmetic_default()) ->
     {ok, non_neg_integer()} | {error, term()}.
 update_counter(Connection, Key, Delta, Default) ->
-    case cberl:arithmetic(Connection, Key, Delta, Default, 0, ?TIMEOUT) of
+    case cberl:arithmetic(Connection, Key, Delta, Default, 0, ?OP_TIMEOUT) of
         {ok, _, Value} -> {ok, Value};
         {error, Reason} -> {error, Reason}
     end.
@@ -191,7 +193,7 @@ add_durability_request(_Ctx, Key, Requests) ->
 store(_Connection, [], DRequests, Responses) ->
     {DRequests, Responses};
 store(Connection, SRequests, DRequests, Responses) ->
-    case cberl:bulk_store(Connection, SRequests, ?TIMEOUT) of
+    case cberl:bulk_store(Connection, SRequests, ?OP_TIMEOUT) of
         {ok, StoreResponses} ->
             lists:foldl(fun
                 ({_Key, {ok, _}}, {DRequests2, Responses2}) ->
@@ -221,7 +223,7 @@ store(Connection, SRequests, DRequests, Responses) ->
 check_durable(_Connection, [], Responses) ->
     Responses;
 check_durable(Connection, Requests, Responses) ->
-    case cberl:bulk_durability(Connection, Requests, {1, -1}, ?TIMEOUT) of
+    case cberl:bulk_durability(Connection, Requests, {1, -1}, ?DUR_TIMEOUT) of
         {ok, DurabilityResponses} ->
             lists:foldl(fun
                 ({_Key, {ok, _}}, Responses2) ->
