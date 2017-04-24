@@ -234,8 +234,10 @@ exists(Ctx, Key) ->
 %% Adds given links to the document with given key. Allows for link duplication when model is configured this way.
 %% @end
 %%--------------------------------------------------------------------
--spec add_links(opt_ctx(), ext_key(), link_spec() | [link_spec()]) ->
+-spec add_links(opt_ctx(), ext_key() | document(), link_spec() | [link_spec()]) ->
     ok | generic_error().
+add_links(Ctx, #document{key = Key}, Links) ->
+    add_links(Ctx, Key, Links);
 add_links(Ctx, Key, {_LinkName, _LinkTarget} = LinkSpec) ->
     add_links(Ctx, Key, [LinkSpec]);
 add_links(Ctx, Key, Links) when is_list(Links) ->
@@ -252,8 +254,10 @@ add_links(Ctx, Key, Links) when is_list(Links) ->
 %% Sets given links to the document with given key.
 %% @end
 %%--------------------------------------------------------------------
--spec set_links(opt_ctx(), ext_key(), link_spec() | [link_spec()]) ->
+-spec set_links(opt_ctx(), ext_key() | document(), link_spec() | [link_spec()]) ->
     ok | generic_error().
+set_links(Ctx, #document{key = Key}, Links) ->
+    set_links(Ctx, Key, Links);
 set_links(Ctx, Key, {_LinkName, _LinkTarget} = LinkSpec) ->
     set_links(Ctx, Key, [LinkSpec]);
 set_links(Ctx, Key, Links) when is_list(Links) ->
@@ -266,8 +270,10 @@ set_links(Ctx, Key, Links) when is_list(Links) ->
 %% Adds given links to the document with given key if link does not exist.
 %% @end
 %%--------------------------------------------------------------------
--spec create_link(opt_ctx(), ext_key(), link_spec()) ->
+-spec create_link(opt_ctx(), ext_key() | document(), link_spec()) ->
     ok | create_error().
+create_link(Ctx, #document{key = Key}, Link) ->
+    create_link(Ctx, Key, Link);
 create_link(Ctx, Key, Link) ->
     exec_driver(Ctx, create_link, [Key, normalize_link_target(Ctx, Link)]).
 
@@ -277,8 +283,10 @@ create_link(Ctx, Key, Link) ->
 %% Removes links from the document with given key. There is special link name 'all' which removes all links.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_links(opt_ctx(), ext_key(),
+-spec delete_links(opt_ctx(), ext_key() | document(),
     link_name() | [link_name()] | all) -> ok | generic_error().
+delete_links(Ctx, #document{key = Key}, LinkNames) ->
+    delete_links(Ctx, Key, LinkNames);
 delete_links(Ctx, Key, LinkNames) when is_list(LinkNames); LinkNames =:= all ->
     exec_driver(Ctx, delete_links, [Key, LinkNames]);
 delete_links(Ctx, Key, LinkName) ->
@@ -290,8 +298,10 @@ delete_links(Ctx, Key, LinkName) ->
 %% Gets specified link from the document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link(opt_ctx(), ext_key(), link_name()) ->
+-spec fetch_link(opt_ctx(), ext_key() | document(), link_name()) ->
     {ok, simple_link_target()} | link_error().
+fetch_link(Ctx, #document{key = Key}, LinkName) ->
+    fetch_link(Ctx, Key, LinkName);
 fetch_link(Ctx, Key, LinkName) ->
     {RawLinkName, RequestedScope, VHash} = links_utils:unpack_link_scope(undefined, LinkName),
     case fetch_full_link(Ctx, Key, RawLinkName) of
@@ -333,8 +343,10 @@ fetch_link(Ctx, Key, LinkName) ->
 %% Gets specified link from the document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_full_link(opt_ctx(), ext_key(), link_name()) ->
+-spec fetch_full_link(opt_ctx(), ext_key() | document(), link_name()) ->
     {ok, normalized_link_target()} | generic_error().
+fetch_full_link(Ctx, #document{key = Key}, LinkName) ->
+    fetch_full_link(Ctx, Key, LinkName);
 fetch_full_link(Ctx, Key, LinkName) ->
     exec_driver(Ctx, fetch_link, [Key, LinkName]).
 
@@ -344,8 +356,10 @@ fetch_full_link(Ctx, Key, LinkName) ->
 %% Gets document pointed by given link of document given by key.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link_target(opt_ctx(), ext_key(), link_name()) ->
+-spec fetch_link_target(opt_ctx(), ext_key() | document(), link_name()) ->
     {ok, document()} | generic_error().
+fetch_link_target(Ctx, #document{key = Key}, LinkName) ->
+    fetch_link_target(Ctx, Key, LinkName);
 fetch_link_target(Ctx, Key, LinkName) ->
     case fetch_link(Ctx, Key, LinkName) of
         {ok, _Target = {TargetKey, TargetModel}} ->
@@ -360,9 +374,11 @@ fetch_link_target(Ctx, Key, LinkName) ->
 %% Executes given function for each link of the document given by key - similar to 'foldl'.
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link(opt_ctx(), Key :: ext_key(),
+-spec foreach_link(opt_ctx(), ext_key() | document(),
     fun((link_name(), link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | link_error().
+foreach_link(Ctx, #document{key = Key}, Fun, AccIn) ->
+    foreach_link(Ctx, Key, Fun, AccIn);
 foreach_link(Ctx, Key, Fun, AccIn) ->
     exec_driver(Ctx, foreach_link, [Key, Fun, AccIn]).
 
@@ -375,7 +391,7 @@ foreach_link(Ctx, Key, Fun, AccIn) ->
 %% In case of Mode == get_leaf, list of all link's uuids is also returned.
 %% @end
 %%--------------------------------------------------------------------
--spec link_walk(opt_ctx(), Key :: ext_key(), [link_name()], get_leaf | get_all) ->
+-spec link_walk(opt_ctx(), Key :: ext_key() | document(), [link_name()], get_leaf | get_all) ->
     {ok, {document(), [ext_key()]} | [document()]} | link_error() | get_error().
 link_walk(Ctx, #document{key = StartKey}, LinkNames, Mode) ->
     link_walk(Ctx, StartKey, LinkNames, Mode);
