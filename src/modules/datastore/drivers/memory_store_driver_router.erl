@@ -47,9 +47,9 @@
     term().
 % TODO - refactor force_link_save
 call(force_link_save, OptCtx, [ToSave, MainDocKey]) ->
-    deletage_call(force_link_save, OptCtx, MainDocKey, [ToSave]);
+    deletage_link_call(force_save, OptCtx, MainDocKey, [ToSave]);
 call(force_link_save, OptCtx, [BucketOverride, ToSave, MainDocKey]) ->
-    deletage_call(force_link_save, OptCtx, MainDocKey, [BucketOverride, ToSave]);
+    deletage_link_call(force_save, OptCtx, MainDocKey, [BucketOverride, ToSave]);
 % delegate document changes to tp
 call(Method, OptCtx, [#document{key = Key} | _] = Args) ->
     deletage_call(Method, OptCtx, Key, Args);

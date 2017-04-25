@@ -37,7 +37,7 @@
     Level :: datastore:store_level(), Driver :: atom(), DriverCtx :: driver_ctx(),
     LRS :: links_utils:link_replica_scope(), LD :: boolean(), DRLD :: boolean(),
     Hooks :: hooks_config(), ResolveConflicts :: resolve_conflicts(),
-    Bucket :: couchdb_datastore_driver:couchdb_bucket()) -> ctx().
+    Bucket :: couchdb_datastore_driver:couchdb_bucket() | default) -> ctx().
 % TODO - migrate some parameters to driver context when drivers use ctx
 create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks,
     ResolveConflicts, Bucket) ->
@@ -147,6 +147,6 @@ get_resolve_conflicts(OptCtx) ->
 %% Returns driver context.
 %% @end
 %%--------------------------------------------------------------------
--spec get_bucket(ctx()) -> couchdb_datastore_driver:couchdb_bucket().
+-spec get_bucket(ctx()) -> couchdb_datastore_driver:couchdb_bucket() | default.
 get_bucket(OptCtx) ->
   maps:get(bucket, OptCtx).
