@@ -165,6 +165,14 @@ supervisor_children_spec() ->
             modules => [datastore_pool_sup]
         },
         #{
+            id => datastore_cache_manager,
+            start => {datastore_cache_manager, start_link, []},
+            restart => permanent,
+            shutdown => timer:seconds(10),
+            type => worker,
+            modules => [datastore_cache_manager]
+        },
+        #{
             id => couchbase_pool_sup,
             start => {couchbase_pool_sup, start_link, []},
             restart => permanent,

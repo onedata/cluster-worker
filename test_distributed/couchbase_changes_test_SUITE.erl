@@ -77,6 +77,8 @@ all() ->
     value = ?VALUE(N),
     scope = ?SCOPE
 }).
+-define(TIMEOUT, timer:minutes(5)).
+-define(ATTEMPTS, 60).
 
 %%%===================================================================
 %%% Test functions
@@ -85,35 +87,35 @@ all() ->
 seq_counters_should_be_initialized_on_start(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual({ok, 0}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )),
     ?assertEqual({ok, 0}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
     )).
 
 seq_safe_should_be_incremented_on_doc_save(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
-    ), 20),
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
+    ), ?ATTEMPTS),
     ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, couchbase_changes:get_change_key(?SCOPE, 1)]
-    ), 5).
+    ), ?ATTEMPTS).
 
 seq_safe_should_be_incremented_on_multiple_same_doc_save(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    DocNum = 100,
-    utils:pforeach(fun(_) ->
+    DocNum = 10,
+    lists:foreach(fun(_) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
     end, lists:seq(1, DocNum)),
     ?assertEqual({ok, DocNum}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
-    ), 60),
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
+    ), ?ATTEMPTS),
     lists:foreach(fun(N) ->
         ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
             [?CTX, couchbase_changes:get_change_key(?SCOPE, N)]
-        ), 5)
+        ), ?ATTEMPTS)
     end, lists:seq(1, DocNum)).
 
 seq_safe_should_be_incremented_on_multiple_diff_docs_save(Config) ->
@@ -123,12 +125,12 @@ seq_safe_should_be_incremented_on_multiple_diff_docs_save(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     ?assertEqual({ok, DocNum}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
-    ), 60),
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
+    ), ?ATTEMPTS),
     lists:foreach(fun(N) ->
         ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
             [?CTX, couchbase_changes:get_change_key(?SCOPE, N)]
-        ), 5)
+        ), ?ATTEMPTS)
     end, lists:seq(1, DocNum)).
 
 seq_safe_should_be_incremented_on_missing_change_doc(Config) ->
@@ -137,8 +139,8 @@ seq_safe_should_be_incremented_on_missing_change_doc(Config) ->
         [?CTX, couchbase_changes:get_seq_key(?SCOPE), 1, 0]
     ),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
-    ), 30).
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
+    ), ?ATTEMPTS).
 
 seq_safe_should_be_incremented_on_missing_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -149,8 +151,8 @@ seq_safe_should_be_incremented_on_missing_doc(Config) ->
         [?CTX, couchbase_changes:get_change_key(?SCOPE, 1), <<"someId">>]
     ),
     ?assertEqual({ok, 1}, rpc:call(Worker, couchbase_driver, get_counter,
-        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE), 1]
-    ), 20).
+        [?CTX, couchbase_changes:get_seq_safe_key(?SCOPE)]
+    ), ?ATTEMPTS).
 
 stream_should_return_all_changes(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -162,7 +164,7 @@ stream_should_return_all_changes(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, SeqList) ->
-        Doc = ?assertReceivedNextMatch(#document2{}, timer:seconds(60)),
+        Doc = ?assertReceivedNextMatch(#document2{}, ?TIMEOUT),
         ?assert(lists:member(Doc#document2.seq, SeqList)),
         lists:delete(Doc#document2.seq, SeqList)
     end, lists:seq(1, DocNum), lists:seq(1, DocNum)).
@@ -187,7 +189,7 @@ stream_should_return_all_changes_except_mutator(Config) ->
         end
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, Keys) ->
-        Doc = ?assertReceivedNextMatch(#document2{}, timer:seconds(60)),
+        Doc = ?assertReceivedNextMatch(#document2{}, ?TIMEOUT),
         ?assert(lists:member(Doc#document2.key, Keys)),
         lists:delete(Doc#document2.key, Keys)
     end, KeysExp, KeysExp).
@@ -206,7 +208,7 @@ stream_should_return_changes_from_finite_range(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, SeqList) ->
-        Doc = ?assertReceivedNextMatch(#document2{}, timer:seconds(60)),
+        Doc = ?assertReceivedNextMatch(#document2{}, ?TIMEOUT),
         ?assert(lists:member(Doc#document2.seq, SeqList)),
         lists:delete(Doc#document2.seq, SeqList)
     end, lists:seq(Since, Until), lists:seq(Since, Until)),
@@ -225,7 +227,7 @@ stream_should_return_changes_from_infinite_range(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, SeqList) ->
-        Doc = ?assertReceivedNextMatch(#document2{}, timer:seconds(60)),
+        Doc = ?assertReceivedNextMatch(#document2{}, ?TIMEOUT),
         ?assert(lists:member(Doc#document2.seq, SeqList)),
         lists:delete(Doc#document2.seq, SeqList)
     end, lists:seq(Since, DocNum), lists:seq(Since, DocNum)).

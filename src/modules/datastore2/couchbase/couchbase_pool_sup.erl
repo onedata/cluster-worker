@@ -19,7 +19,7 @@
 
 %% API
 -export([start_link/0]).
--export([register_pool/3, get_pool/2, unregister_pool/2]).
+-export([register_worker/4, get_worker/3, unregister_worker/4]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -42,29 +42,29 @@ start_link() ->
 %% Registers CouchBase worker pool manager.
 %% @end
 %%--------------------------------------------------------------------
--spec register_pool(couchbase_driver:bucket(), couchbase_pool:mode(), pid()) ->
-    ok.
-register_pool(Bucket, Mode, Pid) ->
-    ets:insert(couchbase_pools, {{Bucket, Mode}, Pid}),
+-spec register_worker(couchbase_config:bucket(), couchbase_pool:mode(),
+    couchbase_pool_worker:id(), pid()) -> ok.
+register_worker(Bucket, Mode, Id, Worker) ->
+    ets:insert(couchbase_pool_workers, {{Bucket, Mode, Id}, Worker}),
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns CouchBase worker pool manager.
+%% Returns CouchBase pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec get_pool(couchbase_driver:bucket(), couchbase_pool:mode()) -> pid().
-get_pool(Bucket, Mode) ->
-    ets:lookup_element(couchbase_pools, {Bucket, Mode}, 2).
+get_worker(Bucket, Mode, Id) ->
+    ets:lookup_element(couchbase_pool_workers, {Bucket, Mode, Id}, 2).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Unregisters CouchBase worker pool manager.
+%% Unregisters CouchBase pool worker.
 %% @end
 %%--------------------------------------------------------------------
--spec unregister_pool(couchbase_driver:bucket(), couchbase_pool:mode()) -> ok.
-unregister_pool(Bucket, Mode) ->
-    ets:delete(couchbase_pools, {Bucket, Mode}),
+-spec unregister_worker(couchbase_config:bucket(), couchbase_pool:mode(),
+    couchbase_pool_worker:id(), pid()) -> ok.
+unregister_worker(Bucket, Mode, Id, Worker) ->
+    ets:delete_object(couchbase_pool_workers, {{Bucket, Mode, Id}, Worker}),
     ok.
 
 %%%===================================================================
@@ -83,16 +83,22 @@ unregister_pool(Bucket, Mode) ->
 -spec init(Args :: term()) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
-    DbHosts = datastore_config2:get_db_hosts(),
-    Buckets = couchbase_driver:get_buckets(),
-    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, couchbase_pool_size, 1),
-    ets:new(couchbase_pools, [public, named_table, {read_concurrency, true}]),
+    ets:new(couchbase_pool_workers, [
+        public, named_table, {read_concurrency, true}
+    ]),
+    ets:new(couchbase_pool_stats, [
+        public, named_table, {write_concurrency, true}
+    ]),
+
+    DbHosts = couchbase_config:get_hosts(),
     {ok, {#{strategy => one_for_one, intensity => 3, period => 1},
-        lists:foldl(fun(Mode, Specs) ->
-            lists:foldl(fun(Bucket, Specs2) ->
-                [couchbase_pool_spec(Bucket, Mode, DbHosts, Size) | Specs2]
-            end, Specs, Buckets)
-        end, [], couchbase_pool:get_modes())
+        lists:foldl(fun(Bucket, Specs) ->
+            lists:foldl(fun(Mode, Specs2) ->
+                lists:foldl(fun(Id, Specs3) ->
+                    [worker_spec(Bucket, Mode, Id, DbHosts) | Specs3]
+                end, Specs2, lists:seq(1, couchbase_pool:get_size(Mode)))
+            end, Specs, couchbase_pool:get_modes())
+        end, [], couchbase_config:get_buckets())
     }}.
 
 %%%===================================================================
@@ -105,14 +111,16 @@ init([]) ->
 %% Returns a worker child_spec for a CouchBase worker pool manager.
 %% @end
 %%--------------------------------------------------------------------
--spec couchbase_pool_spec(couchbase_driver:bucket(), couchbase_pool:type(),
-    [couchbase_driver:db_host()], non_neg_integer()) -> supervisor:child_spec().
-couchbase_pool_spec(Bucket, Mode, DbHosts, Size) ->
+-spec worker_spec(couchbase_config:bucket(), couchbase_pool:type(),
+    couchbase_pool_worker:id(), [couchbase_driver:db_host()]) ->
+    supervisor:child_spec().
+worker_spec(Bucket, Mode, Id, DbHosts) ->
+    Args = [Bucket, Mode, Id, DbHosts],
     #{
-        id => {Bucket, Mode},
-        start => {couchbase_pool, start_link, [Bucket, Mode, DbHosts, Size]},
+        id => {Bucket, Mode, Id},
+        start => {couchbase_pool_worker, start_link, Args},
         restart => permanent,
         shutdown => timer:seconds(10),
         type => worker,
-        modules => [couchbase_pool]
+        modules => [couchbase_pool_worker]
     }.

@@ -40,6 +40,16 @@
 -export_type([doc/0, rev/0, seq/0, scope/0, mutator/0]).
 -export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0, bucket/0, option/0]).
 
+-type memory_driver() :: ets_driver | mnesia_driver.
+-type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
+-type disc_driver() :: couchbase_driver.
+-type disc_driver_ctx() :: couchbase_driver:ctx().
+-type driver() :: memory_driver() | disc_driver().
+-type driver_ctx() :: memory_driver_ctx() | disc_driver_ctx().
+
+-export_type([memory_driver/0, disc_driver/0, driver/0]).
+-export_type([memory_driver_ctx/0, disc_driver_ctx/0, driver_ctx/0]).
+
 %% Error types
 -type generic_error() :: {error, Reason :: term()}.
 -type not_found_error(ObjectType) :: {error, {not_found, ObjectType}}.

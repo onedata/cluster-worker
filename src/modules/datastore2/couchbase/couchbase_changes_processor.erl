@@ -30,7 +30,7 @@
     code_change/3]).
 
 -record(state, {
-    bucket :: couchbase_driver:bucket(),
+    bucket :: couchbase_config:bucket(),
     scope :: datastore:scope(),
     seq :: couchbase_changes:since(),
     seq_safe :: couchbase_changes:until(),
@@ -49,7 +49,7 @@
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_driver:bucket(), datastore:scope()) ->
+-spec start_link(couchbase_config:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope) ->
     gen_server2:start_link(?MODULE, [Bucket, Scope], []).
@@ -135,7 +135,7 @@ handle_info(update, #state{
 } = State) ->
     Ctx = #{bucket => Bucket},
     SeqKey = couchbase_changes:get_seq_key(Scope),
-    Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey, 0) of
+    Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey) of
         {ok, Seq2} -> Seq2;
         {error, _Reason} -> Seq
     end,
@@ -182,8 +182,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% Sets safe sequence number to the last acknowledge sequence number.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_changes(couchbase_changes:seq(), couchbase_changes:seq(), state()) ->
-    state().
+-spec fetch_changes(couchbase_changes:seq(), couchbase_changes:seq(),
+    state()) -> state().
 fetch_changes(Seq, Seq, #state{interval = Interval} = State) ->
     erlang:send_after(Interval, self(), update),
     State;
@@ -207,12 +207,12 @@ fetch_changes(SeqSafe, Seq, #state{
 
     SeqSafe3 = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    ok = couchbase_driver:save(Ctx, SeqSafeKey, SeqSafe3),
+    ok = couchbase_driver:save(Ctx, {SeqSafeKey, SeqSafe3}),
 
-    lists:foreach(fun(S) ->
-        ChangeKey = couchbase_changes:get_change_key(Scope, S),
-        couchbase_driver:purge(Ctx, ChangeKey)
+    ChangeKeys = lists:map(fun(S) ->
+        couchbase_changes:get_change_key(Scope, S)
     end, lists:seq(SeqSafe2, SeqSafe3)),
+    couchbase_driver:delete(Ctx, ChangeKeys),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);

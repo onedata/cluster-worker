@@ -6,31 +6,47 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides datastore configuration.
+%%% This module provides CouchBase configuration.
 %%% @end
 %%%-------------------------------------------------------------------
--module(datastore_config2).
+-module(couchbase_config).
 -author("Krzysztof Trzepla").
 
--export([get_db_hosts/0]).
+%% API
+-export([get_hosts/0, get_buckets/0]).
 
--type db_host() :: binary().
+-type host() :: binary().
+-type bucket() :: binary().
 
--export_type([db_host/0]).
+-export_type([host/0, bucket/0]).
 
 %%%===================================================================
-%%% API functions
+%%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns list of database hosts.
+%% Returns list of CouchBase hosts.
 %% @end
 %%--------------------------------------------------------------------
--spec get_db_hosts() -> [db_host()].
-get_db_hosts() ->
+-spec get_hosts() -> [host()].
+get_hosts() ->
     {ok, Nodes} = plugins:apply(node_manager_plugin, db_nodes, []),
     lists:map(fun(Node) ->
         [Host, _Port] = binary:split(atom_to_binary(Node, utf8), <<":">>),
         Host
     end, Nodes).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns list of CouchBase buckets.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_buckets() -> [bucket()].
+get_buckets() ->
+    DbHost = utils:random_element(get_hosts()),
+    Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
+    {ok, 200, _, Body} = http_client:get(Url),
+    lists:map(fun(BucketMap) ->
+        maps:get(<<"name">>, BucketMap)
+    end, jiffy:decode(Body, [return_maps])).

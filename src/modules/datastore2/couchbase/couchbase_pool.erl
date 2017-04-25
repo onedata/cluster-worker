@@ -6,60 +6,36 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module implements gen_server behaviour and is responsible
-%%% for management of CouchBase connections (worker pool) and request routing.
+%%% This module provides an interface for a CouchBase worker pool.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(couchbase_pool).
 -author("Krzysztof Trzepla").
 
--behaviour(gen_server).
-
 -include("global_definitions.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/4]).
--export([post/3, post/4]).
--export([get_modes/0, get_queue_size/1, get_queue_size/2, get_queue_size/3]).
-
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-    code_change/3]).
-
--record(queue, {
-    size = 0 :: non_neg_integer(),
-    data = queue:new() :: queue:queue()
-}).
-
--record(state, {
-    db_hosts :: [datastore_config2:db_host()],
-    bucket :: couchbase_driver:bucket(),
-    mode :: mode(),
-    worker_queue :: queue(),
-    request_queue :: queue(),
-    batch_size :: non_neg_integer()
-}).
+-export([post_async/3, post/3, wait/1]).
+-export([get_modes/0, get_size/1]).
+-export([get_request_queue_size/1, get_request_queue_size/2,
+    reset_request_queue_size/3, update_request_queue_size/4]).
 
 -type mode() :: read | write.
--type request() :: {save, couchbase_driver:key(), couchbase_driver:value()} |
-                   {remove, couchbase_driver:key()} |
-                   {mget, [couchbase_driver:key()]} |
-                   {update_counter, couchbase_driver:key(),
-                       Offset :: non_neg_integer(),
-                       Default :: non_neg_integer()} |
+-type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
+                   {get, datastore:key()} |
+                   {delete, datastore:key()} |
+                   {get_counter, datastore:key(), cberl:arithmetic_default()} |
+                   {update_counter, datastore:key(), cberl:arithmetic_delta(),
+                       cberl:arithmetic_default()} |
                    {save_design_doc, couchbase_driver:design(),
-                       couchbase_driver:value()} |
+                       datastore_json2:ejson()} |
                    {delete_design_doc, couchbase_driver:design()} |
                    {query_view, couchbase_driver:design(),
                        couchbase_driver:view(), [couchbase_driver:view_opt()]}.
--type response() :: ok | {ok, Result :: term()} | {error, Reason :: term()} |
-                    list(response()).
--type queue() :: #queue{}.
--type queue_type() :: request | worker.
--type state() :: #state{}.
+-type response() :: ok | {ok, term()} | {error, term()}.
+-type future() :: reference().
 
--export_type([mode/0, queue_type/0, request/0, response/0]).
+-export_type([mode/0, request/0, response/0, future/0]).
 
 %%%===================================================================
 %%% API
@@ -67,39 +43,42 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts CouchBase worker pool manager.
+%% Schedules request execution on a worker pool.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_driver:bucket(), mode(),
-    [datastore_config2:db_host()], non_neg_integer()) ->
-    {ok, pid()} | {error, Reason :: term()}.
-start_link(Bucket, Mode, DbHosts, Size) ->
-    gen_server2:start_link(?MODULE, [Bucket, DbHosts, Mode, Size], []).
-
-%%--------------------------------------------------------------------
-%% @equiv post(Bucket, Mode, Request, 30000)
-%% @end
-%%--------------------------------------------------------------------
--spec post(couchbase_driver:bucket(), mode(), request()) -> response().
-post(Bucket, Mode, Request) ->
-    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_request_timeout, timer:seconds(30)),
-    post(Bucket, Mode, Request, Timeout).
+-spec post_async(couchbase_config:bucket(), mode(), request()) -> future().
+post_async(Bucket, Mode, Request) ->
+    Ref = make_ref(),
+    Id = get_next_worker_id(Bucket, Mode),
+    Worker = couchbase_pool_sup:get_worker(Bucket, Mode, Id),
+    update_request_queue_size(Bucket, Mode, Id, 1),
+    Worker ! {post, {Ref, self(), Request}},
+    Ref.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Schedules request execution on a worker pool and awaits response.
 %% @end
 %%--------------------------------------------------------------------
--spec post(couchbase_driver:bucket(), mode(), request(), timeout()) -> response().
-post(Bucket, Mode, Request, Timeout) ->
-    Ref = make_ref(),
-    Pool = couchbase_pool_sup:get_pool(Bucket, Mode),
-    gen_server2:cast(Pool, {post, Ref, self(), Request}),
+-spec post(couchbase_config:bucket(), mode(), request()) -> response().
+post(Bucket, Mode, Request) ->
+    wait(post_async(Bucket, Mode, Request)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits for response associated with a reference.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait(future()) -> response().
+wait(Future) ->
+    OpTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_operation_timeout, 60000),
+    DurTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_durability_timeout, 60000),
     receive
-        {Ref, Response} -> Response
+        {Future, Response} -> Response
     after
-        Timeout -> {error, timeout}
+        OpTimeout + DurTimeout -> {error, timeout}
     end.
 
 %%--------------------------------------------------------------------
@@ -113,179 +92,67 @@ get_modes() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns size of selected queue type for all buckets and modes.
+%% Returns size of worker pool for given mode.
 %% @end
 %%--------------------------------------------------------------------
--spec get_queue_size(queue_type()) -> non_neg_integer().
-get_queue_size(Type) ->
-    lists:foldl(fun(Bucket, Size) ->
-        Size + get_queue_size(Type, Bucket)
-    end, 0, couchbase_driver:get_buckets()).
+-spec get_size(mode()) -> non_neg_integer().
+get_size(Mode) ->
+    PoolSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_size, []),
+    proplists:get_value(Mode, PoolSize, 1).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns size of selected queue type for given bucket and all modes.
+%% Returns requests queue size for given bucket and all modes.
 %% @end
 %%--------------------------------------------------------------------
--spec get_queue_size(queue_type(), couchbase_driver:bucket()) ->
-    non_neg_integer().
-get_queue_size(Type, Bucket) ->
+-spec get_request_queue_size(couchbase_config:bucket()) -> non_neg_integer().
+get_request_queue_size(Bucket) ->
     lists:foldl(fun(Mode, Size) ->
-        Size + get_queue_size(Type, Bucket, Mode)
+        Size + get_request_queue_size(Bucket, Mode)
     end, 0, get_modes()).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns size of selected queue type for given bucket and mode.
+%% Returns requests queue size for given bucket and mode.
 %% @end
 %%--------------------------------------------------------------------
--spec get_queue_size(queue_type(), couchbase_driver:bucket(), mode()) ->
+-spec get_request_queue_size(couchbase_config:bucket(), mode()) ->
     non_neg_integer().
-get_queue_size(Type, Bucket, Mode) ->
-    Pool = couchbase_pool_sup:get_pool(Bucket, Mode),
-    gen_server2:call(Pool, {get_queue_size, Type}).
-
-%%%===================================================================
-%%% gen_server callbacks
-%%%===================================================================
+get_request_queue_size(Bucket, Mode) ->
+    lists:foldl(fun(Id, Size) ->
+        Key = {request_queue_size, Bucket, Mode, Id},
+        Size + ets:lookup_element(couchbase_pool_stats, Key, 2)
+    end, 0, lists:seq(1, get_size(Mode))).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
-%% Initializes CouchBase worker pool manager.
+%% Set worker's requests queue size to zero.
 %% @end
 %%--------------------------------------------------------------------
--spec init(Args :: term()) ->
-    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore.
-init([Bucket, DbHosts, Mode, Size]) ->
-    process_flag(trap_exit, true),
-    couchbase_pool_sup:register_pool(Bucket, Mode, self()),
-    {ok, #state{
-        bucket = Bucket,
-        mode = Mode,
-        worker_queue = start_workers(Bucket, DbHosts, Size),
-        request_queue = #queue{},
-        batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_pool_batch_size, 50),
-        db_hosts = DbHosts
-    }}.
+-spec reset_request_queue_size(couchbase_config:bucket(), mode(),
+    couchbase_pool_worker:id()) -> ok.
+reset_request_queue_size(Bucket, Mode, Id) ->
+    Key = {request_queue_size, Bucket, Mode, Id},
+    ets:insert(couchbase_pool_stats, {Key, 0}),
+    ok.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
-%% Handles call messages.
+%% Updates worker's requests queue size by delta. Prevents queue size from
+%% getting below zero.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: state()) ->
-    {reply, Reply :: term(), NewState :: state()} |
-    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
-    {stop, Reason :: term(), NewState :: state()}.
-handle_call({get_queue_size, request}, _From, #state{} = State) ->
-    {reply, State#state.request_queue#queue.size, State};
-handle_call({get_queue_size, worker}, _From, #state{} = State) ->
-    {reply, State#state.worker_queue#queue.size, State};
-handle_call(Request, _From, #state{} = State) ->
-    ?log_bad_request(Request),
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handles cast messages.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_cast(Request :: term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}.
-handle_cast({post, Ref, From, Request}, #state{
-    request_queue = RQueue,
-    worker_queue = #queue{size = 0}
-} = State) ->
-    {noreply, State#state{
-        request_queue = queue({Ref, From, Request}, RQueue)
-    }};
-handle_cast({post, Ref, From, Request}, #state{
-    worker_queue = WQueue
-} = State) ->
-    {Worker, WQueue2} = dequeue(WQueue),
-    gen_server2:cast(Worker, {post, [{Ref, From, Request}]}),
-    {noreply, State#state{worker_queue = WQueue2}};
-handle_cast({worker, Worker}, #state{
-    worker_queue = WQueue,
-    request_queue = RQueue,
-    batch_size = BatchSize
-} = State) ->
-    case RQueue#queue.size > 0 of
-        true ->
-            {Requests, RQueue2} = dequeue(BatchSize, RQueue),
-            gen_server2:cast(Worker, {post, Requests}),
-            {noreply, State#state{request_queue = RQueue2}};
-        false ->
-            State2 = State#state{worker_queue = queue(Worker, WQueue)},
-            {noreply, State2}
-    end;
-handle_cast(Request, #state{} = State) ->
-    ?log_bad_request(Request),
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handles all non call/cast messages.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_info(Info :: timeout() | term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}.
-handle_info({'EXIT', _Worker, normal}, #state{} = State) ->
-    {noreply, State};
-handle_info({'EXIT', Worker, Reason}, #state{} = State) ->
-    ?error("Couchbase pool worker ~p exited with reason: ~p", [Worker, Reason]),
-    #state{db_hosts = DbHosts, bucket = Bucket, worker_queue = WQueue} = State,
-    Worker2 = start_worker(Bucket, DbHosts),
-    gen_server2:cast(self(), {worker, Worker2}),
-    Workers = queue:filter(fun(W) -> W =/= Worker end, WQueue#queue.data),
-    WQueue2 = WQueue#queue{
-        size = queue:len(Workers),
-        data = Workers
-    },
-    {noreply, State#state{worker_queue = WQueue2}};
-handle_info(Info, #state{} = State) ->
-    ?log_bad_request(Info),
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%% @end
-%%--------------------------------------------------------------------
--spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: state()) -> term().
-terminate(Reason, #state{bucket = Bucket, mode = Mode} = State) ->
-    couchbase_pool_sup:unregister_pool(Bucket, Mode),
-    ?log_terminate(Reason, State).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Converts process state when code is changed.
-%% @end
-%%--------------------------------------------------------------------
--spec code_change(OldVsn :: term() | {down, term()}, State :: state(),
-    Extra :: term()) -> {ok, NewState :: state()} | {error, Reason :: term()}.
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+-spec update_request_queue_size(couchbase_config:bucket(), mode(),
+    couchbase_pool_worker:id(), integer()) -> ok.
+update_request_queue_size(Bucket, Mode, Id, Delta) when Delta < 0 ->
+    Key = {request_queue_size, Bucket, Mode, Id},
+    ets:update_counter(couchbase_pool_stats, Key, {2, Delta, 0, 0}, {Key, 0}),
+    ok;
+update_request_queue_size(Bucket, Mode, Id, Delta) ->
+    Key = {request_queue_size, Bucket, Mode, Id},
+    ets:update_counter(couchbase_pool_stats, Key, {2, Delta}, {Key, 0}),
+    ok.
 
 %%%===================================================================
 %%% Internal functions
@@ -294,72 +161,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Starts CouchBase pool worker.
+%% Returns next worker ID.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker(couchbase_driver:bucket(), couchbase_driver:db_host()) ->
-    pid().
-start_worker(Bucket, DbHosts) ->
-    {ok, Worker} = couchbase_pool_worker:start_link(self(), Bucket, DbHosts),
-    Worker.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes worker pool by starting given amount of workers.
-%% @end
-%%--------------------------------------------------------------------
--spec start_workers(couchbase_driver:bucket(), [couchbase_driver:db_host()],
-    non_neg_integer()) -> queue().
-start_workers(Bucket, DbHosts, Size) ->
-    lists:foldl(fun(_, WorkerQueue) ->
-        Worker = start_worker(Bucket, DbHosts),
-        queue(Worker, WorkerQueue)
-    end, #queue{}, lists:seq(1, Size)).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Removes an item from the front of the queue.
-%% Fails with an error if the queue is empty.
-%% @end
-%%--------------------------------------------------------------------
--spec dequeue(queue()) -> {Item :: term(), queue()}.
-dequeue(#queue{size = Size, data = Data} = Queue) ->
-    {{value, Item}, Data2} = queue:out(Data),
-    {Item, Queue#queue{size = Size - 1, data = Data2}}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @equiv dequeue(Count, Queue, [])
-%% @end
-%%--------------------------------------------------------------------
--spec dequeue(non_neg_integer(), queue()) -> {Items :: list(), queue()}.
-dequeue(Count, #queue{} = Queue) ->
-    dequeue(Count, Queue, []).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Removes provided number of items from the front of the queue.
-%% If queue size if smaller that the requested number returns all elements.
-%% @end
-%%--------------------------------------------------------------------
--spec dequeue(non_neg_integer(), queue(), list()) -> {Items :: list(), queue()}.
-dequeue(0, #queue{} = Queue, Items) ->
-    {lists:reverse(Items), Queue};
-dequeue(_Count, #queue{size = 0} = Queue, Items) ->
-    {lists:reverse(Items), Queue};
-dequeue(Count, #queue{} = Queue, Items) ->
-    {Item, Queue2} = dequeue(Queue),
-    dequeue(Count - 1, Queue2, [Item | Items]).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Adds an item to the queue.
-%% @end
-%%--------------------------------------------------------------------
--spec queue(Item :: term(), queue()) -> queue().
-queue(Value, #queue{size = Size, data = Data} = Queue) ->
-    Queue#queue{size = Size + 1, data = queue:in(Value, Data)}.
+-spec get_next_worker_id(couchbase_config:bucket(), mode()) ->
+    couchbase_pool_worker:id().
+get_next_worker_id(Bucket, Mode) ->
+    Key = {next_worker_id, Bucket, Mode},
+    Size = get_size(Mode),
+    ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 0}).

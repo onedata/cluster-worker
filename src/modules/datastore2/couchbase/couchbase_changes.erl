@@ -36,7 +36,7 @@
 %% Enables CouchBase documents changes generation.
 %% @end
 %%--------------------------------------------------------------------
--spec enable([couchbase_driver:bucket()]) -> ok.
+-spec enable([couchbase_config:bucket()]) -> ok.
 enable(Buckets) ->
     EJson = jiffy:encode({[{<<"views">>,
         {[{view(),
@@ -63,7 +63,7 @@ enable(Buckets) ->
 %% Starts CouchBase changes processor.
 %% @end
 %%--------------------------------------------------------------------
--spec start(couchbase_driver:bucket(), datastore:scope()) ->
+-spec start(couchbase_config:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start(Bucket, Scope) ->
     couchbase_changes_sup:start_worker(Bucket, Scope).
@@ -73,7 +73,7 @@ start(Bucket, Scope) ->
 %% Stops CouchBase changes processor.
 %% @end
 %%--------------------------------------------------------------------
--spec stop(couchbase_driver:bucket(), datastore:scope()) ->
+-spec stop(couchbase_config:bucket(), datastore:scope()) ->
     ok | {error, Reason :: term()}.
 stop(Bucket, Scope) ->
     couchbase_changes_sup:stop_worker(Bucket, Scope).
@@ -82,7 +82,7 @@ stop(Bucket, Scope) ->
 %% @equiv stream(Bucket, Scope, Callback, [])
 %% @end
 %%--------------------------------------------------------------------
--spec stream(couchbase_driver:bucket(), datastore:scope(), callback()) ->
+-spec stream(couchbase_config:bucket(), datastore:scope(), callback()) ->
     {ok, pid()} | {error, Reason :: term()}.
 stream(Bucket, Scope, Callback) ->
     stream(Bucket, Scope, Callback, []).
@@ -96,7 +96,7 @@ stream(Bucket, Scope, Callback) ->
 %% - {except_mutator, datastore:mutator()}
 %% @end
 %%--------------------------------------------------------------------
--spec stream(couchbase_driver:bucket(), datastore:scope(), callback(),
+-spec stream(couchbase_config:bucket(), datastore:scope(), callback(),
     proplists:proplist()) -> {ok, pid()} | {error, Reason :: term()}.
 stream(Bucket, Scope, Callback, Opts) ->
     couchbase_changes_stream_sup:start_worker(Bucket, Scope, Callback, Opts).

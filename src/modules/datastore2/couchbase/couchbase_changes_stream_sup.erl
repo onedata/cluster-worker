@@ -40,7 +40,7 @@ start_link() ->
 %% Starts CouchBase changes stream worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker(couchbase_driver:bucket(), datastore:scope(),
+-spec start_worker(couchbase_config:bucket(), datastore:scope(),
     couchbase_changes:callback(), proplists:proplist()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_worker(Bucket, Scope, Callback, Opts) ->
