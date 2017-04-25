@@ -14,13 +14,14 @@
 %% API
 -export([get_model_name/1, get_level/1, get_driver/1, get_hooks_config/1,
   get_link_duplication/1, get_link_replica_scope/1, get_disable_remote_link_delete/1,
-  get_driver_context/1, create_context/8, override/3]).
+  get_driver_context/1, create_context/10, override/3, get_resolve_conflicts/1,
+  get_bucket/1]).
 
 -type ctx() :: #{atom() => term()}.
 % TODO - change to map
 -type driver_ctx() :: term().
 -type hooks_config() :: run_hooks | no_hooks.
-
+-type resolve_conflicts() :: doc | {links, DocKey :: datastore:ext_key()} | false.
 -export_type([ctx/0]).
 
 %%%===================================================================
@@ -35,8 +36,11 @@
 -spec create_context(ModelName :: model_behaviour:model_type(),
     Level :: datastore:store_level(), Driver :: atom(), DriverCtx :: driver_ctx(),
     LRS :: links_utils:link_replica_scope(), LD :: boolean(), DRLD :: boolean(),
-    Hooks :: hooks_config()) -> ctx().
-create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks) ->
+    Hooks :: hooks_config(), ResolveConflicts :: resolve_conflicts(),
+    Bucket :: couchdb_datastore_driver:couchdb_bucket()) -> ctx().
+% TODO - migrate some parameters to driver context when drivers use ctx
+create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks,
+    ResolveConflicts, Bucket) ->
   C0 = maps:put(model_name, ModelName, #{}),
   C1 = maps:put(level, Level, C0),
   C2 = maps:put(driver, Driver, C1),
@@ -44,7 +48,9 @@ create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks) ->
   C4 = maps:put(link_replica_scope, LRS, C3),
   C5 = maps:put(link_duplication, LD, C4),
   C6 = maps:put(disable_remote_link_delete, DRLD, C5),
-  maps:put(hooks_config, Hooks, C6).
+  C7 = maps:put(hooks_config, Hooks, C6),
+  C8 = maps:put(resolve_conflicts, ResolveConflicts, C7),
+  maps:put(bucket, Bucket, C8).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -126,3 +132,21 @@ get_disable_remote_link_delete(OptCtx) ->
 -spec get_driver_context(ctx()) -> driver_ctx().
 get_driver_context(OptCtx) ->
   maps:get(driver_ctx, OptCtx).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns driver context.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_resolve_conflicts(ctx()) -> resolve_conflicts().
+get_resolve_conflicts(OptCtx) ->
+  maps:get(resolve_conflicts, OptCtx).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns driver context.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_bucket(ctx()) -> couchdb_datastore_driver:couchdb_bucket().
+get_bucket(OptCtx) ->
+  maps:get(bucket, OptCtx).

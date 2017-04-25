@@ -827,4 +827,24 @@ final_method_with_args(?PERSISTENCE_DRIVER, OptCtx, Method, Args) ->
     {Method, [DriverContext | Args]};
 final_method_with_args(_Driver, OptCtx, Method, Args) ->
     DriverContext = datastore_context:get_driver_context(OptCtx),
-    {call, [Method, DriverContext, Args]}.
+    case datastore_context:get_resolve_conflicts(OptCtx) of
+        doc ->
+            {call, [force_save, DriverContext, add_bucket(OptCtx, Args)]};
+        {links, DocKey} ->
+            {call, [force_link_save, DriverContext, add_bucket(OptCtx, Args) ++ [DocKey]]};
+        _ ->
+            {call, [Method, DriverContext, Args]}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Adds information about bucket to calls.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_bucket(opt_ctx(), Args :: [term()]) -> NewArgs :: [term()].
+add_bucket(OptCtx, Args) ->
+    case datastore_context:get_bucket(OptCtx) of
+        default -> Args;
+        Bucket -> [Bucket | Args]
+    end.
