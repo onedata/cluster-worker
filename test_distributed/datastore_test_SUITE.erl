@@ -177,10 +177,10 @@ links_scope_test(Config) ->
             delete_links, [Doc, lists:map(fun(I) -> GetLinkName(I) end, Links)]))
     end,
 
-%%    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
-%%        exists_link_doc, [Doc, <<"scope1">>])),
-%%    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
-%%        exists_link_doc, [Doc, <<"scope2">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope1">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope1">>),
     AddLinkWithDoc(1),
@@ -201,10 +201,10 @@ links_scope_test(Config) ->
     DeleteLink(100),
     GetAllLinks([2,3,4]),
 
-%%    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
-%%        exists_link_doc, [Doc, <<"scope1">>])),
-%%    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
-%%        exists_link_doc, [Doc, <<"scope2">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope1">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope2">>),
     GetAllLinks([2,3,4]),
@@ -228,10 +228,10 @@ links_scope_test(Config) ->
     DeleteLinks([3, 7, 100]),
     GetAllLinks([2,4,5,6]),
 
-%%    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
-%%        exists_link_doc, [Doc, <<"scope1">>])),
-%%    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
-%%        exists_link_doc, [Doc, <<"scope2">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope1">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope1">>),
     DeleteLinks([3, 7, 100, 5, 6]),

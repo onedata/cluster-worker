@@ -74,7 +74,7 @@
     get/2, list/3, list/4, list_dirty/3, delete/2, delete/3, delete/4, exists/2]).
 -export([fetch_link/3, add_links/3, create_link/3, delete_links/3,
     foreach_link/4, fetch_link_target/3, link_walk/4, set_links/3]).
--export([fetch_full_link/3]).
+-export([fetch_full_link/3, exists_link_doc/3]).
 -export([configs_per_bucket/1, ensure_state_loaded/0, cluster_initialized/0, healthcheck/0, level_to_driver/1,
     driver_to_module/1, initialize_state/1]).
 -export([run_transaction/1, run_transaction/2, normalize_link_target/2]).
@@ -398,6 +398,18 @@ link_walk(Ctx, #document{key = StartKey}, LinkNames, Mode) ->
 link_walk(Ctx, Key, R, Mode) ->
     link_walk7(Ctx, Key, R, [], Mode).
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if document that describes links from scope exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists_link_doc(opt_ctx(), ext_key(), links_utils:scope()) ->
+    {ok, boolean()} | datastore:generic_error().
+exists_link_doc(Ctx, #document{key = Key}, Scope) ->
+    exists_link_doc(Ctx, Key, Scope);
+exists_link_doc(Ctx, Key, Scope) ->
+    exec_driver(Ctx, exists_link_doc, [Key, Scope]).
 
 %%--------------------------------------------------------------------
 %% @doc
