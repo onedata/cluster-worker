@@ -163,5 +163,29 @@ supervisor_children_spec() ->
             shutdown => infinity,
             type => supervisor,
             modules => [datastore_pool_sup]
+        },
+        #{
+            id => datastore_cache_manager,
+            start => {datastore_cache_manager, start_link, []},
+            restart => permanent,
+            shutdown => timer:seconds(10),
+            type => worker,
+            modules => [datastore_cache_manager]
+        },
+        #{
+            id => couchbase_pool_sup,
+            start => {couchbase_pool_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [couchbase_pool_sup]
+        },
+        #{
+            id => couchbase_changes_sup,
+            start => {couchbase_changes_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [couchbase_changes_sup]
         }
     ].
