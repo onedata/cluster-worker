@@ -38,6 +38,7 @@
     update_should_get_value_from_disc_and_save_in_memory/1,
     update_should_get_value_from_disc_and_save_on_disc/1,
     update_should_return_missing_error/1,
+    update_should_pass_error/1,
     delete_should_save_value_in_memory/1,
     delete_should_save_value_on_disc/1,
     flush_should_save_value_on_disc/1,
@@ -70,6 +71,7 @@ all() ->
         update_should_get_value_from_disc_and_save_in_memory,
         update_should_get_value_from_disc_and_save_on_disc,
         update_should_return_missing_error,
+        update_should_pass_error,
         delete_should_save_value_in_memory,
         delete_should_save_value_on_disc,
         flush_should_save_value_on_disc,
@@ -227,7 +229,7 @@ update_should_get_value_from_memory_and_save_in_memory(Config) ->
     rpc:call(Worker, ?MEM_DRV, save, [?MEM_CTX, ?DOC]),
     ?assertMatch({ok, memory, #document2{value = #test_model{field = <<"2">>}}},
         rpc:call(Worker, datastore_cache, update, [?CTX, ?KEY, fun(Doc) ->
-            Doc#document2{value = #test_model{field = <<"2">>}}
+            {ok, Doc#document2{value = #test_model{field = <<"2">>}}}
         end])
     ).
 
@@ -236,7 +238,7 @@ update_should_get_value_from_disc_and_save_in_memory(Config) ->
     rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
     ?assertMatch({ok, memory, #document2{value = #test_model{field = <<"2">>}}},
         rpc:call(Worker, datastore_cache, update, [?CTX, ?KEY, fun(Doc) ->
-            Doc#document2{value = #test_model{field = <<"2">>}}
+            {ok, Doc#document2{value = #test_model{field = <<"2">>}}}
         end])
     ).
 
@@ -245,7 +247,7 @@ update_should_get_value_from_disc_and_save_on_disc(Config) ->
     rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
     ?assertMatch({ok, disc, #document2{value = #test_model{field = <<"2">>}}},
         rpc:call(Worker, datastore_cache, update, [?CTX, ?KEY, fun(Doc) ->
-            Doc#document2{value = #test_model{field = <<"2">>}}
+            {ok, Doc#document2{value = #test_model{field = <<"2">>}}}
         end])
     ).
 
@@ -253,7 +255,16 @@ update_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual({error, key_enoent},
         rpc:call(Worker, datastore_cache, update, [?CTX, ?KEY, fun(Doc) ->
-            Doc#document2{value = #test_model{field = <<"2">>}}
+            {ok, Doc#document2{value = #test_model{field = <<"2">>}}}
+        end])
+    ).
+
+update_should_pass_error(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
+    ?assertEqual({error, aborted},
+        rpc:call(Worker, datastore_cache, update, [?CTX, ?KEY, fun(_Doc) ->
+            {error, aborted}
         end])
     ).
 

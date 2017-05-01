@@ -92,7 +92,9 @@ create(Key, Pid) ->
         false ->
             case ets:insert_new(?TP_ROUTING_TABLE, {Key, Pid}) of
                 true -> ok;
-                false -> {error, already_exists}
+                false ->
+                    update_size(-1),
+                    {error, already_exists}
             end
     end.
 

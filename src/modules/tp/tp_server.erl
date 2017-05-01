@@ -6,10 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module implements gen_server behaviour and is responsible
-%%% for serialization and aggregation of requests associated with a transaction
-%%% process key. Requests handling logic is provided by a module implementing
-%%% behaviour defined in a behaviour module.
+%%% This module is a wrapper around gen_server behaviour, which ensures that for
+%%% a custom key there will be only one process at the time that handles
+%%% requests. Singularity guarantees are kept only on per Erlang VM bases, i.e.
+%%% there might be two processes associated with the same key running
+%%% simultaneously on two different Erlang nodes.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(tp_server).
@@ -19,7 +20,6 @@
 
 -include("global_definitions.hrl").
 -include("modules/tp/tp.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([start_link/3]).
@@ -29,24 +29,9 @@
     code_change/3]).
 
 -record(state, {
-    module :: tp:mod(),
+    module :: module(),
     key :: tp:key(),
-    data :: tp:data(),
-    rev :: tp:rev(),
-    changes = undefined :: undefined | tp:changes(),
-    requests = [] :: [{pid(), reference(), tp:request()}],
-    % a pid of the modify handler process
-    modify_handler_pid :: undefined | pid(),
-    % a pid of the commit handler process
-    commit_handler_pid :: undefined | pid(),
-    % a reference to a timer expected to trigger terminate
-    terminate_timer_ref :: undefined | reference(),
-    % a reference to a message expected to trigger commit
-    commit_msg_ref :: undefined | reference(),
-    % a reference to a message expected to trigger terminate
-    terminate_msg_ref :: undefined | reference(),
-    commit_delay :: timeout(),
-    idle_timeout :: timeout()
+    state :: tp:state()
 }).
 
 -type state() :: #state{}.
@@ -60,7 +45,7 @@
 %% Starts the transaction process.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(tp:mod(), tp:args(), tp:key()) ->
+-spec start_link(module(), tp:args(), tp:key()) ->
     {ok, pid()} | ignore | {error, Reason :: term()}.
 start_link(Module, Args, Key) ->
     gen_server:start_link(?MODULE, [Module, Args, Key], []).
@@ -82,18 +67,11 @@ init([Module, Args, Key]) ->
     case tp_router:create(Key, self()) of
         ok ->
             process_flag(trap_exit, true),
-            case exec(Module, init, [Args]) of
-                {ok, #tp_init{} = Init} ->
-                    {ok, schedule_terminate(#state{
-                        module = Module,
-                        key = Key,
-                        data = Init#tp_init.data,
-                        rev = Init#tp_init.rev,
-                        commit_delay = Init#tp_init.max_commit_delay,
-                        idle_timeout = Init#tp_init.idle_timeout
-                    })};
-                {error, Reason} ->
-                    {error, Reason}
+            case Module:init(Args) of
+                {ok, State} ->
+                    {ok, #state{module = Module, key = Key, state = State}};
+                Other ->
+                    Other
             end;
         {error, already_exists} ->
             ignore;
@@ -115,13 +93,21 @@ init([Module, Args, Key]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call(Request, {Pid, _Tag}, #state{requests = Requests} = State) ->
-    Ref = make_ref(),
-    State2 = State#state{
-        requests = [{Pid, Ref, Request} | Requests]
-    },
-    {reply, {ok, Ref}, modify_async(State2)}.
-
+handle_call(Request, From, #state{module = Module, state = State} = S) ->
+    case Module:handle_call(Request, From, State) of
+        {reply, Reply, State2} ->
+            {reply, Reply, S#state{state = State2}};
+        {reply, Reply, State2, Timeout} ->
+            {reply, Reply, S#state{state = State2}, Timeout};
+        {noreply, State2} ->
+            {noreply, S#state{state = State2}};
+        {noreply, State2, Timeout} ->
+            {noreply, S#state{state = State2}, Timeout};
+        {stop, Reason, Reply, State2} ->
+            {stop, Reason, Reply, S#state{state = State2}};
+        {stop, Reason, State2} ->
+            {stop, Reason, S#state{state = State2}}
+    end.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -132,9 +118,15 @@ handle_call(Request, {Pid, _Tag}, #state{requests = Requests} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_cast(Request, #state{} = State) ->
-    ?log_bad_request(Request),
-    {noreply, State}.
+handle_cast(Request, #state{module = Module, state = State} = S) ->
+    case Module:handle_cast(Request, State) of
+        {noreply, State2} ->
+            {noreply, S#state{state = State2}};
+        {noreply, State2, Timeout} ->
+            {noreply, S#state{state = State2}, Timeout};
+        {stop, Reason, State2} ->
+            {stop, Reason, S#state{state = State2}}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -146,29 +138,15 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_info({'EXIT', Pid, Exit}, #state{
-    modify_handler_pid = Pid
-} = State) ->
-    {noreply, handle_modified(Exit, State)};
-handle_info({'EXIT', Pid, Exit}, #state{
-    commit_handler_pid = Pid
-} = State) ->
-    {noreply, handle_committed(Exit, State)};
-handle_info({Ref, {commit, Delay}}, #state{commit_msg_ref = Ref} = State) ->
-    {noreply, commit_async(Delay, State#state{commit_msg_ref = undefined})};
-handle_info({Ref, terminate}, #state{
-    requests = [],
-    changes = undefined,
-    modify_handler_pid = undefined,
-    commit_handler_pid = undefined,
-    terminate_msg_ref = Ref
-} = State) ->
-    {stop, normal, State};
-handle_info({_Ref, terminate}, #state{} = State) ->
-    {noreply, State};
-handle_info(Info, #state{} = State) ->
-    ?log_bad_request(Info),
-    {noreply, State}.
+handle_info(Info, #state{module = Module, state = State} = S) ->
+    case Module:handle_info(Info, State) of
+        {noreply, State2} ->
+            {noreply, S#state{state = State2}};
+        {noreply, State2, Timeout} ->
+            {noreply, S#state{state = State2}, Timeout};
+        {stop, Reason, State2} ->
+            {stop, Reason, S#state{state = State2}}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -181,19 +159,8 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{module = Module, key = Key, rev = Rev} = State) when
-    Reason == normal;
-    Reason == shutdown ->
-    State2 = modify_sync(State),
-    #state{data = Data} = commit_sync(State2),
-    {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        tp_server_terminate_retry_delay),
-    exec_retry(Module, terminate, [Data, Rev], Delay),
-    tp_router:delete(Key, self());
-terminate({shutdown, _}, State) ->
-    terminate(shutdown, State);
-terminate(Reason, #state{key = Key} = State) ->
-    ?log_terminate(Reason, State),
+terminate(Reason, #state{key = Key, module = Module, state = State}) ->
+    Module:terminate(Reason, State),
     tp_router:delete(Key, self()).
 
 %%--------------------------------------------------------------------
@@ -204,310 +171,8 @@ terminate(Reason, #state{key = Key} = State) ->
 %%--------------------------------------------------------------------
 -spec code_change(OldVsn :: term() | {down, term()}, State :: state(),
     Extra :: term()) -> {ok, NewState :: state()} | {error, Reason :: term()}.
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Synchronously modifies transaction process data.
-%% @end
-%%--------------------------------------------------------------------
--spec modify_sync(state()) -> state().
-modify_sync(#state{requests = [], modify_handler_pid = undefined} = State) ->
-    State;
-modify_sync(#state{} = State) ->
-    modify_sync(wait_modify(State)).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Asynchronously modifies transaction process data by spawning a handling
-%% process. The process is spawned only if there are pending requests and
-%% there is no other handler already spawned.
-%% @end
-%%--------------------------------------------------------------------
--spec modify_async(state()) -> state().
-modify_async(#state{requests = []} = State) ->
-    State;
-modify_async(#state{
-    module = Module,
-    data = Data,
-    rev = Rev,
-    requests = Requests,
-    modify_handler_pid = undefined
-} = State) ->
-    Pid = spawn_link(fun() ->
-        {Pids, Refs, TpRequests} = lists:unzip3(lists:reverse(Requests)),
-        case exec_noexcept(Module, modify, [TpRequests, Data, Rev]) of
-            {ok, {TpResponses, Changes, Data2}} ->
-                notify(Pids, Refs, TpResponses),
-                return({modified, Changes, Data2});
-            {error, Reason, Stacktrace} ->
-                notify(Pids, Refs, {error, Reason, Stacktrace}),
-                return({Reason, Stacktrace})
-        end
-    end),
-    State#state{
-        requests = [],
-        modify_handler_pid = Pid
-    };
-modify_async(#state{} = State) ->
-    State.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Waits for the modify handler completion.
-%% @end
-%%--------------------------------------------------------------------
--spec wait_modify(state()) -> state().
-wait_modify(#state{modify_handler_pid = undefined} = State) ->
-    State;
-wait_modify(#state{modify_handler_pid = Pid} = State) ->
-    receive
-        {'EXIT', Pid, Exit} -> handle_modified(Exit, State)
+code_change(OldVsn, #state{module = Module, state = State} = S, Extra) ->
+    case Module:code_change(OldVsn, State, Extra) of
+        {ok, State2} -> {ok, S#state{state = State2}};
+        {error, Reason} -> {error, Reason}
     end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handles the outcome of the modify handler.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_modified(Exit :: any(), state()) -> state().
-handle_modified({modified, false, Data}, #state{} = State) ->
-    schedule_terminate(handle_modified(
-        {modified, {true, undefined}, Data}, State
-    ));
-handle_modified({modified, {true, NextChanges}, Data}, #state{
-    module = Module,
-    changes = Changes,
-    commit_delay = Delay
-} = State) ->
-    schedule_commit(Delay, modify_async(State#state{
-        data = Data,
-        changes = merge_changes(Module, Changes, NextChanges),
-        modify_handler_pid = undefined
-    }));
-handle_modified(Exit, #state{commit_delay = Delay} = State) ->
-    ?error("Modify handler of a transaction process terminated abnormally: ~p",
-        [Exit]),
-    schedule_terminate(schedule_commit(Delay, modify_async(State#state{
-        modify_handler_pid = undefined
-    }))).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Synchronously commits transaction process changes.
-%% @end
-%%--------------------------------------------------------------------
--spec commit_sync(state()) -> state().
-commit_sync(#state{
-    changes = undefined,
-    commit_handler_pid = undefined
-} = State) ->
-    State;
-commit_sync(#state{commit_delay = Delay} = State) ->
-    commit_sync(commit_async(Delay, wait_commit(State))).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Asynchronously commits transaction process changes by spawning a handling
-%% process. The process is spawned only if there are uncommitted changes and
-%% there is no other handler already spawned.
-%% @end
-%%--------------------------------------------------------------------
--spec commit_async(timeout(), state()) -> state().
-commit_async(_Delay, #state{changes = undefined} = State) ->
-    State;
-commit_async(Delay, #state{
-    module = Module,
-    data = Data,
-    changes = Changes,
-    commit_handler_pid = undefined
-} = State) ->
-    Pid = spawn_link(fun() ->
-        Response = exec(Module, commit, [Changes, Data]),
-        return({committed, Response, Delay})
-    end),
-    State#state{
-        changes = undefined,
-        commit_handler_pid = Pid
-    };
-commit_async(_Delay, #state{} = State) ->
-    State.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Waits for the commit handler completion or a trigger commit message.
-%% @end
-%%--------------------------------------------------------------------
--spec wait_commit(state()) -> state().
-wait_commit(#state{commit_handler_pid = undefined} = State) ->
-    State;
-wait_commit(#state{commit_handler_pid = Pid} = State) ->
-    receive
-        {'EXIT', Pid, Exit} -> handle_committed(Exit, State)
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handles the outcome of the commit handler.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_committed(Exit :: any(), state()) -> state().
-handle_committed({committed, {true, Rev}, _}, #state{
-    commit_delay = Delay
-} = State) ->
-    schedule_terminate(schedule_commit(Delay, State#state{
-        rev = Rev,
-        commit_handler_pid = undefined
-    }));
-handle_committed({committed, {{false, Changes}, Rev}, Delay}, #state{
-    module = Module,
-    changes = Changes2
-} = State) ->
-    Delay2 = exec(Module, commit_backoff, [Delay]),
-    schedule_commit(Delay2, State#state{
-        rev = Rev,
-        changes = merge_changes(Module, Changes, Changes2),
-        commit_handler_pid = undefined
-    });
-handle_committed(Exit, #state{commit_delay = Delay} = State) ->
-    ?error("Commit handler of a transaction process terminated abnormally: ~p",
-        [Exit]),
-    schedule_terminate(schedule_commit(Delay, State#state{
-        commit_handler_pid = undefined
-    })).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Merges transaction process changes.
-%% @end
-%%--------------------------------------------------------------------
--spec merge_changes(tp:mod(), tp:changes(), tp:changes()) -> tp:changes().
-merge_changes(_Module, Changes, undefined) ->
-    Changes;
-merge_changes(_Module, undefined, NextChanges) ->
-    NextChanges;
-merge_changes(Module, Changes, NextChanges) ->
-    exec(Module, merge_changes, [Changes, NextChanges]).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Schedules commit operation if there are uncommitted changes and a commit
-%% trigger message is no already awaited.
-%% @end
-%%--------------------------------------------------------------------
--spec schedule_commit(timeout(), state()) -> state().
-schedule_commit(_Delay, #state{changes = undefined} = State) ->
-    State;
-schedule_commit(Delay, #state{commit_msg_ref = undefined} = State) ->
-    Ref = make_ref(),
-    erlang:send_after(Delay, self(), {Ref, {commit, Delay}}),
-    State#state{commit_msg_ref = Ref};
-schedule_commit(_Delay, #state{} = State) ->
-    State.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Schedules terminate operation.
-%% @end
-%%--------------------------------------------------------------------
--spec schedule_terminate(state()) -> state().
-schedule_terminate(#state{
-    idle_timeout = IdleTimeout,
-    terminate_timer_ref = undefined
-} = State) ->
-    MsgRef = make_ref(),
-    TimerRef = erlang:send_after(IdleTimeout, self(), {MsgRef, terminate}),
-    State#state{
-        terminate_timer_ref = TimerRef,
-        terminate_msg_ref = MsgRef
-    };
-schedule_terminate(#state{terminate_timer_ref = Ref} = State) ->
-    erlang:cancel_timer(Ref),
-    schedule_terminate(State#state{terminate_timer_ref = undefined}).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns the result of applying Function in Module to Args.
-%% @end
-%%--------------------------------------------------------------------
--spec exec(tp:mod(), atom(), list()) -> Result :: term().
-exec(Module, Function, Args) ->
-    erlang:apply(Module, Function, Args).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Calls {@link exec/3} and catches exceptions.
-%% @end
-%%--------------------------------------------------------------------
--spec exec_noexcept(tp:mod(), atom(), list()) ->
-    {ok, Result :: term()} | {error, Reason :: term(), Stacktrace :: term()}.
-exec_noexcept(Module, Function, Args) ->
-    try
-        {ok, exec(Module, Function, Args)}
-    catch
-        _:Reason -> {error, Reason, erlang:get_stacktrace()}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Calls {@link exec/3} as long as it fails with an exception.
-%% Waits 'RetryDelay' milliseconds between consecutive attempts.
-%% @end
-%%--------------------------------------------------------------------
--spec exec_retry(tp:mod(), atom(), list(), timeout()) -> term().
-exec_retry(Module, Function, Args, RetryDelay) ->
-    try
-        exec(Module, Function, Args)
-    catch
-        _:Reason ->
-            ?error_stacktrace("Tp server encountered unexpected error: ~p. "
-            "Retrying after ~p...", [Reason, RetryDelay]),
-            timer:sleep(RetryDelay),
-            exec_retry(Module, Function, Args, RetryDelay)
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sends responses to the tp_server callers.
-%% @end
-%%--------------------------------------------------------------------
--spec notify([pid()], [reference()], term() | [tp:response()]) -> ok.
-notify(Pids, Refs, TpResponses) when is_list(TpResponses) ->
-    Responses = lists:zip3(Pids, Refs, TpResponses),
-    lists:foreach(fun({Pid, Ref, TpResponse}) ->
-        Pid ! {Ref, TpResponse}
-    end, Responses);
-notify(Pids, Refs, Response) ->
-    Responses = lists:duplicate(length(Pids), Response),
-    notify(Pids, Refs, Responses).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Stops the execution of the calling process with exit response.
-%% @end
-%%--------------------------------------------------------------------
--spec return(Response :: term()) -> ok.
-return(Response) ->
-    exit(self(), Response),
-    receive _ -> ok end.
