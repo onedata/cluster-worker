@@ -137,7 +137,7 @@ create(Ctx, #document{} = Document) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(opt_ctx(), Document :: datastore:document(),
-    Diff :: datastore:document_diff()) -> {ok, ext_key()} | datastore:create_error().
+    Diff :: datastore:document_diff()) -> {ok, ext_key()} | datastore:generic_error().
 create_or_update(Ctx, #document{} = Document, Diff) ->
     exec_driver(Ctx, create_or_update, [Document, Diff]).
 
