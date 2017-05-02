@@ -17,6 +17,8 @@
   get_driver_context/1, create_context/10, override/3, get_resolve_conflicts/1,
   get_bucket/1]).
 
+% TODO - define map better when its structure is stable
+% (after integration of new drivers)
 -type ctx() :: #{atom() => term()}.
 % TODO - change to map
 -type driver_ctx() :: term().
@@ -41,16 +43,18 @@
 % TODO - migrate some parameters to driver context when drivers use ctx
 create_context(ModelName, Level, Driver, DriverCtx, LRS, LD, DRLD, Hooks,
     ResolveConflicts, Bucket) ->
-  C0 = maps:put(model_name, ModelName, #{}),
-  C1 = maps:put(level, Level, C0),
-  C2 = maps:put(driver, Driver, C1),
-  C3 = maps:put(driver_ctx, DriverCtx, C2),
-  C4 = maps:put(link_replica_scope, LRS, C3),
-  C5 = maps:put(link_duplication, LD, C4),
-  C6 = maps:put(disable_remote_link_delete, DRLD, C5),
-  C7 = maps:put(hooks_config, Hooks, C6),
-  C8 = maps:put(resolve_conflicts, ResolveConflicts, C7),
-  maps:put(bucket, Bucket, C8).
+  #{
+    model_name => ModelName,
+    level => Level,
+    driver => Driver,
+    driver_ctx => DriverCtx,
+    link_replica_scope => LRS,
+    link_duplication => LD,
+    disable_remote_link_delete => DRLD,
+    hooks_config => Hooks,
+    resolve_conflicts => ResolveConflicts,
+    bucket => Bucket
+  }.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -67,8 +71,7 @@ override(Key, Value, Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_model_name(ctx()) -> model_behaviour:model_type().
-get_model_name(OptCtx) ->
-  maps:get(model_name, OptCtx).
+get_model_name(#{model_name := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -76,8 +79,7 @@ get_model_name(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_level(ctx()) -> datastore:store_level().
-get_level(OptCtx) ->
-  maps:get(level, OptCtx).
+get_level(#{level := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -85,8 +87,7 @@ get_level(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_driver(ctx()) -> atom().
-get_driver(OptCtx) ->
-  maps:get(driver, OptCtx).
+get_driver(#{driver := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -94,8 +95,7 @@ get_driver(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_hooks_config(ctx()) -> hooks_config().
-get_hooks_config(OptCtx) ->
-  maps:get(hooks_config, OptCtx).
+get_hooks_config(#{hooks_config := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -103,8 +103,7 @@ get_hooks_config(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_duplication(ctx()) -> boolean().
-get_link_duplication(OptCtx) ->
-  maps:get(link_duplication, OptCtx).
+get_link_duplication(#{link_duplication := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -112,8 +111,7 @@ get_link_duplication(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_link_replica_scope(ctx()) -> links_utils:link_replica_scope().
-get_link_replica_scope(OptCtx) ->
-  maps:get(link_replica_scope, OptCtx).
+get_link_replica_scope(#{link_replica_scope := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -121,8 +119,8 @@ get_link_replica_scope(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_disable_remote_link_delete(ctx()) -> boolean().
-get_disable_remote_link_delete(OptCtx) ->
-  maps:get(disable_remote_link_delete, OptCtx).
+get_disable_remote_link_delete(#{disable_remote_link_delete := ToReturn}) ->
+  ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -130,8 +128,7 @@ get_disable_remote_link_delete(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_driver_context(ctx()) -> driver_ctx().
-get_driver_context(OptCtx) ->
-  maps:get(driver_ctx, OptCtx).
+get_driver_context(#{driver_ctx := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -139,8 +136,7 @@ get_driver_context(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_resolve_conflicts(ctx()) -> resolve_conflicts().
-get_resolve_conflicts(OptCtx) ->
-  maps:get(resolve_conflicts, OptCtx).
+get_resolve_conflicts(#{resolve_conflicts := ToReturn}) -> ToReturn.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -148,5 +144,4 @@ get_resolve_conflicts(OptCtx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_bucket(ctx()) -> couchdb_datastore_driver:couchdb_bucket() | default.
-get_bucket(OptCtx) ->
-  maps:get(bucket, OptCtx).
+get_bucket(#{bucket := ToReturn}) -> ToReturn.

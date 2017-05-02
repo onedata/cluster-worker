@@ -882,6 +882,7 @@ final_method_with_args(_Driver, OptCtx, Method, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec add_bucket(opt_ctx(), Args :: [term()]) -> NewArgs :: [term()].
+% TODO - probably not used option
 add_bucket(OptCtx, Args) ->
     case datastore_context:get_bucket(OptCtx) of
         default -> Args;
