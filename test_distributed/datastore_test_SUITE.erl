@@ -25,6 +25,10 @@
 
 -define(TIMEOUT, timer:minutes(5)).
 -define(call_store(N, F, A), ?call(N, datastore, F, A)).
+-define(call_store(N, Model, F, A), ?call(N,
+    model, execute_with_default_context, [Model, F, A])).
+-define(call_store(N, Model, F, A, Override), ?call(N,
+    model, execute_with_default_context, [Model, F, A, Override])).
 -define(call(N, M, F, A), ?call(N, M, F, A, ?TIMEOUT)).
 -define(call(N, M, F, A, T), rpc:call(N, M, F, A, T)).
 
@@ -85,8 +89,8 @@ test_models(Config) ->
             key = Key,
             value = MC#model_config.defaults
         },
-        ?assertMatch({ok, _}, ?call_store(Worker, save, [SL, Doc])),
-        ?assertMatch({ok, true}, ?call_store(Worker, exists, [SL, ModelName, Key])),
+        ?assertMatch({ok, _}, ?call_store(Worker, ModelName, save, [Doc])),
+        ?assertMatch({ok, true}, ?call_store(Worker, ModelName, exists, [Key])),
 
 %%        ct:print("Module ok ~p", [ModelName]),
 
@@ -127,30 +131,35 @@ links_scope_test(Config) ->
         }
     end,
     AddLink = fun(I) ->
-        ?assertMatch(ok, ?call_store(Worker1, add_links, [?GLOBAL_ONLY_LEVEL, Doc, [{GetLinkName(I), GetDoc(I)}]]))
+        ?assertMatch(ok, ?call_store(Worker1, link_scopes_test_record,
+            add_links, [Doc, [{GetLinkName(I), GetDoc(I)}]]))
     end,
     AddLinkWithDoc = fun(I) ->
         ?assertMatch({ok, _}, ?call(Worker2, link_scopes_test_record, create, [GetDoc(I)])),
         AddLink(I)
     end,
     CreateLink = fun(I) ->
-        ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]))
+        ?assertMatch(ok, ?call_store(Worker2, link_scopes_test_record,
+            create_link, [Doc, {GetLinkName(I), GetDoc(I)}]))
     end,
     CreateExistingLink = fun(I) ->
-        ?assertMatch({error, already_exists}, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]))
+        ?assertMatch({error, already_exists}, ?call_store(Worker2,
+            link_scopes_test_record, create_link, [Doc, {GetLinkName(I), GetDoc(I)}]))
     end,
     CreateLinkWithDoc = fun(I) ->
         ?assertMatch({ok, _}, ?call(Worker1, link_scopes_test_record, create, [GetDoc(I)])),
         CreateLink(I)
     end,
     FetchLink = fun(I) ->
-        ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(I)]))
+        ?assertMatch({ok, _}, ?call_store(Worker2, link_scopes_test_record,
+            fetch_link, [Doc, GetLinkName(I)]))
     end,
     GetAllLinks = fun(Links) ->
         AccFun = fun(LinkName, _, Acc) ->
             [LinkName | Acc]
                  end,
-        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [?GLOBAL_ONLY_LEVEL, Doc, AccFun, []]),
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, link_scopes_test_record,
+            foreach_link, [Doc, AccFun, []]),
         ?assertMatch({ok, _}, FLAns),
 
         lists:foreach(fun(I) ->
@@ -160,15 +169,18 @@ links_scope_test(Config) ->
         ?assertMatch(LinksLength, length(ListedLinks))
     end,
     DeleteLink = fun(I) ->
-        ?assertMatch(ok, ?call_store(Worker2, delete_links, [?GLOBAL_ONLY_LEVEL, Doc, [GetLinkName(I)]]))
+        ?assertMatch(ok, ?call_store(Worker2, link_scopes_test_record,
+            delete_links, [Doc, [GetLinkName(I)]]))
     end,
     DeleteLinks = fun(Links) ->
-        ?assertMatch(ok, ?call_store(Worker2, delete_links, [?GLOBAL_ONLY_LEVEL, Doc,
-            lists:map(fun(I) -> GetLinkName(I) end, Links)]))
+        ?assertMatch(ok, ?call_store(Worker2, link_scopes_test_record,
+            delete_links, [Doc, lists:map(fun(I) -> GetLinkName(I) end, Links)]))
     end,
 
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope1">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope1">>),
     AddLinkWithDoc(1),
@@ -189,8 +201,10 @@ links_scope_test(Config) ->
     DeleteLink(100),
     GetAllLinks([2,3,4]),
 
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope1">>])),
+    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope2">>),
     GetAllLinks([2,3,4]),
@@ -214,19 +228,25 @@ links_scope_test(Config) ->
     DeleteLinks([3, 7, 100]),
     GetAllLinks([2,4,5,6]),
 
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope1">>])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists_link_doc, [?GLOBAL_ONLY_LEVEL, Doc, <<"scope2">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope1">>])),
+    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
+        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope1">>),
     DeleteLinks([3, 7, 100, 5, 6]),
     GetAllLinks([2,4]),
-    ?assertMatch(ok, ?call_store(Worker2, create_link, [?GLOBAL_ONLY_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}])),
+    ?assertMatch(ok, ?call_store(Worker2, link_scopes_test_record,
+        create_link, [Doc, {GetLinkName(5), GetDoc(1)}])),
     AddLinkWithDoc(8),
     GetAllLinks([2,4,5,8]),
     DK1 = GetDocKey(1),
-    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(5)])),
-    ?assertMatch(ok, ?call_store(Worker2, add_links, [?GLOBAL_ONLY_LEVEL, Doc, [{GetLinkName(2), GetDoc(1)}]])),
-    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, fetch_link, [?GLOBAL_ONLY_LEVEL, Doc, GetLinkName(2)])),
+    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, link_scopes_test_record,
+        fetch_link, [Doc, GetLinkName(5)])),
+    ?assertMatch(ok, ?call_store(Worker2, link_scopes_test_record, add_links,
+        [Doc, [{GetLinkName(2), GetDoc(1)}]])),
+    ?assertMatch({ok, {DK1, _}}, ?call_store(Worker2, link_scopes_test_record,
+        fetch_link, [Doc, GetLinkName(2)])),
 
     MasterLoop ! stop,
     ok.
@@ -257,7 +277,7 @@ links_scope_proc_mem_test(Config) ->
     end,
     AddLink = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(I), GetDoc(I)}]]]))
+            add_links, [Doc, [{GetLinkName(I), GetDoc(I)}]]]))
     end,
     AddLinkWithDoc = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({ok, _}, ?call(Worker2, link_scopes_test_record2, create, [GetDoc(I)])),
@@ -265,11 +285,11 @@ links_scope_proc_mem_test(Config) ->
     end,
     CreateLink = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]]))
+            create_link, [Doc, {GetLinkName(I), GetDoc(I)}]]))
     end,
     CreateExistingLink = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({error, already_exists}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(I), GetDoc(I)}]]))
+            create_link, [Doc, {GetLinkName(I), GetDoc(I)}]]))
     end,
     CreateLinkWithDoc = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({ok, _}, ?call(Worker1, link_scopes_test_record2, create, [GetDoc(I)])),
@@ -277,7 +297,7 @@ links_scope_proc_mem_test(Config) ->
     end,
     FetchLink = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
+            fetch_link, [Doc, GetLinkName(I)]])),
         ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
             fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
     end,
@@ -286,7 +306,7 @@ links_scope_proc_mem_test(Config) ->
             maps:put(LinkName, LinkValue, Acc)
         end,
         {_, ListedLinks} = FLAns = ?call(Worker1, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            foreach_link, [?GLOBALLY_CACHED_LEVEL, Doc, AccFun, #{}]]),
+            foreach_link, [Doc, AccFun, #{}]]),
         ?assertMatch({ok, _}, FLAns),
 
         lists:foreach(fun(I) ->
@@ -297,22 +317,22 @@ links_scope_proc_mem_test(Config) ->
     end,
     DeleteLink = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker1, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            delete_links, [?GLOBALLY_CACHED_LEVEL, Doc, [GetLinkName(I)]]]))
+            delete_links, [Doc, [GetLinkName(I)]]]))
     end,
     DeleteLinkAndCheck = fun(I, LinkReplicaScope, OtherScopes) ->
         DeleteLink(I, LinkReplicaScope, OtherScopes),
         ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
+            fetch_link, [Doc, GetLinkName(I)]])),
         ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
             fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
                  end,
     DeleteLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            delete_links, [?GLOBALLY_CACHED_LEVEL, Doc,
+            delete_links, [Doc,
             lists:map(fun(I) -> GetLinkName(I) end, Links)]])),
         lists:map(fun(I) ->
             ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-                fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(I)]])),
+                fetch_link, [Doc, GetLinkName(I)]])),
             ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
                 fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
         end, Links)
@@ -360,18 +380,18 @@ links_scope_proc_mem_test(Config) ->
     GetAllLinks([2,4,5,6], <<"scope1">>, []),
     DeleteLinks([3, 7, 100, 5,6], <<"scope1">>, []),
     ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [],
-        create_link, [?GLOBALLY_CACHED_LEVEL, Doc, {GetLinkName(5), GetDoc(1)}]])),
+        create_link, [Doc, {GetLinkName(5), GetDoc(1)}]])),
     AddLinkWithDoc(8, <<"scope1">>, []),
     GetAllLinks([2,4,5,8], <<"scope1">>, []),
 
     DK1 = GetDocKey(1),
     ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [],
-            fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(5)]])),
+            fetch_link, [Doc, GetLinkName(5)]])),
     ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [],
-        add_links, [?GLOBALLY_CACHED_LEVEL, Doc, [{GetLinkName(2), GetDoc(1)}]]])),
+        add_links, [Doc, [{GetLinkName(2), GetDoc(1)}]]])),
     GetAllLinks([2,4,5,8], <<"scope1">>, []),
     ?assertMatch({ok, {DK1, _}}, ?call(Worker2, ?MODULE, execute_with_link_context, [<<"scope1">>, [<<"scope2">>],
-        fetch_link, [?GLOBALLY_CACHED_LEVEL, Doc, GetLinkName(2)]])),
+        fetch_link, [Doc, GetLinkName(2)]])),
 
 
     DeleteLinks([2,4,5,6,8], <<"scope2">>, []),
@@ -379,8 +399,9 @@ links_scope_proc_mem_test(Config) ->
 
     ok.
 
-execute_with_link_context(LinkReplicaScope, OtherScopes, Op, Args) ->
-    execute_with_link_context(LinkReplicaScope, OtherScopes, datastore, Op, Args).
+execute_with_link_context(LinkReplicaScope, _OtherScopes, Op, Args) ->
+    apply(model, execute_with_default_context, [link_scopes_test_record2, Op,
+        Args, [{link_replica_scope, LinkReplicaScope}]]).
 
 execute_with_link_context(LinkReplicaScope, _OtherScopes, Module, Op, Args) ->
     put(link_replica_scope, LinkReplicaScope),
@@ -451,25 +472,25 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
         value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
     },
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update,
+        [Doc, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update,
+        [Doc2, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
 
     ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity2])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update,
+        [Doc2, UpdateEntity2])),
     ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
     ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
         ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
     ok.
@@ -496,15 +517,13 @@ create_or_update_test_base(Config, Level, UpdateEntity, KeyExt) ->
         value = datastore_basic_ops_utils:get_record(TestRecord, 10, <<"def">>, {test, tuple})
     },
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc, UpdateEntity])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update, [Doc, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create_or_update, [Level, Doc2, UpdateEntity])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update, [Doc2, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
     ok.
 
 disk_only_many_links_test(Config) ->
@@ -598,23 +617,26 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             key = GetLinkKey(I),
             value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
         },
-        ?assertMatch(ok, ?call_store(Worker1, add_links, [
-            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ?assertMatch(ok, ?call_store(Worker1, TestRecord, add_links, [
+            Doc, [{GetLinkName(I), LinkedDoc}]
         ]))
     end),
 
     CheckLinks = fun(Start, End, Sum) ->
         for(Start, End, fun(I) ->
-            ?assertMatch({ok, _}, ?call_store(Worker1, fetch_link, [Level, Doc, GetLinkName(I)]))
+            ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, fetch_link,
+                [Doc, GetLinkName(I)]))
         end),
         for(Start, End, fun(I) ->
-            ?assertMatch({ok, _}, ?call_store(Worker2, fetch_link, [Level, Doc, GetLinkName(I)]))
+            ?assertMatch({ok, _}, ?call_store(Worker2, TestRecord, fetch_link,
+                [Doc, GetLinkName(I)]))
         end),
 
         AccFun = fun(LinkName, _, Acc) ->
             [LinkName | Acc]
         end,
-        {_, ListedLinks} = FLAns = ?call_store(Worker1, foreach_link, [Level, Doc, AccFun, []]),
+        {_, ListedLinks} = FLAns = ?call_store(Worker1, TestRecord, foreach_link,
+            [Doc, AccFun, []]),
         ?assertMatch({ok, _}, FLAns),
 
         for(Start, End, fun(I) ->
@@ -636,8 +658,8 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             key = GetLinkKey(I),
             value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
         },
-        ?assertMatch(ok, ?call_store(Worker1, add_links, [
-            Level, Doc, [{GetLinkName(I), LinkedDoc}]
+        ?assertMatch(ok, ?call_store(Worker1, TestRecord, add_links, [
+            Doc, [{GetLinkName(I), LinkedDoc}]
         ]))
     end),
     CheckLinks(1, 120, 120),
@@ -651,13 +673,13 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
         {GetLinkName(I), LinkedDoc}
     end,
     AddList = lists:map(ToAddList, lists:seq(121, 180)),
-    ?assertMatch(ok, ?call_store(Worker1, add_links, [
-        Level, Doc, AddList
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, add_links, [
+        Doc, AddList
     ])),
     CheckLinks(121, 180, 180),
 
-    ?assertMatch(ok, ?call_store(Worker1, add_links, [
-        Level, Doc, AddList
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, add_links, [
+        Doc, AddList
     ])),
     CheckLinks(121, 180, 180),
 
@@ -666,20 +688,21 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             key = GetLinkKey(I),
             value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
         },
-        ?assertMatch({error, already_exists}, ?call_store(Worker1, create_link, [
-            Level, Doc, {GetLinkName(I), LinkedDoc}
+        ?assertMatch({error, already_exists}, ?call_store(Worker1, TestRecord,
+            create_link, [Doc, {GetLinkName(I), LinkedDoc}
         ]))
     end),
 
     for(91, 110, fun(I) ->
-        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+        ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links,
+            [Doc, [GetLinkName(I)]]))
     end),
 
     DelList = lists:map(fun(I) ->
         GetLinkName(I)
     end, lists:seq(131, 150)),
-    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
-        Level, Doc, DelList
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links, [
+        Doc, DelList
     ])),
     CheckLinks(1, 90, 140),
     CheckLinks(111, 130, 140),
@@ -687,32 +710,34 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
 
     AddDocs(181, 300),
     AddList2 = lists:map(ToAddList, lists:seq(181, 300)),
-    ?assertMatch(ok, ?call_store(Worker1, add_links, [
-        Level, Doc, AddList2
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, add_links, [
+        Doc, AddList2
     ])),
     CheckLinks(181, 300, 260),
 
     DelList2 = lists:map(fun(I) ->
         GetLinkName(I)
     end, lists:seq(1, 150)),
-    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
-        Level, Doc, DelList2
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links, [
+        Doc, DelList2
     ])),
     CheckLinks(151, 300, 150),
 
-    ?assertMatch(ok, ?call_store(Worker1, delete_links, [
-        Level, Doc, DelList2
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links, [
+        Doc, DelList2
     ])),
     CheckLinks(151, 300, 150),
 
-    ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, []])),
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links, [Doc, []])),
     CheckLinks(151, 300, 150),
 
     for(161, 180, fun(I) ->
-        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+        ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links,
+            [Doc, [GetLinkName(I)]]))
     end),
     for(211, 300, fun(I) ->
-        ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc, [GetLinkName(I)]]))
+        ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links,
+            [Doc, [GetLinkName(I)]]))
     end),
     CheckLinks(151, 160, 40),
     CheckLinks(181, 210, 40),
@@ -722,8 +747,8 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
             key = GetLinkKey(I),
             value = datastore_basic_ops_utils:get_record(TestRecord, I, <<"abc">>, {test, tuple})
         },
-        ?assertMatch(ok, ?call_store(Worker1, create_link, [
-            Level, Doc, {GetLinkName(I), LinkedDoc}
+        ?assertMatch(ok, ?call_store(Worker1, TestRecord, create_link, [
+            Doc, {GetLinkName(I), LinkedDoc}
         ]))
     end),
     CheckLinks(1, 150, 190),
@@ -732,16 +757,12 @@ many_links_test_base(Config, Level, GetLinkKey, GetLinkName) ->
     ok.
 
 multiple_links_creation_disk_test(Config) ->
-    [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
-    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    multiple_links_creation_test_base(Config, PModule).
+    multiple_links_creation_test_base(Config, ?DISK_ONLY_LEVEL).
 
 multiple_links_creation_global_only_test(Config) ->
-    [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
-    PModule = ?call_store(Worker1, driver_to_module, [?MEMORY_DRIVER]),
-    multiple_links_creation_test_base(Config, PModule).
+    multiple_links_creation_test_base(Config, ?GLOBAL_ONLY_LEVEL).
 
-multiple_links_creation_test_base(Config, PModule) ->
+multiple_links_creation_test_base(Config, Level) ->
     [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
@@ -751,38 +772,40 @@ multiple_links_creation_test_base(Config, PModule) ->
     end, Workers),
 
     ModelConfig = TestRecord:model_init(),
-    Key = get_key("key_mlct_", PModule),
+    Key = get_key("key_mlct_", Level),
     Doc =  #document{
         key = Key,
         value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
     },
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, Doc])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create, [Doc], [{level, Level}])),
 
-    LinkedKey = get_key("linked_key_mlct_", PModule),
+    LinkedKey = get_key("linked_key_mlct_", Level),
     LinkedDoc = #document{
         key = LinkedKey,
         value = datastore_basic_ops_utils:get_record(TestRecord, 2, <<"efg">>, {test, tuple2})
     },
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, LinkedDoc])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create, [LinkedDoc], [{level, Level}])),
 
-    LinkedKey2 = get_key("linked_key_mlct2_", PModule),
+    LinkedKey2 = get_key("linked_key_mlct2_", Level),
     LinkedDoc2 = #document{
         key = LinkedKey2,
         value = datastore_basic_ops_utils:get_record(TestRecord, 3, <<"hij">>, {test, tuple3})
     },
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, LinkedDoc2])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create, [LinkedDoc2], [{level, Level}])),
 
-    LinkedKey3 = get_key("linked_key_mlct3_", PModule),
+    LinkedKey3 = get_key("linked_key_mlct3_", Level),
     LinkedDoc3 = #document{
         key = LinkedKey3,
         value = datastore_basic_ops_utils:get_record(TestRecord, 4, <<"klm">>, {test, tuple4})
     },
-    ?assertMatch({ok, _}, ?call(Worker1, PModule, create, [ModelConfig, LinkedDoc3])),
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create, [LinkedDoc3], [{level, Level}])),
 
     Self = self(),
     AddLinks = fun(Links, Send) ->
-        Ans = ?call(Worker1, PModule, add_links, [ModelConfig, Doc#document.key,
-            datastore:normalize_link_target(ModelConfig, Links)]),
+        Ans = ?call_store(Worker1, TestRecord, add_links, [Doc#document.key,
+            datastore:normalize_link_target(
+                model:create_datastore_context(normalize_link_target, ModelConfig),
+                Links)], [{level, Level}]),
         case Send of
             true ->
                 Self ! {link_ans, Ans};
@@ -799,14 +822,14 @@ multiple_links_creation_test_base(Config, PModule) ->
     rec_add_link_ans(),
     rec_add_link_ans(),
 
-    F1 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
-    F2 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
-    F3 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+    F1 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link], [{level, Level}]),
+    F2 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link2], [{level, Level}]),
+    F3 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link3], [{level, Level}]),
 
     ?assertMatch({{ok, _}, {ok, _}, {ok, _}}, {F1, F2, F3}),
 
     DeleteLinks = fun(Links, Send) ->
-        Ans = ?call(Worker1, PModule, delete_links, [ModelConfig, Doc#document.key, Links]),
+        Ans = ?call_store(Worker1, TestRecord, delete_links, [Doc#document.key, Links], [{level, Level}]),
         case Send of
             true ->
                 Self ! {link_ans, Ans};
@@ -823,24 +846,24 @@ multiple_links_creation_test_base(Config, PModule) ->
     rec_add_link_ans(),
     rec_add_link_ans(),
 
-    F4 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
-    F5 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
-    F6 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+    F4 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link], [{level, Level}]),
+    F5 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link2], [{level, Level}]),
+    F6 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link3], [{level, Level}]),
 
     ?assertMatch({{error,link_not_found}, {error,link_not_found}, {error,link_not_found}},
         {F4, F5, F6}),
 
     ?assertMatch(ok, AddLinks([{link, LinkedDoc}, {link2, LinkedDoc2}, {link3, LinkedDoc3}], false)),
-    F7 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
-    F8 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
-    F9 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+    F7 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link], [{level, Level}]),
+    F8 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link2], [{level, Level}]),
+    F9 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link3], [{level, Level}]),
 
     ?assertMatch({{ok, _}, {ok, _}, {ok, _}}, {F7, F8, F9}),
 
     ?assertMatch(ok, DeleteLinks(all, false)),
-    F10 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link]),
-    F11 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link2]),
-    F12 = ?call(Worker1, PModule, fetch_link, [ModelConfig, Doc#document.key, link3]),
+    F10 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link], [{level, Level}]),
+    F11 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link2], [{level, Level}]),
+    F12 = ?call_store(Worker1, TestRecord, fetch_link, [Doc#document.key, link3], [{level, Level}]),
 
     ?assertMatch({{error,link_not_found}, {error,link_not_found}, {error,link_not_found}},
         {F10, F11, F12}),
@@ -870,19 +893,17 @@ local_test(Config) ->
     local_access_only(TestRecord, Worker2, Level),
 
     ?assertMatch({ok, _},
-        ?call_store(Worker1, create, [Level,
+        ?call_store(Worker1, TestRecord, create, [
             #document{
                 key = some_other_key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
             }])),
 
     ?assertMatch({ok, false},
-        ?call_store(Worker2, exists, [Level,
-            TestRecord, some_other_key])),
+        ?call_store(Worker2, TestRecord, exists, [some_other_key])),
 
     ?assertMatch({ok, true},
-        ?call_store(Worker1, exists, [Level,
-            TestRecord, some_other_key])),
+        ?call_store(Worker1, TestRecord, exists, [some_other_key])),
 
     ok.
 
@@ -954,7 +975,7 @@ atomic_update_test_base(Config, Level, UpdateFun1, UpdateFun2) ->
     Key = rand_key(),
 
     ?assertMatch({ok, _},
-        ?call_store(Worker1, create, [Level,
+        ?call_store(Worker1, TestRecord, create, [
             #document{
                 key = Key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 0, <<"abc">>, {test, tuple})
@@ -965,25 +986,25 @@ atomic_update_test_base(Config, Level, UpdateFun1, UpdateFun2) ->
     ?assertMatch({{ok, Key}, {ok, #document{value = ?test_record_f1_2(0, Pid)}}}, AggregatedAns),
 
     ?assertMatch({ok, #document{value = ?test_record_f1_2(0, Pid)}},
-        ?call_store(Worker1, get, [Level, TestRecord, Key])),
+        ?call_store(Worker1, TestRecord, get, [Key])),
 
     Self = self(),
     Timeout = timer:seconds(30),
     utils:pforeach(fun(Node) ->
-        ?call_store(Node, update, [Level, TestRecord, Key, UpdateFun2]),
+        ?call_store(Node, TestRecord, update, [Key, UpdateFun2]),
         Self ! done
     end, lists:duplicate(100, Worker1) ++ lists:duplicate(100, Worker2)),
     [receive done -> ok after Timeout -> ok end || _ <- lists:seq(1, 200)],
 
     ?assertMatch({ok, #document{value = ?test_record_f1(200)}},
-        ?call_store(Worker1, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker1, TestRecord, get, [Key])),
 
     ok.
 
 update_and_check(Level, TestRecord, Key, UpdateFun) ->
-    UpdateAns = datastore:update(Level, TestRecord, Key, UpdateFun),
-    GetAns = datastore:get(Level, TestRecord, Key),
+    UpdateAns = datastore:update(
+        model:create_datastore_context(update, TestRecord), Key, UpdateFun),
+    GetAns = datastore:get(model:create_datastore_context(get, TestRecord), Key),
     {UpdateAns, GetAns}.
 
 %% list operation on global cache driver (on several nodes)
@@ -1068,11 +1089,15 @@ link_walk_test(Config) ->
     ?assertMatch({ok, _},
         ?call(Worker1, TestRecord, create, [Doc3])),
 
-    ?assertMatch(ok, ?call_store(Worker2, add_links, [Level, Doc1, [{some, Doc2}, {other, Doc1}]])),
-    ?assertMatch(ok, ?call_store(Worker1, add_links, [Level, Doc2, [{link, Doc3}, {parent, Doc1}]])),
+    ?assertMatch(ok, ?call_store(Worker2, TestRecord, add_links,
+        [Doc1, [{some, Doc2}, {other, Doc1}]])),
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, add_links,
+        [Doc2, [{link, Doc3}, {parent, Doc1}]])),
 
-    Res0 = ?call_store(Worker1, link_walk, [Level, Doc1, [some, link], get_leaf]),
-    Res1 = ?call_store(Worker2, link_walk, [Level, Doc1, [some, parent], get_leaf]),
+    Res0 = ?call_store(Worker1, TestRecord, link_walk,
+        [Doc1, [some, link], get_leaf]),
+    Res1 = ?call_store(Worker2, TestRecord, link_walk,
+        [Doc1, [some, parent], get_leaf]),
 
     ?assertMatch({ok, {#document{key = Key3, value = ?test_record_f1(3)}, [Key2, Key3]}}, Res0),
     ?assertMatch({ok, {#document{key = Key1, value = ?test_record_f1(1)}, [Key2, Key1]}}, Res1),
@@ -1121,48 +1146,46 @@ end_per_testcase(_Case, Config) ->
 local_access_only(TestRecord, Node, Level) ->
     Key = rand_key(),
 
-    ?assertMatch({ok, Key}, ?call_store(Node, create, [
-        Level, #document{key = Key, value =
+    ?assertMatch({ok, Key}, ?call_store(Node, TestRecord, create, [
+        #document{key = Key, value =
             datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
         }
     ])),
 
-    ?assertMatch({error, already_exists}, ?call_store(Node, create, [
-        Level, #document{key = Key, value =
+    ?assertMatch({error, already_exists}, ?call_store(Node, TestRecord, create, [
+        #document{key = Key, value =
             datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
         }
     ])),
 
-    ?assertMatch({ok, true}, ?call_store(Node, exists, [Level, TestRecord, Key])),
+    ?assertMatch({ok, true}, ?call_store(Node, TestRecord, exists, [Key])),
 
     ?assertMatch({ok, #document{value = ?test_record_f3({test, tuple})}},
-        ?call_store(Node, get, [Level, TestRecord, Key])),
+        ?call_store(Node, TestRecord, get, [Key])),
 
     Pid = self(),
-    ?assertMatch({ok, Key}, ?call_store(Node, update, [
-        Level, TestRecord, Key, #{field2 => Pid}
+    ?assertMatch({ok, Key}, ?call_store(Node, TestRecord, update, [
+        Key, #{field2 => Pid}
     ])),
 
     ?assertMatch({ok, #document{value = ?test_record_f2(Pid)}},
-        ?call_store(Node, get, [Level, TestRecord, Key])),
+        ?call_store(Node, TestRecord, get, [Key])),
 
-    ?assertMatch(ok, ?call_store(Node, delete, [
-        Level, TestRecord, Key, fun() -> false end
+    ?assertMatch(ok, ?call_store(Node, TestRecord, delete, [
+        Key, fun() -> false end
     ])),
 
     ?assertMatch({ok, #document{value = ?test_record_f2(Pid)}},
-        ?call_store(Node, get, [Level, TestRecord, Key])),
+        ?call_store(Node, TestRecord, get, [Key])),
 
-    ?assertMatch(ok, ?call_store(Node, delete, [
-        Level, TestRecord, Key
+    ?assertMatch(ok, ?call_store(Node, TestRecord, delete, [Key])),
+
+    ?assertMatch({error, {not_found, _}}, ?call_store(Node, TestRecord, get, [
+        Key
     ])),
 
-    ?assertMatch({error, {not_found, _}}, ?call_store(Node, get, [
-        Level, TestRecord, Key
-    ])),
-
-    ?assertMatch({error, {not_found, _}}, ?call_store(Node, update, [
-        Level, TestRecord, Key, #{field2 => self()}
+    ?assertMatch({error, {not_found, _}}, ?call_store(Node, TestRecord, update, [
+        Key, #{field2 => self()}
     ])),
 
     ok.
@@ -1175,38 +1198,37 @@ global_access(Config, Level) ->
 
     Key = rand_key(),
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, create, [Level, #document{
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create, [#document{
         key = Key, value =
             datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
     }])),
 
-    ?assertMatch({ok, true}, ?call_store(Worker2, exists, [
-        Level, TestRecord, Key
+    ?assertMatch({ok, true}, ?call_store(Worker2, TestRecord, exists, [
+        Key
     ])),
 
-    ?assertMatch({ok, true}, ?call_store(Worker1, exists, [
-        Level, TestRecord, Key
+    ?assertMatch({ok, true}, ?call_store(Worker1, TestRecord, exists, [
+        Key
     ])),
 
-    ?assertMatch({error, already_exists}, ?call_store(Worker2, create, [
-        Level, #document{key = Key, value =
+    ?assertMatch({error, already_exists}, ?call_store(Worker2, TestRecord, create, [
+        #document{key = Key, value =
             datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
         }
     ])),
 
     ?assertMatch({ok, #document{value = ?test_record_f1_3(1, {test, tuple})}},
-        ?call_store(Worker1, get, [Level, TestRecord, Key])),
+        ?call_store(Worker1, TestRecord, get, [Key])),
 
     ?assertMatch({ok, #document{value = ?test_record_f1_3(1, {test, tuple})}},
-        ?call_store(Worker2, get, [Level, TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
 
-    ?assertMatch({ok, _}, ?call_store(Worker1, update, [
-        Level, TestRecord, Key, #{field1 => 2}
+    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, update, [
+        Key, #{field1 => 2}
     ])),
 
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
-        ?call_store(Worker2, get, [Level,
-            TestRecord, Key])),
+        ?call_store(Worker2, TestRecord, get, [Key])),
 
     ok.
 
@@ -1241,30 +1263,30 @@ generic_links_test(Config, Level) ->
 
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc3])),
 
-    ?assertMatch(ok, ?call_store(Worker2, add_links, [
-        Level, Doc1, [{link3, Doc2}, {link2, Doc3}]
+    ?assertMatch(ok, ?call_store(Worker2, TestRecord, add_links, [
+        Doc1, [{link3, Doc2}, {link2, Doc3}]
     ])),
 
     %% Fetch all links and theirs targets
-    Ret0 = ?call_store(Worker2, fetch_link_target, [Level, Doc1, link2]),
-    Ret1 = ?call_store(Worker1, fetch_link_target, [Level, Doc1, link3]),
-    Ret2 = ?call_store(Worker2, fetch_link, [Level, Doc1, link2]),
-    Ret3 = ?call_store(Worker1, fetch_link, [Level, Doc1, link3]),
+    Ret0 = ?call_store(Worker2, TestRecord, fetch_link_target, [Doc1, link2]),
+    Ret1 = ?call_store(Worker1, TestRecord, fetch_link_target, [Doc1, link3]),
+    Ret2 = ?call_store(Worker2, TestRecord, fetch_link, [Doc1, link2]),
+    Ret3 = ?call_store(Worker1, TestRecord, fetch_link, [Doc1, link3]),
 
     ?assertMatch({ok, {Key3, TestRecord}}, Ret2),
     ?assertMatch({ok, {Key2, TestRecord}}, Ret3),
     ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret0),
     ?assertMatch({ok, #document{key = Key2, value = ?test_record_f1(2)}}, Ret1),
 
-    ?assertMatch(ok, ?call_store(Worker2, set_links, [
-        Level, Doc1, [{link2, Doc2}, {link3, Doc3}]
+    ?assertMatch(ok, ?call_store(Worker2, TestRecord, set_links, [
+        Doc1, [{link2, Doc2}, {link3, Doc3}]
     ])),
 
     %% Fetch all links and theirs targets
-    Ret00 = ?call_store(Worker2, fetch_link_target, [Level, Doc1, link2]),
-    Ret01 = ?call_store(Worker1, fetch_link_target, [Level, Doc1, link3]),
-    Ret02 = ?call_store(Worker2, fetch_link, [Level, Doc1, link2]),
-    Ret03 = ?call_store(Worker1, fetch_link, [Level, Doc1, link3]),
+    Ret00 = ?call_store(Worker2, TestRecord, fetch_link_target, [Doc1, link2]),
+    Ret01 = ?call_store(Worker1, TestRecord, fetch_link_target, [Doc1, link3]),
+    Ret02 = ?call_store(Worker2, TestRecord, fetch_link, [Doc1, link2]),
+    Ret03 = ?call_store(Worker1, TestRecord, fetch_link, [Doc1, link3]),
 
     ?assertMatch({ok, {Key2, TestRecord}}, Ret02),
     ?assertMatch({ok, {Key3, TestRecord}}, Ret03),
@@ -1272,48 +1294,49 @@ generic_links_test(Config, Level) ->
     ?assertMatch({ok, #document{key = Key3, value = ?test_record_f1(3)}}, Ret01),
 
 
-    ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc1, [link2, link3]])),
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links,
+        [Doc1, [link2, link3]])),
 
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker2, fetch_link_target, [Level, Doc1, link2]
+        Worker2, TestRecord, fetch_link_target, [Doc1, link2]
     ), 10),
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker1, fetch_link_target, [Level, Doc1, link3]
+        Worker1, TestRecord, fetch_link_target, [Doc1, link3]
     ), 10),
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker2, fetch_link, [Level, Doc1, link2]
+        Worker2, TestRecord, fetch_link, [Doc1, link2]
     ), 10),
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker1, fetch_link, [Level, Doc1, link3]
+        Worker1, TestRecord, fetch_link, [Doc1, link3]
     )),
 
-    ?assertMatch(ok, ?call_store(Worker2, add_links, [Level, Doc1, [{link2, Doc2}, {link3, Doc3}]])),
+    ?assertMatch(ok, ?call_store(Worker2, TestRecord, add_links, [Doc1, [{link2, Doc2}, {link3, Doc3}]])),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key2])),
-    ?assertMatch(ok, ?call_store(Worker1, delete_links, [Level, Doc1, link3]), 10),
+    ?assertMatch(ok, ?call_store(Worker1, TestRecord, delete_links, [Doc1, link3]), 10),
 
     ?assertMatch({ok, {Key2, TestRecord}}, ?call_store(
-        Worker1, fetch_link, [Level, Doc1, link2]
+        Worker1, TestRecord, fetch_link, [Doc1, link2]
     ), 10),
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker2, fetch_link, [Level, Doc1, link3]
+        Worker2, TestRecord, fetch_link, [Doc1, link3]
     ), 10),
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker2, fetch_link_target, [Level, Doc1, link3]
+        Worker2, TestRecord, fetch_link_target, [Doc1, link3]
     ), 10),
     ?assertMatch({error, {not_found, _}}, ?call_store(
-        Worker1, fetch_link_target, [Level, Doc1, link2]
+        Worker1, TestRecord, fetch_link_target, [Doc1, link2]
     ), 10),
 
     %% Delete on document shall delete all its links
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key1])),
 
     ?assertMatch({error, link_not_found}, ?call_store(
-        Worker2, fetch_link, [Level, Doc1, link2]
+        Worker2, TestRecord, fetch_link, [Doc1, link2]
     ), 10),
 
-    ok = ?call_store(Worker2, delete, [Level, TestRecord, Key1]),
-    ok = ?call_store(Worker2, delete, [Level, TestRecord, Key2]),
-    ok = ?call_store(Worker2, delete, [Level, TestRecord, Key3]),
+    ok = ?call_store(Worker2, TestRecord, delete, [Key1]),
+    ok = ?call_store(Worker2, TestRecord, delete, [Key2]),
+    ok = ?call_store(Worker2, TestRecord, delete, [Key3]),
 
     ok.
 
@@ -1323,7 +1346,7 @@ generic_list_test(TestRecord, Nodes, Level) ->
     generic_list_test(TestRecord, Nodes, Level, 0, non, 0).
 
 generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelSecondCheckAfter) ->
-    Ret0 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+    Ret0 = ?call_store(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
     Keys0 = lists:map(fun(#document{key = Key}) -> Key end, Objects0),
@@ -1332,7 +1355,7 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
 
     CreateDocFun = fun(Key) ->
-        ?call_store(rand_node(Nodes), create, [Level,
+        ?call_store(rand_node(Nodes), TestRecord, create, [
             #document{
                 key = Key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
@@ -1340,13 +1363,13 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     end,
 
     RemoveDocFun = fun(Key) ->
-        ?call_store(rand_node(Nodes), delete, [Level, TestRecord, Key, ?PRED_ALWAYS])
+        ?call_store(rand_node(Nodes), TestRecord, delete, [Key, ?PRED_ALWAYS])
     end,
 
     [?assertMatch({ok, _}, CreateDocFun(Key)) || Key <- Keys],
 
     ListFun = fun() ->
-        Ret1 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+        Ret1 = ?call_store(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
         ?assertMatch({ok, _}, Ret1),
         {ok, Objects1} = Ret1,
         ReceivedKeys = lists:map(fun(#document{key = Key}) ->
@@ -1374,7 +1397,7 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     [?assertMatch(ok, RemoveDocFun(Key)) || Key <- Keys],
 
     CheckDelFun = fun() ->
-        Ret2 = ?call_store(rand_node(Nodes), list, [Level, TestRecord, ?GET_ALL, []]),
+        Ret2 = ?call_store(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
         ?assertMatch({ok, _}, Ret2),
         {ok, Objects2} = Ret2,
 

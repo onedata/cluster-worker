@@ -42,7 +42,7 @@ run(RawKey, Fun) ->
 -spec run_in_mnesia_transaction(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run_in_mnesia_transaction(Key, Fun) ->
-    ?MEMORY_DRIVER:run_transation(Key, Fun).
+    datastore:run_transaction(Key, Fun).
 
 %%--------------------------------------------------------------------
 %% @doc

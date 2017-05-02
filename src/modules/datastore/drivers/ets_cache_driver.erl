@@ -11,7 +11,6 @@
 %%%-------------------------------------------------------------------
 -module(ets_cache_driver).
 -author("Rafal Slota").
--behaviour(auxiliary_cache_behaviour).
 
 
 -include("modules/datastore/datastore_models_def.hrl").
@@ -26,10 +25,6 @@
 -export([add_links/3, set_links/3, create_link/3, delete_links/4, fetch_link/3, foreach_link/4]).
 
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2, exists_link_doc/3]).
-
-%% auxiliary_cache_behaviour
--export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3,
-    aux_create/3, aux_first/2, aux_next/3]).
 
 %% Batch size for list operation
 -define(LIST_BATCH_SIZE, 100).
@@ -166,13 +161,8 @@ get(#model_config{name = ModelName} = ModelConfig, Key) ->
 -spec list(model_behaviour:model_config(),
     Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
-list(#model_config{} = ModelConfig, Fun, AccIn, Opts) ->
-    case proplists:get_value(mode, Opts, undefined) of
-        {ordered, Field} ->
-            list_ordered(ModelConfig, Fun, AccIn, Field);
-        _ ->
-            list(ModelConfig, Fun, AccIn)
-        end.
+list(#model_config{} = ModelConfig, Fun, AccIn, _Opts) ->
+    list(ModelConfig, Fun, AccIn).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -354,104 +344,6 @@ delete_link_doc(#model_config{} = ModelConfig, #document{key = Key} = _Document)
     true = ets:delete(links_table_name(ModelConfig), Key),
     ok.
 
-%%%===================================================================
-%%% auxiliary_cache_behaviour callbacks
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback
-%% create_auxiliary_caches/2.
-%% @end
-%%--------------------------------------------------------------------
--spec create_auxiliary_caches(
-    model_behaviour:model_config(), Fields :: [atom()], _NodeToSync :: node()) ->
-    ok | datastore:generic_error() | no_return().
-create_auxiliary_caches(#model_config{}=ModelConfig, Fields, _NodeToSync) ->
-    lists:foreach(fun(Field) ->
-        create_table(aux_table_name(ModelConfig, Field), ordered_set)
-    end, Fields).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback first/2.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_first(model_behaviour:model_config(), Field :: atom()) -> datastore:aux_cache_handle().
-aux_first(#model_config{}=ModelConfig, Field) ->
-    ets:first(aux_table_name(ModelConfig, Field)).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback next/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_next(model_behaviour:model_config(), Field :: atom(),
-    Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
-aux_next(_, _, '$end_of_table') -> '$end_of_table';
-aux_next(#model_config{}=ModelConfig, Field, Handle) ->
-    ets:next(aux_table_name(ModelConfig, Field), Handle).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback delete/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_delete(Model :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_delete(ModelConfig, Field, [Key]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    ets:select_delete(AuxTableName,
-        ets:fun2ms(fun({{_, K}, _}) when K == Key -> true end)),
-    ok.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_save/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_save(Model :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_save(ModelConfig, Field, [Key, Doc]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    case is_aux_field_value_updated(AuxTableName, Key,  CurrentFieldValue) of
-        {true, AuxKey} ->
-            true = ets:delete(AuxTableName, AuxKey),
-            ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined});
-        true -> % there is no entry in AuxTableName matching Key
-            ets:insert(AuxTableName, {{CurrentFieldValue, Key}, undefined});
-        _ -> ok
-    end,
-    ok.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_update/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_update(Model :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_update(ModelConfig = #model_config{name=ModelName}, Field, [Key, Level]) ->
-    {ok, Doc} = datastore:get(Level, ModelName, Key),
-    aux_save(ModelConfig, Field, [Key, Doc]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_create/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_create(Model :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_create(ModelConfig, Field, [Key, Doc]) ->
-    AuxTableName = aux_table_name(ModelConfig, Field),
-    CurrentFieldValue = datastore_utils:get_field_value(Doc, Field),
-    ets:insert_new(AuxTableName, {{CurrentFieldValue, Key}, undefined}),
-    ok.
-
 
 %%%===================================================================
 %%% Internal functions
@@ -510,48 +402,6 @@ list_next([Tuple | R], Handle, Fun, AccIn) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function traverses records in order by field Field,
-%% basing on auxiliary cache connected with that field
-%% @end
-%%--------------------------------------------------------------------
--spec list_ordered(model_behaviour:model_config(), Fun :: datastore:list_fun(),
-    AccIn :: term(), Field :: atom()) ->
-    {ok, Acc :: term()} | datastore:generic_error() | no_return().
-list_ordered(#model_config{auxiliary_caches = AuxCaches} = ModelConfig, Fun, AccIn, Field) ->
-    AuxCacheLevel = datastore_utils:get_aux_cache_level(AuxCaches, Field),
-    AuxDriver = datastore:level_to_driver(AuxCacheLevel),
-    First = AuxDriver:aux_first(ModelConfig, Field),
-    IteratorFun = fun(Handle) -> AuxDriver:aux_next(ModelConfig, Field, Handle) end,
-    TableName = table_name(ModelConfig),
-    list_ordered_next(TableName, First, Fun, IteratorFun, AccIn).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Accumulator helper function for list_ordered
-%% @end
-%%--------------------------------------------------------------------
--spec list_ordered_next(atom(), term(), Fun :: datastore:list_fun(),
-    IteratorFun :: datastore:aux_iterator_fun(), AccIn :: term()) ->
-    {ok, Acc :: term()} | datastore:generic_error().
-list_ordered_next(_Table, '$end_of_table' = EoT, Fun, _IteratorFun, AccIn) ->
-    {abort, NewAcc} = Fun(EoT, AccIn),
-    {ok, NewAcc};
-list_ordered_next(Table, CurrentKey, Fun, IteratorFun, AccIn) ->
-    [Tuple] = ets:lookup(Table, datastore_utils:aux_key_to_key(CurrentKey)),
-    Doc = Doc = translate_to_doc(Tuple),
-    case Fun(Doc, AccIn) of
-        {next, NewAcc} ->
-            Next = IteratorFun(CurrentKey),
-            list_ordered_next(Table, Next, Fun, IteratorFun, NewAcc);
-        {abort, NewAcc} ->
-            {ok, NewAcc}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Gets ETS table name for given model.
 %% @end
 %%--------------------------------------------------------------------
@@ -572,19 +422,6 @@ links_table_name(#model_config{name = ModelName}) ->
     links_table_name(ModelName);
 links_table_name(TabName) when is_atom(TabName) ->
     binary_to_atom(<<"lc_links_", (erlang:atom_to_binary(TabName, utf8))/binary>>, utf8).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets ETS auxiliary table name for given model and field.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_table_name(model_behaviour:model_config() | atom(), atom()) -> atom().
-aux_table_name(#model_config{name = ModelName}, Field) ->
-    aux_table_name(ModelName, Field);
-aux_table_name(TabName, Field) when is_atom(TabName) and is_atom(Field) ->
-    binary_to_atom(<<(atom_to_binary(table_name(TabName), utf8))/binary, "_",
-        (atom_to_binary(Field, utf8))/binary>>, utf8).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -619,40 +456,6 @@ create_table(TableName) ->
 create_table(TableName, Type) ->
     Ans = (catch ets:new(TableName, [named_table, public, Type])),
     ?info("Creating ets table: ~p, result: ~p", [TableName, Ans]).
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Determines whether value of field Field has changed. Old value is checked
-%% in auxiliary cache table.
-%% If it exists and is different than current value
-%% tuple {true, {OldFieldValue, Key}} is returned.
-%% If it doesn't exist true is returned.
-%% If it exists and it's value hasn't changed, false is returned.
-%% @end
-%%%--------------------------------------------------------------------
--spec is_aux_field_value_updated(datastore:model_config(), datastore:key(),
-    term()) -> boolean() | {true, OldAuxKey :: {term(), datastore:key()}}.
-is_aux_field_value_updated(AuxTableName, Key, CurrentFieldValue) ->
-    case aux_get(AuxTableName, Key) of
-        [] -> true;
-        [{CurrentFieldValue, Key}] -> false;
-        [{AuxKey, _Value}] -> {true, AuxKey}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns entry from auxiliary table of Model connected with Field,
-%% matching the Key.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_get(atom(), Key :: datastore:key()) -> [{term(), datastore:key()}].
-aux_get(AuxTableName, Key) ->
-    ets:select(AuxTableName,
-        ets:fun2ms(fun(T = {{_, K}, _}) when K == Key -> T end)).
-
 
 %%--------------------------------------------------------------------
 %% @private

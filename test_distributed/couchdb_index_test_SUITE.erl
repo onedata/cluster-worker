@@ -23,6 +23,10 @@
 -include("datastore_test_models_def.hrl").
 
 -define(TIMEOUT, timer:seconds(30)).
+-define(call_store(N, Model, F, A), ?call(N,
+    model, execute_with_default_context, [Model, F, A])).
+-define(call(N, M, F, A), ?call(N, M, F, A, ?TIMEOUT)).
+-define(call(N, M, F, A, T), rpc:call(N, M, F, A, T)).
 
 %% export for ct
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
@@ -49,8 +53,8 @@ view_query_test(Config) ->
     ?assertEqual(ok, rpc:call(W, couchdb_datastore_driver, add_view, [test_record_1, ViewId, ViewFunction, false])),
 
     ?assertMatch({ok, []}, rpc:call(W, couchdb_datastore_driver, query_view, [test_record_1, ViewId, [{stale, false}]])),
-    {ok, Id1} = ?assertMatch({ok, _}, rpc:call(W, datastore, create, [disk_only, #document{value = #test_record_1{}}])),
-    {ok, Id2} = ?assertMatch({ok, _}, rpc:call(W, datastore, create, [disk_only, #document{value = #test_record_1{}}])),
+    {ok, Id1} = ?assertMatch({ok, _}, ?call_store(W, test_record_1, create, [#document{value = #test_record_1{}}])),
+    {ok, Id2} = ?assertMatch({ok, _}, ?call_store(W, test_record_1, create, [#document{value = #test_record_1{}}])),
 
     {ok, Ids} = ?assertMatch({ok, _}, rpc:call(W, couchdb_datastore_driver, query_view, [test_record_1, ViewId, [{stale, false}]])),
     ?assertEqual(lists:sort([Id1, Id2]), lists:sort(Ids)),
@@ -65,10 +69,10 @@ spatial_view_query_test(Config) ->
     ViewId = <<"view_id">>,
     ViewFunction = <<"function (doc, meta) {emit([1,1], null);}">>,
     ?assertEqual(ok, rpc:call(W, couchdb_datastore_driver, add_view, [test_record_1, ViewId, ViewFunction, true])),
-    {ok, Id1} = ?assertMatch({ok, _}, rpc:call(W, datastore, create,
-        [disk_only, #document{value = #test_record_1{}}])),
-    {ok, Id2} = ?assertMatch({ok, _}, rpc:call(W, datastore, create,
-        [disk_only, #document{value = #test_record_1{}}])),
+    {ok, Id1} = ?assertMatch({ok, _}, ?call_store(W, test_record_1, create,
+        [#document{value = #test_record_1{}}])),
+    {ok, Id2} = ?assertMatch({ok, _}, ?call_store(W, test_record_1, create,
+        [#document{value = #test_record_1{}}])),
 
     {ok, Ids} = ?assertMatch({ok, _}, rpc:call(W, couchdb_datastore_driver, query_view,
         [test_record_1, ViewId, [{stale, false}, {start_range, [1,1]}, {end_range, [2,2]}, spatial]])),

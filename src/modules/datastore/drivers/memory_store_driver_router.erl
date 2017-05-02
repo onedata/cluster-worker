@@ -10,7 +10,6 @@
 %%%-------------------------------------------------------------------
 -module(memory_store_driver_router).
 -author("Rafal Slota").
--behaviour(store_driver_behaviour).
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -21,299 +20,272 @@
 -include("timeouts.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
-%% store_driver_behaviour callbacks
--export([save/2, update/3, create/2, create_or_update/3, exists/2, get/2, list/4, delete/3, is_model_empty/1]).
--export([add_links/3, add_links/4, set_links/3, create_link/3, delete_links/3, delete_links/4, fetch_link/3, foreach_link/4]).
--export([run_transation/1, run_transation/2, run_transation/3]).
--export([clear/2, clear_links/2, force_save/2, force_link_save/3, force_link_save/4]).
+-type opt_ctx() :: datastore_context:driver_ctx().
 
-% TODO - internal link implementation - delete from datastore API
--export([get_link_doc/4, exists_link_doc/3]).
+%% API
+-export([call/3, get_default_context/2]).
 
-%% auxiliary ordered_store behaviour
--export([create_auxiliary_caches/3, aux_delete/3, aux_save/3, aux_update/3,
-    aux_create/3, aux_first/2, aux_next/3]).
-
+%% for apply
+-export([list/4, get/2, exists/2, fetch_link/3, foreach_link/4,
+    exists_link_doc/3, get_link_doc/4]).
 %% for rpc
 -export([direct_call_internal/5, direct_link_call_internal/5, foreach_link_internal/4]).
 
+-define(EXTENDED_ROUTING, [list, get, exists, fetch_link, foreach_link,
+    exists_link_doc, get_link_doc]).
+
 %%%===================================================================
-%%% store_driver_behaviour callbacks
+%%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback save/2.
+%% Routes call to appropriate node/tp process.
 %% @end
 %%--------------------------------------------------------------------
--spec save(model_behaviour:model_config(), datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:generic_error().
-save(ModelConfig, Document) ->
-    deletage_call(save, ModelConfig, Document#document.key, [Document]).
+-spec call(Function :: atom(), opt_ctx(), Args :: [term()]) ->
+    term().
+% TODO - refactor force_link_save
+call(force_link_save, OptCtx, [ToSave, MainDocKey]) ->
+    deletage_link_call(force_save, OptCtx, MainDocKey, [ToSave]);
+call(force_link_save, OptCtx, [BucketOverride, ToSave, MainDocKey]) ->
+    deletage_link_call(force_save, OptCtx, MainDocKey, [BucketOverride, ToSave]);
+% delegate document changes to tp
+call(Method, OptCtx, [#document{key = Key} | _] = Args) ->
+    deletage_call(Method, OptCtx, Key, Args);
+call(clear, OptCtx, [Key]) ->
+    execute(OptCtx, Key, false, {clear, []}, [100]);
+call(clear_links, OptCtx, [Key]) ->
+    execute(OptCtx, Key, true, {clear, []}, [100]);
+call(Method, OptCtx, Args) ->
+    case lists:member(Method, ?EXTENDED_ROUTING) of
+        true ->
+            apply(?MODULE, Method, [OptCtx | Args]);
+        _ ->
+            [Key | _] = Args,
+            IsLinkOp = model:is_link_op(Method),
+            case IsLinkOp of
+                false ->
+                    deletage_call(Method, OptCtx, Key, Args);
+                _ ->
+                    deletage_link_call(Method, OptCtx, Key, Args)
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link store_driver_behaviour} callback update/2.
+%% Gets default config user by memory store driver.
 %% @end
 %%--------------------------------------------------------------------
--spec update(model_behaviour:model_config(), datastore:ext_key(),
-    Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:update_error().
-update(ModelConfig, Key, Diff) ->
-    deletage_call(update, ModelConfig, Key, [Key, Diff]).
+-spec get_default_context(Operation :: atom(), model_behaviour:model_config()) ->
+    opt_ctx().
+get_default_context(_Op, Config) ->
+    Config.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback create/2.
-%% @end
-%%--------------------------------------------------------------------
--spec create(model_behaviour:model_config(), datastore:document()) ->
-    {ok, datastore:ext_key()} | datastore:create_error().
-create(ModelConfig, Document) ->
-    deletage_call(create, ModelConfig, Document#document.key, [Document]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback create_or_update/2.
-%% @end
-%%--------------------------------------------------------------------
--spec create_or_update(model_behaviour:model_config(), datastore:document(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:ext_key()} | datastore:create_error().
-create_or_update(ModelConfig, Document, Diff) ->
-    deletage_call(create_or_update, ModelConfig, Document#document.key, [Document, Diff]).
+%%%===================================================================
+%%% Extended routing functions
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link store_driver_behaviour} callback get/2.
 %% @end
 %%--------------------------------------------------------------------
--spec get(model_behaviour:model_config(), datastore:ext_key()) ->
+-spec get(opt_ctx(), datastore:ext_key()) ->
     {ok, datastore:document()} | datastore:get_error().
-get(#model_config{store_level = L} = ModelConfig, Key)
-    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
-    direct_call(get, ModelConfig, Key, [Key]);
-get(#model_config{name = MN} = ModelConfig, Key) ->
-    direct_call(get, ModelConfig, Key, [Key], {error, {not_found, MN}}).
+get(OptCtx, Key) ->
+    case get_level(OptCtx, false) of
+        ?GLOBAL_ONLY_LEVEL ->
+            direct_call(get, OptCtx, Key, [Key]);
+        ?LOCAL_ONLY_LEVEL ->
+            direct_call(get, OptCtx, Key, [Key]);
+        _ ->
+            MN = get_model_name(OptCtx),
+            direct_call(get, OptCtx, Key, [Key], {error, {not_found, MN}})
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback exists/2.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists(opt_ctx(), datastore:ext_key()) ->
+    {ok, boolean()} | datastore:generic_error().
+exists(OptCtx, Key) ->
+    case get_level(OptCtx, false) of
+        ?GLOBAL_ONLY_LEVEL ->
+            direct_call(exists, OptCtx, Key, [Key]);
+        ?LOCAL_ONLY_LEVEL ->
+            direct_call(exists, OptCtx, Key, [Key]);
+        _ ->
+            direct_call(exists, OptCtx, Key, [Key], {ok, false})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link store_driver_behaviour} callback list/4.
 %% @end
 %%--------------------------------------------------------------------
--spec list(model_behaviour:model_config(),
+-spec list(opt_ctx(),
     Fun :: datastore:list_fun(), AccIn :: term(), Opts :: store_driver_behaviour:list_options()) ->
     {ok, Handle :: term()} | datastore:generic_error() | no_return().
 % TODO - implementation base on old implementation from datastore - refactor when local cache is finished
-list(#model_config{store_level = ?GLOBAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, Opts) ->
-    Nodes = consistent_hasing:get_all_nodes(),
+list(OptCtx, Fun, AccIn, Opts) ->
+    case get_level(OptCtx, false) of
+        ?GLOBAL_ONLY_LEVEL ->
+            Nodes = consistent_hasing:get_all_nodes(),
 
-    % TODO - use user function and catch last element not to save all docs in memory
-    HelperFun = fun
-        (#document{} = Document, Acc) ->
-            {next, [Document | Acc]};
-        (_, Acc) ->
-            {abort, Acc}
-    end,
-    SlaveDriver = get_slave_driver(false, ModelConfig),
+            % TODO - use user function and catch last element not to save all docs in memory
+            HelperFun = fun
+                (#document{} = Document, Acc) ->
+                    {next, [Document | Acc]};
+                (_, Acc) ->
+                    {abort, Acc}
+            end,
+            SlaveDriver = get_slave_driver(false, OptCtx),
 
-    ListAns = lists:foldl(fun
-        (N, {ok, Acc}) ->
-            rpc:call(N, SlaveDriver, list, [ModelConfig, HelperFun, Acc, Opts]);
-        (_, Error) ->
-            Error
-    end, {ok, []}, Nodes),
+            ListAns = lists:foldl(fun
+                (N, {ok, Acc}) ->
+                    rpc:call(N, SlaveDriver, list, [OptCtx, HelperFun, Acc, Opts]);
+                (_, Error) ->
+                    Error
+            end, {ok, []}, Nodes),
 
-    case ListAns of
-        {ok, LA} ->
-            execute_list_fun(Fun, LA, AccIn);
-        Other ->
-            Other
-    end;
-list(#model_config{store_level = ?LOCAL_ONLY_LEVEL} = ModelConfig, Fun, AccIn, Opts) ->
-    SlaveDriver = get_slave_driver(false, ModelConfig),
-    SlaveDriver:list(ModelConfig, Fun, AccIn, Opts);
-list(#model_config{name = MN, store_level = Level} = ModelConfig, Fun, AccIn, Opts) ->
-    Nodes = case Level of
-        ?LOCALLY_CACHED_LEVEL ->
-            [node()];
-        _ ->
-            consistent_hasing:get_all_nodes()
-    end,
+            case ListAns of
+                {ok, LA} ->
+                    execute_list_fun(Fun, LA, AccIn);
+                Other ->
+                    Other
+            end;
+        ?LOCAL_ONLY_LEVEL ->
+            SlaveDriver = get_slave_driver(false, OptCtx),
+            SlaveDriver:list(OptCtx, Fun, AccIn, Opts);
+        Level ->
+            MN = get_model_name(OptCtx),
+            Nodes = case Level of
+                ?LOCALLY_CACHED_LEVEL ->
+                    [node()];
+                _ ->
+                    consistent_hasing:get_all_nodes()
+            end,
 
-    HelperFun = fun
-        (#document{key = Key} = Document, Acc) ->
-            {next, maps:put(Key, Document, Acc)};
-        (_, Acc) ->
-            {abort, Acc}
-    end,
+            HelperFun = fun
+                (#document{key = Key} = Document, Acc) ->
+                    {next, maps:put(Key, Document, Acc)};
+                (_, Acc) ->
+                    {abort, Acc}
+            end,
 
-    % TODO - one consistency check (after migration from counter to times)
-    try
-        ConsistencyCheck1 = caches_controller:check_cache_consistency(
-            memory_store_driver:main_level(Level), MN),
-        MemMapAns = lists:foldl(fun
-            (N, {ok, Acc}) ->
-                rpc:call(N, get_slave_driver(false, ModelConfig), list, [ModelConfig, HelperFun, Acc, Opts]);
-            (_, Error) ->
-                throw(Error)
-        end, {ok, #{}}, Nodes),
+            % TODO - one consistency check (after migration from counter to times)
+            try
+                ConsistencyCheck1 = caches_controller:check_cache_consistency(
+                    memory_store_driver:main_level(Level), MN),
+                MemMapAns = lists:foldl(fun
+                    (N, {ok, Acc}) ->
+                        rpc:call(N, get_slave_driver(false, OptCtx), list, [OptCtx, HelperFun, Acc, Opts]);
+                    (_, Error) ->
+                        throw(Error)
+                end, {ok, #{}}, Nodes),
 
-        {ok, MemMap} = MemMapAns,
-        FirstPhaseAns = case ConsistencyCheck1 of
-            {ok, ClearCounter, _} ->
-                case caches_controller:check_cache_consistency(
-                    memory_store_driver:main_level(Level), MN) of
+                {ok, MemMap} = MemMapAns,
+                FirstPhaseAns = case ConsistencyCheck1 of
                     {ok, ClearCounter, _} ->
-                        {ok, maps:values(MemMap)};
+                        case caches_controller:check_cache_consistency(
+                            memory_store_driver:main_level(Level), MN) of
+                            {ok, ClearCounter, _} ->
+                                {ok, maps:values(MemMap)};
+                            _ ->
+                                restore
+                        end;
                     _ ->
                         restore
-                end;
-            _ ->
-                restore
-        end,
-
-        case FirstPhaseAns of
-            {ok, List} ->
-                execute_list_fun(Fun, List, AccIn);
-            restore ->
-                Pid = self(),
-                caches_controller:begin_consistency_restoring(
-                    memory_store_driver:main_level(Level), MN, Pid),
-
-                HelperFun2 = fun
-                    (#document{key = Key}, Acc) ->
-                        {next, [Key | Acc]};
-                    (_, Acc) ->
-                        {abort, Acc}
                 end,
 
-                case couchdb_datastore_driver:list(ModelConfig, HelperFun2, [], Opts) of
-                    {ok, DiskList} ->
-                        DiskOnlyKeys = DiskList -- maps:keys(MemMap),
-                        DiskOnlyValues = lists:foldl(fun(K, Acc) ->
-                            case deletage_call(get, ModelConfig, K, [K]) of
-                                {ok, D} -> [D | Acc];
-                                {error, {not_found, _}} -> Acc;
-                                Err ->
-                                    throw({restore_from_disk_error, Err})
-                            end
-                        end, [], DiskOnlyKeys),
-
-                        caches_controller:end_consistency_restoring(
+                case FirstPhaseAns of
+                    {ok, List} ->
+                        execute_list_fun(Fun, List, AccIn);
+                    restore ->
+                        Pid = self(),
+                        caches_controller:begin_consistency_restoring(
                             memory_store_driver:main_level(Level), MN, Pid),
-                        execute_list_fun(Fun, maps:values(MemMap) ++ DiskOnlyValues, AccIn);
-                    Other ->
-                        throw({restore_from_disk_error, Other})
+
+                        HelperFun2 = fun
+                            (#document{key = Key}, Acc) ->
+                                {next, [Key | Acc]};
+                            (_, Acc) ->
+                                {abort, Acc}
+                        end,
+
+                        case couchdb_datastore_driver:list(OptCtx, HelperFun2, [], Opts) of
+                            {ok, DiskList} ->
+                                DiskOnlyKeys = DiskList -- maps:keys(MemMap),
+                                DiskOnlyValues = lists:foldl(fun(K, Acc) ->
+                                    case deletage_call(get, OptCtx, K, [K]) of
+                                        {ok, D} -> [D | Acc];
+                                        {error, {not_found, _}} -> Acc;
+                                        Err ->
+                                            throw({restore_from_disk_error, Err})
+                                    end
+                                end, [], DiskOnlyKeys),
+
+                                caches_controller:end_consistency_restoring(
+                                    memory_store_driver:main_level(Level), MN, Pid),
+                                execute_list_fun(Fun, maps:values(MemMap) ++ DiskOnlyValues, AccIn);
+                            Other ->
+                                throw({restore_from_disk_error, Other})
+                        end
                 end
-        end
-    catch
-        throw:{restore_from_disk_error, Err} ->
-            caches_controller:end_consistency_restoring(
-                memory_store_driver:main_level(Level), MN, self(), not_monitored),
-            ?error("Listing error ~p", [{restore_from_disk_error, Err}]),
-            {error, {restore_from_disk, Err}};
-        throw:Error ->
-            ?error("Listing error ~p", [Error]),
-            Error
+            catch
+                throw:{restore_from_disk_error, Err} ->
+                    caches_controller:end_consistency_restoring(
+                        memory_store_driver:main_level(Level), MN, self(), not_monitored),
+                    ?error("Listing error ~p", [{restore_from_disk_error, Err}]),
+                    {error, {restore_from_disk, Err}};
+                throw:Error ->
+                    ?error("Listing error ~p", [Error]),
+                    Error
+            end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback is_model_empty/1.
-%% @end
-%%--------------------------------------------------------------------
--spec is_model_empty(model_behaviour:model_config()) -> no_return().
-is_model_empty(_ModelConfig) ->
-    error(not_supported).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback add_links/3.
-%% @end
-%%--------------------------------------------------------------------
--spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
-    ok | datastore:generic_error().
-add_links(ModelConfig, Key, Links) ->
-    deletage_link_call(add_links, ModelConfig, Key, [Key, Links]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Add links with override of link replica scope.
-%% @end
-%%--------------------------------------------------------------------
--spec add_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()],
-    ReplicaScopeOverride :: links_utils:link_replica_scope()) -> ok | datastore:generic_error().
-add_links(ModelConfig, Key, Links, LinkReplicaScope) ->
-    deletage_link_call(add_links, ModelConfig, Key, [Key, Links, LinkReplicaScope]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback set_links/3.
-%% @end
-%%--------------------------------------------------------------------
--spec set_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
-    ok | datastore:generic_error().
-set_links(ModelConfig, Key, Links) ->
-    deletage_link_call(set_links, ModelConfig, Key, [Key, Links]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback create_link/3.
-%% @end
-%%--------------------------------------------------------------------
--spec create_link(model_behaviour:model_config(), datastore:ext_key(), datastore:normalized_link_spec()) ->
-    ok | datastore:create_error().
-create_link(ModelConfig, Key, Link) ->
-    deletage_link_call(create_link, ModelConfig, Key, [Key, Link]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback delete_links/3.
-%% @end
-%%--------------------------------------------------------------------
--spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all) ->
-    ok | datastore:generic_error().
-delete_links(ModelConfig, Key, LinkNames) ->
-    delete_links(ModelConfig, Key, LinkNames, ?PRED_ALWAYS).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Simmilar to {@link store_driver_behaviour} callback delete_links/3 witch delete predicate.
-%% @end
-%%--------------------------------------------------------------------
--spec delete_links(model_behaviour:model_config(), datastore:ext_key(), [datastore:link_name()] | all,
-    datastore:delete_predicate()) -> ok | datastore:generic_error().
-delete_links(ModelConfig, Key, Links, Pred) ->
-    deletage_link_call(delete_links, ModelConfig, Key, [Key, Links, Pred]).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link store_driver_behaviour} callback fetch_link/3.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_link(model_behaviour:model_config(), datastore:ext_key(), datastore:link_name()) ->
+-spec fetch_link(opt_ctx(), datastore:ext_key(), datastore:link_name()) ->
     {ok, datastore:link_target()} | datastore:link_error().
-fetch_link(#model_config{link_store_level = L} = ModelConfig, Key, LinkName)
-    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
-    direct_link_call(fetch_link, ModelConfig, Key, [Key, LinkName]);
-fetch_link(ModelConfig, Key, LinkName) ->
-    direct_link_call(fetch_link, ModelConfig, Key, [Key, LinkName], {error, link_not_found}).
+fetch_link(OptCtx, Key, LinkName) ->
+    case get_level(OptCtx, true) of
+        ?GLOBAL_ONLY_LEVEL ->
+            direct_link_call(fetch_link, OptCtx, Key, [Key, LinkName]);
+        ?LOCAL_ONLY_LEVEL ->
+            direct_link_call(fetch_link, OptCtx, Key, [Key, LinkName]);
+        _ ->
+            direct_link_call(fetch_link, OptCtx, Key, [Key, LinkName],
+                {error, link_not_found})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% {@link store_driver_behaviour} callback foreach_link/4.
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link(model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec foreach_link(opt_ctx(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
 % TODO - implementation base on old implementation from datastore - refactor when local cache is finished
-foreach_link(#model_config{link_store_level = L} = ModelConfig, Key, Fun, AccIn)
-    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
-    direct_call(foreach_link, ModelConfig, Key, [Key, Fun, AccIn]);
-foreach_link(MC, Key, Fun, AccIn) ->
-    Node = get_hashing_node(MC, Key),
-
-    rpc:call(Node, ?MODULE, foreach_link_internal, [MC, Key, Fun, AccIn]).
+foreach_link(OptCtx, Key, Fun, AccIn) ->
+    case get_level(OptCtx, true) of
+        ?GLOBAL_ONLY_LEVEL ->
+            direct_link_call(foreach_link, OptCtx, Key, [Key, Fun, AccIn]);
+        ?LOCAL_ONLY_LEVEL ->
+            direct_link_call(foreach_link, OptCtx, Key, [Key, Fun, AccIn]);
+        _ ->
+            Node = get_hashing_node(OptCtx, Key, true),
+            rpc:call(Node, ?MODULE, foreach_link_internal,
+                [OptCtx, Key, Fun, AccIn])
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -321,251 +293,68 @@ foreach_link(MC, Key, Fun, AccIn) ->
 %% (to be executed at node that hosts links process).
 %% @end
 %%--------------------------------------------------------------------
--spec foreach_link_internal(model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec foreach_link_internal(opt_ctx(), Key :: datastore:ext_key(),
     fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
     {ok, Acc :: term()} | datastore:link_error().
-foreach_link_internal(#model_config{name = ModelName} = MC, Key, Fun, AccIn) ->
+foreach_link_internal(OptCtx, Key, Fun, AccIn) ->
+    ModelName = get_model_name(OptCtx),
     CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
     % TODO - one consistency check (after migration from counter to times)
-    SlaveDriver = get_slave_driver(true, MC),
+    SlaveDriver = get_slave_driver(true, OptCtx),
     case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid, ModelName) of
         {ok, ClearingCounter, _} ->
             % TODO - foreach link returns error when doc is not found, and should be
-            RPCAns = apply(SlaveDriver, foreach_link, [MC, Key, Fun, AccIn]),
+            RPCAns = apply(SlaveDriver, foreach_link, [OptCtx, Key, Fun, AccIn]),
             % TODO - check directly in SLAVE_DRIVER
             case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid) of
                 {ok, ClearingCounter, _} ->
                     RPCAns;
                 _ ->
-                    deletage_link_call(foreach_link, MC, Key, [Key, Fun, AccIn])
+                    deletage_link_call(foreach_link, OptCtx, Key, [Key, Fun, AccIn])
             end;
         _ ->
-            deletage_link_call(foreach_link, MC, Key, [Key, Fun, AccIn])
+            deletage_link_call(foreach_link, OptCtx, Key, [Key, Fun, AccIn])
     end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback delete/2.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(model_behaviour:model_config(), datastore:ext_key(), datastore:delete_predicate()) ->
-    ok | datastore:generic_error().
-delete(ModelConfig, Key, Pred) ->
-    deletage_call(delete, ModelConfig, Key, [Key, Pred]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link store_driver_behaviour} callback exists/2.
-%% @end
-%%--------------------------------------------------------------------
--spec exists(model_behaviour:model_config(), datastore:ext_key()) ->
-    {ok, boolean()} | datastore:generic_error().
-exists(#model_config{link_store_level = L} = ModelConfig, Key)
-    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
-    direct_call(exists, ModelConfig, Key, [Key]);
-exists(ModelConfig, Key) ->
-    direct_call(exists, ModelConfig, Key, [Key], {ok, false}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Checks if document that describes links from scope exists.
 %% @end
 %%--------------------------------------------------------------------
--spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(), links_utils:scope()) ->
+-spec exists_link_doc(opt_ctx(), datastore:ext_key(), links_utils:scope()) ->
     {ok, boolean()} | datastore:generic_error().
-exists_link_doc(#model_config{link_store_level = L} = ModelConfig, DocKey, Scope)
-    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
-    direct_link_call(exists_link_doc, ModelConfig, DocKey, [DocKey, Scope]);
-exists_link_doc(ModelConfig, DocKey, Scope) ->
-    direct_link_call(exists_link_doc, ModelConfig, DocKey, [DocKey, Scope], {ok, false}).
+exists_link_doc(OptCtx, DocKey, Scope) ->
+    case get_level(OptCtx, true) of
+        ?GLOBAL_ONLY_LEVEL ->
+            direct_link_call(exists_link_doc, OptCtx, DocKey, [DocKey, Scope]);
+        ?LOCAL_ONLY_LEVEL ->
+            direct_link_call(exists_link_doc, OptCtx, DocKey, [DocKey, Scope]);
+        _ ->
+            direct_link_call(exists_link_doc, OptCtx, DocKey, [DocKey, Scope],
+                {ok, false})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Gets link document. Allows override bucket.
 %% @end
 %%--------------------------------------------------------------------
--spec get_link_doc(model_behaviour:model_config(), binary(), DocKey :: datastore:ext_key(),
+-spec get_link_doc(opt_ctx(), binary(), DocKey :: datastore:ext_key(),
     MainDocKey :: datastore:ext_key()) -> {ok, datastore:document()} | datastore:generic_error().
-get_link_doc(#model_config{link_store_level = L} = ModelConfig, BucketOverride, DocKey, MainDocKey)
-    when L =:= ?GLOBAL_ONLY_LEVEL; L =:= ?LOCAL_ONLY_LEVEL ->
-    direct_link_call(get_link_doc, ModelConfig, MainDocKey, [BucketOverride, DocKey]);
-get_link_doc(#model_config{name = ModelName} = ModelConfig, BucketOverride, DocKey, MainDocKey) ->
-    direct_link_call(get_link_doc, ModelConfig, MainDocKey, [BucketOverride, DocKey], {error, {not_found, ModelName}}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
-%% run at the same time.
-%% @end
-%%--------------------------------------------------------------------
--spec run_transation(model_behaviour:model_config(), ResourceId :: binary(), fun(() -> Result)) -> Result
-    when Result :: term().
-run_transation(ModelConfig, ResourceID, Fun) ->
-    ?GLOBAL_SLAVE_DRIVER:run_transation(ModelConfig, ResourceID, Fun).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Runs given function within locked ResourceId. This function makes sure that 2 funs with same ResourceId won't
-%% run at the same time.
-%% @end
-%%--------------------------------------------------------------------
--spec run_transation(ResourceId :: binary(), fun(() -> Result)) -> Result
-    when Result :: term().
-run_transation(ResourceID, Fun) ->
-    ?GLOBAL_SLAVE_DRIVER:run_transation(ResourceID, Fun).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Runs given function within transaction.
-%% @end
-%%--------------------------------------------------------------------
--spec run_transation(fun(() -> Result)) -> Result
-    when Result :: term().
-run_transation(Fun) ->
-    ?GLOBAL_SLAVE_DRIVER:run_transation(Fun).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Clears document from memory.
-%% @end
-%%--------------------------------------------------------------------
--spec clear(MC :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear(ModelConfig, Key) ->
-    execute(ModelConfig, Key, false, {clear, []}, [100]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Clears document from memory.
-%% @end
-%%--------------------------------------------------------------------
--spec clear_links(MC :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear_links(ModelConfig, Key) ->
-    execute(ModelConfig, Key, true, {clear, []}, [100]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Inserts given document to database while preserving revision number.
-%% Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec force_save(model_behaviour:model_config(), datastore:document()) ->
-    ok | datastore:generic_error().
-% TODO - return doc for dbsync
-force_save(ModelConfig, #document{key = Key} = ToSave) ->
-    deletage_call(force_save, ModelConfig, Key, [ToSave]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Inserts given document to database while preserving revision number.
-%% Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec force_link_save(model_behaviour:model_config(), datastore:document(),
-    MainDocKey :: datastore:ext_key()) -> ok | datastore:generic_error().
-% TODO - use main doc key
-force_link_save(ModelConfig, ToSave, MainDocKey) ->
-    deletage_link_call(force_save, ModelConfig, MainDocKey, [ToSave]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Inserts given document to database while preserving revision number.
-%% Used only for document replication.
-%% @end
-%%--------------------------------------------------------------------
--spec force_link_save(model_behaviour:model_config(), binary(), datastore:document(),
-    MainDocKey :: datastore:ext_key()) -> ok | datastore:generic_error().
-force_link_save(ModelConfig, BucketOverride, ToSave, MainDocKey) ->
-    deletage_link_call(force_save, ModelConfig, MainDocKey, [BucketOverride, ToSave]).
+get_link_doc(OptCtx, BucketOverride, DocKey, MainDocKey) ->
+    case get_level(OptCtx, true) of
+        ?GLOBAL_ONLY_LEVEL ->
+            direct_link_call(get_link_doc, OptCtx, MainDocKey, [BucketOverride, DocKey]);
+        ?LOCAL_ONLY_LEVEL ->
+            direct_link_call(get_link_doc, OptCtx, MainDocKey, [BucketOverride, DocKey]);
+        _ ->
+            ModelName = get_model_name(OptCtx),
+            direct_link_call(get_link_doc, OptCtx, MainDocKey, [BucketOverride, DocKey],
+                {error, {not_found, ModelName}})
+    end.
 
 %%%===================================================================
-%%% auxiliary_cache_behaviour callbacks
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback
-%% create_auxiliary_caches/3.
-%% @end
-%%--------------------------------------------------------------------
--spec create_auxiliary_caches(
-    model_behaviour:model_config(), Fields :: [atom()], NodeToSync :: node()) ->
-    ok | datastore:generic_error() | no_return().
-create_auxiliary_caches(ModelConfig, Fields, NodeToSync) ->
-    SlaveDriver = get_slave_driver(false, ModelConfig),
-    SlaveDriver:create_auxiliary_caches(ModelConfig, Fields, NodeToSync).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_first/2.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_first(model_behaviour:model_config(), Field :: atom()) ->
-    datastore:aux_cache_handle().
-aux_first(ModelConfig, Field) ->
-    direct_local_call(aux_first, ModelConfig, [Field]).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback next/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_next(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
-    Handle :: datastore:aux_cache_handle()) -> datastore:aux_cache_handle().
-aux_next(_, _, '$end_of_table') -> '$end_of_table';
-aux_next(ModelConfig, Field, Handle) ->
-    direct_local_call(aux_next, ModelConfig, [Field, Handle]).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback delete/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_delete(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
-    Key :: datastore:ext_key()) -> ok.
-aux_delete(ModelConfig, Field, [Key]) ->
-    direct_local_call(aux_delete, ModelConfig, [Field, [Key]]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_save/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_save(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_save(ModelConfig, Field, [Key, Doc]) ->
-    direct_local_call(aux_save, ModelConfig, [Field, [Key, Doc]]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_update/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_update(ModelConfig :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_update(ModelConfig, Field, [Key, Level]) ->
-    direct_local_call(aux_update, ModelConfig, [Field, [Key, Level]]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link auxiliary_cache_behaviour} callback aux_create/3.
-%% @end
-%%--------------------------------------------------------------------
--spec aux_create(Model :: model_behaviour:model_config(), Field :: atom(),
-    Args :: [term()]) -> ok.
-aux_create(ModelConfig, Field, [Key, Doc]) ->
-    direct_local_call(aux_create, ModelConfig, [Field, [Key, Doc]]).
-
-%%%===================================================================
-%%% Internal functions
+%%% Routing functions
 %%%===================================================================
 
 %%--------------------------------------------------------------------
@@ -574,10 +363,10 @@ aux_create(ModelConfig, Field, [Key, Doc]) ->
 %% Delegates call to appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec deletage_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec deletage_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
-deletage_call(Op, MC, Key, Args) ->
-    execute(MC, Key, false, {Op, Args}).
+deletage_call(Op, OptCtx, Key, Args) ->
+    execute(OptCtx, Key, false, {Op, Args}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -585,10 +374,10 @@ deletage_call(Op, MC, Key, Args) ->
 %% Delegates call to appropriate link handling process.
 %% @end
 %%--------------------------------------------------------------------
--spec deletage_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec deletage_link_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
-deletage_link_call(Op, MC, Key, Args) ->
-    execute(MC, Key, true, {Op, Args}).
+deletage_link_call(Op, OptCtx, Key, Args) ->
+    execute(OptCtx, Key, true, {Op, Args}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -596,12 +385,12 @@ deletage_link_call(Op, MC, Key, Args) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
-direct_call(Op, MC, Key, Args) ->
-    Node = get_hashing_node(MC, Key),
+direct_call(Op, OptCtx, Key, Args) ->
+    Node = get_hashing_node(OptCtx, Key, false),
 
-    rpc:call(Node, get_slave_driver(false, MC), Op, [MC | Args]).
+    rpc:call(Node, get_slave_driver(false, OptCtx), Op, [OptCtx | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -609,12 +398,12 @@ direct_call(Op, MC, Key, Args) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
-direct_call(Op, MC, Key, Args, CheckAns) ->
-    Node = get_hashing_node(MC, Key),
+direct_call(Op, OptCtx, Key, Args, CheckAns) ->
+    Node = get_hashing_node(OptCtx, Key, false),
 
-    rpc:call(Node, ?MODULE, direct_call_internal, [Op, MC, Key, Args, CheckAns]).
+    rpc:call(Node, ?MODULE, direct_call_internal, [Op, OptCtx, Key, Args, CheckAns]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -622,11 +411,12 @@ direct_call(Op, MC, Key, Args, CheckAns) ->
 %% Executes operation (to be executed appropriate node).
 %% @end
 %%--------------------------------------------------------------------
--spec direct_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_call_internal(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
-direct_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
-    SlaveDriver = get_slave_driver(false, MC),
-    case apply(SlaveDriver, Op, [MC | Args]) of
+direct_call_internal(Op, OptCtx, Key, Args, CheckAns) ->
+    SlaveDriver = get_slave_driver(false, OptCtx),
+    ModelName = get_model_name(OptCtx),
+    case apply(SlaveDriver, Op, [OptCtx | Args]) of
         CheckAns ->
             % TODO - better consistency info management for models
             case caches_controller:check_cache_consistency_direct(SlaveDriver, ModelName) of
@@ -636,12 +426,12 @@ direct_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckA
                 {monitored, ClearedList, _, _} ->
                     case lists:member(Key, ClearedList) of
                         true ->
-                            deletage_call(Op, MC, Key, Args);
+                            deletage_call(Op, OptCtx, Key, Args);
                         _ ->
                             CheckAns
                     end;
                 _ ->
-                    deletage_call(Op, MC, Key, Args)
+                    deletage_call(Op, OptCtx, Key, Args)
             end;
         RPCAns ->
             RPCAns
@@ -653,12 +443,12 @@ direct_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckA
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_link_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list()) -> term().
-direct_link_call(Op, MC, Key, Args) ->
-    Node = get_hashing_node(MC, Key),
+direct_link_call(Op, OptCtx, Key, Args) ->
+    Node = get_hashing_node(OptCtx, Key, true),
 
-    rpc:call(Node, get_slave_driver(true, MC), Op, [MC | Args]).
+    rpc:call(Node, get_slave_driver(true, OptCtx), Op, [OptCtx | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -666,13 +456,13 @@ direct_link_call(Op, MC, Key, Args) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_link_call(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_link_call(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
 % TODO - link_utils return appripriate error when link doc not found.
-direct_link_call(Op, MC, Key, Args, CheckAns) ->
-    Node = get_hashing_node(MC, Key),
+direct_link_call(Op, OptCtx, Key, Args, CheckAns) ->
+    Node = get_hashing_node(OptCtx, Key, true),
 
-    rpc:call(Node, ?MODULE, direct_link_call_internal, [Op, MC, Key, Args, CheckAns]).
+    rpc:call(Node, ?MODULE, direct_link_call_internal, [Op, OptCtx, Key, Args, CheckAns]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -680,32 +470,24 @@ direct_link_call(Op, MC, Key, Args, CheckAns) ->
 %% Executes operation at appropriate node.
 %% @end
 %%--------------------------------------------------------------------
--spec direct_link_call_internal(Op :: atom(), MC :: model_behaviour:model_config(),
+-spec direct_link_call_internal(Op :: atom(), opt_ctx(),
     Key :: datastore:ext_key(), Args :: list(), CheckAns :: term()) -> term().
-direct_link_call_internal(Op, #model_config{name = ModelName} = MC, Key, Args, CheckAns) ->
-    SlaveDriver = get_slave_driver(true, MC),
-    case apply(SlaveDriver, Op, [MC | Args]) of
+direct_link_call_internal(Op, OptCtx, Key, Args, CheckAns) ->
+    SlaveDriver = get_slave_driver(true, OptCtx),
+    case apply(SlaveDriver, Op, [OptCtx | Args]) of
         CheckAns ->
+            ModelName = get_model_name(OptCtx),
             CCCUuid = caches_controller:get_cache_uuid(Key, ModelName),
             case caches_controller:check_cache_consistency_direct(SlaveDriver, CCCUuid, ModelName) of
                 {ok, _, _} ->
                     CheckAns; % TODO - check time (if consistency wasn't restored a moment ago)
                 _ ->
-                    deletage_link_call(Op, MC, Key, Args)
+                    deletage_link_call(Op, OptCtx, Key, Args)
             end;
         RPCAns2 ->
             RPCAns2
     end.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Executes operation at local node.
-%% @end
-%%--------------------------------------------------------------------
--spec direct_local_call(Op :: atom(), MC :: model_behaviour:model_config(), Args :: list()) -> term().
-direct_local_call(Op, MC, Args) ->
-    apply(get_slave_driver(false, MC), Op, [MC | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -713,10 +495,10 @@ direct_local_call(Op, MC, Args) ->
 %% Executes operation in appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec execute(opt_ctx(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}) -> term().
-execute(MC, Key, Link, Msg) ->
-    execute(MC, Key, Link, Msg, []).
+execute(OptCtx, Key, Link, Msg) ->
+    execute(OptCtx, Key, Link, Msg, []).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -724,27 +506,68 @@ execute(MC, Key, Link, Msg) ->
 %% Executes operation in appropriate process.
 %% @end
 %%--------------------------------------------------------------------
--spec execute(MC :: model_behaviour:model_config(), Key :: datastore:ext_key(),
+-spec execute(opt_ctx(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}, InitExtension :: list()) -> term().
 % TODO - allow node specification (for fallbacks from direct operations)
-execute(#model_config{name = ModelName, store_level = Level} = MC, Key, Link, Msg, InitExtension) ->
+execute(OptCtx, Key, Link, Msg, InitExtension) ->
     TPMod = memory_store_driver,
 
-    Persist = case Level of
+    Persist = get_persistance_driver(OptCtx),
+
+    SD = get_slave_driver(Link, OptCtx),
+    TMInit = [SD, OptCtx, Key, Persist, Link],
+    TPKey = {get_model_name(OptCtx), Key, Link, SD},
+
+    Node = get_hashing_node(OptCtx, Key, Link),
+    rpc:call(Node, tp, run_sync, [TPMod, TMInit, TPKey, Msg | InitExtension]).
+
+%%%===================================================================
+%%% Context functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets model_name from config.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_model_name(opt_ctx()) ->
+    model_behaviour:model_type().
+get_model_name(#model_config{name = Name} = _OptCtx) ->
+    Name.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets model_name from config.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_level(opt_ctx(), LinkOp :: boolean()) ->
+    datastore:store_level().
+% TODO - delete second arg
+get_level(#model_config{store_level = Level} = _OptCtx, false) ->
+    Level;
+get_level(#model_config{link_store_level = Level} = _OptCtx, _LinkOp) ->
+    Level.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets persistance driver from config.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_persistance_driver(opt_ctx()) ->
+    atom().
+get_persistance_driver(#model_config{store_level = Level} = _OptCtx) ->
+    case Level of
         ?GLOBALLY_CACHED_LEVEL ->
             couchdb_datastore_driver;
         ?LOCALLY_CACHED_LEVEL ->
             couchdb_datastore_driver;
         _ ->
             undefined
-    end,
+    end.
 
-    SD = get_slave_driver(Link, MC),
-    TMInit = [SD, MC, Key, Persist, Link],
-    TPKey = {ModelName, Key, Link, SD},
-
-    Node = get_hashing_node(MC, Key),
-    rpc:call(Node, tp, run_sync, [TPMod, TMInit, TPKey, Msg | InitExtension]).
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private
@@ -780,14 +603,19 @@ execute_list_fun(Fun, List, AccIn) ->
 %% Gets key for consistent hashing algorithm.
 %% @end
 %%--------------------------------------------------------------------
--spec get_hashing_node(MC :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) -> term().
-get_hashing_node(#model_config{store_level = ?LOCAL_ONLY_LEVEL}, _Key) ->
-    node();
-get_hashing_node(#model_config{store_level = ?LOCALLY_CACHED_LEVEL}, _Key) ->
-    node();
-get_hashing_node(#model_config{name = ModelName}, Key) ->
-    consistent_hasing:get_node({ModelName, Key}).
+-spec get_hashing_node(opt_ctx(), Key :: datastore:ext_key(),
+    Link :: boolean()) -> term().
+% TODO - delete third arg
+get_hashing_node(OptCtx, Key, Link) ->
+    case get_level(OptCtx, Link) of
+        ?LOCAL_ONLY_LEVEL ->
+            node();
+        ?LOCALLY_CACHED_LEVEL ->
+            node();
+        _ ->
+            MN = get_model_name(OptCtx),
+            consistent_hasing:get_node({MN, Key})
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -795,17 +623,13 @@ get_hashing_node(#model_config{name = ModelName}, Key) ->
 %% Returns slave driver for model.
 %% @end
 %%--------------------------------------------------------------------
--spec get_slave_driver(Link :: boolean(), MC :: model_behaviour:model_config()) ->
-    atom().
-get_slave_driver(true, #model_config{link_store_level = ?GLOBAL_ONLY_LEVEL}) ->
-    ?GLOBAL_SLAVE_DRIVER;
-get_slave_driver(true, #model_config{link_store_level = ?GLOBALLY_CACHED_LEVEL}) ->
-    ?GLOBAL_SLAVE_DRIVER;
-get_slave_driver(true, _) ->
-    ?LOCAL_SLAVE_DRIVER;
-get_slave_driver(_, #model_config{store_level = ?GLOBAL_ONLY_LEVEL}) ->
-    ?GLOBAL_SLAVE_DRIVER;
-get_slave_driver(_, #model_config{store_level = ?GLOBALLY_CACHED_LEVEL}) ->
-    ?GLOBAL_SLAVE_DRIVER;
-get_slave_driver(_, _) ->
-    ?LOCAL_SLAVE_DRIVER.
+-spec get_slave_driver(Link :: boolean(), opt_ctx()) -> atom().
+get_slave_driver(Link, OptCtx) ->
+    case get_level(OptCtx, Link) of
+        ?GLOBAL_ONLY_LEVEL ->
+            ?GLOBAL_SLAVE_DRIVER;
+        ?GLOBALLY_CACHED_LEVEL ->
+            ?GLOBAL_SLAVE_DRIVER;
+        _ ->
+            ?LOCAL_SLAVE_DRIVER
+    end.

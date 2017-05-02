@@ -247,8 +247,8 @@ force_save_gc_test(Config) ->
         fun(Doc) ->
             ?assertEqual(
                 ok,
-                rpc:call(W2, ?MEMORY_DRIVER, force_save,
-                    [ModelConfig, Doc])
+                rpc:call(W2, model, execute_with_default_context,
+                    [ModelConfig, save, [Doc], [{resolve_conflicts, doc}]])
             )
         end,
         Docs
@@ -269,23 +269,25 @@ force_save_gc_link_test(Config) ->
     [W1, W2] = ?config(cluster_worker_nodes, Config),
 
     Key = <<"key_l">>,
+    ModelConfig = globally_cached_record:model_init(),
     Docs = lists:map(
         fun(N) ->
-            ?assertEqual(ok, rpc:call(W1, datastore, add_links,
-                [?DISK_ONLY_LEVEL, Key, globally_cached_record, {N, {Key, globally_cached_record}}])),
+            ?assertEqual(ok, rpc:call(W1, model, execute_with_default_context,
+                [ModelConfig, add_links, [Key, {N, {Key, globally_cached_record}}],
+                    [{level, ?DISK_ONLY_LEVEL}]])),
             {_, {_, DocR, _}} = ?assertReceivedMatch({force_save_gc_link_test,
                 {_, #document{}, globally_cached_record}}, ?TIMEOUT),
             DocR
         end,
         lists:seq(1, 10)
     ),
-    ModelConfig = globally_cached_record:model_init(),
 
     lists:map(
         fun(Doc) ->
             ?assertEqual(
                 ok,
-                rpc:call(W2, ?MEMORY_DRIVER, force_link_save, [globally_cached_record:model_init(), Doc, Key])
+                rpc:call(W2, model, execute_with_default_context,
+                    [ModelConfig, save, [Doc], [{resolve_conflicts, {links, Key}}]])
             )
         end,
         Docs

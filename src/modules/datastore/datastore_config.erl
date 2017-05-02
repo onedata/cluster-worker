@@ -22,7 +22,6 @@
 
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
-    auxiliary_cache_controller,
     task_pool,
     cache_consistency_controller,
     cached_identity,
@@ -33,7 +32,7 @@
 
 %% datastore_config_behaviour callbacks
 -export([db_nodes/0, models/0, throttled_models/0, global_caches/0,
-    local_caches/0, models_with_aux_caches/0]).
+    local_caches/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,25 +83,6 @@ global_caches() ->
 local_caches() ->
     filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns a list of models with defined auxiliary caches.
-%% @end
-%%--------------------------------------------------------------------
--spec models_with_aux_caches() -> Models :: [model_behaviour:model_type()].
-models_with_aux_caches() ->
-    case ets:info(?LOCAL_STATE) of
-        undefined ->
-            filter_models_with_aux_caches();
-        _ ->
-            case ets:lookup(?LOCAL_STATE, aux_caches_models) of
-                [] ->
-                    AuxCachesModels = filter_models_with_aux_caches(),
-                    ets:insert_new(?LOCAL_STATE, {aux_caches_models, AuxCachesModels}),
-                    AuxCachesModels;
-                [{_, AuxCachesModels}] -> AuxCachesModels
-            end
-    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -128,21 +108,4 @@ filter_models_by_level(Level, Models) ->
 %% @end
 %%--------------------------------------------------------------------
 models_potentially_cached() ->
-    models() -- [auxiliary_cache_controller, node_management].
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns list of models with defined auxiliary caches.
-%% @end
-%%--------------------------------------------------------------------
--spec filter_models_with_aux_caches() -> Models :: [model_behaviour:model_type()].
-filter_models_with_aux_caches() ->
-    lists:filter(fun(M) ->
-        Config = M:model_init(),
-        case map_size(Config#model_config.auxiliary_caches) of
-            0 -> false;
-            _ -> true
-        end
-    end, ?MODULE:models() -- [auxiliary_cache_controller]).
+    models() -- [node_management].

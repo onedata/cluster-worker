@@ -48,6 +48,8 @@
 -define(CONFIG_THROTTLING, 1).
 -define(NO_THROTTLING, 0).
 
+-define(LEVEL_OVERRIDE(Level), [{level, Level}]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -463,7 +465,7 @@ cache_to_task_level(ModelName) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
-  ?MEMORY_DRIVER:clear(ModelConfig, Key).
+  ?MEMORY_DRIVER:call(clear, ModelConfig, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -474,7 +476,7 @@ clear(_, ModelName, Key) ->
     Key :: datastore:ext_key()) -> ok | datastore:generic_error().
 clear_links(_, ModelName, Key) ->
   ModelConfig = ModelName:model_init(),
-  ?MEMORY_DRIVER:clear_links(ModelConfig, Key).
+  ?MEMORY_DRIVER:call(clear_links, ModelConfig, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -929,7 +931,8 @@ delete_old_keys(Level, Caches, _TimeWindow) ->
 -spec list_old_keys(Level :: global_only | local_only, ClearFun :: datastore:list_fun(),
     ModelName :: model_behaviour:model_type()) -> {ok, term()} | datastore:generic_error() | no_return().
 list_old_keys(Level, ClearFun, Model) ->
-  case datastore:list_dirty(Level, Model, ClearFun, {0, 0, undefined}) of
+  case model:execute_with_default_context(Model, list, [ClearFun, {0, 0, undefined}],
+    ?LEVEL_OVERRIDE(Level)) of
     {ok, _} = Ans ->
       Ans;
     {error, {aborted, R}} ->
