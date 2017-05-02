@@ -101,7 +101,7 @@ create(Level, Document) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(Document :: datastore:document(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:ext_key()} | datastore:create_error().
+    {ok, datastore:ext_key()} | datastore:generic_error().
 create_or_update(Document, Diff) ->
     model:execute_with_default_context(?MODULE, create_or_update, [Document, Diff]).
 
@@ -112,7 +112,7 @@ create_or_update(Document, Diff) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_or_update(Level :: datastore:store_level(), Document :: datastore:document(),
-    Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:create_error().
+    Diff :: datastore:document_diff()) -> {ok, datastore:ext_key()} | datastore:generic_error().
 create_or_update(Level, Document, Diff) ->
     model:execute_with_default_context(?MODULE, create_or_update,
         [Document, Diff], ?LEVEL_OVERRIDE(Level)).

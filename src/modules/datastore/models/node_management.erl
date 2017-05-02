@@ -55,12 +55,12 @@ create(Document) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates document with using ID from document. If such object does not exist,
-%% it initialises the object with the document.
+%% Updates given document by replacing given fields with new values or
+%% creates new one if not exists.
 %% @end
 %%--------------------------------------------------------------------
--spec create_or_update(datastore:ext_key(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:ext_key()} | datastore:update_error().
+-spec create_or_update(Document :: datastore:document(), Diff :: datastore:document_diff()) ->
+    {ok, datastore:ext_key()} | datastore:generic_error().
 create_or_update(Doc, Diff) ->
     model:execute_with_default_context(?MODULE, create_or_update, [Doc, Diff]).
 
