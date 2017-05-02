@@ -17,63 +17,93 @@
 -include("modules/tp/tp.hrl").
 
 %% API
--export([run_async/4, run_sync/4, run_sync/5]).
+-export([call/4, call/5, call/6, cast/4, send/4]).
 -export([get_processes_limit/0, set_processes_limit/1, get_processes_number/0]).
 
--type init() :: #tp_init{}.
--type mod() :: module().
--type args() :: list().
 -type key() :: term().
--type data() :: any().
+-type args() :: list().
+-type state() :: any().
 -type server() :: pid().
--type changes() :: any().
--type rev() :: any().
--type request() :: any().
--type response() :: any().
+-type request() :: term().
+-type response() :: term().
 
--export_type([init/0, mod/0, args/0, key/0, data/0, server/0, changes/0, rev/0,
-    request/0, response/0]).
+-export_type([key/0, args/0, state/0, server/0, request/0, response/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Delegates request processing to the transaction process server and waits for
-%% the response with default 5 seconds timeout.
+%% @equiv call(Module, Args, Key, Request, timer:seconds(5))
 %% @end
 %%--------------------------------------------------------------------
--spec run_sync(module(), args(), key(), request()) ->
-    response() | {error, Reason :: term()} | no_return().
-run_sync(Module, Args, Key, Request) ->
-    run_sync(Module, Args, Key, Request, timer:seconds(5)).
+-spec call(module(), args(), key(), request()) ->
+    response() | {error, Reason :: term()}.
+call(Module, Args, Key, Request) ->
+    call(Module, Args, Key, Request, timer:seconds(5)).
+
+%%--------------------------------------------------------------------
+%% @equiv call(Module, Args, Key, Request, Timeout, 1)
+%% @end
+%%--------------------------------------------------------------------
+-spec call(module(), args(), key(), request(), timeout()) ->
+    response() | {error, Reason :: term()}.
+call(Module, Args, Key, Request, Timeout) ->
+    call(Module, Args, Key, Request, Timeout, 1).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Delegates request processing to the transaction process server and waits for
-%% the response with custom timeout.
+%% Sends synchronous request to transaction process and awaits response.
 %% @end
 %%--------------------------------------------------------------------
--spec run_sync(module(), args(), key(), request(), timeout()) ->
-    response() | {error, Reason :: term()} | no_return().
-run_sync(Module, Args, Key, Request, Timeout) ->
-    case run_async(Module, Args, Key, Request) of
-        {ok, Ref} -> receive_response(Ref, Timeout);
+-spec call(module(), args(), key(), request(), timeout(), non_neg_integer()) ->
+    response() | {error, Reason :: term()}.
+call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
+    {error, timeout};
+call(Module, Args, Key, Request, Timeout, Attempts) ->
+    case get_or_create_tp_server(Module, Args, Key) of
+        {ok, Pid} ->
+            try
+                gen_server:call(Pid, Request, Timeout)
+            catch
+                _:{noproc, _} ->
+                    tp_router:delete(Key, Pid),
+                    call(Module, Args, Key, Request, Timeout);
+                exit:{normal, _} ->
+                    tp_router:delete(Key, Pid),
+                    call(Module, Args, Key, Request, Timeout);
+                _:{timeout, _} ->
+                    call(Module, Args, Key, Request, Timeout, Attempts - 1);
+                _:Reason ->
+                    {error, {Reason, erlang:get_stacktrace()}}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sends asynchronous request to transaction process.
+%% @end
+%%--------------------------------------------------------------------
+-spec cast(module(), args(), key(), request()) -> ok | {error, Reason :: term()}.
+cast(Module, Args, Key, Request) ->
+    case get_or_create_tp_server(Module, Args, Key) of
+        {ok, Pid} -> gen_server:cast(Pid, Request);
         {error, Reason} -> {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Delegates request processing to the transaction process server and returns
-%% a reference in which a response will be wrapped ({Ref, Msg}).
+%% Sends message to transaction process.
 %% @end
 %%--------------------------------------------------------------------
--spec run_async(module(), args(), key(), request()) ->
-    {ok, reference()} | {error, Reason :: term()}.
-run_async(Module, Args, Key, Request) ->
-    run_async(Module, Args, Key, Request, 3).
-
+-spec send(module(), args(), key(), term()) -> ok | {error, Reason :: term()}.
+send(Module, Args, Key, Info) ->
+    case get_or_create_tp_server(Module, Args, Key) of
+        {ok, Pid} -> Pid ! Info, ok;
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -111,55 +141,6 @@ get_processes_number() ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Delegates request processing to the transaction process server. In case of
-%% timeout retires 'Attempts' times.
-%% @end
-%%--------------------------------------------------------------------
--spec run_async(module(), args(), key(), request(),
-    Attempts :: non_neg_integer()) ->
-    {ok, reference()} | {error, Reason :: term()}.
-run_async(_Module, _Args, _Key, _Request, 0) ->
-    {error, timeout};
-run_async(Module, Args, Key, Request, Attempts) ->
-    case get_or_create_tp_server(Module, Args, Key) of
-        {ok, Pid} ->
-            try
-                gen_server:call(Pid, Request)
-            catch
-                _:{noproc, _} ->
-                    tp_router:delete(Key, Pid),
-                    run_async(Module, Args, Key, Request);
-                exit:{normal, _} ->
-                    tp_router:delete(Key, Pid),
-                    run_async(Module, Args, Key, Request);
-                _:{timeout, _} ->
-                    run_async(Module, Args, Key, Request, Attempts - 1);
-                _:Reason ->
-                    {error, Reason}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns a response form a transaction process server or fails with a timeout.
-%% @end
-%%--------------------------------------------------------------------
--spec receive_response(reference(), timeout()) ->
-    response() | {error, timeout} | no_return().
-receive_response(Ref, Timeout) ->
-    receive
-        {Ref, {throw, Exception}} -> throw(Exception);
-        {Ref, Response} -> Response
-    after
-        Timeout -> {error, timeout}
-    end.
 
 %%--------------------------------------------------------------------
 %% @private

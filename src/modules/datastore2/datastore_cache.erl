@@ -30,7 +30,7 @@
                  disc_driver_ctx => datastore:disc_driver_ctx()}.
 -type key() :: datastore:key().
 -type value() :: datastore:doc().
--type diff() :: fun((value()) -> value()).
+-type diff() :: fun((value()) -> {ok, value()} | {error, term()}).
 -type durability() :: memory | disc.
 
 -export_type([ctx/0, diff/0, durability/0]).
@@ -128,8 +128,13 @@ update(Ctx, Updates) when is_list(Updates) ->
     {Keys, Diffs} = lists:unzip(Updates),
 
     Futures = lists:map(fun
-        ({Diff, {ok, _, Value}}) -> save_async(Ctx, Diff(Value), true);
-        ({_Diff, {error, Reason}}) -> ?FUTURE({error, Reason})
+        ({Diff, {ok, _, Value}}) ->
+            case Diff(Value) of
+                {ok, NewValue} -> save_async(Ctx, NewValue, true);
+                {error, Reason} -> ?FUTURE({error, Reason})
+            end;
+        ({_Diff, {error, Reason}}) ->
+            ?FUTURE({error, Reason})
     end, lists:zip(Diffs, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
 
     wait(Futures).

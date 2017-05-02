@@ -266,16 +266,16 @@ delete_should_return_missing_error(Config) ->
 
 save_get_delete_should_return_success(Config) ->
     ?PERFORMANCE(Config, [
-        {repeats, 1},
+        {repeats, 3},
         {success_rate, 100},
         {parameters, [?OPS_NUM(10), ?DURABLE(true)]},
         {description, "Multiple cycles of parallel save/get/delete operations."},
         ?PERF_CFG(small_memory, [?OPS_NUM(1000), ?DURABLE(false)]),
         ?PERF_CFG(small_disk, [?OPS_NUM(1000), ?DURABLE(true)]),
-        ?PERF_CFG(medium_memory, [?OPS_NUM(10000), ?DURABLE(false)]),
-        ?PERF_CFG(medium_disk, [?OPS_NUM(10000), ?DURABLE(true)]),
-        ?PERF_CFG(large_memory, [?OPS_NUM(100000), ?DURABLE(false)]),
-        ?PERF_CFG(largs_disk, [?OPS_NUM(100000), ?DURABLE(true)])
+        ?PERF_CFG(medium_memory, [?OPS_NUM(5000), ?DURABLE(false)]),
+        ?PERF_CFG(medium_disk, [?OPS_NUM(5000), ?DURABLE(true)]),
+        ?PERF_CFG(large_memory, [?OPS_NUM(10000), ?DURABLE(false)]),
+        ?PERF_CFG(large_disk, [?OPS_NUM(10000), ?DURABLE(true)])
     ]).
 save_get_delete_should_return_success_base(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),

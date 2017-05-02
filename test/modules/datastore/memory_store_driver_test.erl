@@ -17,7 +17,7 @@
 -include("modules/datastore/memory_store_driver.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
--include("modules/tp/tp.hrl").
+-include("modules/datastore/datastore_doc.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 % Driver mock functions
@@ -78,10 +78,10 @@ single_op() ->
     put(get_response, {ok, #document{key = Key, value = "g"}}),
 
     Ans0 = memory_store_driver:init([memory_store_driver_test, MC, Key, undefined, Link]),
-    ?assertMatch({ok, #tp_init{min_commit_delay = infinity, max_commit_delay = infinity}}, Ans0),
+    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = infinity, max_commit_delay = infinity}}, Ans0),
     Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #tp_init{}}, Ans1),
-    {ok, #tp_init{data = State}} = Ans1,
+    ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
+    {ok, #datastore_doc_init{data = State}} = Ans1,
 
     Msg = {save, [#document{key = Key, value = "v"}]},
     Ans2 = memory_store_driver:modify([Msg], State, []),
@@ -179,8 +179,8 @@ many_op() ->
     put(get_response, {ok, #document{key = Key, value = "g"}}),
 
     Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #tp_init{}}, Ans1),
-    {ok, #tp_init{data = State}} = Ans1,
+    ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
+    {ok, #datastore_doc_init{data = State}} = Ans1,
 
     Msg = {save, [#document{key = Key, value = "v"}]},
     Msg1 = {save, [#document{key = Key, value = "error"}]},
@@ -212,10 +212,13 @@ single_op_link() ->
     erase(),
 
     Ans0 = memory_store_driver:init([memory_store_driver_test, MC, Key, undefined, Link]),
-    ?assertMatch({ok, #tp_init{min_commit_delay = infinity, max_commit_delay = infinity}}, Ans0),
+    ?assertMatch({ok, #datastore_doc_init{
+        min_commit_delay = infinity,
+        max_commit_delay = infinity
+    }}, Ans0),
     Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #tp_init{}}, Ans1),
-    {ok, #tp_init{data = State}} = Ans1,
+    ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
+    {ok, #datastore_doc_init{data = State}} = Ans1,
 
     V = [l1, l2],
     Msg = {add_links, [Key, V]},
@@ -276,8 +279,8 @@ many_op_link() ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 5000),
 
     Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #tp_init{}}, Ans1),
-    {ok, #tp_init{data = State}} = Ans1,
+    ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
+    {ok, #datastore_doc_init{data = State}} = Ans1,
 
     Msg = {add_links, [Key, [l1, l2]]},
     Msg2 = {add_links, [Key, [l4, l5]]},
@@ -330,8 +333,8 @@ flush_doc() ->
     put(get_flush_response, {error, {not_found, mc}}),
 
     Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #tp_init{min_commit_delay = 5000, max_commit_delay = 10000}}, Ans1),
-    {ok, #tp_init{data = State}} = Ans1,
+    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = 5000, max_commit_delay = 10000}}, Ans1),
+    {ok, #datastore_doc_init{data = State}} = Ans1,
 
     Msg = {update, [Key, diff]},
     Ans2 = memory_store_driver:modify([Msg], State, []),
@@ -423,8 +426,8 @@ flush_links() ->
     put(get_flush_response, {error, {not_found, mc}}),
 
     Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #tp_init{min_commit_delay = 5000, max_commit_delay = 10000}}, Ans1),
-    {ok, #tp_init{data = State}} = Ans1,
+    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = 5000, max_commit_delay = 10000}}, Ans1),
+    {ok, #datastore_doc_init{data = State}} = Ans1,
 
     V = [l1, l2],
     Msg = {add_links, [Key, V]},

@@ -510,16 +510,14 @@ execute(OptCtx, Key, Link, Msg) ->
     Link :: boolean(), {Op :: atom(), Args :: list()}, InitExtension :: list()) -> term().
 % TODO - allow node specification (for fallbacks from direct operations)
 execute(OptCtx, Key, Link, Msg, InitExtension) ->
-    TPMod = memory_store_driver,
-
     Persist = get_persistance_driver(OptCtx),
 
     SD = get_slave_driver(Link, OptCtx),
-    TMInit = [SD, OptCtx, Key, Persist, Link],
+    TpArgs = [SD, OptCtx, Key, Persist, Link],
     TPKey = {get_model_name(OptCtx), Key, Link, SD},
 
     Node = get_hashing_node(OptCtx, Key, Link),
-    rpc:call(Node, tp, run_sync, [TPMod, TMInit, TPKey, Msg | InitExtension]).
+    rpc:call(Node, datastore_doc, run_sync, [TpArgs, TPKey, Msg | InitExtension]).
 
 %%%===================================================================
 %%% Context functions

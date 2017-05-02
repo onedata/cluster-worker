@@ -10,10 +10,9 @@
 %%%-------------------------------------------------------------------
 -module(memory_store_driver).
 -author("Michal Wrzeszcz").
--behaviour(tp_behaviour).
 
 -include("global_definitions.hrl").
--include("modules/tp/tp.hrl").
+-include("modules/datastore/datastore_doc.hrl").
 -include("modules/datastore/memory_store_driver.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -129,15 +128,23 @@ modify(Messages, #state{link_proc = LP, current_value = CurrentValue,
 init([Driver, MC, Key, FD, LinkProc]) ->
   init([Driver, MC, Key, FD, LinkProc, caches_controller:get_idle_timeout()]);
 init([Driver, MC, Key, FD, true = LinkProc, IdleT]) ->
-  {ok, #tp_init{data = #state{driver = Driver, model_config = MC, key = Key,
-    link_proc = LinkProc, flush_driver = FD, current_value = []},
-    idle_timeout = IdleT, min_commit_delay = get_flush_min_interval(FD),
-    max_commit_delay = get_flush_max_interval(FD), rev = []}};
-init([Driver, MC, Key, FD, LinkProc, IdleT]) ->
-  {ok, #tp_init{data = #state{driver = Driver, model_config = MC, key = Key,
-    link_proc = LinkProc, flush_driver = FD}, idle_timeout = IdleT,
+  {ok, #datastore_doc_init{
+    data = #state{
+      driver = Driver, model_config = MC, key = Key,
+      link_proc = LinkProc, flush_driver = FD, current_value = []},
+    idle_timeout = IdleT,
     min_commit_delay = get_flush_min_interval(FD),
-    max_commit_delay = get_flush_max_interval(FD)}}.
+    max_commit_delay = get_flush_max_interval(FD),
+    rev = []
+  }};
+init([Driver, MC, Key, FD, LinkProc, IdleT]) ->
+  {ok, #datastore_doc_init{
+    data = #state{driver = Driver, model_config = MC, key = Key,
+      link_proc = LinkProc, flush_driver = FD},
+    idle_timeout = IdleT,
+    min_commit_delay = get_flush_min_interval(FD),
+    max_commit_delay = get_flush_max_interval(FD)
+  }}.
 
 %%--------------------------------------------------------------------
 %% @doc
