@@ -7,12 +7,11 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module is responsible for streaming CouchBase documents changes in
-%%% range [Since, Until] (inclusive except for infinity). It should be used by
-%%% clients. There may be many couchbase_changes_streamer processes, as they
-%%% work in a readonly mode.
+%%% range [Since, Until). It should be used by clients. There may be many
+%%% couchbase_changes_stream processes, as they work in a readonly mode.
 %%% @end
 %%%-------------------------------------------------------------------
--module(couchbase_changes_streamer).
+-module(couchbase_changes_stream).
 -author("Krzysztof Trzepla").
 
 -behaviour(gen_server).
@@ -70,6 +69,7 @@ start_link(Bucket, Scope, Callback, Opts) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Bucket, Scope, Callback, Opts]) ->
+    process_flag(trap_exit, true),
     erlang:send_after(0, self(), update),
     {ok, #state{
         bucket = Bucket,
@@ -127,12 +127,12 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(update, #state{since = Since, until = Until} = State) ->
-    {Since2, Changes} = get_changes(Since, Until, State),
-    Docs = get_docs(Changes, State),
-    stream_docs(Docs, State),
-    case Since2 > Until of
-        true -> {stop, normal, State};
-        false -> {noreply, State#state{since = Since2}}
+    {Changes, State2} = get_changes(Since, Until, State),
+    Docs = get_docs(Changes, State2),
+    stream_docs(Docs, State2),
+    case State2#state.since >= Until of
+        true -> {stop, normal, State2};
+        false -> {noreply, State2}
     end;
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
@@ -149,7 +149,11 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{} = State) ->
+terminate(Reason, #state{since = Since, callback = Callback} = State) ->
+    case Reason of
+        normal -> Callback({ok, end_of_stream});
+        _ -> Callback({error, Since, Reason})
+    end,
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------
@@ -170,11 +174,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns updated since value and a list of CouchBase changes.
+%% Returns list of CouchBase changes and updated state.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_changes(couchbase_changes:since(), couchbase_changes:until(), state()) ->
-    {couchbase_changes:since(), [couchbase_changes:change()]}.
+    {[couchbase_changes:change()], state()}.
 get_changes(Since, infinity, #state{batch_size = BatchSize} = State) ->
     get_changes(Since, Since + BatchSize, State);
 get_changes(Since, Until, #state{} = State) ->
@@ -185,21 +189,21 @@ get_changes(Since, Until, #state{} = State) ->
     } = State,
     Ctx = #{bucket => Bucket},
     Key = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, Until2} = couchbase_driver:get_counter(Ctx, Key),
-    Until3 = min(Since + BatchSize, min(Until, Until2)),
+    {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
+    Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),
 
-    case Since > Until3 of
+    case Since >= Until2 of
         true ->
-            {Since, []};
+            {[], State};
         false ->
             {ok, {Changes}} = couchbase_driver:query_view(Ctx,
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, jiffy:encode([Scope, Since])},
-                    {endkey, jiffy:encode([Scope, Until3])},
-                    {inclusive_end, true}
+                    {endkey, jiffy:encode([Scope, Until2])},
+                    {inclusive_end, false}
                 ]
             ),
-            {Until3 + 1, Changes}
+            {Changes, State#state{since = Until2}}
     end.
 
 %%--------------------------------------------------------------------
@@ -224,9 +228,9 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
     Ctx = #{bucket => Bucket},
     {Keys, Revs} = lists:unzip(KeyRevs),
     lists:filtermap(fun
-        ({{ok, #document2{rev = [Rev1 | _]} = Doc}, Rev2}) when Rev1 =:= Rev2 ->
-            {true, Doc};
-        ({{ok, #document2{}}, _Rev}) ->
+        ({{ok, _, #document2{rev = [Rev1 | _]} = Doc}, Rev2})
+            when Rev1 =:= Rev2 -> {true, Doc};
+        ({{ok, _, #document2{}}, _Rev}) ->
             false
     end, lists:zip(couchbase_driver:get(Ctx, Keys), Revs)).
 
@@ -241,6 +245,6 @@ stream_docs([], #state{interval = Interval}) ->
     erlang:send_after(Interval, self(), update);
 stream_docs(Docs, #state{callback = Callback}) ->
     lists:foreach(fun(Doc) ->
-        Callback(Doc)
+        Callback({ok, Doc})
     end, Docs),
     erlang:send_after(0, self(), update).

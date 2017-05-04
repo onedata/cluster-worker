@@ -277,12 +277,9 @@ batch_requests(Requests) ->
     end, #{
         save => [],
         get => gb_sets:new(),
-        delete => gb_sets:new()
+        delete => []
     }, Requests),
-    RequestsBatch2#{
-        get => gb_sets:to_list(maps:get(get, RequestsBatch2)),
-        delete => gb_sets:to_list(maps:get(delete, RequestsBatch2))
-    }.
+    RequestsBatch2#{get => gb_sets:to_list(maps:get(get, RequestsBatch2))}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -302,8 +299,9 @@ batch_request({save, Ctx, {Key, Value}}, RequestsBatch) ->
     RequestsBatch#{save => SaveRequests2};
 batch_request({get, Key}, #{get := GetRequests} = RequestsBatch) ->
     RequestsBatch#{get => gb_sets:add(Key, GetRequests)};
-batch_request({delete, Key}, #{delete := RemoveRequests} = RequestsBatch) ->
-    RequestsBatch#{delete => gb_sets:add(Key, RemoveRequests)};
+batch_request({delete, Ctx, Key}, #{delete := RemoveRequests} = RequestsBatch) ->
+    RemoveRequests2 = lists:keystore(Key, 2, RemoveRequests, {Ctx, Key}),
+    RequestsBatch#{delete => RemoveRequests2};
 batch_request(_Request, RequestsBatch) ->
     RequestsBatch.
 
@@ -343,7 +341,7 @@ handle_request(_Connection, {save, _, {Key, _Value}}, ResponsesBatch) ->
 handle_request(_Connection, {get, Key}, ResponsesBatch) ->
     GetResponses = maps:get(get, ResponsesBatch),
     get_response(Key, GetResponses);
-handle_request(_Connection, {delete, Key}, ResponsesBatch) ->
+handle_request(_Connection, {delete, _, Key}, ResponsesBatch) ->
     RemoveResponses = maps:get(delete, ResponsesBatch),
     get_response(Key, RemoveResponses);
 handle_request(Connection, {get_counter, Key, Default}, _) ->
@@ -352,6 +350,8 @@ handle_request(Connection, {update_counter, Key, Delta, Default}, _) ->
     couchbase_crud:update_counter(Connection, Key, Delta, Default);
 handle_request(Connection, {save_design_doc, DesignName, EJson}, _) ->
     couchbase_view:save_design_doc(Connection, DesignName, EJson);
+handle_request(Connection, {get_design_doc, DesignName}, _) ->
+    couchbase_view:get_design_doc(Connection, DesignName);
 handle_request(Connection, {delete_design_doc, DesignName}, _) ->
     couchbase_view:delete_design_doc(Connection, DesignName);
 handle_request(Connection, {query_view, DesignName, ViewName, Opts}, _) ->

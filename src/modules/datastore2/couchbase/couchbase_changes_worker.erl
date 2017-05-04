@@ -9,11 +9,11 @@
 %%% This module is responsible for moving forward safe sequence number.
 %%% Safe sequence number defines upper bound for changes that are guaranteed
 %%% to be present in the changes view and may be streamed to the clients.
-%%% There should be only one couchbase_changes_processor process per bucket
+%%% There should be only one couchbase_changes_worker process per bucket
 %%% and scope, as it mutates safe sequence number associated with this pair.
 %%% @end
 %%%-------------------------------------------------------------------
--module(couchbase_changes_processor).
+-module(couchbase_changes_worker).
 -author("Krzysztof Trzepla").
 
 -behaviour(gen_server).
@@ -34,6 +34,7 @@
     scope :: datastore:scope(),
     seq :: couchbase_changes:since(),
     seq_safe :: couchbase_changes:until(),
+    seq_safe_cas :: cberl:cas(),
     batch_size :: non_neg_integer(),
     interval :: non_neg_integer()
 }).
@@ -70,15 +71,16 @@ start_link(Bucket, Scope) ->
 init([Bucket, Scope]) ->
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
+    {ok, Cas, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
     SeqKey = couchbase_changes:get_seq_key(Scope),
-    {ok, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
+    {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     erlang:send_after(0, self(), update),
     {ok, #state{
         bucket = Bucket,
         scope = Scope,
         seq = Seq,
         seq_safe = SeqSafe,
+        seq_safe_cas = Cas,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 25),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -136,7 +138,7 @@ handle_info(update, #state{
     Ctx = #{bucket => Bucket},
     SeqKey = couchbase_changes:get_seq_key(Scope),
     Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey) of
-        {ok, Seq2} -> Seq2;
+        {ok, _, Seq2} -> Seq2;
         {error, _Reason} -> Seq
     end,
     {noreply, fetch_changes(Seq, Seq3, State)};
@@ -190,6 +192,7 @@ fetch_changes(Seq, Seq, #state{interval = Interval} = State) ->
 fetch_changes(SeqSafe, Seq, #state{
     bucket = Bucket,
     scope = Scope,
+    seq_safe_cas = Cas,
     batch_size = BatchSize,
     interval = Interval
 } = State) ->
@@ -207,7 +210,9 @@ fetch_changes(SeqSafe, Seq, #state{
 
     SeqSafe3 = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    ok = couchbase_driver:save(Ctx, {SeqSafeKey, SeqSafe3}),
+    {ok, Cas2, SeqSafe3} = couchbase_driver:save(
+        Ctx#{cas => Cas}, {SeqSafeKey, SeqSafe3}
+    ),
 
     ChangeKeys = lists:map(fun(S) ->
         couchbase_changes:get_change_key(Scope, S)
@@ -218,7 +223,7 @@ fetch_changes(SeqSafe, Seq, #state{
         Seq2 -> erlang:send_after(0, self(), update);
         _ -> erlang:send_after(Interval, self(), update)
     end,
-    State#state{seq_safe = SeqSafe3, seq = Seq}.
+    State#state{seq_safe = SeqSafe3, seq_safe_cas = Cas2, seq = Seq}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -281,10 +286,10 @@ ignore_change(Seq, #state{bucket = Bucket, scope = Scope}) ->
     Ctx = #{bucket => Bucket},
     ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
     case couchbase_driver:get(Ctx, ChangeKey) of
-        {ok, Key} ->
+        {ok, _, Key} ->
             case couchbase_driver:get(Ctx, Key) of
-                {ok, #document2{seq = Seq}} -> false;
-                {ok, #document2{}} -> true;
+                {ok, _, #document2{seq = Seq}} -> false;
+                {ok, _, #document2{}} -> true;
                 {error, key_enoent} -> undefined
             end;
         {error, key_enoent} ->

@@ -219,13 +219,13 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{ rev = Rev} = State) when
+terminate(Reason, #state{rev = Rev} = State) when
     Reason == normal;
     Reason == shutdown ->
     State2 = modify_sync(State),
     #state{data = Data} = commit_sync(State2),
-    {ok, Delay} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_doc_commit_retry_delay),
+    Delay = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        datastore_doc_commit_retry_delay, timer:seconds(1)),
     exec_retry(terminate, [Data, Rev], Delay);
 terminate({shutdown, _}, State) ->
     terminate(shutdown, State);

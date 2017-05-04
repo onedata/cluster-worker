@@ -256,7 +256,7 @@ wait(#future{value = {error, Reason}}) ->
     {error, Reason};
 wait(#future{durability = disc, driver = Driver, value = Ref}) ->
     case Driver:wait(Ref) of
-        {ok, Value} -> {ok, disc, Value};
+        {ok, _Cas, Value} -> {ok, disc, Value};
         {error, Reason} -> {error, Reason}
     end;
 wait(Futures) when is_list(Futures) ->

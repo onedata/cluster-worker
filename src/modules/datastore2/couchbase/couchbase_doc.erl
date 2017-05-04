@@ -49,9 +49,11 @@ set_next_seq(_Connection, #{no_seq := true}, Doc) ->
     Doc;
 set_next_seq(Connection, Ctx, #document2{key = Key, scope = Scope} = Doc) ->
     SeqKey = couchbase_changes:get_seq_key(Scope),
-    {ok, Seq} = couchbase_crud:update_counter(Connection, SeqKey, 1, 1),
+    {ok, _, Seq} = couchbase_crud:update_counter(Connection, SeqKey, 1, 1),
     ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
-    [{ChangeKey, ok}] = couchbase_crud:save(Connection, [{Ctx, ChangeKey, Key}]),
+    [{ChangeKey, {ok, _Cas, Key}}] = couchbase_crud:save(
+        Connection, [{Ctx#{cas => 0}, ChangeKey, Key}]
+    ),
     Doc#document2{seq = Seq}.
 
 %%--------------------------------------------------------------------
