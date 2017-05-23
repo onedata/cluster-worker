@@ -27,20 +27,25 @@
     get_should_return_missing_error/1,
     fetch_should_return_value_from_memory/1,
     fetch_should_return_value_from_disc/1,
+    fetch_should_return_value_from_disc_when_memory_driver_undefined/1,
+    fetch_should_return_value_from_memory_when_disc_driver_undefined/1,
     fetch_should_save_value_in_memory/1,
     fetch_should_return_value_from_memory_and_disc/1,
+    fetch_should_return_missing_error/1,
+    fetch_should_return_missing_error_when_disc_driver_undefined/1,
     save_should_save_value_in_memory/1,
     save_should_save_value_on_disc/1,
+    save_should_save_value_on_disc_when_memory_driver_undefined/1,
     save_should_save_value_in_memory_and_on_disc/1,
     save_should_overwrite_value_in_memory/1,
     save_should_not_overwrite_value_in_memory/1,
+    save_should_save_value_in_memory_when_disc_driver_undefined/1,
+    save_should_return_no_memory_error_when_disc_driver_undefined/1,
     update_should_get_value_from_memory_and_save_in_memory/1,
     update_should_get_value_from_disc_and_save_in_memory/1,
     update_should_get_value_from_disc_and_save_on_disc/1,
     update_should_return_missing_error/1,
     update_should_pass_error/1,
-    delete_should_save_value_in_memory/1,
-    delete_should_save_value_on_disc/1,
     flush_should_save_value_on_disc/1,
     flush_should_return_missing_error/1,
     mark_active_should_activate_new_entry/1,
@@ -60,20 +65,25 @@ all() ->
         get_should_return_missing_error,
         fetch_should_return_value_from_memory,
         fetch_should_return_value_from_disc,
+        fetch_should_return_value_from_disc_when_memory_driver_undefined,
+        fetch_should_return_value_from_memory_when_disc_driver_undefined,
         fetch_should_save_value_in_memory,
         fetch_should_return_value_from_memory_and_disc,
+        fetch_should_return_missing_error,
+        fetch_should_return_missing_error_when_disc_driver_undefined,
         save_should_save_value_in_memory,
         save_should_save_value_on_disc,
+        save_should_save_value_on_disc_when_memory_driver_undefined,
         save_should_save_value_in_memory_and_on_disc,
         save_should_overwrite_value_in_memory,
         save_should_not_overwrite_value_in_memory,
+        save_should_save_value_in_memory_when_disc_driver_undefined,
+        save_should_return_no_memory_error_when_disc_driver_undefined,
         update_should_get_value_from_memory_and_save_in_memory,
         update_should_get_value_from_disc_and_save_in_memory,
         update_should_get_value_from_disc_and_save_on_disc,
         update_should_return_missing_error,
         update_should_pass_error,
-        delete_should_save_value_in_memory,
-        delete_should_save_value_on_disc,
         flush_should_save_value_on_disc,
         flush_should_return_missing_error,
         mark_active_should_activate_new_entry,
@@ -127,6 +137,11 @@ get_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual({error, key_enoent},
         rpc:call(Worker, datastore_cache, get, [?CTX, ?KEY])
+    ),
+    ?assertEqual({error, key_enoent},
+        rpc:call(Worker, datastore_cache, get, [
+            ?CTX#{memory_driver => undefined}, ?KEY
+        ])
     ).
 
 fetch_should_return_value_from_memory(Config) ->
@@ -141,6 +156,26 @@ fetch_should_return_value_from_disc(Config) ->
     rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
     ?assertMatch({ok, disc, #document2{}},
         rpc:call(Worker, datastore_cache, fetch, [?CTX, ?KEY])
+    ).
+
+fetch_should_return_value_from_disc_when_memory_driver_undefined(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, ?MEM_DRV, save, [?MEM_CTX, ?DOC]),
+    rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
+    ?assertMatch({ok, disc, #document2{}},
+        rpc:call(Worker, datastore_cache, fetch, [
+            ?CTX#{memory_driver => undefined}, ?KEY
+        ])
+    ).
+
+fetch_should_return_value_from_memory_when_disc_driver_undefined(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, ?MEM_DRV, save, [?MEM_CTX, ?DOC]),
+    rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
+    ?assertMatch({ok, memory, #document2{}},
+        rpc:call(Worker, datastore_cache, fetch, [
+            ?CTX#{disc_driver => undefined}, ?KEY
+        ])
     ).
 
 fetch_should_save_value_in_memory(Config) ->
@@ -167,6 +202,21 @@ fetch_should_return_value_from_memory_and_disc(Config) ->
         ])
     ).
 
+fetch_should_return_missing_error(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual({error, key_enoent},
+        rpc:call(Worker, datastore_cache, fetch, [?CTX, ?KEY])
+    ).
+
+fetch_should_return_missing_error_when_disc_driver_undefined(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?DOC]),
+    ?assertEqual({error, key_enoent},
+        rpc:call(Worker, datastore_cache, fetch, [
+            ?CTX#{disc_driver => undefined}, ?KEY
+        ])
+    ).
+
 save_should_save_value_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, memory, #document2{}},
@@ -177,6 +227,22 @@ save_should_save_value_on_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, disc, #document2{}},
         rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC])
+    ).
+
+save_should_save_value_in_memory_when_disc_driver_undefined(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertMatch({ok, memory, #document2{}},
+        rpc:call(Worker, datastore_cache, save, [
+            ?CTX#{disc_driver => undefined}, ?DOC
+        ])
+    ).
+
+save_should_save_value_on_disc_when_memory_driver_undefined(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertMatch({ok, disc, #document2{}},
+        rpc:call(Worker, datastore_cache, save, [
+            ?CTX#{memory_driver => undefined}, ?DOC
+        ])
     ).
 
 save_should_save_value_in_memory_and_on_disc(Config) ->
@@ -224,6 +290,14 @@ save_should_not_overwrite_value_in_memory(Config) ->
         rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC(2)])
     ).
 
+save_should_return_no_memory_error_when_disc_driver_undefined(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual({error, enomem},
+        rpc:call(Worker, datastore_cache, save, [
+            ?CTX#{disc_driver => undefined}, ?DOC
+        ])
+    ).
+
 update_should_get_value_from_memory_and_save_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, ?MEM_DRV, save, [?MEM_CTX, ?DOC]),
@@ -266,18 +340,6 @@ update_should_pass_error(Config) ->
         rpc:call(Worker, datastore_cache, update, [?CTX, ?KEY, fun(_Doc) ->
             {error, aborted}
         end])
-    ).
-
-delete_should_save_value_in_memory(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({ok, memory, #document2{deleted = true}},
-        rpc:call(Worker, datastore_cache, delete, [?CTX, ?DOC])
-    ).
-
-delete_should_save_value_on_disc(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({ok, disc, #document2{deleted = true}},
-        rpc:call(Worker, datastore_cache, delete, [?CTX, ?DOC])
     ).
 
 flush_should_save_value_on_disc(Config) ->
@@ -411,6 +473,7 @@ cache_size(fetch_should_return_value_from_disc) -> 0;
 cache_size(save_should_save_value_on_disc) -> 0;
 cache_size(save_should_save_value_in_memory_and_on_disc) -> 1;
 cache_size(save_should_overwrite_value_in_memory) -> 1;
+cache_size(save_should_return_no_memory_error_when_disc_driver_undefined) -> 0;
 cache_size(update_should_get_value_from_disc_and_save_on_disc) -> 0;
 cache_size(delete_should_save_value_on_disc) -> 0;
 cache_size(mark_active_should_fail_on_full_cache) -> 0;

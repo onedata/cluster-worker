@@ -22,7 +22,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([get/2, fetch/2, save/2, update/2, update/3, delete/2, flush/2]).
+-export([get/2, fetch/2, save/2, update/2, update/3, flush/2]).
 
 -type ctx() :: #{memory_driver => datastore:memory_driver(),
                  memory_driver_ctx => datastore:memory_driver_ctx(),
@@ -38,7 +38,7 @@
 -record(future, {
     durability :: undefined | durability(),
     driver :: undefined | datastore:driver(),
-    value :: {ok, value()} | {error, term()}
+    value :: {ok, value()} | {error, term()} | couchbase_pool:future()
 }).
 
 -type future() :: #future{}.
@@ -104,7 +104,10 @@ fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
 save(Ctx, #document2{} = Value) ->
     hd(save(Ctx, [Value]));
 save(Ctx, Values) when is_list(Values) ->
-    wait([save_async(Ctx, Value, true) || Value <- Values]).
+    lists:map(fun
+        ({error, {enomem, _Value}}) -> {error, enomem};
+        (Other) -> Other
+    end, wait([save_async(Ctx, Value, true) || Value <- Values])).
 
 %%--------------------------------------------------------------------
 %% @equiv hd(update(Ctx, [{Key, Diff}]))
@@ -137,19 +140,10 @@ update(Ctx, Updates) when is_list(Updates) ->
             ?FUTURE({error, Reason})
     end, lists:zip(Diffs, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
 
-    wait(Futures).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Marks values as deleted in memory or on disc.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(ctx(), value()) -> {ok, durability(), value()} | {error, term()};
-    (ctx(), [value()]) -> [{ok, durability(), value()} | {error, term()}].
-delete(Ctx, #document2{} = Value) ->
-    hd(delete(Ctx, [Value]));
-delete(Ctx, Values) when is_list(Values) ->
-    save(Ctx, [Value#document2{deleted = true} || Value <- Values]).
+    lists:map(fun
+        ({error, {enomem, _Value}}) -> {error, enomem};
+        (Other) -> Other
+    end, wait(Futures)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -178,6 +172,26 @@ flush(Ctx, Keys) when is_list(Keys) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_async(ctx(), key(), boolean()) -> future().
+get_async(#{memory_driver := undefined} = Ctx, Key, true) ->
+    #{
+        disc_driver := DiscDriver,
+        disc_driver_ctx := DiscCtx
+    } = Ctx,
+    ?FUTURE(disc, DiscDriver, DiscDriver:get_async(DiscCtx, Key));
+get_async(#{memory_driver := undefined}, _Key, false) ->
+    ?FUTURE(memory, undefined, {error, key_enoent});
+get_async(#{disc_driver := undefined} = Ctx, Key, _) ->
+    #{
+        memory_driver := MemoryDriver,
+        memory_driver_ctx := MemoryCtx
+    } = Ctx,
+
+    case MemoryDriver:get(MemoryCtx, Key) of
+        {ok, Value} ->
+            ?FUTURE(memory, MemoryDriver, {ok, Value});
+        {error, Reason} ->
+            ?FUTURE(memory, MemoryDriver, {error, Reason})
+    end;
 get_async(Ctx, Key, DiscFallback) ->
     #{
         memory_driver := MemoryDriver,
@@ -203,6 +217,26 @@ get_async(Ctx, Key, DiscFallback) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), value(), boolean()) -> future().
+save_async(#{memory_driver := undefined} = Ctx, #document2{} = Value, true) ->
+    #{
+        disc_driver := DiscDriver,
+        disc_driver_ctx := DiscCtx
+    } = Ctx,
+    ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Value));
+save_async(#{memory_driver := undefined}, #document2{} = Value, false) ->
+    ?FUTURE(memory, undefined, {error, {enomem, Value}});
+save_async(#{disc_driver := undefined} = Ctx, #document2{key = Key} = Value, _) ->
+    #{
+        memory_driver := MemoryDriver,
+        memory_driver_ctx := MemoryCtx
+    } = Ctx,
+
+    case datastore_cache_manager:mark_active(Key) of
+        true ->
+            ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Value));
+        false ->
+            ?FUTURE(memory, MemoryDriver, {error, {enomem, Value}})
+    end;
 save_async(Ctx, #document2{key = Key} = Value, DiscFallback) ->
     #{
         memory_driver := MemoryDriver,

@@ -42,9 +42,9 @@
 -export_type([uuid/0, key/0, ext_key/0, value/0, document/0, document_diff/0,
     bucket/0, opt_ctx/0, option/0]).
 
--type memory_driver() :: ets_driver | mnesia_driver.
+-type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
--type disc_driver() :: couchbase_driver.
+-type disc_driver() :: undefined | couchbase_driver.
 -type disc_driver_ctx() :: couchbase_driver:ctx().
 -type driver() :: memory_driver() | disc_driver().
 -type driver_ctx() :: memory_driver_ctx() | disc_driver_ctx().
