@@ -54,10 +54,8 @@ init(_Args) ->
 -spec handle(ping | healthcheck) -> pong | ok.
 handle(ping) ->
     pong;
-
 handle(healthcheck) ->
     ok;
-
 handle(_Request) ->
     ?log_bad_request(_Request).
 

@@ -23,16 +23,17 @@
 -type mode() :: read | write.
 -type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
                    {get, datastore:key()} |
-                   {delete, datastore:key()} |
+                   {delete, couchbase_driver:ctx(), datastore:key()} |
                    {get_counter, datastore:key(), cberl:arithmetic_default()} |
                    {update_counter, datastore:key(), cberl:arithmetic_delta(),
                        cberl:arithmetic_default()} |
                    {save_design_doc, couchbase_driver:design(),
                        datastore_json2:ejson()} |
+                   {get_design_doc, couchbase_driver:design()} |
                    {delete_design_doc, couchbase_driver:design()} |
                    {query_view, couchbase_driver:design(),
                        couchbase_driver:view(), [couchbase_driver:view_opt()]}.
--type response() :: ok | {ok, term()} | {error, term()}.
+-type response() :: ok | {ok, term()} | {ok, term(), term()} | {error, term()}.
 -type future() :: reference().
 
 -export_type([mode/0, request/0, response/0, future/0]).

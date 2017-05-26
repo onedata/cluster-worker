@@ -17,7 +17,8 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([save_design_doc/3, delete_design_doc/2, query/4]).
+-export([save_design_doc/3, get_design_doc/2, delete_design_doc/2]).
+-export([query/4]).
 
 -define(TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_view_timeout, 120000)).
@@ -37,8 +38,21 @@ save_design_doc(Connection, DesignName, EJson) ->
     Path = <<"_design/", DesignName/binary>>,
     Body = jiffy:encode(EJson),
     ContentType = <<"application/json">>,
-    parse_design_doc_response(
+    parse_design_doc_response(save,
         cberl:http(Connection, view, put, Path, ContentType, Body, ?TIMEOUT)
+    ).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Retrieves design document from a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_design_doc(cberl:connection(), couchbase_driver:design()) ->
+    {ok, datastore_json2:ejson()} | {error, term()}.
+get_design_doc(Connection, DesignName) ->
+    Path = <<"_design/", DesignName/binary>>,
+    parse_design_doc_response(get,
+        cberl:http(Connection, view, get, Path, <<>>, <<>>, ?TIMEOUT)
     ).
 
 %%--------------------------------------------------------------------
@@ -50,9 +64,8 @@ save_design_doc(Connection, DesignName, EJson) ->
     ok | {error, term()}.
 delete_design_doc(Connection, DesignName) ->
     Path = <<"_design/", DesignName/binary>>,
-    ContentType = <<"application/json">>,
-    parse_design_doc_response(
-        cberl:http(Connection, view, delete, Path, ContentType, <<>>, ?TIMEOUT)
+    parse_design_doc_response(delete,
+        cberl:http(Connection, view, delete, Path, <<>>, <<>>, ?TIMEOUT)
     ).
 
 %%--------------------------------------------------------------------
@@ -91,19 +104,23 @@ query(Connection, DesignName, ViewName, Opts) ->
 %% Parses add/delete design document response.
 %% @end
 %%--------------------------------------------------------------------
--spec parse_design_doc_response({ok, cberl:http_status(), cberl:http_body()} |
-    {error, term()}) -> ok | {error, term()}.
-parse_design_doc_response({ok, Code, _Response})
+-spec parse_design_doc_response(Method :: atom(),
+    {ok, cberl:http_status(), cberl:http_body()} | {error, term()}) ->
+    ok | {ok, datastore_json2:ejson()} | {error, term()}.
+parse_design_doc_response(get, {ok, Code, Response})
+    when 200 =< Code andalso Code < 300 ->
+    {ok, jiffy:decode(Response)};
+parse_design_doc_response(_Method, {ok, Code, _Response})
     when 200 =< Code andalso Code < 300 ->
     ok;
-parse_design_doc_response({ok, _Code, Response}) ->
+parse_design_doc_response(_Method, {ok, _Code, Response}) ->
     case jiffy:decode(Response) of
         {[{<<"error">>, Error}, {<<"reason">>, Reason}]} ->
             {error, {Error, Reason}};
         _ ->
             {error, {unknown_error, Response}}
     end;
-parse_design_doc_response({error, Reason}) ->
+parse_design_doc_response(_Method, {error, Reason}) ->
     {error, Reason}.
 
 %%--------------------------------------------------------------------

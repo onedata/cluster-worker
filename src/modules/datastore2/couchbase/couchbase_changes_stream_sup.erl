@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module implements supervisor behaviour and is responsible
-%%% for supervising and restarting CouchBase changes streamers.
+%%% for supervising and restarting CouchBase changes streams.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(couchbase_changes_stream_sup).
@@ -72,7 +72,7 @@ stop_worker(Pid) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
     {ok, {#{strategy => simple_one_for_one, intensity => 3, period => 1}, [
-        couchbase_changes_streamer_spec()
+        couchbase_changes_stream_spec()
     ]}}.
 
 %%%===================================================================
@@ -85,13 +85,13 @@ init([]) ->
 %% Returns a worker child_spec for a CouchBase changes stream.
 %% @end
 %%--------------------------------------------------------------------
--spec couchbase_changes_streamer_spec() -> supervisor:child_spec().
-couchbase_changes_streamer_spec() ->
+-spec couchbase_changes_stream_spec() -> supervisor:child_spec().
+couchbase_changes_stream_spec() ->
     #{
-        id => couchbase_changes_streamer,
-        start => {couchbase_changes_streamer, start_link, []},
-        restart => transient,
+        id => couchbase_changes_stream,
+        start => {couchbase_changes_stream, start_link, []},
+        restart => temporary,
         shutdown => timer:seconds(10),
         type => worker,
-        modules => [couchbase_changes_streamer]
+        modules => [couchbase_changes_stream]
     }.
