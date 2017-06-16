@@ -27,7 +27,7 @@
     multicast/4, cast_pool/3, cast_pool/4, cast_pool/5]).
 
 
--type execute_type() :: direct | spawn | {pool, worker_pool:name()}.
+-type execute_type() :: direct | spawn | {pool, call | cast, worker_pool:name()}.
 
 
 %%%===================================================================
@@ -99,7 +99,7 @@ call_pool(WorkerRef, Request, PoolName) ->
 -spec call_pool(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
     worker_pool:name(), Timeout :: timeout()) -> Result :: term() | {error, term()}.
 call_pool(WorkerRef, Request, PoolName, Timeout) ->
-    call(WorkerRef, Request, Timeout, {pool, PoolName}).
+    call(WorkerRef, Request, Timeout, {pool, call, PoolName}).
 
 
 
@@ -198,7 +198,7 @@ cast_pool(WorkerRef, Request, PoolName, ReplyTo) ->
     worker_pool:name(), ReplyTo :: process_ref(), MsgId :: term() | undefined)
         -> ok | {error, term()}.
 cast_pool(WorkerRef, Request, PoolName, ReplyTo, MsgId) ->
-    cast(WorkerRef, Request, ReplyTo, MsgId, {pool, PoolName}).
+    cast(WorkerRef, Request, ReplyTo, MsgId, {pool, cast, PoolName}).
 
 
 %%--------------------------------------------------------------------
@@ -255,7 +255,7 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
             Args = prepare_args(Name, Request, MsgId),
-            execute(Args, Node, ExecOption),
+            execute(Args, Node, ExecOption, Timeout),
             receive
                 #worker_answer{id = MsgId, response = Response} -> Response
             after Timeout ->
@@ -284,7 +284,7 @@ cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
             Args = prepare_args(Name, Request, MsgId, ReplyTo),
-            execute(Args, Node, ExecOption),
+            execute(Args, Node, ExecOption, undefined),
             ok;
         Error ->
             Error
@@ -296,15 +296,19 @@ cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
 %% Executes request by calling worker_host:proc_request.
 %% It depends on ExecOption whether request will be processed by
 %% the calling process spawned process or process from pool.
+%% Timeout argument is ignored for direct and spawn exec options.
 %% @end
 %%--------------------------------------------------------------------
--spec execute(Args :: list(), node(), ExecOption :: execute_type()) -> term().
-execute(Args, _Node, direct) ->
+-spec execute(Args :: list(), node(), ExecOption :: execute_type(),
+    Timeout ::non_neg_integer() | undefined) -> term().
+execute(Args, _Node, direct, _Timeout) ->
     apply(worker_host, proc_request, Args);
-execute(Args, Node, spawn) ->
+execute(Args, Node, spawn, _Timeout) ->
     spawn(Node, worker_host, proc_request, Args);
-execute(Args, _Node, {pool, PoolName}) ->
-    worker_pool:call(PoolName, {worker_host, proc_request, Args}).
+execute(Args, _Node, {pool, call, PoolName}, Timeout) ->
+    worker_pool:call(PoolName, {worker_host, proc_request, Args}, worker_pool:default_strategy(), Timeout);
+execute(Args, _Node, {pool, cast, PoolName}, _) ->
+    worker_pool:cast(PoolName, {worker_host, proc_request, Args}).
 
 
 %%--------------------------------------------------------------------
