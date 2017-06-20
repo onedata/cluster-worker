@@ -50,6 +50,11 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
+-define(LOG_MONITORING_STATS(Format, Data),
+    file:write_file("/tmp/node_manager_monitoring.txt",
+        io_lib:format("~n~p: " ++ Format, [calendar:local_time() | Data]),
+        [append])).
+
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
@@ -888,8 +893,8 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
             ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold) orelse (MemUsage >= MemToStartCleaning))) of
         true ->
             spawn(fun() ->
-                ?info("Monitoring state: ~p", [MonState]),
-                ?info("Erlang ets mem usage: ~p", [
+                ?LOG_MONITORING_STATS("Monitoring state: ~p", [MonState]),
+                ?LOG_MONITORING_STATS("Erlang ets mem usage: ~p", [
                     lists:reverse(lists:sort(lists:map(fun(N) ->
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
@@ -930,12 +935,12 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                             erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
                             erlang:process_info(P, total_heap_size), P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
-                ?info("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
+                ?LOG_MONITORING_STATS("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
                 "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
                     TopProcesses, MergedStacks, MergedStacks2
                 ]),
 
-                ?debug("Schedulers basic info: all: ~p, online: ~p",
+                ?LOG_MONITORING_STATS("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
                 NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
                 case is_list(NewSchedulerInfo0) of
@@ -943,7 +948,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                         NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
                         gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
 
-                        ?debug("Schedulers advanced info: ~p", [NewSchedulerInfo]),
+                        ?LOG_MONITORING_STATS("Schedulers advanced info: ~p", [NewSchedulerInfo]),
                         case is_list(SchedulerInfo) of
                             true ->
                                 Percent = lists:map(fun({{I, A0, T0}, {I, A1, T1}}) ->
@@ -951,7 +956,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                                 {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai, Ti}) ->
                                     {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo, NewSchedulerInfo)),
                                 Aggregated = A / T,
-                                ?debug("Schedulers utilization percent: ~p, aggregated: ~p", [Percent, Aggregated]);
+                                ?LOG_MONITORING_STATS("Schedulers utilization percent: ~p, aggregated: ~p", [Percent, Aggregated]);
                             _ ->
                                 ok
                         end;
