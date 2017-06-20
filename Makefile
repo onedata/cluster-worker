@@ -20,25 +20,13 @@ all: test_rel
 ## Rebar targets
 ##
 
-priv/sync_gateway:
-	git config --global user.name dev
-	git config --global user.email dev@onedata.org
-	git config --global color.ui false
-	mkdir -p vendor/sync_gateway
-	curl https://raw.githubusercontent.com/couchbase/sync_gateway/1.3.1/bootstrap.sh > vendor/sync_gateway/bootstrap.sh
-	chmod +x vendor/sync_gateway/bootstrap.sh
-	cd vendor/sync_gateway && ./bootstrap.sh 660b1c92fadce1a9c7e692dfe7c5b741772d1dd2 && ./build.sh
-	find vendor/sync_gateway -name shallow -type l -exec test ! -e '{}' ';' -delete
-	cp vendor/sync_gateway/godeps/bin/sync_gateway priv/
-	rm -rf vendor
-
-compile: priv/sync_gateway
+compile:
 	$(REBAR) compile
 
-upgrade: priv/sync_gateway
+upgrade:
 	$(REBAR) upgrade
 
-generate: compile priv/sync_gateway
+generate: compile
 	$(REBAR) release $(OVERLAY_VARS)
 
 clean: relclean

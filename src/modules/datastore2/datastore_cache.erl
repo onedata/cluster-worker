@@ -22,14 +22,20 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([get/2, fetch/2, save/2, update/2, update/3, flush/2]).
+-export([get/2, fetch/2, save/2, update/2, update/3, flush/2, flush/1]).
+-export([inactivate/1]).
 
--type ctx() :: #{memory_driver => datastore:memory_driver(),
+-type ctx() :: #{prefix => binary(),
+                 mutator_pid => pid(),
+                 volatile => boolean(),
+                 memory_driver => datastore:memory_driver(),
                  memory_driver_ctx => datastore:memory_driver_ctx(),
                  disc_driver => datastore:disc_driver(),
-                 disc_driver_ctx => datastore:disc_driver_ctx()}.
+                 disc_driver_ctx => datastore:disc_driver_ctx(),
+                % TODO - remove when driver and datastore ctx are separated
+                 atom() => term()}.
 -type key() :: datastore:key().
--type value() :: datastore:doc().
+-type value() :: datastore:document().
 -type diff() :: fun((value()) -> {ok, value()} | {error, term()}).
 -type durability() :: memory | disc.
 
@@ -99,9 +105,10 @@ fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
 %% Stores values in memory or if cache is full on disc.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), value()) -> {ok, durability(), value()} | {error, term()};
-    (ctx(), [value()]) -> [{ok, durability(), value()} | {error, term()}].
-save(Ctx, #document2{} = Value) ->
+-spec save(ctx(), value() | [value()]) ->
+    {ok, durability(), value()} | {error, term()}
+    | [{ok, durability(), value()} | {error, term()}].
+save(Ctx, #document{} = Value) ->
     hd(save(Ctx, [Value]));
 save(Ctx, Values) when is_list(Values) ->
     lists:map(fun
@@ -150,6 +157,15 @@ update(Ctx, Updates) when is_list(Updates) ->
 %% Stores values from memory on disc.
 %% @end
 %%--------------------------------------------------------------------
+-spec flush([{key(), ctx()}]) -> [{ok, value()} | {error, term()}].
+flush(List) ->
+    lists:map(fun({Key, Ctx}) -> flush(Ctx, Key) end, List).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Stores values from memory on disc.
+%% @end
+%%--------------------------------------------------------------------
 -spec flush(ctx(), key()) -> {ok, value()} | {error, term()};
     (ctx(), [key()]) -> [{ok, value()} | {error, term()}].
 flush(Ctx, <<_/binary>> = Key) ->
@@ -159,6 +175,20 @@ flush(Ctx, Keys) when is_list(Keys) ->
         ({ok, disc, Value}) -> {ok, Value};
         ({error, Reason}) -> {error, Reason}
     end, wait([flush_async(Ctx, Key) || Key <- Keys])).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks all values stored in memory as inactive, i.e. all inactivated entries
+%% may be removed from cache when its capacity limit is reached.
+%% @end
+%%--------------------------------------------------------------------
+-spec inactivate(ctx()) -> boolean().
+inactivate(#{memory_driver := undefined}) ->
+    false;
+inactivate(#{disc_driver := undefined, mutator_pid := Pid}) ->
+    datastore_cache_manager:mark_inactive(memory, Pid);
+inactivate(#{mutator_pid := Pid}) ->
+    datastore_cache_manager:mark_inactive(disc, Pid).
 
 %%%===================================================================
 %%% Internal functions
@@ -217,27 +247,29 @@ get_async(Ctx, Key, DiscFallback) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), value(), boolean()) -> future().
-save_async(#{memory_driver := undefined} = Ctx, #document2{} = Value, true) ->
+save_async(#{memory_driver := undefined} = Ctx, #document{} = Value, true) ->
     #{
         disc_driver := DiscDriver,
         disc_driver_ctx := DiscCtx
     } = Ctx,
     ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Value));
-save_async(#{memory_driver := undefined}, #document2{} = Value, false) ->
+save_async(#{memory_driver := undefined}, #document{} = Value, false) ->
     ?FUTURE(memory, undefined, {error, {enomem, Value}});
-save_async(#{disc_driver := undefined} = Ctx, #document2{key = Key} = Value, _) ->
+save_async(#{disc_driver := undefined} = Ctx, #document{key = Key} = Value, _) ->
     #{
         memory_driver := MemoryDriver,
         memory_driver_ctx := MemoryCtx
     } = Ctx,
 
-    case datastore_cache_manager:mark_active(Key) of
+    case datastore_cache_manager:mark_active(memory, Ctx, Key) of
         true ->
-            ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Value));
+            Result = MemoryDriver:save(MemoryCtx, Value),
+            inactivate_volatile(memory, Ctx, Key),
+            ?FUTURE(memory, MemoryDriver, Result);
         false ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Value}})
     end;
-save_async(Ctx, #document2{key = Key} = Value, DiscFallback) ->
+save_async(Ctx, #document{key = Key} = Value, DiscFallback) ->
     #{
         memory_driver := MemoryDriver,
         memory_driver_ctx := MemoryCtx,
@@ -245,9 +277,11 @@ save_async(Ctx, #document2{key = Key} = Value, DiscFallback) ->
         disc_driver_ctx := DiscCtx
     } = Ctx,
 
-    case {datastore_cache_manager:mark_active(Key), DiscFallback} of
+    case {datastore_cache_manager:mark_active(disc, Ctx, Key), DiscFallback} of
         {true, _} ->
-            ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Value));
+            Result = MemoryDriver:save(MemoryCtx, Value),
+            inactivate_volatile(disc, Ctx, Key),
+            ?FUTURE(memory, MemoryDriver, Result);
         {false, true} ->
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Value));
         {false, false} ->
@@ -295,3 +329,17 @@ wait(#future{durability = disc, driver = Driver, value = Ref}) ->
     end;
 wait(Futures) when is_list(Futures) ->
     [wait(Future) || Future <- Futures].
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inactivates volatile entry.
+%% @end
+%%--------------------------------------------------------------------
+-spec inactivate_volatile(datastore_cache_manager:pool(), ctx(), key()) ->
+    boolean().
+inactivate_volatile(Pool, Ctx = #{volatile := true}, Key) ->
+    CacheKey = couchbase_doc:set_prefix(Ctx, Key),
+    datastore_cache_manager:mark_inactive(Pool, CacheKey);
+inactivate_volatile(_Pool, _Ctx, _Key) ->
+    false.

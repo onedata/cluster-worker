@@ -20,7 +20,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([handle_messages/6, clear/3, update/2]).
+-export([handle_messages/3, update/2]).
 
 %%%===================================================================
 %%% API functions
@@ -31,304 +31,48 @@
 %% Handles operations on documents.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_messages(Messages :: [model_behaviour:message()],
-    CurrentValue :: model_behaviour:value_doc(), Driver :: atom(), FD :: atom(),
-    ModelConfig :: model_behaviour:model_config(), Key :: datastore:ext_key()) ->
-  {AnsList :: list(), NewCurrentValue :: model_behaviour:value_doc(),
-    Status :: memory_store_driver:change()} | no_return().
-handle_messages(Messages, CurrentValue0, Driver, FD, ModelConfig, Key) ->
-  {CurrentValue, Restored} = case CurrentValue0 of
-    undefined ->
-      case get_from_memory(Driver, FD, ModelConfig, Key) of
-        {error, _} = Error ->
-          throw({{get_error, Error}, CurrentValue0, ok});
-        GetAns ->
-          GetAns
-      end;
-    _ ->
-      {CurrentValue0, false}
-  end,
-
-  {NewValue, DiskValue, RestoreMem, OpAnsReversed} =
-    lists:foldl(fun(M, {TmpValue, TmpDiskValue, TmpRestoreMem, AnsList}) ->
-    OpAns = handle_message(M, TmpValue, FD, ModelConfig),
-    {NTV, NDV, NRM} =
-      translate_handle_ans(OpAns, TmpValue, TmpDiskValue, TmpRestoreMem),
-    {NTV, NDV, NRM, [{M, OpAns} | AnsList]}
-  end, {CurrentValue, CurrentValue, false, []}, Messages),
-
-  apply_at_memory_store(ModelConfig, Driver, Key,
-    NewValue, CurrentValue, Restored, RestoreMem),
-
-  AnsList = map_ans_list(Key, lists:reverse(OpAnsReversed)),
-
-  case NewValue =/= CurrentValue of
-    true ->
-      case DiskValue =/= CurrentValue of
-        true ->
-          {AnsList, NewValue, {to_save, DiskValue}};
-        _ ->
-          {AnsList, NewValue, to_save}
-      end;
-    _ ->
-      {AnsList, NewValue, ok}
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles clear operation.
-%% @end
-%%--------------------------------------------------------------------
--spec clear(Driver :: atom(), ModelConfig :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) -> ok | datastore:generic_error().
-clear(Driver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
-  % TODO - race at delete
-  case caches_controller:save_consistency_info(memory_store_driver:main_level(Level), MN, Key) of
-    true ->
-      apply(Driver, delete, [ModelConfig, Key, ?PRED_ALWAYS]);
-    _ ->
-      {error, consistency_info_save_failed}
-  end.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handles single operation on document.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_message(Messages :: model_behaviour:message(),
-    CurrentValue :: model_behaviour:value_doc(), FD :: atom(),
-    ModelConfig :: model_behaviour:model_config()) -> {ok | memory_restore,
-  NewCurrentValue :: model_behaviour:value_doc()} | {disk_save,
-  NewCurrentValue :: model_behaviour:value_doc(), DiskAction :: term()} |{error, term()}.
-handle_message({save, [Document]}, _CurrentValue, _FD, _ModelConfig) ->
-  {ok, Document};
-handle_message({force_save, Args}, CurrentValue, FD, ModelConfig) ->
-  [Bucket, ToSave] = case Args of
-    [TS] ->
-      [FD:select_bucket(ModelConfig, TS), TS];
-    _ ->
-      Args
-  end,
-  case memory_store_driver:resolve_conflict(ModelConfig, FD, ToSave) of
-    not_changed ->
-      {ok, CurrentValue};
-    {#document{} = Document, ToDel} ->
-      {disk_save, Document#document{rev = undefined}, {Document, Bucket, ToDel}};
-    Error ->
-      Error
-  end;
-handle_message({create, [Document]}, not_found, _FD, _ModelConfig) ->
-  {ok, Document};
-handle_message({create, [_Document]}, _CurrentValue, _FD, _ModelConfig) ->
-  {error, already_exists};
-handle_message({update, [_Key, _Diff]}, not_found, _FD,
-    #model_config{name = ModelName}) ->
-  {error, {not_found, ModelName}};
-handle_message({update, [_Key, Diff]}, CurrentValue, _FD, _ModelConfig) ->
-  try
-    case ?MODULE:update(CurrentValue#document.value, Diff) of
-      {ok, V2} ->
-        {ok, CurrentValue#document{value = V2}};
-      Error ->
-        Error
-    end
-  catch
-    % Update function may throw exception to cancel update
-    throw:Thrown ->
-      {throw, Thrown}
-  end;
-handle_message({create_or_update, [Document, _Diff]}, not_found, _FD,
-    _ModelConfig) ->
-  {ok, Document};
-handle_message({create_or_update, [_Document, Diff]}, CurrentValue, _FD, _ModelConfig) ->
-  try
-    case ?MODULE:update(CurrentValue#document.value, Diff) of
-      {ok, V2} ->
-        {ok, CurrentValue#document{value = V2}};
-      Error ->
-        Error
-    end
-  catch
-    % Update function may throw exception to cancel update
-    throw:Thrown ->
-      {throw, Thrown}
-  end;
-handle_message({delete, [_Key, _Pred]}, not_found, _FD, _ModelConfig) ->
-  {ok, not_found};
-handle_message({delete, [_Key, Pred]}, CurrentValue, _FD, _ModelConfig) ->
-  try
-    case Pred() of
-      true ->
-        {ok, not_found};
-      false ->
-        {ok, CurrentValue}
-    end
-  catch
-    % Pred function may throw exception
-    throw:Thrown ->
-      {throw, Thrown}
-  end;
-handle_message({get, [_Key]}, not_found, _FD, #model_config{name = ModelName}) ->
-  {error, {not_found, ModelName}};
-handle_message({get, [_Key]}, CurrentValue, _FD, _ModelConfig) ->
-  {memory_restore, CurrentValue};
-handle_message({exists, [_Key]}, not_found, _FD, _ModelConfig) ->
-  {ok, false};
-handle_message({exists, [_Key]}, CurrentValue, _FD, _ModelConfig) ->
-  {memory_restore, CurrentValue}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets document from memory if not cached in process.
-%% @end
-%%--------------------------------------------------------------------
--spec get_from_memory(Driver :: atom(), FlushDriver :: atom(),
-    ModelConfig :: model_behaviour:model_config(), Key :: datastore:ext_key()) ->
-  {model_behaviour:value_doc() | not_found, boolean()} | {error, term()}.
-get_from_memory(Driver, undefined, ModelConfig, Key) ->
-  case apply(Driver, get, [ModelConfig, Key]) of
-    {error, {not_found, _}} ->
-      {not_found, false};
-    {ok, #document{} = D} ->
-      {D, false};
-    Other ->
-      Other
-  end;
-get_from_memory(Driver, FlushDriver, #model_config{name = MN, store_level = Level} = ModelConfig, Key) ->
-  case apply(Driver, get, [ModelConfig, Key]) of
-    {error, {not_found, _}} ->
-      case caches_controller:check_cache_consistency(memory_store_driver:main_level(Level), MN) of
-        {ok, _, _} ->
-          {not_found, false};
-        % TODO - simplify memory monitoring
-        % (monitor whole memory consistency - not single docs)
-        {monitored, ClearedList, _, _} ->
-          case lists:member(Key, ClearedList) of
-            true ->
-              get_from_disk(FlushDriver, ModelConfig, Key);
+-spec handle_messages(Messages :: [memory_store_driver:message()],
+    Key :: datastore:ext_key(), Master :: pid()) ->
+  {AnsList :: list(), memory_store_driver:change()}.
+handle_messages(Messages, Key, Master) ->
+  OpAnsReversedFinal = try
+    {Ctx, NewValue, OpAnsReversed, AnsToProc} =
+      lists:foldl(fun({Ctx0, Op} = _M0, {LastCtx, TmpValue0, AnsList, TmpAnsToProc}) ->
+        try
+          Ctx = datastore_context:override(mutator_pid, Master, Ctx0),
+          M = {Ctx, Op},
+          {Saved, TmpValue00} = apply_at_memory_store(Ctx, LastCtx, TmpValue0),
+          TmpValue = get_if_needed(M, TmpValue00, Key),
+          {OpAns, Value} = handle_message(M, TmpValue),
+          case Saved of
+            ok ->
+              {Ctx, Value, AnsList, [OpAns | TmpAnsToProc]};
             _ ->
-              {not_found, false}
-          end;
-        _ ->
-          get_from_disk(FlushDriver, ModelConfig, Key)
-      end;
-    {ok, #document{} = D} ->
-      {D, false};
-    Other ->
-      Other
-  end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets document from disk.
-%% @end
-%%--------------------------------------------------------------------
--spec get_from_disk(Driver :: atom(),
-    ModelConfig :: model_behaviour:model_config(), Key :: datastore:ext_key()) ->
-  {model_behaviour:value_doc(), boolean()} | {error, term()}.
-get_from_disk(Driver, ModelConfig, Key) ->
-  case apply(Driver, get, [ModelConfig, Key]) of
-    {ok, Doc} ->
-      % TODO - memory store driver understands revisions
-      {Doc#document{rev = undefined}, true};
-    {error, {not_found, _}} ->
-      {not_found, false};
-    Error ->
-      Error
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @private
-%% Translates handle answer to structure used in further processing.
-%% @end
-%%--------------------------------------------------------------------
--spec translate_handle_ans(OpAns :: term(), TmpValue :: model_behaviour:value_doc(),
-    TmpDiskValue :: model_behaviour:value_doc(), TmpRestoreMem :: boolean()) ->
-    {Value :: model_behaviour:value_doc(), DiskValue :: model_behaviour:value_doc(),
-      RestoreMem :: boolean()}.
-translate_handle_ans(OpAns, TmpValue, TmpDiskValue, TmpRestoreMem) ->
-  case OpAns of
-    {ok, false} -> {TmpValue, TmpDiskValue, TmpRestoreMem};
-    {ok, NewTmpValue} -> {NewTmpValue, TmpDiskValue, TmpRestoreMem};
-    {error, {not_found, _}} -> {not_found, TmpDiskValue, TmpRestoreMem};
-    % Newer forceSave will override disk action (its has newer revisions)
-    {disk_save, SavedValue, DiskAction} -> {SavedValue, DiskAction, TmpRestoreMem};
-    {memory_restore, RestoredValue} -> {RestoredValue, TmpDiskValue, true};
-    _ -> {TmpValue, TmpDiskValue, TmpRestoreMem}
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @private
-%% Maps lists of answers to its final form.
-%% @end
-%%--------------------------------------------------------------------
--spec map_ans_list(Key :: datastore:ext_key(), List :: list()) -> list().
-map_ans_list(Key, List) ->
-  lists:map(fun
-    ({{delete, _}, {ok, _}}) -> ok;
-    ({{exists, _}, {ok, false}}) -> {ok, false};
-    ({{exists, _}, {ok, _}}) -> {ok, true};
-    ({{exists, _}, {memory_restore, _}}) -> {ok, true};
-    ({{get, _}, {memory_restore, GetAns}}) -> {ok, GetAns};
-    ({{force_save, _}, {ok, _}}) -> ok;
-    ({_, {ok, _}}) -> {ok, Key};
-    ({_, {disk_save, _, _}}) -> ok;
-    ({_, Err}) -> Err
-  end, List).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @private
-%% Applies changes to memory store.
-%% @end
-%%--------------------------------------------------------------------
--spec apply_at_memory_store(ModelConfig :: model_behaviour:model_config(),
-    Driver :: atom(), Key :: datastore:ext_key(),
-    NewValue :: model_behaviour:value_doc(),
-    CurrentValue :: model_behaviour:value_doc(),
-    Restored :: boolean(), RestoreMem :: boolean()) ->
-    ok | no_return().
-apply_at_memory_store(ModelConfig, Driver, Key,
-    NewValue, CurrentValue, Restored, RestoreMem) ->
-  case {NewValue =:= CurrentValue, Restored or RestoreMem} of
-    {true, false} ->
-      ok;
-    {true, true} ->
-      case NewValue of
-        not_found ->
-          ok;
-        _ ->
-          case apply(Driver, save, [ModelConfig, NewValue]) of
-            {ok, Key} -> ok;
-            Other -> throw({Other, CurrentValue, ok})
+              {Ctx, Value, TmpAnsToProc ++ AnsList, [OpAns]}
           end
-      end;
-    _ ->
-      case NewValue of
-        not_found ->
-          case apply(Driver, delete, [ModelConfig, Key, ?PRED_ALWAYS]) of
-            ok -> ok;
-            Other -> throw({Other, CurrentValue, ok})
-          end;
-        _ ->
-          case apply(Driver, save, [ModelConfig, NewValue]) of
-            {ok, Key} -> ok;
-            Other -> throw({Other, CurrentValue, ok})
-          end
-      end
-  end.
+        catch
+          throw:{datastore_cache_error, Error} ->
+            ?error_stacktrace("Modify error for key ~p: ~p", [Key, Error]),
+            throw({{datastore_cache_error, Error}, AnsList})
+        end
+    end, {undefined, undefined, [], []}, Messages),
+
+    try
+      apply_at_memory_store(undefined, Ctx, NewValue),
+      AnsToProc ++ OpAnsReversed
+    catch
+      throw:{datastore_cache_error, Error2} ->
+        [{datastore_cache_error, Error2} | OpAnsReversed]
+    end
+  catch
+    throw:{{datastore_cache_error, DCError}, AList} ->
+      lists:duplicate(length(Messages) - length(AList),
+        {datastore_cache, DCError}) ++ AList
+  end,
+  AnsList = lists:reverse(OpAnsReversedFinal),
+  {AnsList, memory_store_driver:get_durability_from_memory()}.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Updates documents value.
 %% @end
@@ -340,3 +84,152 @@ update(OldValue, Diff) when is_map(Diff) ->
   {ok, datastore_utils:shallow_to_record(NewValue)};
 update(OldValue, Diff) when is_function(Diff) ->
   Diff(OldValue).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handles single operation on document.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_message(Messages :: memory_store_driver:message(),
+    CurrentValue :: memory_store_driver:value_doc()) -> {Ans,
+  NewCurrentValue :: memory_store_driver:value_doc()} when
+  Ans :: {ok, boolean() | datastore:ext_key()} | datastore:generic_error().
+handle_message({#{resolve_conflicts := false},
+  {save, [#document{key = Key} = Document]}}, CurrentValue) ->
+  {{ok, Key}, memory_store_driver:update_rev_if_needed(CurrentValue, Document)};
+handle_message({_, {save, [Doc]}}, CurrentValue) ->
+  case memory_store_driver:resolve_conflict(CurrentValue, Doc) of
+    not_changed ->
+      {ok, CurrentValue};
+    Document ->
+      {ok, Document}
+  end;
+handle_message({_, {create, [#document{key = Key} = Document]}},
+    #document{deleted = true} = CurrentValue) ->
+  {{ok, Key}, memory_store_driver:update_rev_if_needed(CurrentValue, Document)};
+handle_message({_, {create, [_Document]}}, CurrentValue) ->
+  {{error, already_exists}, CurrentValue};
+handle_message({#{model_name := MN}, {update, [_Key, _Diff]}},
+    #document{deleted = true} = CV) ->
+  {{error, {not_found, MN}}, CV};
+handle_message({_, {update, [Key, Diff]}}, CurrentValue) ->
+  try
+    case ?MODULE:update(CurrentValue#document.value, Diff) of
+      {ok, V2} ->
+        {{ok, Key}, CurrentValue#document{value = V2}};
+      Error ->
+        {Error, CurrentValue}
+    end
+  catch
+    % Update function may throw exception to cancel update
+    throw:Thrown ->
+      {{throw, Thrown}, CurrentValue}
+  end;
+handle_message({_, {create_or_update, [#document{key = Key} = Document, _Diff]}},
+    #document{deleted = true} = CurrentValue) ->
+  {{ok, Key}, memory_store_driver:update_rev_if_needed(CurrentValue, Document)};
+handle_message({_, {create_or_update, [#document{key = Key}, Diff]}}, CurrentValue) ->
+  try
+    case ?MODULE:update(CurrentValue#document.value, Diff) of
+      {ok, V2} ->
+        {{ok, Key}, CurrentValue#document{value = V2}};
+      Error ->
+        {Error, CurrentValue}
+    end
+  catch
+    % Update function may throw exception to cancel update
+    throw:Thrown ->
+      {{throw, Thrown}, CurrentValue}
+  end;
+handle_message({_, {delete, [_Key, _Pred]}}, #document{deleted = true} = CV) ->
+  {ok, CV};
+handle_message({_, {delete, [_Key, Pred]}}, CurrentValue) ->
+  try
+    case Pred() of
+      true ->
+        {ok, CurrentValue#document{deleted = true}};
+      false ->
+        {ok, CurrentValue}
+    end
+  catch
+    % Pred function may throw exception
+    throw:Thrown ->
+      {{throw, Thrown}, CurrentValue}
+  end;
+handle_message({#{model_name := MN}, {get, [_Key]}},
+    #document{deleted = true} = CV) ->
+  {{error, {not_found, MN}}, CV};
+handle_message({_, {get, [_Key]}}, CurrentValue) ->
+  {{ok, CurrentValue}, CurrentValue};
+handle_message({_, {exists, [_Key]}}, #document{deleted = true} = CV) ->
+  {{ok, false}, CV};
+handle_message({_, {exists, [_Key]}}, CurrentValue) ->
+  {{ok, true}, CurrentValue}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handles single operation on document.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_if_needed(Ctx :: memory_store_driver:ctx(),
+    CurrentValue :: memory_store_driver:value_doc(),
+    Key :: datastore:ext_key()) -> memory_store_driver:value_doc() | no_return().
+% TODO - models work on #document{deleted = true}
+get_if_needed({#{generated_uuid := true}, {save, _}}, CurrentValue, _) ->
+  CurrentValue;
+get_if_needed({#{get_method := GetMethod} = Ctx, _Op}, undefined, Key) ->
+  case apply(datastore_cache, GetMethod, [Ctx, Key]) of
+    {ok, Doc} ->
+      put(mem_value, Doc),
+      Doc;
+    {ok, _, Doc} ->
+      put(mem_value, Doc),
+      Doc;
+    {error, key_enoent} ->
+      DelDoc = #document{key = Key, deleted = true},
+      put(mem_value, DelDoc),
+      DelDoc;
+    {error, _} = Error ->
+      throw({datastore_cache_error, Error})
+  end;
+get_if_needed(_, CurrentValue, _) ->
+  CurrentValue.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies changes to memory store.
+%% @end
+%%--------------------------------------------------------------------
+-spec apply_at_memory_store(Ctx :: memory_store_driver:ctx(),
+    LastCtx :: memory_store_driver:ctx(),
+    NewValue :: memory_store_driver:value_doc()) ->
+    {ok | saved, ValueAfterSave :: memory_store_driver:value_doc()} | no_return().
+apply_at_memory_store(_Ctx, undefined, NewValue) ->
+  {ok, NewValue};
+apply_at_memory_store(Ctx, Ctx, NewValue) ->
+  {ok, NewValue};
+apply_at_memory_store(_Ctx, LastCtx, NewValue) ->
+  case NewValue =:= get(mem_value) of
+    true ->
+      {ok, NewValue};
+    _ ->
+      ToSave = memory_store_driver:increment_rev(LastCtx, NewValue),
+      case datastore_cache:save(LastCtx, ToSave) of
+        {ok, disc, #document{key = Key} = Saved} ->
+          put(mem_value, Saved),
+          memory_store_driver:del_durability_from_memory(Key),
+          {saved, Saved};
+        {ok, _, #document{key = Key} = Saved} ->
+          put(mem_value, Saved),
+          memory_store_driver:add_durability_to_memory(Key, LastCtx),
+          {saved, Saved};
+        Other -> throw({datastore_cache_error, Other})
+      end
+  end.

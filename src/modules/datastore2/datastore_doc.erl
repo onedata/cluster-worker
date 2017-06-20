@@ -70,7 +70,7 @@
 -spec run_sync(args(), key(), request()) ->
     response() | {error, Reason :: term()} | no_return().
 run_sync(Args, Key, Request) ->
-    run_sync(Args, Key, Request, timer:seconds(5)).
+    run_sync(Args, Key, Request, timer:minutes(10)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -250,7 +250,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Synchronously modifies transaction process data.
+%% Synchronously modifies datastore document data.
 %% @end
 %%--------------------------------------------------------------------
 -spec modify_sync(state()) -> state().
@@ -262,7 +262,7 @@ modify_sync(#state{} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Asynchronously modifies transaction process data by spawning a handling
+%% Asynchronously modifies datastore document data by spawning a handling
 %% process. The process is spawned only if there are pending requests and
 %% there is no other handler already spawned.
 %% @end
@@ -329,7 +329,7 @@ handle_modified({modified, {true, NextChanges}, Data}, #state{
         modify_handler_pid = undefined
     }));
 handle_modified(Exit, #state{commit_delay = Delay} = State) ->
-    ?error("Modify handler of a transaction process terminated abnormally: ~p",
+    ?error("Modify handler of a datastore document terminated abnormally: ~p",
         [Exit]),
     schedule_terminate(schedule_commit(Delay, modify_async(State#state{
         modify_handler_pid = undefined
@@ -338,7 +338,7 @@ handle_modified(Exit, #state{commit_delay = Delay} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Synchronously commits transaction process changes.
+%% Synchronously commits datastore document changes.
 %% @end
 %%--------------------------------------------------------------------
 -spec commit_sync(state()) -> state().
@@ -353,7 +353,7 @@ commit_sync(#state{commit_delay = Delay} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Asynchronously commits transaction process changes by spawning a handling
+%% Asynchronously commits datastore document changes by spawning a handling
 %% process. The process is spawned only if there are uncommitted changes and
 %% there is no other handler already spawned.
 %% @end
@@ -415,7 +415,7 @@ handle_committed({committed, {{false, Changes}, Rev}, Delay}, #state{
         commit_handler_pid = undefined
     });
 handle_committed(Exit, #state{commit_delay = Delay} = State) ->
-    ?error("Commit handler of a transaction process terminated abnormally: ~p",
+    ?error("Commit handler of a datastore document terminated abnormally: ~p",
         [Exit]),
     schedule_terminate(schedule_commit(Delay, State#state{
         commit_handler_pid = undefined
@@ -424,7 +424,7 @@ handle_committed(Exit, #state{commit_delay = Delay} = State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Merges transaction process changes.
+%% Merges datastore document changes.
 %% @end
 %%--------------------------------------------------------------------
 -spec merge_changes(changes(), changes()) -> changes().

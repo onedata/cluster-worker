@@ -20,7 +20,7 @@
 -define(TASK_SAVE_TIMEOUT, timer:seconds(30)).
 
 %%worker_proxy
--define(DEFAULT_REQUEST_TIMEOUT, timer:minutes(5)).
+-define(DEFAULT_REQUEST_TIMEOUT, timer:minutes(20)).
 
 %%couchdb_datastore_driver
 -define(WAIT_FOR_STATE_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_wait_for_state_timeout, timer:seconds(30))).

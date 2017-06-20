@@ -21,7 +21,7 @@
 -type table() :: atom().
 -type ctx() :: #{table => table()}.
 -type key() :: datastore:key().
--type value() :: datastore:doc().
+-type value() :: datastore:document().
 -type init_opt() :: {type, ets:type()} | {read_concurrency, boolean()} |
                     {write_concurrency, boolean()}.
 
@@ -58,7 +58,7 @@ init(#{table := Table}, Opts) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save(ctx(), value()) -> {ok, value()}.
-save(#{table := Table}, #document2{key = Key} = Doc) ->
+save(#{table := Table}, #document{key = Key} = Doc) ->
     ets:insert(Table, {Key, Doc}),
     {ok, Doc}.
 

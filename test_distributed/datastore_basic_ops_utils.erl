@@ -27,14 +27,20 @@
 -define(REQUEST_TIMEOUT, timer:minutes(5)).
 
 -export([create_delete_test/2, save_test/2, update_test/2, get_test/2,
-    exists_test/2, mixed_test/2, links_test/2, links_number_test/2, set_env/2,
-    clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
+    exists_test/2, mixed_test/2, links_test/2, links_number_test/2, list_test_base/2,
+    set_env/2, clear_env/1, clear_cache/1, get_record/2, get_record/3, get_record/4]).
 
 -define(TIMEOUT, timer:minutes(5)).
 -define(call_store(Model, Fun, CustomArgs),
     erlang:apply(model, execute_with_default_context, [Model, Fun, CustomArgs])).
+-define(call_store_with_list(Model, Fun, CustomArgs),
+    erlang:apply(model, execute_with_default_context, [Model, Fun, CustomArgs,
+        [{list_enabled, {true, return_errors}}]])).
 -define(rpc_store(W, Model, Fun, CustomArgs),
     rpc:call(W, model, execute_with_default_context, [Model, Fun, CustomArgs])).
+-define(rpc_store_with_list(W, Model, Fun, CustomArgs),
+    rpc:call(W, model, execute_with_default_context, [Model, Fun, CustomArgs,
+        [{list_enabled, {true, return_errors}}]])).
 -define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
 
 %%%===================================================================
@@ -266,9 +272,53 @@ save_test_base(Config, Level, Fun, Fun2) ->
     ?assertEqual(OpsNum, OkNum),
 
     test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
+    clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
+
+    [
+        #parameter{name = save_time, value = OkTime / OkNum, unit = "us",
+            description = "Average time of save operation"}
+    ].
+
+list_test_base(Config, Level) ->
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    ThreadsNum = ?config(threads_num, Config),
+    DocsPerThead = ?config(docs_per_thead, Config),
+    OpsPerDoc = ?config(ops_per_doc, Config),
+    ConflictedThreads = ?config(conflicted_threads, Config),
+    TestRecord = ?config(test_record, Config),
+
+    Fun = save,
+    Fun2 = delete,
+
+    set_test_type(Config, Workers),
+    Master = self(),
+    AnswerDesc = get(file_beg),
+
+    SaveMany = fun(DocsSet) ->
+        for(1, DocsPerThead, fun(I) ->
+            for(OpsPerDoc, fun() ->
+                BeforeProcessing = os:timestamp(),
+                Ans = ?call_store_with_list(TestRecord, Fun, [
+                    #document{
+                        key = list_to_binary(DocsSet ++ integer_to_list(I)),
+                        value = get_record(TestRecord, I, <<"abc">>, {test, tuple})
+                    }]),
+                AfterProcessing = os:timestamp(),
+                Master ! {store_ans, AnswerDesc, Ans, timer:now_diff(AfterProcessing, BeforeProcessing)}
+            end)
+        end)
+    end,
+
+    spawn_at_nodes(Workers, ThreadsNum, ConflictedThreads, SaveMany),
+    OpsNum = ThreadsNum * DocsPerThead * OpsPerDoc,
+    {OkNum, OkTime, _ErrorNum, _ErrorTime, ErrorsList} = count_answers(OpsNum),
+    ?assertEqual([], ErrorsList),
+    ?assertEqual(OpsNum, OkNum),
+
+    test_with_get(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc),
 
     ListBeforeProcessing = os:timestamp(),
-    ?assertMatch({ok, _}, ?rpc_store(Worker1, TestRecord, list, [?GET_ALL, []])),
+    ?assertMatch({ok, _}, ?rpc_store_with_list(Worker1, TestRecord, list, [?GET_ALL, []])),
     ListAfterProcessing = os:timestamp(),
 
     clear_with_del(TestRecord, Level, Workers, DocsPerThead, ThreadsNum, ConflictedThreads, Master, AnswerDesc, Fun2),
@@ -386,7 +436,7 @@ get_test(Config, Level) ->
             description = "Average time of get operation that ended successfully"},
         #parameter{name = get_error_time, value = GetErrorTime, unit = "us",
             description = "Average time of get operation that failed (e.g. file does not exist)"},
-        #parameter{name = update_error_num, value = ErrorNum, unit = "-",
+        #parameter{name = get_error_num, value = ErrorNum, unit = "-",
             description = "Average number of update operation that failed (e.g. file does not exist)"}
     ].
 
@@ -804,14 +854,9 @@ set_env(Case, Config) ->
         false ->
             ok;
         _ ->
-            FlushDelay = case TestRecord of
-                disk_only_record -> 50;
-                _ -> 1000
-            end,
             lists:foreach(fun(W) ->
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, timer:seconds(3))),
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(3))),
-                ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, datastore_pool_batch_delay, FlushDelay)),
                 ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, tp_proc_terminate_clear_memory, false))
             end, Workers)
     end,
@@ -912,11 +957,6 @@ count_answers(Num, {OkNum, OkTime, ErrorNum, ErrorTime, ErrorsList}) ->
             count_answers(Num - 1, NewAns)
     end.
 
-disable_cache_control(Workers) ->
-    lists:foreach(fun(W) ->
-        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
-    end, Workers).
-
 get_record_name(Case) ->
     CStr = atom_to_list(Case),
     case {string:str(CStr, "cache") > 0, string:str(CStr, "sync") == 0, string:str(CStr, "no_transactions") > 0} of
@@ -948,15 +988,7 @@ get_record_name(Case) ->
     end.
 
 set_test_type(Config, Workers) ->
-    put(file_beg, get_random_string()),
-    % TODO - check why cauchdb driver does not work with such elements in link_name:
-%%     put(file_beg, binary_to_list(term_to_binary(os:timestamp()))),
-    case performance:should_clear(Config) of
-        true ->
-            disable_cache_control(Workers);
-        _ ->
-            ok
-    end.
+    put(file_beg, get_random_string()).
 
 get_random_string() ->
     get_random_string(10, "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ").

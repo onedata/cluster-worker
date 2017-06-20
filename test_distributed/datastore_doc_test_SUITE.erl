@@ -319,6 +319,9 @@ init_per_testcase(_Case, Config) ->
         proplists:get_value(merge_changes_fun, Config, MergeChangesFun)),
     test_utils:mock_expect(Workers, ?DRIVER, commit,
         proplists:get_value(commit_fun, Config, CommitFun)),
+    test_utils:mock_expect(Workers, ?DRIVER, handle_committed, fun
+        (Data, _Rev) -> Data
+    end),
     test_utils:mock_expect(Workers, ?DRIVER, commit_backoff,
         proplists:get_value(commit_backoff_fun, Config, CommitBackoffFun)),
     test_utils:mock_expect(Workers, ?DRIVER, terminate, fun
