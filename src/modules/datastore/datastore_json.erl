@@ -77,9 +77,9 @@ get_renamed_models() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec encode_record(datastore:document()) -> ejson() | no_return().
-encode_record(#document{version = undefined, value = Value}) ->
-    Type = element(1, Value),
-    encode_record(Value, {record, Type});
+%%encode_record(#document{version = undefined, value = Value}) ->
+%%    Type = element(1, Value),
+%%    encode_record(Value, {record, Type});
 encode_record(#document{version = Version, value = Value}) when is_integer(Version) ->
     Type = element(1, Value),
     {record, Fields} = Type:record_struct(Version),

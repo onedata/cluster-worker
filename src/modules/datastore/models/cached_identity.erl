@@ -86,7 +86,8 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(identity_cache_bucket, [], ?LOCAL_ONLY_LEVEL).
+    ?MODEL_CONFIG(identity_cache_bucket, [], ?LOCAL_ONLY_LEVEL)#model_config{
+        list_enabled = {true, return_errors}}.
 
 %%--------------------------------------------------------------------
 %% @doc

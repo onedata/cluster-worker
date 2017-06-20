@@ -29,6 +29,12 @@
     model, execute_with_default_context, [Model, F, A])).
 -define(call_store(N, Model, F, A, Override), ?call(N,
     model, execute_with_default_context, [Model, F, A, Override])).
+-define(call_disk(N, Model, F, A), ?call(N,
+    model, execute_with_default_context, [Model, F, A,
+        [{level, ?DIRECT_DISK_LEVEL}]])).
+-define(call_store_with_list(N, Model, F, A), ?call(N,
+    model, execute_with_default_context, [Model, F, A,
+        [{list_enabled, {true, return_errors}}]])).
 -define(call(N, M, F, A), ?call(N, M, F, A, ?TIMEOUT)).
 -define(call(N, M, F, A, T), rpc:call(N, M, F, A, T)).
 
@@ -44,10 +50,10 @@
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 %%tests
 -export([local_test/1, global_test/1, global_atomic_update_test/1, globally_cached_atomic_update_test/1,
-    disk_list_test/1, global_list_test/1, persistance_test/1, local_list_test/1, globally_cached_list_test/1,
+    disk_list_test/1, global_list_test/1, persistance_test/1, local_list_test/1,
     disk_only_links_test/1, global_only_links_test/1, globally_cached_links_test/1,
-    link_walk_test/1, multiple_links_creation_disk_test/1, multiple_links_creation_global_only_test/1,
-    disk_only_many_links_test/1, global_only_many_links_test/1, globally_cached_many_links_test/1,
+    global_only_link_walk_test/1, multiple_links_creation_disk_test/1, multiple_links_creation_global_only_test/1,
+    global_only_many_links_test/1, globally_cached_many_links_test/1,
     disk_only_create_or_update_test/1, global_only_create_or_update_test/1, globally_cached_create_or_update_test/1,
     links_scope_test/1, links_scope_proc_mem_test/1, test_models/1]).
 -export([update_and_check/4, execute_with_link_context/4, execute_with_link_context/5]).
@@ -55,10 +61,10 @@
 all() ->
     ?ALL([
         local_test, global_test, global_atomic_update_test, globally_cached_atomic_update_test, disk_list_test,
-        global_list_test, persistance_test, local_list_test, globally_cached_list_test,
-        disk_only_links_test, global_only_links_test, globally_cached_links_test, link_walk_test,
+        global_list_test, persistance_test, local_list_test,
+        disk_only_links_test, global_only_links_test, globally_cached_links_test, global_only_link_walk_test,
         multiple_links_creation_disk_test, multiple_links_creation_global_only_test,
-        disk_only_many_links_test, global_only_many_links_test, globally_cached_many_links_test,
+        global_only_many_links_test, globally_cached_many_links_test,
         disk_only_create_or_update_test, global_only_create_or_update_test, globally_cached_create_or_update_test,
         links_scope_test, links_scope_proc_mem_test, test_models
     ]).
@@ -66,9 +72,6 @@ all() ->
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
-
-% TODO - add tests that clear cache_controller model and check if cache still works,
-% TODO - add tests that check time refreshing by get and fetch_link operations
 
 test_models(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -90,14 +93,13 @@ test_models(Config) ->
             value = MC#model_config.defaults
         },
         ?assertMatch({ok, _}, ?call_store(Worker, ModelName, save, [Doc])),
-        ?assertMatch({ok, true}, ?call_store(Worker, ModelName, exists, [Key])),
+        ?assertMatch({ok, _}, ?call_store(Worker, ModelName, get, [Key])),
 
 %%        ct:print("Module ok ~p", [ModelName]),
 
         case Cache of
             true ->
-                PModule = ?call_store(Worker, driver_to_module, [?PERSISTENCE_DRIVER]),
-                ?assertMatch({ok, true}, ?call(Worker, PModule, exists, [MC, Key]), 10);
+                ?assertMatch({ok, _, _}, ?call_disk(Worker, ModelName, get, [Key]), 10);
 %%                ct:print("Module caching ok ~p", [ModelName]);
             _ ->
                 ok
@@ -177,11 +179,6 @@ links_scope_test(Config) ->
             delete_links, [Doc, lists:map(fun(I) -> GetLinkName(I) end, Links)]))
     end,
 
-    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
-        exists_link_doc, [Doc, <<"scope1">>])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
-        exists_link_doc, [Doc, <<"scope2">>])),
-
     set_link_replica_scope(<<"scope1">>),
     AddLinkWithDoc(1),
     AddLinkWithDoc(2),
@@ -200,11 +197,6 @@ links_scope_test(Config) ->
     GetAllLinks([2,3,4]),
     DeleteLink(100),
     GetAllLinks([2,3,4]),
-
-    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
-        exists_link_doc, [Doc, <<"scope1">>])),
-    ?assertMatch({ok, false}, ?call_store(Worker2, link_scopes_test_record,
-        exists_link_doc, [Doc, <<"scope2">>])),
 
     set_link_replica_scope(<<"scope2">>),
     GetAllLinks([2,3,4]),
@@ -228,11 +220,6 @@ links_scope_test(Config) ->
     DeleteLinks([3, 7, 100]),
     GetAllLinks([2,4,5,6]),
 
-    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
-        exists_link_doc, [Doc, <<"scope1">>])),
-    ?assertMatch({ok, true}, ?call_store(Worker2, link_scopes_test_record,
-        exists_link_doc, [Doc, <<"scope2">>])),
-
     set_link_replica_scope(<<"scope1">>),
     DeleteLinks([3, 7, 100, 5, 6]),
     GetAllLinks([2,4]),
@@ -253,8 +240,6 @@ links_scope_test(Config) ->
 
 links_scope_proc_mem_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
-    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    ModelConfig = link_scopes_test_record2:model_init(),
 
     Key = <<"key_lspmt">>,
     Doc =  #document{
@@ -297,9 +282,7 @@ links_scope_proc_mem_test(Config) ->
     end,
     FetchLink = fun(I, LinkReplicaScope, OtherScopes) ->
         ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            fetch_link, [Doc, GetLinkName(I)]])),
-        ?assertMatch({ok, _}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
-            fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
+            fetch_link, [Doc, GetLinkName(I)]]))
     end,
     GetAllLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
         AccFun = fun(LinkName, LinkValue, Acc) ->
@@ -322,9 +305,7 @@ links_scope_proc_mem_test(Config) ->
     DeleteLinkAndCheck = fun(I, LinkReplicaScope, OtherScopes) ->
         DeleteLink(I, LinkReplicaScope, OtherScopes),
         ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-            fetch_link, [Doc, GetLinkName(I)]])),
-        ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
-            fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
+            fetch_link, [Doc, GetLinkName(I)]]))
                  end,
     DeleteLinks = fun(Links, LinkReplicaScope, OtherScopes) ->
         ?assertMatch(ok, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
@@ -332,9 +313,7 @@ links_scope_proc_mem_test(Config) ->
             lists:map(fun(I) -> GetLinkName(I) end, Links)]])),
         lists:map(fun(I) ->
             ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes,
-                fetch_link, [Doc, GetLinkName(I)]])),
-            ?assertMatch({error, link_not_found}, ?call(Worker2, ?MODULE, execute_with_link_context, [LinkReplicaScope, OtherScopes, PModule,
-                fetch_link, [ModelConfig, Key, GetLinkName(I)]]), 7)
+                fetch_link, [Doc, GetLinkName(I)]]))
         end, Links)
     end,
 
@@ -459,8 +438,6 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
     Level = ?GLOBALLY_CACHED_LEVEL,
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
-    PModule = ?call_store(Worker1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    ModelConfig = TestRecord:model_init(),
 
     Key = list_to_binary("key_coutb_" ++ atom_to_list(Level) ++ KeyExt),
     Doc =  #document{
@@ -476,23 +453,15 @@ globally_cached_create_or_update_test_base(Config, UpdateEntity, UpdateEntity2, 
         [Doc, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
         ?call_store(Worker2, TestRecord, get, [Key])),
-    ?assertMatch({ok, #document{value = ?test_record_f1(1)}},
-        ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
+    ?assertMatch({ok, _, #document{value = ?test_record_f1(1)}},
+        ?call_disk(Worker1, TestRecord, get, [Key]), 7),
 
     ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update,
         [Doc2, UpdateEntity])),
     ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
         ?call_store(Worker2, TestRecord, get, [Key])),
-    ?assertMatch({ok, #document{value = ?test_record_f1(2)}},
-        ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
-
-    ?assertMatch(ok, ?call(Worker1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key])),
-    ?assertMatch({ok, _}, ?call_store(Worker1, TestRecord, create_or_update,
-        [Doc2, UpdateEntity2])),
-    ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
-        ?call_store(Worker2, TestRecord, get, [Key])),
-    ?assertMatch({ok, #document{value = ?test_record_f1(3)}},
-        ?call(Worker1, PModule, get, [ModelConfig, Key]), 7),
+    ?assertMatch({ok, _, #document{value = ?test_record_f1(2)}},
+        ?call_disk(Worker1, TestRecord, get, [Key]), 7),
     ok.
 
 create_or_update_test_base(Config, Level) ->
@@ -526,9 +495,6 @@ create_or_update_test_base(Config, Level, UpdateEntity, KeyExt) ->
         ?call_store(Worker2, TestRecord, get, [Key])),
     ok.
 
-disk_only_many_links_test(Config) ->
-    many_links_test_base(Config, ?DISK_ONLY_LEVEL).
-
 global_only_many_links_test(Config) ->
     many_links_test_base(Config, ?GLOBAL_ONLY_LEVEL).
 
@@ -539,10 +505,12 @@ many_links_test_base(Config, Level) ->
     GetLinkKey1 = fun(LinkedDocKey, I) ->
         list_to_binary(LinkedDocKey ++ integer_to_list(I))
     end,
-    GetLinkKey2 = fun(LinkedDocKey, I) ->
-        list_to_atom(LinkedDocKey ++ integer_to_list(I))
-    end,
-    KeyFuns = [GetLinkKey1, GetLinkKey2],
+    % Cannot use atoms in keys
+%%    GetLinkKey2 = fun(LinkedDocKey, I) ->
+%%        list_to_atom(LinkedDocKey ++ integer_to_list(I))
+%%    end,
+%%    KeyFuns = [GetLinkKey1, GetLinkKey2],
+    KeyFuns = [GetLinkKey1],
 
     GetLinkName1 = fun(_LinkedDocKey, I) ->
         integer_to_binary(I)
@@ -565,7 +533,7 @@ many_links_test_base(Config, Level) ->
     NameFuns = [GetLinkName1, GetLinkName2, GetLinkName3, GetLinkName4, GetLinkName5,
         GetLinkName6],
 
-    KeyFunsTuples = lists:zip(lists:seq(1,2), KeyFuns),
+    KeyFunsTuples = lists:zip(lists:seq(1,1), KeyFuns),
     NameFunsTuples = lists:zip(lists:seq(1,6), NameFuns),
 
     LevelString = atom_to_list(Level),
@@ -763,13 +731,8 @@ multiple_links_creation_global_only_test(Config) ->
     multiple_links_creation_test_base(Config, ?GLOBAL_ONLY_LEVEL).
 
 multiple_links_creation_test_base(Config, Level) ->
-    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
+    [Worker1, _Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
-
-    disable_cache_control_and_set_dump_delay(Workers, timer:seconds(5)), % Automatic cleaning may influence results
-    lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, timer:seconds(10)))
-    end, Workers),
 
     ModelConfig = TestRecord:model_init(),
     Key = get_key("key_mlct_", Level),
@@ -804,8 +767,8 @@ multiple_links_creation_test_base(Config, Level) ->
     AddLinks = fun(Links, Send) ->
         Ans = ?call_store(Worker1, TestRecord, add_links, [Doc#document.key,
             datastore:normalize_link_target(
-                model:create_datastore_context(normalize_link_target, ModelConfig),
-                Links)], [{level, Level}]),
+                model:create_datastore_context(normalize_link_target,
+                    [Doc#document.key], ModelConfig), Links)], [{level, Level}]),
         case Send of
             true ->
                 Self ! {link_ans, Ans};
@@ -895,15 +858,15 @@ local_test(Config) ->
     ?assertMatch({ok, _},
         ?call_store(Worker1, TestRecord, create, [
             #document{
-                key = some_other_key,
+                key = <<"some_other_key">>,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
             }])),
 
     ?assertMatch({ok, false},
-        ?call_store(Worker2, TestRecord, exists, [some_other_key])),
+        ?call_store(Worker2, TestRecord, exists, [<<"some_other_key">>])),
 
     ?assertMatch({ok, true},
-        ?call_store(Worker1, TestRecord, exists, [some_other_key])),
+        ?call_store(Worker1, TestRecord, exists, [<<"some_other_key">>])),
 
     ok.
 
@@ -1003,8 +966,8 @@ atomic_update_test_base(Config, Level, UpdateFun1, UpdateFun2) ->
 
 update_and_check(Level, TestRecord, Key, UpdateFun) ->
     UpdateAns = datastore:update(
-        model:create_datastore_context(update, TestRecord), Key, UpdateFun),
-    GetAns = datastore:get(model:create_datastore_context(get, TestRecord), Key),
+        model:create_datastore_context(update, [Key], TestRecord), Key, UpdateFun),
+    GetAns = datastore:get(model:create_datastore_context(get, [Key], TestRecord), Key),
     {UpdateAns, GetAns}.
 
 %% list operation on global cache driver (on several nodes)
@@ -1016,35 +979,6 @@ global_list_test(Config) ->
 disk_list_test(Config) ->
     generic_list_test(disk_only_record, ?config(cluster_worker_nodes, Config), ?DISK_ONLY_LEVEL).
 
-%% list operation on disk only driver (on several nodes)
-globally_cached_list_test(Config) ->
-    [Node1 | _] = Nodes = ?config(cluster_worker_nodes, Config),
-    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
-        0, non, timer:seconds(10)),
-    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
-        timer:seconds(10), non, timer:seconds(10)),
-
-    TestRecord = ?config(test_record, Config),
-    PModule = ?call_store(Node1, driver_to_module, [?PERSISTENCE_DRIVER]),
-    ModelConfig = TestRecord:model_init(),
-
-    BeforeRetryFun = fun(Keys) ->
-        lists:map(fun(Key) ->
-            ?assertMatch(ok, ?call(Node1, PModule, delete, [ModelConfig, Key, ?PRED_ALWAYS]))
-        end, Keys)
-    end,
-    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
-        timer:seconds(10), BeforeRetryFun, timer:seconds(10)),
-
-    BeforeRetryFun2 = fun(Docs) ->
-        lists:map(fun(Key) ->
-            ?assertMatch(ok, ?call(Node1, caches_controller, clear, [?GLOBAL_ONLY_LEVEL, TestRecord, Key]))
-        end, Docs)
-    end,
-    generic_list_test(globally_cached_record, Nodes, ?GLOBALLY_CACHED_LEVEL,
-        timer:seconds(10), BeforeRetryFun2, timer:seconds(10)).
-
-
 %% list operation on local cache driver (on several nodes)
 local_list_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
@@ -1055,11 +989,10 @@ local_list_test(Config) ->
     ok.
 
 %% Simple usege of link_walk
-link_walk_test(Config) ->
+global_only_link_walk_test(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
-    Level = ?DISK_ONLY_LEVEL,
     Key1 = rand_key(),
     Key2 = rand_key(),
     Key3 = rand_key(),
@@ -1346,16 +1279,21 @@ generic_list_test(TestRecord, Nodes, Level) ->
     generic_list_test(TestRecord, Nodes, Level, 0, non, 0).
 
 generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelSecondCheckAfter) ->
-    Ret0 = ?call_store(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
+    Ret0 = ?call_store_with_list(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
     ?assertMatch({ok, _}, Ret0),
     {ok, Objects0} = Ret0,
     Keys0 = lists:map(fun(#document{key = Key}) -> Key end, Objects0),
 
-    ObjCount = 424,
+    ObjCount = case Level of
+        ?DISK_ONLY_LEVEL ->
+            20;
+        _ ->
+            424
+    end,
     Keys = [rand_key() || _ <- lists:seq(1, ObjCount)],
 
     CreateDocFun = fun(Key) ->
-        ?call_store(rand_node(Nodes), TestRecord, create, [
+        ?call_store_with_list(rand_node(Nodes), TestRecord, create, [
             #document{
                 key = Key,
                 value = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>, {test, tuple})
@@ -1363,13 +1301,13 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     end,
 
     RemoveDocFun = fun(Key) ->
-        ?call_store(rand_node(Nodes), TestRecord, delete, [Key, ?PRED_ALWAYS])
+        ?call_store_with_list(rand_node(Nodes), TestRecord, delete, [Key, ?PRED_ALWAYS])
     end,
 
     [?assertMatch({ok, _}, CreateDocFun(Key)) || Key <- Keys],
 
     ListFun = fun() ->
-        Ret1 = ?call_store(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
+        Ret1 = ?call_store_with_list(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
         ?assertMatch({ok, _}, Ret1),
         {ok, Objects1} = Ret1,
         ReceivedKeys = lists:map(fun(#document{key = Key}) ->
@@ -1395,9 +1333,8 @@ generic_list_test(TestRecord, Nodes, Level, ListRetryAfter, BeforeRetryFun, DelS
     end,
 
     [?assertMatch(ok, RemoveDocFun(Key)) || Key <- Keys],
-
     CheckDelFun = fun() ->
-        Ret2 = ?call_store(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
+        Ret2 = ?call_store_with_list(rand_node(Nodes), TestRecord, list, [?GET_ALL, []]),
         ?assertMatch({ok, _}, Ret2),
         {ok, Objects2} = Ret2,
 
@@ -1426,10 +1363,3 @@ for(N, N, F) ->
 for(I, N, F) ->
     F(I),
     for(I + 1, N, F).
-
-disable_cache_control_and_set_dump_delay(Workers, Delay) ->
-    lists:foreach(fun(W) ->
-        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, Delay)),
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, mem_clearing_ratio_to_stop, 0))
-    end, Workers).

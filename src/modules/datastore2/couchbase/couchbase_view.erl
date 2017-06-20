@@ -77,8 +77,13 @@ delete_design_doc(Connection, DesignName) ->
     couchbase_driver:view(), [couchbase_dirver:view_opt()]) ->
     {ok, datastore_json2:ejson()} | {error, term()}.
 query(Connection, DesignName, ViewName, Opts) ->
-    Path = <<"_design/", DesignName/binary, "/_view/", ViewName/binary,
-        (get_query_params(Opts))/binary>>,
+    Type = case proplists:get_value(spatial, Opts, false) of
+        true -> <<"_spatial">>;
+        false -> <<"_view">>
+    end,
+    Opts2 = proplists:delete(spatial, Opts),
+    Path = <<"_design/", DesignName/binary, "/", Type/binary, "/",
+        ViewName/binary, (get_query_params(Opts2))/binary>>,
     ContentType = <<"application/json">>,
     case cberl:http(Connection, view, get, Path, ContentType, <<>>, ?TIMEOUT) of
         {ok, _Code, Response} ->
@@ -165,7 +170,12 @@ get_query_param({stale, false}) -> <<"stale=false">>;
 get_query_param({stale, update_after}) -> <<"stale=update_after">>;
 get_query_param({startkey, Key}) -> <<"startkey=", Key/binary>>;
 get_query_param({startkey_docid, Id}) -> <<"startkey_docid=", Id/binary>>;
+get_query_param({bbox, BBox}) -> <<"bbox=", BBox/binary>>;
+get_query_param({start_range, Range}) ->
+    <<"start_range=", (jiffy:encode(Range))/binary>>;
+get_query_param({end_range, Range}) ->
+    <<"end_range=", (jiffy:encode(Range))/binary>>;
 get_query_param({group, true}) -> <<"group=true">>;
 get_query_param({group, false}) -> <<"group=false">>;
-get_query_param({group_level, L}) ->
-    <<"group_level=", (integer_to_binary(L))/binary>>.
+get_query_param({group_level, Level}) ->
+    <<"group_level=", (integer_to_binary(Level))/binary>>.

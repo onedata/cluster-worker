@@ -40,9 +40,9 @@ run(RawKey, Fun) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec run_in_mnesia_transaction(Key :: term(), Fun :: fun (() -> Result :: term())) ->
-    Result :: term().
-run_in_mnesia_transaction(Key, Fun) ->
-    datastore:run_transaction(Key, Fun).
+    no_return().
+run_in_mnesia_transaction(_Key, _Fun) ->
+    throw(not_supported).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -52,7 +52,7 @@ run_in_mnesia_transaction(Key, Fun) ->
 -spec run_on_global(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run_on_global(RawKey, Fun) ->
-    Key = couchdb_datastore_driver:to_binary(RawKey),
+    Key = utils:to_binary(RawKey),
     global:trans({Key, self()}, Fun).
 
 %%--------------------------------------------------------------------
@@ -78,7 +78,7 @@ run_on_mnesia(Key, Fun) ->
 -spec run_on_mnesia(RawKey :: term(), Fun :: fun (() -> Result :: term()),
     Recursive :: boolean()) -> Result :: term().
 run_on_mnesia(RawKey, Fun, Recursive) ->
-    Key = couchdb_datastore_driver:to_binary(RawKey),
+    Key = utils:to_binary(RawKey),
     ok = lock(Key, Recursive),
     try
         Fun()

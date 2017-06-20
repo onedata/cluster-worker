@@ -13,13 +13,11 @@
 -define(MEMORY_STORE_DRIVER_HRL, 1).
 
 -record(state, {
-  driver :: atom(),
-  flush_driver :: atom(),
-  model_config :: model_behaviour:model_config(),
   key :: datastore:ext_key(),
-  current_value :: memory_store_driver:value_doc() | memory_store_driver:value_link(),
   link_proc = false :: boolean(),
-  revisions_to_save :: memory_store_driver:revision_info()
+  cached = false :: boolean(),
+  master_pid :: pid(),
+  last_ctx :: undefined | datastore_context:ctx()
 }).
 
 -endif.

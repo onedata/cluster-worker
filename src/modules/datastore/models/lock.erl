@@ -148,27 +148,25 @@ before(_ModelName, _Method, _Level, _Context) ->
 -spec enqueue(datastore:ext_key(), pid(), boolean()) ->
     {ok, acquired | wait} | {error, already_acquired}.
 enqueue(Key, Pid, Recursive) ->
-    datastore:run_transaction(Key, fun() ->
-        case get(Key) of
-            {ok, #document{value = #lock{queue = Q}}} ->
-                case has(Q, Pid) of
-                    true ->
-                        case Recursive of
-                            true ->
-                                {ok, Key} = update(Key, #{queue => inc(Q)}),
-                                {ok, acquired};
-                            false ->
-                                {error, already_acquired}
-                        end;
-                    false ->
-                        {ok, Key} = update(Key, #{queue => add(Q, Pid)}),
-                        {ok, wait}
-                end;
-            {error, {not_found, _}} ->
-                {ok, _} = create(#document{key = Key, value = #lock{queue = add([], Pid)}}),
-                {ok, acquired}
-        end
-    end).
+    case get(Key) of
+        {ok, #document{value = #lock{queue = Q}}} ->
+            case has(Q, Pid) of
+                true ->
+                    case Recursive of
+                        true ->
+                            {ok, Key} = update(Key, #{queue => inc(Q)}),
+                            {ok, acquired};
+                        false ->
+                            {error, already_acquired}
+                    end;
+                false ->
+                    {ok, Key} = update(Key, #{queue => add(Q, Pid)}),
+                    {ok, wait}
+            end;
+        {error, {not_found, _}} ->
+            {ok, _} = create(#document{key = Key, value = #lock{queue = add([], Pid)}}),
+            {ok, acquired}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -180,27 +178,25 @@ enqueue(Key, Pid, Recursive) ->
 -spec dequeue(datastore:ext_key(), pid()) ->
     {ok, pid() | empty} | {error, not_lock_owner | lock_does_not_exist}.
 dequeue(Key, Pid) ->
-    datastore:run_transaction(Key, fun() ->
-        case get(Key) of
-            {ok, #document{value = #lock{queue = Q}}} ->
-                case has(Q, Pid) of
-                    false ->
-                        {error, not_lock_owner};
-                    true ->
-                        NewQ = dec(Q),
-                        case length(NewQ) of
-                            0 ->
-                                delete(Key),
-                                {ok, empty};
-                            _ ->
-                                {ok, Key} = update(Key, #{queue => NewQ}),
-                                {ok, owner(NewQ)}
-                        end
-                end;
-            {error, {not_found, _}} ->
-                {error, lock_does_not_exist}
-        end
-    end).
+    case get(Key) of
+        {ok, #document{value = #lock{queue = Q}}} ->
+            case has(Q, Pid) of
+                false ->
+                    {error, not_lock_owner};
+                true ->
+                    NewQ = dec(Q),
+                    case length(NewQ) of
+                        0 ->
+                            delete(Key),
+                            {ok, empty};
+                        _ ->
+                            {ok, Key} = update(Key, #{queue => NewQ}),
+                            {ok, owner(NewQ)}
+                    end
+            end;
+        {error, {not_found, _}} ->
+            {error, lock_does_not_exist}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

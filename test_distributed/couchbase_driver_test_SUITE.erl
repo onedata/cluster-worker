@@ -44,6 +44,8 @@
     update_counter_should_return_default_value/1,
     update_counter_should_update_value/1,
     save_design_doc_should_return_success/1,
+    save_view_doc_should_return_success/1,
+    save_spatial_view_doc_should_return_success/1,
     get_design_doc_should_return_doc/1,
     get_design_doc_should_return_missing_error/1,
     delete_design_doc_should_return_success/1,
@@ -84,6 +86,8 @@ all() ->
         update_counter_should_return_default_value,
         update_counter_should_update_value,
         save_design_doc_should_return_success,
+        save_view_doc_should_return_success,
+        save_spatial_view_doc_should_return_success,
         get_design_doc_should_return_doc,
         get_design_doc_should_return_missing_error,
         delete_design_doc_should_return_success,
@@ -106,7 +110,7 @@ all() ->
 
 -define(MODEL, test_model).
 -define(BUCKET, <<"default">>).
--define(CTX, #{bucket => ?BUCKET, mutator => ?MUTATOR}).
+-define(CTX, #{bucket => ?BUCKET, mutator => ?MUTATOR, prefix => <<"prefix">>}).
 -define(CASE, atom_to_binary(?FUNCTION_NAME, utf8)).
 -define(KEY, ?KEY(1)).
 -define(KEY(N), <<"key-", (?CASE)/binary, "-", (integer_to_binary(N))/binary>>).
@@ -120,20 +124,19 @@ all() ->
 -define(MUTATOR(N), <<"mutator-", (?CASE)/binary, "-",
     (integer_to_binary(N))/binary>>).
 -define(DOC, ?DOC(1)).
--define(DOC(N), #document2{
+-define(DOC(N), #document{
     key = ?KEY(N),
     value = ?VALUE,
     scope = ?SCOPE
 }).
 -define(DESIGN, <<"design-", (?CASE)/binary>>).
 -define(VIEW, <<"view-", (?CASE)/binary>>).
+-define(VIEW_FUNCTION, <<"function (doc, meta) {\r\n"
+"  emit(meta.id, null);\r\n"
+"}\r\n">>).
 -define(DESIGN_EJSON, {[{<<"views">>,
     {[{?VIEW,
-        {[{<<"map">>,
-            <<"function (doc, meta) {\r\n"
-            "  emit(meta.id, null);\r\n"
-            "}\r\n">>
-        }]}
+        {[{<<"map">>, ?VIEW_FUNCTION}]}
     }]}
 }]}).
 -define(PERF_PARAM(Name, Value, Unit, Description), [
@@ -159,17 +162,17 @@ all() ->
 
 save_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, _, Doc} = ?assertMatch({ok, _, #document2{}},
+    {ok, _, Doc} = ?assertMatch({ok, _, #document{}},
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
     ),
-    ?assertEqual(?KEY, Doc#document2.key),
-    ?assertEqual(?VALUE, Doc#document2.value),
-    ?assertEqual(?SCOPE, Doc#document2.scope),
-    ?assertEqual([?MUTATOR], Doc#document2.mutator),
-    ?assertMatch([<<"1-", _/binary>>], Doc#document2.rev),
-    ?assertEqual(1, Doc#document2.seq),
-    ?assertEqual(false, Doc#document2.deleted),
-    ?assertEqual(1, Doc#document2.version).
+    ?assertEqual(?KEY, Doc#document.key),
+    ?assertEqual(?VALUE, Doc#document.value),
+    ?assertEqual(?SCOPE, Doc#document.scope),
+    ?assertEqual([?MUTATOR], Doc#document.mutator),
+    ?assertMatch([<<"1-", _/binary>>], Doc#document.rev),
+    ?assertEqual(1, Doc#document.seq),
+    ?assertEqual(false, Doc#document.deleted),
+    ?assertEqual(1, Doc#document.version).
 
 save_should_increment_seq_counter(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -183,7 +186,7 @@ save_should_not_increment_seq_counter(Config) ->
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
         save, [?CTX#{no_seq => true}, ?DOC]
     )),
-    ?assertEqual(undefined, Doc#document2.seq),
+    ?assertEqual(0, Doc#document.seq),
     ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver,
         get_counter, [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
@@ -193,22 +196,30 @@ save_should_not_set_mutator(Config) ->
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
         save, [maps:remove(mutator, ?CTX), ?DOC]
     )),
-    ?assertEqual([], Doc#document2.mutator).
+    ?assertEqual([], Doc#document.mutator).
 
 save_should_not_set_revision(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
         save, [?CTX#{no_rev => true}, ?DOC]
     )),
-    ?assertEqual([], Doc#document2.rev).
+    ?assertEqual([], Doc#document.rev).
 
 save_should_create_change_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
-    Key = ?KEY,
-    ?assertMatch({ok, _, Key}, rpc:call(Worker, couchbase_driver, get,
-        [?CTX, couchbase_changes:get_change_key(?SCOPE, 1)]
-    )).
+    Key = couchbase_doc:set_prefix(?CTX, ?KEY),
+    {ok, _, Json} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
+        get, [
+            maps:remove(prefix, ?CTX),
+            couchbase_changes:get_change_key(?SCOPE, 1)
+        ]
+    )),
+    {Props} = jiffy:decode(Json),
+    ?assertEqual(Key, proplists:get_value(<<"key">>, Props)),
+    Pid = binary_to_term(base64:decode(proplists:get_value(<<"pid">>, Props))),
+    ?assertEqual(true, is_pid(Pid)),
+    ?assertEqual(pong, gen_server:call(Pid, ping)).
 
 save_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -218,7 +229,7 @@ save_should_return_missing_error(Config) ->
 
 save_should_return_already_exists_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, _, _} = ?assertMatch({ok, _, #document2{}},
+    {ok, _, _} = ?assertMatch({ok, _, #document{}},
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
     ),
     ?assertEqual({error, key_eexists},
@@ -249,28 +260,28 @@ update_should_change_doc(Config) ->
         filed3 = '4'
     },
     {ok, _, Doc2} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [?CTX#{mutator => ?MUTATOR(2)}, Doc#document2{value = Value}]
+        save, [?CTX#{mutator => ?MUTATOR(2)}, Doc#document{value = Value}]
     )),
-    ?assertEqual(?KEY, Doc2#document2.key),
-    ?assertEqual(Value, Doc2#document2.value),
-    ?assertEqual(?SCOPE, Doc2#document2.scope),
-    ?assertEqual([?MUTATOR(2), ?MUTATOR(1)], Doc2#document2.mutator),
-    ?assertMatch([<<"2-", _/binary>>, <<"1-", _/binary>>], Doc2#document2.rev),
-    ?assertEqual(2, Doc2#document2.seq),
-    ?assertEqual(false, Doc2#document2.deleted),
-    ?assertEqual(1, Doc2#document2.version).
+    ?assertEqual(?KEY, Doc2#document.key),
+    ?assertEqual(Value, Doc2#document.value),
+    ?assertEqual(?SCOPE, Doc2#document.scope),
+    ?assertEqual([?MUTATOR(2), ?MUTATOR(1)], Doc2#document.mutator),
+    ?assertMatch([<<"2-", _/binary>>, <<"1-", _/binary>>], Doc2#document.rev),
+    ?assertEqual(2, Doc2#document.seq),
+    ?assertEqual(false, Doc2#document.deleted),
+    ?assertEqual(1, Doc2#document.version).
 
 multiple_update_should_not_overfill_revision_history(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Doc3 = lists:foldl(fun(N, Doc) ->
         {ok, _, Doc2} = ?assertMatch({ok, _, _}, rpc:call(Worker,
-            couchbase_driver, save, [?CTX, Doc#document2{
+            couchbase_driver, save, [?CTX, Doc#document{
                 value = ?VALUE#?MODEL{field1 = N}
             }]
         )),
         Doc2
     end, ?DOC, lists:seq(1, 21)),
-    ?assertEqual(20, length(Doc3#document2.rev)).
+    ?assertEqual(20, length(Doc3#document.rev)).
 
 delete_should_remove_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -313,7 +324,7 @@ save_get_delete_should_return_success_base(Config) ->
             couchbase_driver:save_async(Ctx, ?DOC(N))
         end, lists:seq(1, OpsNum)),
         lists:foreach(fun(Future) ->
-            ?assertMatch({ok, _, #document2{}}, couchbase_driver:wait(Future))
+            ?assertMatch({ok, _, #document{}}, couchbase_driver:wait(Future))
         end, Futures),
         ?assertEqual(
             0, couchbase_pool:get_request_queue_size(?BUCKET, write), ?ATTEMPTS
@@ -323,7 +334,7 @@ save_get_delete_should_return_success_base(Config) ->
             couchbase_driver:get_async(?CTX, ?KEY(N))
         end, lists:seq(1, OpsNum)),
         lists:foreach(fun(Future) ->
-            ?assertMatch({ok, _, #document2{}}, couchbase_driver:wait(Future))
+            ?assertMatch({ok, _, #document{}}, couchbase_driver:wait(Future))
         end, Futures2),
         ?assertEqual(
             0, couchbase_pool:get_request_queue_size(?BUCKET, read), ?ATTEMPTS
@@ -380,6 +391,18 @@ save_design_doc_should_return_success(Config) ->
         [?CTX, ?DESIGN, ?DESIGN_EJSON]
     )).
 
+save_view_doc_should_return_success(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(ok, rpc:call(Worker, couchbase_driver, save_view_doc,
+        [?CTX, ?VIEW, ?VIEW_FUNCTION]
+    )).
+
+save_spatial_view_doc_should_return_success(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(ok, rpc:call(Worker, couchbase_driver, save_spatial_view_doc,
+        [?CTX, ?VIEW, ?VIEW_FUNCTION]
+    )).
+
 get_design_doc_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, couchbase_driver, save_design_doc,
@@ -429,11 +452,15 @@ query_view_should_return_result(Config) ->
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
     {ok, {[Result]}} = ?assertMatch({ok, {[_]}},
         rpc:call(Worker, couchbase_driver, query_view,
-            [?CTX, ?DESIGN, ?VIEW, [{stale, false}, {key, ?KEY}]]
+            [?CTX, ?DESIGN, ?VIEW, [
+                {stale, false}, {key, couchbase_doc:set_prefix(?CTX, ?KEY)}
+            ]]
         )
     ),
-    ?assertEqual(?KEY, proplists:get_value(<<"id">>, Result)),
-    ?assertEqual(?KEY, proplists:get_value(<<"key">>, Result)),
+    ?assertEqual(couchbase_doc:set_prefix(?CTX, ?KEY),
+        proplists:get_value(<<"id">>, Result)),
+    ?assertEqual(couchbase_doc:set_prefix(?CTX, ?KEY),
+        proplists:get_value(<<"key">>, Result)),
     ?assertEqual(null, proplists:get_value(<<"value">>, Result)).
 
 query_view_should_return_missing_error(Config) ->
@@ -473,12 +500,17 @@ query_view_should_parse_all_opts(Config) ->
                 {on_error, stop},
                 {reduce, true},
                 {reduce, false},
+                {spatial, true},
+                {spatial, false},
                 {skip, 0},
                 {stale, ok},
                 {stale, false},
                 {stale, update_after},
                 {startkey, <<"key">>},
-                {startkey_docid, <<"id">>}
+                {startkey_docid, <<"id">>},
+                {bbox, <<"bbox">>},
+                {start_range, <<"range">>},
+                {end_range, <<"range">>}
             ]]
         )
     ).

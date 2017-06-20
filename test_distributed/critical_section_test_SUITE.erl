@@ -62,19 +62,20 @@ massive_test(Config) ->
                 [{name, method}, {value, run_on_global}]
             ]},
             {description, "Uses locks on global module"}
-        ]},
-        {config, [{name, in_mnesia_transaction},
-            {parameters, [
-                [{name, method}, {value, run_in_mnesia_transaction}]
-            ]},
-            {description, "Lock inside single mnesia transaction"}
-        ]},
-        {config, [{name, on_mnesia},
-            {parameters, [
-                [{name, method}, {value, run_on_mnesia}]
-            ]},
-            {description, "Mnesia used for locking"}
         ]}
+        % TODO - new transactions on datastore
+%%        {config, [{name, in_mnesia_transaction},
+%%            {parameters, [
+%%                [{name, method}, {value, run_in_mnesia_transaction}]
+%%            ]},
+%%            {description, "Lock inside single mnesia transaction"}
+%%        ]},
+%%        {config, [{name, on_mnesia},
+%%            {parameters, [
+%%                [{name, method}, {value, run_on_mnesia}]
+%%            ]},
+%%            {description, "Mnesia used for locking"}
+%%        ]}
     ]).
 massive_test_base(Config) ->
     process_flag(trap_exit, true),
@@ -183,63 +184,63 @@ performance_test_base(Config) ->
         critical_section:run(rand:uniform(), TestFun)
     end,
 
-    TestCriticalMnesia = fun() ->
-        critical_section:run_on_mnesia(<<"key">>, TestFun)
-    end,
-    TestCriticalMnesia2 = fun() ->
-        critical_section:run_on_mnesia(rand:uniform(), TestFun)
-    end,
-
-    TestTransaction = fun() ->
-        critical_section:run_in_mnesia_transaction(<<"key">>, TestFun)
-    end,
-    TestTransaction2 = fun() ->
-        critical_section:run_in_mnesia_transaction(float_to_binary(rand:uniform()), TestFun)
-    end,
+%%    TestCriticalMnesia = fun() ->
+%%        critical_section:run_on_mnesia(<<"key">>, TestFun)
+%%    end,
+%%    TestCriticalMnesia2 = fun() ->
+%%        critical_section:run_on_mnesia(rand:uniform(), TestFun)
+%%    end,
+%%
+%%    TestTransaction = fun() ->
+%%        critical_section:run_in_mnesia_transaction(<<"key">>, TestFun)
+%%    end,
+%%    TestTransaction2 = fun() ->
+%%        critical_section:run_in_mnesia_transaction(float_to_binary(rand:uniform()), TestFun)
+%%    end,
 
     T1 = check_time(TestCritical, [Worker]),
-    T1M = check_time(TestCriticalMnesia, [Worker]),
-    T2 = check_time(TestTransaction, [Worker]),
+%%    T1M = check_time(TestCriticalMnesia, [Worker]),
+%%    T2 = check_time(TestTransaction, [Worker]),
     T3 = check_time(TestCritical, Workers),
-    T3M = check_time(TestCriticalMnesia, Workers),
-    T4 = check_time(TestTransaction, Workers),
+%%    T3M = check_time(TestCriticalMnesia, Workers),
+%%    T4 = check_time(TestTransaction, Workers),
 
 %%    ct:print("~p", [{T1, T1M, T2, T3, T3M, T4}]),
 
     T12 = check_time(TestCritical2, [Worker]),
-    T12M = check_time(TestCriticalMnesia2, [Worker]),
-    T22 = check_time(TestTransaction2, [Worker]),
+%%    T12M = check_time(TestCriticalMnesia2, [Worker]),
+%%    T22 = check_time(TestTransaction2, [Worker]),
     T32 = check_time(TestCritical2, Workers),
-    T32M = check_time(TestCriticalMnesia2, Workers),
-    T42 = check_time(TestTransaction2, Workers),
+%%    T32M = check_time(TestCriticalMnesia2, Workers),
+%%    T42 = check_time(TestTransaction2, Workers),
 
 %%    ct:print("~p", [{T12, T12M, T22, T32, T32M, T42}]),
 
     [
         #parameter{name = critical_parallel_1_node, value = T1, unit = "us",
             description = "Time of 100 executions of critical section on 1 node"},
-        #parameter{name = critical_mnesia_parallel_1_node, value = T1M, unit = "us",
-            description = "Time of 100 executions of critical section with mnesia on 1 node"},
-        #parameter{name = transaction_parallel_1_node, value = T2, unit = "us",
-            description = "Time of 100 executions of transaction on 1 node"},
+%%        #parameter{name = critical_mnesia_parallel_1_node, value = T1M, unit = "us",
+%%            description = "Time of 100 executions of critical section with mnesia on 1 node"},
+%%        #parameter{name = transaction_parallel_1_node, value = T2, unit = "us",
+%%            description = "Time of 100 executions of transaction on 1 node"},
         #parameter{name = critical_parallel_2_node, value = T3, unit = "us",
             description = "Time of 100 executions of critical section on 2 nodes"},
-        #parameter{name = critical_parallel_mnesia_2_node, value = T3M, unit = "us",
-            description = "Time of 100 executions of critical section with mnesia on 2 nodes"},
-        #parameter{name = transaction_parallel_2_node, value = T4, unit = "us",
-            description = "Time of 100 executions of transaction on 2 nodes"},
+%%        #parameter{name = critical_parallel_mnesia_2_node, value = T3M, unit = "us",
+%%            description = "Time of 100 executions of critical section with mnesia on 2 nodes"},
+%%        #parameter{name = transaction_parallel_2_node, value = T4, unit = "us",
+%%            description = "Time of 100 executions of transaction on 2 nodes"},
         #parameter{name = critical_random_1_node, value = T12, unit = "us",
             description = "Time of 100 executions of critical section with random lock key on 1 node"},
-        #parameter{name = critical_mnesia_random_1_node, value = T12M, unit = "us",
-            description = "Time of 100 executions of critical section with mnesia with random lock key on 1 node"},
-        #parameter{name = transaction_random_1_node, value = T22, unit = "us",
-            description = "Time of 100 executions of transaction with random lock key on 1 node"},
+%%        #parameter{name = critical_mnesia_random_1_node, value = T12M, unit = "us",
+%%            description = "Time of 100 executions of critical section with mnesia with random lock key on 1 node"},
+%%        #parameter{name = transaction_random_1_node, value = T22, unit = "us",
+%%            description = "Time of 100 executions of transaction with random lock key on 1 node"},
         #parameter{name = critical_random_2_node, value = T32, unit = "us",
-            description = "Time of 100 executions of critical section with random lock key on 2 nodes"},
-        #parameter{name = critical_mnesia_random_2_node, value = T32M, unit = "us",
-            description = "Time of 100 executions of critical section with mnesia with random lock key on 2 nodes"},
-        #parameter{name = transaction_random_2_node, value = T42, unit = "us",
-            description = "Time of 100 executions of transaction with random lock key on 2 nodes"}
+            description = "Time of 100 executions of critical section with random lock key on 2 nodes"}
+%%        #parameter{name = critical_mnesia_random_2_node, value = T32M, unit = "us",
+%%            description = "Time of 100 executions of critical section with mnesia with random lock key on 2 nodes"},
+%%        #parameter{name = transaction_random_2_node, value = T42, unit = "us",
+%%            description = "Time of 100 executions of transaction with random lock key on 2 nodes"}
     ].
 
 check_time(Fun, Workers) ->
@@ -279,8 +280,8 @@ run_and_update_test(Config) ->
     Key = <<"some_key">>,
 
     RecordId = <<"some_id">>,
-    ?assertEqual({ok, RecordId}, rpc:call(Worker, disk_only_record, save,
-        [#document{key = RecordId, value = #disk_only_record{}}])),
+    ?assertEqual({ok, RecordId}, rpc:call(Worker, global_only_record, save,
+        [#document{key = RecordId, value = #global_only_record{}}])),
 
     % then
     Targets = [{nth_with_modulo(N, Workers), N} || N <- lists:seq(1, 10)],
@@ -303,8 +304,8 @@ run_and_increment_test(Config) ->
     Key = <<"some_key">>,
 
     RecordId = <<"some_id">>,
-    ?assertEqual({ok, RecordId}, rpc:call(Worker, disk_only_record, save,
-        [#document{key = RecordId, value = #disk_only_record{field1 = 0}}])),
+    ?assertEqual({ok, RecordId}, rpc:call(Worker, global_only_record, save,
+        [#document{key = RecordId, value = #global_only_record{field1 = 0}}])),
 
     % then
     Targets = [nth_with_modulo(N, Workers) || N <- lists:seq(1, 10)],
@@ -319,8 +320,8 @@ run_and_increment_test(Config) ->
         ?assertReceivedMatch({Pid, ok}, ?TIMEOUT)
     end, Pids),
 
-    ?assertEqual({ok, #document{key = RecordId, value = #disk_only_record{field1 = length(Targets)}}},
-        rpc:call(Worker, disk_only_record, get, [RecordId])),
+    ?assertEqual({ok, #document{key = RecordId, value = #global_only_record{field1 = length(Targets)}}},
+        rpc:call(Worker, global_only_record, get, [RecordId])),
     ok.
 
 failure_in_critical_section_test(Config) ->
@@ -343,7 +344,7 @@ failure_in_critical_section_test(Config) ->
 
 init_per_testcase(_, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:enable_datastore_models(Workers, [disk_only_record]),
+    test_utils:enable_datastore_models(Workers, [global_only_record]),
     Config.
 
 end_per_testcase(_, _) ->
@@ -356,10 +357,10 @@ end_per_testcase(_, _) ->
 %% changes value of record, sleeps and checks if value is still the same
 critical_fun_update(RecordId, V1, Key) ->
     critical_section:run(Key, fun() ->
-        disk_only_record:update(RecordId, #{field1 => V1}),
+        global_only_record:update(RecordId, #{field1 => V1}),
         timer:sleep(timer:seconds(1)),
-        {ok, #document{value = #disk_only_record{field1 = V2}}} =
-            disk_only_record:get(RecordId),
+        {ok, #document{value = #global_only_record{field1 = V2}}} =
+            global_only_record:get(RecordId),
         case V1 =:= V2 of
             true ->
                 {ok, V1};
@@ -371,10 +372,10 @@ critical_fun_update(RecordId, V1, Key) ->
 %% reads value of record, sleeps and writes incremented value
 critical_fun_increment(RecordId, Key) ->
     critical_section:run(Key, fun() ->
-        {ok, #document{value = #disk_only_record{field1 = V}}} =
-            disk_only_record:get(RecordId),
+        {ok, #document{value = #global_only_record{field1 = V}}} =
+            global_only_record:get(RecordId),
         timer:sleep(timer:seconds(1)),
-        disk_only_record:update(RecordId, #{field1 => V+1}),
+        global_only_record:update(RecordId, #{field1 => V+1}),
         ok
     end).
 
