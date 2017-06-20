@@ -19,29 +19,22 @@
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
 
-% TODO - add option - enable mnesia transaction log and/or replication
-% of data to other nodes
-% TODO - add setting of cache level - from simple ets to dumping to
-% couch immediately
-% TODO - check size of key and doc during modify operation
-
 %% API
+% TODO - delete second arg of terminate and third arg of modify
 -export([modify/3, init/1, terminate/2, commit/2, merge_changes/2,
-  commit_backoff/1]).
+  commit_backoff/1, handle_committed/2]).
 %% Helper functions
--export([main_level/1, resolve_conflict/3]).
+-export([resolve_conflict/2, update_rev_if_needed/2, add_durability_to_memory/2,
+  get_durability_from_memory/0, del_durability_from_memory/1,
+  add_to_proc_mem/3, get_from_proc_mem/2, increment_rev/2, rev_to_info/1]).
 
 % Types
+-type ctx() :: datastore_context:ctx().
 -type state() :: #state{}.
--type value_doc() :: datastore:document() | undefined | not_found.
+-type value_doc() :: datastore:document() | undefined.
 -type value_link() :: list().
--type message() :: {atom(), list()}.
--type resolved_conflict() :: {Document :: datastore:document(),
-  Bucket :: datastore:bucket(), ToDel :: false | datastore:document()}.
--type change() :: ok | to_save | {to_save, resolved_conflict()} |
-  {[datastore:ext_key()], [{datastore:ext_key(), resolved_conflict()}]}.
--type revision() :: term().
--type revision_info() :: term().
+-type message() :: {ctx(), {atom(), list()}}.
+-type change() :: [{datastore:ext_key(), ctx()}].
 
 -export_type([value_doc/0, value_link/0, message/0]).
 
@@ -49,73 +42,30 @@
 %%% API functions
 %%%===================================================================
 
-% TODO - couch driver provides revisions
-% TODO - tp process works only on mnesia (no own memory)
-% Check: no need to save revision in memory when tp process lives
-% Check: do we need to remember more than last revision? For force save maybe
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Handles all operation executed at memory store.
 %% @end
 %%--------------------------------------------------------------------
--spec modify(Messages :: [message()], State :: state(), tp:rev()) ->
+-spec modify(Messages :: [message()], State :: state(), datastore_doc:rev()) ->
   {Answers :: list(), {true, change()} | false, NewState :: state()}.
-modify([{clear, _}], #state{link_proc = true, key = Key, driver = Driver,
-  model_config = ModelConfig} = State, _Rev) ->
-  Ans = memory_store_driver_links:clear(Driver, ModelConfig, Key),
-  {[Ans], false, State};
-modify([{clear, _}], #state{driver = Driver, model_config = ModelConfig,
-  key = Key} = State, _Rev) ->
-  Ans = memory_store_driver_docs:clear(Driver, ModelConfig, Key),
-  {[Ans], false, State};
-modify(Messages, #state{link_proc = LP, current_value = CurrentValue,
-  driver = Driver, flush_driver = FD, revisions_to_save = RTS,
-  model_config = ModelConfig, key = Key} = State, NewRev) ->
-  FilteredMessages = lists:filter(fun
-    ({clear, _}) -> false;
-    (_) -> true
-  end, Messages),
-  Revs = new_revisions(RTS, NewRev),
-  CVWithRev = update_revisions(CurrentValue, Revs),
-  {A, NV, Changes} = try
-    case LP of
-      true ->
-        memory_store_driver_links:handle_link_messages(FilteredMessages,
-          CVWithRev, Driver, FD, ModelConfig, Key);
-      _ ->
-        memory_store_driver_docs:handle_messages(FilteredMessages,
-          CVWithRev, Driver, FD, ModelConfig, Key)
-    end
-  catch
-    throw:{Reason, ThrowNV, ThrowChanges} ->
-      ?error_stacktrace("Modify error for key ~p: ~p", [Key, Reason]),
-      ThrowA = lists:map(fun(_) -> Reason end, FilteredMessages),
-      {ThrowA, ThrowNV, ThrowChanges}
-  end,
-
-  FinalChanges = case {FD, Changes} of
-    {undefined, _} -> false;
-    {_, {[], []}} -> false;
-    {_, ok} -> false;
-    _ -> {true, Changes}
-  end,
-
-  FinalState = State#state{current_value = NV,
-    revisions_to_save = new_revisions_to_save(Changes, Revs)},
-
-  case length(FilteredMessages) =:= length(Messages) of
+modify(Messages, #state{link_proc = LP, key = Key, cached = Cached,
+  master_pid = Master} = State, _) ->
+  {A, Changes} = case LP of
     true ->
-      {A, FinalChanges, FinalState};
+      memory_store_driver_links:handle_link_messages(Messages, Master);
     _ ->
-      {ReversedAns, []} = lists:foldl(fun
-        ({clear, _}, {Acc, AnsList}) ->
-          {[ok | Acc], AnsList};
-        (_, {Acc, [Ans | AnsList]}) ->
-          {[Ans | Acc], AnsList}
-      end, {[], A}, Messages),
-      {lists:reverse(ReversedAns), FinalChanges, FinalState}
-  end.
+      memory_store_driver_docs:handle_messages(Messages, Key, Master)
+  end,
+
+  {FinalChanges, FinalState} = case {Cached, Changes} of
+    {false, [{_K, Ctx} | _]} -> {false, State#state{last_ctx = Ctx}};
+    {false, _} -> {false, State};
+    {_, []} -> {false, State};
+    {_, [{_K, Ctx} | _]} -> {{true, Changes}, State#state{last_ctx = Ctx}}
+  end,
+
+  {A, FinalChanges, FinalState}.
 
 
 %%--------------------------------------------------------------------
@@ -124,26 +74,13 @@ modify(Messages, #state{link_proc = LP, current_value = CurrentValue,
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: list()) -> {ok, tp:init()}.
-% TODO - add arg for save and create etc operations that get is not needed.
-init([Driver, MC, Key, FD, LinkProc]) ->
-  init([Driver, MC, Key, FD, LinkProc, caches_controller:get_idle_timeout()]);
-init([Driver, MC, Key, FD, true = LinkProc, IdleT]) ->
+init([Key, LinkProc, Cached]) ->
   {ok, #datastore_doc_init{
-    data = #state{
-      driver = Driver, model_config = MC, key = Key,
-      link_proc = LinkProc, flush_driver = FD, current_value = []},
-    idle_timeout = IdleT,
-    min_commit_delay = get_flush_min_interval(FD),
-    max_commit_delay = get_flush_max_interval(FD),
-    rev = []
-  }};
-init([Driver, MC, Key, FD, LinkProc, IdleT]) ->
-  {ok, #datastore_doc_init{
-    data = #state{driver = Driver, model_config = MC, key = Key,
-      link_proc = LinkProc, flush_driver = FD},
-    idle_timeout = IdleT,
-    min_commit_delay = get_flush_min_interval(FD),
-    max_commit_delay = get_flush_max_interval(FD)
+    data = #state{key = Key, link_proc = LinkProc, cached = Cached,
+      master_pid = self()},
+    idle_timeout = caches_controller:get_idle_timeout(),
+    min_commit_delay = get_flush_min_interval(Cached),
+    max_commit_delay = get_flush_max_interval(Cached)
   }}.
 
 %%--------------------------------------------------------------------
@@ -151,62 +88,11 @@ init([Driver, MC, Key, FD, LinkProc, IdleT]) ->
 %% Checks if memory store driver can be stopped.
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(State :: state(), tp:rev()) -> ok | {error, term()}.
-terminate(#state{flush_driver = undefined}, _Rev) ->
+-spec terminate(State :: state(), datastore_doc:rev()) -> ok | {error, term()}.
+terminate(#state{last_ctx = undefined}, _Rev) ->
   ok;
-% TODO - use function link_opt_to_slave and merge cases for clear
-terminate(#state{link_proc = true, key = Key, current_value = CV, driver = Driver,
-  model_config = ModelConfig, revisions_to_save = RTS}, NewRev) ->
-  case application:get_env(?CLUSTER_WORKER_APP_NAME,
-    tp_proc_terminate_clear_memory) of
-    {ok, true} ->
-      memory_store_driver_links:clear(Driver, ModelConfig, Key);
-    _ ->
-      try
-        Revs = new_revisions(RTS, NewRev),
-        lists:foreach(fun({K, Rev}) ->
-          case proplists:get_value(K, CV) of
-            not_found ->
-              ok;
-            Doc ->
-              case Doc#document.rev of
-                Rev ->
-                  ok;
-                _ ->
-                  {ok, _} = apply(Driver, save_link_doc, [ModelConfig, Doc#document{rev = Rev}])
-              end
-          end
-        end, Revs)
-      catch
-        E1:E2 ->
-          {error, {E1, E2}}
-      end
-  end,
-  ok;
-terminate(#state{current_value = not_found}, _Rev) ->
-  ok;
-terminate(#state{key = Key, current_value = CV, driver = Driver,
-  model_config = ModelConfig, revisions_to_save = RTS}, NewRev) ->
-  case application:get_env(?CLUSTER_WORKER_APP_NAME,
-    tp_proc_terminate_clear_memory) of
-    {ok, true} ->
-      memory_store_driver_docs:clear(Driver, ModelConfig, Key),
-      ok;
-    _ ->
-      try
-        Rev = new_revisions(RTS, NewRev),
-        case CV#document.rev of
-          Rev ->
-            ok;
-          _ ->
-            {ok, _} = apply(Driver, save, [ModelConfig, CV#document{rev = Rev}]),
-            ok
-        end
-      catch
-        E1:E2 ->
-          {error, {E1, E2}}
-      end
-  end.
+terminate(#state{last_ctx = Ctx}, _Rev) ->
+  datastore_cache:inactivate(Ctx).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -214,131 +100,24 @@ terminate(#state{key = Key, current_value = CV, driver = Driver,
 %% @end
 %%--------------------------------------------------------------------
 -spec commit(Modified :: change(), State :: state()) ->
-  {true | {false, change()}, tp:rev()}.
-% TODO - use single element list as current_value for doc and merge
-commit({ModifiedKeys, []}, #state{model_config = MC, current_value = CV,
-  flush_driver = Driver, link_proc = true}) ->
-  ModifiedList = lists:map(fun(K) ->
-    {K, proplists:get_value(K, CV)}
-  end, ModifiedKeys),
+  {true | {false, change()}, datastore_doc:rev()}.
+commit(ModifiedKeys, _) ->
+  ToFlush = lists:reverse(ModifiedKeys),
+  AnsList = datastore_cache:flush(ToFlush),
 
-  NotSaved = dump_docs(MC, Driver, ModifiedList),
+  {_Revs, NotSaved} = lists:foldl(fun
+    ({_Flush, {ok, #document{key = K, rev = R}}}, {AccRev, AccErr}) ->
+      {[{K, R} | AccRev], AccErr};
+    ({{Key, Ctx} = Flush, Error}, {AccRev, AccErr}) ->
+      ?error("Dump error ~p for ~p", [Error, Flush]),
+      {AccRev, [{Key, Ctx} | AccErr]}
+  end, {[], []}, lists:zip(ToFlush, AnsList)),
 
   case NotSaved of
     [] ->
       {true, []};
     _ ->
-      {{false, {NotSaved, []}}, []}
-  end;
-commit({ModifiedKeys, ResolvedChanges}, #state{model_config = MC, current_value = CV,
-  flush_driver = Driver, link_proc = true} = State) ->
-  NotSaved = dump_docs(MC, Driver, ResolvedChanges),
-
-  RevsToDel = lists:foldl(fun({K, {_Document, _Bucket, ToDel}}, Acc) ->
-    case lists:member(K, NotSaved) of
-      true ->
-        Acc;
-      _ ->
-        [{K, {delete_doc_asynch, ToDel}} | Acc]
-    end
-  end, [], ResolvedChanges),
-  NotSaved2 = dump_docs(MC, Driver, RevsToDel),
-
-  case {NotSaved, NotSaved2} of
-    {[], []} ->
-      ModifiedKeys2 = lists:foldl(fun(K, Acc) ->
-        V = proplists:get_value(K, CV),
-        case proplists:get_value(K, ResolvedChanges) of
-          {ToCheck, _, _} ->
-            case check_resolved_doc(V, ToCheck) of
-              true ->
-                Acc;
-              _ ->
-                [K | Acc]
-            end;
-          _ ->
-            [K | Acc]
-        end
-      end, [], ModifiedKeys),
-
-      commit({ModifiedKeys2, []}, State);
-    _ ->
-      ResolvedChanges2 = lists:foldl(fun(K, Acc) ->
-        [proplists:get_value(K, ResolvedChanges) | Acc]
-      end, [], NotSaved),
-
-      ResolvedChanges2_2 = lists:foldl(fun(K, Acc) ->
-        [proplists:get_value(K, RevsToDel) | Acc]
-      end, [], NotSaved2),
-      % TODO - delete old rev even if new revision appears before successful del
-      {{false, {ModifiedKeys, ResolvedChanges2 ++ ResolvedChanges2_2}}, []}
-  end;
-commit(ok, _State)->
-  {true, []};
-commit(to_save, #state{model_config = MC, key = Key, current_value = CV,
-  flush_driver = Driver})->
-  Ans = case CV of
-    not_found ->
-      apply(Driver, delete, [MC, Key, ?PRED_ALWAYS]);
-    _ ->
-      case apply(Driver, save, [MC, CV]) of
-        {ok, Key} -> ok;
-        Other -> Other
-      end
-  end,
-
-  case Ans of
-    ok ->
-      {true, undefined};
-    {error, already_exists} -> % conflict with force_save
-      ?debug("Dump doc canceled for key ~p, value ~p: already exists", [Key, CV]),
-      {true, undefined};
-    {error, conflict} -> % conflict with force_save
-      ?debug("Dump doc canceled for key ~p, value ~p: conflict", [Key, CV]),
-      {true, undefined};
-    Err ->
-      ?error("Dump doc error ~p for key ~p, value ~p", [Err, Key, CV]),
-      {{false, to_save}, undefined}
-  end;
-commit({to_save, ResolvedConflicts} = TS, #state{model_config = MC, key = Key,
-  current_value = CV, flush_driver = Driver} = State)->
-  {Document, Bucket, ToDel} = ResolvedConflicts,
-
-  SRAns = case Driver:save_revision(MC, Bucket, Document) of
-    {ok, _} ->
-      % TODO - what happens if first save is ok and second fails
-      % Delete in new task type that starts if first try fails
-      case ToDel of
-        false ->
-          ok;
-        _ ->
-          apply(Driver, delete_doc, [MC, ToDel])
-      end;
-    Other ->
-      Other
-  end,
-
-  Ans = case SRAns of
-    ok ->
-      true;
-    {error, already_exists} ->
-      ?debug("Dump doc canceled for key ~p, value ~p: already exists", [Key, CV]),
-      true;
-    {error, conflict} ->
-      ?debug("Dump doc canceled for key ~p, value ~p: conflict", [Key, CV]),
-      true;
-    Err ->
-      ?error("Dump doc error ~p for key ~p, value ~p", [Err, Key, CV]),
-      {false, TS}
-  end,
-
-  case {Ans, check_resolved_doc(CV, Document#document{rev = undefined})} of
-    {true, true} ->
-      {true, undefined};
-    {true, _} ->
-      commit(to_save, State);
-    {Err2, _} ->
-      {Err2, undefined}
+      {{false, NotSaved}, []}
   end.
 
 %%--------------------------------------------------------------------
@@ -347,23 +126,8 @@ commit({to_save, ResolvedConflicts} = TS, #state{model_config = MC, key = Key,
 %% @end
 %%--------------------------------------------------------------------
 -spec merge_changes(Prev :: change(), Next :: change()) -> change().
-merge_changes(_, {to_save, DiskValue}) ->
-  {to_save, DiskValue};
-merge_changes({to_save, DiskValue}, _) ->
-  {to_save, DiskValue};
-merge_changes(to_save, _) ->
-  to_save;
-merge_changes(_, to_save) ->
-  to_save;
-merge_changes(P, _N) when is_atom(P) ->
-  P;
-merge_changes({P1, P2}, {N1, N2}) ->
-  PrevK = proplists:get_keys(P2),
-  NewK = proplists:get_keys(N2),
-  New2 = lists:foldl(fun(K, Acc) ->
-    [proplists:lookup(K, P2) | Acc]
-  end, N2, PrevK -- NewK),
-  {N1 ++ (P1 -- N1), New2}.
+merge_changes(Prev, Next) ->
+  Next ++ (Prev -- Next).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -371,11 +135,26 @@ merge_changes({P1, P2}, {N1, N2}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec commit_backoff(timeout()) -> timeout().
-% TODO - brac pod uwage ile procesow wisi na flush
 commit_backoff(_T) ->
   {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
     memory_store_flush_error_suspension_ms),
-  Interval.
+
+  {ok, Base} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    throttling_delay_db_queue_size),
+  QueueSize = lists:foldl(fun(Bucket, Acc) ->
+    couchbase_pool:get_request_queue_size(Bucket) + Acc
+  end, 0, couchbase_config:get_buckets()),
+
+  min(10, max(round(QueueSize/Base), 1)) * Interval.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Updates revision in datastore cache.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_committed(state(), datastore_doc:rev()) -> state().
+handle_committed(#state{} = State, _Rev) ->
+  State.
 
 %%%===================================================================
 %%% Helper functions
@@ -383,78 +162,109 @@ commit_backoff(_T) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Translates cached levels to memory store levels.
-%% @end
-%%--------------------------------------------------------------------
--spec main_level(datastore:store_level()) -> datastore:store_level().
-main_level(?GLOBALLY_CACHED_LEVEL) ->
-  ?GLOBAL_ONLY_LEVEL;
-main_level(?LOCALLY_CACHED_LEVEL) ->
-  ?LOCAL_ONLY_LEVEL;
-main_level(Level) ->
-  Level.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Resolves conflict between new document and current document.
-%% @end
-%%--------------------------------------------------------------------
--spec resolve_conflict(model_behaviour:model_config(), atom(), datastore:document()) ->
-  datastore:generic_error() | not_changed | {ResolvedDoc :: datastore:document(),
-    DeleteOldRev :: datastore:document() | false}.
-resolve_conflict(ModelConfig, Driver,
-    #document{key = Key, rev = {RNum, [Id | _]}} = ToSave) ->
-
-  case Driver:get_last(ModelConfig, Key) of
-    {error, {not_found, _}} ->
-      FinalDoc = ToSave#document{rev = {RNum, [Id]}},
-      {FinalDoc, false};
-    {error, not_found} ->
-      FinalDoc = ToSave#document{rev = {RNum, [Id]}},
-      {FinalDoc, false};
-    {error, Reason} ->
-      {error, Reason};
-    {ok, OldDoc} ->
-      resolve_docs_conflict(OldDoc, ToSave)
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Resolves conflict between two documents.
 %% @end
 %%--------------------------------------------------------------------
--spec resolve_docs_conflict(datastore:document(), datastore:document()) ->
-  not_changed | {ResolvedDoc :: datastore:document(),
-    DeleteOldRev :: datastore:document() | false}.
-resolve_docs_conflict(#document{key = Key, rev = Rev, deleted = OldDel} = Old,
-    #document{key = Key, rev = {RNum, [Id | IdsTail]}} = ToSave) ->
-  {OldRNum, OldId} = rev_to_info(Rev),
-  case RNum of
-    OldRNum ->
-      case Id > OldId of
-        true ->
-          case OldDel of
-            true ->
-              {ToSave, false};
-            _ ->
-              {ToSave, Old}
-          end;
-        false ->
-          not_changed
-      end;
-    Higher when Higher > OldRNum ->
-      NewIDs = check_revisions_list(OldId, IdsTail, OldRNum, Higher),
-      {ToSave#document{rev = {RNum, [Id | NewIDs]}}, false};
-    _ ->
-      not_changed
+-spec resolve_conflict(datastore:document(), datastore:document()) ->
+  Resolved :: datastore:document() | not_changed.
+resolve_conflict(#document{rev = []} = _Old, ToSave) ->
+  ToSave;
+resolve_conflict(#document{key = Key, rev = [OldRev | _]} = _Old,
+    #document{key = Key, rev = [Rev | _]} = ToSave) ->
+  case is_second_higher(OldRev, Rev) of
+    higher -> ToSave;
+    higher_rev -> ToSave;
+    _ -> not_changed
   end.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+update_rev_if_needed(#document{key = Key, rev = [OldRev | _] = OldRevs} = _Old,
+    #document{key = Key, rev = [Rev | _]} = New) ->
+  case is_second_higher(Rev, OldRev) of
+    higher -> New#document{rev = OldRevs};
+    _ -> New
+  end;
+update_rev_if_needed(#document{key = Key, rev = [_ | _] = OldRevs} = _Old,
+    #document{key = Key, rev = []} = New) ->
+  New#document{rev = OldRevs};
+update_rev_if_needed(_, New) ->
+  New.
 
 %%--------------------------------------------------------------------
-%% @private
+%% @doc
+%% Saves information about document durability in memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_durability_to_memory(datastore:ext_key(),
+    Durability :: ctx()) -> ok.
+add_durability_to_memory(Key, D) ->
+  add_to_proc_mem(durability_cache, Key, D).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes information about document durability from memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec del_durability_from_memory(datastore:ext_key()) -> ok.
+del_durability_from_memory(Key) ->
+  Value = get_value(durability_cache),
+  put(durability_cache, proplists:delete(Key, Value)),
+  ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets document version that was fetched from memory from process memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_durability_from_memory() -> [{datastore:ext_key(), ctx()}].
+get_durability_from_memory() ->
+  case get(durability_cache) of
+    undefined -> [];
+    List -> List
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves information in memory. Generic cache function for caching of information
+%% needed to process single batch of messages.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_to_proc_mem(MainKey :: atom(), AdditionalKey :: datastore:ext_key(),
+    ToAdd :: term()) -> ok.
+add_to_proc_mem(MainKey, AdditionalKey, ToAdd) ->
+  Value = get_value(MainKey),
+  put(MainKey, [{AdditionalKey, ToAdd} | proplists:delete(AdditionalKey, Value)]),
+  ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets information from memory. Generic cache function for caching of information
+%% needed to process single batch of messages.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_from_proc_mem(MainKey :: atom(), AdditionalKey :: datastore:ext_key()) ->
+  term().
+get_from_proc_mem(MainKey, AdditionalKey) ->
+  case get(MainKey) of
+    undefined -> undefined;
+    List ->
+      proplists:get_value(AdditionalKey, List, undefined)
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets value from process memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec increment_rev(ctx(), datastore:document()) -> datastore:document().
+increment_rev(#{resolve_conflicts := true}, Value) ->
+  Value;
+increment_rev(#{persistence := false}, Value) ->
+  Value;
+increment_rev(Ctx, Value) ->
+  {Doc2, _} = couchbase_doc:set_next_rev(Ctx, Value),
+  Doc2.
+
+%%--------------------------------------------------------------------
 %% @doc
 %% Converts given binary into tuple {revision_num, hash}.
 %% @end
@@ -465,17 +275,47 @@ rev_to_info(Rev) ->
   [Num, ID] = binary:split(Rev, <<"-">>),
   {binary_to_integer(Num), ID}.
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Checks if revision list provided to force_save can be written.
+%% Compares two revisons.
 %% @end
 %%--------------------------------------------------------------------
--spec check_revisions_list(term(), list(), integer(), integer()) -> list().
-check_revisions_list(OldID, [OldID | _] = NewIDs, OldNum, NewNum) when NewNum =:= OldNum + 1 ->
-  NewIDs;
-check_revisions_list(_, _, _, _) ->
-  [].
+-spec is_second_higher(couchbase_doc:hash(), couchbase_doc:hash()) ->
+  higher | lower | higher_rev | lower_rev.
+is_second_higher(First, Second) ->
+  {FirstNum, FirstId} = rev_to_info(First),
+  {SecodnNum, SecondId} = rev_to_info(Second),
+  case SecodnNum of
+    FirstNum ->
+      case SecondId > FirstId of
+        true ->
+          higher_rev;
+        _ ->
+          lower_rev
+      end;
+    Higher when Higher > FirstNum ->
+      higher;
+    _ ->
+      lower
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets value from process memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_value(atom()) -> list().
+get_value(Key) ->
+  case get(Key) of
+    undefined -> [];
+    List -> List
+  end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -484,15 +324,12 @@ check_revisions_list(_, _, _, _) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_flush_min_interval(FlushDriver :: atom()) -> non_neg_integer().
-get_flush_min_interval(FlushDriver) ->
-  case FlushDriver of
-    undefined ->
-      infinity;
-    _ ->
-      {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        cache_to_disk_delay_ms),
-      Interval
-  end.
+get_flush_min_interval(true) ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    cache_to_disk_delay_ms),
+  Interval;
+get_flush_min_interval(_) ->
+  infinity.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -501,172 +338,9 @@ get_flush_min_interval(FlushDriver) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_flush_max_interval(FlushDriver :: atom()) -> non_neg_integer().
-get_flush_max_interval(FlushDriver) ->
-  case FlushDriver of
-    undefined ->
-      infinity;
-    _ ->
-      {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        cache_to_disk_force_delay_ms),
-      Interval
-  end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Dumps to disk.
-%% @end
-%%--------------------------------------------------------------------
--spec dump_docs(model_behaviour:model_config(), atom(), ModifiedList :: list()) ->
-  [datastore:ext_key()].
-dump_docs(MC, Driver, ModifiedList) ->
-  Refs = lists:foldl(fun
-  % TODO - handle batch delete
-    ({K, not_found}, Acc) ->
-      % TODO - get should not be needed before get
-      RefOrError = case apply(Driver, get_link_doc, [MC, K]) of
-        {ok, OldDoc} ->
-          apply(Driver, delete_doc_asynch, [MC, OldDoc]);
-        {error, {not_found, _}} ->
-          ok;
-        E ->
-          {get_error, E}
-      end,
-      [{K, not_found, RefOrError} | Acc];
-    ({K, {Document, Bucket, _ToDel} = V}, Acc) ->
-      RefOrError = Driver:save_revision_asynch(MC, Bucket, Document),
-      [{K, V, RefOrError} | Acc];
-    ({K, {delete_doc_asynch, ToDel} = V}, Acc) ->
-      RefOrError = case ToDel of
-        false -> ok;
-        _ -> apply(Driver, delete_doc_asynch, [MC, ToDel])
-      end,
-      [{K, V, RefOrError} | Acc];
-    ({K, #document{value = V} = D}, Acc) ->
-      % TODO - get should not be needed before save
-      RefOrError = case apply(Driver, get_link_doc, [MC, K]) of
-        {ok, OldDoc} ->
-          apply(Driver, save_doc_asynch, [MC, OldDoc#document{value = V}]);
-        {error, {not_found, _}} ->
-          apply(Driver, save_doc_asynch, [MC, D]);
-        E ->
-          {get_error, E}
-      end,
-      [{K, D, RefOrError} | Acc]
-  end, [], ModifiedList),
-
-  lists:foldl(fun
-    ({K, V, {get_error, _} = E}, Acc) ->
-      ?error("Get link doc error ~p for key ~p, value ~p", [E, K, V]),
-      [K | Acc];
-    ({_K, _V, ok}, Acc) ->
-      Acc;
-    ({K, V, Ref}, Acc) ->
-      case apply(Driver, asynch_response, [Ref]) of
-        ok ->
-          Acc;
-        {ok, _} ->
-          Acc;
-        {error, already_exists} -> % conflict with force_save
-          ?debug("Save link canceled for key ~p, value ~p: already exists", [K, V]),
-          Acc;
-        Err ->
-          ?error("Link dump error ~p for key ~p, value ~p", [Err, K, V]),
-          [K | Acc]
-      end
-  end, [], Refs).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks if resolved doc is equal to doc voalue in memory.
-%% @end
-%%--------------------------------------------------------------------
--spec check_resolved_doc(value_doc() | datastore:value(), datastore:document()) ->
-  boolean().
-check_resolved_doc(not_found, #document{deleted = true}) ->
-  true;
-check_resolved_doc(#document{value = V}, #document{value = V}) ->
-  true;
-check_resolved_doc(V, #document{value = V}) ->
-  true;
-check_resolved_doc(_, _) ->
-  false.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns revision info on the basis of saved info and updated info.
-%% @end
-%%--------------------------------------------------------------------
--spec new_revisions(revision_info(), revision_info()) ->
-  revision_info().
-new_revisions(undefined, New) ->
-  New;
-% TODO - revisions may be a list after couch refactor
-new_revisions(Old, New) when is_list(New) ->
-  OK = proplists:get_keys(Old),
-  NK = proplists:get_keys(New),
-  lists:foldl(fun(K, Acc) ->
-    [proplists:lookup(K, Old) | Acc]
-  end, New, OK -- NK);
-new_revisions(_Old, New) ->
-  New.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Updates revisions of documents stored in memory.
-%% @end
-%%--------------------------------------------------------------------
--spec update_revisions(memory_store_driver:value_doc()
-  | memory_store_driver:value_link(), revision_info()) ->
-  memory_store_driver:value_doc() | memory_store_driver:value_link().
-update_revisions(CV, Revs) when is_list(CV) ->
-  % TODO - iterate over Revs instead of CV
-  lists:map(fun
-    ({_, not_found} = NF) ->
-      NF;
-    ({K, #document{rev = Old} = Doc}) ->
-      NewRev = choose_revision(Old, proplists:get_value(K, Revs, undefined)),
-      {K, Doc#document{rev = NewRev}}
-  end, CV);
-update_revisions(not_found, _Revs) ->
-  not_found;
-update_revisions(undefined, _Revs) ->
-  undefined;
-update_revisions(CV, Revs) ->
-  NewRev = choose_revision(CV#document.rev, Revs),
-  CV#document{rev = NewRev}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Chooses revision to be saved in document.
-%% @end
-%%--------------------------------------------------------------------
--spec choose_revision(revision(), revision()) -> revision().
-choose_revision(Old, undefined) ->
-  Old;
-choose_revision(_Old, New) ->
-  New.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks which revisions are still to be saved.
-%% @end
-%%--------------------------------------------------------------------
--spec new_revisions_to_save(change(), revision_info()) -> revision_info().
-new_revisions_to_save(to_save, _Revs) ->
-  undefined;
-new_revisions_to_save({to_save, _}, _Revs) ->
-  undefined;
-new_revisions_to_save(ok, Revs) ->
-  Revs;
-new_revisions_to_save({Changes, _}, Revs) ->
-  new_revisions_to_save(Changes, Revs);
-new_revisions_to_save(Changes, Revs) ->
-  lists:foldl(fun(K, Acc) ->
-    proplists:delete(K, Acc)
-  end, Revs, Changes).
+get_flush_max_interval(true) ->
+  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    cache_to_disk_force_delay_ms),
+  Interval;
+get_flush_max_interval(_) ->
+  infinity.

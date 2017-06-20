@@ -16,23 +16,24 @@
 
 %% API
 -export([post_async/3, post/3, wait/1]).
--export([get_modes/0, get_size/1]).
+-export([get_timeout/0, get_modes/0, get_size/2]).
 -export([get_request_queue_size/1, get_request_queue_size/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
 
 -type mode() :: read | write.
 -type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
                    {get, datastore:key()} |
-                   {delete, datastore:key()} |
+                   {delete, couchbase_driver:ctx(), datastore:key()} |
                    {get_counter, datastore:key(), cberl:arithmetic_default()} |
                    {update_counter, datastore:key(), cberl:arithmetic_delta(),
                        cberl:arithmetic_default()} |
                    {save_design_doc, couchbase_driver:design(),
                        datastore_json2:ejson()} |
+                   {get_design_doc, couchbase_driver:design()} |
                    {delete_design_doc, couchbase_driver:design()} |
                    {query_view, couchbase_driver:design(),
                        couchbase_driver:view(), [couchbase_driver:view_opt()]}.
--type response() :: ok | {ok, term()} | {error, term()}.
+-type response() :: ok | {ok, term()} | {ok, term(), term()} | {error, term()}.
 -type future() :: reference().
 
 -export_type([mode/0, request/0, response/0, future/0]).
@@ -71,15 +72,25 @@ post(Bucket, Mode, Request) ->
 %%--------------------------------------------------------------------
 -spec wait(future()) -> response().
 wait(Future) ->
-    OpTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_operation_timeout, 60000),
-    DurTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_durability_timeout, 60000),
+    Timeout = get_timeout(),
     receive
         {Future, Response} -> Response
     after
-        OpTimeout + DurTimeout -> {error, timeout}
+        Timeout -> {error, timeout}
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns request handling timeout.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_timeout() -> timeout().
+get_timeout() ->
+    OpTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_operation_timeout, 900000),
+    DurTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_durability_timeout, 900000),
+    OpTimeout + DurTimeout.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -95,11 +106,14 @@ get_modes() ->
 %% Returns size of worker pool for given mode.
 %% @end
 %%--------------------------------------------------------------------
--spec get_size(mode()) -> non_neg_integer().
-get_size(Mode) ->
-    PoolSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+-spec get_size(couchbase_config:bucket(), mode()) -> non_neg_integer().
+get_size(Bucket, Mode) ->
+    PoolSizeByBucket = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_size, []),
-    proplists:get_value(Mode, PoolSize, 1).
+    PoolSizeByMode = proplists:get_value(
+        Bucket, PoolSizeByBucket, proplists:get_value('_', PoolSizeByBucket, [])
+    ),
+    proplists:get_value(Mode, PoolSizeByMode, 20).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -123,7 +137,7 @@ get_request_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
         Key = {request_queue_size, Bucket, Mode, Id},
         Size + ets:lookup_element(couchbase_pool_stats, Key, 2)
-    end, 0, lists:seq(1, get_size(Mode))).
+    end, 0, lists:seq(1, get_size(Bucket, Mode))).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -168,5 +182,5 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
     couchbase_pool_worker:id().
 get_next_worker_id(Bucket, Mode) ->
     Key = {next_worker_id, Bucket, Mode},
-    Size = get_size(Mode),
+    Size = get_size(Bucket, Mode),
     ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 0}).

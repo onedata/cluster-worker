@@ -9,11 +9,11 @@
 %%% This module is responsible for moving forward safe sequence number.
 %%% Safe sequence number defines upper bound for changes that are guaranteed
 %%% to be present in the changes view and may be streamed to the clients.
-%%% There should be only one couchbase_changes_processor process per bucket
+%%% There should be only one couchbase_changes_worker process per bucket
 %%% and scope, as it mutates safe sequence number associated with this pair.
 %%% @end
 %%%-------------------------------------------------------------------
--module(couchbase_changes_processor).
+-module(couchbase_changes_worker).
 -author("Krzysztof Trzepla").
 
 -behaviour(gen_server).
@@ -34,6 +34,7 @@
     scope :: datastore:scope(),
     seq :: couchbase_changes:since(),
     seq_safe :: couchbase_changes:until(),
+    seq_safe_cas :: cberl:cas(),
     batch_size :: non_neg_integer(),
     interval :: non_neg_integer()
 }).
@@ -70,15 +71,16 @@ start_link(Bucket, Scope) ->
 init([Bucket, Scope]) ->
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
+    {ok, Cas, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
     SeqKey = couchbase_changes:get_seq_key(Scope),
-    {ok, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
+    {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     erlang:send_after(0, self(), update),
     {ok, #state{
         bucket = Bucket,
         scope = Scope,
         seq = Seq,
         seq_safe = SeqSafe,
+        seq_safe_cas = Cas,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 25),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -136,12 +138,12 @@ handle_info(update, #state{
     Ctx = #{bucket => Bucket},
     SeqKey = couchbase_changes:get_seq_key(Scope),
     Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey) of
-        {ok, Seq2} -> Seq2;
+        {ok, _, Seq2} -> Seq2;
         {error, _Reason} -> Seq
     end,
-    {noreply, fetch_changes(Seq, Seq3, State)};
-handle_info(update, #state{seq_safe = SeqSafe, seq = Seq} = State) ->
-    {noreply, fetch_changes(SeqSafe, Seq, State)};
+    {noreply, fetch_changes(State#state{seq = Seq3})};
+handle_info(update, #state{} = State) ->
+    {noreply, fetch_changes(State)};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -182,14 +184,16 @@ code_change(_OldVsn, State, _Extra) ->
 %% Sets safe sequence number to the last acknowledge sequence number.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_changes(couchbase_changes:seq(), couchbase_changes:seq(),
-    state()) -> state().
-fetch_changes(Seq, Seq, #state{interval = Interval} = State) ->
+-spec fetch_changes(state()) -> state().
+fetch_changes(#state{seq_safe = Seq, seq = Seq, interval = Interval} = State) ->
     erlang:send_after(Interval, self(), update),
     State;
-fetch_changes(SeqSafe, Seq, #state{
+fetch_changes(#state{
     bucket = Bucket,
     scope = Scope,
+    seq_safe = SeqSafe,
+    seq_safe_cas = Cas,
+    seq = Seq,
     batch_size = BatchSize,
     interval = Interval
 } = State) ->
@@ -205,9 +209,14 @@ fetch_changes(SeqSafe, Seq, #state{
         {inclusive_end, true}
     ]),
 
-    SeqSafe3 = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
+    State2 = #state{
+        seq_safe = SeqSafe3
+    } = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
+
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    ok = couchbase_driver:save(Ctx, {SeqSafeKey, SeqSafe3}),
+    {ok, Cas2, SeqSafe3} = couchbase_driver:save(
+        Ctx#{cas => Cas}, {SeqSafeKey, SeqSafe3}
+    ),
 
     ChangeKeys = lists:map(fun(S) ->
         couchbase_changes:get_change_key(Scope, S)
@@ -218,7 +227,7 @@ fetch_changes(SeqSafe, Seq, #state{
         Seq2 -> erlang:send_after(0, self(), update);
         _ -> erlang:send_after(Interval, self(), update)
     end,
-    State#state{seq_safe = SeqSafe3, seq = Seq}.
+    State2#state{seq_safe_cas = Cas2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -227,26 +236,38 @@ fetch_changes(SeqSafe, Seq, #state{
 %% For each sequence number checks whether it appears in changes.
 %% If sequence number is not found in changes checks whether it can be ignored.
 %% If sequence number is not found in changes and can not be ignored processing
-%% is stopped and previous sequence number is returned.
+%% is stopped.
 %% @end
 %%--------------------------------------------------------------------
 -spec process_changes(couchbase_changes:seq(), couchbase_changes:seq(),
-    [couchbase_changes:change()], state()) -> couchbase_changes:seq().
-process_changes(Seq, Seq, [], _State) ->
-    Seq - 1;
+    [couchbase_changes:change()], state()) -> state().
+process_changes(Seq, Seq, [], State) ->
+    State;
 process_changes(SeqSafe, Seq, [], State) ->
-    case ignore_change(SeqSafe, State, 10) of
-        true -> process_changes(SeqSafe + 1, Seq, [], State);
-        false -> SeqSafe - 1
+    Timeout = 2 * couchbase_pool:get_timeout(),
+    case ignore_change(SeqSafe, State, Timeout, 500) of
+        true ->
+            process_changes(SeqSafe + 1, Seq, [], State#state{
+                seq_safe = SeqSafe
+            });
+        false ->
+            State
     end;
 process_changes(SeqSafe, Seq, [Change | _] = Changes, State) ->
     case lists:keyfind(<<"key">>, 1, Change) of
         {<<"key">>, [_, SeqSafe]} ->
-            process_changes(SeqSafe + 1, Seq, tl(Changes), State);
+            process_changes(SeqSafe + 1, Seq, tl(Changes), State#state{
+                seq_safe = SeqSafe
+            });
         {<<"key">>, [_, _]} ->
-            case ignore_change(SeqSafe, State, 10) of
-                true -> process_changes(SeqSafe + 1, Seq, Changes, State);
-                false -> SeqSafe - 1
+            Timeout = 2 * couchbase_pool:get_timeout(),
+            case ignore_change(SeqSafe, State, Timeout, 500) of
+                true ->
+                    process_changes(SeqSafe + 1, Seq, Changes, State#state{
+                        seq_safe = SeqSafe
+                    });
+                false ->
+                    State
             end
     end.
 
@@ -257,16 +278,19 @@ process_changes(SeqSafe, Seq, [Change | _] = Changes, State) ->
 %% Retries when status is undefined.
 %% @end
 %%--------------------------------------------------------------------
--spec ignore_change(couchbase_changes:seq(), state(), non_neg_integer()) ->
+-spec ignore_change(couchbase_changes:seq(), state(), timeout(), timeout()) ->
     boolean().
-ignore_change(Seq, State, AttemptsLeft) ->
-    case {ignore_change(Seq, State), AttemptsLeft} of
-        {undefined, 1} ->
-            true;
-        {undefined, _} ->
-            timer:sleep(timer:seconds(1)),
-            ignore_change(Seq, State, AttemptsLeft - 1);
-        {Ignore, _} ->
+ignore_change(Seq, State, Timeout, Delay) when Timeout =< Delay ->
+    case ignore_change(Seq, State) of
+        undefined -> true;
+        Ignore -> Ignore
+    end;
+ignore_change(Seq, State, Timeout, Delay) ->
+    case ignore_change(Seq, State) of
+        undefined ->
+            timer:sleep(Delay),
+            ignore_change(Seq, State, Timeout - Delay, Delay);
+        Ignore ->
             Ignore
     end.
 
@@ -277,16 +301,60 @@ ignore_change(Seq, State, AttemptsLeft) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec ignore_change(couchbase_changes:seq(), state()) -> boolean() | undefined.
-ignore_change(Seq, #state{bucket = Bucket, scope = Scope}) ->
+ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope}) ->
     Ctx = #{bucket => Bucket},
     ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
     case couchbase_driver:get(Ctx, ChangeKey) of
-        {ok, Key} ->
-            case couchbase_driver:get(Ctx, Key) of
-                {ok, #document2{seq = Seq}} -> false;
-                {ok, #document2{}} -> true;
-                {error, key_enoent} -> undefined
+        {ok, _, Json} ->
+            {Props} = jiffy:decode(Json),
+            {<<"key">>, Key} = lists:keyfind(<<"key">>, 1, Props),
+            {<<"pid">>, Term} = lists:keyfind(<<"pid">>, 1, Props),
+            Pid = binary_to_term(base64:decode(Term)),
+            case ignore_change(Seq, Key, State) of
+                undefined ->
+                    wait_for_worker(Pid),
+                    case ignore_change(Seq, Key, State) of
+                        undefined -> true;
+                        Ignore -> Ignore
+                    end;
+                Ignore ->
+                    Ignore
             end;
         {error, key_enoent} ->
             undefined
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Check whether provided sequence number can be ignored, that is smaller than
+%% a sequence number of a document fetched from a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec ignore_change(couchbase_changes:seq(), couchbase_driver:key(), state()) ->
+    boolean() | undefined.
+ignore_change(Seq, Key, #state{bucket = Bucket}) ->
+    Ctx = #{bucket => Bucket},
+    case couchbase_driver:get(Ctx, Key) of
+        {ok, _, #document{seq = Seq}} -> false;
+        {ok, _, #document{seq = Seq2}} when Seq2 > Seq -> true;
+        {ok, _, #document{seq = Seq2}} when Seq2 < Seq -> undefined;
+        {error, key_enoent} -> undefined
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits until CouchBase pool worker complete current action.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_for_worker(pid()) -> ok.
+wait_for_worker(Pid) ->
+    try
+        pong = gen_server:call(Pid, ping, couchbase_pool:get_timeout()),
+        ok
+    catch
+        _:{noproc, _} -> ok;
+        exit:{normal, _} -> ok;
+        _:{timeout, _} -> wait_for_worker(Pid)
     end.

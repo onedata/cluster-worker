@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([set_mutator/2, set_next_seq/3, set_next_rev/2]).
+-export([set_mutator/2, set_next_rev/2, set_prefix/2]).
 
 -type hash() :: datastore_utils2:hex().
 -export_type([hash/0]).
@@ -30,29 +30,13 @@
 %% Stores mutator in a document.
 %% @end
 %%--------------------------------------------------------------------
--spec set_mutator(couchbase_driver:ctx(), datastore:doc()) -> datastore:doc().
-set_mutator(#{mutator := Mutator}, #document2{mutator = Mutators} = Doc) ->
+-spec set_mutator(couchbase_driver:ctx(), datastore:document()) -> datastore:document().
+set_mutator(#{mutator := Mutator}, #document{mutator = Mutators} = Doc) ->
     Length = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_mutator_history_length, 20),
-    Doc#document2{mutator = lists:sublist([Mutator | Mutators], Length)};
+    Doc#document{mutator = lists:sublist([Mutator | Mutators], Length)};
 set_mutator(_Ctx, Doc) ->
     Doc.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates and stores next sequence number in a document.
-%% @end
-%%--------------------------------------------------------------------
--spec set_next_seq(cberl:connection(), couchbase_driver:ctx(),
-    datastore:doc()) -> datastore:doc().
-set_next_seq(_Connection, #{no_seq := true}, Doc) ->
-    Doc;
-set_next_seq(Connection, Ctx, #document2{key = Key, scope = Scope} = Doc) ->
-    SeqKey = couchbase_changes:get_seq_key(Scope),
-    {ok, Seq} = couchbase_crud:update_counter(Connection, SeqKey, 1, 1),
-    ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
-    [{ChangeKey, ok}] = couchbase_crud:save(Connection, [{Ctx, ChangeKey, Key}]),
-    Doc#document2{seq = Seq}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -60,20 +44,32 @@ set_next_seq(Connection, Ctx, #document2{key = Key, scope = Scope} = Doc) ->
 %% Returns updated document and its EJSON encoded counterpart.
 %% @end
 %%--------------------------------------------------------------------
--spec set_next_rev(couchbase_driver:ctx(), datastore:doc()) ->
-    {datastore:doc(), datastore_json2:ejson()}.
+-spec set_next_rev(couchbase_driver:ctx(), datastore:document()) ->
+    {datastore:document(), datastore_json2:ejson()}.
 set_next_rev(#{no_rev := true}, Doc) ->
     {Doc, datastore_json2:encode(Doc)};
-set_next_rev(_Ctx, #document2{rev = Revs} = Doc) ->
+set_next_rev(_Ctx, #document{rev = Revs} = Doc) ->
     {Props} = EJson = datastore_json2:encode(Doc),
     Rev = create_rev(EJson),
     Length = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_revision_history_length, 20),
     Revs2 = lists:sublist([Rev | Revs], Length),
 
-    Doc2 = Doc#document2{rev = Revs2},
+    Doc2 = Doc#document{rev = Revs2},
     Props2 = lists:keystore(<<"_rev">>, 1, Props, {<<"_rev">>, Revs2}),
     {Doc2, {Props2}}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Adds prefix to a key.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_prefix(couchbase_driver:ctx() | datastore_cache:ctx(),
+    datastore:key()) -> datastore:key().
+set_prefix(#{prefix := <<_/binary>> = Prefix}, Key) ->
+    <<Prefix/binary, "-", Key/binary>>;
+set_prefix(_Ctx, Key) ->
+    Key.
 
 %%%===================================================================
 %%% Internal functions

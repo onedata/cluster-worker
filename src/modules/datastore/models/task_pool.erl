@@ -18,10 +18,25 @@
 %% model_behaviour callbacks
 -export([save/1, get/1, list/0, list/1, list_failed/1, exists/1, delete/1, delete/2, update/2, update/3,
     create/1, create/2, model_init/0, 'after'/5, before/4]).
+-export([record_struct/1]).
 %% API
 -export([count_tasks/3]).
 
 -define(LEVEL_OVERRIDE(Level), [{level, Level}]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns structure of the record in specified version.
+%% @end
+%%--------------------------------------------------------------------
+-spec record_struct(datastore_json:record_version()) -> datastore_json:record_struct().
+record_struct(1) ->
+    {record, [
+        {task, term},
+        {task_type, atom},
+        {owner, term},
+        {node, atom}
+    ]}.
 
 %%%===================================================================
 %%% model_behaviour callbacks
@@ -199,7 +214,8 @@ exists(Key) ->
 %%--------------------------------------------------------------------
 -spec model_init() -> model_behaviour:model_config().
 model_init() ->
-    ?MODEL_CONFIG(task_pool_bucket, [], ?LOCAL_ONLY_LEVEL).
+    ?MODEL_CONFIG(task_pool_bucket, [], ?LOCAL_ONLY_LEVEL)#model_config{
+        list_enabled = {true, return_errors}}.
 
 %%--------------------------------------------------------------------
 %% @doc

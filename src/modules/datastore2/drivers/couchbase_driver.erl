@@ -19,15 +19,20 @@
 -export([save_async/2, get_async/2, delete_async/2, wait/1]).
 -export([save/2, get/2, delete/2]).
 -export([get_counter/2, get_counter/3, update_counter/4]).
--export([save_design_doc/3, delete_design_doc/2, query_view/4]).
+-export([save_design_doc/3, get_design_doc/2, delete_design_doc/2]).
+-export([save_view_doc/3, save_spatial_view_doc/3, query_view/4]).
+-export([call/3]).
 
--type ctx() :: #{bucket => couchbase_config:bucket(),
+-type ctx() :: #{prefix => binary(),
+                 bucket => couchbase_config:bucket(),
+                 mutator => datastore:mutator(),
+                 cas => cberl:cas(),
                  no_rev => boolean(),
                  no_seq => boolean(),
                  no_durability => boolean()}.
 -type key() :: datastore:key().
--type value() :: datastore:doc() | cberl:value().
--type item() :: datastore:doc() | {cberl:key(), cberl:value()}.
+-type value() :: datastore:document() | cberl:value().
+-type item() :: datastore:document() | {cberl:key(), cberl:value()}.
 -type rev() :: [couchbase_doc:hash()].
 -type design() :: binary().
 -type view() :: binary().
@@ -43,10 +48,14 @@
                     {limit, integer()} |
                     {on_error, continue | stop} |
                     {reduce, boolean()} |
+                    {spatial, boolean()} |
                     {skip, integer()} |
                     {stale, false | ok | update_after} |
                     {startkey, binary()} |
-                    {startkey_docid, binary()}.
+                    {startkey_docid, binary()} |
+                    {bbox, binary()} |
+                    {start_range, binary()} |
+                    {end_range, binary()}.
 
 -export_type([ctx/0, key/0, value/0, item/0, rev/0, design/0, view/0,
     view_opt/0]).
@@ -57,14 +66,26 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Call method on this driver.
+%% @end
+%%--------------------------------------------------------------------
+-spec call(Function :: atom(), ctx(), Args :: [term()]) ->
+  term().
+call(delete = Method, OptCtx, [Key, _Pred]) ->
+  call(Method, OptCtx, [Key]);
+call(Method, OptCtx, Args) ->
+  apply(?MODULE, Method, [OptCtx | Args]).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Asynchronously saves value in CouchBase.
 %% @end
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), item()) -> couchbase_pool:future().
-save_async(#{bucket := Bucket} = Ctx, #document2{} = Doc) ->
-    couchbase_pool:post_async(Bucket, write, {save, Ctx, Doc});
+save_async(#{bucket := Bucket} = Ctx, #document{} = Doc) ->
+  couchbase_pool:post_async(Bucket, write, {save, Ctx, Doc});
 save_async(#{bucket := Bucket} = Ctx, {Key, Value}) ->
-    couchbase_pool:post_async(Bucket, write, {save, Ctx, {Key, Value}}).
+  couchbase_pool:post_async(Bucket, write, {save, Ctx, {Key, Value}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -72,8 +93,9 @@ save_async(#{bucket := Bucket} = Ctx, {Key, Value}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_async(ctx(), key()) -> couchbase_pool:future().
-get_async(#{bucket := Bucket}, Key) ->
-    couchbase_pool:post_async(Bucket, read, {get, Key}).
+get_async(#{bucket := Bucket} = Ctx, Key) ->
+  Key2 = couchbase_doc:set_prefix(Ctx, Key),
+  couchbase_pool:post_async(Bucket, read, {get, Key2}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -81,8 +103,9 @@ get_async(#{bucket := Bucket}, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_async(ctx(), key()) -> couchbase_pool:future().
-delete_async(#{bucket := Bucket}, Key) ->
-    couchbase_pool:post_async(Bucket, write, {delete, Key}).
+delete_async(#{bucket := Bucket} = Ctx, Key) ->
+  Key2 = couchbase_doc:set_prefix(Ctx, Key),
+  couchbase_pool:post_async(Bucket, write, {delete, Ctx, Key2}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -102,8 +125,8 @@ wait(Future) ->
 %% Saves values in CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), value() | [value()]) -> ok | {ok, datastore:doc()} |
-    {error, term()} | [ok | {ok, datastore:doc()} | {error, term()}].
+-spec save(ctx(), value() | [value()]) -> {ok, cberl:cas(), value()} |
+    {error, term()} | [{ok, cberl:cas(), value()} | {error, term()}].
 save(Ctx, Values) when is_list(Values) ->
     wait([save_async(Ctx, Value) || Value <- Values]);
 save(Ctx, Value) ->
@@ -114,8 +137,8 @@ save(Ctx, Value) ->
 %% Retrieves values from CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec get(ctx(), key()) -> {ok, value()} | {error, term()};
-    (ctx(), [key()]) -> [{ok, value()} | {error, term()}].
+-spec get(ctx(), key()) -> {ok, cberl:cas(), value()} | {error, term()};
+    (ctx(), [key()]) -> [{ok, cberl:cas(), value()} | {error, term()}].
 get(Ctx, Keys) when is_list(Keys) ->
     wait([get_async(Ctx, Key) || Key <- Keys]);
 get(Ctx, Key) ->
@@ -138,12 +161,16 @@ delete(Ctx, Key) ->
 %% Returns counter value from a database.
 %% @end
 %%--------------------------------------------------------------------
--spec get_counter(ctx(), key()) -> {ok, non_neg_integer()} | {error, term()}.
+-spec get_counter(ctx(), key()) ->
+    {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
 get_counter(Ctx, Key) ->
-    case get(Ctx, Key) of
-        {ok, Value} when is_integer(Value) -> {ok, Value};
-        {ok, Value} when is_binary(Value) -> {ok, binary_to_integer(Value)};
-        {error, Reason} -> {error, Reason}
+    case get(maps:remove(prefix, Ctx), Key) of
+        {ok, Cas, Value} when is_integer(Value) ->
+            {ok, Cas, Value};
+        {ok, Cas, Value} when is_binary(Value) ->
+            {ok, Cas, binary_to_integer(Value)};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
@@ -153,7 +180,7 @@ get_counter(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_counter(ctx(), key(), cberl:arithmetic_default()) ->
-    {ok, non_neg_integer()} | {error, term()}.
+    {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
 get_counter(#{bucket := Bucket}, Key, Default) ->
     couchbase_pool:post(Bucket, read, {get_counter, Key, Default}).
 
@@ -164,7 +191,8 @@ get_counter(#{bucket := Bucket}, Key, Default) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec update_counter(ctx(), key(), cberl:arithmetic_delta(),
-    cberl:arithmetic_default()) -> {ok, non_neg_integer()} | {error, term()}.
+    cberl:arithmetic_default()) ->
+    {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
 update_counter(#{bucket := Bucket}, Key, Delta, Default) ->
     couchbase_pool:post(Bucket, write, {update_counter, Key, Delta, Default}).
 
@@ -180,12 +208,50 @@ save_design_doc(#{bucket := Bucket}, DesignName, EJson) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Retrieves design document from a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_design_doc(ctx(), design()) ->
+    {ok, datastore_json2:ejson()} | {error, term()}.
+get_design_doc(#{bucket := Bucket}, DesignName) ->
+    couchbase_pool:post(Bucket, read, {get_design_doc, DesignName}).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Removes design document from a database.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_design_doc(ctx(), design()) -> ok | {error, term()}.
 delete_design_doc(#{bucket := Bucket}, DesignName) ->
     couchbase_pool:post(Bucket, write, {delete_design_doc, DesignName}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a design document with a single view. Name of design document is
+%% equal to the view name.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
+save_view_doc(Ctx, ViewName, Function) ->
+    EJson = {[{<<"views">>, {[{
+        ViewName, {[{
+            <<"map">>, Function
+        }]}
+    }]}}]},
+    save_design_doc(Ctx, ViewName, EJson).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a design document with a single spatial view. Name of design document
+%% is equal to the view name.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_spatial_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
+save_spatial_view_doc(Ctx, ViewName, Function) ->
+    EJson = {[{<<"spatial">>, {[{
+        ViewName, Function
+    }]}}]},
+    save_design_doc(Ctx, ViewName, EJson).
 
 %%--------------------------------------------------------------------
 %% @doc

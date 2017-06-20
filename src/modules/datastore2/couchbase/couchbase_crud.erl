@@ -23,21 +23,27 @@
 -type save_request() :: {couchbase_driver:ctx(), couchbase_driver:key(),
                          couchbase_driver:value()}.
 -type get_request() :: couchbase_driver:key().
--type delete_request() :: couchbase_driver:key().
+-type delete_request() :: {couchbase_driver:ctx(), couchbase_driver:key()}.
 
 -export_type([save_request/0, get_request/0, delete_request/0]).
 
 -type response(R) :: {couchbase_driver:key(), R | {error, term()}}.
--type save_response() :: response(ok | {ok, datastore:doc()}).
--type get_response() :: response({ok, couchbase_driver:value()}).
+-type save_response() :: response({ok, cberl:cas(), couchbase_driver:value()}).
+-type get_response() :: response({ok, cberl:cas(), couchbase_driver:value()}).
 -type delete_response() :: response(ok).
 
 -export_type([save_response/0, get_response/0, delete_response/0]).
 
+-type save_requests_map() :: #{couchbase_driver:key() => {
+    couchbase_driver:ctx(),
+    {ok, cberl:cas(), couchbase_driver:value()} | {error, term()}
+}}.
+-type change_key_map() :: #{couchbase_driver:key() => couchbase_driver:key()}.
+
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_operation_timeout, 60000)).
+    couchbase_operation_timeout, 900000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_durability_timeout, 60000)).
+    couchbase_durability_timeout, 900000)).
 
 %%%===================================================================
 %%% API
@@ -52,11 +58,31 @@
 save(_Connection, []) ->
     [];
 save(Connection, Requests) ->
-    {SRequests, DRequests, Responses} =
-        prepare_save_requests(Connection, Requests),
-    {DRequests2, Responses2} =
-        store(Connection, SRequests, DRequests, Responses),
-    check_durable(Connection, DRequests2, Responses2).
+    CountByScope = count_by_scope(Requests),
+    SeqsByScope = allocate_seq(Connection, CountByScope),
+    SaveRequests = prepare_save_requests(SeqsByScope, Requests),
+
+    {ChangeStoreRequests, ChangeKeys} = prepare_change_store(SaveRequests),
+    ChangeStoreResponses = store(Connection, ChangeStoreRequests),
+    ChangeStoreResponses2 = replace_change_keys(ChangeKeys, ChangeStoreResponses),
+    SaveRequests2 = update_save_responses(ChangeStoreResponses2, SaveRequests),
+
+    {ChangeDurableRequests, ChangeKeys2} = prepare_change_durable(SaveRequests2),
+    ChangeDurableResponses = wait_durable(Connection, ChangeDurableRequests),
+    ChangeDurableResponses2 = replace_change_keys(ChangeKeys2, ChangeDurableResponses),
+    SaveRequests3 = update_save_responses(ChangeDurableResponses2, SaveRequests2),
+
+    {StoreRequests, SaveRequests4} = prepare_store(SaveRequests3),
+    StoreResponses = store(Connection, StoreRequests),
+    SaveRequests5 = update_save_responses(StoreResponses, SaveRequests4),
+
+    DurableRequests = prepare_durable(SaveRequests5),
+    DurableResponses = wait_durable(Connection, DurableRequests),
+    SaveRequests6 = update_save_responses(DurableResponses, SaveRequests5),
+
+    maps:fold(fun(Key, {_Ctx, Response}, SaveResponses) ->
+        [{Key, Response} | SaveResponses]
+    end, [], SaveRequests6).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -66,25 +92,25 @@ save(Connection, Requests) ->
 -spec get(cberl:connection(), [get_request()]) -> [get_response()].
 get(_Connection, []) ->
     [];
-get(Connection, Keys) ->
-    Requests = lists:map(fun(Key) -> {Key, 0, false} end, Keys),
-    case cberl:bulk_get(Connection, Requests, ?OP_TIMEOUT) of
+get(Connection, Requests) ->
+    GetRequests = [{Key, 0, false} || Key <- Requests],
+    case cberl:bulk_get(Connection, GetRequests, ?OP_TIMEOUT) of
         {ok, Responses} ->
             lists:map(fun
-                ({Key, {ok, _, {_} = EJson}}) ->
+                ({Key, {ok, Cas, {_} = EJson}}) ->
                     try
-                        {Key, {ok, datastore_json2:decode(EJson)}}
+                        {Key, {ok, Cas, datastore_json2:decode(EJson)}}
                     catch
                         _:Reason ->
                             {Key, {error, {Reason, erlang:get_stacktrace()}}}
                     end;
-                ({Key, {ok, _, Value}}) ->
-                    {Key, {ok, Value}};
+                ({Key, {ok, Cas, Value}}) ->
+                    {Key, {ok, Cas, Value}};
                 ({Key, {error, Reason}}) ->
                     {Key, {error, Reason}}
             end, Responses);
         {error, Reason} ->
-            lists:map(fun(Key) -> {Key, {error, Reason}} end, Keys)
+            [{Key, {error, Reason}} || Key <- Requests]
     end.
 
 %%--------------------------------------------------------------------
@@ -95,13 +121,13 @@ get(Connection, Keys) ->
 -spec delete(cberl:connection(), [delete_request()]) -> [delete_response()].
 delete(_Connection, []) ->
     [];
-delete(Connection, Keys) ->
-    Requests = lists:map(fun(Key) -> {Key, 0} end, Keys),
-    case cberl:bulk_remove(Connection, Requests, ?OP_TIMEOUT) of
+delete(Connection, Requests) ->
+    RemoveRequests = [{Key, maps:get(cas, Ctx, 0)} || {Ctx, Key} <- Requests],
+    case cberl:bulk_remove(Connection, RemoveRequests, ?OP_TIMEOUT) of
         {ok, Responses} ->
             Responses;
         {error, Reason} ->
-            lists:map(fun(Key) -> {Key, {error, Reason}} end, Keys)
+            [{Key, {error, Reason}} || {_, Key} <- Requests]
     end.
 
 %%--------------------------------------------------------------------
@@ -111,7 +137,8 @@ delete(Connection, Keys) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_counter(cberl:connection(), couchbase_driver:key(),
-    cberl:arithmetic_default()) -> {ok, non_neg_integer()} | {error, term()}.
+    cberl:arithmetic_default()) ->
+    {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
 get_counter(Connection, Key, Default) ->
     update_counter(Connection, Key, 0, Default).
 
@@ -123,12 +150,9 @@ get_counter(Connection, Key, Default) ->
 %%--------------------------------------------------------------------
 -spec update_counter(cberl:connection(), couchbase_driver:key(),
     cberl:arithmetic_delta(), cberl:arithmetic_default()) ->
-    {ok, non_neg_integer()} | {error, term()}.
+    {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
 update_counter(Connection, Key, Delta, Default) ->
-    case cberl:arithmetic(Connection, Key, Delta, Default, 0, ?OP_TIMEOUT) of
-        {ok, _, Value} -> {ok, Value};
-        {error, Reason} -> {error, Reason}
-    end.
+    cberl:arithmetic(Connection, Key, Delta, Default, 0, ?OP_TIMEOUT).
 
 %%%===================================================================
 %%% Internal functions
@@ -137,102 +161,248 @@ update_counter(Connection, Key, Delta, Default) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Creates store/durability requests and future save responses.
+%% Returns values count by scope.
 %% @end
 %%--------------------------------------------------------------------
--spec prepare_save_requests(cberl:connection(), [save_request()]) ->
-    {[cberl:store_request()], [cberl:durability_request()], [save_response()]}.
-prepare_save_requests(Connection, Requests) ->
+-spec count_by_scope([save_request()]) -> #{datastore:scope() => pos_integer()}.
+count_by_scope(Requests) ->
     lists:foldl(fun
-        ({Ctx, Key, #document2{} = Doc}, {SRequests, DRequests, Responses}) ->
-            try
-                Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
-                Doc3 = couchbase_doc:set_next_seq(Connection, Ctx, Doc2),
-                {Doc4, EJson} = couchbase_doc:set_next_rev(Ctx, Doc3),
-                {
-                    [{set, Key, EJson, json, 0, 0} | SRequests],
-                    add_durability_request(Ctx, Key, DRequests),
-                    [{Key, {ok, Doc4}} | Responses]
-                }
-            catch
-                _:Reason ->
-                    Error = {error, {Reason, erlang:get_stacktrace()}},
-                    {SRequests, DRequests, [{Key, Error} | Responses]}
-            end;
-        ({Ctx, Key, Value}, {SRequests, DRequests, Responses}) ->
-            {
-                [{set, Key, Value, json, 0, 0} | SRequests],
-                add_durability_request(Ctx, Key, DRequests),
-                [{Key, ok} | Responses]
-            }
-    end, {[], [], []}, Requests).
+        ({#{no_seq := true}, _Key, #document{}}, Scopes) ->
+            Scopes;
+        ({_Ctx, _Key, #document{scope = Scope}}, Scopes) ->
+            Delta = maps:get(Scope, Scopes, 0),
+            maps:put(Scope, Delta + 1, Scopes);
+        ({_Ctx, _Key, _Value}, Scopes) ->
+            Scopes
+    end, #{}, Requests).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Adds durability request for a key.
+%% Allocates sequence numbers by scopes.
 %% @end
 %%--------------------------------------------------------------------
--spec add_durability_request(couchbase_driver:ctx(), couchbase_driver:key(),
-    [cberl:durability_request()]) -> [cberl:durability_request()].
-add_durability_request(#{no_durability := true}, _Key, Requests) ->
-    Requests;
-add_durability_request(_Ctx, Key, Requests) ->
-    [{Key, 0} | Requests].
+-spec allocate_seq(cberl:connection(), #{datastore:scope() => pos_integer()}) ->
+    #{datastore:scope() => [pos_integer()]}.
+allocate_seq(Connection, CountByScope) ->
+    maps:fold(fun(Scope, Count, SeqByScope) ->
+        Key = couchbase_changes:get_seq_key(Scope),
+        case update_counter(Connection, Key, Count, Count) of
+            {ok, _, Seq} ->
+                Seqs = lists:seq(Seq - Count + 1, Seq),
+                maps:put(Scope, {ok, Seqs}, SeqByScope);
+            {error, Reason} ->
+                maps:put(Scope, {error, Reason}, SeqByScope)
+        end
+    end, #{}, CountByScope).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handles store requests and updates durability requests and save responses
-%% according to encountered errors.
+%% Builds save requests map and fills sequence numbers in documents.
 %% @end
 %%--------------------------------------------------------------------
--spec store(cberl:connection(), [cberl:store_request()],
-    [cberl:durability_request()], [save_response()]) ->
-    {[cberl:durability_request()], [save_response()]}.
-store(_Connection, [], DRequests, Responses) ->
-    {DRequests, Responses};
-store(Connection, SRequests, DRequests, Responses) ->
-    case cberl:bulk_store(Connection, SRequests, ?OP_TIMEOUT) of
-        {ok, StoreResponses} ->
-            lists:foldl(fun
-                ({_Key, {ok, _}}, {DRequests2, Responses2}) ->
-                    {DRequests2, Responses2};
-                ({Key, {error, _} = Error}, {DRequests2, Responses2}) ->
+-spec prepare_save_requests(#{datastore:scope() => [pos_integer()]},
+    [save_request()]) -> save_requests_map().
+prepare_save_requests(SeqsByScope, Requests) ->
+    {_, Requests3} = lists:foldl(fun
+        (
+            {Ctx = #{no_seq := true}, Key, Doc = #document{}},
+            {SeqsByScope2, Requests2}
+        ) ->
+            {SeqsByScope2, maps:put(Key, {Ctx, {ok, 0, Doc}}, Requests2)};
+        (
+            {Ctx, Key, Doc = #document{scope = Scope}},
+            {SeqsByScope2, Requests2}
+        ) ->
+            case maps:get(Scope, SeqsByScope2) of
+                {ok, [Seq | Seqs]} ->
+                    Doc2 = Doc#document{seq = Seq},
                     {
-                        lists:keydelete(Key, 1, DRequests2),
-                        lists:keyreplace(Key, 1, Responses2, {Key, Error})
+                        maps:put(Scope, {ok, Seqs}, SeqsByScope2),
+                        maps:put(Key, {Ctx, {ok, 0, Doc2}}, Requests2)
+                    };
+                {error, Reason} ->
+                    {
+                        SeqsByScope2,
+                        maps:put(Key, {Ctx, {error, Reason}}, Requests2)
                     }
-            end, {DRequests, Responses}, StoreResponses);
+            end;
+        ({Ctx, Key, Value}, {SeqsByScope2, Requests2}) ->
+            {SeqsByScope2, maps:put(Key, {Ctx, {ok, 0, Value}}, Requests2)}
+    end, {SeqsByScope, #{}}, Requests),
+    Requests3.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Prepares bulk store request for change documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_change_store(save_requests_map()) ->
+    {[cberl:store_request()], change_key_map()}.
+prepare_change_store(Requests) ->
+    maps:fold(fun
+        (_Key, {_, {error, _}}, {ChangeStoreRequests, ChangeKeys}) ->
+            {ChangeStoreRequests, ChangeKeys};
+        (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
+            {ChangeStoreRequests, ChangeKeys};
+        (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
+            #document{scope = Scope, seq = Seq} = Doc,
+            ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
+            Json = jiffy:encode({[
+                {<<"key">>, Key},
+                {<<"pid">>, base64:encode(term_to_binary(self()))}
+            ]}),
+            {
+                [{set, ChangeKey, Json, raw, 0, 0} | ChangeStoreRequests],
+                maps:put(ChangeKey, Key, ChangeKeys)
+            };
+        (_Key, {_, _}, {ChangeStoreRequests, ChangeKeys}) ->
+            {ChangeStoreRequests, ChangeKeys}
+    end, {[], #{}}, Requests).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Prepares bulk durability check request for change documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_change_durable(save_requests_map()) ->
+    {[cberl:durability_request()], change_key_map()}.
+prepare_change_durable(Requests) ->
+    maps:fold(fun
+        (_Key, {_, {error, _}}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys};
+        (_Key, {#{no_seq := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys};
+        (_Key, {#{no_durability := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys};
+        (Key, {_, {ok, Cas, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
+            #document{scope = Scope, seq = Seq} = Doc,
+            ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
+            {
+                [{ChangeKey, Cas} | ChangeDurableRequests],
+                maps:put(ChangeKey, Key, ChangeKeys)
+            };
+        (_Key, {_, _}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys}
+    end, {[], #{}}, Requests).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Prepares bulk store request and future save responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_store(save_requests_map()) ->
+    {[cberl:store_request()], save_requests_map()}.
+prepare_store(Requests) ->
+    maps:fold(fun
+        (Key, {_, {error, _Reason}} = Request, {StoreRequests, Requests2}) ->
+            {
+                StoreRequests,
+                maps:put(Key, Request, Requests2)
+            };
+        (Key, {Ctx, {ok, _, Doc = #document{}}}, {StoreRequests, Requests2}) ->
+            Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
+            {Doc3, EJson} = couchbase_doc:set_next_rev(Ctx, Doc2),
+            Cas = maps:get(cas, Ctx, 0),
+            {
+                [{set, Key, EJson, json, Cas, 0} | StoreRequests],
+                maps:put(Key, {Ctx, {ok, Cas, Doc3}}, Requests2)
+            };
+        (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Responses}) ->
+            Cas = maps:get(cas, Ctx, 0),
+            {
+                [{set, Key, Value, json, Cas, 0} | StoreRequests],
+                maps:put(Key, {Ctx, {ok, Cas, Value}}, Responses)
+            }
+    end, {[], #{}}, Requests).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Executes bulk store request.
+%% @end
+%%--------------------------------------------------------------------
+-spec store(cberl:connection(), [cberl:store_request()]) ->
+    [cberl:store_response()].
+store(_Connection, []) ->
+    [];
+store(Connection, Requests) ->
+    case cberl:bulk_store(Connection, Requests, ?OP_TIMEOUT) of
+        {ok, Responses} ->
+            Responses;
         {error, Reason} ->
-            Responses3 = lists:foldl(fun({_, Key, _, _, _, _}, Responses2) ->
-                lists:keyreplace(Key, 1, Responses2, {Key, {error, Reason}})
-            end, Responses, SRequests),
-            {[], Responses3}
+            [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
     end.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handles durability requests and updates future save responses according to
-%% encountered errors.
+%% Prepares bulk durability check request.
 %% @end
 %%--------------------------------------------------------------------
--spec check_durable(cberl:connection(), [cberl:durability_request()],
-    [save_response()]) -> [save_response()].
-check_durable(_Connection, [], Responses) ->
-    Responses;
-check_durable(Connection, Requests, Responses) ->
+-spec prepare_durable(save_requests_map()) -> [cberl:durability_request()].
+prepare_durable(Requests) ->
+    maps:fold(fun
+        (_Key, {_, {error, _}}, DurableRequests) ->
+            DurableRequests;
+        (_Key, {#{no_durability := true}, _}, DurableRequests) ->
+            DurableRequests;
+        (Key, {_, {ok, Cas, _}}, DurableRequests) ->
+            [{Key, Cas} | DurableRequests]
+    end, [], Requests).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Executes bulk durability check request.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_durable(cberl:connection(), [cberl:durability_request()]) ->
+    [cberl:durability_response()].
+wait_durable(_Connection, []) ->
+    [];
+wait_durable(Connection, Requests) ->
     case cberl:bulk_durability(Connection, Requests, {1, -1}, ?DUR_TIMEOUT) of
-        {ok, DurabilityResponses} ->
-            lists:foldl(fun
-                ({_Key, {ok, _}}, Responses2) ->
-                    Responses2;
-                ({Key, {error, _} = Error}, Responses2) ->
-                    lists:keyreplace(Key, 1, Responses2, {Key, Error})
-            end, Responses, DurabilityResponses);
+        {ok, Responses} ->
+            Responses;
         {error, Reason} ->
-            lists:foldl(fun({Key, _}, Responses2) ->
-                lists:keyreplace(Key, 1, Responses2, {Key, {error, Reason}})
-            end, Responses, Requests)
+            [{Key, {error, Reason}} || {Key, _} <- Requests]
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Replaces change key with a document key in change store or durability
+%% requests.
+%% @end
+%%--------------------------------------------------------------------
+-spec replace_change_keys(change_key_map(),
+    [cberl:store_response() | cberl:durability_response()]) ->
+    [cberl:store_response() | cberl:durability_response()].
+replace_change_keys(ChangeKeys, ChangeResponses) ->
+    lists:map(fun({ChangeKey, Response}) ->
+        {maps:get(ChangeKey, ChangeKeys), Response}
+    end, ChangeResponses).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Updates future save responses according to store and durability check
+%% requests outcomes.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_save_responses([cberl:store_response() | cberl:durability_response()],
+    save_requests_map()) -> save_requests_map().
+update_save_responses(Responses, SaveRequests) ->
+    lists:foldl(fun
+        ({Key, {ok, Cas}}, SaveRequests2) ->
+            {Ctx, {ok, _Cas, Value}} = maps:get(Key, SaveRequests2),
+            maps:put(Key, {Ctx, {ok, Cas, Value}}, SaveRequests2);
+        ({Key, {error, Reason}}, SaveRequests2) ->
+            {Ctx, _Response} = maps:get(Key, SaveRequests2),
+            maps:put(Key, {Ctx, {error, Reason}}, SaveRequests2)
+    end, SaveRequests, Responses).

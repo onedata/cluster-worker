@@ -17,38 +17,15 @@
 %% Also contains info from couchdb changes stream
 %% todo: consider introducing separate record for couchdb stream updates
 -record(document, {
+    % TODO - models do not use records as keys at model level (change type to key)
     key :: datastore:ext_key(),
-    %% holds revision
-    %% or revision history (in changes stream)
-    rev :: term(),
-    %% if record has been deleted  (in changes stream)
-    deleted = false :: boolean(),
-    generated_uuid = false :: boolean(),
-    value :: datastore:value(),
-    links :: term(),
-    version :: non_neg_integer() | undefined
-}).
-
--record(document2, {
-    key :: datastore:key(),
     value :: datastore:value(),
     scope = <<>> :: datastore:scope(),
     mutator = [] :: [datastore:mutator()],
-    rev = [] :: [datastore:rev()],
-    seq :: datastore:seq(),
+    rev = [] :: datastore:rev(),
+    seq = 0 :: datastore:seq(),
     deleted = false :: boolean(),
     version = 1 :: datastore_version2:version()
-}).
-
-% Max size of cleared_list in cache_consistency_controller
-% TODO - new cache_consistency_controller for new datastore
--define(CLEAR_MONITOR_MAX_SIZE, 0).
-%% Model that controls consistency of cache
--record(cache_consistency_controller, {
-    cleared_list = [] :: [datastore:key() | datastore:link_name()],
-    status = ok :: ok | not_monitored | {restoring, pid()},
-    clearing_counter = 0 :: non_neg_integer(),
-    restore_counter  = 0 :: non_neg_integer()
 }).
 
 %% Description of task to be done

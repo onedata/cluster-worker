@@ -64,7 +64,7 @@ all() ->
 }).
 -define(SCOPE, <<"scope">>).
 -define(DOC, ?DOC(1)).
--define(DOC(N), #document2{
+-define(DOC(N), #document{
     key = ?KEY(N),
     value = ?VALUE,
     scope = ?SCOPE
@@ -90,14 +90,14 @@ all() ->
 save_should_return_doc(Config) ->
     Ctx = ?config(ctx, Config),
     {ok, Doc} = ?assertMatch({ok, _}, mnesia_driver:save(Ctx, ?DOC)),
-    ?assertEqual(?KEY, Doc#document2.key),
-    ?assertEqual(?VALUE, Doc#document2.value),
-    ?assertEqual(?SCOPE, Doc#document2.scope),
-    ?assertEqual([], Doc#document2.mutator),
-    ?assertMatch([], Doc#document2.rev),
-    ?assertEqual(undefined, Doc#document2.seq),
-    ?assertEqual(false, Doc#document2.deleted),
-    ?assertEqual(1, Doc#document2.version).
+    ?assertEqual(?KEY, Doc#document.key),
+    ?assertEqual(?VALUE, Doc#document.value),
+    ?assertEqual(?SCOPE, Doc#document.scope),
+    ?assertEqual([], Doc#document.mutator),
+    ?assertMatch([], Doc#document.rev),
+    ?assertEqual(0, Doc#document.seq),
+    ?assertEqual(false, Doc#document.deleted),
+    ?assertEqual(1, Doc#document.version).
 
 get_should_return_doc(Config) ->
     Ctx = ?config(ctx, Config),
@@ -117,16 +117,16 @@ update_should_change_doc(Config) ->
         filed3 = '4'
     },
     {ok, Doc2} = ?assertMatch({ok, _}, mnesia_driver:save(
-        Ctx, Doc#document2{value = Value}
+        Ctx, Doc#document{value = Value}
     )),
-    ?assertEqual(?KEY, Doc2#document2.key),
-    ?assertEqual(Value, Doc2#document2.value),
-    ?assertEqual(?SCOPE, Doc2#document2.scope),
-    ?assertEqual([], Doc#document2.mutator),
-    ?assertMatch([], Doc#document2.rev),
-    ?assertEqual(undefined, Doc#document2.seq),
-    ?assertEqual(false, Doc2#document2.deleted),
-    ?assertEqual(1, Doc2#document2.version).
+    ?assertEqual(?KEY, Doc2#document.key),
+    ?assertEqual(Value, Doc2#document.value),
+    ?assertEqual(?SCOPE, Doc2#document.scope),
+    ?assertEqual([], Doc#document.mutator),
+    ?assertMatch([], Doc#document.rev),
+    ?assertEqual(0, Doc#document.seq),
+    ?assertEqual(false, Doc2#document.deleted),
+    ?assertEqual(1, Doc2#document.version).
 
 delete_should_remove_doc(Config) ->
     Ctx = ?config(ctx, Config),
@@ -149,11 +149,11 @@ save_get_delete_should_return_success_base(Config) ->
     OpsNum = ?config(ops_num, Config),
 
     lists:foreach(fun(N) ->
-        ?assertMatch({ok, #document2{}}, mnesia_driver:save(Ctx, ?DOC(N)))
+        ?assertMatch({ok, #document{}}, mnesia_driver:save(Ctx, ?DOC(N)))
     end, lists:seq(1, OpsNum)),
 
     lists:foreach(fun(N) ->
-        ?assertMatch({ok, #document2{}}, mnesia_driver:get(Ctx, ?KEY(N)))
+        ?assertMatch({ok, #document{}}, mnesia_driver:get(Ctx, ?KEY(N)))
     end, lists:seq(1, OpsNum)),
 
     lists:foreach(fun(N) ->
