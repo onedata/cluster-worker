@@ -9,7 +9,7 @@
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.4.0">>},2},
  {<<"cluster_manager">>,
   {raw,"ssh://git@git.plgrid.pl:7999/vfs/cluster-manager.git",
-       {mod_ref,git,{ref,"e383cde6c74106639475ee9a7c7a66feef7a06e5"},[]}},
+       {mod_ref,git,{ref,"2cb553e08574f1abfd2403a09a806efda304083d"},[]}},
   0},
  {<<"corman">>,
   {git,"git://github.com/RoXeon/corman.git",
