@@ -697,7 +697,7 @@ get_link_child_num(LinkName, LinkDocKey) ->
     LinkNameId = binary:decode_unsigned(crypto:hash(md5, term_to_binary(LinkName))),
     LinkDocKeyId = binary:decode_unsigned(crypto:hash(md5, term_to_binary(LinkDocKey))),
 
-    LinkNameId bxor LinkDocKeyId rem ?LINKS_TREE_BASE.
+    (LinkNameId bxor LinkDocKeyId) rem ?LINKS_TREE_BASE.
 
 %%--------------------------------------------------------------------
 %% @private
