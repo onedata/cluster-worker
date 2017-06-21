@@ -45,17 +45,17 @@
 %% Encodes a document to erlang json format with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec encode(datastore:doc()) -> ejson().
-encode(#document2{value = Value, version = Version} = Doc) ->
+-spec encode(datastore:document()) -> ejson().
+encode(#document{value = Value, version = Version} = Doc) ->
     Model = element(1, Value),
     {Props} = encode_term(Value, Model:record_struct(Version)),
     {[
-        {<<"_key">>, Doc#document2.key},
-        {<<"_scope">>, Doc#document2.scope},
-        {<<"_mutator">>, Doc#document2.mutator},
-        {<<"_rev">>, Doc#document2.rev},
-        {<<"_seq">>, Doc#document2.seq},
-        {<<"_deleted">>, Doc#document2.deleted},
+        {<<"_key">>, Doc#document.key},
+        {<<"_scope">>, Doc#document.scope},
+        {<<"_mutator">>, Doc#document.mutator},
+        {<<"_rev">>, Doc#document.rev},
+        {<<"_seq">>, Doc#document.seq},
+        {<<"_deleted">>, Doc#document.deleted},
         {<<"_version">>, Version} |
         Props
     ]}.
@@ -65,7 +65,7 @@ encode(#document2{value = Value, version = Version} = Doc) ->
 %% Decodes a document from erlang json format with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec decode(ejson()) -> datastore:doc().
+-spec decode(ejson()) -> datastore:document().
 decode({Term} = EJson) when is_list(Term) ->
     {<<"_key">>, Key} = lists:keyfind(<<"_key">>, 1, Term),
     {<<"_scope">>, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
@@ -80,7 +80,7 @@ decode({Term} = EJson) when is_list(Term) ->
     Record = decode_term(EJson, ModelName2:record_struct(Version)),
     {Version2, Record2} = datastore_version2:upgrade_model(
         Version, ModelName2, Record),
-    #document2{
+    #document{
         key = Key,
         value = Record2,
         scope = Scope,

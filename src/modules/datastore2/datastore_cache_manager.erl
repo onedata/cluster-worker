@@ -21,25 +21,38 @@
 -behaviour(gen_server).
 
 -include("global_definitions.hrl").
+-include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/0]).
--export([reset/0, resize/1, mark_active/1, mark_inactive/3]).
+-export([start_link/1]).
+-export([reset/1, resize/2]).
+-export([mark_active/3, mark_inactive/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
+-record(entry, {
+    cache_key :: datastore:key() | '_',
+    mutator_pid :: pid() | '_',
+    volatile :: boolean() | '_',
+    driver :: datastore:memory_driver() | '_',
+    driver_ctx :: datastore:memory_driver_ctx() | '_',
+    driver_key :: datastore:key() | '_'
+}).
+
 -record(state, {
+    pool :: pool(),
     size :: non_neg_integer(),
     max_size :: non_neg_integer()
 }).
 
+-type pool() :: memory | disc.
+-type entry() :: #entry{}.
 -type state() :: #state{}.
 
--define(ACTIVE, datastore_cache_active).
--define(INACTIVE, datastore_cache_inactive).
+-export_type([pool/0]).
 
 %%%===================================================================
 %%% API
@@ -50,9 +63,9 @@
 %% Starts datastore cache manager.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link() -> {ok, pid()} | {error, Reason :: term()}.
-start_link() ->
-    gen_server2:start_link({local, ?MODULE}, ?MODULE, [], []).
+-spec start_link(pool()) -> {ok, pid()} | {error, Reason :: term()}.
+start_link(Pool) ->
+    gen_server2:start_link({local, name(Pool)}, ?MODULE, [Pool], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -60,9 +73,9 @@ start_link() ->
 %% IMPORTANT! This function does not free active/inactive entries.
 %% @end
 %%--------------------------------------------------------------------
--spec reset() -> ok.
-reset() ->
-    gen_server2:call(?MODULE, reset).
+-spec reset(pool()) -> ok.
+reset(Pool) ->
+    gen_server2:call(name(Pool), reset).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -71,9 +84,9 @@ reset() ->
 %% are removed from cache.
 %% @end
 %%--------------------------------------------------------------------
--spec resize(non_neg_integer()) -> ok.
-resize(NewSize) ->
-    gen_server2:call(?MODULE, {resize, NewSize}).
+-spec resize(pool(), non_neg_integer()) -> ok.
+resize(Pool, NewSize) ->
+    gen_server2:call(name(Pool), {resize, NewSize}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -83,12 +96,32 @@ resize(NewSize) ->
 %% otherwise returns 'false'.
 %% @end
 %%--------------------------------------------------------------------
--spec mark_active(datastore:key()) -> boolean().
-mark_active(Key) ->
-    case ets:lookup(?ACTIVE, Key) of
-        [{Key}] -> true;
-        [] -> gen_server2:call(?MODULE, {mark_active, Key})
-    end.
+-spec mark_active(pool(), datastore_cache:ctx(), datastore:key()) -> boolean().
+mark_active(Pool, Ctx = #{
+    mutator_pid := Pid,
+    volatile := Volatile,
+    memory_driver := Driver,
+    memory_driver_ctx := DriverCtx
+}, Key) ->
+    CacheKey = couchbase_doc:set_prefix(Ctx, Key),
+    NewEntry = #entry{
+        cache_key = CacheKey,
+        mutator_pid = Pid,
+        volatile = Volatile,
+        driver = Driver,
+        driver_ctx = DriverCtx,
+        driver_key = Key
+    },
+    case ets:lookup(active(Pool), CacheKey) of
+        [#entry{mutator_pid = Pid}] ->
+            true;
+        [#entry{}] ->
+            gen_server2:call(name(Pool), {remark_active, NewEntry});
+        _ ->
+            gen_server2:call(name(Pool), {mark_active, NewEntry})
+    end;
+mark_active(Pool, Ctx, Key) ->
+    mark_active(Pool, Ctx#{volatile => false}, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -97,16 +130,20 @@ mark_active(Key) ->
 %% from cache.
 %% @end
 %%--------------------------------------------------------------------
--spec mark_inactive(datastore:key(), datastore:memory_driver(),
-    datastore:memory_driver_ctx()) -> boolean().
-mark_inactive(Key, MemoryDriver, MemoryDriverCtx) ->
-    case ets:lookup(?ACTIVE, Key) of
-        [{Key}] ->
-            Request = {mark_inactive, Key, MemoryDriver, MemoryDriverCtx},
-            gen_server2:call(?MODULE, Request);
-        [] ->
-            false
-    end.
+-spec mark_inactive(pool(), pid() | datastore:key()) -> boolean().
+mark_inactive(memory, Selector) ->
+    Filter = fun
+        (#entry{volatile = true}) ->
+            true;
+        (#entry{driver = Driver, driver_ctx = Ctx, driver_key = Key}) ->
+            case Driver:get(Ctx, Key) of
+                {ok, #document{deleted = Deleted}} -> Deleted;
+                {error, key_enoent} -> true
+            end
+    end,
+    inactivate(memory, Selector, Filter);
+mark_inactive(disc, Selector) ->
+    inactivate(disc, Selector, fun(_) -> true end).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -121,13 +158,17 @@ mark_inactive(Key, MemoryDriver, MemoryDriverCtx) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([]) ->
-    ets:new(?ACTIVE, [set, public, named_table, {read_concurrency, true}]),
-    ets:new(?INACTIVE, [set, named_table]),
+init([Pool]) ->
+    ets:new(active(Pool), [
+        set, public, named_table, {keypos, 2}, {read_concurrency, true}
+    ]),
+    ets:new(inactive(Pool), [set, named_table, {keypos, 2}]),
+    SizeByPool = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        datastore_cache_size, []),
     {ok, #state{
+        pool = Pool,
         size = 0,
-        max_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            datastore_cache_size, 10000)
+        max_size = proplists:get_value(Pool, SizeByPool, 500000)
     }}.
 
 %%--------------------------------------------------------------------
@@ -144,26 +185,35 @@ init([]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call(reset, _From, #state{} = State) ->
-    ets:delete_all_objects(?ACTIVE),
-    ets:delete_all_objects(?INACTIVE),
+handle_call(reset, _From, State = #state{pool = Pool}) ->
+    ets:delete_all_objects(active(Pool)),
+    ets:delete_all_objects(inactive(Pool)),
     {reply, ok, State#state{size = 0}};
 handle_call({resize, Size}, _From, #state{} = State) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, datastore_cache_size, Size),
     {reply, ok, deallocate(State#state{max_size = Size})};
-handle_call({mark_active, Key}, _From, #state{} = State) ->
-    case ets:lookup(?INACTIVE, Key) of
-        [{Key, _}] ->
-            ets:insert(?ACTIVE, {Key}),
-            ets:delete(?INACTIVE, Key),
+handle_call({remark_active, Entry = #entry{}}, _, State = #state{
+    pool = Pool
+}) ->
+    ets:insert(active(Pool), Entry),
+    {reply, true, State};
+handle_call({mark_active, Entry = #entry{cache_key = Key}}, _, State = #state{
+    pool = Pool
+}) ->
+    case ets:lookup(inactive(Pool), Key) of
+        [#entry{}] ->
+            ets:insert(active(Pool), Entry),
+            ets:delete(inactive(Pool), Key),
             {reply, true, State};
         [] ->
-            {Activated, State2} = activate(Key, State),
+            {Activated, State2} = activate(Entry, State),
             {reply, Activated, State2}
     end;
-handle_call({mark_inactive, Key, Driver, Ctx}, _From, #state{} = State) ->
-    ets:insert(?INACTIVE, {Key, {Driver, Ctx}}),
-    ets:delete(?ACTIVE, Key),
+handle_call({mark_inactive, Entries}, _From, State = #state{pool = Pool}) ->
+    lists:foreach(fun(Entry = #entry{cache_key = Key}) ->
+        ets:insert(inactive(Pool), Entry),
+        ets:delete(active(Pool), Key)
+    end, Entries),
     {reply, true, deallocate(State)};
 handle_call(Request, _From, #state{} = State) ->
     ?log_bad_request(Request),
@@ -229,30 +279,89 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Returns name of datastore cache manager server for a pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec name(pool()) -> atom().
+name(memory) -> datastore_cache_manager_memory_pool;
+name(disc) -> datastore_cache_manager_disc_pool.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns name of active keys table for a pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec active(pool()) -> atom().
+active(memory) -> datastore_cache_active_memory_pool;
+active(disc) -> datastore_cache_active_disc_pool.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns name of inactive keys table for a pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec inactive(pool()) -> atom().
+inactive(memory) -> datastore_cache_inactive_memory_pool;
+inactive(disc) -> datastore_cache_inactive_disc_pool.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Tries to activate entry associated with key. Activation does not take place
 %% if it would cause cache limit overflow and removal of inactive entries
 %% does not change this situation. Returns tuple where first element denotes
 %% whether entry has been activated, and second element is new state.
 %% @end
 %%--------------------------------------------------------------------
--spec activate(datastore:key(), state()) -> {boolean(), state()}.
-activate(Key, #state{} = State) ->
+-spec activate(entry(), state()) -> {boolean(), state()}.
+activate(Entry = #entry{}, State = #state{pool = Pool}) ->
     #state{size = Size, max_size = MaxSize} = State2 = deallocate(State),
     case Size + 1 > MaxSize of
         true ->
-            case ets:first(?INACTIVE) of
+            case ets:first(inactive(Pool)) of
                 '$end_of_table' ->
                     {false, State2};
-                Key2 ->
-                    [{Key2, {Driver, Ctx}}] = ets:lookup(?INACTIVE, Key2),
-                    Driver:delete(Ctx, Key2),
-                    ets:delete(?INACTIVE, Key2),
-                    ets:insert(?ACTIVE, {Key}),
+                CacheKey ->
+                    [#entry{
+                        driver = Driver,
+                        driver_ctx = Ctx,
+                        driver_key = Key
+                    }] = ets:lookup(inactive(Pool), CacheKey),
+                    Driver:delete(Ctx, Key),
+                    ets:delete(inactive(Pool), CacheKey),
+                    ets:insert(active(Pool), Entry),
                     {true, State2}
             end;
         false ->
-            ets:insert(?ACTIVE, {Key}),
+            ets:insert(active(Pool), Entry),
             {true, State2#state{size = Size + 1}}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Marks previously active entries as inactive.
+%% @end
+%%--------------------------------------------------------------------
+-spec inactivate(pool(), pid() | datastore:key(),
+    fun((datastore:key()) -> boolean())) -> boolean().
+inactivate(Pool, Pid, Filter) when is_pid(Pid) ->
+    Entries = ets:select(active(Pool), [
+        {#entry{mutator_pid = Pid, _='_'}, [], ['$_']}
+    ]),
+    Entries2 = lists:filter(Filter, Entries),
+    case Entries2 of
+        [] -> false;
+        _ -> gen_server2:call(name(Pool), {mark_inactive, Entries2})
+    end;
+inactivate(Pool, Key, Filter) when is_binary(Key) ->
+    Entries = ets:lookup(active(Pool), Key),
+    Entries2 = lists:filter(Filter, Entries),
+    case Entries2 of
+        [] -> false;
+        _ -> gen_server2:call(name(Pool), {mark_inactive, Entries2})
     end.
 
 %%--------------------------------------------------------------------
@@ -263,16 +372,23 @@ activate(Key, #state{} = State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec deallocate(state()) -> state().
-deallocate(#state{size = Size, max_size = MSize} = State) when Size > MSize ->
-    case ets:first(?INACTIVE) of
+deallocate(State = #state{
+    pool = Pool,
+    size = Size,
+    max_size = MSize
+} = State) when Size > MSize ->
+    case ets:first(inactive(Pool)) of
         '$end_of_table' ->
             State;
-        Key ->
-            [{Key, {Driver, Ctx}}] = ets:lookup(?INACTIVE, Key),
+        CacheKey ->
+            [#entry{
+                driver = Driver,
+                driver_ctx = Ctx,
+                driver_key = Key
+            }] = ets:lookup(inactive(Pool), CacheKey),
             Driver:delete(Ctx, Key),
-            ets:delete(?INACTIVE, Key),
+            ets:delete(inactive(Pool), CacheKey),
             deallocate(State#state{size = Size - 1})
     end;
 deallocate(#state{} = State) ->
     State.
-    

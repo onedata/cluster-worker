@@ -17,6 +17,8 @@
 
 -include("datastore_basic_ops_utils.hrl").
 
+-define(DB_REPEATS, 1).
+
 %% export for ct
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 %%tests
@@ -51,32 +53,32 @@ all() ->
 %%%===================================================================
 
 create_delete_db_test(Config) ->
-	?PERFORMANCE(Config, ?create_delete_test_def).
+	?PERFORMANCE(Config, ?create_delete_test_def(?DB_REPEATS)).
 create_delete_db_test_base(Config) ->
 	datastore_basic_ops_utils:create_delete_test(Config, disk_only).
 
 save_db_test(Config) ->
-	?PERFORMANCE(Config, ?save_test_def).
+	?PERFORMANCE(Config, ?save_test_def(?DB_REPEATS)).
 save_db_test_base(Config) ->
 	datastore_basic_ops_utils:save_test(Config, disk_only).
 
 update_db_test(Config) ->
-	?PERFORMANCE(Config, ?update_test_def).
+	?PERFORMANCE(Config, ?update_test_def(?DB_REPEATS)).
 update_db_test_base(Config) ->
 	datastore_basic_ops_utils:update_test(Config, disk_only).
 
 get_db_test(Config) ->
-	?PERFORMANCE(Config, ?get_test_def).
+	?PERFORMANCE(Config, ?get_test_def(?DB_REPEATS)).
 get_db_test_base(Config) ->
 	datastore_basic_ops_utils:get_test(Config, disk_only).
 
 exists_db_test(Config) ->
-	?PERFORMANCE(Config, ?exists_test_def).
+	?PERFORMANCE(Config, ?exists_test_def(?DB_REPEATS)).
 exists_db_test_base(Config) ->
 	datastore_basic_ops_utils:exists_test(Config, disk_only).
 
 links_db_test(Config) ->
-	?PERFORMANCE(Config, ?links_test_def).
+	?PERFORMANCE(Config, ?links_test_def(?DB_REPEATS)).
 links_db_test_base(Config) ->
 	datastore_basic_ops_utils:links_test(Config, disk_only).
 

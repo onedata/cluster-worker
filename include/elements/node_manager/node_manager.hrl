@@ -21,11 +21,12 @@
   initialized = false :: boolean(),
   monitoring_state = undefined :: monitoring:node_monitoring_state(),
   scheduler_info = undefined :: undefined | list(),
-  cache_control = true,
-  task_control = true,
+  % TODO - better task manager
+  task_control = false,
   last_cache_cleaning = {0,0,0},
   cache_cleaning_pid = undefined :: undefined | pid(),
-  last_state_analysis = {0,0,0}
+  last_state_analysis = {0,0,0},
+  throttling = true
 }).
 
 -endif.

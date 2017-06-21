@@ -131,23 +131,5 @@ model_init() ->
     Method :: model_behaviour:model_action(),
     Level :: datastore:store_level(), Context :: term()) ->
     ok | {task, task_manager:task()} | {tasks, [task_manager:task()]} | datastore:generic_error().
-before(ModelName, save, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, create_or_update, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, update, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, create, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, delete, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle_del(ModelName);
-before(ModelName, add_links, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, set_links, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, create_link, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle(ModelName);
-before(ModelName, delete_links, ?GLOBAL_ONLY_LEVEL, _) ->
-    caches_controller:throttle_del(ModelName);
 before(_ModelName, _Method, _Level, _Context) ->
     ok.

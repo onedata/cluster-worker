@@ -36,10 +36,13 @@
 
 all() ->
     ?ALL([
-        cm_and_worker_test, task_pool_test, task_manager_repeats_test,
-        task_manager_rerun_test, task_manager_delayed_save_test, transaction_test, transaction_rollback_test,
+        cm_and_worker_test, transaction_test, transaction_rollback_test,
         transaction_rollback_stop_test, multi_transaction_test,
-        transaction_retry_test, transaction_error_test, task_manager_delayed_save_with_type_test, throttling_test]).
+        transaction_retry_test, transaction_error_test, throttling_test,
+        task_pool_test, task_manager_repeats_test,
+        task_manager_rerun_test, task_manager_delayed_save_test,
+        task_manager_delayed_save_with_type_test
+    ]).
 
 -define(TIMEOUT, timer:minutes(1)).
 -define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
@@ -57,8 +60,10 @@ all() ->
 throttling_test(Config) ->
     [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     MockUsage = fun(DBQueue, TPSize, MemUsage) ->
-        test_utils:mock_expect(Workers, datastore_pool, request_queue_size,
-            fun () -> DBQueue end),
+        test_utils:mock_expect(Workers, couchbase_pool, get_request_queue_size,
+            fun (_) -> DBQueue end),
+        test_utils:mock_expect(Workers, couchbase_pool, get_request_queue_size,
+            fun (_, _) -> DBQueue end),
         test_utils:mock_expect(Workers, tp, get_processes_number,
             fun () -> TPSize end),
         test_utils:mock_expect(Workers, monitoring, get_memory_stats,
@@ -105,9 +110,7 @@ throttling_test(Config) ->
 
 
         VerifyIntervalFun(A2),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model])),
-        ?assertEqual(error, ?call_cc(Worker1, throttle, [throttled_model, error])),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model, ok]))
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model]))
     end,
 
     CheckThrottlingDefault = fun() ->
@@ -727,7 +730,7 @@ init_per_testcase(throttling_test, Config) ->
         fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
 
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_throttling))
     end, Workers),
 
     Config;
@@ -742,6 +745,11 @@ init_per_testcase(_Case, Config) ->
 
 end_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, enable_throttling))
+    end, Workers),
+
     test_utils:mock_unload(Workers, [monitoring, datastore_pool, tp, caches_controller, datastore_config_plugin_default]);
 
 end_per_testcase(_Case, _Config) ->
