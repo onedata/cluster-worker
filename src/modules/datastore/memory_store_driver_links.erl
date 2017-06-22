@@ -267,8 +267,15 @@ apply_at_memory_store(_Ctx, LastCtx) ->
           ok;
         _ ->
           Scope = maps:get(scope, LastCtx, <<>>), % Scope may be not present in Ctx
-          ToSave = memory_store_driver:increment_rev(LastCtx, Doc),
+          ToSave0 = memory_store_driver:increment_rev(LastCtx, Doc),
           MC = links:model_init(),
+
+          ToSave = case Scope of
+            <<>> ->
+              ToSave0#document{version = MC#model_config.version};
+            _ ->
+              ToSave0#document{scope = Scope, version = MC#model_config.version}
+          end,
 
           % TODO - delete with new links
           SaveCtx = case catch binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of
@@ -285,8 +292,7 @@ apply_at_memory_store(_Ctx, LastCtx) ->
               LastCtx
           end,
 
-          case datastore_cache:save(SaveCtx, ToSave#document{scope = Scope,
-            version = MC#model_config.version}) of
+          case datastore_cache:save(SaveCtx, ToSave) of
             {ok, disc, #document{key = Key} = Saved} ->
               add_doc_to_memory(Key, Saved),
               add_doc_to_cache(Key, Saved),

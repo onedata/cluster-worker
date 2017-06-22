@@ -52,7 +52,7 @@ set_next_rev(_Ctx, #document{rev = Revs} = Doc) ->
     {Props} = EJson = datastore_json2:encode(Doc),
     Rev = create_rev(EJson),
     Length = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_revision_history_length, 5),
+        couchbase_revision_history_length, 1),
     Revs2 = lists:sublist([Rev | Revs], Length),
 
     Doc2 = Doc#document{rev = Revs2},
