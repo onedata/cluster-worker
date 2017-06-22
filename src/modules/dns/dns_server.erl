@@ -88,6 +88,8 @@ handle_query(Packet, Transport) ->
                     ok ->
                         [#dns_query{domain = Domain, type = Type, class = Class}] = QDList,
                         case call_worker(string:to_lower(Domain), Type) of
+                            {error, _} ->
+                                generate_answer(set_reply_code(DNSRec, serv_fail), OPTRR, Transport);
                             Reply when is_atom(Reply) -> % Reply :: reply_type()
                                 generate_answer(set_reply_code(DNSRec, Reply), OPTRR, Transport);
                             {Reply, ResponseList} ->

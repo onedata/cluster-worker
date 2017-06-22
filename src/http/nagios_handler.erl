@@ -92,14 +92,14 @@ handle(Req, State) ->
                         NodeDetails = lists:map(
                             fun({Component, Status}) ->
                                 StatusList = case Status of
-                                                 {error, Desc} ->
-                                                     "error: " ++ atom_to_list(Desc);
-                                                 A when is_atom(A) -> atom_to_list(A);
-                                                 _ ->
-                                                     ?error("Wrong nagios status: {~p, ~p} at node ~p",
-                                                         [Component, Status, Node]),
-                                                     "error: wrong_status"
-                                             end,
+                                    {error, Desc} ->
+                                        "error: " ++ atom_to_list(Desc);
+                                    A when is_atom(A) -> atom_to_list(A);
+                                    _ ->
+                                        ?error("Wrong nagios status: {~p, ~p} at node ~p",
+                                            [Component, Status, Node]),
+                                        "error: wrong_status"
+                                end,
                                 {Component, [{status, StatusList}], []}
                             end, NodeComponents),
                         {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
@@ -163,9 +163,9 @@ terminate(_Reason, _Req, _State) ->
 -spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
     Status :: healthcheck_response(),
     ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
-        {node(), Status, [
-            {ModuleName :: module(), Status}
-        ]}
+    {node(), Status, [
+    {ModuleName :: module(), Status}
+    ]}
     ]}.
 get_cluster_status(Timeout) ->
     case check_cm(Timeout) of
@@ -176,8 +176,14 @@ get_cluster_status(Timeout) ->
                 NodeManagerStatuses = check_node_managers(Nodes, Timeout),
                 DispatcherStatuses = check_dispatchers(Nodes, Timeout),
                 Workers = lists:foldl(fun(Name, Acc) ->
-                    {ok, ModuleNodes} = request_dispatcher:get_worker_nodes(Name),
-                    lists:map(fun(Node) -> {Node, Name} end, ModuleNodes) ++ Acc
+                    case request_dispatcher:get_worker_nodes(Name) of
+                        {ok, ModuleNodes} ->
+                            Acc ++ lists:map(fun(Node) ->
+                                {Node, Name}
+                            end, ModuleNodes);
+                        {error, dispatcher_out_of_sync} ->
+                            Acc
+                    end
                 end, [], node_manager:modules()),
                 WorkerStatuses = check_workers(Nodes, Workers, Timeout),
                 Listeners = [{Node, Name} || Node <- Nodes, Name <- node_manager:listeners()],
@@ -262,10 +268,19 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 %%--------------------------------------------------------------------
 -spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
 check_cm(Timeout) ->
-    case gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout) of
+    try gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout) of
         {ok, Nodes} ->
             Nodes;
         {error, invalid_worker_num} ->
+            error
+    catch
+        exit:{noproc, _} ->
+            ?warning("cluster manager is not reachable");
+        Type:Message ->
+            ?error_stacktrace(
+                "Unexpected error during cluster manager healthcheck - ~p:~p",
+                [Type, Message]
+            ),
             error
     end.
 
