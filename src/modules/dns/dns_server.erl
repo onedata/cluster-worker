@@ -160,13 +160,13 @@ validate_query(DNSRec) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_worker(Domain :: string(), Type :: atom()) ->
-    dns_worker_plugin_behaviour:handler_reply().
+    dns_worker_plugin_behaviour:handler_reply() | {error, term()}.
 call_worker(Domain, Type) ->
     case type_to_method(Type) of
         not_impl ->
             not_impl;
         Method ->
-            erlang:apply(dns_worker, resolve, [Method, Domain])
+            dns_worker:resolve(Method, Domain)
     end.
 
 %%--------------------------------------------------------------------
