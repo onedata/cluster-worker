@@ -55,7 +55,9 @@
         ___Now = os:timestamp(),
         {___Date, ___Time} = lager_util:format_time(lager_util:maybe_utc(
             lager_util:localtime_ms(___Now))),
-        file:write_file("./logs/node_manager_monitoring.log",
+        ___LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
+            "/tmp/node_manager_monitoring.log"),
+        file:write_file(___LogFile,
             io_lib:format("~n~s, ~s: " ++ Format, [___Date, ___Time | Args]),
             [append])
     end
