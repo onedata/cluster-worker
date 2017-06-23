@@ -275,7 +275,8 @@ check_cm(Timeout) ->
             error
     catch
         exit:{noproc, _} ->
-            ?warning("cluster manager is not reachable");
+            ?warning("cluster manager is not reachable"),
+            error;
         Type:Message ->
             ?error_stacktrace(
                 "Unexpected error during cluster manager healthcheck - ~p:~p",
