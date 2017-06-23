@@ -110,8 +110,8 @@ cleanup() ->
 %% See {@link dns_worker_plugin_behaviour} for reference.
 %% @end
 %%--------------------------------------------------------------------
--spec resolve(Method :: dns_worker_plugin_behaviour:handle_method(), Domain :: string())
-        -> dns_worker_plugin_behaviour:handler_reply().
+-spec resolve(Method :: dns_worker_plugin_behaviour:handle_method(),
+    Domain :: string()) -> dns_worker_plugin_behaviour:handler_reply() | {error, term()}.
 resolve(Method, Domain) ->
     worker_proxy:call(dns_worker, {Method, Domain}).
 

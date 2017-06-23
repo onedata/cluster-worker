@@ -88,6 +88,8 @@ handle_query(Packet, Transport) ->
                     ok ->
                         [#dns_query{domain = Domain, type = Type, class = Class}] = QDList,
                         case call_worker(string:to_lower(Domain), Type) of
+                            {error, _} ->
+                                generate_answer(set_reply_code(DNSRec, serv_fail), OPTRR, Transport);
                             Reply when is_atom(Reply) -> % Reply :: reply_type()
                                 generate_answer(set_reply_code(DNSRec, Reply), OPTRR, Transport);
                             {Reply, ResponseList} ->
@@ -158,13 +160,13 @@ validate_query(DNSRec) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_worker(Domain :: string(), Type :: atom()) ->
-    dns_worker_plugin_behaviour:handler_reply().
+    dns_worker_plugin_behaviour:handler_reply() | {error, term()}.
 call_worker(Domain, Type) ->
     case type_to_method(Type) of
         not_impl ->
             not_impl;
         Method ->
-            erlang:apply(dns_worker, resolve, [Method, Domain])
+            dns_worker:resolve(Method, Domain)
     end.
 
 %%--------------------------------------------------------------------

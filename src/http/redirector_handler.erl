@@ -36,7 +36,7 @@ init(_Type, Req, _Opts) ->
 %%--------------------------------------------------------------------
 -spec handle(term(), term()) -> {ok, term(), term()}.
 handle(Req, State) ->
-    {FullHostname, _} = cowboy_req:header(<<"host">>, Req),
+    {FullHostname, _} = cowboy_req:host(Req),
     {Qs, _} = cowboy_req:qs(Req),
     QsString = case str_utils:to_binary(Qs) of
         <<"">> -> <<"">>;
@@ -45,8 +45,10 @@ handle(Req, State) ->
     end,
     % Remove the leading 'www.' if present
     Hostname = case FullHostname of
-        <<"www.", Rest/binary>> -> Rest;
-        _ -> FullHostname
+        <<"www.", Rest/binary>> ->
+            Rest;
+        _ ->
+            FullHostname
     end,
     {Path, _} = cowboy_req:path(Req),
     {ok, Req2} = cowboy_req:reply(301, [
