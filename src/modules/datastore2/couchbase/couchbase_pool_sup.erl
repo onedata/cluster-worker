@@ -91,12 +91,13 @@ init([]) ->
     ]),
 
     DbHosts = couchbase_config:get_hosts(),
-    {ok, {#{strategy => one_for_one, intensity => 3, period => 1},
+    {ok, {#{strategy => one_for_one, intensity => 5, period => 1},
         lists:foldl(fun(Bucket, Specs) ->
             lists:foldl(fun(Mode, Specs2) ->
+                PoolSize = couchbase_pool:get_size(Bucket, Mode),
                 lists:foldl(fun(Id, Specs3) ->
                     [worker_spec(Bucket, Mode, Id, DbHosts) | Specs3]
-                end, Specs2, lists:seq(1, couchbase_pool:get_size(Mode)))
+                end, Specs2, lists:seq(1, PoolSize))
             end, Specs, couchbase_pool:get_modes())
         end, [], couchbase_config:get_buckets())
     }}.

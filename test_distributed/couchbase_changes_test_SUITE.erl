@@ -31,10 +31,16 @@
     seq_safe_should_be_incremented_on_missing_change_doc/1,
     seq_safe_should_be_incremented_on_missing_doc/1,
     stream_should_return_all_changes/1,
+    stream_should_return_last_changes/1,
     stream_should_return_all_changes_except_mutator/1,
     stream_should_return_changes_from_finite_range/1,
     stream_should_return_changes_from_infinite_range/1,
     cancel_stream_should_stop_worker/1
+]).
+
+%% test_bases
+-export([
+    stream_should_return_last_changes_base/1
 ]).
 
 all() ->
@@ -47,10 +53,13 @@ all() ->
         seq_safe_should_be_incremented_on_missing_change_doc,
         seq_safe_should_be_incremented_on_missing_doc,
         stream_should_return_all_changes,
+        stream_should_return_last_changes,
         stream_should_return_all_changes_except_mutator,
         stream_should_return_changes_from_finite_range,
         stream_should_return_changes_from_infinite_range,
         cancel_stream_should_stop_worker
+    ], [
+        stream_should_return_last_changes
     ]).
 
 -record(test_model, {
@@ -74,13 +83,29 @@ all() ->
 -define(MUTATOR(N), <<"mutator-", (?CASE)/binary, "-",
     (integer_to_binary(N))/binary>>).
 -define(DOC, ?DOC(1)).
--define(DOC(N), #document2{
+-define(DOC(N), ?DOC(N, ?VALUE(N))).
+-define(DOC(N, Value), #document{
     key = ?KEY(N),
-    value = ?VALUE(N),
+    value = Value,
     scope = ?SCOPE
 }).
 -define(TIMEOUT, timer:minutes(5)).
 -define(ATTEMPTS, 60).
+
+-define(PERF_PARAM(Name, Value, Unit, Description), [
+    {name, Name},
+    {value, Value},
+    {description, Description},
+    {unit, Unit}
+]).
+-define(PERF_CFG(Name, Params), {config, [
+    {name, Name},
+    {description, atom_to_list(Name)},
+    {parameters, Params}
+]}).
+-define(DOC_NUM(Value), ?PERF_PARAM(doc_num, Value, "", "Number of documents.")).
+-define(CHANGE_NUM(Value), ?PERF_PARAM(change_num, Value, "",
+    "Number of single document changes.")).
 
 %%%===================================================================
 %%% Test functions
@@ -172,10 +197,44 @@ stream_should_return_all_changes(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, SeqList) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document2{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document2.seq, SeqList)),
-        lists:delete(Doc#document2.seq, SeqList)
+        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
+        ?assert(lists:member(Doc#document.seq, SeqList)),
+        lists:delete(Doc#document.seq, SeqList)
     end, lists:seq(1, DocNum), lists:seq(1, DocNum)).
+
+stream_should_return_last_changes(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, 10},
+        {success_rate, 100},
+        {parameters, [?DOC_NUM(10), ?CHANGE_NUM(10)]},
+        {description, "Parallel modifications of multiple documents."},
+        ?PERF_CFG(small, [?DOC_NUM(100), ?CHANGE_NUM(10)]),
+        ?PERF_CFG(medium, [?DOC_NUM(100), ?CHANGE_NUM(20)]),
+        ?PERF_CFG(large, [?DOC_NUM(100), ?CHANGE_NUM(50)])
+    ]).
+stream_should_return_last_changes_base(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = ?config(doc_num, Config),
+    ChangesNum = ?config(change_num, Config),
+    Callback = fun(Any) -> Self ! Any end,
+    rpc:call(Worker, couchbase_changes, stream, [?BUCKET, ?SCOPE, Callback]),
+    utils:pforeach(fun(N) ->
+        lists:foldl(fun(M, Doc) ->
+            {ok, _, Doc2} = rpc:call(Worker, couchbase_driver, save, [
+                ?CTX, Doc
+            ]),
+            Doc2#document{value = ?VALUE(M + 1)}
+        end, ?DOC(N, ?VALUE(1)), lists:seq(1, ChangesNum))
+    end, lists:seq(1, DocNum)),
+    lists:foldl(fun(_, KeysList) ->
+        Value = ?VALUE(ChangesNum),
+        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{
+            value = Value
+        }}, ?TIMEOUT),
+        ?assert(lists:member(Doc#document.key, KeysList)),
+        lists:delete(Doc#document.key, KeysList)
+    end, [?KEY(N) || N <- lists:seq(1, DocNum)], lists:seq(1, DocNum)).
 
 stream_should_return_all_changes_except_mutator(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -197,9 +256,9 @@ stream_should_return_all_changes_except_mutator(Config) ->
         end
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, Keys) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document2{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document2.key, Keys)),
-        lists:delete(Doc#document2.key, Keys)
+        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
+        ?assert(lists:member(Doc#document.key, Keys)),
+        lists:delete(Doc#document.key, Keys)
     end, KeysExp, KeysExp).
 
 stream_should_return_changes_from_finite_range(Config) ->
@@ -216,9 +275,9 @@ stream_should_return_changes_from_finite_range(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, SeqList) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document2{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document2.seq, SeqList)),
-        lists:delete(Doc#document2.seq, SeqList)
+        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
+        ?assert(lists:member(Doc#document.seq, SeqList)),
+        lists:delete(Doc#document.seq, SeqList)
     end, lists:seq(Since, Until - 1), lists:seq(Since, Until - 1)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
 
@@ -235,9 +294,9 @@ stream_should_return_changes_from_infinite_range(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum)),
     lists:foldl(fun(_, SeqList) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document2{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document2.seq, SeqList)),
-        lists:delete(Doc#document2.seq, SeqList)
+        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
+        ?assert(lists:member(Doc#document.seq, SeqList)),
+        lists:delete(Doc#document.seq, SeqList)
     end, lists:seq(Since, DocNum), lists:seq(Since, DocNum)).
 
 cancel_stream_should_stop_worker(Config) ->
@@ -266,6 +325,16 @@ init_per_suite(Config) ->
 
 init_per_testcase(Case, Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun({Key, Value}) ->
+        test_utils:set_env(Worker, cluster_worker, Key, Value)
+    end, [
+        {couchbase_changes_update_interval, 500},
+        {couchbase_changes_stream_update_interval, 500}
+    ]),
+    test_utils:mock_new(Workers, couchbase_pool),
+    test_utils:mock_expect(Workers, couchbase_pool, get_timeout, fun() ->
+        get_couchbase_pool_timeout(Case)
+    end),
     test_utils:mock_new(Workers, ?MODEL, [passthrough, non_strict]),
     test_utils:mock_expect(Workers, ?MODEL, model_init, fun() ->
         #model_config{version = 1}
@@ -277,13 +346,29 @@ init_per_testcase(Case, Config) ->
         ]}
     end),
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, start,
-        [?BUCKET, ?SCOPE(Case)]
+        [?BUCKET, get_scope(Case)]
     )),
     Config.
 
 end_per_testcase(Case, Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, couchbase_changes, stop,
-        [?BUCKET, ?SCOPE(Case)]
+        [?BUCKET, get_scope(Case)]
     )),
     test_utils:mock_validate_and_unload(Workers, ?MODEL).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+get_couchbase_pool_timeout(seq_safe_should_be_incremented_on_missing_change_doc) ->
+    timer:seconds(1);
+get_couchbase_pool_timeout(seq_safe_should_be_incremented_on_missing_doc) ->
+    timer:seconds(1);
+get_couchbase_pool_timeout(_) ->
+    timer:minutes(2).
+
+get_scope(stream_should_return_last_changes) ->
+    ?SCOPE(stream_should_return_last_changes_base);
+get_scope(Case) ->
+    ?SCOPE(Case).
