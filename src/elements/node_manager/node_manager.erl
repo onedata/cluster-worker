@@ -51,10 +51,18 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
--define(LOG_MONITORING_STATS(Format, Data),
-    file:write_file("/tmp/node_manager_monitoring.txt",
-        io_lib:format("~n~p: " ++ Format, [calendar:local_time() | Data]),
-        [append])).
+-define(LOG_MONITORING_STATS(Format, Args),
+    begin
+        ___Now = os:timestamp(),
+        {___Date, ___Time} = lager_util:format_time(lager_util:maybe_utc(
+            lager_util:localtime_ms(___Now))),
+        ___LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
+            "/tmp/node_manager_monitoring.log"),
+        file:write_file(___LogFile,
+            io_lib:format("~n~s, ~s: " ++ Format, [___Date, ___Time | Args]),
+            [append])
+    end
+).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
