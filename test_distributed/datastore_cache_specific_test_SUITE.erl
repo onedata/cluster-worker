@@ -66,6 +66,9 @@ dump_global_cache_test(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
+    test_utils:set_env(Node, ?CLUSTER_WORKER_APP_NAME,
+        couchbase_revision_history_length, 20),
+
     Key = <<"dgct_key">>,
     V1 = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>,
         {test, tuple}),
