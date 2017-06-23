@@ -214,7 +214,7 @@ get_changes(Since, Until, #state{} = State) ->
 %% included in the future changes).
 %% @end
 %%--------------------------------------------------------------------
--spec get_docs([couchbase_changes:change()], state()) -> [datastore:doc()].
+-spec get_docs([couchbase_changes:change()], state()) -> [datastore:document()].
 get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
     KeyRevs = lists:filtermap(fun(Change) ->
         {<<"id">>, Key} = lists:keyfind(<<"id">>, 1, Change),
@@ -228,9 +228,9 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
     Ctx = #{bucket => Bucket},
     {Keys, Revs} = lists:unzip(KeyRevs),
     lists:filtermap(fun
-        ({{ok, _, #document2{rev = [Rev1 | _]} = Doc}, Rev2})
+        ({{ok, _, #document{rev = [Rev1 | _]} = Doc}, Rev2})
             when Rev1 =:= Rev2 -> {true, Doc};
-        ({{ok, _, #document2{}}, _Rev}) ->
+        ({{ok, _, #document{}}, _Rev}) ->
             false
     end, lists:zip(couchbase_driver:get(Ctx, Keys), Revs)).
 
@@ -240,7 +240,7 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
 %% Streams documents and schedules next update.
 %% @end
 %%--------------------------------------------------------------------
--spec stream_docs([datastore:doc()], state()) -> reference().
+-spec stream_docs([datastore:document()], state()) -> reference().
 stream_docs([], #state{interval = Interval}) ->
     erlang:send_after(Interval, self(), update);
 stream_docs(Docs, #state{callback = Callback}) ->

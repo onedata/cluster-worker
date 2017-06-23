@@ -20,7 +20,11 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([handle_link_messages/6, clear/3]).
+-export([handle_link_messages/2, get/2]).
+
+%% API for links
+-export([add_links/3, set_links/3, create_link/3, delete_links/4, fetch_link/3,
+  foreach_link/4]).
 
 %% API for link_utils
 -export([save_link_doc/2, get_link_doc/2, delete_link_doc/2]).
@@ -38,94 +42,61 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_link_messages(Messages :: [memory_store_driver:message()],
-    CurrentValue :: memory_store_driver:value_link(), Driver :: atom(),
-    FD :: atom(), ModelConfig :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) -> {AnsList :: list(),
-    NewCurrentValue :: memory_store_driver:value_link(),
-    Changes :: memory_store_driver:change()}.
-handle_link_messages(Messages, CurrentValue, Driver, FD,
-    #model_config{name = MN} = ModelConfig, Key) ->
-  put(doc_cache, CurrentValue),
-  put(mem_driver, Driver),
-  put(flush_driver, FD),
-
+    Master :: pid()) ->
+  {AnsList :: list(), Changes :: memory_store_driver:change()}.
+handle_link_messages(Messages, Master) ->
   Agg = merge_link_ops(Messages),
 
-  Ans = lists:foldl(fun({M, Num}, TmpAns) ->
-    put(current_message, M),
-    A = handle_link_message(M, Driver, FD, ModelConfig),
-    lists:duplicate(Num, A) ++ TmpAns
-  end, [], Agg),
+  FinalAns = try
+    {Ctx, Ans, AnsToProc} = lists:foldl(fun
+      ({{Ctx0, Op} = _M0, Num}, {LastCtx, TmpAns, TmpAnsToProc}) ->
+        try
+          Ctx = datastore_context:override(mutator_pid, Master, Ctx0),
+          M = {Ctx, Op},
+          case apply_at_memory_store(Ctx, LastCtx) of
+            ok ->
+              A = handle_link_message(M),
+              {Ctx, TmpAns, lists:duplicate(Num, A) ++ TmpAnsToProc};
+            saved ->
+              A = handle_link_message(M),
+              {Ctx, TmpAnsToProc ++ TmpAns, lists:duplicate(Num, A)}
+          end
+        catch
+          throw:{datastore_cache_error, Error} ->
+            ToMap = lists:duplicate(Num, error) ++ TmpAnsToProc,
+            throw({{datastore_cache_error, Error},
+              prepare_error({datastore_cache_error, Error}, ToMap) ++ TmpAns})
+        end
+    end, {undefined, [], []}, Agg),
 
-  NewOps = get_value(op_cache),
-  Restored = get_value(restore_cache),
-
-  lists:foreach(fun({K,  V}) ->
-      case apply(Driver, save_link_doc, [ModelConfig, V]) of
-        {ok, _} ->
-          ok;
-        RErr ->
-          throw({{restore, K,  V, RErr}, CurrentValue, {[], []}})
-      end
-  end, Restored),
-
-  case get(foreach_restore) of
-    true ->
-      % TODO - allow foreach_link that does not check whole links tree
-      CCCUuid = caches_controller:get_cache_uuid(Key, MN),
-      caches_controller:consistency_restored(Driver, CCCUuid);
-    _ ->
-      ok
+    try
+      apply_at_memory_store(undefined, Ctx),
+      AnsToProc ++ Ans
+    catch
+      throw:{datastore_cache_error, Error2} ->
+        prepare_error({datastore_cache_error, Error2}, AnsToProc) ++ Ans
+    end
+  catch
+    throw:{{datastore_cache_error, DCError}, AList} ->
+      lists:duplicate(length(Messages) - length(AList),
+        {datastore_cache, DCError}) ++ AList
   end,
 
-  % TODO - revers changes applied to mnesia or ets
-  {DumpAns, Changes} = lists:foldl(fun
-    ({K, delete_link_doc}, {ok, TmpChanges}) ->
-      case apply(Driver, delete_link_doc, [ModelConfig, K]) of
-        ok ->
-          {ok, [K | TmpChanges]};
-        Err ->
-          reverse_doc_change_in_memory(K, CurrentValue),
-          {Err, TmpChanges}
-      end;
-    ({K,  {_, ToSave}}, {ok, TmpChanges}) ->
-      case apply(Driver, save_link_doc, [ModelConfig, ToSave]) of
-        {ok, _} ->
-          {ok, [K | TmpChanges]};
-        Err ->
-          reverse_doc_change_in_memory(K, CurrentValue),
-          {Err, TmpChanges}
-      end;
-    (_, Acc) ->
-      Acc
-  end, {ok, []}, NewOps),
-  ResolveCache = get_value(dump_cache),
-
-  NewCV = get_value(doc_cache),
-  erase(),
-
-  case DumpAns of
-    ok ->
-      {lists:reverse(Ans), NewCV, {Changes, ResolveCache}};
-    _ ->
-      {lists:map(fun(_) -> DumpAns end, Messages), NewCV, {Changes, ResolveCache}}
-  end.
+  {lists:reverse(FinalAns), memory_store_driver:get_durability_from_memory()}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Handles clear operation.
+%% Gets document that describes links (used by router).
 %% @end
 %%--------------------------------------------------------------------
--spec clear(Driver :: atom(), ModelConfig :: model_behaviour:model_config(),
-    Key :: datastore:ext_key()) ->
-  ok | datastore:generic_error().
-clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
-  CCCUuid = caches_controller:get_cache_uuid(Key, MN),
-  case caches_controller:save_consistency_info_direct(Driver, CCCUuid, all) of
-    true ->
-      apply(links_utils, delete_links, [Driver, ModelConfig, Key]);
-    _ ->
-      {error, consistency_info_save_failed}
+-spec get(memory_store_driver:ctx(), datastore:ext_key()) ->
+  {ok, datastore:document()} | datastore:get_error().
+get(#{model_name := MN} = Ctx, Key) ->
+  case datastore_cache:get(Ctx, Key) of
+    {ok, #document{deleted = true}} ->
+      {error, {not_found, MN}};
+    Other ->
+      Other
   end.
 
 %%%===================================================================
@@ -138,11 +109,10 @@ clear(Driver, #model_config{name = MN} = ModelConfig, Key) ->
 %% (used by links utils).
 %% @end
 %%--------------------------------------------------------------------
--spec save_link_doc(model_behaviour:model_config(), datastore:document()) ->
+-spec save_link_doc(memory_store_driver:ctx(), datastore:document()) ->
   {ok, datastore:ext_key()} | datastore:generic_error().
-save_link_doc(_MC, #document{key = Key} = Doc) ->
-  add_doc_to_memory(Key, Doc),
-  add_change_to_memory(Key, {save_link_doc, Doc}),
+save_link_doc(_Ctx, #document{key = Key} = Doc) ->
+  add_doc_to_cache(Key, Doc),
   {ok, Key}.
 
 %%--------------------------------------------------------------------
@@ -150,28 +120,32 @@ save_link_doc(_MC, #document{key = Key} = Doc) ->
 %% Gets document that describes links (used by links utils).
 %% @end
 %%--------------------------------------------------------------------
--spec get_link_doc(model_behaviour:model_config(), datastore:ext_key()) ->
+-spec get_link_doc(memory_store_driver:ctx(), datastore:ext_key()) ->
   {ok, datastore:document()} | datastore:get_error().
-get_link_doc(#model_config{name = MN} = ModelConfig, Key) ->
-  get_link_doc(#model_config{name = MN} = ModelConfig, undefined, Key).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Gets document that describes links (used by links utils).
-%% @end
-%%--------------------------------------------------------------------
--spec get_link_doc(model_behaviour:model_config(),
-    BucketOverride:: binary() | undefined, datastore:ext_key()) ->
-  {ok, datastore:document()} | datastore:get_error().
-get_link_doc(#model_config{name = MN} = ModelConfig, BucketOverride, Key) ->
-  case get_doc_from_memory(Key) of
-    undefined ->
-      get_from_stores(ModelConfig, Key, BucketOverride);
-    % TODO consider: save {error, {not_found, MN}} in memory instead not_found
-    not_found ->
+get_link_doc(#{get_method := get_direct, model_name := MN,
+  persistence := false} = Ctx, Key) ->
+  case datastore_cache:get(Ctx, Key) of
+    {error, key_enoent} ->
+      {error, {not_found, MN}};
+    {ok, #document{deleted = true}} ->
+      {error, {not_found, MN}};
+    Other ->
+      Other
+  end;
+get_link_doc(#{get_method := get_direct, model_name := MN} = Ctx, Key) ->
+  case datastore_cache:get(Ctx, Key) of
+    {error, key_enoent} ->
+      {error, {not_found_in_memory, MN}};
+    {ok, #document{deleted = true}} ->
+      {error, {not_found, MN}};
+    Other ->
+      Other
+  end;
+get_link_doc(#{model_name := MN} = Ctx, Key) ->
+  case get_doc(Ctx, Key) of
+    #document{deleted = true} ->
       {error, {not_found, MN}};
     Cached ->
-      add_restore_to_memory(Key, Cached, true),
       {ok, Cached}
   end.
 
@@ -181,28 +155,86 @@ get_link_doc(#model_config{name = MN} = ModelConfig, BucketOverride, Key) ->
 %% (used by links utils).
 %% @end
 %%--------------------------------------------------------------------
--spec delete_link_doc(model_behaviour:model_config(), datastore:document()) ->
+-spec delete_link_doc(memory_store_driver:ctx(), datastore:document()) ->
   ok | datastore:generic_error().
-delete_link_doc(_MC, #document{key = Key} = _Document) ->
-  add_doc_to_memory(Key, not_found),
-  add_change_to_memory(Key, delete_link_doc),
+delete_link_doc(_Ctx, #document{key = Key} = Document) ->
+  add_doc_to_cache(Key, Document#document{deleted = true}),
   ok.
+
+%%%===================================================================
+%%% Link operations functions
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Checks if document exist.
+%% {@link store_driver_behaviour} callback add_links/3.
 %% @end
 %%--------------------------------------------------------------------
--spec exists_link_doc(model_behaviour:model_config(), datastore:ext_key(),
-    links_utils:scope()) ->
-  {ok, boolean()} | datastore:generic_error().
-% TODO - remove operation (used only during ct tests)
-exists_link_doc(MC, DocKey, Scope) ->
-  Key = links_utils:links_doc_key(DocKey, Scope),
-  case get_link_doc(MC, Key) of
-    {error, {not_found, _}} -> {ok, false};
-    {ok, _} -> {ok, true};
-    Error -> Error
+-spec add_links(memory_store_driver:ctx(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+  ok | datastore:generic_error().
+add_links(Ctx, Key, Links) ->
+  links_utils:save_links_maps(memory_store_driver_links, Ctx, Key, Links, add).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback set_links/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_links(memory_store_driver:ctx(), datastore:ext_key(), [datastore:normalized_link_spec()]) ->
+  ok | datastore:generic_error().
+set_links(Ctx, Key, Links) ->
+  links_utils:save_links_maps(memory_store_driver_links, Ctx, Key, Links, set).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback create_link/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_link(memory_store_driver:ctx(), datastore:ext_key(), datastore:normalized_link_spec()) ->
+  ok | datastore:create_error().
+create_link(Ctx, Key, Link) ->
+  links_utils:create_link_in_map(memory_store_driver_links, Ctx, Key, Link).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Simmilar to {@link store_driver_behaviour} callback delete_links/3 witch delete predicate.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_links(memory_store_driver:ctx(), datastore:ext_key(), [datastore:link_name()] | all,
+    datastore:delete_predicate()) -> ok | datastore:generic_error().
+delete_links(Ctx, Key, Links, Pred) ->
+  case Pred() of
+    true ->
+      ok = links_utils:delete_links(memory_store_driver_links,
+        Ctx, Key, Links);
+    false ->
+      ok
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback fetch_link/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_link(memory_store_driver:ctx(), datastore:ext_key(), datastore:link_name()) ->
+  {ok, datastore:link_target()} | datastore:link_error().
+fetch_link(Ctx, Key, LinkName) ->
+  links_utils:fetch_link(memory_store_driver_links, Ctx, LinkName, Key).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link store_driver_behaviour} callback foreach_link/4.
+%% @end
+%%--------------------------------------------------------------------
+-spec foreach_link(memory_store_driver:ctx(), Key :: datastore:ext_key(),
+    fun((datastore:link_name(), datastore:link_target(), Acc :: term()) -> Acc :: term()), AccIn :: term()) ->
+  {ok, Acc :: term()} | datastore:link_error().
+foreach_link(Ctx, Key, Fun, AccIn) ->
+  try
+    links_utils:foreach_link(memory_store_driver_links, Ctx, Key, Fun, AccIn)
+  catch
+    throw:Thrown ->
+      {throw, Thrown}
   end.
 
 %%%===================================================================
@@ -212,60 +244,149 @@ exists_link_doc(MC, DocKey, Scope) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Applies changes to memory store.
+%% @end
+%%--------------------------------------------------------------------
+-spec apply_at_memory_store(Ctx :: memory_store_driver:ctx(),
+    LastCtx :: memory_store_driver:ctx()) -> ok | saved | no_return().
+apply_at_memory_store(_Ctx, undefined) ->
+  ok;
+apply_at_memory_store(Ctx, Ctx) ->
+  ok;
+apply_at_memory_store(_Ctx, LastCtx) ->
+  Docs = case get(doc_cache) of
+    undefined -> [];
+    List -> List
+  end,
+
+  % TODO - incosistency if error occured at part of documents
+  lists:foreach(fun
+    ({Key, Doc}) ->
+      case Doc =:= get_doc_from_memory(Key) of
+        true ->
+          ok;
+        _ ->
+          Scope = maps:get(scope, LastCtx, <<>>), % Scope may be not present in Ctx
+          ToSave = memory_store_driver:increment_rev(LastCtx, Doc),
+          MC = links:model_init(),
+
+          % TODO - delete with new links
+          SaveCtx = case catch binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of
+            {0, _} ->
+              case maps:get(disc_driver_ctx, LastCtx, undefined) of
+                DiskCtx when is_map(DiskCtx) ->
+                  datastore_context:override(disc_driver_ctx,
+                    datastore_context:override(bucket, <<"default">>, DiskCtx),
+                    LastCtx);
+                _ ->
+                  LastCtx
+              end;
+            _ ->
+              LastCtx
+          end,
+
+          case datastore_cache:save(SaveCtx, ToSave#document{scope = Scope,
+            version = MC#model_config.version}) of
+            {ok, disc, #document{key = Key} = Saved} ->
+              add_doc_to_memory(Key, Saved),
+              add_doc_to_cache(Key, Saved),
+              memory_store_driver:del_durability_from_memory(Key);
+            {ok, _, #document{key = Key} = Saved} ->
+              add_doc_to_memory(Key, Saved),
+              add_doc_to_cache(Key, Saved),
+              memory_store_driver:add_durability_to_memory(Key, SaveCtx);
+            Other ->
+              throw({datastore_cache_error, Other})
+          end
+      end
+  end, Docs),
+  saved.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Prepare list of errors to answer.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_error(DumpAns :: term(), AnsList :: list()) ->
+  NewAnsList :: list().
+prepare_error(DumpAns, AnsList) ->
+  lists:map(fun(_) -> DumpAns end, AnsList).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets document that describes links from stores.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_doc(memory_store_driver:ctx(), datastore:ext_key()) ->
+  datastore:document() | datastore:get_error().
+get_doc(#{generated_uuid := true}, Key) ->
+  DelDoc = #document{key = Key, deleted = true},
+  add_doc_to_memory(Key, DelDoc),
+  add_doc_to_cache(Key, DelDoc),
+  DelDoc;
+get_doc(#{get_method := GetMethod} = Ctx, Key) ->
+  case get_doc_from_cache(Key) of
+    undefined ->
+      % TODO - delete with new links
+      GetCtx = case catch binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of
+        {0, _} ->
+          case maps:get(disc_driver_ctx, Ctx, undefined) of
+            DiskCtx when is_map(DiskCtx) ->
+              datastore_context:override(disc_driver_ctx,
+                datastore_context:override(bucket, <<"default">>, DiskCtx),
+                Ctx);
+            _ ->
+              Ctx
+          end;
+        _ ->
+          Ctx
+      end,
+
+      case apply(datastore_cache, GetMethod, [GetCtx, Key]) of
+        {ok, Doc} ->
+          add_doc_to_memory(Key, Doc),
+          add_doc_to_cache(Key, Doc),
+          Doc;
+        {ok, _, Doc} ->
+          add_doc_to_memory(Key, Doc),
+          add_doc_to_cache(Key, Doc),
+          Doc;
+        {error, key_enoent} ->
+          DelDoc = #document{key = Key, deleted = true},
+          add_doc_to_memory(Key, DelDoc),
+          add_doc_to_cache(Key, DelDoc),
+          DelDoc;
+        {error, _} = Error ->
+          throw({datastore_cache_error, Error})
+      end;
+    Cached ->
+      Cached
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Handles single link operation.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_link_message(Messages :: memory_store_driver:message(),
-    Driver :: atom(), FD :: atom(),
-    ModelConfig :: model_behaviour:model_config()) -> ok | {error, term()}.
-handle_link_message({force_save, Args}, _Driver, FD, ModelConfig) ->
-  [Bucket, ToSave] = case Args of
-    [TS] ->
-      [FD:select_bucket(ModelConfig, TS), TS];
-    _ ->
-      Args
-  end,
-  case memory_store_driver:resolve_conflict(ModelConfig, FD, ToSave) of
+-spec handle_link_message(Ctx :: memory_store_driver:ctx()) ->
+  ok | {error, term()}.
+handle_link_message({Ctx, {save, [#document{key = Key} = ToSave]}}) ->
+  case memory_store_driver:resolve_conflict(get_doc(Ctx, Key), ToSave) of
     not_changed ->
       ok;
-    {#document{key = Key, deleted = true} = Document, ToDel} ->
-      delete_link_doc(ModelConfig, Document#document{rev = undefined}),
-      add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
-    {#document{key = Key} = Document, ToDel} ->
-      save_link_doc(ModelConfig, Document#document{rev = undefined}),
-      add_change_to_dump_memory(Key, {Document, Bucket, ToDel});
-    Error ->
-      Error
-  end;
-handle_link_message({get_link_doc, [DocKey]}, _Driver, _FD, ModelConfig) ->
-  get_link_doc(ModelConfig, DocKey);
-handle_link_message({get_link_doc, [BucketOverride, DocKey]}, _Driver, _FD,
-    ModelConfig) ->
-  get_link_doc(ModelConfig, BucketOverride, DocKey);
-handle_link_message({exists_link_doc, [DocKey, Scope]}, _Driver, _FD,
-    ModelConfig) ->
-  exists_link_doc(ModelConfig, DocKey, Scope);
-handle_link_message({foreach_link, Args}, Driver, _FD, ModelConfig) ->
-  put(mcd_driver, ?MODULE),
-  Ans = apply(Driver, foreach_link, [ModelConfig | Args]),
-  case Ans of
-    {ok, _} ->
-      put(foreach_restore, true);
-    _ ->
+    Document ->
+      save_link_doc(Ctx, Document),
       ok
-  end,
-  Ans;
-handle_link_message({add_links, [Key, Links, LinkReplicaScope]}, Driver, FD,
-    ModelConfig) ->
-  handle_link_message({add_links, [Key, Links]}, Driver, FD,
-    ModelConfig#model_config{link_replica_scope = LinkReplicaScope});
-handle_link_message({delete_links, [Key, LinkNames]}, Driver, FD,
-    ModelConfig) ->
-  handle_link_message({delete_links, [Key, LinkNames, ?PRED_ALWAYS]}, Driver, FD,
-    ModelConfig);
-handle_link_message({Op, Args}, Driver, _FD, ModelConfig) ->
-  put(mcd_driver, ?MODULE),
-  apply(Driver, Op, [ModelConfig | Args]).
+  end;
+handle_link_message({Ctx, {get, [DocKey]}}) ->
+  get_link_doc(Ctx, DocKey);
+handle_link_message({Ctx, {delete_links, [Key, LinkNames]}}) ->
+  handle_link_message({Ctx, {delete_links, [Key, LinkNames, ?PRED_ALWAYS]}});
+handle_link_message({Ctx, {Op, Args}}) ->
+  apply(?MODULE, Op, [Ctx | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -276,13 +397,16 @@ handle_link_message({Op, Args}, Driver, _FD, ModelConfig) ->
 -spec merge_link_ops(Messages :: [memory_store_driver:message()]) ->
   [{Message :: memory_store_driver:message(), Count :: non_neg_integer()}].
 merge_link_ops([M1 | Messages]) ->
-  {LM, MN, AggReversed} = lists:foldl(fun(M, {LastM, MergedNum, Acc}) ->
-    case merge_link_ops(LastM, M) of
-      {merged, NewM} ->
-        {NewM, MergedNum + 1, Acc};
-      different ->
-        {M, 1, [{LastM, MergedNum} | Acc]}
-    end
+  {LM, MN, AggReversed} = lists:foldl(fun
+    ({Ctx, M}, {{Ctx, LastM}, MergedNum, Acc}) ->
+      case merge_link_ops(LastM, M) of
+        {merged, NewM} ->
+          {{Ctx, NewM}, MergedNum + 1, Acc};
+        different ->
+          {{Ctx, M}, 1, [{{Ctx, LastM}, MergedNum} | Acc]}
+      end;
+    (M, {LastM, MergedNum, Acc}) ->
+      {M, 1, [{LastM, MergedNum} | Acc]}
   end, {M1, 1, []}, Messages),
 
   lists:reverse([{LM, MN} | AggReversed]).
@@ -299,17 +423,17 @@ merge_link_ops({fetch_link, _}, _) ->
   different;
 merge_link_ops({foreach_link, _}, _) ->
   different;
-merge_link_ops({get_link_doc, _}, _) ->
+merge_link_ops({get, _}, _) ->
   different;
-merge_link_ops({exists_link_doc, _}, _) ->
+merge_link_ops({save, _}, _) ->
   different;
 merge_link_ops(_, {fetch_link, _}) ->
   different;
 merge_link_ops(_, {foreach_link, _}) ->
   different;
-merge_link_ops(_, {get_link_doc, _}) ->
+merge_link_ops(_, {get, _}) ->
   different;
-merge_link_ops(_, {exists_link_doc, _}) ->
+merge_link_ops(_, {save, _}) ->
   different;
 merge_link_ops({Op, [A1, [] | T]}, {Op, [A1, L2 | T]}) when is_list(L2) ->
   {merged, {Op, [A1, L2 | T]}};
@@ -333,103 +457,13 @@ merge_link_ops(_, _) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Saves operation in memory.
-%% @end
-%%--------------------------------------------------------------------
--spec add_change_to_memory(datastore:ext_key(),
-    Op :: atom() | {atom(), term()}) -> ok.
-add_change_to_memory(Key, Op) ->
-  Value = get_value(op_cache),
-  put(op_cache, [{Key, Op} | proplists:delete(Key, Value)]),
-  ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves key to be dumped to store in memory.
-%% @end
-%%--------------------------------------------------------------------
--spec add_change_to_dump_memory(datastore:ext_key(), term()) ->
-  ok.
-add_change_to_dump_memory(Key, Change) ->
-  Value = get_value(dump_cache),
-  put(dump_cache, [{Key, Change} | proplists:delete(Key, Value)]),
-  ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves document to be restored from disk to memory.
-%% @end
-%%--------------------------------------------------------------------
--spec add_restore_to_memory(datastore:ext_key(), memory_store_driver:value(),
-    FetchFilter :: boolean()) -> ok.
-add_restore_to_memory(Key, V, FetchFilter) ->
-  Message = get(current_message),
-  add_restore_to_memory(Key, V, Message, FetchFilter).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves document to be restored from disk to memory.
-%% @end
-%%--------------------------------------------------------------------
--spec add_restore_to_memory(datastore:ext_key(), memory_store_driver:value(),
-    Op :: atom(), FetchFilter :: boolean()) -> ok.
-add_restore_to_memory(_Key, _V, clear, _FetchFilter) ->
-  ok;
-add_restore_to_memory(Key, V, {fetch_link, _}, true) ->
-  add_restore_to_memory(Key, V);
-add_restore_to_memory(Key, V, {foreach_link, _}, true) ->
-  add_restore_to_memory(Key, V);
-add_restore_to_memory(_Key, _V, _Message, true) ->
-  ok;
-add_restore_to_memory(Key, V, _, _) ->
-  add_restore_to_memory(Key, V).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves document to be restored from disk to memory.
-%% @end
-%%--------------------------------------------------------------------
--spec add_restore_to_memory(datastore:ext_key(), memory_store_driver:value()) ->
-  ok.
-add_restore_to_memory(Key, V) ->
-  Value = get_value(restore_cache),
-  put(restore_cache, [{Key, V} | proplists:delete(Key, Value)]),
-  ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Saves document in process memory to be cached by tp process.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_doc_to_memory(datastore:ext_key(), memory_store_driver:value()) ->
   ok.
 add_doc_to_memory(Key, Doc) ->
-  Value = get_value(doc_cache),
-  put(doc_cache, [{Key, Doc} | proplists:delete(Key, Value)]),
-  ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Revers document change in memory after failure.
-%% @end
-%%--------------------------------------------------------------------
--spec reverse_doc_change_in_memory(datastore:ext_key(), memory_store_driver:value()) ->
-  ok.
-reverse_doc_change_in_memory(Key, OldValue) ->
-  Value = get_value(doc_cache),
-  case proplists:get_value(Key, OldValue, undefined) of
-    undefined ->
-      put(doc_cache, proplists:delete(Key, Value));
-    OldV ->
-      put(doc_cache, [{Key, OldV} | proplists:delete(Key, Value)])
-  end,
-  ok.
+  memory_store_driver:add_to_proc_mem(mem_cache, Key, Doc).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -439,67 +473,27 @@ reverse_doc_change_in_memory(Key, OldValue) ->
 %%--------------------------------------------------------------------
 -spec get_doc_from_memory(datastore:ext_key()) -> memory_store_driver:value() | undefined.
 get_doc_from_memory(Key) ->
-  case get(doc_cache) of
-    undefined -> undefined;
-    List ->
-      proplists:get_value(Key, List, undefined)
-  end.
+  memory_store_driver:get_from_proc_mem(mem_cache, Key).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets value from process memory.
+%% Saves document in process memory to be cached by tp process.
 %% @end
 %%--------------------------------------------------------------------
--spec get_value(atom()) -> list().
-get_value(Key) ->
-  case get(Key) of
-    undefined -> [];
-    List -> List
-  end.
+-spec add_doc_to_cache(datastore:ext_key(), memory_store_driver:value()) ->
+  ok.
+add_doc_to_cache(Key, Doc) ->
+  OldDoc = get_doc_from_cache(Key),
+  ToSave = memory_store_driver:update_rev_if_needed(OldDoc, Doc),
+  memory_store_driver:add_to_proc_mem(doc_cache, Key, ToSave).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Gets document that describes links from stores (memory or disk).
+%% Gets document from process memory.
 %% @end
 %%--------------------------------------------------------------------
--spec get_from_stores(model_behaviour:model_config(), datastore:ext_key(),
-    BucketOverride:: binary() | undefined) ->
-  {ok, datastore:document()} | datastore:get_error().
-get_from_stores(#model_config{name = MN} = ModelConfig, Key, BucketOverride) ->
-  MemDriver = get(mem_driver),
-  Ans = apply(MemDriver, get_link_doc, [ModelConfig, Key]),
-
-  case {Ans, get(flush_driver)} of
-    {{ok, V}, _} ->
-      add_doc_to_memory(Key, V),
-      Ans;
-    {{error, {not_found, _}}, undefined} ->
-      add_doc_to_memory(Key, not_found),
-      Ans;
-    {{error, {not_found, _}}, FlushDriver} ->
-      CCCUuid = caches_controller:get_cache_uuid(Key, MN),
-      case caches_controller:check_cache_consistency_direct(MemDriver,
-        CCCUuid, MN) of
-        {ok, _, _} ->
-          add_doc_to_memory(Key, not_found),
-          Ans;
-        _ ->
-          Ans2 = case BucketOverride of
-            undefined -> apply(FlushDriver, get_link_doc, [ModelConfig, Key]);
-            _ -> apply(FlushDriver, get_link_doc,
-              [ModelConfig, BucketOverride, Key])
-          end,
-          case Ans2 of
-            {ok, V2} ->
-              add_doc_to_memory(Key, V2#document{rev = undefined}),
-              add_restore_to_memory(Key, V2, false),
-              Ans2;
-            {error, {not_found, _}} ->
-              add_doc_to_memory(Key, not_found),
-              Ans2
-          end
-      end;
-    {E, _} ->
-      E
-  end.
+-spec get_doc_from_cache(datastore:ext_key()) -> memory_store_driver:value() | undefined.
+get_doc_from_cache(Key) ->
+  memory_store_driver:get_from_proc_mem(doc_cache, Key).

@@ -24,152 +24,126 @@
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 %%tests
 -export([stress_test/1,
-    datastore_mixed_db_test/1, datastore_mixed_global_store_test/1, datastore_mixed_local_store_test/1,
-    datastore_mixed_global_cache_test/1, datastore_mixed_local_cache_test/1, mixed_cast_test/1,
-    datastore_links_number_global_cache_test/1, datastore_links_number_db_test/1
+  datastore_mixed_global_store_test/1, datastore_mixed_local_store_test/1,
+  datastore_mixed_global_cache_test/1, datastore_mixed_local_cache_test/1, mixed_cast_test/1,
+  datastore_links_number_global_cache_test/1
 ]).
 %%test_bases
 -export([stress_test_base/1,
-    datastore_mixed_db_test_base/1, datastore_mixed_global_store_test_base/1,
-    datastore_mixed_local_store_test_base/1, datastore_mixed_global_cache_test_base/1,
-    datastore_mixed_local_cache_test_base/1, mixed_cast_test_base/1,
-    datastore_links_number_global_cache_test_base/1,datastore_links_number_db_test_base/1
+  datastore_mixed_global_store_test_base/1,
+  datastore_mixed_local_store_test_base/1, datastore_mixed_global_cache_test_base/1,
+  datastore_mixed_local_cache_test_base/1, mixed_cast_test_base/1,
+  datastore_links_number_global_cache_test_base/1
 ]).
 
 -define(STRESS_CASES, [
-        datastore_mixed_db_test, datastore_mixed_global_store_test,
-        datastore_mixed_local_store_test, datastore_mixed_global_cache_test,
-        datastore_mixed_local_cache_test, mixed_cast_test
-    ]).
+  datastore_mixed_global_store_test,
+  datastore_mixed_local_store_test, datastore_mixed_global_cache_test,
+  datastore_mixed_local_cache_test, mixed_cast_test
+]).
 
 -define(STRESS_NO_CLEARING_CASES, [
-        datastore_mixed_global_cache_test, datastore_mixed_db_test,
-        datastore_links_number_global_cache_test, datastore_links_number_db_test
-    ]).
+  datastore_mixed_global_cache_test,
+  datastore_links_number_global_cache_test
+]).
 
 all() ->
-    ?STRESS_ALL(?STRESS_CASES, ?STRESS_NO_CLEARING_CASES).
+  ?STRESS_ALL(?STRESS_CASES, ?STRESS_NO_CLEARING_CASES).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
 
 stress_test(Config) ->
-    ?STRESS(Config, [
-            {description, "Main stress test function. Links together all cases to be done multiple times as one continous test."},
-            {success_rate, 95},
-            {config, [{name, stress}, {description, "Basic config for stress test"}]}
-        ]).
+  ?STRESS(Config, [
+    {description, "Main stress test function. Links together all cases to be done multiple times as one continous test."},
+    {success_rate, 95},
+    {config, [{name, stress}, {description, "Basic config for stress test"}]}
+  ]).
 stress_test_base(Config) ->
-    ?STRESS_TEST_BASE(Config).
+  ?STRESS_TEST_BASE(Config).
 
 %%%===================================================================
-
-datastore_mixed_db_test(Config) ->
-    ?PERFORMANCE(Config, [
-            {parameters, [
-                [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-                [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-                [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-                [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-            ]},
-            {description, "Performs multiple datastore operations using many threads. Level - database."}
-        ]).
-datastore_mixed_db_test_base(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, disk_only).
 
 datastore_mixed_global_store_test(Config) ->
   ?PERFORMANCE(Config, [
     {parameters, [
-        [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-        [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-        [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-        [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
+      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
+      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
+      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
     ]},
     {description, "Performs multiple datastore operations using many threads. Level - global store."}
   ]).
 datastore_mixed_global_store_test_base(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, global_only).
+  datastore_basic_ops_utils:mixed_test(Config, global_only).
 
 datastore_mixed_local_store_test(Config) ->
-    ?PERFORMANCE(Config, [
-            {parameters, [
-                [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-                [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-                [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-                [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-            ]},
-            {description, "Performs multiple datastore operations using many threads. Level - local store."}
-        ]).
+  ?PERFORMANCE(Config, [
+    {parameters, [
+      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
+      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
+      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
+    ]},
+    {description, "Performs multiple datastore operations using many threads. Level - local store."}
+  ]).
 datastore_mixed_local_store_test_base(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, local_only).
+  datastore_basic_ops_utils:mixed_test(Config, local_only).
 
 datastore_mixed_global_cache_test(Config) ->
-    ?PERFORMANCE(Config, [
-        {parameters, [
-            [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-            [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-            [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-            [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-        ]},
-        {description, "Performs multiple datastore operations using many threads. Level - global cache."}
-      ]).
+  ?PERFORMANCE(Config, [
+    {parameters, [
+      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
+      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
+      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
+    ]},
+    {description, "Performs multiple datastore operations using many threads. Level - global cache."}
+  ]).
 datastore_mixed_global_cache_test_base(Config) ->
-   datastore_basic_ops_utils:mixed_test(Config, globally_cached).
+  datastore_basic_ops_utils:mixed_test(Config, globally_cached).
 
 datastore_mixed_local_cache_test(Config) ->
-    ?PERFORMANCE(Config, [
-        {parameters, [
-            [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-            [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-            [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-            [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-        ]},
-        {description, "Performs multiple datastore operations using many threads. Level - local cache."}
-      ]).
+  ?PERFORMANCE(Config, [
+    {parameters, [
+      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
+      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
+      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
+    ]},
+    {description, "Performs multiple datastore operations using many threads. Level - local cache."}
+  ]).
 datastore_mixed_local_cache_test_base(Config) ->
-    datastore_basic_ops_utils:mixed_test(Config, locally_cached).
+  datastore_basic_ops_utils:mixed_test(Config, locally_cached).
 
 %%%===================================================================
 
 datastore_links_number_global_cache_test(Config) ->
-    ?PERFORMANCE(Config, [
-        {parameters, [
-            [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-            [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-            [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-            [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-        ]},
-        {description, "Performs multiple datastore links operations using many threads. Level - global cache."}
-    ]).
+  ?PERFORMANCE(Config, [
+    {parameters, [
+      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
+      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
+      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
+    ]},
+    {description, "Performs multiple datastore links operations using many threads. Level - global cache."}
+  ]).
 datastore_links_number_global_cache_test_base(Config) ->
-    datastore_basic_ops_utils:links_number_test(Config, globally_cached).
-
-datastore_links_number_db_test(Config) ->
-    ?PERFORMANCE(Config, [
-        {parameters, [
-            [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-            [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-            [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-            [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-        ]},
-        {description, "Performs multiple datastore links operations using many threads. Level - database."}
-    ]).
-datastore_links_number_db_test_base(Config) ->
-    datastore_basic_ops_utils:links_number_test(Config, disk_only).
+  datastore_basic_ops_utils:links_number_test(Config, globally_cached).
 
 %%%===================================================================
 
 mixed_cast_test(Config) ->
   ?PERFORMANCE(Config, [
-      {parameters, [
-        [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
-        [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
-      ]},
-      {description, "Performs many one worker_proxy calls with various arguments"}
-    ]).
+    {parameters, [
+      [{name, proc_num}, {value, 10}, {description, "Number of threads used during the test."}],
+      [{name, proc_repeats}, {value, 10}, {description, "Number of operations done by single threads."}]
+    ]},
+    {description, "Performs many one worker_proxy calls with various arguments"}
+  ]).
 mixed_cast_test_base(Config) ->
-    requests_routing_test_SUITE:mixed_cast_test_core(Config).
+  requests_routing_test_SUITE:mixed_cast_test_core(Config).
 
 
 %%%===================================================================
@@ -177,30 +151,26 @@ mixed_cast_test_base(Config) ->
 %%%===================================================================
 
 init_per_testcase(Case, Config) when
-    Case =:= datastore_mixed_db_test;
-    Case =:= datastore_mixed_global_store_test;
-    Case =:= datastore_mixed_local_store_test;
-    Case =:= datastore_mixed_local_cache_test;
-    Case =:= datastore_mixed_global_cache_test;
-    Case =:= datastore_links_number_global_cache_test;
-    Case =:= datastore_links_number_db_test ->
-    datastore_basic_ops_utils:set_env(Case, Config);
+  Case =:= datastore_mixed_global_store_test;
+  Case =:= datastore_mixed_local_store_test;
+  Case =:= datastore_mixed_local_cache_test;
+  Case =:= datastore_mixed_global_cache_test;
+  Case =:= datastore_links_number_global_cache_test ->
+  datastore_basic_ops_utils:set_env(Case, Config);
 
 init_per_testcase(_Case, Config) ->
-    Config.
+  Config.
 
 end_per_testcase(Case, Config) when
-    Case =:= datastore_mixed_db_test;
-    Case =:= datastore_mixed_global_store_test;
-    Case =:= datastore_mixed_local_store_test;
-    Case =:= datastore_mixed_local_cache_test;
-    Case =:= datastore_mixed_global_cache_test;
-    Case =:= datastore_links_number_global_cache_test;
-    Case =:= datastore_links_number_db_test ->
-    datastore_basic_ops_utils:clear_env(Config);
+  Case =:= datastore_mixed_global_store_test;
+  Case =:= datastore_mixed_local_store_test;
+  Case =:= datastore_mixed_local_cache_test;
+  Case =:= datastore_mixed_global_cache_test;
+  Case =:= datastore_links_number_global_cache_test ->
+  datastore_basic_ops_utils:clear_env(Config);
 
 end_per_testcase(_Case, _Config) ->
-    ok.
+  ok.
 
 %%%===================================================================
 %%% Internal functions

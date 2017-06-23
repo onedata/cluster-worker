@@ -36,18 +36,10 @@
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
-    DBNodes = datastore_config:db_nodes(),
-
-    State = #{db_nodes => DBNodes},
-    PersistenceDriverMod = datastore:driver_to_module(?PERSISTENCE_DRIVER),
-    PersistenceDriverMod:init_driver(State),
-    ?LOCAL_SLAVE_DRIVER:init_driver(State),
-    ?GLOBAL_SLAVE_DRIVER:init_driver(State),
-
     State2 = lists:foldl(fun(Model, StateAcc) ->
         #model_config{name = RecordName} = ModelConfig = Model:model_init(),
         maps:put(RecordName, ModelConfig, StateAcc)
-    end, State, datastore_config:models()),
+    end, #{}, datastore_config:models()),
 
     {ok, State2}.
 
@@ -67,26 +59,7 @@ handle(ping) ->
     pong;
 
 handle(healthcheck) ->
-    State = worker_host:state_to_map(?MODULE),
-    PersistenceModule = datastore:driver_to_module(?PERSISTENCE_DRIVER),
-
-    lists:foldl(fun
-        (_, {error, Reason}) ->
-            {error, Reason};
-        ({_Driver, ok}, ok) ->
-            ok;
-        ({Driver, {error, Reason}}, ok) ->
-            ?error("Driver ~p healthcheck error: ~p", [Driver, Reason]),
-            {error, {Driver, Reason}};
-        ({Driver, Error}, ok) ->
-            ?error("Driver ~p unexpected healthcheck error: ~p", [Driver, Error]),
-            {error, {Driver, Error}}
-    end, ok, [
-        {datastore_state_init, datastore:healthcheck()},
-        {?PERSISTENCE_DRIVER, catch PersistenceModule:healthcheck(State)},
-        {?LOCAL_SLAVE_DRIVER, catch ?LOCAL_SLAVE_DRIVER:healthcheck(State)},
-        {?GLOBAL_SLAVE_DRIVER, catch ?GLOBAL_SLAVE_DRIVER:healthcheck(State)}
-    ]);
+    datastore:healthcheck();
 
 handle({driver_call, Module, Method, Args}) ->
     try erlang:apply(Module, Method, Args) of
@@ -138,7 +111,7 @@ state_get(Key) ->
 %%--------------------------------------------------------------------
 -spec supervisor_flags() -> supervisor:sup_flags().
 supervisor_flags() ->
-    #{strategy => one_for_one, intensity => 1, period => 5}.
+    #{strategy => one_for_one, intensity => 5, period => 1}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -148,30 +121,8 @@ supervisor_flags() ->
 -spec supervisor_children_spec() -> [supervisor:child_spec()].
 supervisor_children_spec() ->
     [
-        #{
-            id => couchbase_gateway_sup,
-            start => {couchbase_gateway_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [couchbase_gateway_sup]
-        },
-        #{
-            id => datastore_pool_sup,
-            start => {datastore_pool_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [datastore_pool_sup]
-        },
-        #{
-            id => datastore_cache_manager,
-            start => {datastore_cache_manager, start_link, []},
-            restart => permanent,
-            shutdown => timer:seconds(10),
-            type => worker,
-            modules => [datastore_cache_manager]
-        },
+        datastore_cache_manager_spec(memory),
+        datastore_cache_manager_spec(disc),
         #{
             id => couchbase_pool_sup,
             start => {couchbase_pool_sup, start_link, []},
@@ -189,3 +140,25 @@ supervisor_children_spec() ->
             modules => [couchbase_changes_sup]
         }
     ].
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns a child spec for a datastore cache manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec datastore_cache_manager_spec(datastore_cache_manager:pool()) ->
+    supervisor:child_spec().
+datastore_cache_manager_spec(Pool) ->
+    #{
+        id => {datastore_cache_manager, Pool},
+        start => {datastore_cache_manager, start_link, [Pool]},
+        restart => permanent,
+        shutdown => timer:seconds(10),
+        type => worker,
+        modules => [datastore_cache_manager]
+    }.

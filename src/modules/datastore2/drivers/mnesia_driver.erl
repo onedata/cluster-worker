@@ -21,7 +21,7 @@
 -type table() :: atom().
 -type ctx() :: #{table => table()}.
 -type key() :: datastore:key().
--type value() :: datastore:doc().
+-type value() :: datastore:document().
 -type init_opt() :: {type, set | ordered_set | bag}.
 
 -export_type([table/0, ctx/0]).
@@ -40,8 +40,8 @@ init(#{table := Table}, Opts) ->
     Opts2 = [
         {type, proplists:get_value(type, Opts, set)},
         {ram_copies, [node()]},
-        {record_name, document2},
-        {attributes, record_info(fields, document2)}
+        {record_name, document},
+        {attributes, record_info(fields, document)}
     ],
     case mnesia:create_table(Table, Opts2) of
         {atomic, ok} -> ok;

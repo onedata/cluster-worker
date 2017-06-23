@@ -26,7 +26,6 @@
             % for awareness of them being used in the project and
             % to make sure they are started before the application.
             lager,
-            etls,
             hackney,
             web_client,
             cowboy,
@@ -52,8 +51,6 @@
             {mem_clearing_ratio_to_stop, 75},
             %% Time to wait before memory check during clearing procedure
             {clearing_time_to_refresh_stats, 5000},
-            %% Clearing value from memory when tp process terminates
-            {tp_proc_terminate_clear_memory, true},
 
             %% Memory percent that results in blocking operations on mnesia
             {throttling_block_mem_error_ratio, 95},
@@ -66,17 +63,17 @@
             %% Number of tp processes allowed when throttling blocks actions
             {throttling_block_memory_proc_number, 150000},
             %% Size of couch queue to start throttling
-            {throttling_db_queue_limit, 10000},
+            {throttling_db_queue_limit, 50000},
             %% Size of couch queue to introduce delay
-            {throttling_delay_db_queue_size, 50},
+            {throttling_delay_db_queue_size, 1000},
             %% Base time for throttling
             {throttling_base_time_ms, 16},
             %% Maximum throttling time
-            {throttling_max_time_ms, 1024},
+            {throttling_max_time_ms, 2048},
             %% Interval of throttling configuration when throttling is used
-            {throttling_active_check_interval_seconds, 5},
+            {throttling_active_check_interval_seconds, 15},
             %% Interval of throttling configuration
-            {throttling_check_interval_seconds, 5},
+            {throttling_check_interval_seconds, 15},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB
@@ -114,6 +111,8 @@
             {task_checking_period_minutes, 5},
             %% Heap size limit for changes stream (it works all the time and must be limited)
             {changes_max_heap_size_words, 33554432}, % 256 MB with 8byte word
+            %% Period between calling node_manager_plugin callback for memory checking
+            {memory_check_interval_seconds, 300},
 
             %% ===================================================================
             %% PLUGINS
@@ -194,9 +193,6 @@
             %% DATASTORE
             %% ===================================================================
 
-            %% Persistence driver to use in datastore.
-            %% Supported values: couchbase_datastore_driver, riak_datastore_driver, couchdb_datastore_driver
-            {persistence_driver_module, 'couchdb_datastore_driver'},
             %% Limit for the number of active tp processes.
             {tp_processes_limit, 200},
             %% Delay in ms between consecutive calls to tp_server logic
@@ -211,6 +207,30 @@
             %% Range of port numbers for a CouchBase gateway API port
             {couchbase_gateway_api_port_range, {12000, 12999}},
             %% Range of port numbers for a CouchBase gateway admin port
-            {couchbase_gateway_admin_port_range, {13000, 13999}}
+            {couchbase_gateway_admin_port_range, {13000, 13999}},
+
+            {datastore_cache_size, [
+                {memory, 100000},
+                {disc, 500000}
+            ]},
+            {datastore_doc_commit_retry_delay, 1000},
+            {couchbase_revision_history_length, 20},
+            {couchbase_mutator_history_length, 20},
+            {couchbase_config_total_timeout, 30000},
+            {couchbase_operation_timeout, 600000},
+            {couchbase_view_timeout, 120000},
+            {couchbase_durability_timeout, 600000},
+            {couchbase_http_timeout, 60000},
+            {couchbase_pool_size, [
+                {'_', [
+                    {read, 10},
+                    {write, 20}
+                ]}
+            ]},
+            {couchbase_pool_batch_size, 50},
+            {couchbase_changes_batch_size, 25},
+            {couchbase_changes_update_interval, 5000},
+            {couchbase_changes_stream_batch_size, 25},
+            {couchbase_changes_stream_update_interval, 5000}
         ]}
     ]}.

@@ -14,6 +14,7 @@
 
 %% Levels
 -define(DISK_ONLY_LEVEL, disk_only).
+-define(DIRECT_DISK_LEVEL, direct_disk).
 -define(GLOBAL_ONLY_LEVEL, global_only).
 -define(LOCAL_ONLY_LEVEL, local_only).
 -define(GLOBALLY_CACHED_LEVEL, globally_cached).
@@ -49,7 +50,9 @@
     sync_enabled = false :: boolean(),
     % TODO - delete aggregate_db_writes
     aggregate_db_writes = false :: boolean(),
-    disable_remote_link_delete = false :: boolean()
+    disable_remote_link_delete = false :: boolean(),
+    list_enabled = false :: datastore_context:list_opt(),
+    volatile = false
 }).
 
 %% Helper macro for instantiating #model_config record.

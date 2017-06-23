@@ -23,7 +23,6 @@
 -define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
     task_pool,
-    cache_consistency_controller,
     cached_identity,
     synced_cert,
     lock,
@@ -31,8 +30,8 @@
 ]).
 
 %% datastore_config_behaviour callbacks
--export([db_nodes/0, models/0, throttled_models/0, global_caches/0,
-    local_caches/0]).
+-export([db_nodes/0, models/0, throttled_models/0, get_mutator/0,
+    global_caches/0, local_caches/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -64,6 +63,15 @@ models() ->
 -spec throttled_models() -> Models :: [model_behaviour:model_type()].
 throttled_models() ->
     plugins:apply(?DATASTORE_CONFIG_PLUGIN, throttled_models, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% {@link datastore_config_behaviour} callback get_mutator/0.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_mutator() -> datastore:mutator() | undefined.
+get_mutator() ->
+    undefined.
 
 %%--------------------------------------------------------------------
 %% @doc

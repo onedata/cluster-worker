@@ -26,3 +26,10 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback throttled_models() -> Models :: [model_behaviour:model_type()].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets mutator of document.
+%% @end
+%%--------------------------------------------------------------------
+-callback get_mutator() -> datastore:mutator() | undefined.

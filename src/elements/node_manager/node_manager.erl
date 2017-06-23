@@ -45,6 +45,7 @@
     nagios_listener,
     redirector_listener
 ]).
+% TODO - new drivers do not require two step init
 -define(MODULES_HOOKS, [
     {{datastore_worker, early_init}, {datastore, ensure_state_loaded, []}},
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
@@ -216,9 +217,10 @@ init([]) ->
             ok = erlang:apply(Module, start, []) end, node_manager:listeners()),
         ?info("All listeners started"),
 
-        next_mem_check(),
         next_task_check(),
         erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
+        {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
+        erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
@@ -263,38 +265,17 @@ handle_call(healthcheck, _From, State) ->
 handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
     {reply, IPAddress, State};
 
-% only for tests
-handle_call(check_mem_synch, _From, State) ->
-    Ans = case monitoring:get_memory_stats() of
-        [{<<"mem">>, MemUsage}] ->
-            case caches_controller:should_clear_cache(MemUsage, erlang:memory()) of
-                true ->
-                    free_memory(MemUsage);
-                _ ->
-                    ok
-            end;
-        _ ->
-            cannot_check_mem_usage
-    end,
-    {reply, Ans, State};
-
-% only for tests
-handle_call(clear_mem_synch, _From, State) ->
-    caches_controller:delete_old_keys(locally_cached, 0),
-    caches_controller:delete_old_keys(globally_cached, 0),
-    {reply, ok, State};
-
-handle_call(disable_cache_control, _From, State) ->
-    {reply, ok, State#state{cache_control = false}};
-
-handle_call(enable_cache_control, _From, State) ->
-    {reply, ok, State#state{cache_control = true}};
-
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
 
 handle_call(enable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = true}};
+
+handle_call(disable_throttling, _From, State) ->
+    {reply, ok, State#state{throttling = false}};
+
+handle_call(enable_throttling, _From, State) ->
+    {reply, ok, State#state{throttling = true}};
 
 %% Generic function apply in node_manager's process
 handle_call({apply, M, F, A}, _From, State) ->
@@ -328,35 +309,21 @@ handle_cast(cluster_init_finished, State) ->
     NewState = cluster_init_finished(State),
     {noreply, NewState};
 
-handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
-    last_cache_cleaning = Last, cache_cleaning_pid = LastCleaningPid} = State) when CacheControl =:= true ->
-    MemUsage = monitoring:mem_usage(MonState),
-    {_, ErlangMemUsage, _} = monitoring:erlang_vm_stats(MonState),
-    % Check if memory cleaning of oldest docs should be started
-    % even when memory utilization is low (e.g. once a day)
-    NewState = case caches_controller:should_clear_cache(MemUsage, ErlangMemUsage) of
-        true ->
-            start_memory_cleaning(LastCleaningPid, MemUsage, State);
-        _ ->
-            Now = os:timestamp(),
-            {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
-            case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
-                true ->
-                    start_memory_cleaning(LastCleaningPid, undefined, State);
-                _ ->
-                    State
-            end
-    end,
-
-    next_mem_check(),
-    {noreply, NewState};
-
-handle_cast(configure_throttling, State) ->
+handle_cast(configure_throttling, #state{throttling = true} = State) ->
     ok = caches_controller:configure_throttling(),
     {noreply, State};
 
-handle_cast(check_mem, State) ->
-    next_mem_check(),
+handle_cast(configure_throttling, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
+    erlang:send_after(timer:seconds(Interval), self(), {timer, configure_throttling}),
+    {noreply, State};
+
+handle_cast(check_memory, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
+    erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
+    spawn(fun() ->
+        plugins:apply(node_manager_plugin, clear_memory, [false])
+    end),
     {noreply, State};
 
 handle_cast(check_tasks, #state{task_control = TC} = State) ->
@@ -751,94 +718,6 @@ start_worker(Module, Args) ->
             ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
             {error, Error}
     end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Starts memory cleaning.
-%% @end
-%%--------------------------------------------------------------------
--spec start_memory_cleaning(LastCleaningPid :: pid(), MemUsage :: float() | undefined, State :: #state{}) -> #state{}.
-start_memory_cleaning(LastCleaningPid, MemUsage, State) ->
-    case LastCleaningPid of
-        undefined ->
-            Pid = spawn(fun() -> free_memory(MemUsage) end),
-            State#state{last_cache_cleaning = os:timestamp(), cache_cleaning_pid = Pid};
-        _ ->
-            case is_process_alive(LastCleaningPid) of
-                true ->
-                    Pid = spawn(fun() -> free_memory(MemUsage) end),
-                    State#state{last_cache_cleaning = os:timestamp(), cache_cleaning_pid = Pid};
-                _ ->
-                    State
-            end
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Clears memory caches.
-%% @end
-%%--------------------------------------------------------------------
--spec free_memory(NodeMem :: float() | undefined) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
-free_memory(undefined) ->
-    try
-        % Following code will be used when clearing memory algorithm will change
-        % TODO VFS-2428 - do not use foreach during clearing
-        ok
-%%        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
-%%        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
-%%        lists:foreach(fun
-%%            ({Aggressive, StoreType}) ->
-%%                caches_controller:clear_cache(Aggressive, StoreType)
-%%        end, ClearingOrder)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
-            {error, E2}
-    end;
-free_memory(NodeMem) ->
-    try
-        ok = plugins:apply(node_manager_plugin, clear_memory, [true]),
-        AvgMem = gen_server2:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
-        ClearingOrder = case NodeMem >= AvgMem of
-            true ->
-                [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
-            _ ->
-                [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
-        end,
-        ?info("Clearing memory in order: ~p~nMemory info: ~p", [ClearingOrder, erlang:memory()]),
-        lists:foldl(fun
-            ({_Aggressive, _StoreType}, ok) ->
-                ok;
-            ({Aggressive, StoreType}, _) ->
-                Ans = caches_controller:clear_cache(Aggressive, StoreType),
-                case Ans of
-                    mem_usage_too_high ->
-                        ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
-                    _ ->
-                        ok
-                end,
-                Ans
-        end, start, ClearingOrder)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
-            {error, E2}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Plans next memory checking.
-%% @end
-%%--------------------------------------------------------------------
--spec next_mem_check() -> TimerRef :: reference().
-next_mem_check() ->
-    {ok, IntervalMin} = application:get_env(?CLUSTER_WORKER_APP_NAME, check_mem_interval_minutes),
-    Interval = timer:minutes(IntervalMin),
-    % random to reduce probability that two nodes clear memory simultanosly
-    erlang:send_after(crypto:rand_uniform(round(0.8 * Interval), round(1.2 * Interval)), self(), {timer, check_mem}).
 
 
 %%--------------------------------------------------------------------

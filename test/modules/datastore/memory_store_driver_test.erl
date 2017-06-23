@@ -20,10 +20,6 @@
 -include("modules/datastore/datastore_doc.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
-% Driver mock functions
--export([save/2, get/2, delete/3]).
--export([add_links/3, delete_links/4, get_link_doc/2, save_link_doc/2, delete_link_doc/2]).
-
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
@@ -43,16 +39,20 @@ merge_link_ops_test() ->
     Msg7 = {create_link, [Key, l5]},
     Msg8 = {add_links, [Key, [l4, l7]]},
 
-    ?assertEqual({merged, {add_links, [Key, [l1, l2, l4, l5]]}}, memory_store_driver_links:merge_link_ops(Msg, Msg2)),
+    ?assertEqual({merged, {add_links, [Key, [l1, l2, l4, l5]]}},
+        memory_store_driver_links:merge_link_ops(Msg, Msg2)),
     ?assertEqual(different, memory_store_driver_links:merge_link_ops(Msg, Msg3)),
     ?assertEqual({merged, {delete_links, [Key, [l2, l4, l6], Pred1]}},
         memory_store_driver_links:merge_link_ops(Msg3, Msg4)),
     ?assertEqual(different, memory_store_driver_links:merge_link_ops(Msg, Msg5)),
     ?assertEqual(different, memory_store_driver_links:merge_link_ops(Msg6, Msg7)),
 
-    Msgs = [Msg, Msg2, Msg3, Msg4, Msg5, Msg6, Msg7, Msg8],
-    Ans = [{{add_links, [Key, [l1, l2, l4, l5]]}, 2}, {{delete_links, [Key, [l2, l4, l6], Pred1]}, 2},
-        {Msg5, 1}, {Msg6, 1}, {Msg7, 1}, {Msg8, 1}],
+    Msgs = [{x, Msg}, {x, Msg2}, {x, Msg3}, {x, Msg4}, {x, Msg5}, {x, Msg6},
+        {x, Msg7}, {x, Msg8}, {y, Msg}, {y, Msg8}],
+    Ans = [{{x, {add_links, [Key, [l1, l2, l4, l5]]}}, 2},
+        {{x, {delete_links, [Key, [l2, l4, l6], Pred1]}}, 2},
+        {{x, Msg5}, 1}, {{x, Msg6}, 1}, {{x, Msg7}, 1}, {{x, Msg8}, 1},
+        {{y, {add_links, [Key, [l1, l2, l4, l7]]}}, 2}],
 
     ?assertEqual(Ans, memory_store_driver_links:merge_link_ops(Msgs)).
 
@@ -71,116 +71,128 @@ opts_test_() ->
     }.
 
 single_op() ->
-    MC = #model_config{},
     Key = k,
     Link = false,
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 5000),
-    put(get_response, {ok, #document{key = Key, value = "g"}}),
 
-    Ans0 = memory_store_driver:init([memory_store_driver_test, MC, Key, undefined, Link]),
-    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = infinity, max_commit_delay = infinity}}, Ans0),
-    Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
+    Ans0 = memory_store_driver:init([Key, Link, false]),
+    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = infinity,
+        max_commit_delay = infinity}}, Ans0),
+    Ans1 = memory_store_driver:init([Key, Link, true]),
     ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
     {ok, #datastore_doc_init{data = State}} = Ans1,
 
+    Ctx = #{get_method => fetch, resolve_conflicts => false, model_name => mn,
+        mutator_pid => self()},
+    CheckState = State#state{last_ctx = Ctx},
+    set_response({ok, #document{key = Key, value = "g"}}),
     Msg = {save, [#document{key = Key, value = "v"}]},
-    Ans2 = memory_store_driver:modify([Msg], State, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans2),
-    {_, _, #state{current_value = CV} = NewState} = Ans2,
-    ?assertEqual("v", CV#document.value),
+    Ans2 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans2),
+    ?assertMatch(#document{value = "v", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response({ok, #document{key = Key, value = "v"}}),
     Msg1 = {save, [#document{key = Key, value = "error"}]},
-    Ans2_2 = memory_store_driver:modify([Msg1], NewState, []),
-    ?assertMatch({[{error, error}], false, _}, Ans2_2),
-    {_, _, #state{current_value = CV1} = NewState1} = Ans2_2,
-    ?assertEqual("v", CV1#document.value),
+    Ans2_2 = memory_store_driver:modify([{Ctx, Msg1}], State, []),
+    ?assertMatch({[{datastore_cache_error, {error, error}}], false, State}, Ans2_2),
+    ?assertMatch(#document{value = "v", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response(),
     Msg2 = {update, [Key, diff]},
-    Ans3 = memory_store_driver:modify([Msg2], NewState1, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans3),
-    {_, _, #state{current_value = CV2} = NewState2} = Ans3,
-    ?assertEqual("vu", CV2#document.value),
+    Ans3 = memory_store_driver:modify([{Ctx, Msg2}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans3),
+    ?assertMatch(#document{value = "vu", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response({ok, #document{key = Key, value = "vu"}}),
     Msg3 = {create_or_update, [#document{key = Key, value = "v"}, fun() -> true end]},
-    Ans4 = memory_store_driver:modify([Msg3], NewState2, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans4),
-    {_, _, #state{current_value = CV3} = NewState3} = Ans4,
-    ?assertEqual("vuu", CV3#document.value),
+    Ans4 = memory_store_driver:modify([{Ctx, Msg3}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans4),
+    ?assertMatch(#document{value = "vuu", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response({ok, #document{key = Key, value = "vuu"}}),
     Msg4 = {create, [#document{key = Key, value = "v"}]},
-    Ans5 = memory_store_driver:modify([Msg4], NewState3, []),
-    ?assertMatch({[{error, already_exists}], false, _}, Ans5),
-    {_, _, #state{current_value = CV4} = NewState4} = Ans5,
-    ?assertEqual("vuu", CV4#document.value),
+    Ans5 = memory_store_driver:modify([{Ctx, Msg4}], State, []),
+    ?assertMatch({[{error, already_exists}], false, State}, Ans5),
+    ?assertMatch(#document{value = "vuu", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response(),
     Msg5 = {delete, [Key, fun() -> true end]},
-    Ans6 = memory_store_driver:modify([Msg5], NewState4, []),
-    ?assertMatch({[ok], {true, to_save}, _}, Ans6),
-    {_, _, #state{current_value = CV5} = NewState5} = Ans6,
-    ?assertEqual(not_found, CV5),
+    Ans6 = memory_store_driver:modify([{Ctx, Msg5}], State, []),
+    ?assertMatch({[ok], {true, [{Key, Ctx}]}, CheckState}, Ans6),
+    ?assertMatch(#document{value = "vuu", rev = [<<"1-rev">>], deleted = true},
+        get_doc()),
 
+    set_response({ok, #document{key = Key, value = "vuu", deleted = true}}),
     Msg6 = {create, [#document{key = Key, value = "v2"}]},
-    Ans7 = memory_store_driver:modify([Msg6], NewState5, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans7),
-    {_, _, #state{current_value = CV6} = NewState6} = Ans7,
-    ?assertEqual("v2", CV6#document.value),
+    Ans7 = memory_store_driver:modify([{Ctx, Msg6}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans7),
+    ?assertMatch(#document{value = "v2", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response({ok, #document{key = Key, value = "v2"}}),
     Msg7 = {delete, [Key, fun() -> true end]},
-    Ans8 = memory_store_driver:modify([Msg7], NewState6, []),
-    ?assertMatch({[ok], {true, to_save}, _}, Ans8),
-    {_, _, #state{current_value = CV7} = NewState7} = Ans8,
-    ?assertEqual(not_found, CV7),
+    Ans8 = memory_store_driver:modify([{Ctx, Msg7}], State, []),
+    ?assertMatch({[ok], {true, [{Key, Ctx}]}, CheckState}, Ans8),
+    ?assertMatch(#document{value = "v2", rev = [<<"1-rev">>], deleted = true},
+        get_doc()),
 
+    set_response({ok, #document{key = Key, value = "v2", deleted = true}}),
     Msg8 = {delete, [Key, fun() -> true end]},
-    Ans9 = memory_store_driver:modify([Msg8], NewState7, []),
-    ?assertMatch({[ok], false, _}, Ans9),
-    {_, _, #state{current_value = CV8} = NewState8} = Ans9,
-    ?assertEqual(not_found, CV8),
+    Ans9 = memory_store_driver:modify([{Ctx, Msg8}], State, []),
+    ?assertMatch({[ok], false, State}, Ans9),
+    ?assertMatch(#document{value = "v2", rev = [<<"1-rev">>], deleted = true},
+        get_doc()),
 
+    set_response(),
     Msg9 = {update, [Key, diff]},
-    Ans10 = memory_store_driver:modify([Msg9], NewState8, []),
-    ?assertMatch({[{error, {not_found, _}}], false, _}, Ans10),
-    {_, _, #state{current_value = CV9} = NewState9} = Ans10,
-    ?assertEqual(not_found, CV9),
+    Ans10 = memory_store_driver:modify([{Ctx, Msg9}], State, []),
+    ?assertMatch({[{error, {not_found, _}}], false, State}, Ans10),
+    ?assertMatch(#document{value = "v2", rev = [<<"1-rev">>], deleted = true},
+        get_doc()),
 
+    set_response(),
     Msg10 = {create_or_update, [#document{key = Key, value = "v3"}, fun() -> true end]},
-    Ans11 = memory_store_driver:modify([Msg10], NewState9, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans11),
-    {_, _, #state{current_value = CV10} = NewState10} = Ans11,
-    ?assertEqual("v3", CV10#document.value),
+    Ans11 = memory_store_driver:modify([{Ctx, Msg10}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans11),
+    ?assertMatch(#document{value = "v3", rev = [<<"1-rev">>]}, get_doc()),
 
-    ?assertEqual(ok, memory_store_driver:terminate(NewState10, [])),
+    ?assertEqual(ok, memory_store_driver:terminate(State, [])),
 
-    put(get_response, {error, {not_found, model}}),
-
+    erase(),
+    set_response({error, key_enoent}),
     Msg11 = {update, [Key, diff]},
-    Ans12 = memory_store_driver:modify([Msg11], State, []),
-    ?assertMatch({[{error, {not_found, _}}], false, _}, Ans12),
-    {_, _, #state{current_value = CV11}} = Ans12,
-    ?assertEqual(not_found, CV11),
+    Ans12 = memory_store_driver:modify([{Ctx, Msg11}], State, []),
+    ?assertMatch({[{error, {not_found, _}}], false, State}, Ans12),
+    ?assertMatch(undefined, get_doc()),
 
+    set_response(),
     Msg13 = {create, [#document{key = Key, value = "v4"}]},
-    Ans14 = memory_store_driver:modify([Msg13], State, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans14),
-    {_, _, #state{current_value = CV13}} = Ans14,
-    ?assertEqual("v4", CV13#document.value),
+    Ans14 = memory_store_driver:modify([{Ctx, Msg13}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans14),
+    ?assertMatch(#document{value = "v4", rev = [<<"1-rev">>]}, get_doc()),
 
+    set_response(),
     Msg14 = {create_or_update, [#document{key = Key, value = "v5"}, fun() -> true end]},
-    Ans15 = memory_store_driver:modify([Msg14], State, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans15),
-    {_, _, #state{current_value = CV14}} = Ans15,
-    ?assertEqual("v5", CV14#document.value).
+    Ans15 = memory_store_driver:modify([{Ctx, Msg14}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans15),
+    ?assertMatch(#document{value = "v5", rev = [<<"1-rev">>]}, get_doc()).
+
 
 many_op() ->
-    MC = #model_config{},
     Key = k,
     Link = false,
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 5000),
-    put(get_response, {ok, #document{key = Key, value = "g"}}),
 
-    Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
+    Ans1 = memory_store_driver:init([Key, Link, true]),
     ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
     {ok, #datastore_doc_init{data = State}} = Ans1,
+
+    Ctx = #{get_method => fetch, resolve_conflicts => false, model_name => mn,
+        mutator_pid => self()},
+    Ctx2 = #{get_method => fetch, resolve_conflicts => false, model_name => mn2,
+        mutator_pid => self()},
+    Ctx3 = #{get_method => fetch, resolve_conflicts => true, model_name => mn,
+        mutator_pid => self()},
+    set_response({ok, #document{key = Key, value = "g"}}),
 
     Msg = {save, [#document{key = Key, value = "v"}]},
     Msg1 = {save, [#document{key = Key, value = "error"}]},
@@ -194,93 +206,127 @@ many_op() ->
     Msg9 = {update, [Key, diff]},
     Msg10 = {create_or_update, [#document{key = Key, value = "v3"}, fun() -> true end]},
 
-    Msgs = [Msg, Msg1, Msg2, Msg3, Msg4, Msg5, Msg6, Msg7, Msg8, Msg9, Msg10],
+    Msgs = [{Ctx, Msg}, {Ctx, Msg1}, {Ctx, Msg2}, {Ctx, Msg3}, {Ctx, Msg4},
+        {Ctx, Msg5}, {Ctx, Msg6}, {Ctx, Msg7}, {Ctx, Msg8}, {Ctx, Msg9},
+        {Ctx, Msg10}],
+
+    CheckState = State#state{last_ctx = Ctx},
+    CheckState2 = State#state{last_ctx = Ctx2},
 
     Ans2 = memory_store_driver:modify(Msgs, State, []),
     ?assertMatch({[{ok, Key}, {ok, Key}, {ok, Key}, {ok, Key}, {error, already_exists}, ok,
-        {ok, Key}, ok, ok, {error, {not_found, _}}, {ok, Key}], {true, to_save}, _}, Ans2),
-    {_, _, #state{current_value = CV} = NewState} = Ans2,
-    ?assertEqual("v3", CV#document.value),
+        {ok, Key}, ok, ok, {error, {not_found, _}}, {ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans2),
+    ?assertMatch(#document{value = "v3", rev = [<<"1-rev">>]}, get_doc()),
 
-    ?assertEqual(ok, memory_store_driver:terminate(NewState, [])).
+    set_response(),
+    Msg10_2 = {save, [#document{key = Key, value = "v2"}]},
+    Msgs2 = [{Ctx, Msg}, {Ctx, Msg}, {Ctx2, Msg10_2}],
+    Ans3 = memory_store_driver:modify(Msgs2, State, []),
+    ?assertMatch({[{ok, Key}, {ok, Key}, {ok, Key}], {true, [{Key, Ctx2}]}, CheckState2}, Ans3),
+    ?assertMatch(#document{value = "v2", rev = [<<"1-rev">>, <<"1-rev">>]}, get_doc()),
+    ?assertMatch([{#document{value = "v2", rev = [<<"1-rev">>, <<"1-rev">>]}, Ctx2},
+        {#document{value = "v", rev = [<<"1-rev">>]}, Ctx}], get_docs_with_ctx()),
+
+    set_response(),
+    Msg11 = {save, [#document{key = Key, value = "v2", rev = [<<"0-rev">>]}]},
+    Msgs3 = [{Ctx, Msg}, {Ctx, Msg}, {Ctx3, Msg11}],
+    Ans4 = memory_store_driver:modify(Msgs3, State, []),
+    ?assertMatch({[{ok, Key}, {ok, Key}, ok], {true, [{Key, Ctx}]}, CheckState}, Ans4),
+    ?assertMatch(#document{value = "v", rev = [<<"1-rev">>]}, get_doc()),
+    ?assertMatch([{#document{value = "v", rev = [<<"1-rev">>]}, Ctx}],
+        get_docs_with_ctx()),
+
+    ?assertEqual(ok, memory_store_driver:terminate(State, [])).
 
 single_op_link() ->
-    MC = #model_config{},
     Key = k,
     Link = true,
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 5000),
-    erase(),
 
-    Ans0 = memory_store_driver:init([memory_store_driver_test, MC, Key, undefined, Link]),
+    Ans0 = memory_store_driver:init([Key, Link, false]),
     ?assertMatch({ok, #datastore_doc_init{
         min_commit_delay = infinity,
         max_commit_delay = infinity
     }}, Ans0),
-    Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
+    Ans1 = memory_store_driver:init([Key, Link, true]),
     ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
     {ok, #datastore_doc_init{data = State}} = Ans1,
 
+    Ctx = #{get_method => fetch, resolve_conflicts => false,
+        mutator_pid => self()},
+    CheckState = State#state{last_ctx = Ctx},
+
+    erase(),
+    set_response(),
     V = [l1, l2],
     Msg = {add_links, [Key, V]},
-    Ans2 = memory_store_driver:modify([Msg], State, []),
-    Check = {{x, V}, #document{key = {x, V}, value = V}},
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans2),
-    {_, _, #state{current_value = CV} = NewState} = Ans2,
-    ?assertMatch([Check], CV),
+    Ans2 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    Check = #document{key = {x, V}, value = V, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V}, Ctx}]}, CheckState}, Ans2),
+    ?assertMatch([Check], get_docs()),
 
+    set_response(),
     V2 = [l4, l5],
     Msg2 = {add_links, [Key, V2]},
-    Ans3 = memory_store_driver:modify([Msg2], NewState, []),
-    Check2 = {{x, V2}, #document{key = {x, V2}, value = V2}},
-    ?assertMatch({[ok], {true, {[{x, V2}], []}}, _}, Ans3),
-    {_, _, #state{current_value = CV2} = NewState2} = Ans3,
-    ?assertEqual([Check2, Check], CV2),
+    Ans3 = memory_store_driver:modify([{Ctx, Msg2}], State, []),
+    Check2 = #document{key = {x, V2}, value = V2, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V2}, Ctx}]}, CheckState}, Ans3),
+    ?assertEqual([Check2, Check], get_docs()),
 
+    set_response(),
     V3 = [l2, l4],
     Msg3 = {delete_links, [Key, V3, fun() -> true end]},
-    Ans4 = memory_store_driver:modify([Msg3], NewState2, []),
-    Check3 = {{y, V3}, not_found},
-    ?assertMatch({[ok], {true, {[{y, V3}], []}}, _}, Ans4),
-    {_, _, #state{current_value = CV3} = NewState3} = Ans4,
-    ?assertEqual([Check3, Check2, Check], CV3),
+    Ans4 = memory_store_driver:modify([{Ctx, Msg3}], State, []),
+    Check3 = #document{key = {y, V3}, value = V3, rev = [<<"1-rev">>],
+        deleted = true},
+    ?assertMatch({[ok], {true, [{{y, V3}, Ctx}]}, CheckState}, Ans4),
+    ?assertEqual([Check3, Check2, Check], get_docs()),
 
+    set_response(),
     Msg4 = {add_links, [Key, [error]]},
-    Ans5 = memory_store_driver:modify([Msg4], NewState3, []),
-    ?assertMatch({[{error, error}], false, _}, Ans5),
-    {_, _, #state{current_value = CV4} = NewState4} = Ans5,
-    ?assertEqual([Check3, Check2, Check], CV4),
+    Ans5 = memory_store_driver:modify([{Ctx, Msg4}], State, []),
+    ?assertMatch({[{error, error}], false, State}, Ans5),
+    ?assertEqual([Check3, Check2, Check], get_docs()),
 
+    set_response(),
     V5 = [l4, l6],
     Msg5 = {add_links, [Key, V5]},
-    Ans6 = memory_store_driver:modify([Msg5], NewState4, []),
-    Check6 = {{x, V5}, #document{key = {x, V5}, value = V5}},
-    ?assertMatch({[ok], {true, {[{x, V5}], []}}, _}, Ans6),
-    {_, _, #state{current_value = CV5} = NewState5} = Ans6,
-    ?assertEqual([Check6, Check3, Check2, Check], CV5),
+    Ans6 = memory_store_driver:modify([{Ctx, Msg5}], State, []),
+    Check6 = #document{key = {x, V5}, value = V5, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V5}, Ctx}]}, CheckState}, Ans6),
+    ?assertEqual([Check6, Check3, Check2, Check], get_docs()),
 
-    Ans7 = memory_store_driver:modify([Msg], NewState5, []),
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans7),
-    {_, _, #state{current_value = CV6} = NewState6} = Ans7,
-    ?assertEqual([Check, Check6, Check3, Check2], CV6),
+    set_response(),
+    Ans7 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    ?assertMatch({[ok], {true, [{{x, V}, Ctx}]}, CheckState}, Ans7),
+    ?assertEqual([Check, Check6, Check3, Check2], get_docs()),
 
+    set_response(),
     V7 = [l1, error],
     Msg7 = {add_links, [Key, V7]},
-    Ans8 = memory_store_driver:modify([Msg7], NewState6, []),
-    ?assertMatch({[{error, error2}], false, _}, Ans8),
-    {_, _, #state{current_value = CV7} = NewState7} = Ans8,
-    ?assertEqual([Check, Check6, Check3, Check2], CV7),
+    Ans8 = memory_store_driver:modify([{Ctx, Msg7}], State, []),
+    ?assertMatch({[{datastore_cache_error, {error, error2}}], false, State}, Ans8),
+    ?assertEqual([Check, Check6, Check3, Check2], get_docs()),
 
-    ?assertEqual(ok, memory_store_driver:terminate(NewState7, [])).
+    ?assertEqual(ok, memory_store_driver:terminate(State, [])).
 
 many_op_link() ->
-    MC = #model_config{},
     Key = k,
     Link = true,
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 5000),
 
-    Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
+    Ans1 = memory_store_driver:init([Key, Link, true]),
     ?assertMatch({ok, #datastore_doc_init{}}, Ans1),
     {ok, #datastore_doc_init{data = State}} = Ans1,
+
+    Ctx = #{get_method => fetch, resolve_conflicts => false,
+        mutator_pid => self()},
+    Ctx2 = #{get_method => fetch, resolve_conflicts => true, model_name => mn,
+        mutator_pid => self()},
+    Ctx3 = #{get_method => fetch, resolve_conflicts => true, model_name => mn2,
+        mutator_pid => self()},
+    erase(),
+    set_response(),
 
     Msg = {add_links, [Key, [l1, l2]]},
     Msg2 = {add_links, [Key, [l4, l5]]},
@@ -290,254 +336,225 @@ many_op_link() ->
     Msg6 = {delete_links, [Key, [l2, l6], fun() -> true end]},
     Msg7 = {add_links, [Key, [l1, l7]]},
 
-    Msgs = [Msg, Msg2, Msg3, Msg4, Msg5, Msg6, Msg7, Msg6, Msg7],
+    Msgs = [{Ctx, Msg}, {Ctx, Msg2}, {Ctx, Msg3}, {Ctx, Msg4}, {Ctx, Msg5},
+        {Ctx, Msg6}, {Ctx, Msg7}, {Ctx, Msg6}, {Ctx, Msg7}],
+
+    CheckState = State#state{last_ctx = Ctx},
+    CheckState3 = State#state{last_ctx = Ctx3},
 
     Ans2 = memory_store_driver:modify(Msgs, State, []),
     K1 = [l1,l2,l4,l5],
     K2 = [l2, l4],
     K3 = [l2,l6],
     K4 = [l1,l7],
-    Check = [{x, K1}, {y, K2}, {y, K3}, {x, K4}],
-    ?assertMatch({[ok, ok, ok, {error, error}, {error, error}, ok, ok, ok, ok], {true, {Check, []}}, _}, Ans2),
-    {_, _, #state{current_value = CV} = NewState} = Ans2,
-    CheckV = [{{x, K1}, #document{key = {x, K1}, value = K1}}, {{y, K2}, not_found}, {{y, K3}, not_found},
-        {{x, K4}, #document{key = {x, K4}, value = K4}}],
-    ?assertEqual(lists:reverse(CheckV), CV), % reverse due to del error value
+    Check = [{{x, K1}, Ctx}, {{y, K2}, Ctx}, {{y, K3}, Ctx}, {{x, K4}, Ctx}],
+    ?assertMatch({[ok, ok, ok, {error, error}, {error, error}, ok, ok, ok, ok],
+        {true, Check}, CheckState}, Ans2),
+    CheckV = [#document{key = {x, K1}, value = K1, rev = [<<"1-rev">>]},
+        #document{key = {y, K2}, value = K2, rev = [<<"1-rev">>], deleted = true},
+        #document{key = {y, K3}, value = K3, rev = [<<"1-rev">>], deleted = true},
+        #document{key = {x, K4}, value = K4, rev = [<<"1-rev">>]}],
+    ?assertEqual(CheckV, get_docs()),
 
+    set_response(),
     Msg8 = {add_links, [Key, [l1, error]]},
-    Msgs2 = [Msg, Msg2, Msg3, Msg4, Msg5, Msg6, Msg7, Msg6, Msg8],
+    Msgs2 = [{Ctx, Msg}, {Ctx, Msg2}, {Ctx, Msg3}, {Ctx, Msg4}, {Ctx, Msg5},
+        {Ctx, Msg6}, {Ctx, Msg7}, {Ctx, Msg6}, {Ctx, Msg8}],
 
     Ans3 = memory_store_driver:modify(Msgs2, State, []),
-    ?assertMatch({[{error, error2}, {error, error2}, {error, error2}, {error, error2}, {error, error2}, {error, error2},
-        {error, error2}, {error, error2}, {error, error2}], false, _}, Ans3),
-    {_, _, #state{current_value = CV2}} = Ans3,
+    CheckList = lists:duplicate(9, {datastore_cache_error, {error, error2}}),
+    ?assertMatch({CheckList, false, State}, Ans3),
 % TODO - check
-%%    ?assertEqual([], CV2),
+%%    ?assertEqual([], get_docs()),
 
-    Msgs3 = [Msg8, Msg6, Msg, Msg2, Msg3, Msg4, Msg5, Msg6, Msg7],
+    set_response(),
+    Msgs3 = [{Ctx, Msg8}, {Ctx, Msg6}, {Ctx, Msg}, {Ctx, Msg2}, {Ctx, Msg3},
+        {Ctx, Msg4}, {Ctx, Msg5}, {Ctx, Msg6}, {Ctx, Msg7}],
 
     Ans4 = memory_store_driver:modify(Msgs3, State, []),
-    ?assertMatch({[{error, error2}, {error, error2}, {error, error2}, {error, error2}, {error, error2}, {error, error2},
-        {error, error2}, {error, error2}, {error, error2}], {true, {Check, []}}, _}, Ans4),
-    {_, _, #state{current_value = CV3}} = Ans4,
+    ?assertMatch({CheckList, {true, Check}, CheckState}, Ans4),
 % TODO - check
-%%    ?assertEqual(CheckV, CV3),
+%%    ?assertEqual(CheckV, get_docs()),
 
-    ?assertEqual(ok, memory_store_driver:terminate(NewState, [])).
+    erase(),
+    set_response({ok, #document{key = Key, deleted = true}}),
+    Msg9 = {save, [#document{key = Key, value = "v", rev = [<<"1-rev">>]}]},
+    Msg10 = {save, [#document{key = Key, value = "v", rev = [<<"2-rev">>]}]},
+    Msgs4 = [{Ctx2, Msg9}, {Ctx2, Msg9}, {Ctx3, Msg10}],
+    Ans5 = memory_store_driver:modify(Msgs4, State, []),
+    ?assertMatch({[ok, ok, ok], {true, [{Key, Ctx3}]}, CheckState3}, Ans5),
+    ?assertMatch(#document{value = "v", rev = [<<"2-rev">>]}, get_doc()),
+    ?assertMatch([{#document{value = "v", rev = [<<"2-rev">>]}, Ctx3},
+        {#document{value = "v", rev = [<<"1-rev">>]}, Ctx2}], get_docs_with_ctx()),
+
+    ?assertEqual(ok, memory_store_driver:terminate(State, [])).
 
 flush_doc() ->
-    MC = #model_config{},
     Key = k,
     Link = false,
-    put(get_response, {error, {not_found, mc}}),
+    Ctx = #{get_method => fetch, resolve_conflicts => false, model_name => mn,
+        mutator_pid => self()},
+    set_response({error, key_enoent}),
     put(get_flush_response, {error, {not_found, mc}}),
 
-    Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = 5000, max_commit_delay = 10000}}, Ans1),
+    Ans1 = memory_store_driver:init([Key, Link, true]),
+    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = 5000,
+        max_commit_delay = 10000}}, Ans1),
     {ok, #datastore_doc_init{data = State}} = Ans1,
 
+    CheckState = State#state{last_ctx = Ctx},
+
     Msg = {update, [Key, diff]},
-    Ans2 = memory_store_driver:modify([Msg], State, []),
-    ?assertMatch({[{error, {not_found, _}}], false, _}, Ans2),
-    {_, _, #state{current_value = CV}} = Ans2,
-    ?assertEqual(not_found, CV),
+    Ans2 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    ?assertMatch({[{error, {not_found, _}}], false, State}, Ans2),
+    ?assertEqual(undefined, get_doc()),
 
+    set_response({error, key_enoent}),
     Msg2 = {create, [#document{key = Key, value = "v4"}]},
-    Ans3 = memory_store_driver:modify([Msg2], State, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans3),
-    {_, _, #state{current_value = CV2}} = Ans3,
-    ?assertEqual("v4", CV2#document.value),
+    Ans3 = memory_store_driver:modify([{Ctx, Msg2}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans3),
+    ?assertEqual(#document{key = Key, value = "v4", rev = [<<"1-rev">>]},
+        get_doc()),
 
+    set_response({error, key_enoent}),
     Msg3 = {create_or_update, [#document{key = Key, value = "v5"}, fun() -> true end]},
-    Ans4 = memory_store_driver:modify([Msg3], State, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans4),
-    {_, _, #state{current_value = CV3}} = Ans4,
-    ?assertEqual("v5", CV3#document.value),
+    Ans4 = memory_store_driver:modify([{Ctx, Msg3}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans4),
+    ?assertEqual(#document{key = Key, value = "v5", rev = [<<"1-rev">>]},
+        get_doc()),
 
     put(get_flush_response, {ok, #document{key = Key, value = "fg"}}),
+    set_response({ok, #document{key = Key, value = "fg"}}),
 
-    Ans5 = memory_store_driver:modify([Msg], State, []),
-    ?assertMatch({[{error, {not_found, _}}], false, _}, Ans5),
-    {_, _, #state{current_value = CV4}} = Ans5,
-    ?assertEqual(not_found, CV4),
+    Ans5 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans5),
+    {_, {true, Changes}, _} = Ans5,
+    ?assertEqual(#document{key = Key, value = "fgu", rev = [<<"1-rev">>]},
+        get_doc()),
 
-    meck:expect(caches_controller, check_cache_consistency, fun(_, _) -> not_monitored end),
-    meck:expect(caches_controller, check_cache_consistency_direct, fun(_, _) -> not_monitored end),
-    Ans5_2 = memory_store_driver:modify([Msg], State, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans5_2),
-    {_, {true, Changes}, #state{current_value = CV4_2} = NewState2} = Ans5_2,
-    ?assertEqual("fgu", CV4_2#document.value),
-
-    Ans6 = memory_store_driver:modify([Msg3], NewState2, []),
-    ?assertMatch({[{ok, Key}], {true, to_save}, _}, Ans6),
-    {_, {true, Changes2}, #state{current_value = CV5} = NewState3} = Ans6,
-    ?assertEqual("fguu", CV5#document.value),
+    set_response({ok, #document{key = Key, value = "fgu"}}),
+    Ans6 = memory_store_driver:modify([{Ctx, Msg3}], State, []),
+    ?assertMatch({[{ok, Key}], {true, [{Key, Ctx}]}, CheckState}, Ans6),
+    {_, {true, Changes2}, CheckState} = Ans6,
+    ?assertEqual(#document{key = Key, value = "fguu", rev = [<<"1-rev">>]},
+        get_doc()),
 
     ?assertMatch(Changes2, memory_store_driver:merge_changes(Changes, Changes2)),
 
-    Ans7 = memory_store_driver:modify([Msg2], NewState3, []),
-    ?assertMatch({[{error, already_exists}], false, _}, Ans7),
-    {_, _Changes3, #state{current_value = CV6} = NewState4} = Ans7,
-    ?assertEqual("fguu", CV6#document.value),
+    ?assertEqual({true, []}, memory_store_driver:commit(Changes2, State)),
+    ?assertEqual([Key], get_flush()),
+    set_response({error, error}),
+    set_get_flush_response(Key, {error, error}),
+    ?assertMatch({{false, Changes2}, []}, memory_store_driver:commit(Changes2,
+        State)),
+    ?assertEqual([], get_flush()),
 
-    ?assertEqual({true, undefined}, memory_store_driver:commit(Changes2, NewState4)),
-    ?assertMatch({{false, Changes2}, undefined}, memory_store_driver:commit(Changes2,
-        NewState4#state{current_value = #document{key = Key, value = "error"}})),
-
+    set_response({ok, #document{key = Key, value = "fgu"}}),
+    set_get_flush_response(Key, ok),
     Msg7 = {delete, [Key, fun() -> true end]},
-    Ans8 = memory_store_driver:modify([Msg7], NewState4, []),
-    ?assertMatch({[ok], {true, to_save}, _}, Ans8),
-    {_, {true, Changes4}, #state{current_value = CV7} = NewState5} = Ans8,
-    ?assertEqual(not_found, CV7),
+    Ans8 = memory_store_driver:modify([{Ctx, Msg7}], State, []),
+    ?assertMatch({[ok], {true, [{Key, Ctx}]}, CheckState}, Ans8),
+    {_, {true, Changes4}, CheckState} = Ans8,
+    ?assertEqual(#document{key = Key, value = "fgu", rev = [<<"1-rev">>],
+        deleted = true}, get_doc()),
 
-    ?assertEqual({true, undefined}, memory_store_driver:commit(Changes4, NewState5)),
+    ?assertEqual({true, []}, memory_store_driver:commit(Changes4, State)),
+    ?assertEqual([Key], get_flush()),
 
-    ?assertEqual(ok, memory_store_driver:terminate(NewState5, [])),
-
-    put(get_last_response, {error, {not_found, model}}),
-    Msg15 = {force_save, [#document{key = Key, value = "fsv", rev = {1, [1]}}]},
-    Ans16 = memory_store_driver:modify([Msg15], State, []),
-    ?assertMatch({[ok], {true, {to_save,
-        {#document{key = Key, value = "fsv"}, b, false}}}, _}, Ans16),
-    {_, {true, Changes16}, #state{current_value = CV15} = FlushState16} = Ans16,
-    ?assertEqual("fsv", CV15#document.value),
-    ?assertEqual({true, undefined}, memory_store_driver:commit(Changes16, FlushState16)),
-
-    put(get_last_response, {ok, #document{key = Key, value = "fgu", rev = <<"2-2">>}}),
-    Ans17 = memory_store_driver:modify([Msg15], NewState2, []),
-    ?assertMatch({[ok], false, _}, Ans17),
-    {_, _, #state{current_value = CV16}} = Ans17,
-    ?assertEqual("fgu", CV16#document.value),
-
-    Msg17 = {force_save, [#document{key = Key, value = "fsv", rev = {2, [<<"3">>]}}]},
-    Ans18 = memory_store_driver:modify([Msg17], NewState2, []),
-    ?assertMatch({[ok], {true, {to_save, {#document{key = Key, value = "fsv"},
-        b, #document{key = Key, value = "fgu", rev = <<"2-2">>}}}}, _}, Ans18),
-    {_, {true, Changes18}, #state{current_value = CV17} = FlushState18} = Ans18,
-    ?assertEqual("fsv", CV17#document.value),
-    ?assertEqual({true, undefined}, memory_store_driver:commit(Changes18, FlushState18)).
+    ?assertEqual(ok, memory_store_driver:terminate(State, [])).
 
 flush_links() ->
-    MC = #model_config{},
     Key = k,
     Link = true,
+    Ctx = #{get_method => fetch, resolve_conflicts => false, model_name => mn,
+        mutator_pid => self()},
+    set_response({error, key_enoent}),
     put(get_links, true),
-    put(get_response, {error, {not_found, mc}}),
-    put(get_flush_response, {error, {not_found, mc}}),
 
-    Ans1 = memory_store_driver:init([memory_store_driver_test, MC, Key, memory_store_flush_driver, Link]),
-    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = 5000, max_commit_delay = 10000}}, Ans1),
+    Ans1 = memory_store_driver:init([Key, Link, true]),
+    ?assertMatch({ok, #datastore_doc_init{min_commit_delay = 5000,
+        max_commit_delay = 10000}}, Ans1),
     {ok, #datastore_doc_init{data = State}} = Ans1,
+
+    CheckState = State#state{last_ctx = Ctx},
 
     V = [l1, l2],
     Msg = {add_links, [Key, V]},
-    Ans2 = memory_store_driver:modify([Msg], State, []),
-    Check = {{x, V}, #document{key = {x, V}, value = V}},
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans2),
-    {_, _, #state{current_value = CV}} = Ans2,
-    ?assertEqual([Check], CV),
+    Ans2 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    Check = #document{key = {x, V}, value = V, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V}, Ctx}]}, CheckState}, Ans2),
+    ?assertEqual([Check], get_docs()),
 
+    set_response({ok, #document{value = [ggg]}}),
     put(get_links, true),
-    put(get_response, {ok, #document{value = [ggg]}}),
-    put(get_flush_response, {ok, #document{value = [ggg2]}}),
 
     V2 = [l1, l2, ggg],
-    Ans3 = memory_store_driver:modify([Msg], State, []),
-    Check2 = {{x, V}, #document{key = {x, V}, value = V2}},
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans3),
-    {_, _, #state{current_value = CV2}} = Ans3,
-    ?assertEqual([Check2], CV2),
+    Ans3 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    Check2 = #document{key = {x, V}, value = V2, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V}, Ctx}]}, CheckState}, Ans3),
+    ?assertEqual([Check2], get_docs()),
 
+    set_response({ok, #document{value = [ggg2]}}),
     put(get_links, true),
-    put(get_response, {error, {not_found, mc}}),
-    put(get_flush_response, {ok, #document{value = [ggg2]}}),
-
-    Ans4 = memory_store_driver:modify([Msg], State, []),
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans4),
-    {_, _, #state{current_value = CV3}} = Ans4,
-    ?assertEqual([Check], CV3),
-
-    put(get_links, true),
-    put(get_response, {error, {not_found, mc}}),
-    put(get_flush_response, {ok, #document{value = [ggg2]}}),
-    meck:expect(caches_controller, check_cache_consistency, fun(_, _, _) -> not_monitored end),
-    meck:expect(caches_controller, check_cache_consistency_direct, fun(_, _, _) -> not_monitored end),
 
     V4 = [l1, l2, ggg2],
-    Ans5 = memory_store_driver:modify([Msg], State, []),
-    Check4 = {{x, V}, #document{key = {x, V}, value = V4}},
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans5),
-    {_, {true, Changes}, #state{current_value = CV4} = NewState} = Ans5,
-    ?assertEqual([Check4], CV4),
+    Ans5 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    Check4 = #document{key = {x, V}, value = V4, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V}, Ctx}]}, CheckState}, Ans5),
+    {_, {true, Changes}, CheckState} = Ans5,
+    ?assertEqual([Check4], get_docs()),
 
+    set_response({ok, #document{value = [l1, l2, ggg2]}}),
     put(get_links, true),
 
     V5 = [l1, l2, l1, l2, ggg2],
-    Ans6 = memory_store_driver:modify([Msg], NewState, []),
-    Check5 = {{x, V}, #document{key = {x, V}, value = V5}},
-    ?assertMatch({[ok], {true, {[{x, V}], []}}, _}, Ans6),
-    {_, {true, Changes2}, #state{current_value = CV5} = NewState2} = Ans6,
-    ?assertEqual([Check5], CV5),
+    Ans6 = memory_store_driver:modify([{Ctx, Msg}], State, []),
+    Check5 = #document{key = {x, V}, value = V5, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V}, Ctx}]}, CheckState}, Ans6),
+    {_, {true, Changes2}, CheckState} = Ans6,
+    ?assertEqual([Check5], get_docs()),
 
     ?assertMatch(Changes2, memory_store_driver:merge_changes(Changes, Changes2)),
 
+    set_response({error, key_enoent}),
     put(get_links, true),
-    put(get_response, {error, {not_found, mc}}),
-    put(get_flush_response, {error, {not_found, mc}}),
 
     V6 = [l3, l4],
     Msg6 = {add_links, [Key, V6]},
-    Ans7 = memory_store_driver:modify([Msg6], NewState2, []),
-    Check6 = {{x, V6}, #document{key = {x, V6}, value = V6}},
-    ?assertMatch({[ok], {true, {[{x, V6}], []}}, _}, Ans7),
-    {_, {true, Changes3}, #state{current_value = CV6} = NewState3} = Ans7,
-    ?assertEqual([Check6, Check5], CV6),
+    Ans7 = memory_store_driver:modify([{Ctx, Msg6}], State, []),
+    Check6 = #document{key = {x, V6}, value = V6, rev = [<<"1-rev">>]},
+    ?assertMatch({[ok], {true, [{{x, V6}, Ctx}]}, CheckState}, Ans7),
+    {_, {true, Changes3}, CheckState} = Ans7,
+    ?assertEqual([Check6, Check5], get_docs()),
 
-    ?assertMatch({[{x, V6}, {x, V}], []}, memory_store_driver:merge_changes(Changes2, Changes3)),
+    ?assertMatch([{{x, V6}, Ctx}, {{x, V}, Ctx}],
+        memory_store_driver:merge_changes(Changes2, Changes3)),
     MChanges = memory_store_driver:merge_changes(Changes2, Changes3),
+
+    set_response({error, key_enoent}),
+    put(get_links, true),
 
     V7 = [l2, l4],
     Msg7 = {delete_links, [Key, V7, fun() -> true end]},
-    Ans8 = memory_store_driver:modify([Msg7], NewState3, []),
-    Check7 = {{y, V7}, not_found},
-    ?assertMatch({[ok], {true, {[{y, V7}], []}}, _}, Ans8),
-    {_, {true, Changes4}, #state{current_value = CV7} = NewState4} = Ans8,
-    ?assertEqual([Check7, Check6, Check5], CV7),
+    Ans8 = memory_store_driver:modify([{Ctx, Msg7}], State, []),
+    Check7 = #document{key = {y, V7}, value = V7, rev = [<<"1-rev">>],
+        deleted = true},
+    ?assertMatch({[ok], {true, [{{y, V7}, Ctx}]}, CheckState}, Ans8),
+    {_, {true, Changes4}, CheckState} = Ans8,
+    ?assertEqual([Check7, Check6, Check5], get_docs()),
 
-    ?assertMatch({[{y, V7}, {x, V6}, {x, V}], []}, memory_store_driver:merge_changes(MChanges, Changes4)),
+    ?assertMatch([{{y, V7}, Ctx}, {{x, V6}, Ctx}, {{x, V}, Ctx}],
+        memory_store_driver:merge_changes(MChanges, Changes4)),
     MChanges2 = memory_store_driver:merge_changes(MChanges, Changes4),
 
-    put(get_flush_response, {error, {not_found, mc}}),
+    ?assertEqual({true, []}, memory_store_driver:commit(MChanges2, State)),
+    ?assertEqual([{y, V7}, {x, V6}, {x, V}], get_flush()),
 
-    ?assertEqual({true, []}, memory_store_driver:commit(MChanges2, NewState4)),
-    ?assertMatch({{false, {[{x, V6}], []}}, []}, memory_store_driver:commit(MChanges2,
-        NewState4#state{current_value = [Check7, {{x, V6}, #document{value = error}}, Check5]})),
-
-    put(get_last_response, {error, {not_found, model}}),
-    V15 = [llll],
-    Check15 = {k, #document{key = k, value = V15}},
-    Msg15 = {force_save, [#document{key = Key, value = V15, rev = {1, [1]}}]},
-    Ans16 = memory_store_driver:modify([Msg15], State, []),
-    ?assertMatch({[ok], {true, {[Key], [{Key,
-        {#document{key = Key, value = V15}, b, false}}]}}, _}, Ans16),
-    {_, {true, Changes16}, #state{current_value = CV15} = FlushState16} = Ans16,
-    ?assertEqual([Check15], CV15),
-    ?assertEqual({true, []}, memory_store_driver:commit(Changes16, FlushState16)),
-
-    put(get_last_response, {ok, #document{key = Key, value = "fgu", rev = <<"2-2">>}}),
-    Ans17 = memory_store_driver:modify([Msg15], NewState2, []),
-    ?assertMatch({[ok], false, _}, Ans17),
-    {_, _, #state{current_value = CV16}} = Ans17,
-    ?assertEqual([Check5], CV16),
-
-    put(get_last_response, {ok, #document{key = Key, value = "fgu", rev = <<"2-2">>}}),
-    Msg17 = {force_save, [#document{key = Key, value = V15, rev = {2, [<<"3">>]}}]},
-    Ans18 = memory_store_driver:modify([Msg17], NewState2, []),
-    ?assertMatch({[ok], {true, {[Key], [{Key, {#document{key = Key, value = V15},
-        b, #document{key = Key, value = "fgu", rev = <<"2-2">>}}}]}}, _}, Ans18),
-    {_, {true, Changes18}, #state{current_value = CV17} = FlushState18} = Ans18,
-    ?assertEqual([Check15, Check5], CV17),
-    ?assertEqual({true, []}, memory_store_driver:commit(Changes18, FlushState18)).
+    set_response({error, error}),
+    set_get_flush_response({x, V6}, {error, error}),
+    ?assertMatch({{false, [{{x, V6}, Ctx}]}, []},
+        memory_store_driver:commit(MChanges2, State)),
+    ?assertEqual([{y, V7}, {x, V}], get_flush()).
 
 %%%===================================================================
 %%% Setup/teardown functions
@@ -548,73 +565,142 @@ setup() ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, 10000),
     application:set_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms, 60000),
 
-    meck:new(caches_controller, [passthrough]),
-    meck:expect(caches_controller, check_cache_consistency, fun(_, _) -> {ok, ok, ok} end),
-    meck:expect(caches_controller, check_cache_consistency, fun(_, _, _) -> {ok, ok, ok} end),
-    meck:expect(caches_controller, check_cache_consistency_direct, fun(_, _) -> {ok, ok, ok} end),
-    meck:expect(caches_controller, check_cache_consistency_direct, fun(_, _, _) -> {ok, ok, ok} end),
-    meck:expect(caches_controller, get_cache_uuid, fun(_, _) -> cuuid end),
+    meck:new(datastore_cache, [passthrough]),
+    meck:expect(datastore_cache, fetch, fun(A1, A2) -> fetch(A1, A2) end),
+    meck:expect(datastore_cache, get, fun(A1, A2) -> fetch(A1, A2) end),
+    meck:expect(datastore_cache, save, fun(A1, A2) -> save(A1, A2) end),
+    meck:expect(datastore_cache, flush, fun(List) ->
+        lists:map(fun({Key, Ctx}) -> flush(Ctx, Key) end, List)
+    end),
 
+    meck:new(memory_store_driver_links, [passthrough]),
+    meck:expect(memory_store_driver_links, add_links, fun(A1, A2, A3) ->
+        add_links(A1, A2, A3) end),
+    meck:expect(memory_store_driver_links, get, fun(A1, A2) -> get(A1, A2) end),
+    meck:expect(memory_store_driver_links, delete_links, fun(A1, A2, A3, A4) ->
+        delete_links(A1, A2, A3, A4) end),
     meck:new(consistent_hasing),
     meck:expect(consistent_hasing, get_node, fun(_) -> node() end),
 
     meck:new(memory_store_driver_docs, [passthrough]),
-    meck:expect(memory_store_driver_docs, update, fun(OldValue, _Diff) -> {ok, OldValue ++ "u"} end),
+    meck:expect(memory_store_driver_docs, update,
+        fun(OldValue, _Diff) -> {ok, OldValue ++ "u"} end),
+
+    meck:new(couchbase_doc),
+    meck:expect(couchbase_doc, set_next_rev,
+        fun(_, #document{rev = Rev} = Doc) ->
+            {Doc#document{rev = [<<"1-rev">> | Rev]}, ok}
+        end),
 
     ok.
 
 teardown(_) ->
+    meck:unload(couchbase_doc),
     meck:unload(consistent_hasing),
-    meck:unload(caches_controller),
+    meck:unload(memory_store_driver_links),
+    meck:unload(datastore_cache),
     meck:unload(memory_store_driver_docs),
     ok.
 
 %%%===================================================================
-%%% Driver mock functions
+%%% Internal functions
 %%%===================================================================
 
-save(_ModelConfig, #document{value = "error"}) ->
-    {error, error};
-save(_ModelConfig, Document) ->
-    {ok, Document#document.key}.
+set_response() ->
+    set_response(get(get_response)).
+set_response(Response) ->
+    DCDoc = get(dc_doc),
+    erase(),
+    put(dc_doc, DCDoc),
+    put(get_response, Response).
 
-get(_ModelConfig, _Key) ->
+set_get_flush_response(Key, Response) ->
+    memory_store_driver:add_to_proc_mem(get_flush_response, Key, Response).
+
+save_doc(#document{key = Key} = Doc) ->
+    memory_store_driver:add_to_proc_mem(dc_doc, Key, Doc).
+
+get_docs() ->
+    lists:map(fun({_K, V}) -> V end, get(dc_doc)).
+
+get_doc() ->
+    case get(dc_doc) of
+        [{_, Doc}] -> Doc;
+        Other -> Other
+    end.
+
+get_flush() ->
+    case get(dc_flush) of
+        undefined ->
+            [];
+        List ->
+            lists:map(fun({K, _V}) -> K end, List)
+    end.
+
+save_doc_with_ctx(Ctx, #document{key = Key} = Doc) ->
+    memory_store_driver:add_to_proc_mem(dc_ctx, {Key, Ctx}, Doc).
+
+get_docs_with_ctx() ->
+    lists:map(fun({{_K, C}, V}) -> {V, C} end, get(dc_ctx)).
+
+%%%===================================================================
+%%% Helper functions for meck
+%%%===================================================================
+
+save(_, #document{value = "error"}) ->
+    {error, error};
+save(_, #document{value = [l1, error]}) ->
+    {error, error2};
+save(Ctx, Document) ->
+    save_doc(Document),
+    save_doc_with_ctx(Ctx, Document),
+    {ok, memory, Document}.
+
+get(_, _Key) ->
     get(get_response).
 
-delete(_ModelConfig, _Key, _Pred) ->
-    ok.
+fetch(A1, A2) ->
+    case get(A1, A2) of
+        {ok, Doc} ->
+            {ok, memory, Doc};
+        Error ->
+            Error
+    end.
 
-add_links(_ModelConfig, _Key, [error]) ->
+flush(Ctx, Key) ->
+    case memory_store_driver:get_from_proc_mem(get_flush_response, Key) of
+        {error, _} ->
+            {error, error};
+        _ ->
+            memory_store_driver:add_to_proc_mem(dc_flush, Key, Ctx),
+            {ok, #document{key = Key}}
+    end.
+
+
+add_links(_, _Key, [error]) ->
     {error, error};
-add_links(_ModelConfig, _Key, [error, l4, l6]) ->
+add_links(_, _Key, [error, l4, l6]) ->
     {error, error};
-add_links(_ModelConfig, _Key, Links) ->
+add_links(Ctx, _Key, Links) ->
     case get(get_links) of
         undefined ->
-            memory_store_driver_links:save_link_doc(mc, #document{key = {x, Links}, value = Links});
+            memory_store_driver_links:save_link_doc(Ctx,
+                #document{key = {x, Links}, value = Links});
         true ->
-            case memory_store_driver_links:get_link_doc(#model_config{name = mc}, {x, Links}) of
+            case memory_store_driver_links:get_link_doc(Ctx, {x, Links}) of
                 {error, {not_found, _}} ->
-                    memory_store_driver_links:save_link_doc(mc, #document{key = {x, Links}, value = Links});
+                    memory_store_driver_links:save_link_doc(Ctx,
+                        #document{key = {x, Links}, value = Links});
                 {ok, #document{value = L2}} ->
-                    memory_store_driver_links:save_link_doc(mc, #document{key = {x, Links}, value = Links ++ L2})
+                    memory_store_driver_links:save_link_doc(Ctx,
+                        #document{key = {x, Links}, value = Links ++ L2})
             end
     end,
     ok.
 
-get_link_doc(_ModelConfig, _Key) ->
-    get(get_response).
-
-delete_links(_ModelConfig, _Key, LinkNames, _Pred) ->
-    memory_store_driver_links:delete_link_doc(mc, #document{key = {y, LinkNames}, value = LinkNames}),
-    ok.
-
-save_link_doc(_ModelConfig, #document{value = [l1, error]}) ->
-    {error, error2};
-save_link_doc(_ModelConfig, #document{}) ->
-    {ok, ok}.
-
-delete_link_doc(_ModelConfig, _Key) ->
+delete_links(_, _Key, LinkNames, _Pred) ->
+    memory_store_driver_links:delete_link_doc(mc,
+        #document{key = {y, LinkNames}, value = LinkNames}),
     ok.
 
 -endif.
