@@ -586,16 +586,21 @@ setup() ->
     meck:expect(memory_store_driver_docs, update,
         fun(OldValue, _Diff) -> {ok, OldValue ++ "u"} end),
 
-    meck:new(couchbase_doc),
-    meck:expect(couchbase_doc, set_next_rev,
-        fun(_, #document{rev = Rev} = Doc) ->
-            {Doc#document{rev = [<<"1-rev">> | Rev]}, ok}
+    meck:new(memory_store_driver, [passthrough]),
+    meck:expect(memory_store_driver, increment_rev,
+        fun
+            (#{resolve_conflicts := true}, Doc) ->
+                Doc;
+            (#{persistence := false}, Doc) ->
+                Doc;
+            (_, #document{rev = Rev} = Doc) ->
+                Doc#document{rev = [<<"1-rev">> | Rev]}
         end),
 
     ok.
 
 teardown(_) ->
-    meck:unload(couchbase_doc),
+    meck:unload(memory_store_driver),
     meck:unload(consistent_hasing),
     meck:unload(memory_store_driver_links),
     meck:unload(datastore_cache),
