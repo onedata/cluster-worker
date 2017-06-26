@@ -214,7 +214,6 @@
                 {disc, 500000}
             ]},
             {datastore_doc_commit_retry_delay, 1000},
-            {couchbase_revision_history_length, 20},
             {couchbase_mutator_history_length, 20},
             {couchbase_config_total_timeout, 30000},
             {couchbase_operation_timeout, 600000},

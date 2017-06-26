@@ -524,11 +524,6 @@ init_per_testcase(_Case, Config) ->
         ]}
     end),
 
-    lists:foreach(fun(W) ->
-        test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME,
-            couchbase_revision_history_length, 20)
-    end, Workers),
-
     Config.
 
 end_per_testcase(_Case, Config) ->

@@ -66,9 +66,6 @@ dump_global_cache_test(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
     TestRecord = ?config(test_record, Config),
 
-    test_utils:set_env(Node, ?CLUSTER_WORKER_APP_NAME,
-        couchbase_revision_history_length, 20),
-
     Key = <<"dgct_key">>,
     V1 = datastore_basic_ops_utils:get_record(TestRecord, 1, <<"abc">>,
         {test, tuple}),
@@ -103,7 +100,7 @@ dump_global_cache_test(Config) ->
     ?assertMatch({error, {not_found, _}},
         ?call_store(Node, TestRecord, get, [Key])),
 
-    ?assertMatch({{ok, _, _}, V1, _, 2, true}, VerifyDisk(), 10),
+    ?assertMatch({{ok, _, _}, V1, _, 1, true}, VerifyDisk(), 10),
 
 
 
@@ -113,7 +110,7 @@ dump_global_cache_test(Config) ->
         #document{key = Key, value = V2}
     ])),
 
-    ?assertMatch({{ok, _, _}, V2, _, 3, false}, VerifyDisk(), 10),
+    ?assertMatch({{ok, _, _}, V2, _, 1, false}, VerifyDisk(), 10),
     {_, _, Rev3, _, _} = VerifyDisk(),
 
     ?assertMatch({ok, #document{value = V2, rev = Rev3}},
@@ -135,21 +132,21 @@ operations_sequence_global_cache_test(Config) ->
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, get, [Key])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, update, [Key, UpdateFun])),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
-    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    timer:sleep(1000), % wait to check if any async operation hasn't changed information in cache
     ?assertMatch({error, {not_found, _}}, ?call(Worker1, TestRecord, get, [Key])),
 
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, update, [Key, UpdateFun])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, get, [Key])),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
-    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    timer:sleep(1000), % wait to check if any async operation hasn't changed information in cache
     ?assertMatch({error, {not_found, _}}, ?call(Worker1, TestRecord, get, [Key])),
 
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, create, [Doc])),
     ?assertMatch({ok, _}, ?call(Worker1, TestRecord, update, [Key, UpdateFun])),
     ?assertMatch(ok, ?call(Worker1, TestRecord, delete, [Key])),
     ?assertMatch({error, {not_found, _}}, ?call(Worker1, TestRecord, get, [Key])),
-    timer:sleep(1000), % wait to check if any asyc opeartion hasn't changed information in cache
+    timer:sleep(1000), % wait to check if any async operation hasn't changed information in cache
     ?assertMatch({error, {not_found, _}}, ?call(Worker1, TestRecord, get, [Key])),
 
     ok.
