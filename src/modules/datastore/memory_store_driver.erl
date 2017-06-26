@@ -256,13 +256,15 @@ get_from_proc_mem(MainKey, AdditionalKey) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec increment_rev(ctx(), datastore:document()) -> datastore:document().
-increment_rev(#{resolve_conflicts := true}, Value) ->
-  Value;
-increment_rev(#{persistence := false}, Value) ->
-  Value;
-increment_rev(Ctx, Value) ->
-  {Doc2, _} = couchbase_doc:set_next_rev(Ctx, Value),
-  Doc2.
+increment_rev(#{resolve_conflicts := true}, Doc) ->
+  Doc;
+increment_rev(#{persistence := false}, Doc) ->
+  Doc;
+increment_rev(_Ctx, Doc) ->
+  Gen = parse_last_rev_generation(Doc),
+  Hash = datastore_utils2:gen_key(),
+  Rev = <<(integer_to_binary(Gen + 1))/binary, "-", Hash/binary>>,
+  Doc#document{rev = [Rev]}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -344,3 +346,16 @@ get_flush_max_interval(true) ->
   Interval;
 get_flush_max_interval(_) ->
   infinity.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns generation of the last document revision.
+%% @end
+%%--------------------------------------------------------------------
+-spec parse_last_rev_generation(datastore:document()) -> non_neg_integer().
+parse_last_rev_generation(#document{rev = []}) ->
+  0;
+parse_last_rev_generation(#document{rev = [Rev | _]}) ->
+  [Gen, _Hash] = binary:split(Rev, <<"-">>),
+  binary_to_integer(Gen).

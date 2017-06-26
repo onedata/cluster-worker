@@ -278,11 +278,11 @@ prepare_change_durable(Requests) ->
             {ChangeDurableRequests, ChangeKeys};
         (_Key, {#{no_durability := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
             {ChangeDurableRequests, ChangeKeys};
-        (Key, {_, {ok, Cas, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
+        (Key, {_, {ok, _, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
             #document{scope = Scope, seq = Seq} = Doc,
             ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
             {
-                [{ChangeKey, Cas} | ChangeDurableRequests],
+                [{ChangeKey, 0} | ChangeDurableRequests],
                 maps:put(ChangeKey, Key, ChangeKeys)
             };
         (_Key, {_, _}, {ChangeDurableRequests, ChangeKeys}) ->
@@ -306,11 +306,11 @@ prepare_store(Requests) ->
             };
         (Key, {Ctx, {ok, _, Doc = #document{}}}, {StoreRequests, Requests2}) ->
             Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
-            {Doc3, EJson} = couchbase_doc:set_next_rev(Ctx, Doc2),
+            EJson = datastore_json2:encode(Doc2),
             Cas = maps:get(cas, Ctx, 0),
             {
                 [{set, Key, EJson, json, Cas, 0} | StoreRequests],
-                maps:put(Key, {Ctx, {ok, Cas, Doc3}}, Requests2)
+                maps:put(Key, {Ctx, {ok, Cas, Doc2}}, Requests2)
             };
         (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Responses}) ->
             Cas = maps:get(cas, Ctx, 0),
@@ -351,8 +351,8 @@ prepare_durable(Requests) ->
             DurableRequests;
         (_Key, {#{no_durability := true}, _}, DurableRequests) ->
             DurableRequests;
-        (Key, {_, {ok, Cas, _}}, DurableRequests) ->
-            [{Key, Cas} | DurableRequests]
+        (Key, {_, {ok, _, _}}, DurableRequests) ->
+            [{Key, 0} | DurableRequests]
     end, [], Requests).
 
 %%--------------------------------------------------------------------
