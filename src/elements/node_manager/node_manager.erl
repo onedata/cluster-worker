@@ -693,11 +693,11 @@ start_worker(Module, Args) ->
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
         {ok, _} = supervisor:start_child(
             ?MAIN_WORKER_SUPERVISOR_NAME,
-            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
+            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
         ),
         {ok, _} = supervisor:start_child(
             ?MAIN_WORKER_SUPERVISOR_NAME,
-            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
+            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
         ),
         ?info("Worker: ~s started", [Module])
     catch

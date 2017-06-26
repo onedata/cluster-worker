@@ -12,6 +12,7 @@
 -module(couchbase_driver_test_SUITE).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
 -include("modules/datastore/datastore.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
@@ -538,6 +539,12 @@ init_per_testcase(_Case, Config) ->
             {field3, atom}
         ]}
     end),
+
+    lists:foreach(fun(W) ->
+        test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME,
+            couchbase_revision_history_length, 20)
+    end, Workers),
+
     Config.
 
 end_per_testcase(_Case, Config) ->
