@@ -278,11 +278,11 @@ prepare_change_durable(Requests) ->
             {ChangeDurableRequests, ChangeKeys};
         (_Key, {#{no_durability := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
             {ChangeDurableRequests, ChangeKeys};
-        (Key, {_, {ok, _, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
+        (Key, {_, {ok, Cas, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
             #document{scope = Scope, seq = Seq} = Doc,
             ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
             {
-                [{ChangeKey, 0} | ChangeDurableRequests],
+                [{ChangeKey, Cas} | ChangeDurableRequests],
                 maps:put(ChangeKey, Key, ChangeKeys)
             };
         (_Key, {_, _}, {ChangeDurableRequests, ChangeKeys}) ->
@@ -351,8 +351,8 @@ prepare_durable(Requests) ->
             DurableRequests;
         (_Key, {#{no_durability := true}, _}, DurableRequests) ->
             DurableRequests;
-        (Key, {_, {ok, _, _}}, DurableRequests) ->
-            [{Key, 0} | DurableRequests]
+        (Key, {_, {ok, Cas, _}}, DurableRequests) ->
+            [{Key, Cas} | DurableRequests]
     end, [], Requests).
 
 %%--------------------------------------------------------------------

@@ -209,11 +209,9 @@ level_to_driver(_) ->
     ResolveConflict :: boolean()) ->
   {Driver :: atom(), datastore_context:driver_ctx()}.
 level_to_disk_config(?GLOBALLY_CACHED_LEVEL, Config, Key, RC) ->
-  {?PERSISTENCE_DRIVER, datastore_context:override(no_rev, true,
-    make_disk_ctx(Config, Key, RC))};
+  {?PERSISTENCE_DRIVER, make_disk_ctx(Config, Key, RC)};
 level_to_disk_config(?LOCALLY_CACHED_LEVEL, Config, Key, RC) ->
-  {?PERSISTENCE_DRIVER, datastore_context:override(no_rev, true,
-    make_disk_ctx(Config, Key, RC))};
+  {?PERSISTENCE_DRIVER, make_disk_ctx(Config, Key, RC)};
 level_to_disk_config(?DISK_ONLY_LEVEL, Config, Key, RC) ->
   {?PERSISTENCE_DRIVER, make_disk_ctx(Config, Key, RC)};
 level_to_disk_config(_, _, _, _) ->
