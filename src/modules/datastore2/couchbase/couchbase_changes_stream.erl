@@ -216,23 +216,17 @@ get_changes(Since, Until, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec get_docs([couchbase_changes:change()], state()) -> [datastore:document()].
 get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
-    KeyRevs = lists:filtermap(fun(Change) ->
+    Keys = lists:filtermap(fun(Change) ->
         {<<"id">>, Key} = lists:keyfind(<<"id">>, 1, Change),
         {<<"value">>, {Value}} = lists:keyfind(<<"value">>, 1, Change),
-        {<<"_rev">>, Rev} = lists:keyfind(<<"_rev">>, 1, Value),
         case lists:keyfind(<<"_mutator">>, 1, Value) of
             {<<"_mutator">>, Mutator} -> false;
-            _ -> {true, {Key, Rev}}
+            _ -> {true, Key}
         end
     end, Changes),
-    Ctx = #{bucket => Bucket},
-    {Keys, Revs} = lists:unzip(KeyRevs),
-    lists:filtermap(fun
-        ({{ok, _, #document{rev = [Rev1 | _]} = Doc}, Rev2})
-            when Rev1 =:= Rev2 -> {true, Doc};
-        ({{ok, _, #document{}}, _Rev}) ->
-            false
-    end, lists:zip(couchbase_driver:get(Ctx, Keys), Revs)).
+    lists:map(fun({ok, _, Doc = #document{}}) ->
+        Doc
+    end, couchbase_driver:get(#{bucket => Bucket}, Keys)).
 
 %%--------------------------------------------------------------------
 %% @private

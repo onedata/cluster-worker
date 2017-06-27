@@ -35,7 +35,6 @@
     get_should_return_doc/1,
     get_should_return_missing_error/1,
     update_should_change_doc/1,
-    multiple_update_should_not_overfill_revision_history/1,
     delete_should_remove_doc/1,
     delete_should_return_missing_error/1,
     save_get_delete_should_return_success/1,
@@ -77,7 +76,6 @@ all() ->
         get_should_return_doc,
         get_should_return_missing_error,
         update_should_change_doc,
-        multiple_update_should_not_overfill_revision_history,
         delete_should_remove_doc,
         delete_should_return_missing_error,
         save_get_delete_should_return_success,
@@ -170,7 +168,6 @@ save_should_return_doc(Config) ->
     ?assertEqual(?VALUE, Doc#document.value),
     ?assertEqual(?SCOPE, Doc#document.scope),
     ?assertEqual([?MUTATOR], Doc#document.mutator),
-    ?assertMatch([<<"1-", _/binary>>], Doc#document.rev),
     ?assertEqual(1, Doc#document.seq),
     ?assertEqual(false, Doc#document.deleted),
     ?assertEqual(1, Doc#document.version).
@@ -202,7 +199,7 @@ save_should_not_set_mutator(Config) ->
 save_should_not_set_revision(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [?CTX#{no_rev => true}, ?DOC]
+        save, [?CTX, ?DOC]
     )),
     ?assertEqual([], Doc#document.rev).
 
@@ -267,22 +264,9 @@ update_should_change_doc(Config) ->
     ?assertEqual(Value, Doc2#document.value),
     ?assertEqual(?SCOPE, Doc2#document.scope),
     ?assertEqual([?MUTATOR(2), ?MUTATOR(1)], Doc2#document.mutator),
-    ?assertMatch([<<"2-", _/binary>>, <<"1-", _/binary>>], Doc2#document.rev),
     ?assertEqual(2, Doc2#document.seq),
     ?assertEqual(false, Doc2#document.deleted),
     ?assertEqual(1, Doc2#document.version).
-
-multiple_update_should_not_overfill_revision_history(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    Doc3 = lists:foldl(fun(N, Doc) ->
-        {ok, _, Doc2} = ?assertMatch({ok, _, _}, rpc:call(Worker,
-            couchbase_driver, save, [?CTX, Doc#document{
-                value = ?VALUE#?MODEL{field1 = N}
-            }]
-        )),
-        Doc2
-    end, ?DOC, lists:seq(1, 21)),
-    ?assertEqual(20, length(Doc3#document.rev)).
 
 delete_should_remove_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -539,11 +523,6 @@ init_per_testcase(_Case, Config) ->
             {field3, atom}
         ]}
     end),
-
-    lists:foreach(fun(W) ->
-        test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME,
-            couchbase_revision_history_length, 20)
-    end, Workers),
 
     Config.
 

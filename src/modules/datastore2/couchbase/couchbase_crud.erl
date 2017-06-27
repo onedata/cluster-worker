@@ -306,11 +306,11 @@ prepare_store(Requests) ->
             };
         (Key, {Ctx, {ok, _, Doc = #document{}}}, {StoreRequests, Requests2}) ->
             Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
-            {Doc3, EJson} = couchbase_doc:set_next_rev(Ctx, Doc2),
+            EJson = datastore_json2:encode(Doc2),
             Cas = maps:get(cas, Ctx, 0),
             {
                 [{set, Key, EJson, json, Cas, 0} | StoreRequests],
-                maps:put(Key, {Ctx, {ok, Cas, Doc3}}, Requests2)
+                maps:put(Key, {Ctx, {ok, Cas, Doc2}}, Requests2)
             };
         (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Responses}) ->
             Cas = maps:get(cas, Ctx, 0),

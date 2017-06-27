@@ -25,21 +25,20 @@
 %%tests
 -export([stress_test/1,
   datastore_mixed_global_store_test/1, datastore_mixed_local_store_test/1,
-  datastore_mixed_global_cache_test/1, datastore_mixed_local_cache_test/1, mixed_cast_test/1,
+  datastore_mixed_global_cache_test/1, mixed_cast_test/1,
   datastore_links_number_global_cache_test/1
 ]).
 %%test_bases
 -export([stress_test_base/1,
   datastore_mixed_global_store_test_base/1,
   datastore_mixed_local_store_test_base/1, datastore_mixed_global_cache_test_base/1,
-  datastore_mixed_local_cache_test_base/1, mixed_cast_test_base/1,
-  datastore_links_number_global_cache_test_base/1
+  mixed_cast_test_base/1, datastore_links_number_global_cache_test_base/1
 ]).
 
 -define(STRESS_CASES, [
   datastore_mixed_global_store_test,
   datastore_mixed_local_store_test, datastore_mixed_global_cache_test,
-  datastore_mixed_local_cache_test, mixed_cast_test
+  mixed_cast_test
 ]).
 
 -define(STRESS_NO_CLEARING_CASES, [
@@ -104,18 +103,19 @@ datastore_mixed_global_cache_test(Config) ->
 datastore_mixed_global_cache_test_base(Config) ->
   datastore_basic_ops_utils:mixed_test(Config, globally_cached).
 
-datastore_mixed_local_cache_test(Config) ->
-  ?PERFORMANCE(Config, [
-    {parameters, [
-      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
-      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
-      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
-      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
-    ]},
-    {description, "Performs multiple datastore operations using many threads. Level - local cache."}
-  ]).
-datastore_mixed_local_cache_test_base(Config) ->
-  datastore_basic_ops_utils:mixed_test(Config, locally_cached).
+%% @TODO
+%%datastore_mixed_local_cache_test(Config) ->
+%%  ?PERFORMANCE(Config, [
+%%    {parameters, [
+%%      [{name, threads_num}, {value, 20}, {description, "Number of threads used during the test."}],
+%%      [{name, docs_per_thead}, {value, 10}, {description, "Number of documents used by single threads."}],
+%%      [{name, ops_per_doc}, {value, 2}, {description, "Number of oprerations on each document."}],
+%%      [{name, conflicted_threads}, {value, 2}, {description, "Number of threads that work with the same documents set."}]
+%%    ]},
+%%    {description, "Performs multiple datastore operations using many threads. Level - local cache."}
+%%  ]).
+%%datastore_mixed_local_cache_test_base(Config) ->
+%%  datastore_basic_ops_utils:mixed_test(Config, locally_cached).
 
 %%%===================================================================
 
