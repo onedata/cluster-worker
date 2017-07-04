@@ -127,7 +127,6 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(update, #state{since = Since, until = Until} = State) ->
-    ?info("bbbbb ~p", [{Since, Until}]),
     {Changes, State2} = get_changes(Since, Until, State),
     Docs = get_docs(Changes, State2),
     stream_docs(Docs, State2),
@@ -193,7 +192,6 @@ get_changes(Since, Until, #state{} = State) ->
     {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
     Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),
 
-    ?info("bbbbb000 ~p", [{Since, Until2}]),
     case Since >= Until2 of
         true ->
             {[], State};
