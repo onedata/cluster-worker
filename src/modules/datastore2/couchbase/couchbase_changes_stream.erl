@@ -79,7 +79,7 @@ init([Bucket, Scope, Callback, Opts]) ->
         until = proplists:get_value(until, Opts, infinity),
         except_mutator = proplists:get_value(except_mutator, Opts),
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_batch_size, 25),
+            couchbase_changes_stream_batch_size, 100),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 5000)
     }}.
@@ -238,7 +238,5 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
 stream_docs([], #state{interval = Interval}) ->
     erlang:send_after(Interval, self(), update);
 stream_docs(Docs, #state{callback = Callback}) ->
-    lists:foreach(fun(Doc) ->
-        Callback({ok, Doc})
-    end, Docs),
+    Callback({ok, Docs}),
     erlang:send_after(0, self(), update).
