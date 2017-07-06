@@ -242,8 +242,19 @@ fetch_changes(#state{
 %%--------------------------------------------------------------------
 -spec process_changes(couchbase_changes:seq(), couchbase_changes:seq(),
     [couchbase_changes:change()], state()) -> state().
-process_changes(_SeqSafe, _Seq, [], State) ->
+process_changes(Seq, Seq, [], State) ->
     State;
+process_changes(SeqSafe, Seq, [], State) ->
+    % TODO - remove this case?
+    Timeout = 2 * couchbase_pool:get_timeout(),
+    case ignore_change(SeqSafe, State, Timeout, 500) of
+        true ->
+            process_changes(SeqSafe + 1, Seq, [], State#state{
+                seq_safe = SeqSafe
+            });
+        false ->
+            State
+    end;
 process_changes(SeqSafe, Seq, [Change | _] = Changes, State) ->
     case lists:keyfind(<<"key">>, 1, Change) of
         {<<"key">>, [_, SeqSafe]} ->
