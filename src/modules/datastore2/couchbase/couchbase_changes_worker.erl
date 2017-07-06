@@ -82,7 +82,7 @@ init([Bucket, Scope]) ->
         seq_safe = SeqSafe,
         seq_safe_cas = Cas,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_batch_size, 25),
+            couchbase_changes_batch_size, 100),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_update_interval, 5000)
     }}.
@@ -241,18 +241,8 @@ fetch_changes(#state{
 %%--------------------------------------------------------------------
 -spec process_changes(couchbase_changes:seq(), couchbase_changes:seq(),
     [couchbase_changes:change()], state()) -> state().
-process_changes(Seq, Seq, [], State) ->
+process_changes(_SeqSafe, _Seq, [], State) ->
     State;
-process_changes(SeqSafe, Seq, [], State) ->
-    Timeout = 2 * couchbase_pool:get_timeout(),
-    case ignore_change(SeqSafe, State, Timeout, 500) of
-        true ->
-            process_changes(SeqSafe + 1, Seq, [], State#state{
-                seq_safe = SeqSafe
-            });
-        false ->
-            State
-    end;
 process_changes(SeqSafe, Seq, [Change | _] = Changes, State) ->
     case lists:keyfind(<<"key">>, 1, Change) of
         {<<"key">>, [_, SeqSafe]} ->

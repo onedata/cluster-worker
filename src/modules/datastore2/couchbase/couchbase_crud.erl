@@ -41,9 +41,9 @@
 -type change_key_map() :: #{couchbase_driver:key() => couchbase_driver:key()}.
 
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_operation_timeout, 900000)).
+    couchbase_operation_timeout, 60000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_durability_timeout, 900000)).
+    couchbase_durability_timeout, 60000)).
 
 %%%===================================================================
 %%% API

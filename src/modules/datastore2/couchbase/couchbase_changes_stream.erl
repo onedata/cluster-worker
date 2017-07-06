@@ -79,7 +79,7 @@ init([Bucket, Scope, Callback, Opts]) ->
         until = proplists:get_value(until, Opts, infinity),
         except_mutator = proplists:get_value(except_mutator, Opts),
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_batch_size, 100),
+            couchbase_changes_stream_batch_size, 200),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 5000)
     }}.

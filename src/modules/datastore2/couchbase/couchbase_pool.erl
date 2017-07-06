@@ -86,11 +86,8 @@ wait(Future) ->
 %%--------------------------------------------------------------------
 -spec get_timeout() -> timeout().
 get_timeout() ->
-    OpTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_operation_timeout, 900000),
-    DurTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_durability_timeout, 900000),
-    OpTimeout + DurTimeout.
+    application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_operation_timeout, 1800000).
 
 %%--------------------------------------------------------------------
 %% @doc
