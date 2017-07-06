@@ -124,7 +124,7 @@ wait(Future) ->
 %% Saves values in CouchBase.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), value() | [value()]) -> {ok, cberl:cas(), value()} |
+-spec save(ctx(), item() | [item()]) -> {ok, cberl:cas(), value()} |
     {error, term()} | [{ok, cberl:cas(), value()} | {error, term()}].
 save(Ctx, Values) when is_list(Values) ->
     wait([save_async(Ctx, Value) || Value <- Values]);
