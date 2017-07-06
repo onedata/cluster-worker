@@ -213,15 +213,16 @@ fetch_changes(#state{
         seq_safe = SeqSafe3
     } = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
 
+    Ctx2 = Ctx#{pool_mode => changes},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, Cas2, SeqSafe3} = couchbase_driver:save(
-        Ctx#{cas => Cas}, {SeqSafeKey, SeqSafe3}
+        Ctx2#{cas => Cas}, {SeqSafeKey, SeqSafe3}
     ),
 
     ChangeKeys = lists:map(fun(S) ->
         couchbase_changes:get_change_key(Scope, S)
     end, lists:seq(SeqSafe2, SeqSafe3)),
-    couchbase_driver:delete(Ctx, ChangeKeys),
+    couchbase_driver:delete(Ctx2, ChangeKeys),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);
