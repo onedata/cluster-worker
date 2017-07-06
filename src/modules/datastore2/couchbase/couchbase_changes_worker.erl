@@ -84,7 +84,7 @@ init([Bucket, Scope]) ->
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 100),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_update_interval, 5000)
+            couchbase_changes_update_interval, 1000)
     }}.
 
 %%--------------------------------------------------------------------

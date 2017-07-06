@@ -81,7 +81,7 @@ init([Bucket, Scope, Callback, Opts]) ->
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_batch_size, 200),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_update_interval, 5000)
+            couchbase_changes_stream_update_interval, 1000)
     }}.
 
 %%--------------------------------------------------------------------
