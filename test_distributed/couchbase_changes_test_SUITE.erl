@@ -208,12 +208,12 @@ stream_should_return_all_changes(Config) ->
     ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum))),
-    verify(fun(SeqList0) ->
+    execute_on_list(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList) ->
-            ?assert(lists:member(Doc#document.seq, SeqList)),
-            lists:delete(Doc#document.seq, SeqList)
-        end, SeqList0, Docs)
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
     end, lists:seq(1, DocNum)).
 
 stream_should_return_last_changes(Config) ->
@@ -277,12 +277,12 @@ stream_should_return_all_changes_except_mutator(Config) ->
             false -> false
         end
     end, lists:seq(1, DocNum)),
-    verify(fun(Keys0) ->
+    execute_on_list(fun(Keys) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, Keys) ->
-            ?assert(lists:member(Doc#document.key, Keys)),
-            lists:delete(Doc#document.key, Keys)
-        end, Keys0, Docs)
+        lists:foldl(fun(Doc, Keys2) ->
+            ?assert(lists:member(Doc#document.key, Keys2)),
+            lists:delete(Doc#document.key, Keys2)
+        end, Keys, Docs)
     end, KeysExp).
 
 stream_should_return_changes_from_finite_range(Config) ->
@@ -298,12 +298,12 @@ stream_should_return_changes_from_finite_range(Config) ->
     ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum))),
-    verify(fun(SeqList0) ->
+    execute_on_list(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList) ->
-            ?assert(lists:member(Doc#document.seq, SeqList)),
-            lists:delete(Doc#document.seq, SeqList)
-        end, SeqList0, Docs)
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
     end, lists:seq(Since, Until - 1)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
 
@@ -319,12 +319,12 @@ stream_should_return_changes_from_infinite_range(Config) ->
     ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum))),
-    verify(fun(SeqList0) ->
+    execute_on_list(fun(SeqList) ->
         {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
-        lists:foldl(fun(Doc, SeqList) ->
-            ?assert(lists:member(Doc#document.seq, SeqList)),
-            lists:delete(Doc#document.seq, SeqList)
-        end, SeqList0, Docs)
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
     end, lists:seq(Since, DocNum)).
 
 cancel_stream_should_stop_worker(Config) ->
@@ -401,8 +401,8 @@ get_scope(stream_should_return_last_changes) ->
 get_scope(Case) ->
     ?SCOPE(Case).
 
-verify(_, []) ->
+execute_on_list(_, []) ->
     ok;
-verify(Fun, List0) ->
+execute_on_list(Fun, List0) ->
     List = Fun(List0),
-    verify(Fun, List).
+    execute_on_list(Fun, List).
