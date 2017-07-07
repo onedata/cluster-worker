@@ -82,9 +82,9 @@ init([Bucket, Scope]) ->
         seq_safe = SeqSafe,
         seq_safe_cas = Cas,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_batch_size, 25),
+            couchbase_changes_batch_size, 100),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_update_interval, 5000)
+            couchbase_changes_update_interval, 1000)
     }}.
 
 %%--------------------------------------------------------------------
@@ -213,15 +213,16 @@ fetch_changes(#state{
         seq_safe = SeqSafe3
     } = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
 
+    Ctx2 = Ctx#{pool_mode => changes},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, Cas2, SeqSafe3} = couchbase_driver:save(
-        Ctx#{cas => Cas}, {SeqSafeKey, SeqSafe3}
+        Ctx2#{cas => Cas}, {SeqSafeKey, SeqSafe3}
     ),
 
     ChangeKeys = lists:map(fun(S) ->
         couchbase_changes:get_change_key(Scope, S)
     end, lists:seq(SeqSafe2, SeqSafe3)),
-    couchbase_driver:delete(Ctx, ChangeKeys),
+    couchbase_driver:delete(Ctx2, ChangeKeys),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);
@@ -244,6 +245,7 @@ fetch_changes(#state{
 process_changes(Seq, Seq, [], State) ->
     State;
 process_changes(SeqSafe, Seq, [], State) ->
+    % TODO - remove this case?
     Timeout = 2 * couchbase_pool:get_timeout(),
     case ignore_change(SeqSafe, State, Timeout, 500) of
         true ->

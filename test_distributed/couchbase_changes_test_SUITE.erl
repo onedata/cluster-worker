@@ -208,11 +208,13 @@ stream_should_return_all_changes(Config) ->
     ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum))),
-    lists:foldl(fun(_, SeqList) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document.seq, SeqList)),
-        lists:delete(Doc#document.seq, SeqList)
-    end, lists:seq(1, DocNum), lists:seq(1, DocNum)).
+    execute_on_list(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(1, DocNum)).
 
 stream_should_return_last_changes(Config) ->
     ?PERFORMANCE(Config, [
@@ -231,7 +233,11 @@ stream_should_return_last_changes_base(Config) ->
     ChangesNum = ?config(change_num, Config),
     Value = ?VALUE(ChangesNum),
     Callback = fun
-        ({ok, Doc = #document{value = Any}}) when Any =:= Value -> Self ! Doc;
+        ({ok, Docs}) ->
+            lists:foreach(fun
+                (Doc = #document{value = Any}) when Any =:= Value -> Self ! Doc;
+                (_) -> ok
+            end, Docs);
         (_Any) -> ok
     end,
     {ok, Pid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes,
@@ -271,11 +277,13 @@ stream_should_return_all_changes_except_mutator(Config) ->
             false -> false
         end
     end, lists:seq(1, DocNum)),
-    lists:foldl(fun(_, Keys) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document.key, Keys)),
-        lists:delete(Doc#document.key, Keys)
-    end, KeysExp, KeysExp).
+    execute_on_list(fun(Keys) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, Keys2) ->
+            ?assert(lists:member(Doc#document.key, Keys2)),
+            lists:delete(Doc#document.key, Keys2)
+        end, Keys, Docs)
+    end, KeysExp).
 
 stream_should_return_changes_from_finite_range(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -290,11 +298,13 @@ stream_should_return_changes_from_finite_range(Config) ->
     ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum))),
-    lists:foldl(fun(_, SeqList) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document.seq, SeqList)),
-        lists:delete(Doc#document.seq, SeqList)
-    end, lists:seq(Since, Until - 1), lists:seq(Since, Until - 1)),
+    execute_on_list(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since, Until - 1)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
 
 stream_should_return_changes_from_infinite_range(Config) ->
@@ -309,11 +319,13 @@ stream_should_return_changes_from_infinite_range(Config) ->
     ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC(N)])
     end, lists:seq(1, DocNum))),
-    lists:foldl(fun(_, SeqList) ->
-        {ok, Doc} = ?assertReceivedNextMatch({ok, #document{}}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document.seq, SeqList)),
-        lists:delete(Doc#document.seq, SeqList)
-    end, lists:seq(Since, DocNum), lists:seq(Since, DocNum)).
+    execute_on_list(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since, DocNum)).
 
 cancel_stream_should_stop_worker(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -388,3 +400,9 @@ get_scope(stream_should_return_last_changes) ->
     ?SCOPE(stream_should_return_last_changes_base);
 get_scope(Case) ->
     ?SCOPE(Case).
+
+execute_on_list(_, []) ->
+    ok;
+execute_on_list(Fun, List0) ->
+    List = Fun(List0),
+    execute_on_list(Fun, List).

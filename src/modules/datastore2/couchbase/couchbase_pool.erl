@@ -20,7 +20,7 @@
 -export([get_request_queue_size/1, get_request_queue_size/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
 
--type mode() :: read | write.
+-type mode() :: changes | read | write.
 -type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
                    {get, datastore:key()} |
                    {delete, couchbase_driver:ctx(), datastore:key()} |
@@ -86,11 +86,8 @@ wait(Future) ->
 %%--------------------------------------------------------------------
 -spec get_timeout() -> timeout().
 get_timeout() ->
-    OpTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_operation_timeout, 900000),
-    DurTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_durability_timeout, 900000),
-    OpTimeout + DurTimeout.
+    application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_operation_timeout, 1800000).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -99,7 +96,7 @@ get_timeout() ->
 %%--------------------------------------------------------------------
 -spec get_modes() -> [mode()].
 get_modes() ->
-    [read, write].
+    [changes, read, write].
 
 %%--------------------------------------------------------------------
 %% @doc

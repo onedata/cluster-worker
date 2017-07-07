@@ -24,6 +24,7 @@
 -export([call/3]).
 
 -type ctx() :: #{prefix => binary(),
+                 pool_mode => couchbase_pool:mode(),
                  bucket => couchbase_config:bucket(),
                  mutator => datastore:mutator(),
                  cas => cberl:cas(),
@@ -69,11 +70,11 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec call(Function :: atom(), ctx(), Args :: [term()]) ->
-  term().
+    term().
 call(delete = Method, OptCtx, [Key, _Pred]) ->
-  call(Method, OptCtx, [Key]);
+    call(Method, OptCtx, [Key]);
 call(Method, OptCtx, Args) ->
-  apply(?MODULE, Method, [OptCtx | Args]).
+    apply(?MODULE, Method, [OptCtx | Args]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -82,9 +83,11 @@ call(Method, OptCtx, Args) ->
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), item()) -> couchbase_pool:future().
 save_async(#{bucket := Bucket} = Ctx, #document{} = Doc) ->
-  couchbase_pool:post_async(Bucket, write, {save, Ctx, Doc});
+    Mode = maps:get(pool_mode, Ctx, write),
+    couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Doc});
 save_async(#{bucket := Bucket} = Ctx, {Key, Value}) ->
-  couchbase_pool:post_async(Bucket, write, {save, Ctx, {Key, Value}}).
+    Mode = maps:get(pool_mode, Ctx, write),
+    couchbase_pool:post_async(Bucket, Mode, {save, Ctx, {Key, Value}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -93,8 +96,9 @@ save_async(#{bucket := Bucket} = Ctx, {Key, Value}) ->
 %%--------------------------------------------------------------------
 -spec get_async(ctx(), key()) -> couchbase_pool:future().
 get_async(#{bucket := Bucket} = Ctx, Key) ->
-  Key2 = couchbase_doc:set_prefix(Ctx, Key),
-  couchbase_pool:post_async(Bucket, read, {get, Key2}).
+    Mode = maps:get(pool_mode, Ctx, read),
+    Key2 = couchbase_doc:set_prefix(Ctx, Key),
+    couchbase_pool:post_async(Bucket, Mode, {get, Key2}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -103,8 +107,9 @@ get_async(#{bucket := Bucket} = Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec delete_async(ctx(), key()) -> couchbase_pool:future().
 delete_async(#{bucket := Bucket} = Ctx, Key) ->
-  Key2 = couchbase_doc:set_prefix(Ctx, Key),
-  couchbase_pool:post_async(Bucket, write, {delete, Ctx, Key2}).
+    Mode = maps:get(pool_mode, Ctx, write),
+    Key2 = couchbase_doc:set_prefix(Ctx, Key),
+    couchbase_pool:post_async(Bucket, Mode, {delete, Ctx, Key2}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -180,8 +185,9 @@ get_counter(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec get_counter(ctx(), key(), cberl:arithmetic_default()) ->
     {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
-get_counter(#{bucket := Bucket}, Key, Default) ->
-    couchbase_pool:post(Bucket, read, {get_counter, Key, Default}).
+get_counter(#{bucket := Bucket} = Ctx, Key, Default) ->
+    Mode = maps:get(pool_mode, Ctx, read),
+    couchbase_pool:post(Bucket, Mode, {get_counter, Key, Default}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -192,8 +198,9 @@ get_counter(#{bucket := Bucket}, Key, Default) ->
 -spec update_counter(ctx(), key(), cberl:arithmetic_delta(),
     cberl:arithmetic_default()) ->
     {ok, cberl:cas(), non_neg_integer()} | {error, term()}.
-update_counter(#{bucket := Bucket}, Key, Delta, Default) ->
-    couchbase_pool:post(Bucket, write, {update_counter, Key, Delta, Default}).
+update_counter(#{bucket := Bucket} = Ctx, Key, Delta, Default) ->
+    Mode = maps:get(pool_mode, Ctx, write),
+    couchbase_pool:post(Bucket, Mode, {update_counter, Key, Delta, Default}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -202,8 +209,9 @@ update_counter(#{bucket := Bucket}, Key, Delta, Default) ->
 %%--------------------------------------------------------------------
 -spec save_design_doc(ctx(), design(), datastore_json2:ejson()) ->
     ok | {error, term()}.
-save_design_doc(#{bucket := Bucket}, DesignName, EJson) ->
-    couchbase_pool:post(Bucket, write, {save_design_doc, DesignName, EJson}).
+save_design_doc(#{bucket := Bucket} = Ctx, DesignName, EJson) ->
+    Mode = maps:get(pool_mode, Ctx, write),
+    couchbase_pool:post(Bucket, Mode, {save_design_doc, DesignName, EJson}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -212,8 +220,9 @@ save_design_doc(#{bucket := Bucket}, DesignName, EJson) ->
 %%--------------------------------------------------------------------
 -spec get_design_doc(ctx(), design()) ->
     {ok, datastore_json2:ejson()} | {error, term()}.
-get_design_doc(#{bucket := Bucket}, DesignName) ->
-    couchbase_pool:post(Bucket, read, {get_design_doc, DesignName}).
+get_design_doc(#{bucket := Bucket} = Ctx, DesignName) ->
+    Mode = maps:get(pool_mode, Ctx, read),
+    couchbase_pool:post(Bucket, Mode, {get_design_doc, DesignName}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -221,8 +230,9 @@ get_design_doc(#{bucket := Bucket}, DesignName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_design_doc(ctx(), design()) -> ok | {error, term()}.
-delete_design_doc(#{bucket := Bucket}, DesignName) ->
-    couchbase_pool:post(Bucket, write, {delete_design_doc, DesignName}).
+delete_design_doc(#{bucket := Bucket} = Ctx, DesignName) ->
+    Mode = maps:get(pool_mode, Ctx, write),
+    couchbase_pool:post(Bucket, Mode, {delete_design_doc, DesignName}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -259,5 +269,6 @@ save_spatial_view_doc(Ctx, ViewName, Function) ->
 %%--------------------------------------------------------------------
 -spec query_view(ctx(), design(), view(), [view_opt()]) ->
     {ok, datastore_json2:ejson()} | {error, term()}.
-query_view(#{bucket := Bucket}, DesignName, ViewName, Opts) ->
-    couchbase_pool:post(Bucket, read, {query_view, DesignName, ViewName, Opts}).
+query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
+    Mode = maps:get(pool_mode, Ctx, read),
+    couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).
