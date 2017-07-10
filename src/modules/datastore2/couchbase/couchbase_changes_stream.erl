@@ -18,6 +18,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_common.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -188,8 +189,16 @@ get_changes(Since, Until, #state{} = State) ->
         batch_size = BatchSize
     } = State,
     Ctx = #{bucket => Bucket},
-    Key = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
+    SeqSafe = case ets:lookup(?CHANGES_COUNTERS, Scope) of
+        [{_, SS}] ->
+            ?info("xxxx stream ets ~p", [{SS}]),
+            SS;
+        _ ->
+            Key = couchbase_changes:get_seq_safe_key(Scope),
+            {ok, _, SS} = couchbase_driver:get_counter(Ctx, Key),
+            ?info("xxxx stream disk ~p", [{SS}]),
+            SS
+    end,
     Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),
 
     case Since >= Until2 of

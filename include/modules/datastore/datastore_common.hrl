@@ -35,6 +35,9 @@
 %% ETS name for local (node scope) state.
 -define(LOCAL_STATE, datastore_local_state).
 
+%% ETS for counters of changes' streams.
+-define(CHANGES_COUNTERS, changes_countes).
+
 %% ETS name for couchbase gateway details
 -define(COUCHBASE_GATEWAYS, couchbase_gateways).
 

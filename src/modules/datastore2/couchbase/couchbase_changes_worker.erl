@@ -20,10 +20,11 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_common.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2]).
+-export([start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -34,9 +35,9 @@
     scope :: datastore:scope(),
     seq :: couchbase_changes:since(),
     seq_safe :: couchbase_changes:until(),
-    seq_safe_cas :: cberl:cas(),
     batch_size :: non_neg_integer(),
-    interval :: non_neg_integer()
+    interval :: non_neg_integer(),
+    gc :: pid()
 }).
 
 -type state() :: #state{}.
@@ -50,10 +51,10 @@
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_config:bucket(), datastore:scope()) ->
+-spec start_link(couchbase_config:bucket(), datastore:scope(), pid()) ->
     {ok, pid()} | {error, Reason :: term()}.
-start_link(Bucket, Scope) ->
-    gen_server2:start_link(?MODULE, [Bucket, Scope], []).
+start_link(Bucket, Scope, GC_Pid) ->
+    gen_server2:start_link(?MODULE, [Bucket, Scope, GC_Pid], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -68,10 +69,10 @@ start_link(Bucket, Scope) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Bucket, Scope]) ->
+init([Bucket, Scope, GC_Pid]) ->
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, Cas, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
+    {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
     SeqKey = couchbase_changes:get_seq_key(Scope),
     {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     erlang:send_after(0, self(), update),
@@ -80,11 +81,11 @@ init([Bucket, Scope]) ->
         scope = Scope,
         seq = Seq,
         seq_safe = SeqSafe,
-        seq_safe_cas = Cas,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 100),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_update_interval, 1000)
+            couchbase_changes_update_interval, 1000),
+        gc = GC_Pid
     }}.
 
 %%--------------------------------------------------------------------
@@ -192,10 +193,10 @@ fetch_changes(#state{
     bucket = Bucket,
     scope = Scope,
     seq_safe = SeqSafe,
-    seq_safe_cas = Cas,
     seq = Seq,
     batch_size = BatchSize,
-    interval = Interval
+    interval = Interval,
+    gc = GC_Pid
 } = State) ->
     SeqSafe2 = SeqSafe + 1,
     Seq2 = min(SeqSafe2 + BatchSize - 1, Seq),
@@ -213,22 +214,14 @@ fetch_changes(#state{
         seq_safe = SeqSafe3
     } = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
 
-    Ctx2 = Ctx#{pool_mode => changes},
-    SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, Cas2, SeqSafe3} = couchbase_driver:save(
-        Ctx2#{cas => Cas}, {SeqSafeKey, SeqSafe3}
-    ),
-
-    ChangeKeys = lists:map(fun(S) ->
-        couchbase_changes:get_change_key(Scope, S)
-    end, lists:seq(SeqSafe2, SeqSafe3)),
-    couchbase_driver:delete(Ctx2, ChangeKeys),
+    ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
+    gen_server:cast(GC_Pid, {batch_ready, SeqSafe3}),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);
         _ -> erlang:send_after(Interval, self(), update)
     end,
-    State2#state{seq_safe_cas = Cas2}.
+    State2.
 
 %%--------------------------------------------------------------------
 %% @private

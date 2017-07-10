@@ -19,7 +19,7 @@
 
 %% API
 -export([start_link/0]).
--export([start_worker/2, stop_worker/2]).
+-export([start_worker/3, stop_worker/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -42,10 +42,10 @@ start_link() ->
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker(couchbase_config:bucket(), datastore:scope()) ->
+-spec start_worker(couchbase_config:bucket(), datastore:scope(), pid()) ->
     {ok, pid()} | {error, Reason :: term()}.
-start_worker(Bucket, Scope) ->
-    Spec = couchbase_changes_worker_spec(Bucket, Scope),
+start_worker(Bucket, Scope, GC_Pid) ->
+    Spec = couchbase_changes_worker_spec(Bucket, Scope, GC_Pid),
     supervisor:start_child(?MODULE, Spec).
 
 %%--------------------------------------------------------------------
@@ -89,11 +89,11 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec couchbase_changes_worker_spec(couchbase_config:bucket(),
-    datastore:scope()) -> supervisor:child_spec().
-couchbase_changes_worker_spec(Bucket, Scope) ->
+    datastore:scope(), pid()) -> supervisor:child_spec().
+couchbase_changes_worker_spec(Bucket, Scope, GC_Pid) ->
     #{
         id => {Bucket, Scope},
-        start => {couchbase_changes_worker, start_link, [Bucket, Scope]},
+        start => {couchbase_changes_worker, start_link, [Bucket, Scope, GC_Pid]},
         restart => transient,
         shutdown => timer:seconds(10),
         type => worker,
