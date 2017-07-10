@@ -105,15 +105,12 @@ handle_call(Request, _From, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_cast({batch_ready, End}, #state{} = State) ->
-    ?info("xxxx batch_ready ~p", [{End}]),
     State2 = State#state{batch_end = End},
     {noreply, delete_old_docs(State2)};
 handle_cast({processing_finished, End, Cas2}, #state{} = State) ->
-    ?info("xxxx processing_finished ~p", [{End}]),
     State2 = State#state{batch_beg = End + 1, cas = Cas2, processing = false},
     {noreply, delete_old_docs(State2)};
 handle_cast(processing_finished, #state{} = State) ->
-    ?info("xxxx processing_finished2 ~p", [{ok}]),
     State2 = State#state{processing = false},
     {noreply, delete_old_docs(State2)};
 handle_cast(Request, #state{} = State) ->
@@ -169,7 +166,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Deletes not needed docs and move safe_key.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_old_docs(state()) -> ok.
+-spec delete_old_docs(state()) -> state().
 delete_old_docs(#state{batch_beg = Beg, batch_end = End} = State) when Beg > End ->
     State;
 delete_old_docs(#state{processing = true} = State) ->
@@ -193,9 +190,7 @@ delete_old_docs(#state{batch_beg = Beg, batch_end = End, bucket = Bucket,
                 couchbase_changes:get_change_key(Scope, S)
             end, lists:seq(Beg, End2)),
             couchbase_driver:delete(Ctx, ChangeKeys),
-            ok = gen_server:cast(Pid, {processing_finished, End2, Cas2}),
-
-            ?info("xxxx batch cleared ~p", [{Beg, End}])
+            ok = gen_server:cast(Pid, {processing_finished, End2, Cas2})
         catch
             E1:E2 ->
                 ?error_stacktrace("Clearing changes old documents error: ~p:~p",

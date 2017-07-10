@@ -373,8 +373,14 @@ init_per_testcase(Case, Config) ->
             {field2, string}
         ]}
     end),
-    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, start,
+    % TODO - dodac startowanie gc w couchbase_changes
+    GCAnc = rpc:call(Worker, couchbase_changes_worker_gc, start_link,
         [?BUCKET, get_scope(Case)]
+    ),
+    ?assertMatch({ok, _}, GCAnc),
+    {ok, GC_Pid} = GCAnc,
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, start,
+        [?BUCKET, get_scope(Case), GC_Pid]
     )),
     Config.
 

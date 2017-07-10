@@ -191,12 +191,10 @@ get_changes(Since, Until, #state{} = State) ->
     Ctx = #{bucket => Bucket},
     SeqSafe = case ets:lookup(?CHANGES_COUNTERS, Scope) of
         [{_, SS}] ->
-            ?info("xxxx stream ets ~p", [{SS}]),
             SS;
         _ ->
             Key = couchbase_changes:get_seq_safe_key(Scope),
             {ok, _, SS} = couchbase_driver:get_counter(Ctx, Key),
-            ?info("xxxx stream disk ~p", [{SS}]),
             SS
     end,
     Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),

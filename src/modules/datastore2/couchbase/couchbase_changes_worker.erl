@@ -72,7 +72,7 @@ start_link(Bucket, Scope, GC_Pid) ->
 init([Bucket, Scope, GC_Pid]) ->
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
+    {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
     SeqKey = couchbase_changes:get_seq_key(Scope),
     {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     erlang:send_after(0, self(), update),
