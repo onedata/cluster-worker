@@ -24,7 +24,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/3]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -51,10 +51,10 @@
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_config:bucket(), datastore:scope(), pid()) ->
+-spec start_link(couchbase_config:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
-start_link(Bucket, Scope, GC_Pid) ->
-    gen_server2:start_link(?MODULE, [Bucket, Scope, GC_Pid], []).
+start_link(Bucket, Scope) ->
+    gen_server2:start_link(?MODULE, [Bucket, Scope], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -69,7 +69,8 @@ start_link(Bucket, Scope, GC_Pid) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Bucket, Scope, GC_Pid]) ->
+init([Bucket, Scope]) ->
+    {ok, GC_Pid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey),

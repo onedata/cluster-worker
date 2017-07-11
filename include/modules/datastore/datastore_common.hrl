@@ -36,7 +36,7 @@
 -define(LOCAL_STATE, datastore_local_state).
 
 %% ETS for counters of changes' streams.
--define(CHANGES_COUNTERS, changes_countes).
+-define(CHANGES_COUNTERS, changes_counters).
 
 %% ETS name for couchbase gateway details
 -define(COUCHBASE_GATEWAYS, couchbase_gateways).

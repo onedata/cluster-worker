@@ -14,7 +14,7 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([enable/1, start/3, stop/2]).
+-export([enable/1, start/2, stop/2]).
 -export([stream/3, stream/4, cancel_stream/1]).
 -export([design/0, view/0]).
 -export([get_seq_key/1, get_seq_safe_key/1, get_change_key/2]).
@@ -70,10 +70,10 @@ enable(Buckets) ->
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start(couchbase_config:bucket(), datastore:scope(), pid()) ->
+-spec start(couchbase_config:bucket(), datastore:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
-start(Bucket, Scope, GC_Pid) ->
-    couchbase_changes_sup:start_worker(Bucket, Scope, GC_Pid).
+start(Bucket, Scope) ->
+    couchbase_changes_sup:start_worker(Bucket, Scope).
 
 %%--------------------------------------------------------------------
 %% @doc
