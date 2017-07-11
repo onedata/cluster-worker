@@ -524,6 +524,10 @@ init_per_testcase(_Case, Config) ->
         ]}
     end),
 
+    lists:foreach(fun(W) ->
+        test_utils:set_env(W, cluster_worker, couchbase_mutator_history_length, 20)
+    end, Workers),
+
     Config.
 
 end_per_testcase(_Case, Config) ->

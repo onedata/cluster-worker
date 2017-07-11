@@ -30,7 +30,7 @@
 -spec set_mutator(couchbase_driver:ctx(), datastore:document()) -> datastore:document().
 set_mutator(#{mutator := Mutator}, #document{mutator = Mutators} = Doc) ->
     Length = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_mutator_history_length, 20),
+        couchbase_mutator_history_length, 1),
     Doc#document{mutator = lists:sublist([Mutator | Mutators], Length)};
 set_mutator(_Ctx, Doc) ->
     Doc.
