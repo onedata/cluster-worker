@@ -28,6 +28,7 @@
                  bucket => couchbase_config:bucket(),
                  mutator => datastore:mutator(),
                  cas => cberl:cas(),
+                 no_rev => boolean(),
                  no_seq => boolean(),
                  no_durability => boolean()}.
 -type key() :: datastore:key().
