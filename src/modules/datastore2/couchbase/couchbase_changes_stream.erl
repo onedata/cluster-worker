@@ -18,6 +18,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_common.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -188,8 +189,7 @@ get_changes(Since, Until, #state{} = State) ->
         batch_size = BatchSize
     } = State,
     Ctx = #{bucket => Bucket},
-    Key = couchbase_changes:get_seq_safe_key(Scope),
-    {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
+    SeqSafe = get_seq_safe(Scope, Ctx),
     Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),
 
     case Since >= Until2 of
@@ -216,17 +216,23 @@ get_changes(Since, Until, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec get_docs([couchbase_changes:change()], state()) -> [datastore:document()].
 get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
-    Keys = lists:filtermap(fun(Change) ->
+    KeyRevs = lists:filtermap(fun(Change) ->
         {<<"id">>, Key} = lists:keyfind(<<"id">>, 1, Change),
         {<<"value">>, {Value}} = lists:keyfind(<<"value">>, 1, Change),
+        {<<"_rev">>, Rev} = lists:keyfind(<<"_rev">>, 1, Value),
         case lists:keyfind(<<"_mutator">>, 1, Value) of
             {<<"_mutator">>, Mutator} -> false;
-            _ -> {true, Key}
+            _ -> {true, {Key, Rev}}
         end
     end, Changes),
-    lists:map(fun({ok, _, Doc = #document{}}) ->
-        Doc
-    end, couchbase_driver:get(#{bucket => Bucket}, Keys)).
+    Ctx = #{bucket => Bucket},
+    {Keys, Revs} = lists:unzip(KeyRevs),
+    lists:filtermap(fun
+        ({{ok, _, #document{rev = [Rev1 | _]} = Doc}, Rev2})
+            when Rev1 =:= Rev2 -> {true, Doc};
+        ({{ok, _, #document{}}, _Rev}) ->
+            false
+    end, lists:zip(couchbase_driver:get(Ctx, Keys), Revs)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -240,3 +246,20 @@ stream_docs([], #state{interval = Interval}) ->
 stream_docs(Docs, #state{callback = Callback}) ->
     Callback({ok, Docs}),
     erlang:send_after(0, self(), update).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets seq_safe from memory or from db (if it is not found in memory).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_seq_safe(datastore:scope(), datastore_context:ctx()) -> non_neg_integer().
+get_seq_safe(Scope, Ctx) ->
+    case ets:lookup(?CHANGES_COUNTERS, Scope) of
+        [{_, SeqSafe}] ->
+            SeqSafe;
+        _ ->
+            Key = couchbase_changes:get_seq_safe_key(Scope),
+            {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
+            SeqSafe
+    end.

@@ -488,7 +488,6 @@ initialize_minimal_env() ->
 initialize_minimal_env(DBNodes) ->
     hackney:start(),
     couchbeam_sup:start_link(),
-        catch ets:new(datastore_worker, [named_table, public, set, {read_concurrency, true}]),
     datastore:ensure_state_loaded(node()),
     {ok, _} = datastore_worker:init(DBNodes),
     ok.
@@ -670,7 +669,6 @@ run_posthooks(#{level := Level, hooks_config := HooksConfig} = Ctx,
     [model_behaviour:model_config()].
 load_local_state(Models) ->
     catch ets:new(?LOCAL_STATE, [named_table, public, bag]),
-        catch ets:new(monitoring_ets, [named_table, public, set]),
     lists:map(
         fun(ModelName) ->
             Config = #model_config{hooks = Hooks} = model_config(ModelName),
@@ -692,6 +690,7 @@ load_local_state(Models) ->
 -spec init_drivers(Configs :: [model_behaviour:model_config()], NodeToSync :: node()) ->
     ok | no_return().
 init_drivers(Configs, _NodeToSync) ->
+    catch ets:new(?CHANGES_COUNTERS, [named_table, public, set]),
     lists:foreach(
         fun(Config)->
             ok = apply(?LOCAL_SLAVE_DRIVER, init,
