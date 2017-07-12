@@ -70,7 +70,7 @@ start_link(Bucket, Scope) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Bucket, Scope]) ->
-    {ok, GC_Pid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
+    {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
@@ -86,7 +86,7 @@ init([Bucket, Scope]) ->
             couchbase_changes_batch_size, 100),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_update_interval, 1000),
-        gc = GC_Pid
+        gc = GCPid
     }}.
 
 %%--------------------------------------------------------------------
@@ -197,7 +197,7 @@ fetch_changes(#state{
     seq = Seq,
     batch_size = BatchSize,
     interval = Interval,
-    gc = GC_Pid
+    gc = GCPid
 } = State) ->
     SeqSafe2 = SeqSafe + 1,
     Seq2 = min(SeqSafe2 + BatchSize - 1, Seq),
@@ -216,7 +216,7 @@ fetch_changes(#state{
     } = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
 
     ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
-    gen_server:cast(GC_Pid, {batch_ready, SeqSafe3}),
+    gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
 
     case SeqSafe3 of
         Seq2 -> erlang:send_after(0, self(), update);

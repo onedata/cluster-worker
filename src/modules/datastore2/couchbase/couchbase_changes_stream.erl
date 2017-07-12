@@ -189,14 +189,7 @@ get_changes(Since, Until, #state{} = State) ->
         batch_size = BatchSize
     } = State,
     Ctx = #{bucket => Bucket},
-    SeqSafe = case ets:lookup(?CHANGES_COUNTERS, Scope) of
-        [{_, SS}] ->
-            SS;
-        _ ->
-            Key = couchbase_changes:get_seq_safe_key(Scope),
-            {ok, _, SS} = couchbase_driver:get_counter(Ctx, Key),
-            SS
-    end,
+    SeqSafe = get_seq_safe(Scope, Ctx),
     Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),
 
     case Since >= Until2 of
@@ -253,3 +246,20 @@ stream_docs([], #state{interval = Interval}) ->
 stream_docs(Docs, #state{callback = Callback}) ->
     Callback({ok, Docs}),
     erlang:send_after(0, self(), update).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets seq_safe from memory or from db (if it is not found in memory).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_seq_safe(datastore:scope(), datastore_context:ctx()) -> non_neg_integer().
+get_seq_safe(Scope, Ctx) ->
+    case ets:lookup(?CHANGES_COUNTERS, Scope) of
+        [{_, SeqSafe}] ->
+            SeqSafe;
+        _ ->
+            Key = couchbase_changes:get_seq_safe_key(Scope),
+            {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
+            SeqSafe
+    end.

@@ -6,9 +6,9 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module is responsible cleaning of couchbase_changes_worker
-%%% internal documents when they are needed no more. It also moves
-%%% changes safe_key in database during cleaning.
+%%% This module is responsible for removing internal documents that describe
+%%% changes when they become obsolete. It also moves forward seq_safe counter
+%%% as removing documents.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(couchbase_changes_worker_gc).
@@ -30,8 +30,8 @@
 -record(state, {
     bucket :: couchbase_config:bucket(),
     scope :: datastore:scope(),
-    cas :: cberl:cas(),
-    batch_beg = 0 :: couchbase_changes:until(),
+    seq_safe_cas :: cberl:cas(),
+    batch_begin = 0 :: couchbase_changes:until(),
     batch_end = 0 :: cberl:cas(),
     processing = false ::boolean()
 }).
@@ -70,8 +70,8 @@ init([Bucket, Scope]) ->
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, Cas, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey, 0),
     {ok, #state{
-        cas = Cas,
-        batch_beg = SeqSafe + 1,
+        seq_safe_cas = Cas,
+        batch_begin = SeqSafe + 1,
         bucket = Bucket,
         scope = Scope
     }}.
@@ -106,13 +106,13 @@ handle_call(Request, _From, #state{} = State) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_cast({batch_ready, End}, #state{} = State) ->
     State2 = State#state{batch_end = End},
-    {noreply, delete_old_docs(State2)};
+    {noreply, delete_internal_docs(State2)};
 handle_cast({processing_finished, End, Cas2}, #state{} = State) ->
-    State2 = State#state{batch_beg = End + 1, cas = Cas2, processing = false},
-    {noreply, delete_old_docs(State2)};
+    State2 = State#state{batch_begin = End + 1, seq_safe_cas = Cas2, processing = false},
+    {noreply, delete_internal_docs(State2)};
 handle_cast(processing_finished, #state{} = State) ->
     State2 = State#state{processing = false},
-    {noreply, delete_old_docs(State2)};
+    {noreply, delete_internal_docs(State2)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -166,13 +166,13 @@ code_change(_OldVsn, State, _Extra) ->
 %% Deletes not needed docs and move safe_key.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_old_docs(state()) -> state().
-delete_old_docs(#state{batch_beg = Beg, batch_end = End} = State) when Beg > End ->
+-spec delete_internal_docs(state()) -> state().
+delete_internal_docs(#state{batch_begin = Beg, batch_end = End} = State) when Beg > End ->
     State;
-delete_old_docs(#state{processing = true} = State) ->
+delete_internal_docs(#state{processing = true} = State) ->
     State;
-delete_old_docs(#state{batch_beg = Beg, batch_end = End, bucket = Bucket,
-    scope = Scope, cas = Cas} = State) ->
+delete_internal_docs(#state{batch_begin = Beg, batch_end = End, bucket = Bucket,
+    scope = Scope, seq_safe_cas = Cas} = State) ->
     Pid = self(),
     spawn(fun() ->
         try
