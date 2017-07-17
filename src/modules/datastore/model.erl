@@ -263,10 +263,12 @@ make_disk_ctx(#model_config{name = Name, sync_enabled = true}, Key, RC) ->
     nomatch ->
       set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"sync">>}, RC);
     _ ->
-      set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"default">>}, RC)
+      set_mutator(#{prefix => atom_to_binary(Name, utf8),
+        bucket => <<"default">>, no_seq => true}, RC)
   end;
 make_disk_ctx(#model_config{name = Name}, _Key, RC) ->
-  set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"default">>}, RC).
+  set_mutator(#{prefix => atom_to_binary(Name, utf8),
+    bucket => <<"default">>, no_seq => true}, RC).
 
 %%--------------------------------------------------------------------
 %% @private

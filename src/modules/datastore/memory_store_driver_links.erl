@@ -283,7 +283,8 @@ apply_at_memory_store(_Ctx, LastCtx) ->
               case maps:get(disc_driver_ctx, LastCtx, undefined) of
                 DiskCtx when is_map(DiskCtx) ->
                   datastore_context:override(disc_driver_ctx,
-                    datastore_context:override(bucket, <<"default">>, DiskCtx),
+                    datastore_context:override(bucket, <<"default">>,
+                      datastore_context:override(no_seq, true, DiskCtx)),
                     LastCtx);
                 _ ->
                   LastCtx
