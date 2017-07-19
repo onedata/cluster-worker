@@ -21,7 +21,7 @@
 
 -type callback() :: fun(({ok, [datastore:document()] | end_of_stream}
                     | {error, since(), Reason :: term()}) -> any()).
--type seq() :: non_neg_integer().
+-type seq() :: non_neg_integer() | null.
 -type since() :: seq().
 -type until() :: seq() | infinity.
 -type change() :: proplists:proplist().

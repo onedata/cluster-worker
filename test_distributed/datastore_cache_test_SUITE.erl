@@ -110,7 +110,7 @@ all() ->
 }).
 
 -define(MODEL, test_model).
--define(BUCKET, <<"default">>).
+-define(BUCKET, <<"onedata">>).
 -define(MEM_DRV, ets_driver).
 -define(MEM_CTX, #{table => ?FUNCTION_NAME}).
 -define(DISC_DRV, couchbase_driver).

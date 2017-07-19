@@ -257,18 +257,18 @@ make_disk_ctx(ModelConfig) ->
 make_disk_ctx(ModelConfig, #document{key = Key}, RC) ->
   make_disk_ctx(ModelConfig, Key, RC);
 make_disk_ctx(#model_config{name = Name, sync_enabled = true}, undefined, RC) ->
-  set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"sync">>}, RC);
+  set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"onedata">>}, RC);
 make_disk_ctx(#model_config{name = Name, sync_enabled = true}, Key, RC) ->
   case binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of
     nomatch ->
-      set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"sync">>}, RC);
+      set_mutator(#{prefix => atom_to_binary(Name, utf8), bucket => <<"onedata">>}, RC);
     _ ->
       set_mutator(#{prefix => atom_to_binary(Name, utf8),
-        bucket => <<"default">>, no_seq => true}, RC)
+        bucket => <<"onedata">>, no_seq => true}, RC)
   end;
 make_disk_ctx(#model_config{name = Name}, _Key, RC) ->
   set_mutator(#{prefix => atom_to_binary(Name, utf8),
-    bucket => <<"default">>, no_seq => true}, RC).
+    bucket => <<"onedata">>, no_seq => true}, RC).
 
 %%--------------------------------------------------------------------
 %% @private

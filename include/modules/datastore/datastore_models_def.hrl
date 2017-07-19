@@ -23,7 +23,7 @@
     scope = <<>> :: datastore:scope(),
     mutator = [] :: [datastore:mutator()],
     rev = [] :: datastore:rev(),
-    seq = 0 :: datastore:seq(),
+    seq = null :: datastore:seq(),
     deleted = false :: boolean(),
     version = 1 :: datastore_version2:version()
 }).

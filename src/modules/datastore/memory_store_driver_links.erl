@@ -283,9 +283,7 @@ apply_at_memory_store(_Ctx, LastCtx) ->
               case maps:get(disc_driver_ctx, LastCtx, undefined) of
                 DiskCtx when is_map(DiskCtx) ->
                   datastore_context:override(disc_driver_ctx,
-                    datastore_context:override(bucket, <<"default">>,
-                      datastore_context:override(no_seq, true, DiskCtx)),
-                    LastCtx);
+                    datastore_context:override(no_seq, true, DiskCtx), LastCtx);
                 _ ->
                   LastCtx
               end;
@@ -336,22 +334,7 @@ get_doc(#{generated_uuid := true}, Key) ->
 get_doc(#{get_method := GetMethod} = Ctx, Key) ->
   case get_doc_from_cache(Key) of
     undefined ->
-      % TODO - delete with new links
-      GetCtx = case catch binary:match(Key, ?NOSYNC_KEY_OVERRIDE_PREFIX) of
-        {0, _} ->
-          case maps:get(disc_driver_ctx, Ctx, undefined) of
-            DiskCtx when is_map(DiskCtx) ->
-              datastore_context:override(disc_driver_ctx,
-                datastore_context:override(bucket, <<"default">>, DiskCtx),
-                Ctx);
-            _ ->
-              Ctx
-          end;
-        _ ->
-          Ctx
-      end,
-
-      case apply(datastore_cache, GetMethod, [GetCtx, Key]) of
+      case apply(datastore_cache, GetMethod, [Ctx, Key]) of
         {ok, Doc} ->
           add_doc_to_memory(Key, Doc),
           add_doc_to_cache(Key, Doc),

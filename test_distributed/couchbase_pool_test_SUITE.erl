@@ -39,7 +39,7 @@ all() ->
         request_should_timeout_on_database_connection_crash
     ]).
 
--define(BUCKET, <<"default">>).
+-define(BUCKET, <<"onedata">>).
 
 %%%===================================================================
 %%% Test functions
