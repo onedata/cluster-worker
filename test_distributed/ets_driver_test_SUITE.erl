@@ -95,7 +95,7 @@ save_should_return_doc(Config) ->
     ?assertEqual(?SCOPE, Doc#document.scope),
     ?assertEqual([], Doc#document.mutator),
     ?assertMatch([], Doc#document.rev),
-    ?assertEqual(0, Doc#document.seq),
+    ?assertEqual(null, Doc#document.seq),
     ?assertEqual(false, Doc#document.deleted),
     ?assertEqual(1, Doc#document.version).
 
@@ -124,7 +124,7 @@ update_should_change_doc(Config) ->
     ?assertEqual(?SCOPE, Doc2#document.scope),
     ?assertEqual([], Doc#document.mutator),
     ?assertMatch([], Doc#document.rev),
-    ?assertEqual(0, Doc#document.seq),
+    ?assertEqual(null, Doc#document.seq),
     ?assertEqual(false, Doc2#document.deleted),
     ?assertEqual(1, Doc2#document.version).
 

@@ -72,7 +72,7 @@ end, List)).
 }).
 
 -define(MODEL, test_model).
--define(BUCKET, <<"default">>).
+-define(BUCKET, <<"onedata">>).
 -define(CTX, #{bucket => ?BUCKET, mutator => ?MUTATOR}).
 -define(CASE, atom_to_binary(?FUNCTION_NAME, utf8)).
 -define(KEY, ?KEY(1)).

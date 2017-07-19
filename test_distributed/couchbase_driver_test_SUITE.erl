@@ -110,7 +110,7 @@ all() ->
 }).
 
 -define(MODEL, test_model).
--define(BUCKET, <<"default">>).
+-define(BUCKET, <<"onedata">>).
 -define(CTX, #{bucket => ?BUCKET, mutator => ?MUTATOR, prefix => <<"prefix">>}).
 -define(CASE, atom_to_binary(?FUNCTION_NAME, utf8)).
 -define(KEY, ?KEY(1)).
@@ -187,7 +187,7 @@ save_should_not_increment_seq_counter(Config) ->
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
         save, [?CTX#{no_seq => true}, ?DOC]
     )),
-    ?assertEqual(0, Doc#document.seq),
+    ?assertEqual(null, Doc#document.seq),
     ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver,
         get_counter, [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
