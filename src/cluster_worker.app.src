@@ -220,6 +220,7 @@
             {couchbase_pool_operation_timeout, 1800000},
             {couchbase_operation_timeout, 60000},
             {couchbase_view_timeout, 120000},
+            {couchbase_durability_interval, 5},
             {couchbase_durability_timeout, 60000},
             {couchbase_http_timeout, 60000},
             {couchbase_pool_size, [
