@@ -127,7 +127,10 @@ commit(ModifiedKeys, _) ->
 %%--------------------------------------------------------------------
 -spec merge_changes(Prev :: change(), Next :: change()) -> change().
 merge_changes(Prev, Next) ->
-  Next ++ (Prev -- Next).
+  FilteredPrev = lists:filter(fun({Key, _Ctx}) ->
+    not proplists:is_defined(Key, Next)
+  end, Prev),
+  Next ++ FilteredPrev.
 
 %%--------------------------------------------------------------------
 %% @doc
