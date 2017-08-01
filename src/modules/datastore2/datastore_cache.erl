@@ -159,7 +159,11 @@ update(Ctx, Updates) when is_list(Updates) ->
 %%--------------------------------------------------------------------
 -spec flush([{key(), ctx()}]) -> [{ok, value()} | {error, term()}].
 flush(List) ->
-    lists:map(fun({Key, Ctx}) -> flush(Ctx, Key) end, List).
+    Futures = [flush_async(Ctx, Key) || {Key, Ctx} <- List],
+    lists:map(fun
+        ({ok, disc, Value}) -> {ok, Value};
+        ({error, Reason}) -> {error, Reason}
+    end, wait(Futures)).
 
 %%--------------------------------------------------------------------
 %% @doc

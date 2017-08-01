@@ -42,6 +42,7 @@
     save_should_save_value_in_memory_when_disc_driver_undefined/1,
     save_should_return_no_memory_error_when_disc_driver_undefined/1,
     save_volatile_should_be_overwritten/1,
+    parallel_save_should_not_overflow_cache_size/1,
     update_should_get_value_from_memory_and_save_in_memory/1,
     update_should_get_value_from_disc_and_save_in_memory/1,
     update_should_get_value_from_disc_and_save_on_disc/1,
@@ -58,9 +59,7 @@
     mark_inactive_should_ignore_not_active_entry/1,
     mark_inactive_should_enable_entries_removal/1,
     mark_active_should_reactivate_inactive_entry/1,
-    mark_active_should_remove_inactive_entry/1,
-    resize_should_block_mark_active/1,
-    resize_should_remove_inactive_entry/1
+    mark_active_should_remove_inactive_entry/1
 ]).
 
 all() ->
@@ -84,6 +83,7 @@ all() ->
         save_should_save_value_in_memory_when_disc_driver_undefined,
         save_should_return_no_memory_error_when_disc_driver_undefined,
         save_volatile_should_be_overwritten,
+        parallel_save_should_not_overflow_cache_size,
         update_should_get_value_from_memory_and_save_in_memory,
         update_should_get_value_from_disc_and_save_in_memory,
         update_should_get_value_from_disc_and_save_on_disc,
@@ -100,9 +100,7 @@ all() ->
         mark_inactive_should_ignore_not_active_entry,
         mark_inactive_should_enable_entries_removal,
         mark_active_should_reactivate_inactive_entry,
-        mark_active_should_remove_inactive_entry,
-        resize_should_block_mark_active,
-        resize_should_remove_inactive_entry
+        mark_active_should_remove_inactive_entry
     ]).
 
 -record(test_model, {
@@ -328,6 +326,28 @@ save_volatile_should_be_overwritten(Config) ->
         rpc:call(Worker, datastore_cache, get, [?CTX, ?KEY(2)])
     ).
 
+parallel_save_should_not_overflow_cache_size(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ThrNum = 1000,
+    Results = utils:pmap(fun(Doc = #document{key = Key}) ->
+        timer:sleep(rand:uniform(100)),
+        case rpc:call(Worker, datastore_cache, save, [?CTX, Doc]) of
+            {ok, memory, #document{}} ->
+                ?assertEqual(true, rpc:call(Worker, datastore_cache_manager,
+                    mark_inactive, [disc, ?CACHE_KEY(Key)]
+                )),
+                ok;
+            {ok, disc, #document{}} ->
+                ok
+        end
+    end, [?DOC(N) || N <- lists:seq(1, ThrNum)]),
+    ?assert(lists:all(fun(Result) -> Result =:= ok end, Results)),
+    ?assertEqual(cache_size(?FUNCTION_NAME), rpc:call(Worker,
+        datastore_cache_manager, get_size, [disc])),
+    ?assertEqual(cache_size(?FUNCTION_NAME), length(rpc:call(Worker,
+        ets, tab2list, [?FUNCTION_NAME]))).
+
+
 update_should_get_value_from_memory_and_save_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, ?MEM_DRV, save, [?MEM_CTX, ?DOC]),
@@ -481,56 +501,18 @@ mark_active_should_remove_inactive_entry(Config) ->
         rpc:call(Worker, datastore_cache, get, [?CTX, ?KEY(1)])
     ).
 
-resize_should_block_mark_active(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, datastore_cache_manager, resize, [
-        disc, 0
-    ])),
-    ?assertEqual(false, rpc:call(Worker, datastore_cache_manager, mark_active,
-        [disc, ?CTX, ?KEY]
-    )).
-
-resize_should_remove_inactive_entry(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    rpc:call(Worker, datastore_cache, save, [?CTX, [
-        ?DOC(1), ?DOC(2), ?DOC(3)
-    ]]),
-    Key1 = ?KEY(1),
-    rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key1)]
-    ),
-    Key3 = ?KEY(3),
-    rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key3)]
-    ),
-    ?assertEqual(ok, rpc:call(Worker, datastore_cache_manager, resize, [
-        disc, 0
-    ])),
-    ?assertMatch([
-        {error, key_enoent},
-        {ok, #document{}},
-        {error, key_enoent}
-    ],
-        rpc:call(Worker, datastore_cache, get, [?CTX, [
-            ?KEY(1), ?KEY(2), ?KEY(3)
-        ]])
-    ).
-
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
 
 init_per_testcase(Case, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    Ctx = #{table => proplists:get_value(table, Config, Case)},
     spawn_link(Worker, fun() ->
-        ?MEM_DRV:init(Ctx, []),
+        ?MEM_DRV:init(#{table => Case}, []),
         receive _ -> ok end
     end),
-    rpc:call(Worker, datastore_cache_manager, reset, [memory]),
-    rpc:call(Worker, datastore_cache_manager, reset, [disc]),
-    rpc:call(Worker, datastore_cache_manager, resize, [memory, cache_size(Case)]),
-    rpc:call(Worker, datastore_cache_manager, resize, [disc, cache_size(Case)]),
+    rpc:call(Worker, datastore_cache_manager, reset, [memory, cache_size(Case)]),
+    rpc:call(Worker, datastore_cache_manager, reset, [disc, cache_size(Case)]),
     test_utils:mock_new(Worker, ?MODEL, [passthrough, non_strict]),
     test_utils:mock_expect(Worker, ?MODEL, model_init, fun() ->
         #model_config{version = 1}
@@ -554,6 +536,7 @@ cache_size(save_should_save_value_in_memory_and_on_disc) -> 1;
 cache_size(save_should_overwrite_value_in_memory) -> 1;
 cache_size(save_volatile_should_be_overwritten) -> 1;
 cache_size(save_should_return_no_memory_error_when_disc_driver_undefined) -> 0;
+cache_size(parallel_save_should_not_overflow_cache_size) -> 10;
 cache_size(update_should_get_value_from_disc_and_save_on_disc) -> 0;
 cache_size(delete_should_save_value_on_disc) -> 0;
 cache_size(mark_active_should_fail_on_full_cache) -> 0;
