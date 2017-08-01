@@ -76,13 +76,13 @@ simple_call_test(Config) ->
 simple_call_test_base(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
-    T1 = erlang:monotonic_time(milli_seconds),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping, ?REQUEST_TIMEOUT])),
-    T2 = erlang:monotonic_time(milli_seconds),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
-    T3 = erlang:monotonic_time(milli_seconds),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{dns_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
-    T4 = erlang:monotonic_time(milli_seconds),
+    T1 = erlang:monotonic_time(millisecond),
+    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [datastore_worker, ping, ?REQUEST_TIMEOUT])),
+    T2 = erlang:monotonic_time(millisecond),
+    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{datastore_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
+    T3 = erlang:monotonic_time(millisecond),
+    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{datastore_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
+    T4 = erlang:monotonic_time(millisecond),
 
     [
         #parameter{name = dispatcher, value = T2 - T1, unit = "ms",
@@ -121,7 +121,7 @@ direct_cast_test_base(Config) ->
     TestProc = fun() ->
         Self = self(),
         SendReq = fun(MsgId) ->
-            ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [dns_worker, ping, {proc, Self}, MsgId]))
+            ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [datastore_worker, ping, {proc, Self}, MsgId]))
         end,
 
         BeforeProcessing = erlang:monotonic_time(milli_seconds),
@@ -165,7 +165,7 @@ redirect_cast_test_base(Config) ->
     TestProc = fun() ->
         Self = self(),
         SendReq = fun(MsgId) ->
-            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, MsgId]))
+            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker2}, ping, {proc, Self}, MsgId]))
         end,
 
         BeforeProcessing = erlang:monotonic_time(milli_seconds),
@@ -230,8 +230,8 @@ mixed_cast_test_core(Config) ->
     TestProc = fun() ->
         Self = self(),
         SendReq = fun(MsgId) ->
-            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker1}, ping, {proc, Self}, 2 * MsgId - 1])),
-            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{dns_worker, Worker2}, ping, {proc, Self}, 2 * MsgId]))
+            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker1}, ping, {proc, Self}, 2 * MsgId - 1])),
+            ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker2}, ping, {proc, Self}, 2 * MsgId]))
         end,
 
         BeforeProcessing = erlang:monotonic_time(milli_seconds),

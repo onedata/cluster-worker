@@ -34,11 +34,9 @@
     {tp_router, [
         {supervisor_flags, tp_router:supervisor_flags()},
         {supervisor_children_spec, tp_router:supervisor_children_spec()}
-    ]},
-    {dns_worker, []}
+    ]}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
-    dns_listener,
     nagios_listener,
     redirector_listener
 ]).
@@ -575,14 +573,12 @@ do_heartbeat(#state{monitoring_state = MonState, last_state_analysis = LSA} = _S
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Receives lb advices update from cluster manager and follows it to DNS worker and dispatcher.
+%% Receives lb advices update from cluster manager and follows it to dispatcher.
 %% @end
 %%--------------------------------------------------------------------
--spec update_lb_advices(State :: #state{}, LBAdvices) -> #state{} when
-    LBAdvices :: {load_balancing:dns_lb_advice(), load_balancing:dispatcher_lb_advice()}.
-update_lb_advices(State, {DNSAdvice, DispatcherAdvice}) ->
+-spec update_lb_advices(State :: #state{}, DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> #state{}.
+update_lb_advices(State, DispatcherAdvice) ->
     gen_server2:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
-    worker_proxy:call({dns_worker, node()}, {update_lb_advice, DNSAdvice}),
     State.
 
 
