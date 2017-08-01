@@ -36,6 +36,8 @@
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
+    datastore_cache_manager:init(),
+
     State2 = lists:foldl(fun(Model, StateAcc) ->
         #model_config{name = RecordName} = ModelConfig = Model:model_init(),
         maps:put(RecordName, ModelConfig, StateAcc)
@@ -121,8 +123,6 @@ supervisor_flags() ->
 -spec supervisor_children_spec() -> [supervisor:child_spec()].
 supervisor_children_spec() ->
     [
-        datastore_cache_manager_spec(memory),
-        datastore_cache_manager_spec(disc),
         #{
             id => couchbase_pool_sup,
             start => {couchbase_pool_sup, start_link, []},
@@ -140,25 +140,3 @@ supervisor_children_spec() ->
             modules => [couchbase_changes_sup]
         }
     ].
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns a child spec for a datastore cache manager.
-%% @end
-%%--------------------------------------------------------------------
--spec datastore_cache_manager_spec(datastore_cache_manager:pool()) ->
-    supervisor:child_spec().
-datastore_cache_manager_spec(Pool) ->
-    #{
-        id => {datastore_cache_manager, Pool},
-        start => {datastore_cache_manager, start_link, [Pool]},
-        restart => permanent,
-        shutdown => timer:seconds(10),
-        type => worker,
-        modules => [datastore_cache_manager]
-    }.

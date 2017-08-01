@@ -230,7 +230,7 @@
                     {changes, 3}
                 ]}
             ]},
-            {couchbase_pool_batch_size, 50},
+            {couchbase_pool_batch_size, 1000},
             {couchbase_changes_batch_size, 100},
             {couchbase_changes_update_interval, 1000},
             {couchbase_changes_stream_batch_size, 200},
