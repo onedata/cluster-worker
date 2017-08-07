@@ -116,10 +116,10 @@ get(Connection, Requests) ->
             end, Responses);
         {error, etimedout} = E ->
             timeout(),
-            E;
+            [{Key, E} || Key <- Requests];
         {error, timeout} = E ->
             timeout(),
-            E;
+            [{Key, E} || Key <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || Key <- Requests]
     end.
@@ -139,10 +139,10 @@ delete(Connection, Requests) ->
             Responses;
         {error, etimedout} = E ->
             timeout(),
-            E;
+            [{Key, E} || {_, Key} <- Requests];
         {error, timeout} = E ->
             timeout(),
-            E;
+            [{Key, E} || {_, Key} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key} <- Requests]
     end.
@@ -355,10 +355,10 @@ store(Connection, Requests) ->
             Responses;
         {error, etimedout} = E ->
             timeout(),
-            E;
+            [{Key, E} || {_, Key, _, _, _, _} <- Requests];
         {error, timeout} = E ->
             timeout(),
-            E;
+            [{Key, E} || {_, Key, _, _, _, _} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
     end.
@@ -398,10 +398,10 @@ wait_durable(Connection, Requests) ->
             Responses;
         {error, etimedout} = E ->
             timeout(),
-            E;
+            [{Key, E} || {Key, _} <- Requests];
         {error, timeout} = E ->
             timeout(),
-            E;
+            [{Key, E} || {Key, _} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {Key, _} <- Requests]
     end.
@@ -482,7 +482,7 @@ timeout() ->
             NewSize = max(round(BS/2), MinBS),
             application:set_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, NewSize),
-            ?info("Decrease batch size to: ~p", NewSize),
+            ?info("Decrease batch size to: ~p", [NewSize]),
             save_modify_batch_size_time();
         _ ->
             ok
@@ -529,7 +529,7 @@ can_modify_batch_size() ->
         _ -> 0
     end,
 
-    MinDiff = (?OP_TIMEOUT + ?DUR_TIMEOUT) / 100,
+    MinDiff = (?OP_TIMEOUT + ?DUR_TIMEOUT) / 1000,
     (os:system_time(seconds) - LastMod) > MinDiff.
 
 %%--------------------------------------------------------------------
@@ -569,7 +569,7 @@ verify_batches_times(CheckList) ->
             NewSize = min(round(BS*2), MaxBS),
             application:set_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, NewSize),
-            ?info("Increase batch size to: ~p", NewSize),
+            ?info("Increase batch size to: ~p", [NewSize]),
             save_modify_batch_size_time();
         _ ->
             ok
