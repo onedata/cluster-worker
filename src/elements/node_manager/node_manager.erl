@@ -44,7 +44,7 @@
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0]).
+    cluster_worker_listeners/0, get_cluster_nodes_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -128,6 +128,7 @@ stop() ->
 %% Returns node's IP address.
 %% @end
 %%--------------------------------------------------------------------
+-spec get_ip_address() -> inet:ip4_address().
 get_ip_address() ->
     gen_server2:call(?NODE_MANAGER_NAME, get_ip_address).
 
@@ -139,6 +140,7 @@ get_ip_address() ->
 %%--------------------------------------------------------------------
 refresh_ip_address() ->
     gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
+
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -825,3 +827,14 @@ log_monitoring_stats(Format, Args) ->
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Fetch cluster nodes and their IPs from cluster manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_nodes_ips() ->
+    {ok, [{node(), inet:ip4_address()}]} | {error, cluster_not_ready}.
+get_cluster_nodes_ips() ->
+    gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).

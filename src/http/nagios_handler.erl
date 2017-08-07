@@ -272,10 +272,11 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 %%--------------------------------------------------------------------
 -spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
 check_cm(Timeout) ->
-    try gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout) of
-        {ok, Nodes} ->
+    try node_manager:get_cluster_nodes_ips() of
+        {ok, NodesIPs} ->
+            {Nodes, _} = lists:unzip(NodesIPs),
             Nodes;
-        {error, invalid_worker_num} ->
+        {error, cluster_not_ready} ->
             error
     catch
         exit:{noproc, _} ->
