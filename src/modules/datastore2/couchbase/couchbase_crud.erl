@@ -15,10 +15,14 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([save/2, get/2, delete/2]).
 -export([get_counter/3, update_counter/4]).
+
+% For tests
+-export([init_batch_size_check/1, timeout/0, execute_and_check_batch_size/3]).
 
 -type save_request() :: {couchbase_driver:ctx(), couchbase_driver:key(),
                          couchbase_driver:value()}.
@@ -58,6 +62,7 @@
 save(_Connection, []) ->
     [];
 save(Connection, Requests) ->
+    init_batch_size_check(Requests),
     CountByScope = count_by_scope(Requests),
     SeqsByScope = allocate_seq(Connection, CountByScope),
     SaveRequests = prepare_save_requests(SeqsByScope, Requests),
@@ -109,6 +114,12 @@ get(Connection, Requests) ->
                 ({Key, {error, Reason}}) ->
                     {Key, {error, Reason}}
             end, Responses);
+        {error, etimedout} = E ->
+            timeout(),
+            E;
+        {error, timeout} = E ->
+            timeout(),
+            E;
         {error, Reason} ->
             [{Key, {error, Reason}} || Key <- Requests]
     end.
@@ -126,6 +137,12 @@ delete(Connection, Requests) ->
     case cberl:bulk_remove(Connection, RemoveRequests, ?OP_TIMEOUT) of
         {ok, Responses} ->
             Responses;
+        {error, etimedout} = E ->
+            timeout(),
+            E;
+        {error, timeout} = E ->
+            timeout(),
+            E;
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key} <- Requests]
     end.
@@ -331,9 +348,17 @@ prepare_store(Requests) ->
 store(_Connection, []) ->
     [];
 store(Connection, Requests) ->
-    case cberl:bulk_store(Connection, Requests, ?OP_TIMEOUT) of
+    Ans = execute_and_check_batch_size(cberl, bulk_store,
+        [Connection, Requests, ?OP_TIMEOUT]),
+    case Ans of
         {ok, Responses} ->
             Responses;
+        {error, etimedout} = E ->
+            timeout(),
+            E;
+        {error, timeout} = E ->
+            timeout(),
+            E;
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
     end.
@@ -366,9 +391,17 @@ prepare_durable(Requests) ->
 wait_durable(_Connection, []) ->
     [];
 wait_durable(Connection, Requests) ->
-    case cberl:bulk_durability(Connection, Requests, {1, -1}, ?DUR_TIMEOUT) of
+    Ans = execute_and_check_batch_size(cberl, bulk_durability,
+        [Connection, Requests, {1, -1}, ?DUR_TIMEOUT]),
+    case Ans of
         {ok, Responses} ->
             Responses;
+        {error, etimedout} = E ->
+            timeout(),
+            E;
+        {error, timeout} = E ->
+            timeout(),
+            E;
         {error, Reason} ->
             [{Key, {error, Reason}} || {Key, _} <- Requests]
     end.
@@ -406,3 +439,138 @@ update_save_responses(Responses, SaveRequests) ->
             {Ctx, _Response} = maps:get(Key, SaveRequests2),
             maps:put(Key, {Ctx, {error, Reason}}, SaveRequests2)
     end, SaveRequests, Responses).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes batch size checking if batch size is appropriate.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_batch_size_check(list()) -> ok.
+init_batch_size_check(Requests) ->
+    BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size, 2000),
+    case length(Requests) of
+        BS ->
+            MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_max_batch_size, 2000),
+            case BS < MaxBS of
+                true ->
+                    put(batch_size_check, []);
+                _ ->
+                    put(batch_size_check, false)
+            end;
+        _ ->
+            put(batch_size_check, false)
+    end,
+    ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Decreases batch size as a result of timeout.
+%% @end
+%%--------------------------------------------------------------------
+-spec timeout() -> ok.
+timeout() ->
+    case can_modify_batch_size() of
+        true ->
+            BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_batch_size, 2000),
+            MinBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_min_batch_size, 250),
+            NewSize = max(round(BS/2), MinBS),
+            application:set_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_batch_size, NewSize),
+            ?info("Decrease batch size to: ~p", NewSize),
+            save_modify_batch_size_time();
+        _ ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Executes function, analysis its execution and increases batch size if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec execute_and_check_batch_size(Module, Function, Args) -> term() when
+    Module :: module(),
+    Function :: atom(),
+    Args :: [term()].
+execute_and_check_batch_size(Module, Fun, Args) ->
+    case get(batch_size_check) of
+        false ->
+            erlang:apply(Module, Fun, Args);
+        CheckList ->
+            {Time, Ans} = timer:tc(Module, Fun, Args),
+            CheckList2 = [(Time / 1000) | CheckList],
+            put(batch_size_check, CheckList2),
+            case length(CheckList2) of
+                4 ->
+                    verify_batches_times(CheckList2);
+                _ ->
+                    ok
+            end,
+            Ans
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if batch size can be modified.
+%% @end
+%%--------------------------------------------------------------------
+-spec can_modify_batch_size() -> boolean().
+can_modify_batch_size() ->
+    LastMod = case application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size_check_time) of
+        {ok, T} -> T;
+        _ -> 0
+    end,
+
+    MinDiff = (?OP_TIMEOUT + ?DUR_TIMEOUT) / 100,
+    (os:system_time(seconds) - LastMod) > MinDiff.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves batch modification time.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_modify_batch_size_time() -> ok.
+save_modify_batch_size_time() ->
+    T = os:system_time(seconds),
+    application:set_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size_check_time, T).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Verifies if batch processing times allow increase of batch size and
+%% increases it if possible.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_batches_times(list()) -> ok.
+verify_batches_times(CheckList) ->
+    Ans = lists:foldl(fun
+        (_T, false) ->
+            false;
+        (T, _Acc) ->
+            T =< (min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4)
+    end, true, CheckList),
+
+    case {Ans, can_modify_batch_size()} of
+        {true, true} ->
+            BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_batch_size, 2000),
+            MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_max_batch_size, 2000),
+            NewSize = min(round(BS*2), MaxBS),
+            application:set_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_batch_size, NewSize),
+            ?info("Increase batch size to: ~p", NewSize),
+            save_modify_batch_size_time();
+        _ ->
+            ok
+    end.

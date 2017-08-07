@@ -38,6 +38,9 @@
 
 -type state() :: #state{}.
 
+-define(ERROR_SLEEP_TIME, 2 * application:get_env(?CLUSTER_WORKER_APP_NAME,
+    couchbase_operation_timeout, 60000)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -195,6 +198,7 @@ delete_internal_docs(#state{batch_begin = Beg, batch_end = End, bucket = Bucket,
             E1:E2 ->
                 ?error_stacktrace("Clearing changes old documents error: ~p:~p",
                     [E1, E2]),
+                timer:sleep(?ERROR_SLEEP_TIME),
                 ok = gen_server:cast(Pid, processing_finished)
         end
     end),

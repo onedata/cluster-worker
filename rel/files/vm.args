@@ -23,6 +23,15 @@
 ## Configure schedulers
 ## +S 32:32
 ## +SDcpu 16:8
-+sfwi 500
++K true
+## +sfwi 500
++stbt db
++sbwt none
 ## +scl false
 ## +sub true
+
+## Enable Symmetric Multiprocessing
+-smp enable
+
+## Set default heap size (256 MB with 8byte word)
+## +hmax 33554432

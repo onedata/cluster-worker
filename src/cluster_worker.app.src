@@ -57,15 +57,15 @@
             %% Number of tp processes to reduce tp process idle time
             {throttling_reduce_idle_time_memory_proc_number, 1000},
             %% Number of tp processes to introduce delay
-            {throttling_start_memory_proc_number, 30000},
+            {throttling_start_memory_proc_number, 100000},
             %% Number of tp processes to start throttling
-            {throttling_max_memory_proc_number, 150000},
+            {throttling_max_memory_proc_number, 200000},
             %% Number of tp processes allowed when throttling blocks actions
             {throttling_block_memory_proc_number, 150000},
             %% Size of couch queue to start throttling
-            {throttling_db_queue_limit, 50000},
+            {throttling_db_queue_limit, 150000},
             %% Size of couch queue to introduce delay
-            {throttling_delay_db_queue_size, 1000},
+            {throttling_delay_db_queue_size, 80000},
             %% Base time for throttling
             {throttling_base_time_ms, 16},
             %% Maximum throttling time
@@ -106,7 +106,7 @@
             %% Minimal idle time of memory store process
             {memory_store_min_idle_timeout_ms, 100},
             %% Time between flush operations after fail
-            {memory_store_flush_error_suspension_ms, 60000},
+            {memory_store_flush_error_suspension_ms, 10000},
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 5},
             %% Heap size limit for changes stream (it works all the time and must be limited)
@@ -220,7 +220,7 @@
             {couchbase_pool_operation_timeout, 1800000},
             {couchbase_operation_timeout, 60000},
             {couchbase_view_timeout, 120000},
-            {couchbase_durability_interval, 5},
+            {couchbase_durability_interval, 500},
             {couchbase_durability_timeout, 60000},
             {couchbase_http_timeout, 60000},
             {couchbase_pool_size, [
@@ -231,7 +231,7 @@
                 ]}
             ]},
             {couchbase_pool_batch_size, 1000},
-            {couchbase_changes_batch_size, 100},
+            {couchbase_changes_batch_size, 200},
             {couchbase_changes_update_interval, 1000},
             {couchbase_changes_stream_batch_size, 200},
             {couchbase_changes_stream_update_interval, 1000}

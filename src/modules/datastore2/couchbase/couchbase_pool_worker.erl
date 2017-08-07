@@ -43,7 +43,6 @@
     mode :: couchbase_pool:mode(),
     id :: id(),
     requests_queue :: queue:queue(request()),
-    batch_size :: non_neg_integer(),
     connection :: cberl:connection()
 }).
 
@@ -95,8 +94,6 @@ init([Bucket, Mode, Id, DbHosts]) ->
         mode = Mode,
         id = Id,
         requests_queue = queue:new(),
-        batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_pool_batch_size, 50),
         connection = Connection
     }}.
 
@@ -198,7 +195,7 @@ get_connect_opts() ->
         {operation_timeout, couchbase_operation_timeout, timer:seconds(60)},
         {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
         {view_timeout, couchbase_view_timeout, timer:seconds(120)},
-        {durability_interval, couchbase_durability_interval, 5},
+        {durability_interval, couchbase_durability_interval, 500},
         {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
         {http_timeout, couchbase_http_timeout, timer:seconds(60)}
     ]).
@@ -210,7 +207,9 @@ get_connect_opts() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec process_requests(state()) -> state().
-process_requests(#state{batch_size = Size} = State) ->
+process_requests(State) ->
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size, 2000),
     State2 = receive_pending_requests(State),
     #state{requests_queue = Queue} = State2,
     {Requests, Queue2} = dequeue(Size, Queue, []),

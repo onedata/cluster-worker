@@ -694,10 +694,13 @@ select_scope_related_link(LinkName, RequestedScope, VHash, Targets) ->
 %%--------------------------------------------------------------------
 -spec get_link_child_num(datastore:link_name(), LinkDocKey :: datastore:ext_key()) -> integer().
 get_link_child_num(LinkName, LinkDocKey) ->
-    LinkNameId = binary:decode_unsigned(crypto:hash(md5, term_to_binary(LinkName))),
+    LinkNameIdBin = crypto:hash(md5, term_to_binary(LinkName)),
+    LinkNameId = binary:decode_unsigned(LinkNameIdBin),
     LinkDocKeyId = binary:decode_unsigned(crypto:hash(md5, term_to_binary(LinkDocKey))),
 
-    (LinkNameId bxor LinkDocKeyId) rem ?LINKS_TREE_BASE.
+    Shift = LinkDocKeyId rem min(size(LinkNameIdBin) * 8 - 10, 64),
+
+    (LinkNameId bsr Shift) rem ?LINKS_TREE_BASE.
 
 %%--------------------------------------------------------------------
 %% @private
