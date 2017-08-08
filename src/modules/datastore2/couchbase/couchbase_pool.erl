@@ -18,6 +18,7 @@
 -export([post_async/3, post/3, wait/1]).
 -export([get_timeout/0, get_modes/0, get_size/2]).
 -export([get_request_queue_size/1, get_request_queue_size/2,
+    get_max_worker_queue_size/1, get_max_worker_queue_size/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
 
 -type mode() :: changes | read | write.
@@ -134,6 +135,30 @@ get_request_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
         Key = {request_queue_size, Bucket, Mode, Id},
         Size + ets:lookup_element(couchbase_pool_stats, Key, 2)
+    end, 0, lists:seq(1, get_size(Bucket, Mode))).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns maximal queue size for given bucket and all modes.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_max_worker_queue_size(couchbase_config:bucket()) -> non_neg_integer().
+get_max_worker_queue_size(Bucket) ->
+    lists:foldl(fun(Mode, Size) ->
+        max(Size, get_request_queue_size(Bucket, Mode))
+    end, 0, get_modes()).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns maximal queue size for given bucket and mode.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_max_worker_queue_size(couchbase_config:bucket(), mode()) ->
+    non_neg_integer().
+get_max_worker_queue_size(Bucket, Mode) ->
+    lists:foldl(fun(Id, Size) ->
+        Key = {request_queue_size, Bucket, Mode, Id},
+        max(Size, ets:lookup_element(couchbase_pool_stats, Key, 2))
     end, 0, lists:seq(1, get_size(Bucket, Mode))).
 
 %%--------------------------------------------------------------------

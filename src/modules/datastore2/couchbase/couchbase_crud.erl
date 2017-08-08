@@ -111,6 +111,9 @@ get(Connection, Requests) ->
                     end;
                 ({Key, {ok, Cas, Value}}) ->
                     {Key, {ok, Cas, Value}};
+                ({Key, {error, etimedout}}) ->
+                    timeout(),
+                    {Key, {error, etimedout}};
                 ({Key, {error, Reason}}) ->
                     {Key, {error, Reason}}
             end, Responses);
@@ -136,6 +139,12 @@ delete(Connection, Requests) ->
     RemoveRequests = [{Key, maps:get(cas, Ctx, 0)} || {Ctx, Key} <- Requests],
     case cberl:bulk_remove(Connection, RemoveRequests, ?OP_TIMEOUT) of
         {ok, Responses} ->
+            lists:foreach(fun
+                ({Key, {error, etimedout}}) ->
+                    timeout();
+                (_) ->
+                    ok
+            end, Responses),
             Responses;
         {error, etimedout} = E ->
             timeout(),
@@ -352,6 +361,12 @@ store(Connection, Requests) ->
         [Connection, Requests, ?OP_TIMEOUT]),
     case Ans of
         {ok, Responses} ->
+            lists:foreach(fun
+                ({Key, {error, etimedout}}) ->
+                    timeout();
+                (_) ->
+                    ok
+            end, Responses),
             Responses;
         {error, etimedout} = E ->
             timeout(),
@@ -395,6 +410,12 @@ wait_durable(Connection, Requests) ->
         [Connection, Requests, {1, -1}, ?DUR_TIMEOUT]),
     case Ans of
         {ok, Responses} ->
+            lists:foreach(fun
+                ({Key, {error, etimedout}}) ->
+                    timeout();
+                (_) ->
+                    ok
+            end, Responses),
             Responses;
         {error, etimedout} = E ->
             timeout(),
@@ -473,6 +494,7 @@ init_batch_size_check(Requests) ->
 %%--------------------------------------------------------------------
 -spec timeout() -> ok.
 timeout() ->
+    ?info("Couchbase crud timeout - batch size checking"),
     case can_modify_batch_size() of
         true ->
             BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -571,6 +593,9 @@ verify_batches_times(CheckList) ->
                 couchbase_pool_batch_size, NewSize),
             ?info("Increase batch size to: ~p", [NewSize]),
             save_modify_batch_size_time();
+        {true, _} ->
+            ?info("Couchbase crud max batch size write checking"),
+            ok;
         _ ->
             ok
     end.

@@ -395,11 +395,11 @@ verify_tp() ->
     ReadDBAction :: non_neg_integer(), ReadQueueSize :: non_neg_integer()}.
 verify_db() ->
   QueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_request_queue_size(Bucket) + Acc
+    couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
   end, 0, couchbase_config:get_buckets()),
 
   ReadQueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_request_queue_size(Bucket, read) + Acc
+    couchbase_pool:get_max_worker_queue_size(Bucket, read) + Acc
   end, 0, couchbase_config:get_buckets()),
 
   DBAction = get_db_action(QueueSize),
