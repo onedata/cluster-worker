@@ -471,12 +471,12 @@ update_save_responses(Responses, SaveRequests) ->
 init_batch_size_check(Requests) ->
     BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 2000),
-    case length(Requests) of
-        BS ->
-            MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_max_batch_size, 2000),
-            case BS < MaxBS of
-                true ->
+    MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_max_batch_size, 2000),
+    case BS < MaxBS of
+        true ->
+            case length(Requests) of
+                BS ->
                     put(batch_size_check, []);
                 _ ->
                     put(batch_size_check, false)
@@ -545,12 +545,8 @@ execute_and_check_batch_size(Module, Fun, Args) ->
 %%--------------------------------------------------------------------
 -spec can_modify_batch_size() -> boolean().
 can_modify_batch_size() ->
-    LastMod = case application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size_check_time) of
-        {ok, T} -> T;
-        _ -> 0
-    end,
-
+    LastMod = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size_check_time, 0),
     MinDiff = (?OP_TIMEOUT + ?DUR_TIMEOUT) / 1000,
     (os:system_time(seconds) - LastMod) > MinDiff.
 

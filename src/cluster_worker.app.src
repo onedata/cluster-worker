@@ -63,17 +63,17 @@
             %% Number of tp processes allowed when throttling blocks actions
             {throttling_block_memory_proc_number, 150000},
             %% Size of couch queue to start throttling
-            {throttling_db_queue_limit, 20000},
+            {throttling_db_queue_limit, 30000},
             %% Size of couch queue to introduce delay
-            {throttling_delay_db_queue_size, 8000},
+            {throttling_delay_db_queue_size, 10000},
             %% Base time for throttling
             {throttling_base_time_ms, 16},
             %% Maximum throttling time
             {throttling_max_time_ms, 2048},
             %% Interval of throttling configuration when throttling is used
-            {throttling_active_check_interval_seconds, 15},
+            {throttling_active_check_interval_seconds, 5},
             %% Interval of throttling configuration
-            {throttling_check_interval_seconds, 15},
+            {throttling_check_interval_seconds, 5},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB
