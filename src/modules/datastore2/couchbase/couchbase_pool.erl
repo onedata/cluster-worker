@@ -145,7 +145,7 @@ get_request_queue_size(Bucket, Mode) ->
 -spec get_max_worker_queue_size(couchbase_config:bucket()) -> non_neg_integer().
 get_max_worker_queue_size(Bucket) ->
     lists:foldl(fun(Mode, Size) ->
-        max(Size, get_request_queue_size(Bucket, Mode))
+        max(Size, get_max_worker_queue_size(Bucket, Mode))
     end, 0, get_modes()).
 
 %%--------------------------------------------------------------------

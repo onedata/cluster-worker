@@ -403,12 +403,15 @@ prepare_durable(Requests) ->
 %%--------------------------------------------------------------------
 -spec wait_durable(cberl:connection(), [cberl:durability_request()]) ->
     [cberl:durability_response()].
-wait_durable(_Connection, []) ->
-    [];
 wait_durable(Connection, Requests) ->
+    wait_durable(Connection, Requests, 5).
+wait_durable(_Connection, [], _) ->
+    [];
+wait_durable(Connection, Requests, Num) ->
+    put(timeout, false),
     Ans = execute_and_check_batch_size(cberl, bulk_durability,
         [Connection, Requests, {1, -1}, ?DUR_TIMEOUT]),
-    case Ans of
+    A = case Ans of
         {ok, Responses} ->
             lists:foreach(fun
                 ({Key, {error, etimedout}}) ->
@@ -425,6 +428,13 @@ wait_durable(Connection, Requests) ->
             [{Key, E} || {Key, _} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {Key, _} <- Requests]
+    end,
+
+    case get(timeout) of
+        true when Num > 1 ->
+            wait_durable(Connection, Requests, Num - 1);
+        _ ->
+            A
     end.
 
 %%--------------------------------------------------------------------
@@ -495,6 +505,7 @@ init_batch_size_check(Requests) ->
 -spec timeout() -> ok.
 timeout() ->
     ?info("Couchbase crud timeout - batch size checking"),
+    put(timeout, true),
     case can_modify_batch_size() of
         true ->
             BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -526,7 +537,7 @@ execute_and_check_batch_size(Module, Fun, Args) ->
             erlang:apply(Module, Fun, Args);
         CheckList ->
             {Time, Ans} = timer:tc(Module, Fun, Args),
-            CheckList2 = [(Time / 1000) | CheckList],
+            CheckList2 = [(Time / 500) | CheckList],
             put(batch_size_check, CheckList2),
             case length(CheckList2) of
                 4 ->
