@@ -354,7 +354,7 @@ prepare_store(Requests) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec store(cberl:connection(), [cberl:store_request()]) ->
-    [cberl:store_response()].
+    {Time :: non_neg_integer(), [cberl:store_response()]}.
 store(_Connection, []) ->
     {0, []};
 store(Connection, Requests) ->
@@ -366,7 +366,7 @@ store(Connection, Requests) ->
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
     end,
-    {(Time / 1000), FinalAns}.
+    {round(Time / 1000), FinalAns}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -392,7 +392,7 @@ prepare_durable(Requests) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec wait_durable(cberl:connection(), [cberl:durability_request()]) ->
-    [cberl:durability_response()].
+    {Time :: non_neg_integer(), [cberl:durability_response()]}.
 wait_durable(_Connection, []) ->
     {0, []};
 wait_durable(Connection, Requests) ->
@@ -404,7 +404,7 @@ wait_durable(Connection, Requests) ->
         {error, Reason} ->
             [{Key, {error, Reason}} || {Key, _} <- Requests]
     end,
-    {(Time / 1000), FinalAns}.
+    {round(Time / 1000), FinalAns}.
 
 %%--------------------------------------------------------------------
 %% @private

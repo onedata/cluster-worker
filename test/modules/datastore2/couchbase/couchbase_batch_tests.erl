@@ -97,6 +97,11 @@ validate_size_increase() ->
         couchbase_pool_batch_size, undefined)),
 
     ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(200),
+      [4, 0, 1, 5], [ok, ok, timeout, ok])),
+    ?assertEqual(200, application:get_env(?CLUSTER_WORKER_APP_NAME,
+      couchbase_pool_batch_size, undefined)),
+
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(200),
         [4, 0, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(400, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),

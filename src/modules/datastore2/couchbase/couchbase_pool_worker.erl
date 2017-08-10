@@ -374,7 +374,7 @@ handle_batch_save(Connection, Requests) ->
 %%--------------------------------------------------------------------
 -spec wait_for_batch(cberl:connection(), [couchbase_crud:save_request()],
     PrepareFun :: atom(), DoRequestFun :: atom()) ->
-    [couchbase_crud:save_response()].
+  {ok | timeout, non_neg_integer(), [couchbase_crud:save_requests_map()]}.
 wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun) ->
     wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, 5).
 
@@ -386,15 +386,17 @@ wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun) ->
 %%--------------------------------------------------------------------
 -spec wait_for_batch(cberl:connection(), [couchbase_crud:save_request()],
     PrepareFun :: atom(), DoRequestFun :: atom(), Num :: non_neg_integer()) ->
-    [couchbase_crud:save_response()].
+  {ok | timeout, non_neg_integer(), [couchbase_crud:save_requests_map()]}.
 wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num) ->
     {Time, SaveRequests} = apply(couchbase_crud, DoRequestFun,
         [Connection, SaveRequests, wait_durable, PrepareFun]),
     case couchbase_batch:analyse_answer(SaveRequests) of
         timeout when Num > 1 ->
             wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num - 1);
-        AnalyseAns ->
-            {AnalyseAns, Time, SaveRequests}
+        ok when Num =:= 5 ->
+            {ok, Time, SaveRequests};
+        _ ->
+            {timeout, Time, SaveRequests}
     end.
 
 %%--------------------------------------------------------------------
