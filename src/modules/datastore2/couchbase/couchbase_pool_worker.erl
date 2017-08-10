@@ -372,9 +372,9 @@ handle_batch_save(Connection, Requests) ->
 %% Waits for batch durability.
 %% @end
 %%--------------------------------------------------------------------
--spec wait_for_batch(cberl:connection(), [couchbase_crud:save_request()],
+-spec wait_for_batch(cberl:connection(), couchbase_crud:save_requests_map(),
     PrepareFun :: atom(), DoRequestFun :: atom()) ->
-  {ok | timeout, non_neg_integer(), [couchbase_crud:save_requests_map()]}.
+  {ok | timeout, non_neg_integer(), couchbase_crud:save_requests_map()}.
 wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun) ->
     wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, 5).
 
@@ -384,19 +384,19 @@ wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun) ->
 %% Waits for batch durability.
 %% @end
 %%--------------------------------------------------------------------
--spec wait_for_batch(cberl:connection(), [couchbase_crud:save_request()],
+-spec wait_for_batch(cberl:connection(), couchbase_crud:save_requests_map(),
     PrepareFun :: atom(), DoRequestFun :: atom(), Num :: non_neg_integer()) ->
-  {ok | timeout, non_neg_integer(), [couchbase_crud:save_requests_map()]}.
+  {ok | timeout, non_neg_integer(), couchbase_crud:save_requests_map()}.
 wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num) ->
-    {Time, SaveRequests} = apply(couchbase_crud, DoRequestFun,
+    {Time, SaveRequests2} = apply(couchbase_crud, DoRequestFun,
         [Connection, SaveRequests, wait_durable, PrepareFun]),
-    case couchbase_batch:analyse_answer(SaveRequests) of
+    case couchbase_batch:analyse_answer(SaveRequests2) of
         timeout when Num > 1 ->
             wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num - 1);
         ok when Num =:= 5 ->
-            {ok, Time, SaveRequests};
+            {ok, Time, SaveRequests2};
         _ ->
-            {timeout, Time, SaveRequests}
+            {timeout, Time, SaveRequests2}
     end.
 
 %%--------------------------------------------------------------------

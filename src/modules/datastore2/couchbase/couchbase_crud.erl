@@ -71,8 +71,8 @@ init_save(Connection, Requests) ->
 %% Does requests to couch.
 %% @end
 %%--------------------------------------------------------------------
--spec do_requests(cberl:connection(), [cberl:store_request()] |
-    [cberl:durability_request()], RequestFun :: atom(), PrepareFun :: atom()) ->
+-spec do_requests(cberl:connection(), save_requests_map(),
+    RequestFun :: atom(), PrepareFun :: atom()) ->
     {Time :: non_neg_integer(), save_requests_map()}.
 do_requests(Connection, Requests, RequestFun, PrepareFun) ->
     {Requests2, ForUpdate} = case  apply(?MODULE, PrepareFun, [Requests]) of
@@ -88,14 +88,14 @@ do_requests(Connection, Requests, RequestFun, PrepareFun) ->
 %% Does requests about seq numbers to couch.
 %% @end
 %%--------------------------------------------------------------------
--spec do_change_requests(cberl:connection(), [cberl:store_request()] |
-    [cberl:durability_request()], RequestFun :: atom(), PrepareFun :: atom()) ->
+-spec do_change_requests(cberl:connection(), save_requests_map(),
+    RequestFun :: atom(), PrepareFun :: atom()) ->
     {Time :: non_neg_integer(), save_requests_map()}.
-do_change_requests(Connection, Requests, SaveFun, PrepareFun) ->
+do_change_requests(Connection, Requests, RequestFun, PrepareFun) ->
     {ChangeRequests, ChangeKeys} =
         apply(?MODULE, PrepareFun, [Requests]),
     {Time, ChangeResponses} =
-        apply(?MODULE, SaveFun, [Connection, ChangeRequests]),
+        apply(?MODULE, RequestFun, [Connection, ChangeRequests]),
     ChangeResponses2 = replace_change_keys(ChangeKeys, ChangeResponses),
     {Time, update_save_responses(ChangeResponses2, Requests)}.
 
@@ -182,6 +182,150 @@ update_counter(Connection, Key, Delta, Default) ->
     cberl:arithmetic(Connection, Key, Delta, Default, 0, ?OP_TIMEOUT).
 
 %%%===================================================================
+%%% Exported for apply
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Prepares bulk store request for change documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_change_store(save_requests_map()) ->
+    {[cberl:store_request()], change_key_map()}.
+prepare_change_store(Requests) ->
+    maps:fold(fun
+        (_Key, {_, {error, _}}, {ChangeStoreRequests, ChangeKeys}) ->
+            {ChangeStoreRequests, ChangeKeys};
+        (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
+            {ChangeStoreRequests, ChangeKeys};
+        (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
+            #document{scope = Scope, seq = Seq} = Doc,
+            ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
+            Json = jiffy:encode({[
+                {<<"key">>, Key},
+                {<<"pid">>, base64:encode(term_to_binary(self()))}
+            ]}),
+            {
+                [{set, ChangeKey, Json, raw, 0, 0} | ChangeStoreRequests],
+                maps:put(ChangeKey, Key, ChangeKeys)
+            };
+        (_Key, {_, _}, {ChangeStoreRequests, ChangeKeys}) ->
+            {ChangeStoreRequests, ChangeKeys}
+    end, {[], #{}}, Requests).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Prepares bulk durability check request for change documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_change_durable(save_requests_map()) ->
+    {[cberl:durability_request()], change_key_map()}.
+prepare_change_durable(Requests) ->
+    maps:fold(fun
+        (_Key, {_, {error, _}}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys};
+        (_Key, {#{no_seq := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys};
+        (_Key, {#{no_durability := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys};
+        (Key, {_, {ok, Cas, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
+            #document{scope = Scope, seq = Seq} = Doc,
+            ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
+            {
+                [{ChangeKey, Cas} | ChangeDurableRequests],
+                maps:put(ChangeKey, Key, ChangeKeys)
+            };
+        (_Key, {_, _}, {ChangeDurableRequests, ChangeKeys}) ->
+            {ChangeDurableRequests, ChangeKeys}
+    end, {[], #{}}, Requests).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Prepares bulk store request and future save responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_store(save_requests_map()) ->
+    {[cberl:store_request()], save_requests_map()}.
+prepare_store(Requests) ->
+    maps:fold(fun
+        (Key, {_, {error, _Reason}} = Request, {StoreRequests, Requests2}) ->
+            {
+                StoreRequests,
+                maps:put(Key, Request, Requests2)
+            };
+        (Key, {Ctx, {ok, _, Doc = #document{}}}, {StoreRequests, Requests2}) ->
+            Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
+            {Doc3, EJson} = couchbase_doc:set_next_rev(Ctx, Doc2),
+            Cas = maps:get(cas, Ctx, 0),
+            {
+                [{set, Key, EJson, json, Cas, 0} | StoreRequests],
+                maps:put(Key, {Ctx, {ok, Cas, Doc3}}, Requests2)
+            };
+        (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Responses}) ->
+            Cas = maps:get(cas, Ctx, 0),
+            {
+                [{set, Key, Value, json, Cas, 0} | StoreRequests],
+                maps:put(Key, {Ctx, {ok, Cas, Value}}, Responses)
+            }
+    end, {[], #{}}, Requests).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes bulk store request.
+%% @end
+%%--------------------------------------------------------------------
+-spec store(cberl:connection(), [cberl:store_request()]) ->
+    {Time :: non_neg_integer(), [cberl:store_response()]}.
+store(_Connection, []) ->
+    {0, []};
+store(Connection, Requests) ->
+    {Time, Ans} = timer:tc(cberl, bulk_store,
+        [Connection, Requests, ?OP_TIMEOUT]),
+    FinalAns = case Ans of
+        {ok, Responses} ->
+            Responses;
+        {error, Reason} ->
+            [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
+    end,
+    {round(Time / 1000), FinalAns}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Prepares bulk durability check request.
+%% @end
+%%--------------------------------------------------------------------
+-spec prepare_durable(save_requests_map()) -> [cberl:durability_request()].
+prepare_durable(Requests) ->
+    maps:fold(fun
+        (_Key, {_, {error, _}}, DurableRequests) ->
+            DurableRequests;
+        (_Key, {#{no_durability := true}, _}, DurableRequests) ->
+            DurableRequests;
+        (Key, {_, {ok, Cas, _}}, DurableRequests) ->
+            [{Key, Cas} | DurableRequests]
+    end, [], Requests).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes bulk durability check request.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_durable(cberl:connection(), [cberl:durability_request()]) ->
+    {Time :: non_neg_integer(), [cberl:durability_response()]}.
+wait_durable(_Connection, []) ->
+    {0, []};
+wait_durable(Connection, Requests) ->
+    {Time, Ans} = timer:tc(cberl, bulk_durability,
+        [Connection, Requests, {1, -1}, ?DUR_TIMEOUT]),
+    FinalAns = case Ans of
+        {ok, Responses} ->
+            Responses;
+        {error, Reason} ->
+            [{Key, {error, Reason}} || {Key, _} <- Requests]
+    end,
+    {round(Time / 1000), FinalAns}.
+
+%%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
@@ -259,152 +403,6 @@ prepare_save_requests(SeqsByScope, Requests) ->
             {SeqsByScope2, maps:put(Key, {Ctx, {ok, 0, Value}}, Requests2)}
     end, {SeqsByScope, #{}}, Requests),
     Requests3.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Prepares bulk store request for change documents.
-%% @end
-%%--------------------------------------------------------------------
--spec prepare_change_store(save_requests_map()) ->
-    {[cberl:store_request()], change_key_map()}.
-prepare_change_store(Requests) ->
-    maps:fold(fun
-        (_Key, {_, {error, _}}, {ChangeStoreRequests, ChangeKeys}) ->
-            {ChangeStoreRequests, ChangeKeys};
-        (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
-            {ChangeStoreRequests, ChangeKeys};
-        (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
-            #document{scope = Scope, seq = Seq} = Doc,
-            ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
-            Json = jiffy:encode({[
-                {<<"key">>, Key},
-                {<<"pid">>, base64:encode(term_to_binary(self()))}
-            ]}),
-            {
-                [{set, ChangeKey, Json, raw, 0, 0} | ChangeStoreRequests],
-                maps:put(ChangeKey, Key, ChangeKeys)
-            };
-        (_Key, {_, _}, {ChangeStoreRequests, ChangeKeys}) ->
-            {ChangeStoreRequests, ChangeKeys}
-    end, {[], #{}}, Requests).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Prepares bulk durability check request for change documents.
-%% @end
-%%--------------------------------------------------------------------
--spec prepare_change_durable(save_requests_map()) ->
-    {[cberl:durability_request()], change_key_map()}.
-prepare_change_durable(Requests) ->
-    maps:fold(fun
-        (_Key, {_, {error, _}}, {ChangeDurableRequests, ChangeKeys}) ->
-            {ChangeDurableRequests, ChangeKeys};
-        (_Key, {#{no_seq := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
-            {ChangeDurableRequests, ChangeKeys};
-        (_Key, {#{no_durability := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
-            {ChangeDurableRequests, ChangeKeys};
-        (Key, {_, {ok, Cas, Doc = #document{}}}, {ChangeDurableRequests, ChangeKeys}) ->
-            #document{scope = Scope, seq = Seq} = Doc,
-            ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
-            {
-                [{ChangeKey, Cas} | ChangeDurableRequests],
-                maps:put(ChangeKey, Key, ChangeKeys)
-            };
-        (_Key, {_, _}, {ChangeDurableRequests, ChangeKeys}) ->
-            {ChangeDurableRequests, ChangeKeys}
-    end, {[], #{}}, Requests).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Prepares bulk store request and future save responses.
-%% @end
-%%--------------------------------------------------------------------
--spec prepare_store(save_requests_map()) ->
-    {[cberl:store_request()], save_requests_map()}.
-prepare_store(Requests) ->
-    maps:fold(fun
-        (Key, {_, {error, _Reason}} = Request, {StoreRequests, Requests2}) ->
-            {
-                StoreRequests,
-                maps:put(Key, Request, Requests2)
-            };
-        (Key, {Ctx, {ok, _, Doc = #document{}}}, {StoreRequests, Requests2}) ->
-            Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
-            {Doc3, EJson} = couchbase_doc:set_next_rev(Ctx, Doc2),
-            Cas = maps:get(cas, Ctx, 0),
-            {
-                [{set, Key, EJson, json, Cas, 0} | StoreRequests],
-                maps:put(Key, {Ctx, {ok, Cas, Doc3}}, Requests2)
-            };
-        (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Responses}) ->
-            Cas = maps:get(cas, Ctx, 0),
-            {
-                [{set, Key, Value, json, Cas, 0} | StoreRequests],
-                maps:put(Key, {Ctx, {ok, Cas, Value}}, Responses)
-            }
-    end, {[], #{}}, Requests).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Executes bulk store request.
-%% @end
-%%--------------------------------------------------------------------
--spec store(cberl:connection(), [cberl:store_request()]) ->
-    {Time :: non_neg_integer(), [cberl:store_response()]}.
-store(_Connection, []) ->
-    {0, []};
-store(Connection, Requests) ->
-    {Time, Ans} = timer:tc(cberl, bulk_store,
-        [Connection, Requests, ?OP_TIMEOUT]),
-    FinalAns = case Ans of
-        {ok, Responses} ->
-            Responses;
-        {error, Reason} ->
-            [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
-    end,
-    {round(Time / 1000), FinalAns}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Prepares bulk durability check request.
-%% @end
-%%--------------------------------------------------------------------
--spec prepare_durable(save_requests_map()) -> [cberl:durability_request()].
-prepare_durable(Requests) ->
-    maps:fold(fun
-        (_Key, {_, {error, _}}, DurableRequests) ->
-            DurableRequests;
-        (_Key, {#{no_durability := true}, _}, DurableRequests) ->
-            DurableRequests;
-        (Key, {_, {ok, Cas, _}}, DurableRequests) ->
-            [{Key, Cas} | DurableRequests]
-    end, [], Requests).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Executes bulk durability check request.
-%% @end
-%%--------------------------------------------------------------------
--spec wait_durable(cberl:connection(), [cberl:durability_request()]) ->
-    {Time :: non_neg_integer(), [cberl:durability_response()]}.
-wait_durable(_Connection, []) ->
-    {0, []};
-wait_durable(Connection, Requests) ->
-    {Time, Ans} = timer:tc(cberl, bulk_durability,
-        [Connection, Requests, {1, -1}, ?DUR_TIMEOUT]),
-    FinalAns = case Ans of
-        {ok, Responses} ->
-            Responses;
-        {error, Reason} ->
-            [{Key, {error, Reason}} || {Key, _} <- Requests]
-    end,
-    {round(Time / 1000), FinalAns}.
 
 %%--------------------------------------------------------------------
 %% @private
