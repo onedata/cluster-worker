@@ -15,14 +15,15 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
--export([save/2, get/2, delete/2]).
+-export([get/2, delete/2]).
+-export([init_save/2, do_requests/4, do_change_requests/4, finish_save/1]).
 -export([get_counter/3, update_counter/4]).
-
-% For tests
--export([init_batch_size_check/1, timeout/0, execute_and_check_batch_size/3]).
+% For apply
+-export([store/2, wait_durable/2]).
+-export([prepare_change_store/1, prepare_store/1,
+    prepare_durable/1, prepare_change_durable/1]).
 
 -type save_request() :: {couchbase_driver:ctx(), couchbase_driver:key(),
                          couchbase_driver:value()}.
@@ -55,39 +56,60 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves key-value pairs in a database.
+%% Initializes save operation allocating seqs and preparing requests.
 %% @end
 %%--------------------------------------------------------------------
--spec save(cberl:connection(), [save_request()]) -> [save_response()].
-save(_Connection, []) ->
-    [];
-save(Connection, Requests) ->
-    init_batch_size_check(Requests),
+-spec init_save(cberl:connection(), [save_request()]) ->
+    save_requests_map().
+init_save(Connection, Requests) ->
     CountByScope = count_by_scope(Requests),
     SeqsByScope = allocate_seq(Connection, CountByScope),
-    SaveRequests = prepare_save_requests(SeqsByScope, Requests),
+    prepare_save_requests(SeqsByScope, Requests).
 
-    {ChangeStoreRequests, ChangeKeys} = prepare_change_store(SaveRequests),
-    ChangeStoreResponses = store(Connection, ChangeStoreRequests),
-    ChangeStoreResponses2 = replace_change_keys(ChangeKeys, ChangeStoreResponses),
-    SaveRequests2 = update_save_responses(ChangeStoreResponses2, SaveRequests),
+%%--------------------------------------------------------------------
+%% @doc
+%% Does requests to couch.
+%% @end
+%%--------------------------------------------------------------------
+-spec do_requests(cberl:connection(), [cberl:store_request()] |
+    [cberl:durability_request()], RequestFun :: atom(), PrepareFun :: atom()) ->
+    {Time :: non_neg_integer(), save_requests_map()}.
+do_requests(Connection, Requests, RequestFun, PrepareFun) ->
+    {Requests2, ForUpdate} = case  apply(?MODULE, PrepareFun, [Requests]) of
+        {R, FU} -> {R, FU};
+        R -> {R, Requests}
+    end,
+    {Time, Responses} =
+        apply(?MODULE, RequestFun, [Connection, Requests2]),
+    {Time, update_save_responses(Responses, ForUpdate)}.
 
-    {ChangeDurableRequests, ChangeKeys2} = prepare_change_durable(SaveRequests2),
-    ChangeDurableResponses = wait_durable(Connection, ChangeDurableRequests),
-    ChangeDurableResponses2 = replace_change_keys(ChangeKeys2, ChangeDurableResponses),
-    SaveRequests3 = update_save_responses(ChangeDurableResponses2, SaveRequests2),
+%%--------------------------------------------------------------------
+%% @doc
+%% Does requests about seq numbers to couch.
+%% @end
+%%--------------------------------------------------------------------
+-spec do_change_requests(cberl:connection(), [cberl:store_request()] |
+    [cberl:durability_request()], RequestFun :: atom(), PrepareFun :: atom()) ->
+    {Time :: non_neg_integer(), save_requests_map()}.
+do_change_requests(Connection, Requests, SaveFun, PrepareFun) ->
+    {ChangeRequests, ChangeKeys} =
+        apply(?MODULE, PrepareFun, [Requests]),
+    {Time, ChangeResponses} =
+        apply(?MODULE, SaveFun, [Connection, ChangeRequests]),
+    ChangeResponses2 = replace_change_keys(ChangeKeys, ChangeResponses),
+    {Time, update_save_responses(ChangeResponses2, Requests)}.
 
-    {StoreRequests, SaveRequests4} = prepare_store(SaveRequests3),
-    StoreResponses = store(Connection, StoreRequests),
-    SaveRequests5 = update_save_responses(StoreResponses, SaveRequests4),
-
-    DurableRequests = prepare_durable(SaveRequests5),
-    DurableResponses = wait_durable(Connection, DurableRequests),
-    SaveRequests6 = update_save_responses(DurableResponses, SaveRequests5),
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Finishes save operation translating response to its final form.
+%% @end
+%%--------------------------------------------------------------------
+-spec finish_save(save_requests_map()) ->
+    [save_response()].
+finish_save(SaveRequests) ->
     maps:fold(fun(Key, {_Ctx, Response}, SaveResponses) ->
         [{Key, Response} | SaveResponses]
-    end, [], SaveRequests6).
+    end, [], SaveRequests).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -111,18 +133,9 @@ get(Connection, Requests) ->
                     end;
                 ({Key, {ok, Cas, Value}}) ->
                     {Key, {ok, Cas, Value}};
-                ({Key, {error, etimedout}}) ->
-                    timeout(),
-                    {Key, {error, etimedout}};
                 ({Key, {error, Reason}}) ->
                     {Key, {error, Reason}}
             end, Responses);
-        {error, etimedout} = E ->
-            timeout(),
-            [{Key, E} || Key <- Requests];
-        {error, timeout} = E ->
-            timeout(),
-            [{Key, E} || Key <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || Key <- Requests]
     end.
@@ -139,19 +152,7 @@ delete(Connection, Requests) ->
     RemoveRequests = [{Key, maps:get(cas, Ctx, 0)} || {Ctx, Key} <- Requests],
     case cberl:bulk_remove(Connection, RemoveRequests, ?OP_TIMEOUT) of
         {ok, Responses} ->
-            lists:foreach(fun
-                ({Key, {error, etimedout}}) ->
-                    timeout();
-                (_) ->
-                    ok
-            end, Responses),
             Responses;
-        {error, etimedout} = E ->
-            timeout(),
-            [{Key, E} || {_, Key} <- Requests];
-        {error, timeout} = E ->
-            timeout(),
-            [{Key, E} || {_, Key} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key} <- Requests]
     end.
@@ -355,28 +356,17 @@ prepare_store(Requests) ->
 -spec store(cberl:connection(), [cberl:store_request()]) ->
     [cberl:store_response()].
 store(_Connection, []) ->
-    [];
+    {0, []};
 store(Connection, Requests) ->
-    Ans = execute_and_check_batch_size(cberl, bulk_store,
+    {Time, Ans} = timer:tc(cberl, bulk_store,
         [Connection, Requests, ?OP_TIMEOUT]),
-    case Ans of
+    FinalAns = case Ans of
         {ok, Responses} ->
-            lists:foreach(fun
-                ({Key, {error, etimedout}}) ->
-                    timeout();
-                (_) ->
-                    ok
-            end, Responses),
             Responses;
-        {error, etimedout} = E ->
-            timeout(),
-            [{Key, E} || {_, Key, _, _, _, _} <- Requests];
-        {error, timeout} = E ->
-            timeout(),
-            [{Key, E} || {_, Key, _, _, _, _} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {_, Key, _, _, _, _} <- Requests]
-    end.
+    end,
+    {(Time / 1000), FinalAns}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -403,39 +393,18 @@ prepare_durable(Requests) ->
 %%--------------------------------------------------------------------
 -spec wait_durable(cberl:connection(), [cberl:durability_request()]) ->
     [cberl:durability_response()].
+wait_durable(_Connection, []) ->
+    {0, []};
 wait_durable(Connection, Requests) ->
-    wait_durable(Connection, Requests, 5).
-wait_durable(_Connection, [], _) ->
-    [];
-wait_durable(Connection, Requests, Num) ->
-    put(timeout, false),
-    Ans = execute_and_check_batch_size(cberl, bulk_durability,
+    {Time, Ans} = timer:tc(cberl, bulk_durability,
         [Connection, Requests, {1, -1}, ?DUR_TIMEOUT]),
-    A = case Ans of
+    FinalAns = case Ans of
         {ok, Responses} ->
-            lists:foreach(fun
-                ({Key, {error, etimedout}}) ->
-                    timeout();
-                (_) ->
-                    ok
-            end, Responses),
             Responses;
-        {error, etimedout} = E ->
-            timeout(),
-            [{Key, E} || {Key, _} <- Requests];
-        {error, timeout} = E ->
-            timeout(),
-            [{Key, E} || {Key, _} <- Requests];
         {error, Reason} ->
             [{Key, {error, Reason}} || {Key, _} <- Requests]
     end,
-
-    case get(timeout) of
-        true when Num > 1 ->
-            wait_durable(Connection, Requests, Num - 1);
-        _ ->
-            A
-    end.
+    {(Time / 1000), FinalAns}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -470,139 +439,3 @@ update_save_responses(Responses, SaveRequests) ->
             {Ctx, _Response} = maps:get(Key, SaveRequests2),
             maps:put(Key, {Ctx, {error, Reason}}, SaveRequests2)
     end, SaveRequests, Responses).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes batch size checking if batch size is appropriate.
-%% @end
-%%--------------------------------------------------------------------
--spec init_batch_size_check(list()) -> ok.
-init_batch_size_check(Requests) ->
-    BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size, 2000),
-    MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_max_batch_size, 2000),
-    case BS < MaxBS of
-        true ->
-            case length(Requests) of
-                BS ->
-                    put(batch_size_check, []);
-                _ ->
-                    put(batch_size_check, false)
-            end;
-        _ ->
-            put(batch_size_check, false)
-    end,
-    ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Decreases batch size as a result of timeout.
-%% @end
-%%--------------------------------------------------------------------
--spec timeout() -> ok.
-timeout() ->
-    ?info("Couchbase crud timeout - batch size checking"),
-    put(timeout, true),
-    case can_modify_batch_size() of
-        true ->
-            BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, 2000),
-            MinBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_min_batch_size, 250),
-            NewSize = max(round(BS/2), MinBS),
-            application:set_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, NewSize),
-            ?info("Decrease batch size to: ~p", [NewSize]),
-            save_modify_batch_size_time();
-        _ ->
-            ok
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Executes function, analysis its execution and increases batch size if needed.
-%% @end
-%%--------------------------------------------------------------------
--spec execute_and_check_batch_size(Module, Function, Args) -> term() when
-    Module :: module(),
-    Function :: atom(),
-    Args :: [term()].
-execute_and_check_batch_size(Module, Fun, Args) ->
-    case get(batch_size_check) of
-        false ->
-            erlang:apply(Module, Fun, Args);
-        CheckList ->
-            {Time, Ans} = timer:tc(Module, Fun, Args),
-            CheckList2 = [(Time / 500) | CheckList],
-            put(batch_size_check, CheckList2),
-            case length(CheckList2) of
-                4 ->
-                    verify_batches_times(CheckList2);
-                _ ->
-                    ok
-            end,
-            Ans
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks if batch size can be modified.
-%% @end
-%%--------------------------------------------------------------------
--spec can_modify_batch_size() -> boolean().
-can_modify_batch_size() ->
-    LastMod = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size_check_time, 0),
-    MinDiff = (?OP_TIMEOUT + ?DUR_TIMEOUT) / 1000,
-    (os:system_time(seconds) - LastMod) > MinDiff.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves batch modification time.
-%% @end
-%%--------------------------------------------------------------------
--spec save_modify_batch_size_time() -> ok.
-save_modify_batch_size_time() ->
-    T = os:system_time(seconds),
-    application:set_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size_check_time, T).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Verifies if batch processing times allow increase of batch size and
-%% increases it if possible.
-%% @end
-%%--------------------------------------------------------------------
--spec verify_batches_times(list()) -> ok.
-verify_batches_times(CheckList) ->
-    Ans = lists:foldl(fun
-        (_T, false) ->
-            false;
-        (T, _Acc) ->
-            T =< (min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4)
-    end, true, CheckList),
-
-    case {Ans, can_modify_batch_size()} of
-        {true, true} ->
-            BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, 2000),
-            MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_max_batch_size, 2000),
-            NewSize = min(round(BS*2), MaxBS),
-            application:set_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, NewSize),
-            ?info("Increase batch size to: ~p", [NewSize]),
-            save_modify_batch_size_time();
-        {true, _} ->
-            ?info("Couchbase crud max batch size write checking"),
-            ok;
-        _ ->
-            ok
-    end.

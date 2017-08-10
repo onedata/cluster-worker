@@ -5,17 +5,15 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc This module tests the functionality of couchbase_crud, using eunit tests.
+%%% @doc This module tests the functionality of couchbase_batch, using eunit tests.
 %%% @end
 %%%-------------------------------------------------------------------
--module(couchbase_crud_tests).
+-module(couchbase_batch_tests).
 
 -ifdef(TEST).
 
 -include("global_definitions.hrl").
 -include_lib("eunit/include/eunit.hrl").
-
--export([store_fun/0]).
 
 %%%===================================================================
 %%% Tests description
@@ -27,11 +25,9 @@ batch_size_verification_test_() ->
         fun setup/0,
         fun(_) -> ok end,
         [
-            {"validate_init", fun validate_init/0},
+            {"validate_analyse_answer", fun validate_analyse_answer/0},
             {"validate_timeout", fun validate_timeout/0},
-            {"validate_size_increase", fun validate_size_increase/0},
-            {"validate_size_increase_trigger",
-                fun validate_size_increase_trigger/0}
+            {"validate_size_increase", fun validate_size_increase/0}
         ]
     }.
 
@@ -39,97 +35,76 @@ batch_size_verification_test_() ->
 %%% Test functions
 %%%===================================================================
 
-validate_init() ->
-    couchbase_crud:init_batch_size_check(lists:seq(1, 10)),
-    ?assertEqual(false, get(batch_size_check)),
+validate_analyse_answer() ->
+    ?assertEqual(ok, couchbase_batch:analyse_answer([])),
+    ?assertEqual(ok, couchbase_batch:analyse_answer(
+        [{key, ok}, {key2, ok}, {key3, ok}])),
+    ?assertEqual(timeout, couchbase_batch:analyse_answer(
+        [{key, ok}, {key2, {error, etimedout}}, {key3, ok}])),
+    ?assertEqual(timeout, couchbase_batch:analyse_answer(
+        [{key, ok}, {key2, {error, timeout}}, {key3, ok}])),
 
-    couchbase_crud:init_batch_size_check(lists:seq(1, 100)),
-    ?assertEqual([], get(batch_size_check)).
+    ?assertEqual(ok, couchbase_batch:analyse_answer(#{})),
+    ?assertEqual(ok, couchbase_batch:analyse_answer(
+        #{key => {ctx, ok}, key2 => {ctx, ok}, key3 => {ctx, ok}})),
+    ?assertEqual(timeout, couchbase_batch:analyse_answer(
+        #{key => {ctx, ok}, key2 => {ctx, {error, etimedout}}, key3 => {ctx, ok}})),
+    ?assertEqual(timeout, couchbase_batch:analyse_answer(
+        #{key => {ctx, ok}, key2 => {ctx, {error, timeout}}, key3 => {ctx, ok}})).
 
 validate_timeout() ->
-    couchbase_crud:timeout(),
+    couchbase_batch:timeout(),
     ?assertEqual(50, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
-    couchbase_crud:timeout(),
+    couchbase_batch:timeout(),
     ?assertEqual(50, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size_check_time, 0),
-    couchbase_crud:timeout(),
+    couchbase_batch:timeout(),
     ?assertEqual(25, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size_check_time, 0),
-    couchbase_crud:timeout(),
+    couchbase_batch:timeout(),
     ?assertEqual(25, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
-validate_size_increase_trigger() ->
-    put(batch_size_check, false),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
-    ?assertEqual(false, get(batch_size_check)),
-
-    put(batch_size_check, []),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
-    L1 = get(batch_size_check),
-    ?assertEqual(1, length(L1)),
-
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
-    L2 = get(batch_size_check),
-    ?assertEqual(2, length(L2)),
-
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
-    L3 = get(batch_size_check),
-    ?assertEqual(3, length(L3)),
-
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
-    L4 = get(batch_size_check),
-    ?assertEqual(4, length(L4)),
-    lists:foreach(fun(T) ->
-        ?assert(T < 100)
-    end, L4).
-
-
 validate_size_increase() ->
-    put(batch_size_check, [1000000, 0, 1]),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(100),
+        [1000000, 0, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
-    put(batch_size_check, [4, 15000, 1]),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(100),
+        [4, 15000, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(200, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
-    put(batch_size_check, [4, 0, 1]),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(200),
+        [4, 0, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(200, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size_check_time, 0),
-    put(batch_size_check, [4, 0, 1]),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(100),
+        [4, 0, 1, 5], [ok, ok, ok, ok])),
+    ?assertEqual(200, application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size, undefined)),
+
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(200),
+        [4, 0, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(400, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size_check_time, 0),
-    put(batch_size_check, [4, 0, 1]),
-    ?assertEqual(ok,
-        couchbase_crud:execute_and_check_batch_size(?MODULE, store_fun, [])),
+    ?assertEqual(ok, couchbase_batch:analyse_times(get_response_map(400),
+        [4, 0, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(400, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
@@ -155,7 +130,8 @@ setup() ->
     ok.
 
 %%%===================================================================
-%%% Helper fun
+%%% Helper function
 %%%===================================================================
-store_fun() ->
-    ok.
+
+get_response_map(Size) ->
+    maps:from_list(lists:zip(lists:seq(1, Size), lists:seq(1, Size))).

@@ -321,11 +321,81 @@ handle_batch_requests(Connection, RequestsBatch) ->
     SaveRequests = maps:get(save, RequestsBatch),
     GetRequests = maps:get(get, RequestsBatch),
     RemoveRequests = maps:get(delete, RequestsBatch),
+
+    GetAns = couchbase_crud:get(Connection, GetRequests),
+    couchbase_batch:analyse_answer(GetAns),
+    DeleteAns = couchbase_crud:delete(Connection, RemoveRequests),
+    couchbase_batch:analyse_answer(DeleteAns),
+    SaveAns = handle_batch_save(Connection, SaveRequests),
+
     #{
-        save => couchbase_crud:save(Connection, SaveRequests),
-        get => couchbase_crud:get(Connection, GetRequests),
-        delete => couchbase_crud:delete(Connection, RemoveRequests)
+        save => SaveAns,
+        get => GetAns,
+        delete => DeleteAns
     }.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves key-value pairs in a database.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_batch_save(cberl:connection(), [couchbase_crud:save_request()]) ->
+    [couchbase_crud:save_response()].
+handle_batch_save(_Connection, []) ->
+    [];
+handle_batch_save(Connection, Requests) ->
+    SaveRequests = couchbase_crud:init_save(Connection, Requests),
+
+    {Time1, SaveRequests2} = couchbase_crud:do_change_requests(Connection, SaveRequests,
+        store, prepare_change_store),
+    AnalyseAns1 = couchbase_batch:analyse_answer(SaveRequests2),
+
+    {AnalyseAns2, Time2, SaveRequests3} = wait_for_batch(Connection, SaveRequests2,
+        prepare_change_durable, do_change_requests),
+
+    {Time3, SaveRequests4} = couchbase_crud:do_requests(Connection, SaveRequests3,
+        store, prepare_store),
+    AnalyseAns3 = couchbase_batch:analyse_answer(SaveRequests4),
+
+    {AnalyseAns4, Time4, SaveRequests5} = wait_for_batch(Connection, SaveRequests4,
+        prepare_durable, do_requests),
+
+    Times = [Time1, Time2, Time3, Time4],
+    Timeouts = [AnalyseAns1, AnalyseAns2, AnalyseAns3, AnalyseAns4],
+    couchbase_batch:analyse_times(SaveRequests5, Times, Timeouts),
+    couchbase_crud:finish_save(SaveRequests5).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for batch durability.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_for_batch(cberl:connection(), [couchbase_crud:save_request()],
+    PrepareFun :: atom(), DoRequestFun :: atom()) ->
+    [couchbase_crud:save_response()].
+wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun) ->
+    wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, 5).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for batch durability.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_for_batch(cberl:connection(), [couchbase_crud:save_request()],
+    PrepareFun :: atom(), DoRequestFun :: atom(), Num :: non_neg_integer()) ->
+    [couchbase_crud:save_response()].
+wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num) ->
+    {Time, SaveRequests} = apply(couchbase_crud, DoRequestFun,
+        [Connection, SaveRequests, wait_durable, PrepareFun]),
+    case couchbase_batch:analyse_answer(SaveRequests) of
+        timeout when Num > 1 ->
+            wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num - 1);
+        AnalyseAns ->
+            {AnalyseAns, Time, SaveRequests}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
