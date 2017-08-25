@@ -17,7 +17,10 @@
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
--export([save/2, get/2, delete/2]).
+-export([init_save_requests/2, terminate_save_requests/1]).
+-export([store_change_docs/2, wait_change_docs_durable/2]).
+-export([store_docs/2, wait_docs_durable/2]).
+-export([get/2, delete/2]).
 -export([get_counter/3, update_counter/4]).
 
 -type save_request() :: {couchbase_driver:ctx(), couchbase_driver:key(),
@@ -35,8 +38,7 @@
 -export_type([save_response/0, get_response/0, delete_response/0]).
 
 -type save_requests_map() :: #{couchbase_driver:key() => {
-    couchbase_driver:ctx(),
-    {ok, cberl:cas(), couchbase_driver:value()} | {error, term()}
+    couchbase_driver:ctx(), {ok, cberl:cas(), couchbase_driver:value()}
 }}.
 -type change_key_map() :: #{couchbase_driver:key() => couchbase_driver:key()}.
 
@@ -51,38 +53,84 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves key-value pairs in a database.
+%% Prepares saves requests by allocating and assigning sequence numbers.
+%% In general call to this function should be followed by consecutive calls to
+%% {@link store_change_docs/2}, {@link wait_change_docs_durable/2},
+%% {@link store_docs/2}, {@link wait_docs_durable/2}
+%% and {@link terminate_save_requests/1} functions.
 %% @end
 %%--------------------------------------------------------------------
--spec save(cberl:connection(), [save_request()]) -> [save_response()].
-save(_Connection, []) ->
-    [];
-save(Connection, Requests) ->
+-spec init_save_requests(cberl:connection(), [save_request()]) ->
+    {save_requests_map(), [save_response()]}.
+init_save_requests(Connection, Requests) ->
     CountByScope = count_by_scope(Requests),
     SeqsByScope = allocate_seq(Connection, CountByScope),
-    SaveRequests = prepare_save_requests(SeqsByScope, Requests),
+    assign_seq(SeqsByScope, Requests).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Completes save requests and returns responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec terminate_save_requests(save_requests_map()) -> [save_response()].
+terminate_save_requests(SaveRequests) ->
+    maps:fold(fun(Key, {_Ctx, Response}, SaveResponses) ->
+        [{Key, Response} | SaveResponses]
+    end, [], SaveRequests).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Stores documents that associates sequence number with a key that has been
+%% changed. Returns updated save requests and erroneous responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec store_change_docs(cberl:connection(), save_requests_map()) ->
+    {save_requests_map(), [save_response()]}.
+store_change_docs(Connection, SaveRequests) ->
     {ChangeStoreRequests, ChangeKeys} = prepare_change_store(SaveRequests),
     ChangeStoreResponses = store(Connection, ChangeStoreRequests),
     ChangeStoreResponses2 = replace_change_keys(ChangeKeys, ChangeStoreResponses),
-    SaveRequests2 = update_save_responses(ChangeStoreResponses2, SaveRequests),
+    update_save_requests(ChangeStoreResponses2, SaveRequests).
 
-    {ChangeDurableRequests, ChangeKeys2} = prepare_change_durable(SaveRequests2),
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits until change documents are persisted on disc. Returns updated save
+%% requests and erroneous responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_change_docs_durable(cberl:connection(), save_requests_map()) ->
+    {save_requests_map(), [save_response()]}.
+wait_change_docs_durable(Connection, SaveRequests) ->
+    {ChangeDurableRequests, ChangeKeys2} = prepare_change_durable(SaveRequests),
     ChangeDurableResponses = wait_durable(Connection, ChangeDurableRequests),
     ChangeDurableResponses2 = replace_change_keys(ChangeKeys2, ChangeDurableResponses),
-    SaveRequests3 = update_save_responses(ChangeDurableResponses2, SaveRequests2),
+    update_save_requests(ChangeDurableResponses2, SaveRequests).
 
-    {StoreRequests, SaveRequests4} = prepare_store(SaveRequests3),
+%%--------------------------------------------------------------------
+%% @doc
+%% Stores documents or key-value pairs. Returns updated save requests
+%% and erroneous responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec store_docs(cberl:connection(), save_requests_map()) ->
+    {save_requests_map(), [save_response()]}.
+store_docs(Connection, SaveRequests) ->
+    {StoreRequests, SaveRequests2} = prepare_store(SaveRequests),
     StoreResponses = store(Connection, StoreRequests),
-    SaveRequests5 = update_save_responses(StoreResponses, SaveRequests4),
+    update_save_requests(StoreResponses, SaveRequests2).
 
-    DurableRequests = prepare_durable(SaveRequests5),
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits until documents are persisted on disc. Returns updated save requests
+%% and erroneous responses.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_docs_durable(cberl:connection(), save_requests_map()) ->
+    {save_requests_map(), [save_response()]}.
+wait_docs_durable(Connection, SaveRequests) ->
+    DurableRequests = prepare_durable(SaveRequests),
     DurableResponses = wait_durable(Connection, DurableRequests),
-    SaveRequests6 = update_save_responses(DurableResponses, SaveRequests5),
-
-    maps:fold(fun(Key, {_Ctx, Response}, SaveResponses) ->
-        [{Key, Response} | SaveResponses]
-    end, [], SaveRequests6).
+    update_save_requests(DurableResponses, SaveRequests).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -202,36 +250,46 @@ allocate_seq(Connection, CountByScope) ->
 %% Builds save requests map and fills sequence numbers in documents.
 %% @end
 %%--------------------------------------------------------------------
--spec prepare_save_requests(#{datastore:scope() => [pos_integer()]},
-    [save_request()]) -> save_requests_map().
-prepare_save_requests(SeqsByScope, Requests) ->
-    {_, Requests3} = lists:foldl(fun
+-spec assign_seq(#{datastore:scope() => [pos_integer()]},
+    [save_request()]) -> {save_requests_map(), [save_response()]}.
+assign_seq(SeqsByScope, Requests) ->
+    {_, SaveRequests2, SaveResponses2} = lists:foldl(fun
         (
             {Ctx = #{no_seq := true}, Key, Doc = #document{}},
-            {SeqsByScope2, Requests2}
+            {SeqsByScope2, SaveRequests, SaveResponses}
         ) ->
-            {SeqsByScope2, maps:put(Key, {Ctx, {ok, 0, Doc}}, Requests2)};
+            {
+                SeqsByScope2,
+                maps:put(Key, {Ctx, {ok, 0, Doc}}, SaveRequests),
+                SaveResponses
+            };
         (
             {Ctx, Key, Doc = #document{scope = Scope}},
-            {SeqsByScope2, Requests2}
+            {SeqsByScope2, SaveRequests, SaveResponses}
         ) ->
             case maps:get(Scope, SeqsByScope2) of
                 {ok, [Seq | Seqs]} ->
                     Doc2 = Doc#document{seq = Seq},
                     {
                         maps:put(Scope, {ok, Seqs}, SeqsByScope2),
-                        maps:put(Key, {Ctx, {ok, 0, Doc2}}, Requests2)
+                        maps:put(Key, {Ctx, {ok, 0, Doc2}}, SaveRequests),
+                        SaveResponses
                     };
                 {error, Reason} ->
                     {
                         SeqsByScope2,
-                        maps:put(Key, {Ctx, {error, Reason}}, Requests2)
+                        SaveResponses,
+                        [{Key, {error, Reason}} | SaveResponses]
                     }
             end;
-        ({Ctx, Key, Value}, {SeqsByScope2, Requests2}) ->
-            {SeqsByScope2, maps:put(Key, {Ctx, {ok, 0, Value}}, Requests2)}
-    end, {SeqsByScope, #{}}, Requests),
-    Requests3.
+        ({Ctx, Key, Value}, {SeqsByScope2, SaveRequests, SaveResponses}) ->
+            {
+                SeqsByScope2,
+                maps:put(Key, {Ctx, {ok, 0, Value}}, SaveRequests),
+                SaveResponses
+            }
+    end, {SeqsByScope, #{}, []}, Requests),
+    {SaveRequests2, SaveResponses2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -243,8 +301,6 @@ prepare_save_requests(SeqsByScope, Requests) ->
     {[cberl:store_request()], change_key_map()}.
 prepare_change_store(Requests) ->
     maps:fold(fun
-        (_Key, {_, {error, _}}, {ChangeStoreRequests, ChangeKeys}) ->
-            {ChangeStoreRequests, ChangeKeys};
         (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
             {ChangeStoreRequests, ChangeKeys};
         (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
@@ -272,8 +328,6 @@ prepare_change_store(Requests) ->
     {[cberl:durability_request()], change_key_map()}.
 prepare_change_durable(Requests) ->
     maps:fold(fun
-        (_Key, {_, {error, _}}, {ChangeDurableRequests, ChangeKeys}) ->
-            {ChangeDurableRequests, ChangeKeys};
         (_Key, {#{no_seq := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
             {ChangeDurableRequests, ChangeKeys};
         (_Key, {#{no_durability := true}, _}, {ChangeDurableRequests, ChangeKeys}) ->
@@ -299,11 +353,6 @@ prepare_change_durable(Requests) ->
     {[cberl:store_request()], save_requests_map()}.
 prepare_store(Requests) ->
     maps:fold(fun
-        (Key, {_, {error, _Reason}} = Request, {StoreRequests, Requests2}) ->
-            {
-                StoreRequests,
-                maps:put(Key, Request, Requests2)
-            };
         (Key, {Ctx, {ok, _, Doc = #document{}}}, {StoreRequests, Requests2}) ->
             Doc2 = couchbase_doc:set_mutator(Ctx, Doc),
             {Doc3, EJson} = couchbase_doc:set_next_rev(Ctx, Doc2),
@@ -347,8 +396,6 @@ store(Connection, Requests) ->
 -spec prepare_durable(save_requests_map()) -> [cberl:durability_request()].
 prepare_durable(Requests) ->
     maps:fold(fun
-        (_Key, {_, {error, _}}, DurableRequests) ->
-            DurableRequests;
         (_Key, {#{no_durability := true}, _}, DurableRequests) ->
             DurableRequests;
         (Key, {_, {ok, Cas, _}}, DurableRequests) ->
@@ -395,14 +442,20 @@ replace_change_keys(ChangeKeys, ChangeResponses) ->
 %% requests outcomes.
 %% @end
 %%--------------------------------------------------------------------
--spec update_save_responses([cberl:store_response() | cberl:durability_response()],
-    save_requests_map()) -> save_requests_map().
-update_save_responses(Responses, SaveRequests) ->
+-spec update_save_requests([cberl:store_response() | cberl:durability_response()],
+    save_requests_map()) -> {save_requests_map(), [save_response()]}.
+update_save_requests(Responses, SaveRequests) ->
     lists:foldl(fun
-        ({Key, {ok, Cas}}, SaveRequests2) ->
+        ({Key, {ok, Cas}}, {SaveRequests2, SaveResponses}) ->
             {Ctx, {ok, _Cas, Value}} = maps:get(Key, SaveRequests2),
-            maps:put(Key, {Ctx, {ok, Cas, Value}}, SaveRequests2);
-        ({Key, {error, Reason}}, SaveRequests2) ->
+            {
+                maps:put(Key, {Ctx, {ok, Cas, Value}}, SaveRequests2),
+                SaveResponses
+            };
+        ({Key, {error, Reason}}, {SaveRequests2, SaveResponses}) ->
             {Ctx, _Response} = maps:get(Key, SaveRequests2),
-            maps:put(Key, {Ctx, {error, Reason}}, SaveRequests2)
-    end, SaveRequests, Responses).
+            {
+                maps:remove(Key, SaveRequests2),
+                [{Key, {error, Reason}} | SaveResponses]
+            }
+    end, {SaveRequests, []}, Responses).
