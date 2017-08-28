@@ -253,7 +253,7 @@ handle_requests(Requests, #state{} = State) ->
     } = State,
 
     RequestsBatch = batch_requests(Requests),
-    ResponsesBatch = handle_batch_requests(Connection, RequestsBatch),
+    ResponsesBatch = handle_requests_batch(Connection, RequestsBatch),
     lists:foreach(fun({Ref, From, Request}) ->
         Response = try
             handle_request(Connection, Request, ResponsesBatch)
@@ -315,9 +315,9 @@ batch_request(_Request, RequestsBatch) ->
 %% Handles batch requests and returns batch responses.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_batch_requests(cberl:connection(), batch_requests()) ->
+-spec handle_requests_batch(cberl:connection(), batch_requests()) ->
     batch_responses().
-handle_batch_requests(Connection, RequestsBatch) ->
+handle_requests_batch(Connection, RequestsBatch) ->
     SaveRequests = maps:get(save, RequestsBatch),
     GetRequests = maps:get(get, RequestsBatch),
     RemoveRequests = maps:get(delete, RequestsBatch),
@@ -329,6 +329,9 @@ handle_batch_requests(Connection, RequestsBatch) ->
     SaveAns = handle_batch_save(Connection, SaveRequests),
 
     #{
+        save => handle_save_requests_batch(Connection, SaveRequests),
+        get => couchbase_crud:get(Connection, GetRequests),
+        delete => couchbase_crud:delete(Connection, RemoveRequests)
         save => SaveAns,
         get => GetAns,
         delete => DeleteAns
@@ -398,6 +401,36 @@ wait_for_batch(Connection, SaveRequests, PrepareFun, DoRequestFun, Num) ->
         _ ->
             {timeout, Time, SaveRequests2}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handles save requests batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_save_requests_batch(cberl:connection(),
+    [couchbase_crud:save_request()]) -> [couchbase_crud:save_response()].
+handle_save_requests_batch(_Connection, []) ->
+    [];
+handle_save_requests_batch(Connection, Requests) ->
+    {SaveRequests, SaveResponses} = couchbase_crud:init_save_requests(
+        Connection, Requests
+    ),
+    {SaveRequests2, SaveResponses2} = couchbase_crud:store_change_docs(
+        Connection, SaveRequests
+    ),
+    {SaveRequests3, SaveResponses3} = couchbase_crud:wait_change_docs_durable(
+        Connection, SaveRequests2
+    ),
+    {SaveRequests5, SaveResponses4} = couchbase_crud:store_docs(
+        Connection, SaveRequests3
+    ),
+    {SaveRequests6, SaveResponses5} = couchbase_crud:wait_docs_durable(
+        Connection, SaveRequests5
+    ),
+    SaveResponses6 = couchbase_crud:terminate_save_requests(SaveRequests6),
+    lists:merge([SaveResponses, SaveResponses2, SaveResponses3, SaveResponses4,
+        SaveResponses5, SaveResponses6]).
 
 %%--------------------------------------------------------------------
 %% @private

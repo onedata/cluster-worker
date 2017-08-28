@@ -89,10 +89,17 @@ fetch(Ctx, <<_/binary>> = Key) ->
     hd(fetch(Ctx, [Key]));
 fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
     Futures = lists:map(fun
-        ({ok, memory, Value}) -> ?FUTURE(memory, MemoryDriver, {ok, Value});
-        ({ok, disc, Value}) -> save_async(Ctx, Value, false);
-        ({error, Reason}) -> ?FUTURE({error, Reason})
-    end, wait([get_async(Ctx, Key, true) || Key <- Keys])),
+        ({_Key, {ok, memory, Value}}) ->
+            ?FUTURE(memory, MemoryDriver, {ok, Value});
+        ({_Key, {ok, disc, Value}}) ->
+            save_async(Ctx, Value, false);
+        ({Key, {error, key_enoent}}) ->
+            Value = #document{key = Key, value = undefined, deleted = true},
+            save_async(Ctx, Value, false),
+            ?FUTURE({error, key_enoent});
+        ({_Key, {error, Reason}}) ->
+            ?FUTURE({error, Reason})
+    end, lists:zip(Keys, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
 
     lists:map(fun
         ({ok, memory, Value}) -> {ok, memory, Value};
