@@ -42,15 +42,7 @@ validate_analyse_answer() ->
     ?assertEqual(timeout, couchbase_batch:analyse_answer(
         [{key, ok}, {key2, {error, etimedout}}, {key3, ok}])),
     ?assertEqual(timeout, couchbase_batch:analyse_answer(
-        [{key, ok}, {key2, {error, timeout}}, {key3, ok}])),
-
-    ?assertEqual(ok, couchbase_batch:analyse_answer(#{})),
-    ?assertEqual(ok, couchbase_batch:analyse_answer(
-        #{key => {ctx, ok}, key2 => {ctx, ok}, key3 => {ctx, ok}})),
-    ?assertEqual(timeout, couchbase_batch:analyse_answer(
-        #{key => {ctx, ok}, key2 => {ctx, {error, etimedout}}, key3 => {ctx, ok}})),
-    ?assertEqual(timeout, couchbase_batch:analyse_answer(
-        #{key => {ctx, ok}, key2 => {ctx, {error, timeout}}, key3 => {ctx, ok}})).
+        [{key, ok}, {key2, {error, timeout}}, {key3, ok}])).
 
 validate_timeout() ->
     couchbase_batch:timeout(),

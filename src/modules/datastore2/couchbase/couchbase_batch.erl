@@ -36,34 +36,17 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec analyse_answer([couchbase_crud:delete_response()]
-    | [couchbase_crud:get_response()] | couchbase_crud:save_requests_map()) ->
+    | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]) ->
     ok | timeout.
 analyse_answer([]) ->
     ok;
-analyse_answer(Responses) when is_list(Responses) ->
+analyse_answer(Responses) ->
     Check = lists:foldl(fun
         ({_Key, {error, etimedout}}, _) ->
             timeout;
         ({_Key, {error, timeout}}, _) ->
             timeout;
         (_, TmpAns) ->
-            TmpAns
-    end, ok, Responses),
-
-    case Check of
-        timeout ->
-            timeout(),
-            timeout;
-        _ ->
-            ok
-    end;
-analyse_answer(Responses) ->
-    Check = maps:fold(fun
-        (_Key, {_Ctx, {error, etimedout}}, _) ->
-            timeout;
-        (_Key, {_Ctx, {error, timeout}}, _) ->
-            timeout;
-        (_, _, TmpAns) ->
             TmpAns
     end, ok, Responses),
 
@@ -80,14 +63,14 @@ analyse_answer(Responses) ->
 %% Checks if batch size can be increased and increases it if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_times(couchbase_crud:save_requests_map(), list(), list()) ->
+-spec analyse_times([couchbase_crud:save_response()], list(), list()) ->
     ok | timeout.
-analyse_times(Responses, Times, Timeouts) ->
+analyse_times(Requests, Times, Timeouts) ->
     BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 2000),
     MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_max_batch_size, 2000),
-    case (BS < MaxBS) andalso (maps:size(Responses) =:= BS) of
+    case (BS < MaxBS) andalso (maps:size(Requests) =:= BS) of
         true ->
             verify_batches_times(Times, Timeouts);
         _ ->
