@@ -27,6 +27,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
+%% for timer:tc
+-export([wait/1]).
+
 -type id() :: non_neg_integer().
 -type request() :: {reference(), pid(), couchbase_pool:request()}.
 -type batch_requests() :: #{save := [couchbase_crud:save_request()],
@@ -43,7 +46,6 @@
     mode :: couchbase_pool:mode(),
     id :: id(),
     requests_queue :: queue:queue(request()),
-    batch_size :: non_neg_integer(),
     connection :: cberl:connection()
 }).
 
@@ -95,8 +97,6 @@ init([Bucket, Mode, Id, DbHosts]) ->
         mode = Mode,
         id = Id,
         requests_queue = queue:new(),
-        batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_pool_batch_size, 50),
         connection = Connection
     }}.
 
@@ -198,7 +198,7 @@ get_connect_opts() ->
         {operation_timeout, couchbase_operation_timeout, timer:seconds(60)},
         {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
         {view_timeout, couchbase_view_timeout, timer:seconds(120)},
-        {durability_interval, couchbase_durability_interval, 5},
+        {durability_interval, couchbase_durability_interval, 500},
         {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
         {http_timeout, couchbase_http_timeout, timer:seconds(60)}
     ]).
@@ -210,7 +210,9 @@ get_connect_opts() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec process_requests(state()) -> state().
-process_requests(#state{batch_size = Size} = State) ->
+process_requests(State) ->
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size, 2000),
     State2 = receive_pending_requests(State),
     #state{requests_queue = Queue} = State2,
     {Requests, Queue2} = dequeue(Size, Queue, []),
@@ -322,10 +324,17 @@ handle_requests_batch(Connection, RequestsBatch) ->
     SaveRequests = maps:get(save, RequestsBatch),
     GetRequests = maps:get(get, RequestsBatch),
     RemoveRequests = maps:get(delete, RequestsBatch),
+
+    SaveResponses = handle_save_requests_batch(Connection, SaveRequests),
+    GetResponses = couchbase_crud:get(Connection, GetRequests),
+    couchbase_batch:check_timeout(GetResponses),
+    DeleteResponses = couchbase_crud:delete(Connection, RemoveRequests),
+    couchbase_batch:check_timeout(DeleteResponses),
+
     #{
-        save => handle_save_requests_batch(Connection, SaveRequests),
-        get => couchbase_crud:get(Connection, GetRequests),
-        delete => couchbase_crud:delete(Connection, RemoveRequests)
+        save => SaveResponses,
+        get => GetResponses,
+        delete => DeleteResponses
     }.
 
 %%--------------------------------------------------------------------
@@ -342,21 +351,79 @@ handle_save_requests_batch(Connection, Requests) ->
     {SaveRequests, SaveResponses} = couchbase_crud:init_save_requests(
         Connection, Requests
     ),
-    {SaveRequests2, SaveResponses2} = couchbase_crud:store_change_docs(
-        Connection, SaveRequests
-    ),
-    {SaveRequests3, SaveResponses3} = couchbase_crud:wait_change_docs_durable(
-        Connection, SaveRequests2
-    ),
-    {SaveRequests5, SaveResponses4} = couchbase_crud:store_docs(
-        Connection, SaveRequests3
-    ),
-    {SaveRequests6, SaveResponses5} = couchbase_crud:wait_docs_durable(
-        Connection, SaveRequests5
-    ),
-    SaveResponses6 = couchbase_crud:terminate_save_requests(SaveRequests6),
+
+    {Time1, {SaveRequests2, SaveResponses2}} =
+        timer:tc(couchbase_crud, store_change_docs, [
+            Connection, SaveRequests
+    ]),
+    AnalyseAns1 = couchbase_batch:check_timeout(SaveResponses2),
+
+    WaitChangeDocsDurable = fun() ->
+        couchbase_crud:wait_change_docs_durable(
+            Connection, SaveRequests2
+        )
+    end,
+    {Time2, {AnalyseAns2, {SaveRequests3, SaveResponses3}}} =
+        timer:tc(?MODULE, wait, [
+            WaitChangeDocsDurable
+    ]),
+
+    {Time3, {SaveRequests4, SaveResponses4}} =
+        timer:tc(couchbase_crud, store_docs, [
+            Connection, SaveRequests3
+    ]),
+    AnalyseAns3 = couchbase_batch:check_timeout(SaveResponses4),
+
+    WaitDocsDurable = fun() ->
+        couchbase_crud:wait_docs_durable(
+            Connection, SaveRequests4
+        )
+    end,
+    {Time4, {AnalyseAns4, {SaveRequests5, SaveResponses5}}} =
+        timer:tc(?MODULE, wait, [
+            WaitDocsDurable
+        ]),
+
+    Times = [Time1, Time2, Time3, Time4],
+    Timeouts = [AnalyseAns1, AnalyseAns2, AnalyseAns3, AnalyseAns4],
+    couchbase_batch:verify_batch_size_increase(SaveRequests5, Times, Timeouts),
+
+    SaveResponses6 = couchbase_crud:terminate_save_requests(SaveRequests5),
     lists:merge([SaveResponses, SaveResponses2, SaveResponses3, SaveResponses4,
         SaveResponses5, SaveResponses6]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv wait(WaitFun, 5).
+%% @end
+%%--------------------------------------------------------------------
+-spec wait(WaitFun :: fun(() ->
+    {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]})) ->
+    {ok | timeout,
+      {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
+wait(WaitFun) ->
+    wait(WaitFun, 5).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for batch durability.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait(WaitFun :: fun(() ->
+    {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}),
+    Num :: non_neg_integer()) -> {ok | timeout,
+    {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
+wait(WaitFun, Num) ->
+    {_, SaveResponses} = Ans = WaitFun(),
+    case couchbase_batch:check_timeout(SaveResponses) of
+        timeout when Num > 1 ->
+            wait(WaitFun, Num - 1);
+        ok when Num =:= 5 ->
+            {ok, Ans};
+        _ ->
+            {timeout, Ans}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private

@@ -92,7 +92,7 @@
 %% Max link map size in single links record
 -define(LINKS_MAP_MAX_SIZE, 128).
 %% Number of children owned by each link record
--define(LINKS_TREE_BASE, 4).
+-define(LINKS_TREE_BASE, 64).
 
 %% Internal semi-model used by document that holds links between documents
 -record(links, {

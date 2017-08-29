@@ -169,7 +169,7 @@ configure_throttling() ->
       % TODO - use info abut failed batch saves and length of queue to pool of processes dumping to disk
       {MemAction, MemoryUsage} = verify_memory(),
       {TPAction, ProcNum} = verify_tp(),
-      {DBAction, QueueSize, ReadDBAction} = verify_db(),
+      {DBAction, QueueSize, ReadDBAction, ReadQueueSize} = verify_db(),
       Action = max(max(MemAction, TPAction), DBAction),
       ReadAction = max(max(MemAction, TPAction), ReadDBAction),
 
@@ -190,8 +190,9 @@ configure_throttling() ->
                 throttle)
           end,
 
-          ?info("Throttling: overload mode started, mem: ~p, tp proc num ~p, couch queue size: ~p, read action ~p",
-            [MemoryUsage, ProcNum, QueueSize, ReadAction]),
+          ?info("Throttling: overload mode started, mem: ~p, tp proc num ~p,
+          couch queue size: ~p, couch read queue size: ~p, read action ~p",
+            [MemoryUsage, ProcNum, QueueSize, ReadQueueSize, ReadAction]),
           plan_next_throttling_check(true);
         _ ->
           Oldthrottling = case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
@@ -216,27 +217,32 @@ configure_throttling() ->
 
           case {Action, Oldthrottling} of
             {?NO_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p, couch queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize]),
+              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p,
+              couch queue size: ~p, couch read queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check();
             {?NO_THROTTLING, _} ->
               application:unset_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY),
               ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
-              ?info("Throttling: stop, mem: ~p, tp proc num ~p, couch queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize]),
+              ?info("Throttling: stop, mem: ~p, tp proc num ~p,
+              couch queue size: ~p, couch read queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check();
             {?CONFIG_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p, couch queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize]),
+              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p,
+              couch queue size: ~p, couch read queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
               application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY, {overloaded, false}),
-              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p, couch queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize]),
+              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p,
+              couch queue size: ~p, couch read queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check(true);
             {?LIMIT_THROTTLING, {overloaded, _}} ->
-              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p, couch queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize]),
+              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p,
+              couch queue size: ~p, couch read queue size: ~p",
+                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check(true);
             _ ->
               TimeBase = case Oldthrottling of
@@ -294,8 +300,9 @@ configure_throttling() ->
               {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
                 value = #node_management{value = {ProcNum, QueueSize, MemoryUsage, NextCheck}}}),
 
-              ?info("Throttling: delay ~p ms used, mem: ~p, tp proc num ~p, couch queue size: ~p, read action ~p",
-                [ThrottlingTime, MemoryUsage, ProcNum, QueueSize, ReadAction]),
+              ?info("Throttling: delay ~p ms used, mem: ~p, tp proc num ~p,
+              couch queue size: ~p, couch read queue size: ~p, read action ~p",
+                [ThrottlingTime, MemoryUsage, ProcNum, QueueSize, ReadQueueSize, ReadAction]),
 
               NextCheck
           end
@@ -385,20 +392,20 @@ verify_tp() ->
 %%--------------------------------------------------------------------
 -spec verify_db() ->
   {DBAction :: non_neg_integer(), QueueSize :: non_neg_integer(),
-    ReadDBAction :: non_neg_integer()}.
+    ReadDBAction :: non_neg_integer(), ReadQueueSize :: non_neg_integer()}.
 verify_db() ->
   QueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_request_queue_size(Bucket) + Acc
+    couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
   end, 0, couchbase_config:get_buckets()),
 
   ReadQueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_request_queue_size(Bucket, read) + Acc
+    couchbase_pool:get_max_worker_queue_size(Bucket, read) + Acc
   end, 0, couchbase_config:get_buckets()),
 
   DBAction = get_db_action(QueueSize),
   ReadDBAction = get_db_action(ReadQueueSize),
 
-  {DBAction, QueueSize, ReadDBAction}.
+  {DBAction, QueueSize, ReadDBAction, ReadQueueSize}.
 
 %%--------------------------------------------------------------------
 %% @doc

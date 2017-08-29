@@ -60,9 +60,9 @@ all() ->
 throttling_test(Config) ->
     [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     MockUsage = fun(DBQueue, TPSize, MemUsage) ->
-        test_utils:mock_expect(Workers, couchbase_pool, get_request_queue_size,
+        test_utils:mock_expect(Workers, couchbase_pool, get_max_worker_queue_size,
             fun (_) -> DBQueue end),
-        test_utils:mock_expect(Workers, couchbase_pool, get_request_queue_size,
+        test_utils:mock_expect(Workers, couchbase_pool, get_max_worker_queue_size,
             fun (_, _) -> DBQueue end),
         test_utils:mock_expect(Workers, tp, get_processes_number,
             fun () -> TPSize end),
