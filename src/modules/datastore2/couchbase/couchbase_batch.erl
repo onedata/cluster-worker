@@ -37,8 +37,6 @@
 -spec check_timeout([couchbase_crud:delete_response()]
     | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]) ->
     ok | timeout.
-check_timeout([]) ->
-    ok;
 check_timeout(Responses) ->
     Check = lists:foldl(fun
         ({_Key, {error, etimedout}}, _) ->
