@@ -13,13 +13,12 @@
 -author("Michał Wrzeszcz").
 
 -include("global_definitions.hrl").
--include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([analyse_answer/1, analyse_times/3]).
+-export([check_timeout/1, verify_batch_size_increase/3]).
 %% For eunit
--export([timeout/0]).
+-export([decrease_batch_size/0]).
 
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
@@ -35,12 +34,12 @@
 %% Checks if timeout appears in the response and changes batch size if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_answer([couchbase_crud:delete_response()]
+-spec check_timeout([couchbase_crud:delete_response()]
     | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]) ->
     ok | timeout.
-analyse_answer([]) ->
+check_timeout([]) ->
     ok;
-analyse_answer(Responses) ->
+check_timeout(Responses) ->
     Check = lists:foldl(fun
         ({_Key, {error, etimedout}}, _) ->
             timeout;
@@ -52,7 +51,7 @@ analyse_answer(Responses) ->
 
     case Check of
         timeout ->
-            timeout(),
+            decrease_batch_size(),
             timeout;
         _ ->
             ok
@@ -63,14 +62,15 @@ analyse_answer(Responses) ->
 %% Checks if batch size can be increased and increases it if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_times([couchbase_crud:save_response()], list(), list()) ->
+-spec verify_batch_size_increase([couchbase_crud:save_response()], list(), list()) ->
     ok | timeout.
-analyse_times(Requests, Times, Timeouts) ->
-    BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+verify_batch_size_increase(Requests, Times, Timeouts) ->
+    BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 2000),
-    MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_max_batch_size, 2000),
-    case (BS < MaxBS) andalso (maps:size(Requests) =:= BS) of
+    case (BatchSize < MaxBatchSize)
+        andalso (maps:size(Requests) =:= BatchSize) of
         true ->
             verify_batches_times(Times, Timeouts);
         _ ->
@@ -87,17 +87,17 @@ analyse_times(Requests, Times, Timeouts) ->
 %% Decreases batch size as a result of timeout.
 %% @end
 %%--------------------------------------------------------------------
--spec timeout() -> ok.
-timeout() ->
+-spec decrease_batch_size() -> ok.
+decrease_batch_size() ->
     ?info("Couchbase crud timeout - batch size checking ~p",
         [erlang:process_info(self(), current_stacktrace)]),
     case can_modify_batch_size() of
         true ->
-            BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+            BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, 2000),
-            MinBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+            MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_min_batch_size, 250),
-            NewSize = max(round(BS/2), MinBS),
+            NewSize = max(round(BatchSize/2), MinBatchSize),
             application:set_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, NewSize),
             ?info("Decrease batch size to: ~p", [NewSize]),
@@ -151,11 +151,11 @@ verify_batches_times(CheckList, Timeouts) ->
 
     case {Ans, can_modify_batch_size()} of
         {true, true} ->
-            BS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+            BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, 2000),
-            MaxBS = application:get_env(?CLUSTER_WORKER_APP_NAME,
+            MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_max_batch_size, 2000),
-            NewSize = min(round(BS*2), MaxBS),
+            NewSize = min(round(BatchSize*2), MaxBatchSize),
             application:set_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, NewSize),
             ?info("Increase batch size to: ~p", [NewSize]),

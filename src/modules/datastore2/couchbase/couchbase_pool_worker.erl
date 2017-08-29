@@ -325,16 +325,16 @@ handle_requests_batch(Connection, RequestsBatch) ->
     GetRequests = maps:get(get, RequestsBatch),
     RemoveRequests = maps:get(delete, RequestsBatch),
 
-    SaveAns = handle_save_requests_batch(Connection, SaveRequests),
-    GetAns = couchbase_crud:get(Connection, GetRequests),
-    couchbase_batch:analyse_answer(GetAns),
-    DeleteAns = couchbase_crud:delete(Connection, RemoveRequests),
-    couchbase_batch:analyse_answer(DeleteAns),
+    SaveResponses = handle_save_requests_batch(Connection, SaveRequests),
+    GetResponses = couchbase_crud:get(Connection, GetRequests),
+    couchbase_batch:check_timeout(GetResponses),
+    DeleteResponses = couchbase_crud:delete(Connection, RemoveRequests),
+    couchbase_batch:check_timeout(DeleteResponses),
 
     #{
-        save => SaveAns,
-        get => GetAns,
-        delete => DeleteAns
+        save => SaveResponses,
+        get => GetResponses,
+        delete => DeleteResponses
     }.
 
 %%--------------------------------------------------------------------
@@ -356,7 +356,7 @@ handle_save_requests_batch(Connection, Requests) ->
         timer:tc(couchbase_crud, store_change_docs, [
             Connection, SaveRequests
     ]),
-    AnalyseAns1 = couchbase_batch:analyse_answer(SaveResponses2),
+    AnalyseAns1 = couchbase_batch:check_timeout(SaveResponses2),
 
     WaitChangeDocsDurable = fun() ->
         couchbase_crud:wait_change_docs_durable(
@@ -372,7 +372,7 @@ handle_save_requests_batch(Connection, Requests) ->
         timer:tc(couchbase_crud, store_docs, [
             Connection, SaveRequests3
     ]),
-    AnalyseAns3 = couchbase_batch:analyse_answer(SaveResponses4),
+    AnalyseAns3 = couchbase_batch:check_timeout(SaveResponses4),
 
     WaitDocsDurable = fun() ->
         couchbase_crud:wait_docs_durable(
@@ -386,7 +386,7 @@ handle_save_requests_batch(Connection, Requests) ->
 
     Times = [Time1, Time2, Time3, Time4],
     Timeouts = [AnalyseAns1, AnalyseAns2, AnalyseAns3, AnalyseAns4],
-    couchbase_batch:analyse_times(SaveRequests5, Times, Timeouts),
+    couchbase_batch:verify_batch_size_increase(SaveRequests5, Times, Timeouts),
 
     SaveResponses6 = couchbase_crud:terminate_save_requests(SaveRequests5),
     lists:merge([SaveResponses, SaveResponses2, SaveResponses3, SaveResponses4,
@@ -394,7 +394,7 @@ handle_save_requests_batch(Connection, Requests) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Waits for batch durability.
+%% @equiv wait(WaitFun, 5).
 %% @end
 %%--------------------------------------------------------------------
 -spec wait(WaitFun :: fun(() ->
@@ -416,7 +416,7 @@ wait(WaitFun) ->
     {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
 wait(WaitFun, Num) ->
     {_, SaveResponses} = Ans = WaitFun(),
-    case couchbase_batch:analyse_answer(SaveResponses) of
+    case couchbase_batch:check_timeout(SaveResponses) of
         timeout when Num > 1 ->
             wait(WaitFun, Num - 1);
         ok when Num =:= 5 ->
