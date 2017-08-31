@@ -204,8 +204,9 @@ delete_internal_docs(#state{batch_begin = Beg, batch_end = End, bucket = Bucket,
             ok = gen_server:cast(Pid, {processing_finished, End2, Cas2})
         catch
             E1:E2 ->
-                ?error_stacktrace("Clearing changes old documents error: ~p:~p, pid: ~p",
-                    [E1, E2, Pid]),
+                ?error_stacktrace("Clearing changes old documents error: ~p:~p,"
+                ++ " pid: ~p, scope ~p, bucket ~p",
+                    [E1, E2, Pid, Scope, Bucket]),
                 timer:sleep(?ERROR_SLEEP_TIME),
                 ok = gen_server:cast(Pid, processing_finished)
         end
