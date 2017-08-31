@@ -13,8 +13,6 @@
 -author("Mateusz Paciorek").
 
 -include("global_definitions.hrl").
--include("modules/datastore/datastore_models_def.hrl").
--include("modules/datastore/datastore_engine.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API

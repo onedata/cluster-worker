@@ -391,6 +391,8 @@ clear_children_and_listeners() ->
                 ok
         end
     catch
+        exit:{noproc, _} -> ok;
+        exit:{shutdown, _} -> ok;
         _:Error1 ->
             ?error_stacktrace("Error stopping dns udp listener, status ~p", [Error1])
     end,

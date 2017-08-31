@@ -8,14 +8,13 @@
 %%% @doc
 %%% This module coordinates tasks that needs special supervision.
 %%% @end
-%%% TODO - atomic update at persistent driver needed
 %%%-------------------------------------------------------------------
 -module(task_manager).
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
 -include("elements/task_manager/task_manager.hrl").
--include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include("timeouts.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
@@ -96,9 +95,9 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
                                 ok;
                             {task_failed, batch} ->
                                 {ok, _} = apply(?MODULE, save_pid, [Task, self(), Level]),
-                                ?error_stacktrace("~p fails of a task ~p", [TaskRepeats, Task]);
+                                ?error("~p fails of a task ~p", [TaskRepeats, Task]);
                             _ ->
-                                ?error_stacktrace("~p fails of a task ~p", [TaskRepeats, Task])
+                                ?error("~p fails of a task ~p", [TaskRepeats, Task])
                         end
                 end
         after
@@ -110,6 +109,8 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
     case DelaySave of
         non ->
             case apply(?MODULE, PersistFun, [Task, Pid, Level]) of
+                {ok, #document{key = Uuid}} ->
+                    Pid ! {start, Uuid};
                 {ok, Uuid} ->
                     Pid ! {start, Uuid};
                 {error, owner_alive} ->
@@ -130,9 +131,8 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
 -spec check_and_rerun_all() -> ok.
 check_and_rerun_all() ->
     check_and_rerun_all(?NODE_LEVEL),
-    check_and_rerun_all(?CLUSTER_LEVEL).
-% TODO - list at persistent driver needed
-%%     check_and_rerun_all(?PERSISTENT_LEVEL).
+    check_and_rerun_all(?CLUSTER_LEVEL),
+    check_and_rerun_all(?PERSISTENT_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -147,7 +147,7 @@ is_task_alive(Task) ->
             check_owner(Task#task_pool.owner);
         OtherNode ->
             case rpc:call(OtherNode, ?MODULE, check_owner, [Task#task_pool.owner]) of
-                {badrpc,nodedown} ->
+                {badrpc, nodedown} ->
                     false;
                 {badrpc, R} ->
                     ?error("Badrpc: ~p checking task ~p", [R, Task]),
@@ -163,10 +163,12 @@ is_task_alive(Task) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_owner(Owner :: pid() | string()) -> boolean().
-check_owner(Owner) when is_pid(Owner) ->
+check_owner(Owner) when is_pid(Owner) andalso node(Owner) == node() ->
     is_process_alive(Owner);
+check_owner(Owner) when is_pid(Owner) ->
+    true;
 check_owner(Owner) ->
-    is_process_alive(list_to_pid(Owner)).
+    check_owner(list_to_pid(Owner)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -176,9 +178,8 @@ check_owner(Owner) ->
 -spec kill_all() -> ok.
 kill_all() ->
     kill_all(?NODE_LEVEL),
-    kill_all(?CLUSTER_LEVEL).
-% TODO - list at persistent driver needed
-%%     kill_all(?PERSISTENT_LEVEL).
+    kill_all(?CLUSTER_LEVEL),
+    kill_all(?PERSISTENT_LEVEL).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -186,24 +187,20 @@ kill_all() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_pid(Task :: task(), Pid :: pid(), Level :: level()) ->
-    {ok, datastore:key()} | datastore:create_error().
+    {ok, non | datastore:doc()} | {error, term()}.
 save_pid({TaskType, TaskFun}, Pid, Level) when is_atom(TaskType) ->
-    Owner = case Level of
-                ?PERSISTENT_LEVEL ->
-                    pid_to_list(Pid);
-                _ ->
-                    Pid
-            end,
-    task_pool:create(Level,
-        #document{value = #task_pool{task = TaskFun, task_type = TaskType, owner = Owner, node = node()}});
+    task_pool:create(Level, #document{value = #task_pool{
+        task = TaskFun,
+        task_type = TaskType,
+        owner = encode_owner(Level, Pid),
+        node = node()
+    }});
 save_pid(Task, Pid, Level) ->
-    Owner = case Level of
-                ?PERSISTENT_LEVEL ->
-                    pid_to_list(Pid);
-                _ ->
-                    Pid
-            end,
-    task_pool:create(Level, #document{value = #task_pool{task = Task, owner = Owner, node = node()}}).
+    task_pool:create(Level, #document{value = #task_pool{
+        task = Task,
+        owner = encode_owner(Level, Pid),
+        node = node()
+    }}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -211,23 +208,14 @@ save_pid(Task, Pid, Level) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec update_pid(Task :: #document{value :: #task_pool{}}, Pid :: pid(), Level :: level()) ->
-    {ok, datastore:key()} | datastore:create_error().
+    {ok, non | datastore:doc()} | {error, term()}.
 update_pid(Task, Pid, Level) ->
-    Owner = case Level of
-                ?PERSISTENT_LEVEL ->
-                    pid_to_list(Pid);
-                _ ->
-                    Pid
-            end,
     UpdateFun = fun(Record) ->
         case is_task_alive(Record) of
-            false ->
-                {ok, Record#task_pool{owner = Owner}};
-            _ ->
-                {error, owner_alive}
+            false -> {ok, Record#task_pool{owner = encode_owner(Level, Pid)}};
+            _ -> {error, owner_alive}
         end
     end,
-
     task_pool:update(Level, Task#document.key, UpdateFun).
 
 %%%===================================================================
@@ -235,6 +223,7 @@ update_pid(Task, Pid, Level) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Deletes information about the task.
 %% @end
@@ -243,14 +232,12 @@ update_pid(Task, Pid, Level) ->
     Level :: level()) -> ok.
 delete_task(Uuid, Task, Level) ->
     case task_pool:delete(Level, Uuid) of
-        ok ->
-            ok;
-        E ->
-            ?error_stacktrace("Error ~p while deleting task ~p", [E, Task]),
-            ok
+        ok -> ok;
+        E -> ?error_stacktrace("Error ~p while deleting task ~p", [E, Task])
     end.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Executes task.
 %% @end
@@ -273,6 +260,7 @@ do_task(Task) ->
     ok.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Executes task.
 %% @end
@@ -286,6 +274,7 @@ do_task(Task, Num) ->
     do_task(Task, Num, Num).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Executes task.
 %% @end
@@ -310,6 +299,7 @@ do_task(Task, CurrentNum, MaxNum) ->
     end.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Checks tasks and reruns failed.
 %% @end
@@ -322,6 +312,7 @@ check_and_rerun_all(Level) ->
     end, Tasks).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Kills all tasks.
 %% @end
@@ -348,6 +339,7 @@ kill_all(Level) ->
     end, Tasks).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Kills process that owns task.
 %% @end
@@ -359,6 +351,7 @@ kill_owner(Owner) ->
     exit(list_to_pid(Owner), stopped_by_manager).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Sleeps random interval specified in task_fail_min_sleep_time_ms and task_fail_max_sleep_time_ms
 %% variables.
@@ -369,3 +362,13 @@ sleep_random_interval(Num) ->
     {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
     {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
     timer:sleep(Num * crypto:rand_uniform(Interval1, Interval2 + 1)).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Encodes task owner pid by level.
+%% @end
+%%--------------------------------------------------------------------
+-spec encode_owner(level(), pid()) -> list() | pid().
+encode_owner(?PERSISTENT_LEVEL, Pid) -> pid_to_list(Pid);
+encode_owner(_Level, Pid) -> Pid.

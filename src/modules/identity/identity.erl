@@ -13,7 +13,6 @@
 -module(identity).
 -author("Michal Zmuda").
 
--include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
@@ -89,7 +88,3 @@ verify(ID, EncodedPublicKeyToMatch) ->
                     {error, key_does_not_match}
             end
     end.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================

@@ -12,30 +12,25 @@
 -module(couchbase_driver_test_SUITE).
 -author("Krzysztof Trzepla").
 
--include("global_definitions.hrl").
--include("modules/datastore/datastore.hrl").
--include("modules/datastore/datastore_common_internal.hrl").
+-include("datastore_test_utils.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
 
 %% export for ct
--export([all/0, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_suite/1]).
 
 %% tests
 -export([
     save_should_return_doc/1,
     save_should_increment_seq_counter/1,
     save_should_not_increment_seq_counter/1,
-    save_should_not_set_mutator/1,
-    save_should_not_set_revision/1,
     save_should_create_change_doc/1,
     save_should_return_missing_error/1,
     save_should_return_already_exists_error/1,
     get_should_return_doc/1,
     get_should_return_missing_error/1,
     update_should_change_doc/1,
-    multiple_update_should_not_overfill_revision_history/1,
     delete_should_remove_doc/1,
     delete_should_return_missing_error/1,
     save_get_delete_should_return_success/1,
@@ -69,15 +64,12 @@ all() ->
         save_should_return_doc,
         save_should_increment_seq_counter,
         save_should_not_increment_seq_counter,
-        save_should_not_set_mutator,
-        save_should_not_set_revision,
         save_should_create_change_doc,
         save_should_return_missing_error,
         save_should_return_already_exists_error,
         get_should_return_doc,
         get_should_return_missing_error,
         update_should_change_doc,
-        multiple_update_should_not_overfill_revision_history,
         delete_should_remove_doc,
         delete_should_return_missing_error,
         save_get_delete_should_return_success,
@@ -103,58 +95,23 @@ all() ->
         save_get_delete_should_return_success
     ]).
 
--record(test_model, {
-    field1 :: integer(),
-    field2 :: binary(),
-    filed3 :: atom()
-}).
-
--define(MODEL, test_model).
--define(BUCKET, <<"onedata">>).
--define(CTX, #{bucket => ?BUCKET, mutator => ?MUTATOR, prefix => <<"prefix">>}).
--define(CASE, atom_to_binary(?FUNCTION_NAME, utf8)).
--define(KEY, ?KEY(1)).
--define(KEY(N), <<"key-", (?CASE)/binary, "-", (integer_to_binary(N))/binary>>).
--define(VALUE, #?MODEL{
-    field1 = 1,
-    field2 = <<"2">>,
-    filed3 = '3'
-}).
--define(SCOPE, <<"scope-", (?CASE)/binary>>).
--define(MUTATOR, ?MUTATOR(1)).
--define(MUTATOR(N), <<"mutator-", (?CASE)/binary, "-",
-    (integer_to_binary(N))/binary>>).
+-define(MODEL, disc_only_model).
+-define(CTX, ?DISC_CTX).
+-define(VALUE, ?MODEL_VALUE(?MODEL, 1)).
 -define(DOC, ?DOC(1)).
--define(DOC(N), #document{
-    key = ?KEY(N),
-    value = ?VALUE,
-    scope = ?SCOPE
-}).
--define(DESIGN, <<"design-", (?CASE)/binary>>).
--define(VIEW, <<"view-", (?CASE)/binary>>).
+-define(DOC(N), ?BASE_DOC(?KEY(N), ?VALUE)).
 -define(VIEW_FUNCTION, <<"function (doc, meta) {\r\n"
-"  emit(meta.id, null);\r\n"
-"}\r\n">>).
+                         "  emit(meta.id, null);\r\n"
+                         "}\r\n">>).
 -define(DESIGN_EJSON, {[{<<"views">>,
     {[{?VIEW,
         {[{<<"map">>, ?VIEW_FUNCTION}]}
     }]}
 }]}).
--define(PERF_PARAM(Name, Value, Unit, Description), [
-    {name, Name},
-    {value, Value},
-    {description, Description},
-    {unit, Unit}
-]).
--define(PERF_CFG(Name, Params), {config, [
-    {name, Name},
-    {description, atom_to_list(Name)},
-    {parameters, Params}
-]}).
--define(OPS_NUM(Value), ?PERF_PARAM(ops_num, Value, "",
-    "Number of operations.")).
+
 -define(DURABLE(Value), ?PERF_PARAM(durable, Value, "",
     "Perform save operation with durability check.")).
+
 -define(ATTEMPTS, 60).
 
 %%%===================================================================
@@ -164,20 +121,18 @@ all() ->
 save_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, #document{}},
-        rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC])
     ),
     ?assertEqual(?KEY, Doc#document.key),
     ?assertEqual(?VALUE, Doc#document.value),
     ?assertEqual(?SCOPE, Doc#document.scope),
-    ?assertEqual([?MUTATOR], Doc#document.mutator),
-    ?assertMatch([<<"1-", _/binary>>], Doc#document.rev),
     ?assertEqual(1, Doc#document.seq),
     ?assertEqual(false, Doc#document.deleted),
     ?assertEqual(1, Doc#document.version).
 
 save_should_increment_seq_counter(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
+    rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
     ?assertMatch({ok, _, 1}, rpc:call(Worker, couchbase_driver, get_counter,
         [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
@@ -185,121 +140,84 @@ save_should_increment_seq_counter(Config) ->
 save_should_not_increment_seq_counter(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [?CTX#{no_seq => true}, ?DOC]
+        save, [?CTX#{no_seq => true}, ?KEY, ?DOC]
     )),
     ?assertEqual(null, Doc#document.seq),
-    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver,
+    ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver,
         get_counter, [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
 
-save_should_not_set_mutator(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [maps:remove(mutator, ?CTX), ?DOC]
-    )),
-    ?assertEqual([], Doc#document.mutator).
-
-save_should_not_set_revision(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [?CTX#{no_rev => true}, ?DOC]
-    )),
-    ?assertEqual([], Doc#document.rev).
-
 save_should_create_change_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
-    Key = couchbase_doc:set_prefix(?CTX, ?KEY),
-    {ok, _, Json} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        get, [
-            maps:remove(prefix, ?CTX),
-            couchbase_changes:get_change_key(?SCOPE, 1)
+    rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
+    {ok, _, {Props}} = ?assertMatch({ok, _, _}, rpc:call(Worker,
+        couchbase_driver, get, [
+            ?CTX, couchbase_changes:get_change_key(?SCOPE, 1)
         ]
     )),
-    {Props} = jiffy:decode(Json),
-    ?assertEqual(Key, proplists:get_value(<<"key">>, Props)),
+    ?assertEqual(<<"seq">>, proplists:get_value(<<"_record">>, Props)),
+    ?assertEqual(?KEY, proplists:get_value(<<"key">>, Props)),
     Pid = binary_to_term(base64:decode(proplists:get_value(<<"pid">>, Props))),
     ?assertEqual(true, is_pid(Pid)),
     ?assertEqual(pong, gen_server:call(Pid, ping)).
 
 save_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual({error, key_enoent},
-        rpc:call(Worker, couchbase_driver, save, [?CTX#{cas => 1}, ?DOC])
+    ?assertEqual({error, not_found},
+        rpc:call(Worker, couchbase_driver, save, [?CTX#{cas => 1}, ?KEY, ?DOC])
     ).
 
 save_should_return_already_exists_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, _} = ?assertMatch({ok, _, #document{}},
-        rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC])
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC])
     ),
-    ?assertEqual({error, key_eexists},
-        rpc:call(Worker, couchbase_driver, save, [?CTX#{cas => 1}, ?DOC])
+    ?assertEqual({error, already_exists},
+        rpc:call(Worker, couchbase_driver, save, [?CTX#{cas => 1}, ?KEY, ?DOC])
     ).
 
 get_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, Cas, Doc} = rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
+    {ok, Cas, Doc} = rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
     ?assertEqual({ok, Cas, Doc}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, ?KEY]
     )).
 
 get_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
+    ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, ?KEY]
     )).
 
 update_should_change_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [?CTX, ?DOC]
+        save, [?CTX, ?KEY, ?DOC]
     )),
-    Value = #?MODEL{
-        field1 = 2,
-        field2 = <<"3">>,
-        filed3 = '4'
-    },
+    Value = ?MODEL_VALUE(?MODEL, 2),
     {ok, _, Doc2} = ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver,
-        save, [?CTX#{mutator => ?MUTATOR(2)}, Doc#document{value = Value}]
+        save, [?CTX, ?KEY, Doc#document{value = Value}]
     )),
     ?assertEqual(?KEY, Doc2#document.key),
     ?assertEqual(Value, Doc2#document.value),
     ?assertEqual(?SCOPE, Doc2#document.scope),
-    Mutator = ?MUTATOR(2),
-    ?assertMatch([Mutator | _], Doc2#document.mutator),
-    ?assertMatch([<<"2-", _/binary>> | _], Doc2#document.rev),
     ?assertEqual(2, Doc2#document.seq),
     ?assertEqual(false, Doc2#document.deleted),
     ?assertEqual(1, Doc2#document.version).
 
-multiple_update_should_not_overfill_revision_history(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    Doc3 = lists:foldl(fun(N, Doc) ->
-        {ok, _, Doc2} = ?assertMatch({ok, _, _}, rpc:call(Worker,
-            couchbase_driver, save, [?CTX, Doc#document{
-                value = ?VALUE#?MODEL{field1 = N}
-            }]
-        )),
-        Doc2
-    end, ?DOC, lists:seq(1, 5)),
-    {ok, Len} = test_utils:get_env(Worker, cluster_worker,
-        couchbase_revision_history_length),
-    ?assertEqual(Len, length(Doc3#document.rev)).
-
 delete_should_remove_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, _, _}, rpc:call(Worker, couchbase_driver, save,
-        [?CTX, ?DOC]
+        [?CTX, ?KEY, ?DOC]
     )),
     ?assertEqual(ok, rpc:call(Worker, couchbase_driver, delete, [?CTX, ?KEY])),
-    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, get,
+    ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, get,
         [?CTX, ?KEY]
     )).
 
 delete_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual({error, key_enoent}, rpc:call(Worker, couchbase_driver, delete,
+    ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, delete,
         [?CTX, ?KEY]
     )).
 
@@ -325,7 +243,7 @@ save_get_delete_should_return_success_base(Config) ->
     spawn_link(Worker, fun() ->
         Futures = lists:map(fun(N) ->
             Ctx = ?CTX#{no_durability => not Durable},
-            couchbase_driver:save_async(Ctx, ?DOC(N))
+            couchbase_driver:save_async(Ctx, ?KEY(N), ?DOC(N))
         end, lists:seq(1, OpsNum)),
         lists:foreach(fun(Future) ->
             ?assertMatch({ok, _, #document{}}, couchbase_driver:wait(Future))
@@ -372,7 +290,7 @@ get_counter_should_return_default_value(Config) ->
 
 get_counter_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({error, key_enoent}, rpc:call(Worker, couchbase_driver,
+    ?assertMatch({error, not_found}, rpc:call(Worker, couchbase_driver,
         get_counter, [?CTX, ?KEY]
     )).
 
@@ -453,18 +371,16 @@ query_view_should_return_result(Config) ->
     rpc:call(Worker, couchbase_driver, save_design_doc,
         [?CTX, ?DESIGN, ?DESIGN_EJSON]
     ),
-    rpc:call(Worker, couchbase_driver, save, [?CTX, ?DOC]),
+    rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
     {ok, {[Result]}} = ?assertMatch({ok, {[_]}},
         rpc:call(Worker, couchbase_driver, query_view,
             [?CTX, ?DESIGN, ?VIEW, [
-                {stale, false}, {key, couchbase_doc:set_prefix(?CTX, ?KEY)}
+                {stale, false}, {key, ?KEY}
             ]]
         )
     ),
-    ?assertEqual(couchbase_doc:set_prefix(?CTX, ?KEY),
-        proplists:get_value(<<"id">>, Result)),
-    ?assertEqual(couchbase_doc:set_prefix(?CTX, ?KEY),
-        proplists:get_value(<<"key">>, Result)),
+    ?assertEqual(?KEY, proplists:get_value(<<"id">>, Result)),
+    ?assertEqual(?KEY, proplists:get_value(<<"key">>, Result)),
     ?assertEqual(null, proplists:get_value(<<"value">>, Result)).
 
 query_view_should_return_missing_error(Config) ->
@@ -529,26 +445,5 @@ get_buckets_should_return_all_buckets(Config) ->
 %%% Init/teardown functions
 %%%===================================================================
 
-init_per_testcase(_Case, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, ?MODEL, [passthrough, non_strict]),
-    test_utils:mock_expect(Workers, ?MODEL, model_init, fun() ->
-        #model_config{version = 1}
-    end),
-    test_utils:mock_expect(Workers, ?MODEL, record_struct, fun(1) ->
-        {record, [
-            {field1, integer},
-            {field2, string},
-            {field3, atom}
-        ]}
-    end),
-
-    lists:foreach(fun(W) ->
-        test_utils:set_env(W, cluster_worker, couchbase_mutator_history_length, 20)
-    end, Workers),
-
-    Config.
-
-end_per_testcase(_Case, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_validate_and_unload(Workers, ?MODEL).
+init_per_suite(Config) ->
+    datastore_test_utils:init_suite(Config).

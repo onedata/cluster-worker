@@ -26,15 +26,12 @@
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
-%% Note: Workers start with order specified below. For this reason
-%% all workers that need datastore_worker shall be after datastore_worker on
-%% the list below.
 -define(CLUSTER_WORKER_MODULES, [
-    {early_init, datastore_worker, [
+    {datastore_worker, [
         {supervisor_flags, datastore_worker:supervisor_flags()},
         {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
     ]},
-    {early_init, tp_router, [
+    {tp_router, [
         {supervisor_flags, tp_router:supervisor_flags()},
         {supervisor_children_spec, tp_router:supervisor_children_spec()}
     ]},
@@ -45,16 +42,11 @@
     nagios_listener,
     redirector_listener
 ]).
-% TODO - new drivers do not require two step init
--define(MODULES_HOOKS, [
-    {{datastore_worker, early_init}, {datastore, ensure_state_loaded, []}},
-    {{datastore_worker, init}, {datastore, cluster_initialized, []}}
-]).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0]).
+    cluster_worker_listeners/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -73,18 +65,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
-    | {singleton | early_init, atom(), [any()]}].
+    | {singleton, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of modules' hooks executed after module initialization (early or standard).
-%% Use in plugins when specifying modules_hooks.
-%% @end
-%%--------------------------------------------------------------------
--spec modules_hooks() -> Hooks :: [{{Module :: atom(), early_init | init},
-    {HookedModule :: atom(), Fun :: atom(), Args :: list()}}].
-modules_hooks() -> ?MODULES_HOOKS.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -105,8 +87,7 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 modules() ->
     lists:map(fun
         ({Module, _}) -> Module;
-        ({singleton, Module, _}) -> Module;
-        ({early_init, Module, _}) -> Module
+        ({singleton, Module, _}) -> Module
     end, plugins:apply(node_manager_plugin, modules_with_args, [])).
 
 %%--------------------------------------------------------------------
@@ -205,7 +186,7 @@ init([]) ->
         ?info("All listeners started"),
 
         next_task_check(),
-        erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
+        erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
@@ -269,7 +250,7 @@ handle_call({apply, M, F, A}, _From, State) ->
     {reply, apply(M, F, A), State};
 
 handle_call(_Request, _From, State) ->
-    plugins:apply(node_manager_plugin, handle_call_extension, [_Request, _From, State]).
+    plugins:apply(node_manager_plugin, handle_call, [_Request, _From, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -297,7 +278,7 @@ handle_cast(cluster_init_finished, State) ->
     {noreply, NewState};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
-    ok = caches_controller:configure_throttling(),
+    ok = datastore_throttling:configure_throttling(),
     {noreply, State};
 
 handle_cast(configure_throttling, State) ->
@@ -395,7 +376,7 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(_Request, State) ->
-    plugins:apply(node_manager_plugin, handle_cast_extension, [_Request, State]).
+    plugins:apply(node_manager_plugin, handle_cast, [_Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -410,7 +391,6 @@ handle_cast(_Request, State) ->
     | {stop, Reason :: term(), NewState},
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
-
 handle_info({timer, Msg}, State) ->
     gen_server2:cast(?NODE_MANAGER_NAME, Msg),
     {noreply, State};
@@ -419,7 +399,8 @@ handle_info({nodedown, Node}, State) ->
     {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
     case lists:member(Node, CMNodes) of
         false ->
-            ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
+            ?warning("Node manager received unexpected nodedown msg: ~p",
+                [{nodedown, Node}]);
         true ->
             ok
         % TODO maybe node_manager should be restarted along with all workers to
@@ -429,8 +410,8 @@ handle_info({nodedown, Node}, State) ->
     end,
     {noreply, State};
 
-handle_info(_Request, State) ->
-    plugins:apply(node_manager_plugin, handle_info_extension, [_Request, State]).
+handle_info(Request, State) ->
+    plugins:apply(node_manager_plugin, handle_info, [Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -446,14 +427,14 @@ handle_info(_Request, State) ->
     | shutdown
     | {shutdown, term()}
     | term().
-terminate(_Reason, _State) ->
-    ?info("Shutting down ~p due to ~p", [?MODULE, _Reason]),
+terminate(Reason, State) ->
+    ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
 
     lists:foreach(fun(Module) ->
         erlang:apply(Module, stop, []) end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
-    plugins:apply(node_manager_plugin, on_terminate, [_Reason, _State]).
+    plugins:apply(node_manager_plugin, terminate, [Reason, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -465,8 +446,8 @@ terminate(_Reason, _State) ->
     Result :: {ok, NewState :: term()} | {error, Reason :: term()},
     OldVsn :: Vsn | {down, Vsn},
     Vsn :: term().
-code_change(_OldVsn, State, _Extra) ->
-    plugins:apply(node_manager_plugin, on_code_change, [_OldVsn, State, _Extra]).
+code_change(OldVsn, State, Extra) ->
+    plugins:apply(node_manager_plugin, code_change, [OldVsn, State, Extra]).
 
 %%%===================================================================
 %%% Internal functions
@@ -520,12 +501,12 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 -spec cm_conn_ack(State :: term()) -> #state{}.
 cm_conn_ack(State = #state{cm_con_status = connected}) ->
     ?info("Successfully connected to cluster manager"),
-    init_node(),
-    ?info("Node initialized"),
+    ?info("Starting default workers..."),
+    init_workers(?CLUSTER_WORKER_MODULES),
+    ?info("Default workers started successfully"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
-    self() ! {timer, check_cluster_status},
     State#state{cm_con_status = registered};
 cm_conn_ack(State) ->
     % Already registered or not connected, do nothing
@@ -541,8 +522,17 @@ cm_conn_ack(State) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_finished(State :: term()) -> #state{}.
 cluster_init_finished(State) ->
-    ?info("Cluster sucessfully initialized"),
-    init_workers(),
+    {ok, AppName} = plugins:apply(node_manager_plugin, app_name, []),
+    case AppName of
+        ?CLUSTER_WORKER_APP_NAME ->
+            ok;
+        _ ->
+            ?info("Starting custom workers..."),
+            Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
+            init_workers(Workers),
+            ?info("Custom workers started successfully")
+    end,
+    self() ! {timer, check_cluster_status},
     State.
 
 %%--------------------------------------------------------------------
@@ -614,69 +604,35 @@ init_net_connection([Node | Nodes]) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Init node as worker of oneprovider cluster
-%% @end
-%%--------------------------------------------------------------------
--spec init_node() -> ok.
-init_node() ->
-    early_init_workers().
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts workers that must be initialized before init of cluster ring.
-%% @end
-%%--------------------------------------------------------------------
--spec early_init_workers() -> ok.
-early_init_workers() ->
-    Hooks = plugins:apply(node_manager_plugin, modules_hooks, []),
-
-    lists:foreach(fun
-        ({early_init, Module, Args}) ->
-            ok = start_worker(Module, Args),
-            case proplists:get_value({Module, early_init}, Hooks) of
-                {HookedModule, Fun, HookedArgs} ->
-                    ok = apply(HookedModule, Fun, HookedArgs);
-                _ -> ok
-            end;
-        (_) ->
-            ok
-    end, plugins:apply(node_manager_plugin, modules_with_args, [])),
-    ?info("Early init finished"),
-    ok.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Starts all workers on node.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
-    Hooks = plugins:apply(node_manager_plugin, modules_hooks, []),
+    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    init_workers(CustomWorkers).
 
-    lists:foreach(fun(ModuleDesc) ->
-        InitializedModul = case ModuleDesc of
-            {early_init, Module, _Args} ->
-                Module;
-            {Module, Args} ->
-                ok = start_worker(Module, Args),
-                Module;
-            {singleton, Module, Args} ->
-                case gen_server2:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
-                    ok ->
-                        ok = start_worker(Module, Args),
-                        ?info("Singleton module ~p started", [Module]);
-                    already_started ->
-                        ok
-                end,
-                Module
-        end,
-        case proplists:get_value({InitializedModul, init}, Hooks) of
-            {HookedModule, Fun, HookedArgs} ->
-                ok = apply(HookedModule, Fun, HookedArgs);
-            _ -> ok
-        end
-    end, plugins:apply(node_manager_plugin, modules_with_args, [])),
-    ?info("All workers started"),
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts specified workers on node.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_workers(list()) -> ok.
+init_workers(Workers) ->
+    lists:foreach(fun
+        ({Module, Args}) ->
+            ok = start_worker(Module, Args);
+        ({singleton, Module, Args}) ->
+            case gen_server2:call({global, ?CLUSTER_MANAGER},
+                {register_singleton_module, Module, node()}) of
+                ok ->
+                    ok = start_worker(Module, Args),
+                    ?info("Singleton module ~p started", [Module]);
+                already_started ->
+                    ok
+            end
+    end, Workers),
     ok.
 
 %%--------------------------------------------------------------------
@@ -693,11 +649,11 @@ start_worker(Module, Args) ->
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
         {ok, _} = supervisor:start_child(
             ?MAIN_WORKER_SUPERVISOR_NAME,
-            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
+            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
         ),
         {ok, _} = supervisor:start_child(
             ?MAIN_WORKER_SUPERVISOR_NAME,
-            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
+            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
         ),
         ?info("Worker: ~s started", [Module])
     catch

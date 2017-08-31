@@ -26,7 +26,7 @@
 
 %% Local name (name and node is used to identify it) of supervisor that
 %% coordinates workers at each node
--define(MAIN_WORKER_SUPERVISOR_NAME, main_worker_sup).
+-define(MAIN_WORKER_SUPERVISOR_NAME, cluster_worker_sup).
 
 %% Local name (name and node is used to identify it) of gen_server that
 %% works as a dispatcher.

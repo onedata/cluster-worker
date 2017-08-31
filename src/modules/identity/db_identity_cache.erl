@@ -16,7 +16,7 @@
 -behaviour(identity_cache_behaviour).
 
 -include("global_definitions.hrl").
--include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 -export([put/2, get/1, invalidate/1]).
@@ -47,10 +47,10 @@ get(ID) ->
             {error, expired};
         {ok, #document{value = #cached_identity{encoded_public_key = Encoded}}} ->
             {ok, Encoded};
-        {error, {not_found, identity_cache}} ->
+        {error, not_found} ->
             {error, not_found};
         {error, Reason} ->
-            {error, {db_error, Reason}}
+            {error, {datastore_error, Reason}}
     end.
 
 
@@ -63,8 +63,8 @@ get(ID) ->
 invalidate(ID) ->
     case cached_identity:delete(ID) of
         ok -> ok;
-        {error, {not_found, cached_identity}} -> ok;
-        {error, Reason} -> {error, {db_error, Reason}}
+        {error, not_found} -> ok;
+        {error, Reason} -> {error, {datastore_error, Reason}}
     end.
 
 %%%===================================================================
@@ -75,17 +75,18 @@ invalidate(ID) ->
     ok | {error, Reason :: term()}.
 cache(ID, EncodedPublicKey) ->
     Now = now_seconds(),
-    Result = cached_identity:create_or_update(#document{
-        key = ID, value = #cached_identity{
-            last_update_seconds = Now,
-            encoded_public_key = EncodedPublicKey,
-            id = ID
-        }}, fun(Current) ->
+    Diff = fun(Current) ->
         {ok, Current#cached_identity{
             last_update_seconds = Now,
             encoded_public_key = EncodedPublicKey
         }}
-    end),
+    end,
+    Default = #cached_identity{
+        id = ID,
+        encoded_public_key = EncodedPublicKey,
+        last_update_seconds = Now
+    },
+    Result = cached_identity:update(ID, Diff, Default),
 
     case Result of
         {ok, _} -> ok;

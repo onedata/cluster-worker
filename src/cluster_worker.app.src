@@ -160,7 +160,7 @@
             %% The reason is that a healthcheck can generate a considerable traffic.
             {nagios_caching_time, 1000},
             %% Time in ms after healthcheck is considered failed
-            {nagios_healthcheck_timeout, 5000},
+            {nagios_healthcheck_timeout, 30000},
 
 
             %% ===================================================================
@@ -193,29 +193,22 @@
             %% DATASTORE
             %% ===================================================================
 
-            %% Limit for the number of active tp processes.
             {tp_processes_limit, 200},
-            %% Delay in ms between consecutive calls to tp_server logic
-            %% terminate callback in case of an error
-            {tp_server_terminate_retry_delay, 1000},
-            %% Size of a datastore worker pool
-            {datastore_pool_size, 5},
-            %% Max number of requests a pool worker may aggregate
-            {datastore_pool_batch_size, 25},
-            %% Max delay in milliseconds before a pool worker queue is flushed
-            {datastore_pool_batch_delay, 500},
-            %% Range of port numbers for a CouchBase gateway API port
-            {couchbase_gateway_api_port_range, {12000, 12999}},
-            %% Range of port numbers for a CouchBase gateway admin port
-            {couchbase_gateway_admin_port_range, {13000, 13999}},
+
+            {datastore_default_models, [
+                links_forest,
+                links_node
+            ]},
+
+            {datastore_doc_commit_retry_delay, 1000},
+            {datastore_doc_revisions_history_length, 1},
+            {datastore_doc_mutators_history_length, 1},
 
             {datastore_cache_size, [
                 {memory, 100000},
                 {disc, 500000}
             ]},
-            {datastore_doc_commit_retry_delay, 1000},
-            {couchbase_revision_history_length, 1},
-            {couchbase_mutator_history_length, 1},
+
             {couchbase_config_total_timeout, 30000},
             {couchbase_pool_operation_timeout, 1800000},
             {couchbase_operation_timeout, 60000},

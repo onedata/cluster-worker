@@ -12,14 +12,10 @@
 -module(ets_driver_test_SUITE).
 -author("Krzysztof Trzepla").
 
--include("modules/datastore/datastore.hrl").
--include("modules/datastore/datastore_common_internal.hrl").
--include_lib("ctool/include/test/test_utils.hrl").
--include_lib("ctool/include/test/assertions.hrl").
--include_lib("ctool/include/test/performance.hrl").
+-include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_testcase/2]).
+-export([all/0, init_per_suite/1]).
 
 %% tests
 -export([
@@ -48,91 +44,73 @@ all() ->
         save_get_delete_should_return_success
     ]).
 
--record(test_model, {
-    field1 :: integer(),
-    field2 :: binary(),
-    filed3 :: atom()
-}).
-
--define(MODEL, test_model).
--define(KEY, ?KEY(1)).
--define(KEY(N), <<"key-", (integer_to_binary(N))/binary>>).
--define(VALUE, #?MODEL{
-    field1 = 1,
-    field2 = <<"2">>,
-    filed3 = '3'
-}).
--define(SCOPE, <<"scope">>).
+-define(MODEL, ets_only_model).
+-define(CTX, ?MEM_CTX(?MODEL)).
+-define(VALUE, ?VALUE(1)).
+-define(VALUE(N), ?MODEL_VALUE(?MODEL, N)).
 -define(DOC, ?DOC(1)).
--define(DOC(N), #document{
-    key = ?KEY(N),
-    value = ?VALUE,
-    scope = ?SCOPE
-}).
--define(PERF_PARAM(Name, Value, Unit, Description), [
-    {name, Name},
-    {value, Value},
-    {description, Description},
-    {unit, Unit}
-]).
--define(PERF_CFG(Name, Params), {config, [
-    {name, Name},
-    {description, atom_to_list(Name)},
-    {parameters, Params}
-]}).
--define(OPS_NUM(Value), ?PERF_PARAM(ops_num, Value, "",
-    "Number of operations.")).
+-define(DOC(N), ?BASE_DOC(?KEY(N), ?VALUE)).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
 
 save_should_return_doc(Config) ->
-    Ctx = ?config(ctx, Config),
-    {ok, Doc} = ?assertMatch({ok, _}, ets_driver:save(Ctx, ?DOC)),
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, ets_driver, save, [
+        ?CTX, ?KEY, ?DOC
+    ])),
     ?assertEqual(?KEY, Doc#document.key),
     ?assertEqual(?VALUE, Doc#document.value),
     ?assertEqual(?SCOPE, Doc#document.scope),
-    ?assertEqual([], Doc#document.mutator),
-    ?assertMatch([], Doc#document.rev),
+    ?assertEqual([], Doc#document.mutators),
+    ?assertMatch([<<_/binary>>], Doc#document.revs),
     ?assertEqual(null, Doc#document.seq),
     ?assertEqual(false, Doc#document.deleted),
     ?assertEqual(1, Doc#document.version).
 
 get_should_return_doc(Config) ->
-    Ctx = ?config(ctx, Config),
-    {ok, Doc} = ets_driver:save(Ctx, ?DOC),
-    ?assertEqual({ok, Doc}, ets_driver:get(Ctx, ?KEY)).
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, ets_driver, save, [
+        ?CTX, ?KEY, ?DOC
+    ])),
+    ?assertEqual({ok, Doc}, rpc:call(Worker, ets_driver, get, [
+        ?CTX, ?KEY
+    ])).
 
 get_should_return_missing_error(Config) ->
-    Ctx = ?config(ctx, Config),
-    ?assertEqual({error, key_enoent}, ets_driver:get(Ctx, ?KEY)).
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual({error, not_found}, rpc:call(Worker, ets_driver, get, [
+        ?CTX, ?KEY
+    ])).
 
 update_should_change_doc(Config) ->
-    Ctx = ?config(ctx, Config),
-    {ok, Doc} = ets_driver:save(Ctx, ?DOC),
-    Value = #?MODEL{
-        field1 = 2,
-        field2 = <<"3">>,
-        filed3 = '4'
-    },
-    {ok, Doc2} = ?assertMatch({ok, _}, ets_driver:save(
-        Ctx, Doc#document{value = Value}
-    )),
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, ets_driver, save, [
+        ?CTX, ?KEY, ?DOC
+    ])),
+    Value = ?VALUE(2),
+    {ok, Doc2} = ?assertMatch({ok, _}, rpc:call(Worker, ets_driver, save, [
+        ?CTX, ?KEY, ?DOC#document{value = Value}
+    ])),
     ?assertEqual(?KEY, Doc2#document.key),
     ?assertEqual(Value, Doc2#document.value),
     ?assertEqual(?SCOPE, Doc2#document.scope),
-    ?assertEqual([], Doc#document.mutator),
-    ?assertMatch([], Doc#document.rev),
+    ?assertEqual([], Doc#document.mutators),
+    ?assertMatch([<<_/binary>>], Doc#document.revs),
     ?assertEqual(null, Doc#document.seq),
     ?assertEqual(false, Doc2#document.deleted),
     ?assertEqual(1, Doc2#document.version).
 
 delete_should_remove_doc(Config) ->
-    Ctx = ?config(ctx, Config),
-    ?assertMatch({ok, _}, ets_driver:save(Ctx, ?DOC)),
-    ?assertEqual(ok, ets_driver:delete(Ctx, ?KEY)),
-    ?assertEqual({error, key_enoent}, ets_driver:get(Ctx, ?KEY)).
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertMatch({ok, _}, rpc:call(Worker, ets_driver, save, [
+        ?CTX, ?KEY, ?DOC
+    ])),
+    ?assertEqual(ok, rpc:call(Worker, ets_driver, delete, [?CTX, ?KEY])),
+    ?assertEqual({error, not_found}, rpc:call(Worker, ets_driver, get, [
+        ?CTX, ?KEY
+    ])).
 
 save_get_delete_should_return_success(Config) ->
     ?PERFORMANCE(Config, [
@@ -145,26 +123,28 @@ save_get_delete_should_return_success(Config) ->
         ?PERF_CFG(large, [?OPS_NUM(1000000)])
     ]).
 save_get_delete_should_return_success_base(Config) ->
-    Ctx = ?config(ctx, Config),
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
     OpsNum = ?config(ops_num, Config),
 
     lists:foreach(fun(N) ->
-        ?assertMatch({ok, #document{}}, ets_driver:save(Ctx, ?DOC(N)))
+        ?assertMatch({ok, #document{}}, rpc:call(Worker, ets_driver, save, [
+            ?CTX, ?KEY(N), ?DOC(N)
+        ]))
     end, lists:seq(1, OpsNum)),
 
     lists:foreach(fun(N) ->
-        ?assertMatch({ok, #document{}}, ets_driver:get(Ctx, ?KEY(N)))
+        ?assertMatch({ok, #document{}}, rpc:call(Worker, ets_driver, get, [
+            ?CTX, ?KEY(N)
+        ]))
     end, lists:seq(1, OpsNum)),
 
     lists:foreach(fun(N) ->
-        ?assertMatch(ok, ets_driver:delete(Ctx, ?KEY(N)))
+        ?assertEqual(ok, rpc:call(Worker, ets_driver, delete, [?CTX, ?KEY(N)]))
     end, lists:seq(1, OpsNum)).
 
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
 
-init_per_testcase(Case, Config) ->
-    Ctx = #{table => Case},
-    ets_driver:init(Ctx, []),
-    [{ctx, Ctx} | Config].
+init_per_suite(Config) ->
+    datastore_test_utils:init_suite([?MODEL], Config).

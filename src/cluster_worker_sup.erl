@@ -30,15 +30,10 @@
 %% Starts the supervisor
 %% @end
 %%--------------------------------------------------------------------
--spec start_link() -> Result when
-    Result :: {ok, pid()}
-    | ignore
-    | {error, Error},
-    Error :: {already_started, pid()}
-    | {shutdown, term()}
-    | term().
+-spec start_link() -> {ok, pid()} | ignore | {error, Reason :: term()}.
 start_link() ->
-    supervisor:start_link({local, ?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME}, ?MODULE, []).
+    Name = {local, ?CLUSTER_WORKER_APPLICATION_SUPERVISOR_NAME},
+    supervisor:start_link(Name, ?MODULE, []).
 
 %%%===================================================================
 %% Supervisor callbacks
@@ -54,9 +49,9 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
-    {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
+    {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
-    {ok, {#{strategy => one_for_all, intensity => 5, period => 10}, [
-        cluster_worker_specs:request_dispatcher_spec(),
-        cluster_worker_specs:node_manager_spec()
+    {ok, {#{strategy => one_for_one, intensity => 5, period => 10}, [
+        cluster_worker_specs:node_manager_spec(),
+        cluster_worker_specs:request_dispatcher_spec()
     ]}}.

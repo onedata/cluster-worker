@@ -12,11 +12,8 @@
 -module(couchbase_pool_test_SUITE).
 -author("Krzysztof Trzepla").
 
--include("modules/datastore/datastore.hrl").
--include("modules/datastore/datastore_common_internal.hrl").
--include_lib("ctool/include/test/test_utils.hrl").
--include_lib("ctool/include/test/assertions.hrl").
--include_lib("ctool/include/test/performance.hrl").
+-include("datastore_test_utils.hrl").
+
 
 %% export for ct
 -export([all/0]).
@@ -38,8 +35,6 @@ all() ->
         worker_should_connect_to_first_active_database_node,
         request_should_timeout_on_database_connection_crash
     ]).
-
--define(BUCKET, <<"onedata">>).
 
 %%%===================================================================
 %%% Test functions
@@ -86,5 +81,5 @@ request_should_timeout_on_database_connection_crash(Config) ->
     test_utils:set_env(Worker, cluster_worker, couchbase_durability_timeout,
         timer:seconds(1)),
     ?assertEqual({error, timeout}, rpc:call(Worker, couchbase_pool, post,
-        [?BUCKET, write, {save, #{}, {key, value}}]
+        [?BUCKET, write, {save, #{}, key, value}]
     )).

@@ -6,37 +6,37 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Plugin which extends node manager for op_worker
+%%% Plugin which extends node manager.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(node_manager_plugin_default).
--author("Michal Zmuda").
-
--behaviour(node_manager_plugin_behaviour).
+-author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
--include("elements/node_manager/node_manager.hrl").
--include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
--include_lib("ctool/include/global_definitions.hrl").
 
-%% node_manager_plugin_behaviour callbacks
--export([before_init/1, after_init/1, on_terminate/2, on_code_change/3,
-  handle_call_extension/3, handle_cast_extension/2, handle_info_extension/2, renamed_models/0,
-  modules_with_args/0, modules_hooks/0, listeners/0, cm_nodes/0, db_nodes/0, check_node_ip_address/0,
-  app_name/0, clear_memory/1]).
+-export([app_name/0, cm_nodes/0, db_nodes/0]).
+-export([renamed_models/0, listeners/0, modules_with_args/0]).
+-export([before_init/1, after_init/1]).
+-export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([check_node_ip_address/0, clear_memory/1]).
+
+-type model() :: datastore_model:model().
+-type record_version() :: datastore_model:record_version().
+-type state() :: term().
 
 %%%===================================================================
 %%% node_manager_plugin_behaviour callbacks
 %%%===================================================================
 
+%%--------------------------------------------------------------------
 %% @doc
-%% List db nodes to be used by node manager.
+%% Returns the name of the application that bases on cluster worker.
 %% @end
 %%--------------------------------------------------------------------
 -spec app_name() -> {ok, Name :: atom()}.
 app_name() ->
-  {ok, cluster_worker}.
+    {ok, cluster_worker}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -45,7 +45,7 @@ app_name() ->
 %%--------------------------------------------------------------------
 -spec cm_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 cm_nodes() ->
-  application:get_env(?CLUSTER_WORKER_APP_NAME, cm_nodes).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, cm_nodes).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,22 +54,20 @@ cm_nodes() ->
 %%--------------------------------------------------------------------
 -spec db_nodes() -> {ok, Nodes :: [atom()]} | undefined.
 db_nodes() ->
-  application:get_env(?CLUSTER_WORKER_APP_NAME, db_nodes).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, db_nodes).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Maps old model name to new one.
 %% @end
 %%--------------------------------------------------------------------
--spec renamed_models() ->
-  #{OldName :: model_behaviour:model_type() =>
-  {RenameVersion :: datastore_json:record_version(), NewName :: model_behaviour:model_type()}}.
+-spec renamed_models() -> #{{record_version(), model()} => model()}.
 renamed_models() ->
-  #{}.
+    #{}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link node_manager_plugin_behaviour} callback listeners/0.
+%% List of listeners to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
 -spec listeners() -> Listeners :: [atom()].
@@ -77,98 +75,84 @@ listeners() -> node_manager:cluster_worker_listeners().
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link node_manager_plugin_behaviour} callback modules_with_args/0.
+%% List of modules with configs to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
--spec modules_with_args() -> Models :: [{atom(), [any()]} | {singleton | early_init, atom(), [any()]}].
+-spec modules_with_args() ->
+    [{module(), list()} | {singleton, module(), list()}].
 modules_with_args() -> node_manager:cluster_worker_modules().
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link node_manager_plugin_behaviour} callback modules_hooks/0.
-%% @end
-%%--------------------------------------------------------------------
--spec modules_hooks() -> Hooks :: [{{Module :: atom(), early_init | init},
-  {HookedModule :: atom(), Fun :: atom(), Args :: list()}}].
-modules_hooks() -> node_manager:modules_hooks().
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link node_manager_plugin_behaviour}  callback on_init/0.
+%% This callback is executed when node manager starts. At time
+%% of invocation, node_manager is not set init'ed yet. Use to inject
+%% custom initialisation.
 %% @end
 %%--------------------------------------------------------------------
 -spec before_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
 before_init([]) ->
-  standalone_host_sup:start_link(),
-  ok.
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link node_manager_plugin_behaviour}  callback on_init/0.
+%% This callback is executed when cluster has finished to initialize
+%% (nagios has reported healthy status).
+%% Use to run custom code required for application initialization that might
+%% need working services (e.g. database).
 %% @end
 %%--------------------------------------------------------------------
 -spec after_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
 after_init([]) ->
-  ok.
+    ok.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Handling call messages
+%% Handles call messages.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_call_extension(Request :: term(), From :: {pid(), Tag :: term()}, State :: term()) -> Result when
-  Result :: {reply, Reply, NewState}
-  | {reply, Reply, NewState, Timeout}
-  | {reply, Reply, NewState, hibernate}
-  | {noreply, NewState}
-  | {noreply, NewState, Timeout}
-  | {noreply, NewState, hibernate}
-  | {stop, Reason, Reply, NewState}
-  | {stop, Reason, NewState},
-  Reply :: nagios_handler:healthcheck_response() | term(),
-  NewState :: term(),
-  Timeout :: non_neg_integer() | infinity,
-  Reason :: term().
-
-handle_call_extension(_Request, _From, State) ->
-  ?log_bad_request(_Request),
-  {reply, wrong_request, State}.
+-spec handle_call(Request :: term(), From :: {pid(), Tag :: term()},
+    State :: state()) ->
+    {reply, Reply :: term(), NewState :: state()} |
+    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
+    {stop, Reason :: term(), NewState :: state()}.
+handle_call(Request, _From, State) ->
+    ?log_bad_request(Request),
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Handling cast messages
+%% Handles cast messages.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_cast_extension(Request :: term(), State :: term()) -> Result when
-  Result :: {noreply, NewState}
-  | {noreply, NewState, Timeout}
-  | {noreply, NewState, hibernate}
-  | {stop, Reason :: term(), NewState},
-  NewState :: term(),
-  Timeout :: non_neg_integer() | infinity.
-
-handle_cast_extension(_Request, State) ->
-  ?log_bad_request(_Request),
-  {noreply, State}.
+-spec handle_cast(Request :: term(), State :: state()) ->
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: state()}.
+handle_cast(Request, State) ->
+    ?log_bad_request(Request),
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Handling all non call/cast messages
+%% Handles all non call/cast messages.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_info_extension(Info :: timeout | term(), State :: term()) -> Result when
-  Result :: {noreply, NewState}
-  | {noreply, NewState, Timeout}
-  | {noreply, NewState, hibernate}
-  | {stop, Reason :: term(), NewState},
-  NewState :: term(),
-  Timeout :: non_neg_integer() | infinity.
-
-handle_info_extension(_Request, State) ->
-  ?log_bad_request(_Request),
-  {noreply, State}.
+-spec handle_info(Info :: timeout() | term(), State :: state()) ->
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: state()}.
+handle_info(Info, State) ->
+    ?log_bad_request(Info),
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% This function is called by a gen_server when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
@@ -176,35 +160,32 @@ handle_info_extension(_Request, State) ->
 %% with Reason. The return value is ignored.
 %% @end
 %%--------------------------------------------------------------------
--spec on_terminate(Reason, State :: term()) -> Any :: term() when
-  Reason :: normal
-  | shutdown
-  | {shutdown, term()}
-  | term().
-on_terminate(_Reason, _State) ->
-  ok.
+-spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
+    State :: state()) -> term().
+terminate(_Reason, State) ->
+    State.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Convert process state when code is changed
+%% Converts process state when code is changed.
 %% @end
 %%--------------------------------------------------------------------
--spec on_code_change(OldVsn, State :: term(), Extra :: term()) -> Result when
-  Result :: {ok, NewState :: term()} | {error, Reason :: term()},
-  OldVsn :: Vsn | {down, Vsn},
-  Vsn :: term().
-on_code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
+-spec code_change(OldVsn :: term() | {down, term()}, State :: state(),
+    Extra :: term()) -> {ok, NewState :: state()} | {error, Reason :: term()}.
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Checks IP address of this node (it assumes a 127.0.0.1).
 %% @end
 %%--------------------------------------------------------------------
--spec check_node_ip_address() -> IPV4Addr :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()}.
+-spec check_node_ip_address() ->
+    IPV4Addr :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()}.
 check_node_ip_address() ->
-  ?info("IP of node defaulting to 127.0.0.1", []),
-  {127, 0, 0, 1}.
+    ?info("IP of node defaulting to 127.0.0.1", []),
+    {127, 0, 0, 1}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -215,8 +196,4 @@ check_node_ip_address() ->
 %%--------------------------------------------------------------------
 -spec clear_memory(HighMemUse :: boolean()) -> ok.
 clear_memory(_HighMemUse) ->
-  ok.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+    ok.
