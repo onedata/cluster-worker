@@ -114,7 +114,7 @@ handle_cast({processing_finished, End, Cas2}, #state{} = State) ->
     State2 = State#state{batch_begin = End + 1, seq_safe_cas = Cas2, processing = false},
     {noreply, delete_internal_docs(State2)};
 handle_cast(processing_finished, #state{} = State) ->
-    State2 = State#state{processing = false},
+    State2 = State#state{processing = false, seq_safe_cas = undefined},
     {noreply, delete_internal_docs(State2)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
@@ -185,8 +185,16 @@ delete_internal_docs(#state{batch_begin = Beg, batch_end = End, bucket = Bucket,
 
             Ctx = #{bucket => Bucket, pool_mode => changes},
             SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
+            SaveCas = case Cas of
+                undefined ->
+                    {ok, CurrentCas, _} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
+                    CurrentCas;
+                _ ->
+                    Cas
+            end,
+
             {ok, Cas2, End2} = couchbase_driver:save(
-                Ctx#{cas => Cas}, {SeqSafeKey, End2}
+                Ctx#{cas => SaveCas}, {SeqSafeKey, End2}
             ),
 
             ChangeKeys = lists:map(fun(S) ->
@@ -196,8 +204,9 @@ delete_internal_docs(#state{batch_begin = Beg, batch_end = End, bucket = Bucket,
             ok = gen_server:cast(Pid, {processing_finished, End2, Cas2})
         catch
             E1:E2 ->
-                ?error_stacktrace("Clearing changes old documents error: ~p:~p",
-                    [E1, E2]),
+                ?error_stacktrace("Clearing changes old documents error: ~p:~p,"
+                ++ " pid: ~p, scope ~p, bucket ~p",
+                    [E1, E2, Pid, Scope, Bucket]),
                 timer:sleep(?ERROR_SLEEP_TIME),
                 ok = gen_server:cast(Pid, processing_finished)
         end
