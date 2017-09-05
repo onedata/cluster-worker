@@ -115,7 +115,8 @@ handle_cast({processing_finished, End, Cas2}, #state{} = State) ->
         processing = false
     })};
 handle_cast(processing_finished, #state{} = State) ->
-    {noreply, delete_internal_docs(State#state{processing = false})};
+    State2 = State#state{processing = false, seq_safe_cas = undefined},
+    {noreply, delete_internal_docs(State2)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -188,8 +189,16 @@ delete_internal_docs(State = #state{
 
             Ctx = #{bucket => Bucket, pool_mode => changes},
             SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
+            SaveCas = case Cas of
+                undefined ->
+                    {ok, CurrentCas, _} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
+                    CurrentCas;
+                _ ->
+                    Cas
+            end,
+
             {ok, Cas2, End2} = couchbase_driver:save(
-                Ctx#{cas => Cas}, SeqSafeKey, End2
+                Ctx#{cas => SaveCas}, SeqSafeKey, End2
             ),
 
             ChangeKeys = lists:map(fun(S) ->
@@ -200,7 +209,8 @@ delete_internal_docs(State = #state{
         catch
             _:Reason ->
                 ?error_stacktrace("Clearing changes intenal documents failed"
-                " due to:~p", [Reason]),
+                " due to: ~p (pid: ~p, scope: ~p, bucket: ~p)",
+                    [Reason, Pid, Scope, Bucket]),
                 timer:sleep(?ERROR_SLEEP_TIME),
                 gen_server:cast(Pid, processing_finished)
         end
