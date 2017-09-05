@@ -208,6 +208,8 @@ load(Ptr, Cache, Mask = #mask{ctx = Ctx, batch = Batch}) ->
                 gb_sets:add(Link, Cache2)
             end, Cache, Links),
             load(Next, Cache3, Mask#mask{batch = Batch2});
+        {{ok, #document{deleted = true}}, Batch2} ->
+            {{ok, Cache}, Mask#mask{batch = Batch2}};
         {{error, not_found}, Batch2} ->
             {{ok, Cache}, Mask#mask{batch = Batch2}};
         {{error, Reason}, Batch2} ->

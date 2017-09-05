@@ -144,7 +144,7 @@ handle_info(flush, State = #state{
     requests_ref = Ref,
     cached_keys_to_flush = CachedKeys
 }) ->
-    gen_server:call(Pid, {flush, Ref, CachedKeys}),
+    gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
     {noreply, State#state{
         cached_keys_to_flush = #{},
         cached_keys_in_flush = CachedKeys
@@ -350,9 +350,6 @@ send_response({Pid, Ref, Responses}, Batch) ->
     Pid ! {Ref, Responses2}.
 
 -spec schedule_flush(state()) -> state().
-schedule_flush(State = #state{cached_keys_to_flush = CachedKeys})
-    when map_size(CachedKeys) == 0 ->
-    State;
 schedule_flush(State = #state{flush_ref = undefined}) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
         timer:seconds(5)),

@@ -119,7 +119,8 @@ delete(Ctx, Key, Pred) ->
 -spec add_links(ctx(), key(), tree_id(), [{link_name(), link_target()}]) ->
     [{ok, link()} | {error, term()}].
 add_links(Ctx, Key, TreeId, Links) ->
-    call(Ctx, {links, Key}, add_links, [Key, TreeId, Links]).
+    Size = length(Links),
+    multi_call(Ctx, {links, Key}, add_links, [Key, TreeId, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -129,17 +130,19 @@ add_links(Ctx, Key, TreeId, Links) ->
 -spec fetch_links(ctx(), key(), tree_ids(), [link_name()]) ->
     [{ok, [link()]} | {error, term()}].
 fetch_links(Ctx, Key, TreeIds, LinkNames) ->
-    call(Ctx, {links, Key}, fetch_links, [Key, TreeIds, LinkNames]).
+    Size = length(LinkNames),
+    multi_call(Ctx, {links, Key}, fetch_links, [Key, TreeIds, LinkNames], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Synchronous and thread safe {@link datastore:delete_links/4} implementation.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_links(ctx(), key(), tree_id(),
-    [link_name() | {link_name(), link_rev()}]) -> [ok | {error, term()}].
+-spec delete_links(ctx(), key(), tree_id(), [{link_name(), link_rev()}]) ->
+    [ok | {error, term()}].
 delete_links(Ctx, Key, TreeId, Links) ->
-    call(Ctx, {links, Key}, delete_links, [Key, TreeId, Links]).
+    Size = length(Links),
+    multi_call(Ctx, {links, Key}, delete_links, [Key, TreeId, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -150,7 +153,8 @@ delete_links(Ctx, Key, TreeId, Links) ->
 -spec mark_links_deleted(ctx(), key(), tree_id(), [{link_name(), link_rev()}]) ->
     [ok | {error, term()}].
 mark_links_deleted(Ctx, Key, TreeId, Links) ->
-    call(Ctx, {links, Key}, mark_links_deleted, [Key, TreeId, Links]).
+    Size = length(Links),
+    multi_call(Ctx, {links, Key}, mark_links_deleted, [Key, TreeId, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -187,6 +191,19 @@ call(Ctx, Key, Function, Args) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Multiplies requests handling error.
+%% @end
+%%--------------------------------------------------------------------
+-spec multi_call(ctx(), {doc | links, key()}, atom(), list(), non_neg_integer()) ->
+    term().
+multi_call(Ctx, Key, Function, Args, Size) ->
+    case call(Ctx, Key, Function, Args) of
+        {error, Reason} -> [{error, Reason} || _ <- lists:seq(1, Size)];
+        Response -> Response
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Performs asynchronous call to a datastore writer process associated
 %% with a key and returns response reference, which may be passed to
 %% {@link wait/1} to collect result.
@@ -196,7 +213,7 @@ call(Ctx, Key, Function, Args) ->
     {ok, reference()} | {error, term()}.
 call_async(Ctx, Key, Function, Args) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_queueing_timeout, timer:seconds(5)),
+        datastore_writer_request_queueing_timeout, timer:minutes(1)),
     Attempts = application:get_env(?CLUSTER_WORKER_APP_NAME,
         datastore_writer_request_queueing_attempts, 3),
     Request = {handle, {Function, [Ctx | Args]}},
@@ -210,7 +227,7 @@ call_async(Ctx, Key, Function, Args) ->
 -spec wait(reference()) -> term() | {error, timeout}.
 wait(Ref) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_handling_timeout, timer:minutes(5)),
+        datastore_writer_request_handling_timeout, timer:minutes(30)),
     receive
         {Ref, Response} -> Response
     after
@@ -348,7 +365,7 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle
 }) ->
     Ref = make_ref(),
-    gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}),
+    gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity),
     State#state{
         requests = [],
         cache_writer_state = {active, Ref},
