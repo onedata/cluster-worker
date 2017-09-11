@@ -367,35 +367,29 @@ process_link(_, Acc, #link{tree_id = TreeId, name = Name}, Opts = #{
     prev_link_name := PrevName
 }) when TreeId =< PrevTreeId andalso Name =< PrevName ->
     {ok, {Acc, Opts}};
-process_link(_, Acc, #link{tree_id = TreeId, name = Name}, Opts = #{
+process_link(Fun, Acc, Link = #link{tree_id = TreeId, name = Name}, Opts = #{
     offset := Offset
 }) when Offset > 0 ->
-    {ok, {Acc, Opts#{
+    Opts2 = Opts#{
         prev_tree_id => TreeId,
-        prev_link_name => Name,
-        offset => Offset - 1
-    }}};
+        prev_link_name => Name
+    },
+    case Fun(Link, Acc) of
+        {ok, Acc} -> {ok, {Acc, Opts2}};
+        {ok, _} -> {ok, {Acc, Opts2#{offset => Offset - 1}}};
+        {{stop, Acc2}, _} -> {ok, {Acc2, Opts2#{offset => 0, size => 0}}};
+        {{error, Reason}, _} -> {error, Reason}
+    end;
 process_link(Fun, Acc, Link = #link{tree_id = TreeId, name = Name}, Opts) ->
+    Opts2 = Opts#{
+        prev_tree_id => TreeId,
+        prev_link_name => Name
+    },
     case {Fun(Link, Acc), maps:get(size, Opts, undefined)} of
-        {{ok, Acc2}, undefined} ->
-            {ok, {Acc2, Opts#{
-                prev_tree_id => TreeId,
-                prev_link_name => Name
-            }}};
-        {{ok, Acc2}, Size} ->
-            {ok, {Acc2, Opts#{
-                prev_tree_id => TreeId,
-                prev_link_name => Name,
-                size => Size - 1
-            }}};
-        {{stop, Acc2}, _} ->
-            {ok, {Acc2, Opts#{
-                prev_tree_id => TreeId,
-                prev_link_name => Name,
-                size => 0
-            }}};
-        {{error, Reason}, _} ->
-            {error, Reason}
+        {{ok, Acc2}, undefined} -> {ok, {Acc2, Opts2}};
+        {{ok, Acc2}, Size} -> {ok, {Acc2, Opts2#{size => Size - 1}}};
+        {{stop, Acc2}, _} -> {ok, {Acc2, Opts2#{size => 0}}};
+        {{error, Reason}, _} -> {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
