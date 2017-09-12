@@ -9,7 +9,7 @@
 %%% This module provides API for datastore document links management.
 %%%
 %%% Each datastore key can be associated with a one or many named links
-%%% that point to some target/targets (#link{}). Links are grouped into tress
+%%% that point to some target/targets (#link{}). Links are grouped into trees
 %%% and internally stored as tree nodes (#links_node{}). A set of trees creates
 %%% a forest which holds pointers to the tree roots (#links_forest{}). In order
 %%% to avoid synchronization conflicts between trees, links masks are introduced
@@ -29,9 +29,9 @@
 %%% a collection of trees and can be created with
 %%% {@link datastore_links_iter:init/3} or {@link datastore_links_iter:init/4}
 %%% functions. Both of them use {@link datastore_doc_batch} as a local cache.
-%%% It stores all the modifications which should be applied on the
-%%% {@link datastore_cache}. In order to retrieve datastore documents batch,
-%%% terminate function should be called on both of the objects.
+%%% In order to retrieve datastore documents batch, terminate function should be
+%%% called on both of the objects. For more information about documents batch
+%%% checkout {@link datastore_doc_batch} module.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_links).

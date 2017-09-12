@@ -27,7 +27,6 @@
 -record(forest_it, {
     ctx :: ctx(),
     key :: key(),
-    acc = [] :: [link()],
     heap = gb_trees:empty() :: gb_trees:tree({link_name(), tree_id()}, tree_it()),
     tree_ids = [] :: [tree_id()],
     masks_cache = #{} :: #{tree_id() => mask_cache()},
@@ -124,19 +123,19 @@ terminate(#forest_it{batch = Batch}) ->
 -spec get(link_name(), forest_it()) ->
     {{ok, [link()]} | {error, term()}, forest_it()}.
 get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
+    Results = utils:pmap(fun(TreeId) ->
+        get_from_tree(LinkName, TreeId, ForestIt)
+    end, TreeIds),
     Result = lists:foldl(fun
-        (TreeId, {ok, ForestIt2}) ->
-            get_from_tree(LinkName, TreeId, ForestIt2);
-        (_, {{error, Reason}, ForestIt2}) ->
-            {{error, Reason}, ForestIt2}
-    end, {ok, ForestIt}, TreeIds),
+        (_, {error, Reason}) -> {error, Reason};
+        ({error, not_found}, {ok, Acc}) -> {ok, Acc};
+        ({error, Reason}, _) -> {error, Reason};
+        ({ok, Link}, {ok, Acc}) -> {ok, [Link | Acc]}
+    end, {ok, []}, Results),
     case Result of
-        {ok, ForestIt3 = #forest_it{acc = []}} ->
-            {{error, not_found}, ForestIt3};
-        {ok, ForestIt3 = #forest_it{acc = Acc}} ->
-            {{ok, Acc}, ForestIt3#forest_it{acc = []}};
-        {{error, Reason}, ForestIt3} ->
-            {{error, Reason}, ForestIt3#forest_it{acc = []}}
+        {ok, []} -> {{error, not_found}, ForestIt};
+        {ok, Acc} -> {{ok, Acc}, ForestIt};
+        {error, Reason} -> {{error, Reason}, ForestIt}
     end.
 
 %%--------------------------------------------------------------------
@@ -224,29 +223,20 @@ init_tree_mask_cache(TreeId, Mask, ForestIt = #forest_it{
 %% @end
 %%--------------------------------------------------------------------
 -spec get_from_tree(link_name(), tree_id(), forest_it()) ->
-    {ok | {error, term()}, forest_it()}.
-get_from_tree(LinkName, TreeId, ForestIt = #forest_it{
-    ctx = Ctx, key = Key, acc = Acc, masks_cache = MasksCache, batch = Batch
+    {ok, link()} | {error, term()}.
+get_from_tree(LinkName, TreeId, #forest_it{
+    ctx = Ctx, key = Key, masks_cache = MasksCache, batch = Batch
 }) ->
     Cache = maps:get(TreeId, MasksCache),
     {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch),
     case datastore_links_crud:get(LinkName, Tree) of
-        {{ok, Link}, Tree2} ->
-            ForestIt2 = ForestIt#forest_it{
-                batch = datastore_links:terminate_tree(Tree2)
-            },
+        {{ok, Link}, _} ->
             case is_deleted(Link, Cache) of
-                true -> {ok, ForestIt2};
-                false -> {ok, ForestIt2#forest_it{acc = [Link | Acc]}}
+                true -> {error, not_found};
+                false -> {ok, Link}
             end;
-        {{error, not_found}, Tree3} ->
-            {ok, ForestIt#forest_it{
-                batch = datastore_links:terminate_tree(Tree3)
-            }};
-        {{error, Reason}, Tree3} ->
-            {{error, Reason}, ForestIt#forest_it{
-                batch = datastore_links:terminate_tree(Tree3)
-            }}
+        {{error, Reason}, _} ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
