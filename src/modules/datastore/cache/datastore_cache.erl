@@ -153,9 +153,9 @@ flush(Ctx, <<_/binary>> = Key) ->
 %%--------------------------------------------------------------------
 -spec flush_async(ctx(), key()) -> future().
 flush_async(#{memory_driver := undefined}, _Key) ->
-    ?FUTURE(memory, undefined, {error, not_found});
+    ?FUTURE(memory, undefined, {error, memory_driver_undefined});
 flush_async(#{disc_driver := undefined}, _Key) ->
-    ?FUTURE(disc, undefined, {error, not_found});
+    ?FUTURE(disc, undefined, {error, disc_driver_undefined});
 flush_async(Ctx, Key) ->
     #{
         memory_driver := MemoryDriver,

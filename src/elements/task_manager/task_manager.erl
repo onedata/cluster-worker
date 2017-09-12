@@ -109,8 +109,6 @@ start_task(Task, Level, PersistFun, Sleep, DelaySave) ->
     case DelaySave of
         non ->
             case apply(?MODULE, PersistFun, [Task, Pid, Level]) of
-                {ok, #document{key = Uuid}} ->
-                    Pid ! {start, Uuid};
                 {ok, Uuid} ->
                     Pid ! {start, Uuid};
                 {error, owner_alive} ->
@@ -187,7 +185,7 @@ kill_all() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_pid(Task :: task(), Pid :: pid(), Level :: level()) ->
-    {ok, non | datastore:doc()} | {error, term()}.
+    {ok, non | datastore:key()} | {error, term()}.
 save_pid({TaskType, TaskFun}, Pid, Level) when is_atom(TaskType) ->
     task_pool:create(Level, #document{value = #task_pool{
         task = TaskFun,

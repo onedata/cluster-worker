@@ -268,7 +268,7 @@ task_pool_test(Config) ->
 
     % then
     CreateAns = lists:foldl(fun({Task, Level, Worker}, Acc) ->
-        {ok, Ans} = ?assertMatch({ok, _},
+        {ok, Key} = ?assertMatch({ok, _},
             rpc:call(Worker, task_pool, create, [Level, #document{
                 value = Task#task_pool{
                     owner = pid_to_list(self()),
@@ -276,12 +276,9 @@ task_pool_test(Config) ->
                 }
             }])
         ),
-        case Ans of
-            #document{key = Key} -> [{Key, Level} | Acc];
-            _ -> Acc
-        end
+        [{Key, Level} | Acc]
     end, [], Tasks),
-    Keys = lists:reverse(CreateAns),
+    [_ | Keys] = lists:reverse(CreateAns),
 
     NewNames = [t2_2, t3_2, t4_2, t5_2, t6_2],
     ToUpdate = lists:zip(Keys, NewNames),

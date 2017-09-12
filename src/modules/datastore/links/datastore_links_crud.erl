@@ -28,7 +28,8 @@
 -type link_target() :: datastore_links:link_target().
 -type link_rev() :: datastore_links:link_rev().
 
--define(REV_LEN, 16).
+-define(REV_LENGTH,
+    application:get_env(cluster_worker, datastore_links_rev_length, 16)).
 
 %%%===================================================================
 %%% API
@@ -42,7 +43,7 @@
 -spec add(link_name(), link_target(), tree()) ->
     {{ok, link()} | {error, term()}, tree()}.
 add(LinkName, LinkTarget, Tree) ->
-    LinkRev = datastore_utils:gen_hex(?REV_LEN),
+    LinkRev = datastore_utils:gen_hex(?REV_LENGTH),
     case bp_tree:insert(LinkName, {LinkTarget, LinkRev}, Tree) of
         {ok, Tree2} ->
             {{ok, #link{
@@ -108,7 +109,9 @@ delete(LinkName, LinkRev, Tree) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Applies function on a datastore link tree. Along with a result returns also
+%% This is a convenient overload used in tests only. It initializes datastore
+%% documents batch and links tree, applies one of add, get, delete functions
+%% and terminates the thee and the batch. Along with a result returns also
 %% cached keys.
 %% @end
 %%--------------------------------------------------------------------

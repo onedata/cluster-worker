@@ -80,7 +80,7 @@ listeners() -> node_manager:cluster_worker_listeners().
 %%--------------------------------------------------------------------
 -spec modules_with_args() ->
     [{module(), list()} | {singleton, module(), list()}].
-modules_with_args() -> node_manager:cluster_worker_modules().
+modules_with_args() -> [].
 
 %%--------------------------------------------------------------------
 %% @doc

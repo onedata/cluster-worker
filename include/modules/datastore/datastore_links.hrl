@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This file contains datastore links records definitions.
+%%% For detailed description checkout {@link datastore_links} module.
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -18,6 +19,31 @@
     name :: datastore_links:link_name(),
     target :: datastore_links:link_target(),
     rev :: datastore_links:link_rev()
+}).
+
+-record(links_forest, {
+    model :: datastore_model:model(),
+    key :: datastore:key(),
+    trees = #{} :: links_forest:trees()
+}).
+
+-record(links_node, {
+    model :: datastore_model:model(),
+    key :: datastore:key(),
+    node :: undefined | links_node:links_node()
+}).
+
+-record(links_mask, {
+    model :: datastore_model:model(),
+    key :: datastore:key(),
+    tree_id :: links_tree:id(),
+    links = [] :: [{datastore_links:link_name(), datastore_links:link_rev()}],
+    next = <<>> :: datastore:key()
+}).
+
+-record(links_mask_root, {
+    heads :: #{links_tree:id() => datastore:key()},
+    tails :: #{links_tree:id() => datastore:key()}
 }).
 
 -endif.

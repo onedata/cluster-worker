@@ -52,7 +52,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% for tests
--export([init_workers/0]).
+-export([init_workers/0, init_workers/1]).
 
 %%%===================================================================
 %%% API
@@ -85,10 +85,12 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
+    DefaultWorkers = cluster_worker_modules(),
+    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
     lists:map(fun
         ({Module, _}) -> Module;
         ({singleton, Module, _}) -> Module
-    end, plugins:apply(node_manager_plugin, modules_with_args, [])).
+    end, DefaultWorkers ++ CustomWorkers).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -502,7 +504,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 cm_conn_ack(State = #state{cm_con_status = connected}) ->
     ?info("Successfully connected to cluster manager"),
     ?info("Starting default workers..."),
-    init_workers(?CLUSTER_WORKER_MODULES),
+    init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
@@ -522,16 +524,10 @@ cm_conn_ack(State) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_finished(State :: term()) -> #state{}.
 cluster_init_finished(State) ->
-    {ok, AppName} = plugins:apply(node_manager_plugin, app_name, []),
-    case AppName of
-        ?CLUSTER_WORKER_APP_NAME ->
-            ok;
-        _ ->
-            ?info("Starting custom workers..."),
-            Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
-            init_workers(Workers),
-            ?info("Custom workers started successfully")
-    end,
+    ?info("Starting custom workers..."),
+    Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
     self() ! {timer, check_cluster_status},
     State.
 
@@ -609,8 +605,9 @@ init_net_connection([Node | Nodes]) ->
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
+    DefaultWorkers = cluster_worker_modules(),
     CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
-    init_workers(CustomWorkers).
+    init_workers(DefaultWorkers ++ CustomWorkers).
 
 
 %%--------------------------------------------------------------------

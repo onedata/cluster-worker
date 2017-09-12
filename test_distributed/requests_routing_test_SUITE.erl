@@ -20,7 +20,7 @@
 -include_lib("ctool/include/global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_suite/1]).
 -export([simple_call_test/1, direct_cast_test/1, redirect_cast_test/1, mixed_cast_test/1]).
 -export([mixed_cast_test_core/1]).
 -export([singleton_module_test/1, simple_call_test_base/1,
@@ -50,7 +50,11 @@ all() ->
 singleton_module_test(Config) ->
     [Worker1, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, {apply, node_manager, init_workers, []}))
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, {
+            apply, node_manager, init_workers, [
+                [{singleton, sample_module, []}]
+            ]
+        }))
     end, Workers),
 
     ?assertMatch({ok, _}, rpc:call(Worker1, supervisor, get_childspec, [?MAIN_WORKER_SUPERVISOR_NAME, sample_module])),
@@ -264,24 +268,6 @@ init_per_suite(Config) ->
         Config2
     end,
     [{?ENV_UP_POSTHOOK, PostHook} | Config].
-
-init_per_testcase(singleton_module_test, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, node_manager_plugin_default),
-    test_utils:mock_expect(
-        Workers, node_manager_plugin_default, modules_with_args,
-        fun() -> [{singleton, sample_module, []}] end),
-    Config;
-
-init_per_testcase(_Case, Config) ->
-    Config.
-
-end_per_testcase(singleton_module_test, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_unload(Workers, node_manager_plugin_default);
-
-end_per_testcase(_Case, _Config) ->
-    ok.
 
 %%%===================================================================
 %%% Internal functions

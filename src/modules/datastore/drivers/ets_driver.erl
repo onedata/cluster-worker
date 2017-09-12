@@ -20,7 +20,7 @@
 
 -type table() :: atom().
 -type ctx() :: #{table => table()}.
--type key() :: datastores:key().
+-type key() :: datastore:key().
 -type doc() :: datastore:doc().
 -type init_opt() :: {type, ets:type()} |
                     {read_concurrency, boolean()} |

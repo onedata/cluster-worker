@@ -169,7 +169,8 @@ wait_flushed(RequestFutures) ->
     Responses = datastore_cache:wait(Futures),
     lists:filtermap(fun
         ({_, {ok, disc, _}}) -> false;
-        ({_, {error, not_found}}) -> false;
+        ({_, {error, memory_driver_undefined}}) -> false;
+        ({_, {error, disc_driver_undefined}}) -> false;
         ({{Key, Ctx}, Error = {error, _}}) -> {true, {{Key, Ctx}, Error}}
     end, lists:zip(Requests, Responses)).
 

@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% @todo write me!
+%%% This module provides datastore tests setup/utility functions.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_test_utils).

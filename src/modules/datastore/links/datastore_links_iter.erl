@@ -126,7 +126,7 @@ terminate(#forest_it{batch = Batch}) ->
 get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
     Result = lists:foldl(fun
         (TreeId, {ok, ForestIt2}) ->
-            get_tree(LinkName, TreeId, ForestIt2);
+            get_from_tree(LinkName, TreeId, ForestIt2);
         (_, {{error, Reason}, ForestIt2}) ->
             {{error, Reason}, ForestIt2}
     end, {ok, ForestIt}, TreeIds),
@@ -148,8 +148,8 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
 -spec fold(fold_fun(), fold_acc(), forest_it(), fold_opts()) ->
     {{ok, fold_acc()} | {error, term()}, forest_it()}.
 fold(Fun, Acc, ForestIt, Opts) ->
-    case fold_forest_init(ForestIt, Opts) of
-        {ok, ForestIt2} -> fold_forest_step(Fun, Acc, ForestIt2, Opts);
+    case init_forest_fold(ForestIt, Opts) of
+        {ok, ForestIt2} -> step_forest_fold(Fun, Acc, ForestIt2, Opts);
         {{error, Reason}, ForestIt2} -> {{error, Reason}, ForestIt2}
     end.
 
@@ -223,9 +223,9 @@ init_tree_mask_cache(TreeId, Mask, ForestIt = #forest_it{
 %% Initializes link tree and returns document links by name.
 %% @end
 %%--------------------------------------------------------------------
--spec get_tree(link_name(), tree_id(), forest_it()) ->
+-spec get_from_tree(link_name(), tree_id(), forest_it()) ->
     {ok | {error, term()}, forest_it()}.
-get_tree(LinkName, TreeId, ForestIt = #forest_it{
+get_from_tree(LinkName, TreeId, ForestIt = #forest_it{
     ctx = Ctx, key = Key, acc = Acc, masks_cache = MasksCache, batch = Batch
 }) ->
     Cache = maps:get(TreeId, MasksCache),
@@ -255,12 +255,12 @@ get_tree(LinkName, TreeId, ForestIt = #forest_it{
 %% Initializes link forest fold state.
 %% @end
 %%--------------------------------------------------------------------
--spec fold_forest_init(forest(), fold_opts()) ->
+-spec init_forest_fold(forest(), fold_opts()) ->
     {ok | {error, term()}, forest_it()}.
-fold_forest_init(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
+init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
     lists:foldl(fun
         (TreeId, {ok, ForestIt2}) ->
-            case fold_tree_init(TreeId, ForestIt2, Opts) of
+            case init_tree_fold(TreeId, ForestIt2, Opts) of
                 {{ok, TreeIt}, ForestIt3} ->
                     {ok, add_tree_it(TreeIt, ForestIt3)};
                 {{error, Reason}, ForestIt3} ->
@@ -276,9 +276,9 @@ fold_forest_init(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
 %% Initializes link tree fold state.
 %% @end
 %%--------------------------------------------------------------------
--spec fold_tree_init(tree_id(), forest_it(), fold_opts()) ->
+-spec init_tree_fold(tree_id(), forest_it(), fold_opts()) ->
     {{ok, tree_it()} | {error, term()}, forest_it()}.
-fold_tree_init(TreeId, ForestIt = #forest_it{
+init_tree_fold(TreeId, ForestIt = #forest_it{
     ctx = Ctx, key = Key, masks_cache = MasksCache, batch = Batch
 }, Opts) ->
     Cache = maps:get(TreeId, MasksCache),
@@ -306,18 +306,18 @@ fold_tree_init(TreeId, ForestIt = #forest_it{
 %% Selects tree that contains next smallest link name and processes the link.
 %% @end
 %%--------------------------------------------------------------------
--spec fold_forest_step(fold_fun(), fold_acc(), forest_it(), fold_opts()) ->
+-spec step_forest_fold(fold_fun(), fold_acc(), forest_it(), fold_opts()) ->
     {{ok, fold_acc()} | {error, term()}, forest_it()}.
-fold_forest_step(_Fun, Acc, ForestIt, #{size := 0}) ->
+step_forest_fold(_Fun, Acc, ForestIt, #{size := 0}) ->
     {{ok, Acc}, ForestIt};
-fold_forest_step(Fun, Acc, ForestIt, Opts) ->
+step_forest_fold(Fun, Acc, ForestIt, Opts) ->
     case get_next_tree_it(ForestIt) of
         {{ok, Links}, ForestIt2} ->
-            case fold_tree_step(Links, ForestIt2) of
+            case step_tree_fold(Links, ForestIt2) of
                 {{ok, Link}, ForestIt3} ->
                     case process_link(Fun, Acc, Link, Opts) of
                         {ok, {Acc2, Opts2}} ->
-                            fold_forest_step(Fun, Acc2, ForestIt3, Opts2);
+                            step_forest_fold(Fun, Acc2, ForestIt3, Opts2);
                         {error, Reason} ->
                             {{error, Reason}, ForestIt3}
                     end;
@@ -331,26 +331,26 @@ fold_forest_step(Fun, Acc, ForestIt, Opts) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Processes smallest link in a tree. If it it the last link in links tree
-%% accumulator tries to load next ones.
+%% Processes next smallest link in a tree in the alphabetical order.
+%% If it it the last link in links tree accumulator tries to load next ones.
 %% @end
 %%--------------------------------------------------------------------
--spec fold_tree_step(tree_it(), forest_it()) ->
+-spec step_tree_fold(tree_it(), forest_it()) ->
     {{ok, link()} | {error, term()}, forest_it()}.
-fold_tree_step(#tree_it{links = [Link], next_node_id = undefined}, ForestIt) ->
+step_tree_fold(#tree_it{links = [Link], next_node_id = undefined}, ForestIt) ->
     {{ok, Link}, ForestIt};
-fold_tree_step(#tree_it{
+step_tree_fold(#tree_it{
     links = [Link = #link{tree_id = TreeId, name = Name}],
     next_node_id = NodeId
 }, ForestIt) ->
     Opts = #{prev_tree_id => TreeId, prev_link_name => Name, node_id => NodeId},
-    case fold_tree_init(TreeId, ForestIt, Opts) of
+    case init_tree_fold(TreeId, ForestIt, Opts) of
         {{ok, TreeIt}, ForestIt3} ->
             {{ok, Link}, add_tree_it(TreeIt, ForestIt3)};
         {{error, Reason}, ForestIt3} ->
             {{error, Reason}, ForestIt3}
     end;
-fold_tree_step(TreeIt = #tree_it{links = [Link | Links]}, ForestIt) ->
+step_tree_fold(TreeIt = #tree_it{links = [Link | Links]}, ForestIt) ->
     {{ok, Link}, add_tree_it(TreeIt#tree_it{links = Links}, ForestIt)}.
 
 %%--------------------------------------------------------------------

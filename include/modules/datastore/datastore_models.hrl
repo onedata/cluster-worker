@@ -13,6 +13,8 @@
 -ifndef(DATASTORE_MODELS_HRL).
 -define(DATASTORE_MODELS_HRL, 1).
 
+-include("datastore_links.hrl").
+
 -record(document, {
     key :: datastore_doc:key(),
     value :: datastore_doc:value(),
@@ -22,31 +24,6 @@
     seq = null :: datastore_doc:seq(),
     deleted = false :: boolean(),
     version = 1 :: datastore_doc:version()
-}).
-
--record(links_forest, {
-    model :: datastore_model:model(),
-    key :: datastore:key(),
-    trees = #{} :: links_forest:trees()
-}).
-
--record(links_node, {
-    model :: datastore_model:model(),
-    key :: datastore:key(),
-    node :: undefined | links_node:links_node()
-}).
-
--record(links_mask, {
-    model :: datastore_model:model(),
-    key :: datastore:key(),
-    tree_id :: links_tree:id(),
-    links = [] :: [{datastore_links:link_name(), datastore_links:link_rev()}],
-    next = <<>> :: datastore:key()
-}).
-
--record(links_mask_root, {
-    heads :: #{links_tree:id() => datastore:key()},
-    tails :: #{links_tree:id() => datastore:key()}
 }).
 
 -record(task_pool, {

@@ -22,8 +22,10 @@
 
 -export_type([hex/0]).
 
--define(KEY_LENGTH, 16).
--define(REV_LENGTH, 16).
+-define(KEY_LENGTH,
+    application:get_env(cluster_worker, datastore_doc_key_length, 16)).
+-define(REV_LENGTH,
+    application:get_env(cluster_worker, datastore_doc_rev_length, 16)).
 
 %%%===================================================================
 %%% API

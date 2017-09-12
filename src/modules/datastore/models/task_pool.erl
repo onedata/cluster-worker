@@ -43,22 +43,28 @@
 %% Creates task at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec create(level(), doc()) -> {ok, non | doc()} | {error, term()}.
+-spec create(level(), doc()) -> {ok, non | key()} | {error, term()}.
 create(?NON_LEVEL, _Doc) ->
     {ok, non};
 create(Level, Doc) ->
-    datastore_model:create(level_to_ctx(Level), Doc).
+    case datastore_model:create(level_to_ctx(Level), Doc) of
+        {ok, #document{key = Key}} -> {ok, Key};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Updates task at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec update(level(), key(), diff()) -> {ok, non | doc()} | {error, term()}.
+-spec update(level(), key(), diff()) -> {ok, non | key()} | {error, term()}.
 update(?NON_LEVEL, _Key, _Diff) ->
     {ok, non};
 update(Level, Key, Diff) ->
-    datastore_model:update(level_to_ctx(Level), Key, Diff).
+    case datastore_model:update(level_to_ctx(Level), Key, Diff) of
+        {ok, #document{key = Key}} -> {ok, Key};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
