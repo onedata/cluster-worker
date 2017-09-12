@@ -193,7 +193,7 @@ throttling_test(Config) ->
 
     MockUsage(0, TPStopLimit - 10, 10.0),
     CheckThrottlingDefault(),
-    VerifyIdle(1500),
+    VerifyIdle(1000),
 
     MockUsage(0, 0, 10.0),
     CheckThrottlingDefault(),

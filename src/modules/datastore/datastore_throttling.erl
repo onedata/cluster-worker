@@ -381,7 +381,7 @@ verify_tp() ->
             IdleTimeout;
         _ ->
             {ok, MinIdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms),
-            NID = round(max(IdleTimeout * (DelayNum * 9 / 10 - ProcNum) / DelayNum, MinIdleTimeout)),
+            NID = round(max(IdleTimeout * (DelayNum * 9 / 10 - 2 * ProcNum) / DelayNum, MinIdleTimeout)),
             ?info("Throttling: idle timeout: ~p", [NID]),
             NID
     end,

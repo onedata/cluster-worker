@@ -30,8 +30,7 @@
 -record(state, {
     requests = [] :: list(),
     cache_writer_pid :: pid(),
-    cache_writer_state = idle :: idle | {active, reference()},
-    disc_writer_state = idle :: idle | {active, reference()},
+    cache_writer_state = idle :: idle | active,
     terminate_msg_ref :: undefined | reference(),
     terminate_timer_ref :: undefined | reference()
 }).
@@ -285,16 +284,10 @@ handle_call(Request, _From, State = #state{}) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_cast({mark_cache_writer_idle, Ref}, State = #state{
-    cache_writer_state = {active, Ref}
+handle_cast(mark_cache_writer_idle, State = #state{
+    cache_writer_state = active
 }) ->
     {noreply, handle_requests(State#state{cache_writer_state = idle})};
-handle_cast({mark_disc_writer_idle, Ref}, State = #state{
-    disc_writer_state = {active, Ref}
-}) ->
-    {noreply, State#state{disc_writer_state = idle}};
-handle_cast({mark_disc_writer_idle, _}, State = #state{}) ->
-    {noreply, State};
 handle_cast(Request, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -310,7 +303,7 @@ handle_cast(Request, State = #state{}) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_info({terminate, MsgRef}, State = #state{
-    requests = [], cache_writer_state = idle, disc_writer_state = idle,
+    requests = [], cache_writer_state = idle,
     terminate_msg_ref = MsgRef
 }) ->
     {stop, normal, State};
@@ -359,17 +352,15 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_requests(state()) -> state().
 handle_requests(State = #state{requests = []}) ->
     State;
-handle_requests(State = #state{cache_writer_state = {active, _}}) ->
+handle_requests(State = #state{cache_writer_state = active}) ->
     State;
 handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle
 }) ->
-    Ref = make_ref(),
-    gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity),
+    gen_server:call(Pid, {handle, lists:reverse(Requests)}, infinity),
     State#state{
         requests = [],
-        cache_writer_state = {active, Ref},
-        disc_writer_state = {active, Ref}
+        cache_writer_state = active
     }.
 
 -spec schedule_terminate(state()) -> state().

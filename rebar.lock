@@ -7,7 +7,7 @@
        {ref,"119234548783af19b8ec75c879c5062676b92571"}},
   3},
  {<<"bp_tree">>,
-  {git,"https://github.com/krzysztof-trzepla/bp_tree.git",
+  {git,"https://github.com/onedata/bp_tree.git",
        {ref,"fa89aba13c4157277fad40e9ad658500865e4a0f"}},
   0},
  {<<"cberl">>,

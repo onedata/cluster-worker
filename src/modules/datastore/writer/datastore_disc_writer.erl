@@ -15,14 +15,13 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
 -record(state, {
-    master_pid :: pid(),
     cache_writer_pid :: pid()
 }).
 
@@ -40,9 +39,9 @@
 %% Starts and links datastore disc writer process to the caller.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid(), pid()) -> {ok, pid()} | {error, term()}.
-start_link(MasterPid, CacheWriterPid) ->
-    gen_server:start_link(?MODULE, [MasterPid, CacheWriterPid], []).
+-spec start_link(pid()) -> {ok, pid()} | {error, term()}.
+start_link(CacheWriterPid) ->
+    gen_server:start_link(?MODULE, [CacheWriterPid], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -57,8 +56,8 @@ start_link(MasterPid, CacheWriterPid) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([MasterPid, CacheWriterPid]) ->
-    {ok, #state{master_pid = MasterPid, cache_writer_pid = CacheWriterPid}}.
+init([CacheWriterPid]) ->
+    {ok, #state{cache_writer_pid = CacheWriterPid}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -74,18 +73,12 @@ init([MasterPid, CacheWriterPid]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call({flush, Ref, CachedKeys}, From, State = #state{
-    master_pid = MasterPid, cache_writer_pid = CacheWriterPid
+handle_call({flush, CachedKeys}, From, State = #state{
+    cache_writer_pid = CacheWriterPid
 }) ->
     Futures = flush_async(CachedKeys),
     gen_server:reply(From, ok),
     NotFlushedWithReason = wait_flushed(Futures),
-    case NotFlushedWithReason of
-        [] ->
-            gen_server:cast(MasterPid, {mark_disc_writer_idle, Ref});
-        _ ->
-            ok
-    end,
     {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
     gen_server:cast(CacheWriterPid, {flushed, maps:from_list(NotFlushed)}),
     {noreply, State};
