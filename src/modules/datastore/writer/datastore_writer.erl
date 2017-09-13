@@ -8,6 +8,9 @@
 %%% @doc
 %%% This module is responsible for serializing modification requests
 %%% to a datastore document and its links.
+%%% It starts datastore cache writer which in turn starts datastore disc writer.
+%%% All three processes are linked together and creates a single, higher-level
+%%% serialization unit wrapped by {@link tp_server}.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_writer).
@@ -21,6 +24,7 @@
 -export([create/3, save/3, update/3, update/4, fetch/2, delete/3]).
 -export([add_links/4, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
+%% For ct tests
 -export([call/4, call_async/4, wait/1]).
 
 %% gen_server callbacks
@@ -226,7 +230,7 @@ call_async(Ctx, Key, Function, Args) ->
 -spec wait(reference()) -> term() | {error, timeout}.
 wait(Ref) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_handling_timeout, timer:minutes(30)),
+        datastore_writer_request_handling_timeout, timer:minutes(10)),
     receive
         {Ref, Response} -> Response
     after

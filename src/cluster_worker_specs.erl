@@ -46,7 +46,7 @@ request_dispatcher_spec() ->
     id => request_dispatcher,
     start => {request_dispatcher, start_link, []},
     restart => permanent,
-    shutdown => timer:minutes(5),
+    shutdown => timer:seconds(5),
     type => worker,
     modules => [request_dispatcher]
   }.
@@ -63,7 +63,7 @@ node_manager_spec() ->
     id => node_manager,
     start => {node_manager, start_link, []},
     restart => permanent,
-    shutdown => timer:minutes(5),
+    shutdown => timer:seconds(5),
     type => worker,
     modules => [node_manager]
   }.

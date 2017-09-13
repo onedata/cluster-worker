@@ -6,8 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module is responsible for reducing number of datastore operation
-%%% in order to prevent overload.
+%%% This module is responsible for introducing delays between datastore
+%%% operations or even blocking them in order to prevent overload.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_throttling).

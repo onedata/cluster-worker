@@ -32,6 +32,10 @@
 %%% In order to retrieve datastore documents batch, terminate function should be
 %%% called on both of the objects. For more information about documents batch
 %%% checkout {@link datastore_doc_batch} module.
+%%%
+%%% NOTE! Functions provided by this module are thread safe. In order to achieve
+%%% consistency and atomicity they should by called from serialization process
+%%% e.g. {@link datastore_writer}.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_links).

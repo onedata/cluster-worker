@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Model of lock for critical section.
+%%% It provides synchronisation mechanism over selected key.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(lock).

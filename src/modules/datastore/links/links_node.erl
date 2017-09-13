@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Model of node of datastore document links tree.
+%%% It represents single B+ tree node.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(links_node).

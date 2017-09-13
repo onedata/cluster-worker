@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Model of mask of datastore document links tree.
+%%% It holds list of links that have been marked as deleted in given revision.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(links_mask).

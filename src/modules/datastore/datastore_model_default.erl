@@ -104,6 +104,13 @@ set_defaults(Ctx) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tries to call custom model function with provided arguments. If such function
+%% is not exported fallbacks to the default implementation.
+%% @end
+%%--------------------------------------------------------------------
 -spec model_apply(model(), {atom(), list()}, fun()) -> term().
 model_apply(Model, {Function, Args}, DefaultFun) ->
     Exports = Model:module_info(functions),
@@ -113,6 +120,12 @@ model_apply(Model, {Function, Args}, DefaultFun) ->
         _ -> DefaultFun()
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets default memory driver.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_memory_driver(ctx()) -> ctx().
 set_memory_driver(Ctx = #{memory_driver := undefined}) ->
     Ctx;
@@ -124,6 +137,12 @@ set_memory_driver(Ctx = #{model := Model}) ->
         {[memory_driver_opts], []}
     ]).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets default disc driver.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_disc_driver(ctx()) -> ctx().
 set_disc_driver(Ctx = #{disc_driver := undefined}) ->
     Ctx;
@@ -134,12 +153,24 @@ set_disc_driver(Ctx) ->
         {[disc_driver_ctx, no_seq], not maps:get(sync_enabled, Ctx, false)}
     ]).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets default context parameters.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_defaults(ctx(), [ctx_default()]) -> ctx().
 set_defaults(Ctx, Defaults) ->
     lists:foldl(fun({Keys, Default}, Ctx2) ->
         set_default(Keys, Default, Ctx2)
     end, Ctx, Defaults).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets default context parameter.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_default([atom()], term(), ctx()) -> ctx().
 set_default([Key], Default, Ctx) ->
     maps:put(Key, maps:get(Key, Ctx, Default), Ctx);

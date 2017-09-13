@@ -195,12 +195,7 @@
 
             {tp_processes_limit, 200},
 
-            {datastore_default_models, [
-                links_forest,
-                links_node
-            ]},
-
-            {datastore_doc_commit_retry_delay, 1000},
+            {datastore_doc_commit_retry_delay, 5000},
             {datastore_doc_revisions_history_length, 1},
             {datastore_doc_mutators_history_length, 1},
 

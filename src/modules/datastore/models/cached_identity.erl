@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Model of cached identity data.
+%%% It holds cached identity details.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(cached_identity).

@@ -279,12 +279,25 @@ get_links_trees(Ctx, Key) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Fills context with default parameters, generates unique key and forwards
+%% function call to the {@link datastore} module.
+%% @end
+%%--------------------------------------------------------------------
 -spec datastore_apply(ctx(), key(), fun(), list()) -> term().
 datastore_apply(Ctx, Key, Fun, Args) ->
     Ctx2 = datastore_model_default:set_defaults(Ctx),
     UniqueKey = get_unique_key(Ctx2, Key),
     erlang:apply(Fun, [Ctx2, UniqueKey | Args]).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Adds link that is used for model folding.
+%% @end
+%%--------------------------------------------------------------------
 -spec add_fold_link(ctx(), key(), {ok, doc()} | {error, term()}) ->
     {ok, doc()} | {error, term()}.
 add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
@@ -298,6 +311,12 @@ add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
 add_fold_link(_Ctx, _Key, Result) ->
     Result.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes link that is used for model folding.
+%% @end
+%%--------------------------------------------------------------------
 -spec delete_fold_link(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
 delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
@@ -310,6 +329,12 @@ delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
 delete_fold_link(_Ctx, _Key, Result) ->
     Result.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes all links that are associated with given key.
+%% @end
+%%--------------------------------------------------------------------
 -spec delete_all_links(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
 delete_all_links(Ctx, Key, ok) ->

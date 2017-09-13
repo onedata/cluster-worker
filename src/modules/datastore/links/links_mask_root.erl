@@ -7,6 +7,8 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Model of mask root of datastore document links tree.
+%%% It holds pointers to heads and tails of datastore links mask linked list
+%%% for each tree.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(links_mask_root).

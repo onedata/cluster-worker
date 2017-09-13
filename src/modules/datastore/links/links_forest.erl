@@ -7,6 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Model of forest of datastore document links trees.
+%%% It maps tree ID to root nodes.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(links_forest).

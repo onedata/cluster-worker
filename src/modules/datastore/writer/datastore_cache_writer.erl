@@ -180,6 +180,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handles requests.
+%% @end
+%%--------------------------------------------------------------------
 -spec handle_requests(list(), state()) -> state().
 handle_requests(Requests, State = #state{cached_keys_to_flush = CachedKeys}) ->
     Batch = datastore_doc_batch:init(),
@@ -189,6 +195,12 @@ handle_requests(Requests, State = #state{cached_keys_to_flush = CachedKeys}) ->
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
     State#state{cached_keys_to_flush = maps:merge(CachedKeys, CachedKeys2)}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Batches requests.
+%% @end
+%%--------------------------------------------------------------------
 -spec batch_requests(list(), list(), batch()) -> {list(), batch()}.
 batch_requests([], Responses, Batch) ->
     {lists:reverse(Responses), Batch};
@@ -196,6 +208,12 @@ batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch) ->
     {Response, Batch2} = batch_request(Request, Batch),
     batch_requests(Requests, [{Pid, Ref, Response} | Responses], Batch2).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Batches request.
+%% @end
+%%--------------------------------------------------------------------
 -spec batch_request(term(), batch()) -> {term(), batch()}.
 batch_request({create, [Ctx, Key, Doc]}, Batch) ->
     batch_apply(Batch, fun(Batch2) ->
@@ -270,6 +288,12 @@ batch_request({fetch_links_trees, [Ctx, Key]}, Batch) ->
 batch_request({Function, Args}, Batch) ->
     apply(datastore_doc_batch, Function, Args ++ [Batch]).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies request on a batch.
+%% @end
+%%--------------------------------------------------------------------
 -spec batch_apply(batch(), fun((batch()) -> {term(), batch()})) ->
     {{reference(), term()}, batch()}.
 batch_apply(Batch, Fun) ->
@@ -278,6 +302,12 @@ batch_apply(Batch, Fun) ->
     {Response, Batch3} = Fun(Batch2),
     {{Ref, Response}, Batch3}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies request on a links tree.
+%% @end
+%%--------------------------------------------------------------------
 -spec links_tree_apply(ctx(), key(), tree_id(), batch(),
     fun((tree()) -> {term(), tree()})) -> {term(), batch()}.
 links_tree_apply(Ctx, Key, TreeId, Batch, Fun) ->
@@ -287,6 +317,12 @@ links_tree_apply(Ctx, Key, TreeId, Batch, Fun) ->
     {Result, Tree2} = Fun(Tree),
     {Result, datastore_links:terminate_tree(Tree2)}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies request on a links tree mask.
+%% @end
+%%--------------------------------------------------------------------
 -spec links_mask_apply(ctx(), key(), tree_id(), batch(),
     fun((mask()) -> {term(), mask()})) -> {term(), batch()}.
 links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
@@ -308,6 +344,12 @@ links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
             {{error, Reason}, Batch2}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies request on a links tree forest.
+%% @end
+%%--------------------------------------------------------------------
 -spec links_forest_apply(ctx(), key(), tree_ids(), batch(),
     fun((forest_it()) -> {term(), forest_it()})) -> {term(), batch()}.
 links_forest_apply(Ctx, Key, TreeIds, Batch, Fun) ->
@@ -320,6 +362,12 @@ links_forest_apply(Ctx, Key, TreeIds, Batch, Fun) ->
             {{error, Reason}, datastore_links_iter:terminate(ForestIt)}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends responses.
+%% @end
+%%--------------------------------------------------------------------
 -spec send_responses(list(), batch()) -> batch().
 send_responses([], Batch) ->
     Batch;
@@ -327,6 +375,12 @@ send_responses([Response | Responses], Batch) ->
     send_response(Response, Batch),
     send_responses(Responses, Batch).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends response.
+%% @end
+%%--------------------------------------------------------------------
 -spec send_response(request() | [request()], batch()) -> any().
 send_response({Pid, Ref, {_ReqRef, {error, Reason}}}, _Batch) ->
     Pid ! {Ref, {error, Reason}};
@@ -347,6 +401,12 @@ send_response({Pid, Ref, Responses}, Batch) ->
     end, lists:reverse(Responses)),
     Pid ! {Ref, Responses2}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Schedules flush.
+%% @end
+%%--------------------------------------------------------------------
 -spec schedule_flush(state()) -> state().
 schedule_flush(State = #state{flush_ref = undefined}) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
@@ -356,6 +416,12 @@ schedule_flush(State = #state{flush_ref = undefined}) ->
 schedule_flush(State = #state{}) ->
     State.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets mutator pid.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_mutator_pid(ctx()) -> ctx().
 set_mutator_pid(Ctx) ->
     Ctx#{mutator_pid => self()}.

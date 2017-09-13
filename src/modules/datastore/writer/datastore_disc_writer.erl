@@ -148,6 +148,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Asynchronously flushes datastore documents from cache to disc.
+%% @end
+%%--------------------------------------------------------------------
 -spec flush_async(cached_keys()) ->
     [{{key(), ctx()}, datastore_cache:future()}].
 flush_async(CachedKeys) ->
@@ -155,6 +161,13 @@ flush_async(CachedKeys) ->
         [{{Key, Ctx}, datastore_cache:flush_async(Ctx, Key)} | RequestFutures]
     end, [], CachedKeys).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for completion of asynchronous flush of datastore documents from
+%% cache to disc.
+%% @end
+%%--------------------------------------------------------------------
 -spec wait_flushed([{{key(), ctx()}, datastore_cache:future()}]) ->
     [{{key(), ctx()}, {error, term()}}].
 wait_flushed(RequestFutures) ->
@@ -167,10 +180,23 @@ wait_flushed(RequestFutures) ->
         ({{Key, Ctx}, Error = {error, _}}) -> {true, {{Key, Ctx}, Error}}
     end, lists:zip(Requests, Responses)).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Synchronously flushes datastore documents from cache to disc.
+%% @end
+%%--------------------------------------------------------------------
 -spec flush(cached_keys()) -> [{{key(), ctx()}, {error, term()}}].
 flush(CachedKeys) ->
     wait_flushed(flush_async(CachedKeys)).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Synchronously flushes datastore documents from cache to disc.
+%% Repeats flush for documents that haven't been successfully flushed.
+%% @end
+%%--------------------------------------------------------------------
 -spec force_flush(cached_keys(), non_neg_integer()) -> ok.
 force_flush(CachedKeys, Delay) ->
     case flush(CachedKeys) of
@@ -178,10 +204,10 @@ force_flush(CachedKeys, Delay) ->
             ok;
         NotFlushedWithReason ->
             CachedKeys2 = lists:foldl(fun({{Key, Ctx}, {error, Reason}}, Map) ->
-                ?error("Failed to flush document ~p, ~p using context ~p due to:
+                ?error("Failed to flush document ~p using context ~p due to:
                 ~p. Retrying after ~p ms...", [Key, Ctx, Reason, Delay]),
                 maps:put(Key, Ctx, Map)
             end, #{}, NotFlushedWithReason),
             timer:sleep(Delay),
-            force_flush(CachedKeys2, Delay)
+            force_flush(CachedKeys2, 2 * Delay)
     end.

@@ -6,7 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model of forest of datastore document links trees.
+%%% This module provides {@link bp_tree_store} behaviour implementation.
+%%% It is responsible for storing and retrieving B+ tree nodes.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(links_tree).
@@ -52,38 +53,6 @@
 -spec get_tree_id(state()) -> id().
 get_tree_id(#state{tree_id = TreeId}) ->
     TreeId.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Selects root of a tree by ID.
-%% @end
-%%--------------------------------------------------------------------
--spec get_root_id(id(), trees()) -> {ok, node_id()} | {error, not_found}.
-get_root_id(TreeId, Trees) ->
-    case maps:find(TreeId, Trees) of
-        {ok, {<<>>, _}} -> {error, not_found};
-        {ok, {RootId, _}} -> {ok, RootId};
-        error -> {error, not_found}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sets root of a tree associated with ID.
-%% @end
-%%--------------------------------------------------------------------
--spec set_root_id(id(), node_id(), trees()) -> trees().
-set_root_id(TreeId, NodeId, Trees) ->
-    {Generation, _Hash} = case maps:find(TreeId, Trees) of
-        {ok, {_, Rev}} -> datastore_utils:parse_rev(Rev);
-        error -> {0, <<>>}
-    end,
-    maps:put(TreeId, {NodeId, datastore_utils:gen_rev(Generation + 1)}, Trees).
 
 %%%===================================================================
 %%% bp_tree_store callbacks
@@ -252,3 +221,35 @@ delete_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
 -spec terminate(state()) -> batch().
 terminate(#state{batch = Batch}) ->
     Batch.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Selects root of a tree by ID.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_root_id(id(), trees()) -> {ok, node_id()} | {error, not_found}.
+get_root_id(TreeId, Trees) ->
+    case maps:find(TreeId, Trees) of
+        {ok, {<<>>, _}} -> {error, not_found};
+        {ok, {RootId, _}} -> {ok, RootId};
+        error -> {error, not_found}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets root of a tree associated with ID.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_root_id(id(), node_id(), trees()) -> trees().
+set_root_id(TreeId, NodeId, Trees) ->
+    {Generation, _Hash} = case maps:find(TreeId, Trees) of
+        {ok, {_, Rev}} -> datastore_utils:parse_rev(Rev);
+        error -> {0, <<>>}
+    end,
+    maps:put(TreeId, {NodeId, datastore_utils:gen_rev(Generation + 1)}, Trees).

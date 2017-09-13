@@ -10,6 +10,9 @@
 %%% document. Most of them requires documents batch for execution.
 %%% It is also responsible for filling document with contextual
 %%% data and resolving modification conflicts.
+%%% NOTE! Functions provided by this module are thread safe. In order to achieve
+%%% consistency and atomicity they should by called from serialization process
+%%% e.g. {@link datastore_writer}.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_doc).
@@ -294,6 +297,12 @@ get_links_trees(Ctx, Key) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Resolve conflict using custom model resolution function.
+%% @end
+%%--------------------------------------------------------------------
 -spec resolve_conflict(ctx(), doc(value()), doc(value())) ->
     {true, doc(value())} | false.
 resolve_conflict(#{sync_change := true}, RemoteDoc, #document{revs = []}) ->
@@ -317,6 +326,12 @@ resolve_conflict(Ctx = #{sync_change := true}, RemoteDoc, LocalDoc) ->
 resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
     {true, fill(Ctx, RemoteDoc, LocalDoc)}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Resolves conflict based on revision.
+%% @end
+%%--------------------------------------------------------------------
 -spec default_resolve_conflict(doc(value()), doc(value())) ->
     {true, doc(value())} | false.
 default_resolve_conflict(RemoteDoc, LocalDoc) ->
@@ -327,10 +342,21 @@ default_resolve_conflict(RemoteDoc, LocalDoc) ->
         false -> false
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @equiv fill(Ctx, Doc, #document{})
+%% @end
+%%--------------------------------------------------------------------
 -spec fill(ctx(), doc(value())) -> doc(value()).
 fill(Ctx, Doc) ->
     fill(Ctx, Doc, #document{}).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Fills document with mutator, scope, version and revision.
+%% @end
+%%--------------------------------------------------------------------
 -spec fill(ctx(), doc(value()), doc(value())) -> doc(value()).
 fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
     Doc2 = Doc#document{deleted = false},
@@ -342,6 +368,12 @@ fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
         [PrevRev | _] -> set_rev(Ctx, Doc5, PrevRev)
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies diff function.
+%% @end
+%%--------------------------------------------------------------------
 -spec apply_diff(diff(value()), doc(value())) ->
     {ok, doc(value())} | {error, term()}.
 apply_diff(Diff, Doc = #document{value = Value}) ->
@@ -353,6 +385,12 @@ apply_diff(Diff, Doc = #document{value = Value}) ->
             {error, {Reason, erlang:get_stacktrace()}}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets document mutator.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_mutator(ctx(), doc(value())) -> doc(value()).
 set_mutator(#{mutator := Mutator}, Doc = #document{mutators = [Mutator | _]}) ->
     Doc;
@@ -363,12 +401,24 @@ set_mutator(#{mutator := Mutator}, Doc = #document{mutators = Mutators}) ->
 set_mutator(_Ctx, Doc) ->
     Doc.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets document scope.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_scope(ctx(), doc(value())) -> doc(value()).
 set_scope(#{scope := Scope}, Doc) ->
     Doc#document{scope = Scope};
 set_scope(_Ctx, Doc) ->
     Doc.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets document version.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_version(doc(value())) -> doc(value()).
 set_version(Doc = #document{value = Value}) when is_tuple(Value) ->
     Model = element(1, Value),
@@ -376,6 +426,12 @@ set_version(Doc = #document{value = Value}) when is_tuple(Value) ->
 set_version(Doc) ->
     Doc.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets document revision.
+%% @end
+%%--------------------------------------------------------------------
 -spec set_rev(ctx(), doc(value()), undefined | rev()) -> doc(value()).
 set_rev(#{sync_enabled := true}, Doc = #document{revs = []}, undefined) ->
     Doc#document{revs = [datastore_utils:gen_rev(1)]};
