@@ -28,7 +28,8 @@
                  generated_key => boolean(),
                  fold_enabled => boolean(),
                  sync_enabled => boolean(),
-                 sync_change => boolean(),
+                 sync_change => boolean(), % should set to 'true' for save
+                                           % of remote change
                  hooks_disabled => boolean(),
                  local_links_tree_id => tree_id(),
                  volatile => boolean(),

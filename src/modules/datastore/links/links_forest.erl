@@ -61,7 +61,12 @@ get_record_struct(1) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Provides custom resolution of remote, concurrent modification conflicts
-%% of links forest.
+%% of links forest. Conflict resolution is handled as follows:
+%% * if forests are identical operation is ignored
+%% * if forests are different for each tree selects root ID with higher
+%%   revision. If at least one tree root has been selected from local forest
+%%   returns Mutated as 'true' with causes change broadcast, otherwise Mutated
+%%   equals 'false'.
 %% @end
 %%--------------------------------------------------------------------
 -spec resolve_conflict(ctx(), doc(), doc()) -> {boolean(), doc()} | ignore.

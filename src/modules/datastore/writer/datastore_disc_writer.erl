@@ -175,6 +175,7 @@ wait_flushed(RequestFutures) ->
     Responses = datastore_cache:wait(Futures),
     lists:filtermap(fun
         ({_, {ok, disc, _}}) -> false;
+        ({_, {error, not_found}}) -> false;
         ({_, {error, memory_driver_undefined}}) -> false;
         ({_, {error, disc_driver_undefined}}) -> false;
         ({{Key, Ctx}, Error = {error, _}}) -> {true, {{Key, Ctx}, Error}}
@@ -209,5 +210,5 @@ force_flush(CachedKeys, Delay) ->
                 maps:put(Key, Ctx, Map)
             end, #{}, NotFlushedWithReason),
             timer:sleep(Delay),
-            force_flush(CachedKeys2, 2 * Delay)
+            force_flush(CachedKeys2, min(2 * Delay, timer:minutes(5)))
     end.

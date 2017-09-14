@@ -19,7 +19,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init/0, process/3]).
+-export([init/0]).
 -export([throttle/1, throttle_get/1, throttle_delete/1, throttle_delete/2]).
 -export([get_idle_timeout/0]).
 -export([configure_throttling/0, plan_next_throttling_check/0]).
@@ -54,29 +54,6 @@ init() ->
     {ok, MaxNum} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         throttling_max_memory_proc_number),
     tp:set_processes_limit(MaxNum).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Throttles datastore request if necessary.
-%% @end
-%%--------------------------------------------------------------------
--spec process(module(), atom(), list()) -> term().
-process(Module, Function, Args = [#{model := Model} | _]) ->
-    GetFunctions = [get, exists, get_links, fold_links],
-    DeleteFunctions = [delete, delete_links],
-    Proceed = case lists:member(Function, GetFunctions) of
-        true ->
-            throttle_get(Model);
-        _ ->
-            case lists:member(Function, DeleteFunctions) of
-                true -> throttle_delete(Model);
-                _ -> throttle(Model)
-            end
-    end,
-    case Proceed of
-        ok -> erlang:apply(Module, Function, Args);
-        {error, Reason} -> {error, Reason}
-    end.
 
 %%--------------------------------------------------------------------
 %% @doc

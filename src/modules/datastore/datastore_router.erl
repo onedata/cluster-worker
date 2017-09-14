@@ -14,7 +14,7 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([route/4]).
+-export([route/4, process/3]).
 
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
@@ -33,9 +33,32 @@ route(Ctx, Key, Function, Args) ->
     Node = select_node(Ctx, Key),
     Module = select_module(Function),
     Args2 = [Module, Function, Args],
-    case rpc:call(Node, datastore_throttling, process, Args2) of
+    case rpc:call(Node, datastore_router, process, Args2) of
         {badrpc, Reason} -> {error, Reason};
         Result -> Result
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Throttles datastore request if necessary.
+%% @end
+%%--------------------------------------------------------------------
+-spec process(module(), atom(), list()) -> term().
+process(Module, Function, Args = [#{model := Model} | _]) ->
+    GetFunctions = [get, exists, get_links, fold_links],
+    DeleteFunctions = [delete, delete_links],
+    Proceed = case lists:member(Function, GetFunctions) of
+        true ->
+            datastore_throttling:throttle_get(Model);
+        _ ->
+            case lists:member(Function, DeleteFunctions) of
+                true -> datastore_throttling:throttle_delete(Model);
+                _ -> datastore_throttling:throttle(Model)
+            end
+    end,
+    case Proceed of
+        ok -> erlang:apply(Module, Function, Args);
+        {error, Reason} -> {error, Reason}
     end.
 
 %%%===================================================================

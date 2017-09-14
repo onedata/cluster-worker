@@ -65,14 +65,19 @@ get_throttled_models() ->
 %%--------------------------------------------------------------------
 -spec apply_plugin(atom(), list(), term()) -> term().
 apply_plugin(Function, Args, Default) ->
-    case code:ensure_loaded(?PLUGIN) of
-        {module, ?PLUGIN} ->
-            Exports = ?PLUGIN:module_info(functions),
-            Arity = length(Args),
-            case lists:keyfind(Function, 1, Exports) of
-                {Function, Arity} -> erlang:apply(?PLUGIN, Function, Args);
-                _ -> Default
-            end;
-        {error, nofile} ->
-            Default
+    try
+        Exports = ?PLUGIN:module_info(functions),
+        Arity = length(Args),
+        case lists:keyfind(Function, 1, Exports) of
+            {Function, Arity} -> erlang:apply(?PLUGIN, Function, Args);
+            _ -> Default
+        end
+    catch
+        _:_ ->
+            case code:ensure_loaded(?PLUGIN) of
+                {module, ?PLUGIN} ->
+                    apply_plugin(Function, Args, Default);
+                {error, nofile} ->
+                    Default
+            end
     end.
