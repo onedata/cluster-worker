@@ -1,306 +1,196 @@
 %%%-------------------------------------------------------------------
 %%% @author Michał Wrzeszcz
-%%% @copyright (C) 2015 ACK CYFRONET AGH
+%%% @copyright (C) 2017 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc Information about tasks to be done.
+%%% @doc
+%%% Information about tasks to be done.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(task_pool).
 -author("Michał Wrzeszcz").
--behaviour(model_behaviour).
 
+-include("modules/datastore/datastore_models.hrl").
 -include("elements/task_manager/task_manager.hrl").
--include("modules/datastore/datastore_internal_model.hrl").
 
-%% model_behaviour callbacks
--export([save/1, get/1, list/0, list/1, list_failed/1, exists/1, delete/1, delete/2, update/2, update/3,
-    create/1, create/2, model_init/0, 'after'/5, before/4]).
--export([record_struct/1]).
 %% API
--export([count_tasks/3]).
+-export([create/2, update/3, delete/2]).
+-export([list/1, list_failed/1, count_tasks/3]).
 
--define(LEVEL_OVERRIDE(Level), [{level, Level}]).
+%% datastore_model callbacks
+-export([get_record_struct/1]).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns structure of the record in specified version.
-%% @end
-%%--------------------------------------------------------------------
--spec record_struct(datastore_json:record_version()) -> datastore_json:record_struct().
-record_struct(1) ->
-    {record, [
-        {task, term},
-        {task_type, atom},
-        {owner, term},
-        {node, atom}
-    ]}.
+-type ctx() :: datastore:ctx().
+-type key() :: datastore:key().
+-type record() :: #task_pool{}.
+-type doc() :: datastore_doc:doc(record()).
+-type diff() :: datastore_doc:diff(record()).
+-type level() :: task_manager:level().
+
+-define(CTX, #{
+    model => ?MODULE,
+    fold_enabled => true
+}).
 
 %%%===================================================================
-%%% model_behaviour callbacks
+%%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback save/1.
+%% Creates task at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec save(datastore:document()) ->
-    {ok, datastore:key()} | datastore:generic_error().
-save(Document) ->
-    model:execute_with_default_context(?MODULE, save, [Document]).
+-spec create(level(), doc()) -> {ok, non | key()} | {error, term()}.
+create(?NON_LEVEL, _Doc) ->
+    {ok, non};
+create(Level, Doc) ->
+    case datastore_model:create(level_to_ctx(Level), Doc) of
+        {ok, #document{key = Key}} -> {ok, Key};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback update/2.
+%% Updates task at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec update(datastore:key(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:key()} | datastore:update_error().
-update(Key, Diff) ->
-    model:execute_with_default_context(?MODULE, update, [Key, Diff]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Same as {@link model_behaviour} callback update/2 but allows
-%% choice of task level.
-%% @end
-%%--------------------------------------------------------------------
--spec update(Level :: task_manager:level(), datastore:key(), Diff :: datastore:document_diff()) ->
-    {ok, datastore:key()} | datastore:update_error().
+-spec update(level(), key(), diff()) -> {ok, non | key()} | {error, term()}.
 update(?NON_LEVEL, _Key, _Diff) ->
     {ok, non};
-
 update(Level, Key, Diff) ->
-    model:execute_with_default_context(?MODULE, update, [Key, Diff],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
+    case datastore_model:update(level_to_ctx(Level), Key, Diff) of
+        {ok, #document{key = Key}} -> {ok, Key};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback create/1.
+%% Deletes task at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec create(datastore:document()) ->
-    {ok, datastore:key()} | datastore:create_error().
-create(Document) ->
-    model:execute_with_default_context(?MODULE, create, [Document]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Same as {@link model_behaviour} callback create/1 but allows
-%% choice of task level.
-%% @end
-%%--------------------------------------------------------------------
--spec create(Level :: task_manager:level(), datastore:document()) ->
-    {ok, datastore:key()} | datastore:create_error().
-create(?NON_LEVEL, _Document) ->
-    {ok, non};
-
-create(Level, Document) ->
-    model:execute_with_default_context(?MODULE, create, [Document],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link model_behaviour} callback get/1.
-%% @end
-%%--------------------------------------------------------------------
--spec get(datastore:key()) -> {ok, datastore:document()} | datastore:get_error().
-get(Key) ->
-    model:execute_with_default_context(?MODULE, get, [Key]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of all records.
-%% @end
-%%--------------------------------------------------------------------
--spec list() -> {ok, [datastore:document()]} | datastore:generic_error() | no_return().
-list() ->
-    model:execute_with_default_context(?MODULE, list, [?GET_ALL, []]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of all records.
-%% @end
-%%--------------------------------------------------------------------
--spec list(Level :: task_manager:level()) ->
-    {ok, [datastore:document()]} | datastore:generic_error() | no_return().
-list(?NON_LEVEL) ->
-    {ok, []};
-
-list(Level) ->
-    model:execute_with_default_context(?MODULE, list, [?GET_ALL, []],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of tasks that failed.
-%% @end
-%%--------------------------------------------------------------------
--spec list_failed(Level :: task_manager:level()) ->
-    {ok, [datastore:document()]} | datastore:generic_error() | no_return().
-list_failed(?NON_LEVEL) ->
-    {ok, []};
-
-list_failed(?NODE_LEVEL = Level) ->
-    Filter = fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (#document{value = V} = Doc, Acc) ->
-            N = node(),
-            case (V#task_pool.node =/= N) orelse task_manager:check_owner(V#task_pool.owner) of
-                false ->
-                    {next, [Doc | Acc]};
-                _ ->
-                    {next, Acc}
-            end
-    end,
-    model:execute_with_default_context(?MODULE, list, [Filter, []],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level)));
-
-list_failed(Level) ->
-    Filter = fun
-        ('$end_of_table', Acc) ->
-            {abort, Acc};
-        (#document{value = V} = Doc, Acc) ->
-            case task_manager:is_task_alive(V) of
-                false ->
-                    {next, [Doc | Acc]};
-                _ ->
-                    {next, Acc}
-            end
-    end,
-    model:execute_with_default_context(?MODULE, list, [Filter, []],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link model_behaviour} callback delete/1.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(datastore:key()) -> ok | datastore:generic_error().
-delete(Key) ->
-    model:execute_with_default_context(?MODULE, delete, [Key]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Same as {@link model_behaviour} callback delete/1 but allows
-%% choice of task level.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(Level :: task_manager:level(), datastore:key()) -> ok | datastore:generic_error().
+-spec delete(level(), key()) -> ok | {error, term()}.
 delete(?NON_LEVEL, _Key) ->
     ok;
-
 delete(Level, Key) ->
-    model:execute_with_default_context(?MODULE, delete, [Key],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
+    datastore_model:delete(level_to_ctx(Level), Key).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback exists/1.
+%% Returns list of all tasks at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec exists(datastore:key()) -> datastore:exists_return().
-exists(Key) ->
-    ?RESPONSE(model:execute_with_default_context(?MODULE, exists, [Key])).
+-spec list(level()) -> {ok, [doc()]} | {error, term()}.
+list(?NON_LEVEL) ->
+    {ok, []};
+list(Level) ->
+    datastore_model:fold(level_to_ctx(Level), fun(Doc, Acc) ->
+        {ok, [Doc | Acc]}
+    end, []).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% {@link model_behaviour} callback model_init/0. 
+%% Returns list of failed tasks at provided level of certainty.
 %% @end
 %%--------------------------------------------------------------------
--spec model_init() -> model_behaviour:model_config().
-model_init() ->
-    ?MODEL_CONFIG(task_pool_bucket, [], ?LOCAL_ONLY_LEVEL)#model_config{
-        list_enabled = {true, return_errors}}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link model_behaviour} callback 'after'/5. 
-%% @end
-%%--------------------------------------------------------------------
--spec 'after'(ModelName :: model_behaviour:model_type(),
-    Method :: model_behaviour:model_action(),
-    Level :: datastore:store_level(), Context :: term(),
-    ReturnValue :: term()) -> ok.
-'after'(_ModelName, _Method, _Level, _Context, _ReturnValue) ->
-    ok.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link model_behaviour} callback before/4. 
-%% @end
-%%--------------------------------------------------------------------
--spec before(ModelName :: model_behaviour:model_type(),
-    Method :: model_behaviour:model_action(),
-    Level :: datastore:store_level(), Context :: term()) ->
-    ok | datastore:generic_error().
-before(_ModelName, _Method, _Level, _Context) ->
-    ok.
-
-%%%===================================================================
-%%% API functions
-%%%===================================================================
+-spec list_failed(level()) -> {ok, [doc()]} | {error, term()}.
+list_failed(?NON_LEVEL) ->
+    {ok, []};
+list_failed(Level = ?NODE_LEVEL) ->
+    datastore_model:fold(level_to_ctx(Level), fun
+        (Doc = #document{value = Task}, Acc) ->
+            RemoteTask = Task#task_pool.node =/= node(),
+            OwnerAlive = task_manager:check_owner(Task#task_pool.owner),
+            case RemoteTask orelse OwnerAlive of
+                true -> {ok, Acc};
+                false -> {ok, [Doc | Acc]}
+            end
+    end, []);
+list_failed(Level) ->
+    datastore_model:fold(level_to_ctx(Level), fun
+        (Doc = #document{value = Task}, Acc) ->
+            case task_manager:is_task_alive(Task) of
+                true -> {ok, Acc};
+                false -> {ok, [Doc | Acc]}
+            end
+    end, []).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Counts alive and failed tasks. Stops counting after specified limit.
 %% @end
 %%--------------------------------------------------------------------
--spec count_tasks(Level :: task_manager:level(), Type :: atom(), Limit :: non_neg_integer()) ->
-    {ok, {Failed :: non_neg_integer(), All :: non_neg_integer()}} | datastore:generic_error() | no_return().
+-spec count_tasks(level(), atom(), non_neg_integer()) ->
+    {ok, {Failed :: non_neg_integer(), All :: non_neg_integer()}} |
+    {error, term()}.
 count_tasks(Level, Type, Limit) ->
-    Filter = fun
-                 ('$end_of_table', {Failed, All}) ->
-                     {abort, {Failed, All}};
-                 (#document{value = #task_pool{task_type = T, node = N} = V}, {Failed, All}) ->
-                     case T of
-                         Type ->
-                             IsFailed = case Level of
-                                 ?NODE_LEVEL ->
-                                     MyNode = node(),
-                                     (MyNode =:= N) andalso not task_manager:check_owner(V#task_pool.owner);
-                                 _ ->
-                                     not task_manager:is_task_alive(V)
-                             end,
-                             NewFailed = case IsFailed of
-                                 true ->
-                                     Failed + 1;
-                                 _ ->
-                                     Failed
-                             end,
-                             NewAll = All + 1,
-                             case NewAll >= Limit of
-                                 true ->
-                                     {abort, {NewFailed, NewAll}};
-                                 _ ->
-                                     {next, {NewFailed, NewAll}}
-                             end;
-                         _ ->
-                             {next, {Failed, All}}
-                     end
-             end,
-    model:execute_with_default_context(?MODULE, list, [Filter, {0,0}],
-        ?LEVEL_OVERRIDE(task_to_db_level(Level))).
+    datastore_model:fold(level_to_ctx(Level), fun
+        (#document{value = Task}, {Failed, All}) ->
+            case Task#task_pool.task_type == Type of
+                true ->
+                    Failed2 = case is_failed(Level, Task) of
+                        true -> Failed + 1;
+                        false -> Failed
+                    end,
+                    All2 = All + 1,
+                    case All2 >= Limit of
+                        true -> {stop, {Failed2, All2}};
+                        false -> {ok, {Failed2, All2}}
+                    end;
+                false ->
+                    {ok, {Failed, All}}
+            end
+    end, {0, 0}).
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Translates task level to store level.
+%% Translates task level to appropriate operation context.
 %% @end
 %%--------------------------------------------------------------------
--spec task_to_db_level(Level :: task_manager:level()) -> datastore:store_level().
-task_to_db_level(?NODE_LEVEL) ->
-    ?LOCAL_ONLY_LEVEL;
+-spec level_to_ctx(level()) -> ctx().
+level_to_ctx(?NODE_LEVEL) ->
+    ?CTX#{routing => local, disc_driver => undefined};
+level_to_ctx(?CLUSTER_LEVEL) ->
+    ?CTX#{disc_driver => undefined};
+level_to_ctx(?PERSISTENT_LEVEL) ->
+    ?CTX#{memory_driver => undefined}.
 
-task_to_db_level(?CLUSTER_LEVEL) ->
-    ?GLOBAL_ONLY_LEVEL;
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Check whether task failed.
+%% @end
+%%--------------------------------------------------------------------
+-spec is_failed(level(), record()) -> boolean().
+is_failed(?NODE_LEVEL, Task) ->
+    LocalTask = node() == Task#task_pool.node,
+    OwnerAlive = task_manager:check_owner(Task#task_pool.owner),
+    LocalTask andalso not OwnerAlive;
+is_failed(_, Task) ->
+    not task_manager:is_task_alive(Task).
 
-task_to_db_level(?PERSISTENT_LEVEL) ->
-    ?DISK_ONLY_LEVEL.
+%%%===================================================================
+%%% datastore_model callbacks
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns structure of model in provided version.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_record_struct(datastore_model:record_version()) ->
+    datastore_model:record_struct().
+get_record_struct(1) ->
+    {record, [
+        {task, term},
+        {task_type, atom},
+        {owner, term},
+        {node, atom}
+    ]}.

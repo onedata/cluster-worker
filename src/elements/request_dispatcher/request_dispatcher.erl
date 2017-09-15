@@ -219,14 +219,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Chooses to which worker (on which node) the request should be sent.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
 %% @end
 %%--------------------------------------------------------------------
--spec get_worker_node(WorkerName :: worker_name()) -> {ok, node()} | {error, dispatcher_out_of_sync}.
+-spec get_worker_node(WorkerName :: worker_name()) ->
+    {ok, node()} | {error, dispatcher_out_of_sync}.
 get_worker_node(WorkerName) ->
     case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
         [{?LB_ADVICE_KEY, undefined}] ->
@@ -238,14 +238,14 @@ get_worker_node(WorkerName) ->
 
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Returns all workers that host given worker.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
 %% @end
 %%--------------------------------------------------------------------
--spec get_worker_nodes(WorkerName :: worker_name()) -> {ok, [node()]} | {error, dispatcher_out_of_sync}.
+-spec get_worker_nodes(WorkerName :: worker_name()) ->
+    {ok, [node()]} | {error, dispatcher_out_of_sync}.
 get_worker_nodes(WorkerName) ->
     case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
         [{?LB_ADVICE_KEY, undefined}] ->

@@ -13,7 +13,7 @@
 -module(identity_utils).
 -author("Michal Zmuda").
 
--include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
@@ -60,14 +60,15 @@ ensure_synced_cert_present(KeyFile, CertFile, DomainForCN) ->
                 ok = file:write_file(CertFile, DBCert),
                 ok = file:write_file(KeyFile, DBKey),
                 ok;
-            {error, {not_found, _}} ->
+            {error, not_found} ->
                 ok = ensure_certs_files_present(KeyFile, CertFile, DomainForCN),
                 {ok, FSCert} = file:read_file(CertFile),
                 {ok, FSKey} = file:read_file(KeyFile),
-                {ok, ?CERT_DB_KEY} = synced_cert:create(#document{
+                {ok, _} = synced_cert:create(#document{
                     key = ?CERT_DB_KEY, value = #synced_cert{
                         cert_file_content = FSCert, key_file_content = FSKey
-                    }}),
+                    }}
+                ),
                 ok
         end
     end).

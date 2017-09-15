@@ -1,96 +1,57 @@
 %%%-------------------------------------------------------------------
-%%% @author Michal Zmuda
-%%% @copyright (C) 2015 ACK CYFRONET AGH
+%%% @author Krzysztof Trzepla
+%%% @copyright (C) 2017 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module defines config of the datastore. It contains default
-%%% (required by infrastructure) config, which is complemented by
-%%% information from datastore_config_plugin.
+%%% This module provides datastore configuration.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_config).
--author("Michal Zmuda").
+-author("Krzysztof Trzepla").
 
--behaviour(datastore_config_behaviour).
+%% API
+-export([get_models/0, get_throttled_models/0]).
 
--include("modules/datastore/datastore_common_internal.hrl").
--include("modules/datastore/datastore_common.hrl").
--include_lib("ctool/include/logging.hrl").
+-type model() :: datastore_model:model().
 
--define(DATASTORE_CONFIG_PLUGIN, datastore_config_plugin).
 -define(DEFAULT_MODELS, [
-    task_pool,
     cached_identity,
-    synced_cert,
+    links_forest,
+    links_mask,
+    links_mask_root,
+    links_node,
     lock,
-    node_management
+    node_management,
+    synced_cert,
+    task_pool
 ]).
 
-%% datastore_config_behaviour callbacks
--export([db_nodes/0, models/0, throttled_models/0, get_mutator/0,
-    global_caches/0, local_caches/0]).
+-define(PLUGIN, datastore_config_plugin).
+
+%%%===================================================================
+%%% API
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns list of datastore nodes.
+%% Returns list of default and custom models.
 %% @end
 %%--------------------------------------------------------------------
--spec db_nodes() -> [datastore:db_node()].
-db_nodes() ->
-    {ok, Nodes} = plugins:apply(node_manager_plugin, db_nodes, []),
-    lists:map(fun(NodeString) ->
-        [HostName, Port] = string:tokens(atom_to_list(NodeString), ":"),
-        {list_to_binary(HostName), list_to_integer(Port)}
-    end, Nodes).
+-spec get_models() -> [model()].
+get_models() ->
+    ?DEFAULT_MODELS ++ apply_plugin(get_models, [], []).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns a list of models.
+%% Returns list of throttled models.
 %% @end
 %%--------------------------------------------------------------------
--spec models() -> Models :: [model_behaviour:model_type()].
-models() ->
-    ?DEFAULT_MODELS ++ plugins:apply(?DATASTORE_CONFIG_PLUGIN, models, []).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns a list of throttled models.
-%% @end
-%%--------------------------------------------------------------------
--spec throttled_models() -> Models :: [model_behaviour:model_type()].
-throttled_models() ->
-    plugins:apply(?DATASTORE_CONFIG_PLUGIN, throttled_models, []).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% {@link datastore_config_behaviour} callback get_mutator/0.
-%% @end
-%%--------------------------------------------------------------------
--spec get_mutator() -> datastore:mutator() | undefined.
-get_mutator() ->
-    undefined.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns a list of models cached globally.
-%% @end
-%%--------------------------------------------------------------------
--spec global_caches() -> Models :: [model_behaviour:model_type()].
-global_caches() ->
-    filter_models_by_level(?GLOBALLY_CACHED_LEVEL, models_potentially_cached()).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns a list of models cached locally.
-%% @end
-%%--------------------------------------------------------------------
--spec local_caches() -> Models :: [model_behaviour:model_type()].
-local_caches() ->
-    filter_models_by_level(?LOCALLY_CACHED_LEVEL, models_potentially_cached()).
-
+-spec get_throttled_models() -> [model()].
+get_throttled_models() ->
+    apply_plugin(get_throttled_models, [], []).
 
 %%%===================================================================
 %%% Internal functions
@@ -99,21 +60,24 @@ local_caches() ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Retains models with given store_level.
+%% Calls plugin function if provided or returns default value.
 %% @end
 %%--------------------------------------------------------------------
-filter_models_by_level(Level, Models) ->
-    lists:filter(fun(Model) ->
-        MInit = Model:model_init(),
-        (MInit#model_config.store_level == Level) and (MInit#model_config.sync_cache == false)
-    end, Models).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Retains models which could be cached. For instance excludes models
-%% which introduce endless recursion.
-%% @end
-%%--------------------------------------------------------------------
-models_potentially_cached() ->
-    models() -- [node_management].
+-spec apply_plugin(atom(), list(), term()) -> term().
+apply_plugin(Function, Args, Default) ->
+    try
+        Exports = ?PLUGIN:module_info(functions),
+        Arity = length(Args),
+        case lists:keyfind(Function, 1, Exports) of
+            {Function, Arity} -> erlang:apply(?PLUGIN, Function, Args);
+            _ -> Default
+        end
+    catch
+        _:_ ->
+            case code:ensure_loaded(?PLUGIN) of
+                {module, ?PLUGIN} ->
+                    apply_plugin(Function, Args, Default);
+                {error, nofile} ->
+                    Default
+            end
+    end.

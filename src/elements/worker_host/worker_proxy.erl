@@ -23,7 +23,7 @@
 %% API
 -export([call/2, call/3, call_direct/2, call_direct/3,
     call_pool/3, call_pool/4, multicall/2, multicall/3,
-    cast/2, cast/3, cast/4, multicast/2, multicast/3,
+    cast/2, cast/3, cast/4, cast/5, multicast/2, multicast/3,
     multicast/4, cast_pool/3, cast_pool/4, cast_pool/5]).
 
 
@@ -53,7 +53,7 @@ call(WorkerRef, Request) ->
 -spec call(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
     Timeout :: timeout()) -> Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout) ->
-   call(WorkerRef, Request, Timeout, spawn).
+    call(WorkerRef, Request, Timeout, spawn).
 
 
 %%--------------------------------------------------------------------
@@ -75,7 +75,7 @@ call_direct(WorkerRef, Request) ->
 -spec call_direct(WorkerRef :: request_dispatcher:worker_ref(),
     Request :: term(), Timeout :: timeout()) -> Result :: term() | {error, term()}.
 call_direct(WorkerRef, Request, Timeout) ->
-   call(WorkerRef, Request, Timeout, direct).
+    call(WorkerRef, Request, Timeout, direct).
 
 %% -------------------------------------------------------------------
 %% @doc
@@ -161,6 +161,28 @@ cast(WorkerRef, Request, ReplyTo) ->
     ReplyTo :: process_ref(), MsgId :: term() | undefined) -> ok | {error, term()}.
 cast(WorkerRef, Request, ReplyTo, MsgId) ->
     cast(WorkerRef, Request, ReplyTo, MsgId, spawn).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Asynchronously send request to worker, answer with given MsgId is
+%% expected at ReplyTo process/gen_server. The answer will be
+%% 'worker_answer' record.
+%% It depends on ExecOption whether request will be processed by
+%% spawned process or process from pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec cast(WorkerRef :: request_dispatcher:worker_ref(),
+    Request :: term(), ReplyTo :: process_ref(), MsgId :: term() | undefined,
+    execute_type()) -> ok | {error, term()}.
+cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
+    case choose_node(WorkerRef) of
+        {ok, Name, Node} ->
+            Args = prepare_args(Name, Request, MsgId, ReplyTo),
+            execute(Args, Node, ExecOption, undefined),
+            ok;
+        Error ->
+            Error
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -263,29 +285,6 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
                     [WorkerRef, Request, Timeout]),
                 {error, timeout}
             end;
-        Error ->
-            Error
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Asynchronously send request to worker, answer with given MsgId is
-%% expected at ReplyTo process/gen_server. The answer will be
-%% 'worker_answer' record.
-%% It depends on ExecOption whether request will be processed by
-%% spawned process or process from pool.
-%% @end
-%%--------------------------------------------------------------------
--spec cast(WorkerRef :: request_dispatcher:worker_ref(),
-    Request :: term(), ReplyTo :: process_ref(), MsgId :: term() | undefined,
-    execute_type()) -> ok | {error, term()}.
-cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
-    case choose_node(WorkerRef) of
-        {ok, Name, Node} ->
-            Args = prepare_args(Name, Request, MsgId, ReplyTo),
-            execute(Args, Node, ExecOption, undefined),
-            ok;
         Error ->
             Error
     end.

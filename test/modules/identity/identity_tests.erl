@@ -12,7 +12,7 @@
 -author("Michal Zmuda").
 
 -ifdef(TEST).
--include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
@@ -215,7 +215,7 @@ delete_from_env(ID, Env) ->
 get_from_env(ID, Env) ->
     case application:get_env(app, Env, #{}) of
         #{ID := Value} -> {ok, Value};
-        _ -> {error, {not_found, Env}}
+        _ -> {error, not_found}
     end.
 
 -endif.

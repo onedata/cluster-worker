@@ -13,7 +13,6 @@
 -author("Krzysztof Trzepla").
 
 -include("modules/tp/tp.hrl").
--include("modules/datastore/datastore_doc.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").

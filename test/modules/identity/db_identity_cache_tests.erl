@@ -13,7 +13,7 @@
 
 -ifdef(TEST).
 -include("global_definitions.hrl").
--include("modules/datastore/datastore_models_def.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
@@ -47,18 +47,17 @@ setup() ->
     meck:new(cached_identity),
     meck:expect(cached_identity, delete, fun(Key) -> delete_from_env(Key, ?ENV) end),
     meck:expect(cached_identity, get, fun(Key) -> get_from_env(Key, ?ENV) end),
-    meck:expect(cached_identity, create_or_update, fun(DocToCreate, UpdateFun) ->
-        Key = DocToCreate#document.key,
+    meck:expect(cached_identity, update, fun(Key, Diff, Default) ->
         NewDoc = case get_from_env(Key, ?ENV) of
-            {error, _} -> DocToCreate;
             {ok, Current = #document{value = Value}} ->
-                case UpdateFun(Value) of
+                case Diff(Value) of
                     {ok, Updated} -> Current#document{value = Updated};
                     _ -> Current
-                end
+                end;
+            {error, _} -> #document{key = Key, value = Default}
         end,
         save_to_env(Key, NewDoc, ?ENV),
-        {ok, DocToCreate#document.key}
+        {ok, Key}
     end),
     ok.
 
@@ -151,7 +150,11 @@ should_no_get_data_on_record_expired() ->
 %%%===================================================================
 
 create_record(ID1, PublicKey1, Now) ->
-    save_to_env(ID1, #document{key = ID1, value = #cached_identity{id = ID1, encoded_public_key = PublicKey1, last_update_seconds = Now}}, ?ENV).
+    save_to_env(ID1, #document{key = ID1, value = #cached_identity{
+        id = ID1,
+        encoded_public_key = PublicKey1,
+        last_update_seconds = Now
+    }}, ?ENV).
 
 data() ->
     ID1 = <<"id1">>,
