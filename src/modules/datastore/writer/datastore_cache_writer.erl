@@ -27,6 +27,7 @@
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
     cached_keys_in_flush = #{} :: cached_keys(),
+    requests_ref = undefined :: undefined | reference(),
     flush_ref = undefined :: undefined | reference()
 }).
 
@@ -69,7 +70,7 @@ start_link(MasterPid) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([MasterPid]) ->
-    {ok, DiscWriterPid} = datastore_disc_writer:start_link(self()),
+    {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid}}.
 
 %%--------------------------------------------------------------------
@@ -86,10 +87,10 @@ init([MasterPid]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call({handle, Requests}, From, State = #state{master_pid = Pid}) ->
+handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
     gen_server:reply(From, ok),
-    State2 = handle_requests(Requests, State),
-    gen_server:cast(Pid, mark_cache_writer_idle),
+    State2 = handle_requests(Requests, State#state{requests_ref = Ref}),
+    gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State2)};
 handle_call({terminate, Requests}, _From, State = #state{
     disc_writer_pid = Pid
@@ -140,9 +141,10 @@ handle_cast(Request, #state{} = State) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(flush, State = #state{
     disc_writer_pid = Pid,
+    requests_ref = Ref,
     cached_keys_to_flush = CachedKeys
 }) ->
-    gen_server:call(Pid, {flush, CachedKeys}, infinity),
+    gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
     {noreply, State#state{
         cached_keys_to_flush = #{},
         cached_keys_in_flush = CachedKeys
@@ -410,7 +412,7 @@ send_response({Pid, Ref, Responses}, Batch) ->
 -spec schedule_flush(state()) -> state().
 schedule_flush(State = #state{flush_ref = undefined}) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
-        timer:seconds(5)),
+        timer:seconds(1)),
     erlang:send_after(Delay, self(), flush),
     State#state{flush_ref = make_ref()};
 schedule_flush(State = #state{}) ->
