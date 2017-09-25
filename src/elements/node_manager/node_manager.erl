@@ -73,7 +73,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
-    | {singleton | early_init, atom(), [any()]}].
+| {singleton | early_init, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
@@ -182,7 +182,7 @@ init([]) ->
     try
         ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
-        ?info("Plugin initailised"),
+        ?info("Plugin initialised"),
 
         ?info("Checking if all ports are free..."),
         lists:foreach(
@@ -201,7 +201,10 @@ init([]) ->
         ?info("Ports OK, starting listeners..."),
 
         lists:foreach(fun(Module) ->
-            ok = erlang:apply(Module, start, []) end, node_manager:listeners()),
+            ?info("Starting ~p", [Module]),
+            ok = erlang:apply(Module, start, []),
+            ?info("Listener: ~p started", [Module])
+        end, node_manager:listeners()),
         ?info("All listeners started"),
 
         next_task_check(),

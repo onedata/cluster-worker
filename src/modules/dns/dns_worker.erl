@@ -71,8 +71,15 @@ handle(healthcheck) ->
 
 handle({update_lb_advice, LBAdvice}) ->
     ?debug("DNS update of load_balancing advice: ~p", [LBAdvice]),
-    ok = worker_host:state_put(?MODULE, last_update, erlang:monotonic_time(milli_seconds)),
-    ok = worker_host:state_put(?MODULE, lb_advice, LBAdvice);
+    try
+        ok = worker_host:state_put(?MODULE, last_update, erlang:monotonic_time(milli_seconds)),
+        ok = worker_host:state_put(?MODULE, lb_advice, LBAdvice)
+    catch
+        error:badarg ->
+            % Possible error during node init - log only debug
+            ?debug("Cannot update lb advice: badarg"),
+            ok
+    end;
 
 handle({Method, Domain}) ->
     LBAdvice = worker_host:state_get(?MODULE, lb_advice),
