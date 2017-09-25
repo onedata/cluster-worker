@@ -261,6 +261,7 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
             end
         end, ok, NodeStatuses),
     % Sort node statuses by node name
+    ?LOG("Cluster status: ~p", [AppStatus]),
     {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, lists:usort(NodeStatuses)}}.
 
 
@@ -353,7 +354,7 @@ check_workers(Nodes, Workers, Timeout) ->
         fun({WNode, WName}) ->
             Result =
                 try
-                    ?LOG("Healthcheck start: node ~p, worker ~p",
+                    ?LOG("Healthcheck start: worker ~p, node ~p",
                         [WName, WNode]),
                     Ans = case WNode of
                         Node ->
@@ -361,7 +362,7 @@ check_workers(Nodes, Workers, Timeout) ->
                         _ ->
                             worker_proxy:call({WName, WNode}, healthcheck, Timeout)
                     end,
-                    ?LOG("Healthcheck: node ~p, worker ~p, ans: ~p",
+                    ?LOG("Healthcheck: worker ~p, node ~p, ans: ~p",
                         [WName, WNode, Ans]),
                     Ans
                 catch T:M ->
