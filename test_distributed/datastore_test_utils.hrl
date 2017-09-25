@@ -40,6 +40,8 @@
 -define(DISC_CTX, #{bucket => ?BUCKET}).
 -define(BUCKET, <<"onedata">>).
 
+-define(REMOTE_DRV, undefined).
+
 -define(CASE, atom_to_binary(?FUNCTION_NAME, utf8)).
 -define(TERM(Name, N), <<Name, "-", (?CASE)/binary, "-",
     (integer_to_binary(N))/binary>>).

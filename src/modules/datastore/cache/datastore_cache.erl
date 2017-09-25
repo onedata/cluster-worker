@@ -37,16 +37,17 @@
 -type key() :: datastore:key().
 -type value() :: datastore_doc:value().
 -type doc() :: datastore_doc:doc(value()).
--type durability() :: memory | disc.
+-type durability() :: memory | disc | remote.
 -type future() :: #future{}.
 
 -export_type([durability/0, future/0]).
 
--define(FUTURE(Doc), ?FUTURE(undefined, undefined, Doc)).
--define(FUTURE(Durability, Driver, Doc), #future{
+-define(FUTURE(Value), ?FUTURE(undefined, Value)).
+-define(FUTURE(Durability, Value), ?FUTURE(Durability, undefined, Value)).
+-define(FUTURE(Durability, Driver, Value), #future{
     durability = Durability,
     driver = Driver,
-    value = Doc
+    value = Value
 }).
 
 %%%===================================================================
@@ -89,18 +90,29 @@ fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
         ({Key, {ok, disc, Doc}}) ->
             save_async(Ctx, Key, Doc, false);
         ({Key, {error, not_found}}) ->
+            get_remote_async(Ctx, Key);
+        ({_Key, {error, Reason}}) ->
+            ?FUTURE({error, Reason})
+    end, lists:zip(Keys, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
+
+    Futures2 = lists:map(fun
+        ({_Key, {ok, memory, Doc}}) ->
+            ?FUTURE(memory, {ok, Doc});
+        ({Key, {ok, remote, Doc}}) ->
+            save_async(Ctx, Key, Doc, true);
+        ({Key, {error, not_found}}) ->
             Doc = #document{key = Key, value = undefined, deleted = true},
             save_async(Ctx, Key, Doc, false),
             ?FUTURE({error, not_found});
         ({_Key, {error, Reason}}) ->
             ?FUTURE({error, Reason})
-    end, lists:zip(Keys, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
+    end, lists:zip(Keys, wait(Futures))),
 
     lists:map(fun
         ({ok, memory, Doc}) -> {ok, memory, Doc};
         ({error, {enomem, Doc}}) -> {ok, disc, Doc};
         ({error, Reason}) -> {error, Reason}
-    end, wait(Futures)).
+    end, wait(Futures2)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -178,13 +190,14 @@ flush_async(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec wait(future()) -> {ok, durability(), doc()} | {error, term()};
     ([future()]) -> [{ok, durability(), doc()} | {error, term()}].
-wait(#future{durability = memory, value = {ok, Doc}}) ->
-    {ok, memory, Doc};
+wait(#future{durability = Durability, value = {ok, Doc}}) ->
+    {ok, Durability, Doc};
 wait(#future{value = {error, Reason}}) ->
     {error, Reason};
-wait(#future{durability = disc, driver = Driver, value = Ref}) ->
-    case Driver:wait(Ref) of
-        {ok, _Cas, Doc} -> {ok, disc, Doc};
+wait(#future{durability = Durability, driver = Driver, value = Value}) ->
+    case Driver:wait(Value) of
+        {ok, Doc} -> {ok, Durability, Doc};
+        {ok, _Cas, Doc} -> {ok, Durability, Doc};
         {error, Reason} -> {error, Reason}
     end;
 wait(Futures) when is_list(Futures) ->
@@ -243,10 +256,8 @@ get_async(#{disc_driver := undefined} = Ctx, Key, _) ->
     } = Ctx,
 
     case MemoryDriver:get(MemoryCtx, Key) of
-        {ok, Doc} ->
-            ?FUTURE(memory, MemoryDriver, {ok, Doc});
-        {error, Reason} ->
-            ?FUTURE(memory, MemoryDriver, {error, Reason})
+        {ok, Doc} -> ?FUTURE(memory, MemoryDriver, {ok, Doc});
+        {error, Reason} -> ?FUTURE(memory, MemoryDriver, {error, Reason})
     end;
 get_async(Ctx, Key, DiscFallback) ->
     #{
@@ -264,6 +275,23 @@ get_async(Ctx, Key, DiscFallback) ->
         {{error, Reason}, _} ->
             ?FUTURE(memory, MemoryDriver, {error, Reason})
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Asynchronously retrieves value from remote store.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_remote_async(ctx(), key()) -> future().
+get_remote_async(#{remote_driver := undefined}, _Key) ->
+    ?FUTURE({error, not_found});
+get_remote_async(#{
+    remote_driver := RemoteDriver,
+    remote_driver_ctx := RemoteCtx
+}, Key) ->
+    ?FUTURE(remote, RemoteDriver, RemoteDriver:get_async(RemoteCtx, Key));
+get_remote_async(_Ctx, _Key) ->
+    ?FUTURE({error, not_found}).
 
 %%--------------------------------------------------------------------
 %% @private

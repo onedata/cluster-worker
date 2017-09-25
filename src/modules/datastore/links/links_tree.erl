@@ -25,7 +25,7 @@
     get_node/2, update_node/3, delete_node/2, terminate/1]).
 
 -record(state, {
-    ctx :: datastore_links:ctx(),
+    ctx :: ctx(),
     key :: datastore:key(),
     forest_id :: datastore_links:forest_id(),
     tree_id :: id(),
@@ -36,6 +36,7 @@
 -type node_id() :: links_node:id().
 -type links_node() :: links_node:links_node().
 -type trees() :: links_forest:trees().
+-type ctx() :: datastore_links:ctx().
 -type batch() :: undefined | datastore_doc_batch:batch().
 -type state() :: #state{}.
 
@@ -129,7 +130,8 @@ unset_root_id(State = #state{
 get_root_id(State = #state{
     ctx = Ctx, forest_id = ForestId, tree_id = TreeId, batch = Batch
 }) ->
-    case datastore_doc:fetch(Ctx, ForestId, Batch) of
+    Ctx2 = set_remote_driver_ctx(Ctx, State),
+    case datastore_doc:fetch(Ctx2, ForestId, Batch) of
         {{ok, #document{value = #links_forest{trees = Trees}}}, Batch2} ->
             {get_root_id(TreeId, Trees), State#state{batch = Batch2}};
         {{error, Reason}, Batch2} ->
@@ -169,7 +171,8 @@ create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
 -spec get_node(node_id(), state()) ->
     {{ok, links_node()} | {error, term()}, state()}.
 get_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
-    case datastore_doc:fetch(Ctx, NodeId, Batch) of
+    Ctx2 = set_remote_driver_ctx(Ctx, State),
+    case datastore_doc:fetch(Ctx2, NodeId, Batch) of
         {{ok, #document{value = #links_node{node = Node}}}, Batch2} ->
             {{ok, Node}, State#state{batch = Batch2}};
         {{error, Reason}, Batch2} ->
@@ -253,3 +256,23 @@ set_root_id(TreeId, NodeId, Trees) ->
         error -> {0, <<>>}
     end,
     maps:put(TreeId, {NodeId, datastore_utils:gen_rev(Generation + 1)}, Trees).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets remote driver context.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_remote_driver_ctx(ctx(), state()) -> ctx().
+set_remote_driver_ctx(Ctx, #state{tree_id = <<"all">>}) ->
+    Ctx;
+set_remote_driver_ctx(Ctx = #{sync_enabled := true}, #state{
+    key = Key, tree_id = TreeId
+}) ->
+    Ctx#{remote_driver_ctx => #{
+        model => maps:get(model, Ctx),
+        routing_key => Key,
+        provider_id => TreeId
+    }};
+set_remote_driver_ctx(Ctx, _State) ->
+    Ctx.

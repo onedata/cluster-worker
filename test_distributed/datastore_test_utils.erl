@@ -168,7 +168,8 @@ get_ctx(Model) ->
         memory_driver_ctx => get_memory_driver_ctx(Model),
         memory_driver_opts => [],
         disc_driver => get_disc_driver(Model),
-        disc_driver_ctx => get_disc_driver_ctx(Model)
+        disc_driver_ctx => get_disc_driver_ctx(Model),
+        remote_driver => ?REMOTE_DRV
     }.
 
 get_record_struct(_Model, 1) ->

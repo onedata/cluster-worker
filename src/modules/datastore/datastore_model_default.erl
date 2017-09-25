@@ -98,7 +98,8 @@ resolve_conflict(Model, Ctx, Doc, PrevDoc) ->
 -spec set_defaults(ctx()) -> ctx().
 set_defaults(Ctx) ->
     Ctx2 = set_memory_driver(Ctx),
-    set_disc_driver(Ctx2).
+    Ctx3 = set_disc_driver(Ctx2),
+    set_remote_driver(Ctx3).
 
 %%%===================================================================
 %%% Internal functions
@@ -151,6 +152,22 @@ set_disc_driver(Ctx) ->
         {[disc_driver], couchbase_driver},
         {[disc_driver_ctx, bucket], <<"onedata">>},
         {[disc_driver_ctx, no_seq], not maps:get(sync_enabled, Ctx, false)}
+    ]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets default remote driver.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_remote_driver(ctx()) -> ctx().
+set_remote_driver(Ctx = #{remote_driver := undefined}) ->
+    Ctx;
+set_remote_driver(Ctx) ->
+    RemoteDriver = application:get_env(cluster_worker, datastore_remote_driver,
+        undefined),
+    set_defaults(Ctx, [
+        {[remote_driver], RemoteDriver}
     ]).
 
 %%--------------------------------------------------------------------

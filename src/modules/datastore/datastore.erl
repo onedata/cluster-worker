@@ -37,17 +37,23 @@
                  memory_driver => memory_driver(),
                  memory_driver_ctx => memory_driver_ctx(),
                  disc_driver => disc_driver(),
-                 disc_driver_ctx => disc_driver_ctx()}.
+                 disc_driver_ctx => disc_driver_ctx(),
+                 remote_driver => remote_driver(),
+                 remote_driver_ctx => remote_driver_ctx()}.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
 -type disc_driver() :: undefined | couchbase_driver.
 -type disc_driver_ctx() :: couchbase_driver:ctx().
--type driver() :: memory_driver() | disc_driver().
--type driver_ctx() :: memory_driver_ctx() | disc_driver_ctx().
+-type remote_driver() :: remote_driver | atom().
+-type remote_driver_ctx() :: remote_driver:ctx().
+-type driver() :: memory_driver() | disc_driver() | remote_driver().
+-type driver_ctx() :: memory_driver_ctx() | disc_driver_ctx() |
+                      remote_driver_ctx().
 
 -export_type([ctx/0]).
--export_type([memory_driver/0, disc_driver/0, driver/0]).
--export_type([memory_driver_ctx/0, disc_driver_ctx/0, driver_ctx/0]).
+-export_type([memory_driver/0, disc_driver/0, remote_driver/0, driver/0]).
+-export_type([memory_driver_ctx/0, disc_driver_ctx/0, remote_driver_ctx/0,
+    driver_ctx/0]).
 
 -type key() :: datastore_doc:key().
 -type value() :: datastore_doc:value().
