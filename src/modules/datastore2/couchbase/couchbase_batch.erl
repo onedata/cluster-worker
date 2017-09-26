@@ -32,15 +32,16 @@
 %%%===================================================================
 
 init_counters() ->
-    init_counter(times),
-    init_counter(sizes).
+    HistogramReport = [min, max, median, mean],
+    init_counter(times, histogram, HistogramReport),
+    init_counter(sizes, histogram, HistogramReport),
+    init_counter(timeouts, counter, [value]).
 
-init_counter(Param) ->
+init_counter(Param, Type, Report) ->
     Name = ?EXOMETER_NAME(Param),
-    exometer:new(Name, histogram, [{time_span,
+    exometer:new(Name, Type, [{time_span,
         application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
-    exometer_report:subscribe(exometer_report_lager, Name,
-        [min, max, median, mean],
+    exometer_report:subscribe(exometer_report_lager, Name, Report,
         application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
@@ -90,13 +91,13 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 
     case Check of
         timeout ->
-            ok;
+            exometer:update(?EXOMETER_NAME(timeouts), 1);
         _ ->
             ok = exometer:update(?EXOMETER_NAME(times), lists:max(Times))
     end,
 
     Size = maps:size(Requests),
-    exometer:update(?EXOMETER_NAME(times), Size),
+    exometer:update(?EXOMETER_NAME(sizes), Size),
 
     BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 2000),
