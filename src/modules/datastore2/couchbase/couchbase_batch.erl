@@ -25,16 +25,21 @@
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_durability_timeout, 60000)).
 
--define(EXOMETER_NAME, [batch_times]).
+-define(EXOMETER_NAME(Param), [batch_stats, Param]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 init_counters() ->
-    exometer:new(?EXOMETER_NAME, histogram, [{time_span,
+    init_counter(times),
+    init_counter(sizes).
+
+init_counter(Param) ->
+    Name = ?EXOMETER_NAME(Param),
+    exometer:new(Name, histogram, [{time_span,
         application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
-    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME,
+    exometer_report:subscribe(exometer_report_lager, Name,
         [min, max, median, mean],
         application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
@@ -87,15 +92,18 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
         timeout ->
             ok;
         _ ->
-            ok = exometer:update(?EXOMETER_NAME, lists:max(Times))
+            ok = exometer:update(?EXOMETER_NAME(times), lists:max(Times))
     end,
+
+    Size = maps:size(Requests),
+    exometer:update(?EXOMETER_NAME(times), Size),
 
     BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 2000),
     MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_max_batch_size, 2000),
     case (BatchSize < MaxBatchSize)
-        andalso (maps:size(Requests) =:= BatchSize) of
+        andalso (Size =:= BatchSize) of
         true ->
             verify_batches_times(Check);
         _ ->

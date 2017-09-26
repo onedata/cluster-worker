@@ -226,7 +226,7 @@ configure_throttling() ->
 
           case {Action, Oldthrottling} of
             {?NO_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p,
+              ?info("Throttling: no config needed, mem: ~p, tp proc num ~p,
               couch queue size: ~p, couch read queue size: ~p",
                 [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check();
@@ -238,7 +238,7 @@ configure_throttling() ->
                 [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check();
             {?CONFIG_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p,
+              ?info("Throttling: no config needed, mem: ~p, tp proc num ~p,
               couch queue size: ~p, couch read queue size: ~p",
                 [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
               plan_next_throttling_check(true);
