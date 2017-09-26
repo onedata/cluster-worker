@@ -29,7 +29,9 @@
             hackney,
             web_client,
             cowboy,
-            worker_pool
+            worker_pool,
+            exometer_core,
+            exometer_lager
         ]},
         {mod, {cluster_worker_app, []}},
         {env, [
@@ -71,9 +73,12 @@
             %% Maximum throttling time
             {throttling_max_time_ms, 2048},
             %% Interval of throttling configuration when throttling is used
-            {throttling_active_check_interval_seconds, 15},
+            {throttling_active_check_interval_seconds, 5},
             %% Interval of throttling configuration
-            {throttling_check_interval_seconds, 15},
+            {throttling_check_interval_seconds, 5},
+
+            {exometer_time_span, 600000},
+            {exometer_logging_interval, 15000},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB

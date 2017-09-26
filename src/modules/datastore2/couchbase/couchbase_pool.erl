@@ -20,6 +20,7 @@
 -export([get_request_queue_size/1, get_request_queue_size/2,
     get_max_worker_queue_size/1, get_max_worker_queue_size/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
+-export([init_counters/0]).
 
 -type mode() :: changes | read | write.
 -type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
@@ -39,9 +40,26 @@
 
 -export_type([mode/0, request/0, response/0, future/0]).
 
+-define(EXOMETER_NAME(Bucket, Mode), [db_queue_size, Bucket, Mode]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+init_counters() ->
+    lists:foreach(fun(Bucket) ->
+        lists:foreach(fun(Mode) ->
+            init_counter(Bucket, Mode)
+        end, get_modes())
+    end, couchbase_config:get_buckets()).
+
+init_counter(Bucket, Mode) ->
+    Name = ?EXOMETER_NAME(Bucket, Mode),
+    exometer:new(Name, histogram, [{time_span,
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
+    exometer_report:subscribe(exometer_report_lager, Name,
+        [min, max, median, mean],
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -158,7 +176,9 @@ get_max_worker_queue_size(Bucket) ->
 get_max_worker_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
         Key = {request_queue_size, Bucket, Mode, Id},
-        max(Size, ets:lookup_element(couchbase_pool_stats, Key, 2))
+        ModeSize = ets:lookup_element(couchbase_pool_stats, Key, 2),
+        ok = exometer:update(?EXOMETER_NAME(Bucket, Mode), ModeSize),
+        max(Size, ModeSize)
     end, 0, lists:seq(1, get_size(Bucket, Mode))).
 
 %%--------------------------------------------------------------------

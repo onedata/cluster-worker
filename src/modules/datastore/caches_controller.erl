@@ -25,7 +25,7 @@
 %% API
 -export([throttle/1, throttle_get/1, throttle_del/1, throttle_del/2,
   get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0,
-  get_hooks_throttling_config/1]).
+  get_hooks_throttling_config/1, init_counters/0]).
 % for tests
 -export([send_after/3]).
 
@@ -43,9 +43,18 @@
 
 -define(LEVEL_OVERRIDE(Level), [{level, Level}]).
 
+-define(EXOMETER_NAME, [tp_nums]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+init_counters() ->
+  exometer:new(?EXOMETER_NAME, histogram, [{time_span,
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
+  exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME,
+    [min, max, median, mean],
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -358,6 +367,7 @@ verify_tp() ->
   {ok, MaxProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
 
   ProcNum = tp:get_processes_number(),
+  ok = exometer:update(?EXOMETER_NAME, ProcNum),
   {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
 
   NewIdleTimeout = case ProcNum < StartNum of

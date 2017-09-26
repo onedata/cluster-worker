@@ -16,7 +16,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([check_timeout/1, verify_batch_size_increase/3]).
+-export([check_timeout/1, verify_batch_size_increase/3, init_counters/0]).
 %% For eunit
 -export([decrease_batch_size/0]).
 
@@ -25,9 +25,18 @@
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_durability_timeout, 60000)).
 
+-define(EXOMETER_NAME, [batch_times]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+init_counters() ->
+    exometer:new(?EXOMETER_NAME, histogram, [{time_span,
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME,
+        [min, max, median, mean],
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -63,6 +72,24 @@ check_timeout(Responses) ->
 -spec verify_batch_size_increase([couchbase_crud:save_response()], list(), list()) ->
     ok | timeout.
 verify_batch_size_increase(Requests, Times, Timeouts) ->
+    Check = lists:foldl(fun
+        (_, false) ->
+            false;
+        (_, timeout) ->
+            timeout;
+        ({_, timeout}, _Acc) ->
+            timeout;
+        ({T, _}, _Acc) ->
+            T =< (min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4)
+    end, true, lists:zip(Times, Timeouts)),
+
+    case Check of
+        timeout ->
+            ok;
+        _ ->
+            ok = exometer:update(?EXOMETER_NAME, lists:max(Times))
+    end,
+
     BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 2000),
     MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -70,7 +97,7 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
     case (BatchSize < MaxBatchSize)
         andalso (maps:size(Requests) =:= BatchSize) of
         true ->
-            verify_batches_times(Times, Timeouts);
+            verify_batches_times(Check);
         _ ->
             ok
     end.
@@ -136,18 +163,9 @@ save_modify_batch_size_time() ->
 %% increases it if possible.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_batches_times(list(), list()) -> ok.
-verify_batches_times(CheckList, Timeouts) ->
-    Ans = lists:foldl(fun
-        (_, false) ->
-            false;
-        ({_, timeout}, _Acc) ->
-            false;
-        ({T, _}, _Acc) ->
-            T =< (min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4)
-    end, true, lists:zip(CheckList, Timeouts)),
-
-    case {Ans, can_modify_batch_size()} of
+-spec verify_batches_times(atom()) -> ok.
+verify_batches_times(Check) ->
+    case {Check, can_modify_batch_size()} of
         {true, true} ->
             BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, 2000),
