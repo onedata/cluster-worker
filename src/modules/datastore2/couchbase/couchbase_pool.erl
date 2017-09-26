@@ -20,7 +20,7 @@
 -export([get_request_queue_size/1, get_request_queue_size/2,
     get_max_worker_queue_size/1, get_max_worker_queue_size/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
--export([init_counters/0]).
+-export([init_counters/0, init_report/0]).
 
 -type mode() :: changes | read | write.
 -type request() :: {save, couchbase_driver:ctx(), couchbase_driver:item()} |
@@ -53,10 +53,20 @@ init_counters() ->
         end, get_modes())
     end, couchbase_config:get_buckets()).
 
+init_report() ->
+    lists:foreach(fun(Bucket) ->
+        lists:foreach(fun(Mode) ->
+            init_report(Bucket, Mode)
+        end, get_modes())
+    end, couchbase_config:get_buckets()).
+
 init_counter(Bucket, Mode) ->
     Name = ?EXOMETER_NAME(Bucket, Mode),
     exometer:new(Name, histogram, [{time_span,
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]).
+
+init_report(Bucket, Mode) ->
+    Name = ?EXOMETER_NAME(Bucket, Mode),
     exometer_report:subscribe(exometer_report_lager, Name,
         [min, max, median, mean],
         application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).

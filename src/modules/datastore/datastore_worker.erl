@@ -36,7 +36,6 @@
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
-    init_counters_logger(),
     couchbase_batch:init_counters(),
     caches_controller:init_counters(),
     couchbase_pool:init_counters(),
@@ -48,12 +47,6 @@ init(_Args) ->
     end, #{}, datastore_config:models()),
 
     {ok, State2}.
-
-init_counters_logger() ->
-    ok = exometer_report:add_reporter(exometer_report_lager, [
-        {type_map,[{'_',integer}]},
-        {level, critical}
-    ]).
 
 %%--------------------------------------------------------------------
 %% @doc

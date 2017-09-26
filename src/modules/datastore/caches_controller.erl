@@ -51,10 +51,30 @@
 
 init_counters() ->
   exometer:new(?EXOMETER_NAME, histogram, [{time_span,
-    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]).
+
+init_report() ->
   exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME,
     [min, max, median, mean],
     application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
+
+init_counters_logger() ->
+  Find = lists:filter(fun
+    ({exometer_report_lager, _}) -> true;
+    (_) -> false
+  end, exometer_report:list_reporters()),
+  case Find of
+    [] ->
+      ok = exometer_report:add_reporter(exometer_report_lager, [
+        {type_map,[{'_',integer}]},
+        {level, critical}
+      ]),
+      init_report(),
+      couchbase_batch:init_report(),
+      couchbase_pool:init_report();
+    _ ->
+      ok
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -174,6 +194,8 @@ get_idle_timeout() ->
 configure_throttling() ->
   Self = self(),
   spawn(fun() ->
+    init_counters_logger(),
+
     CheckInterval = try
       % TODO - use info abut failed batch saves and length of queue to pool of processes dumping to disk
       {MemAction, MemoryUsage} = verify_memory(),

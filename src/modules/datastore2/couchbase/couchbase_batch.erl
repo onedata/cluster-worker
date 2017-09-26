@@ -16,7 +16,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([check_timeout/1, verify_batch_size_increase/3, init_counters/0]).
+-export([check_timeout/1, verify_batch_size_increase/3,
+    init_counters/0, init_report/0]).
 %% For eunit
 -export([decrease_batch_size/0]).
 
@@ -32,15 +33,23 @@
 %%%===================================================================
 
 init_counters() ->
-    HistogramReport = [min, max, median, mean],
-    init_counter(times, histogram, HistogramReport),
-    init_counter(sizes, histogram, HistogramReport),
-    init_counter(timeouts, counter, [value]).
+    init_counter(times, histogram),
+    init_counter(sizes, histogram),
+    init_counter(timeouts, counter).
 
-init_counter(Param, Type, Report) ->
+init_report() ->
+    HistogramReport = [min, max, median, mean],
+    init_report(times, HistogramReport),
+    init_report(sizes, HistogramReport),
+    init_report(timeouts, [value]).
+
+init_counter(Param, Type) ->
     Name = ?EXOMETER_NAME(Param),
     exometer:new(Name, Type, [{time_span,
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]),
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]).
+
+init_report(Param, Report) ->
+    Name = ?EXOMETER_NAME(Param),
     exometer_report:subscribe(exometer_report_lager, Name, Report,
         application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
