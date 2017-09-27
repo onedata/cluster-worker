@@ -60,7 +60,8 @@ init_report() ->
 
 init_counters_logger() ->
   Find = lists:filter(fun
-    ({exometer_report_lager, _}) -> true;
+    ({exometer_report_lager, Pid}) ->
+      erlang:is_alive(Pid);
     (_) -> false
   end, exometer_report:list_reporters()),
   case Find of
