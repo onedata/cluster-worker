@@ -79,6 +79,7 @@
 
             {exometer_time_span, 600000},
             {exometer_logging_interval, 15000},
+            {exometer_check_interval_seconds, 15000},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB

@@ -25,7 +25,7 @@
 %% API
 -export([throttle/1, throttle_get/1, throttle_del/1, throttle_del/2,
   get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0,
-  get_hooks_throttling_config/1, init_counters/0, init_counters_logger/0]).
+  get_hooks_throttling_config/1, init_counters/0, init_report/0]).
 % for tests
 -export([send_after/3]).
 
@@ -57,25 +57,6 @@ init_report() ->
   exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME,
     [min, max, median, mean],
     application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
-
-init_counters_logger() ->
-  Find = lists:filter(fun
-    ({exometer_report_lager, Pid}) ->
-      erlang:is_process_alive(Pid);
-    (_) -> false
-  end, exometer_report:list_reporters()),
-  case Find of
-    [] ->
-      ok = exometer_report:add_reporter(exometer_report_lager, [
-        {type_map,[{'_',integer}]},
-        {level, critical}
-      ]),
-      init_report(),
-      couchbase_batch:init_report(),
-      couchbase_pool:init_report();
-    _ ->
-      ok
-  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -195,8 +176,6 @@ get_idle_timeout() ->
 configure_throttling() ->
   Self = self(),
   spawn(fun() ->
-    init_counters_logger(),
-
     CheckInterval = try
       % TODO - use info abut failed batch saves and length of queue to pool of processes dumping to disk
       {MemAction, MemoryUsage} = verify_memory(),

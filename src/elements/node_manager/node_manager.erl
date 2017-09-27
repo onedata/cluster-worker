@@ -51,6 +51,8 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
+-define(EXOMETER_MODULES, [couchbase_batch, couchbase_pool, caches_controller]).
+
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
@@ -208,6 +210,8 @@ init([]) ->
         erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
+        {ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+        erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
@@ -310,6 +314,14 @@ handle_cast(check_memory, State) ->
     erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
     spawn(fun() ->
         plugins:apply(node_manager_plugin, clear_memory, [false])
+    end),
+    {noreply, State};
+
+handle_cast(check_exometer, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+    erlang:send_after(Interval, self(), {timer, check_exometer}),
+    spawn(fun() ->
+        init_exometer_reporters()
     end),
     {noreply, State};
 
@@ -859,3 +871,26 @@ log_monitoring_stats(Format, Args) ->
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.
+
+init_exometer_reporters() ->
+    Find = lists:filter(fun
+        ({exometer_report_lager, Pid}) ->
+            erlang:is_process_alive(Pid);
+        (_) -> false
+    end, exometer_report:list_reporters()),
+    case Find of
+        [] ->
+            exometer_report:remove_reporter(exometer_report_lager),
+            ok = exometer_report:add_reporter(exometer_report_lager, [
+                {type_map,[{'_',integer}]},
+                {level, critical}
+            ]),
+
+            Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
+
+            lists:foreach(fun(Module) ->
+                Module:init_report()
+            end, ?EXOMETER_MODULES ++ Modules);
+        _ ->
+            ok
+    end.
