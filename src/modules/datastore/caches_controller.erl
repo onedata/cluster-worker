@@ -25,7 +25,7 @@
 %% API
 -export([throttle/1, throttle_get/1, throttle_del/1, throttle_del/2,
   get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0,
-  get_hooks_throttling_config/1, init_counters/0]).
+  get_hooks_throttling_config/1, init_counters/0, init_counters_logger/0]).
 % for tests
 -export([send_after/3]).
 
@@ -61,7 +61,7 @@ init_report() ->
 init_counters_logger() ->
   Find = lists:filter(fun
     ({exometer_report_lager, Pid}) ->
-      erlang:is_alive(Pid);
+      erlang:is_process_alive(Pid);
     (_) -> false
   end, exometer_report:list_reporters()),
   case Find of
