@@ -31,8 +31,8 @@
 -compile(export_all).
 -endif.
 
--define(LOG(Msg), ?info(Msg)).
--define(LOG(Msg, Args), ?info(Msg, Args)).
+-define(LOG(Msg), ?debug(Msg)).
+-define(LOG(Msg, Args), ?debug(Msg, Args)).
 
 %%%===================================================================
 %%% API

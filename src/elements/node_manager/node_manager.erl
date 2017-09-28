@@ -352,8 +352,8 @@ handle_cast(check_cluster_status, State) ->
         Status = case nagios_handler:get_cluster_status(Timeout) of
             {ok, {_AppName, ok, _NodeStatuses}} ->
                 ok;
-            {ok, {_AppName, error, NodeStatuses}}  ->
-                {error, NodeStatuses};
+            {ok, {_AppName, GenericError, NodeStatuses}}  ->
+                {error, {GenericError, NodeStatuses}};
             Error ->
                 {error, Error}
         end,
@@ -378,7 +378,7 @@ handle_cast({cluster_status, CStatus}, #state{initialized = {false, TriesNum}} =
             {noreply, State#state{initialized = true}};
         {error, Error} ->
             MaxChecksNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                cluster_status_max_checks_number, 30),
+                cluster_status_max_checks_number, 0),
             case TriesNum < MaxChecksNum of
                 true ->
                     % Cluster not yet initialized, try in a second.
