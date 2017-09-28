@@ -873,6 +873,7 @@ log_monitoring_stats(Format, Args) ->
     ok.
 
 init_exometer_reporters() ->
+    % TODO - co tu sie zawiesza?
     Find = lists:filter(fun
         ({exometer_report_lager, Pid}) ->
             erlang:is_process_alive(Pid);
