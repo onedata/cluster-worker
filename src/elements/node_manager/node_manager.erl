@@ -201,7 +201,6 @@ init([]) ->
         ?info("Ports OK, starting listeners..."),
 
         lists:foreach(fun(Module) ->
-            ?info("Starting ~p", [Module]),
             ok = erlang:apply(Module, start, []),
             ?info("Listener: ~p started", [Module])
         end, node_manager:listeners()),
@@ -353,8 +352,10 @@ handle_cast(check_cluster_status, State) ->
         Status = case nagios_handler:get_cluster_status(Timeout) of
             {ok, {_AppName, ok, _NodeStatuses}} ->
                 ok;
-            _ ->
-                error
+            {ok, {_AppName, error, NodeStatuses}}  ->
+                {error, NodeStatuses};
+            Error ->
+                {error, Error}
         end,
         % Cast cluster status back to node manager
         gen_server2:cast(?NODE_MANAGER_NAME, {cluster_status, Status})
@@ -366,7 +367,7 @@ handle_cast({cluster_status, _}, #state{initialized = true} = State) ->
     % Already initialized, do nothing
     {noreply, State};
 
-handle_cast({cluster_status, CStatus}, #state{initialized = false} = State) ->
+handle_cast({cluster_status, CStatus}, #state{initialized = {false, TriesNum}} = State) ->
     % Not yet initialized, run after_init if cluster health is ok.
     case CStatus of
         ok ->
@@ -375,11 +376,21 @@ handle_cast({cluster_status, CStatus}, #state{initialized = false} = State) ->
             ?info("Cluster initialized. Running 'after_init' procedures."),
             ok = plugins:apply(node_manager_plugin, after_init, [[]]),
             {noreply, State#state{initialized = true}};
-        error ->
-            % Cluster not yet initialized, try in a second.
-            ?debug("Cluster not initialized. Next check in a second."),
-            erlang:send_after(timer:seconds(1), self(), {timer, check_cluster_status}),
-            {noreply, State}
+        {error, Error} ->
+            MaxChecksNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                cluster_status_max_checks_number, 30),
+            case TriesNum < MaxChecksNum of
+                true ->
+                    % Cluster not yet initialized, try in a second.
+                    ?debug("Cluster not initialized. Next check in a second."),
+                    erlang:send_after(timer:seconds(1), self(), {timer, check_cluster_status}),
+                    {noreply, State#state{initialized = {false, TriesNum + 1}}};
+                _ ->
+                    ?error("Stopping application. Reason: "
+                        "cannot initialize cluster, status: ~p", [Error]),
+                    init:stop(),
+                    {stop, normal, State}
+            end
     end;
 
 handle_cast({update_lb_advices, Advices}, State) ->
@@ -666,8 +677,8 @@ init_workers() ->
             {singleton, Module, Args} ->
                 case gen_server2:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
                     ok ->
-                        ok = start_worker(Module, Args),
-                        ?info("Singleton module ~p started", [Module]);
+                        ?info("Starting singleton module ~p", [Module]),
+                        ok = start_worker(Module, Args);
                     already_started ->
                         ok
                 end,

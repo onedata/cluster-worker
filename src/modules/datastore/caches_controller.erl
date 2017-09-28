@@ -309,7 +309,9 @@ configure_throttling() ->
       end
     catch
       E1:E2 ->
-        ?error_stacktrace("Error during throttling configuration: ~p:~p", [E1, E2]),
+        % Debug log only, possible during start of the system when connection to
+        % database is not ready
+        ?debug_stacktrace("Error during throttling configuration: ~p:~p", [E1, E2]),
         plan_next_throttling_check()
     end,
     caches_controller:send_after(CheckInterval, Self, {timer, configure_throttling})

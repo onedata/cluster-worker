@@ -301,8 +301,6 @@ check_node_managers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    ?LOG("Healthcheck start: node manager: ~p",
-                        [Node]),
                     Ans = gen_server2:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout),
                     ?LOG("Healthcheck: node manager ~p, ans: ~p",
                         [Node, Ans]),
@@ -326,8 +324,6 @@ check_dispatchers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    ?LOG("Healthcheck start: dispatcher: ~p",
-                        [Node]),
                     Ans = gen_server2:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout),
                     ?LOG("Healthcheck: dispatcher ~p, ans: ~p",
                         [Node, Ans]),
@@ -354,8 +350,6 @@ check_workers(Nodes, Workers, Timeout) ->
         fun({WNode, WName}) ->
             Result =
                 try
-                    ?LOG("Healthcheck start: worker ~p, node ~p",
-                        [WName, WNode]),
                     Ans = case WNode of
                         Node ->
                             worker_proxy:call_direct({WName, WNode}, healthcheck);
@@ -403,7 +397,6 @@ check_listeners(Nodes, Listeners, Timeout) ->
 %%--------------------------------------------------------------------
 -spec check_listener(ListenerName :: atom()) -> healthcheck_response().
 check_listener(LName) ->
-    ?LOG("Healthcheck start: listener ~p", [LName]),
     Ans = apply(LName, healthcheck, []),
     ?LOG("Healthcheck: listener ~p, ans: ~p",
         [LName, Ans]),

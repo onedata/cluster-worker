@@ -18,7 +18,7 @@
 -record(state, {
   node_ip = {127, 0, 0, 1} :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()},
   cm_con_status = not_connected :: not_connected | connected | registered,
-  initialized = false :: boolean(),
+  initialized = {false, 0} :: true | {false, TriesNum :: non_neg_integer()},
   monitoring_state = undefined :: monitoring:node_monitoring_state(),
   scheduler_info = undefined :: undefined | list(),
   % TODO - better task manager
