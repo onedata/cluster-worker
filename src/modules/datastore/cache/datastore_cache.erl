@@ -172,7 +172,7 @@ flush_async(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec wait(future()) -> {ok, durability(), doc()} | {error, term()};
     ([future()]) -> [{ok, durability(), doc()} | {error, term()}].
-wait(#future{durability = Durability, value = {ok, Doc}}) ->
+wait(#future{durability = Durability, value = {ok, Doc = #document{}}}) ->
     {ok, Durability, Doc};
 wait(#future{value = {error, Reason}}) ->
     {error, Reason};

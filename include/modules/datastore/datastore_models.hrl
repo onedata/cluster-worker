@@ -15,6 +15,8 @@
 
 -include("datastore_links.hrl").
 
+%% ID of a tree containing links to all instances of a given foldable model.
+%% It is used in datastore_model:fold/3 and datastore_model:fold_keys/3 functions.
 -define(MODEL_ALL_TREE_ID, <<"all">>).
 
 -record(document, {

@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2]).
+-export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -143,20 +143,14 @@ fetch_should_return_value_from_disc(Config) ->
 
 fetch_should_return_value_from_remote(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    RemoteDriver = some_remote_driver,
+    RemoteDriver = ?config(remote_driver, Config),
     Ctx = ?CTX#{
         remote_driver => RemoteDriver,
         remote_driver_ctx => #{}
     },
-    test_utils:mock_new(Worker, RemoteDriver, [non_strict, no_history]),
-    test_utils:mock_expect(Worker, RemoteDriver, get_async, fun(_, _) ->
-        {ok, ?DOC(1)}
-    end),
-    test_utils:mock_expect(Worker, RemoteDriver, wait, fun(Future) -> Future end),
     ?assertMatch({ok, memory, #document{}},
         rpc:call(Worker, datastore_cache, fetch, [Ctx, ?KEY])
-    ),
-    test_utils:mock_validate_and_unload(Worker, RemoteDriver).
+    ).
 
 fetch_should_return_value_from_disc_when_memory_driver_undefined(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -463,10 +457,30 @@ mark_active_should_remove_inactive_entry(Config) ->
 init_per_suite(Config) ->
     datastore_test_utils:init_suite([?MODEL], Config).
 
+init_per_testcase(Case = fetch_should_return_value_from_remote, Config) ->
+    Config2 = init_per_testcase(?DEFAULT_CASE(Case), Config),
+    [Worker | _] = ?config(cluster_worker_nodes, Config2),
+    RemoteDriver = some_remote_driver,
+    test_utils:mock_new(Worker, RemoteDriver, [non_strict, no_history]),
+    test_utils:mock_expect(Worker, RemoteDriver, get_async, fun(_, _) ->
+        {ok, ?DOC(1)}
+    end),
+    test_utils:mock_expect(Worker, RemoteDriver, wait, fun(Future) ->
+        Future
+    end),
+    [{remote_driver, RemoteDriver} | Config2];
+
 init_per_testcase(Case, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, datastore_cache_manager, reset, [memory, cache_size(Case)]),
     rpc:call(Worker, datastore_cache_manager, reset, [disc, cache_size(Case)]),
+    Config.
+
+end_per_testcase(fetch_should_return_value_from_remote, Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    RemoteDriver = ?config(remote_driver, Config),
+    test_utils:mock_validate_and_unload(Worker, RemoteDriver);
+end_per_testcase(_Case, Config) ->
     Config.
 
 %%%===================================================================
