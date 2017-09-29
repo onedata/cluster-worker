@@ -23,6 +23,7 @@
     get_should_return_missing_error/1,
     fetch_should_return_value_from_memory/1,
     fetch_should_return_value_from_disc/1,
+    fetch_should_return_value_from_remote/1,
     fetch_should_return_value_from_disc_when_memory_driver_undefined/1,
     fetch_should_return_value_from_memory_when_disc_driver_undefined/1,
     fetch_should_save_value_in_memory/1,
@@ -59,6 +60,7 @@ all() ->
         get_should_return_missing_error,
         fetch_should_return_value_from_memory,
         fetch_should_return_value_from_disc,
+        fetch_should_return_value_from_remote,
         fetch_should_return_value_from_disc_when_memory_driver_undefined,
         fetch_should_return_value_from_memory_when_disc_driver_undefined,
         fetch_should_save_value_in_memory,
@@ -138,6 +140,23 @@ fetch_should_return_value_from_disc(Config) ->
     ?assertMatch({ok, disc, #document{}},
         rpc:call(Worker, datastore_cache, fetch, [?CTX, ?KEY])
     ).
+
+fetch_should_return_value_from_remote(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    RemoteDriver = some_remote_driver,
+    Ctx = ?CTX#{
+        remote_driver => RemoteDriver,
+        remote_driver_ctx => #{}
+    },
+    test_utils:mock_new(Worker, RemoteDriver, [non_strict, no_history]),
+    test_utils:mock_expect(Worker, RemoteDriver, get_async, fun(_, _) ->
+        {ok, ?DOC(1)}
+    end),
+    test_utils:mock_expect(Worker, RemoteDriver, wait, fun(Future) -> Future end),
+    ?assertMatch({ok, memory, #document{}},
+        rpc:call(Worker, datastore_cache, fetch, [Ctx, ?KEY])
+    ),
+    test_utils:mock_validate_and_unload(Worker, RemoteDriver).
 
 fetch_should_return_value_from_disc_when_memory_driver_undefined(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),

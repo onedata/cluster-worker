@@ -15,6 +15,8 @@
 
 -include("datastore_links.hrl").
 
+-define(MODEL_ALL_TREE_ID, <<"all">>).
+
 -record(document, {
     key :: datastore_doc:key(),
     value :: datastore_doc:value(),

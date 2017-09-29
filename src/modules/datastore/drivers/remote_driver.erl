@@ -7,6 +7,10 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides an interface to a remote store driver.
+%%% Remote store driver is responsible for fetching documents, that should
+%%% be present locally, from remote sources. This driver can complement
+%%% datastore synchronization mechanism (DbSync) in a way that it downloads
+%%% documents that haven't been synchronized yet.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(remote_driver).

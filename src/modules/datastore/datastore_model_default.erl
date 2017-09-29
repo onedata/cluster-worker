@@ -164,11 +164,7 @@ set_disc_driver(Ctx) ->
 set_remote_driver(Ctx = #{remote_driver := undefined}) ->
     Ctx;
 set_remote_driver(Ctx) ->
-    RemoteDriver = application:get_env(cluster_worker, datastore_remote_driver,
-        undefined),
-    set_defaults(Ctx, [
-        {[remote_driver], RemoteDriver}
-    ]).
+    set_default([remote_driver], undefined, Ctx).
 
 %%--------------------------------------------------------------------
 %% @private

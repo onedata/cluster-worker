@@ -81,38 +81,20 @@ get(Ctx, Keys) when is_list(Keys) ->
     (ctx(), [key()]) -> [{ok, durability(), doc()} | {error, term()}].
 fetch(Ctx, <<_/binary>> = Key) ->
     hd(fetch(Ctx, [Key]));
-fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
-    Futures = lists:map(fun
-        ({_Key, {ok, memory, #document{value = undefined, deleted = true}}}) ->
-            ?FUTURE(memory, MemoryDriver, {error, not_found});
-        ({_Key, {ok, memory, Doc}}) ->
-            ?FUTURE(memory, MemoryDriver, {ok, Doc});
-        ({Key, {ok, disc, Doc}}) ->
-            save_async(Ctx, Key, Doc, false);
-        ({Key, {error, not_found}}) ->
-            get_remote_async(Ctx, Key);
-        ({_Key, {error, Reason}}) ->
-            ?FUTURE({error, Reason})
-    end, lists:zip(Keys, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
-
-    Futures2 = lists:map(fun
-        ({_Key, {ok, memory, Doc}}) ->
-            ?FUTURE(memory, {ok, Doc});
-        ({Key, {ok, remote, Doc}}) ->
-            save_async(Ctx, Key, Doc, true);
-        ({Key, {error, not_found}}) ->
-            Doc = #document{key = Key, value = undefined, deleted = true},
-            save_async(Ctx, Key, Doc, false),
-            ?FUTURE({error, not_found});
-        ({_Key, {error, Reason}}) ->
-            ?FUTURE({error, Reason})
-    end, lists:zip(Keys, wait(Futures))),
+fetch(Ctx, Keys) when is_list(Keys) ->
+    Results = fetch_local_or_remote(Ctx, Keys),
+    Results2 = cache_disc_or_remote_results(Ctx, Keys, Results),
 
     lists:map(fun
-        ({ok, memory, Doc}) -> {ok, memory, Doc};
-        ({error, {enomem, Doc}}) -> {ok, disc, Doc};
-        ({error, Reason}) -> {error, Reason}
-    end, wait(Futures2)).
+        ({ok, _Durability, #document{value = undefined, deleted = true}}) ->
+            {error, not_found};
+        ({ok, Durability, Doc}) ->
+            {ok, Durability, Doc};
+        ({error, {enomem, Doc}}) ->
+            {ok, disc, Doc};
+        ({error, Reason}) ->
+            {error, Reason}
+    end, Results2).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -292,6 +274,54 @@ get_remote_async(#{
     ?FUTURE(remote, RemoteDriver, RemoteDriver:get_async(RemoteCtx, Key));
 get_remote_async(_Ctx, _Key) ->
     ?FUTURE({error, not_found}).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Fetches documents from local store and fallbacks to remote store for missing
+%% ones.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_local_or_remote(ctx(), [key()]) ->
+    [{ok, durability(), doc()} | {error, term()}].
+fetch_local_or_remote(Ctx, Keys) ->
+    Futures = lists:map(fun
+        ({_Key, {ok, Durability, Doc}}) ->
+            ?FUTURE(Durability, {ok, Doc});
+        ({Key, {error, not_found}}) ->
+            get_remote_async(Ctx, Key);
+        ({_Key, {error, Reason}}) ->
+            ?FUTURE({error, Reason})
+    end, lists:zip(Keys, wait([get_async(Ctx, Key, true) || Key <- Keys]))),
+
+    wait(Futures).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tries to save documents fetched from disc or remote store in memory cache.
+%% @end
+%%--------------------------------------------------------------------
+-spec cache_disc_or_remote_results(ctx(), [key()],
+    [{ok, durability(), doc()} | {error, term()}]) ->
+    [{ok, durability(), doc()} | {error, term()}].
+cache_disc_or_remote_results(Ctx, Keys, Results) ->
+    Futures = lists:map(fun
+        ({_Key, {ok, memory, Doc}}) ->
+            ?FUTURE(memory, {ok, Doc});
+        ({Key, {ok, disc, Doc}}) ->
+            save_async(Ctx, Key, Doc, false);
+        ({Key, {ok, remote, Doc}}) ->
+            save_async(Ctx, Key, Doc, true);
+        ({Key, {error, not_found}}) ->
+            Doc = #document{key = Key, value = undefined, deleted = true},
+            save_async(Ctx, Key, Doc, false),
+            ?FUTURE({error, not_found});
+        ({_Key, {error, Reason}}) ->
+            ?FUTURE({error, Reason})
+    end, lists:zip(Keys, Results)),
+
+    wait(Futures).
 
 %%--------------------------------------------------------------------
 %% @private

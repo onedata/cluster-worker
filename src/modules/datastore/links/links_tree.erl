@@ -264,15 +264,13 @@ set_root_id(TreeId, NodeId, Trees) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec set_remote_driver_ctx(ctx(), state()) -> ctx().
-set_remote_driver_ctx(Ctx, #state{tree_id = <<"all">>}) ->
+set_remote_driver_ctx(Ctx = #{remote_driver := undefined}, _State) ->
     Ctx;
-set_remote_driver_ctx(Ctx = #{sync_enabled := true}, #state{
-    key = Key, tree_id = TreeId
-}) ->
+set_remote_driver_ctx(Ctx, #state{tree_id = ?MODEL_ALL_TREE_ID}) ->
+    Ctx;
+set_remote_driver_ctx(Ctx, #state{key = Key, tree_id = TreeId}) ->
     Ctx#{remote_driver_ctx => #{
         model => maps:get(model, Ctx),
         routing_key => Key,
-        provider_id => TreeId
-    }};
-set_remote_driver_ctx(Ctx, _State) ->
-    Ctx.
+        source_ids => [TreeId]
+    }}.
