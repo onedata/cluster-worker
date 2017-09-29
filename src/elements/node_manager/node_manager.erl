@@ -378,7 +378,7 @@ handle_cast({cluster_status, CStatus}, #state{initialized = {false, TriesNum}} =
             {noreply, State#state{initialized = true}};
         {error, Error} ->
             MaxChecksNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                cluster_status_max_checks_number, 0),
+                cluster_status_max_checks_number, 30),
             case TriesNum < MaxChecksNum of
                 true ->
                     % Cluster not yet initialized, try in a second.
