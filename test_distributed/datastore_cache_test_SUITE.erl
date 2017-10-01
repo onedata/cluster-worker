@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2]).
+-export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -23,6 +23,7 @@
     get_should_return_missing_error/1,
     fetch_should_return_value_from_memory/1,
     fetch_should_return_value_from_disc/1,
+    fetch_should_return_value_from_remote/1,
     fetch_should_return_value_from_disc_when_memory_driver_undefined/1,
     fetch_should_return_value_from_memory_when_disc_driver_undefined/1,
     fetch_should_save_value_in_memory/1,
@@ -59,6 +60,7 @@ all() ->
         get_should_return_missing_error,
         fetch_should_return_value_from_memory,
         fetch_should_return_value_from_disc,
+        fetch_should_return_value_from_remote,
         fetch_should_return_value_from_disc_when_memory_driver_undefined,
         fetch_should_return_value_from_memory_when_disc_driver_undefined,
         fetch_should_save_value_in_memory,
@@ -96,7 +98,8 @@ all() ->
     memory_driver => ?MEM_DRV(?MODEL),
     memory_driver_ctx => ?MEM_CTX(?MODEL),
     disc_driver => ?DISC_DRV(?MODEL),
-    disc_driver_ctx => ?DISC_CTX
+    disc_driver_ctx => ?DISC_CTX,
+    remote_driver => ?REMOTE_DRV
 }).
 -define(VALUE, ?MODEL_VALUE(?MODEL, 1)).
 -define(DOC, ?DOC(1)).
@@ -136,6 +139,17 @@ fetch_should_return_value_from_disc(Config) ->
     rpc:call(Worker, ?DISC_DRV, save, [?DISC_CTX, ?KEY, ?DOC]),
     ?assertMatch({ok, disc, #document{}},
         rpc:call(Worker, datastore_cache, fetch, [?CTX, ?KEY])
+    ).
+
+fetch_should_return_value_from_remote(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    RemoteDriver = ?config(remote_driver, Config),
+    Ctx = ?CTX#{
+        remote_driver => RemoteDriver,
+        remote_driver_ctx => #{}
+    },
+    ?assertMatch({ok, memory, #document{}},
+        rpc:call(Worker, datastore_cache, fetch, [Ctx, ?KEY])
     ).
 
 fetch_should_return_value_from_disc_when_memory_driver_undefined(Config) ->
@@ -443,10 +457,30 @@ mark_active_should_remove_inactive_entry(Config) ->
 init_per_suite(Config) ->
     datastore_test_utils:init_suite([?MODEL], Config).
 
+init_per_testcase(Case = fetch_should_return_value_from_remote, Config) ->
+    Config2 = init_per_testcase(?DEFAULT_CASE(Case), Config),
+    [Worker | _] = ?config(cluster_worker_nodes, Config2),
+    RemoteDriver = some_remote_driver,
+    test_utils:mock_new(Worker, RemoteDriver, [non_strict, no_history]),
+    test_utils:mock_expect(Worker, RemoteDriver, get_async, fun(_, _) ->
+        {ok, ?DOC(1)}
+    end),
+    test_utils:mock_expect(Worker, RemoteDriver, wait, fun(Future) ->
+        Future
+    end),
+    [{remote_driver, RemoteDriver} | Config2];
+
 init_per_testcase(Case, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, datastore_cache_manager, reset, [memory, cache_size(Case)]),
     rpc:call(Worker, datastore_cache_manager, reset, [disc, cache_size(Case)]),
+    Config.
+
+end_per_testcase(fetch_should_return_value_from_remote, Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    RemoteDriver = ?config(remote_driver, Config),
+    test_utils:mock_validate_and_unload(Worker, RemoteDriver);
+end_per_testcase(_Case, Config) ->
     Config.
 
 %%%===================================================================

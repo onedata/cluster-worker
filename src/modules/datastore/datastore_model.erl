@@ -175,7 +175,7 @@ delete(Ctx, Key, Pred) ->
     {ok, fold_acc()} | {error, term()}.
 fold(Ctx = #{model := Model, fold_enabled := true}, Fun, Acc) ->
     ModelKey = atom_to_binary(Model, utf8),
-    fold_links(Ctx, ModelKey, <<"all">>, fun(#link{name = Key}, Acc2) ->
+    fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         case get(Ctx, Key) of
             {ok, Doc} -> Fun(Doc, Acc2);
             {error, not_found} -> {ok, Acc2};
@@ -194,7 +194,7 @@ fold(_Ctx, _Fun, _Acc) ->
     {ok, fold_acc()} | {error, term()}.
 fold_keys(Ctx = #{model := Model, fold_enabled := true}, Fun, Acc) ->
     ModelKey = atom_to_binary(Model, utf8),
-    fold_links(Ctx, ModelKey, <<"all">>, fun(#link{name = Key}, Acc2) ->
+    fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         Fun(Key, Acc2)
     end, Acc, #{});
 fold_keys(_Ctx, _Fun, _Acc) ->
@@ -303,7 +303,7 @@ datastore_apply(Ctx, Key, Fun, Args) ->
 add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
     Ctx2 = Ctx#{sync_enabled => false},
     ModelKey = atom_to_binary(Model, utf8),
-    case add_links(Ctx2, ModelKey, <<"all">>, [{Key, <<>>}]) of
+    case add_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
         [{ok, #link{}}] -> {ok, Doc};
         [{error, already_exists}] -> {ok, Doc};
         [{error, Reason}] -> {error, Reason}
@@ -322,7 +322,7 @@ add_fold_link(_Ctx, _Key, Result) ->
 delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
     Ctx2 = Ctx#{sync_enabled => false},
     ModelKey = atom_to_binary(Model, utf8),
-    case delete_links(Ctx2, ModelKey, <<"all">>, [Key]) of
+    case delete_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
         [ok] -> ok;
         [{error, Reason}] -> {error, Reason}
     end;

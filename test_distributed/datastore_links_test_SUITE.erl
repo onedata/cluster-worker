@@ -59,7 +59,8 @@ all() ->
     memory_driver => ?MEM_DRV(?MODEL),
     memory_driver_ctx => ?MEM_CTX(?MODEL),
     disc_driver => ?DISC_DRV(?MODEL),
-    disc_driver_ctx => ?DISC_CTX
+    disc_driver_ctx => ?DISC_CTX,
+    remote_driver => ?REMOTE_DRV
 }).
 
 %%%===================================================================
