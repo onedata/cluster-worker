@@ -26,7 +26,9 @@
     lock,
     node_management,
     synced_cert,
-    task_pool
+    task_pool,
+    gs_session,
+    gs_subscription
 ]).
 
 -define(PLUGIN, datastore_config_plugin).

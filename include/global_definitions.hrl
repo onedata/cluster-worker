@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This file contains global definitions of component names, macros and types
-%%% used accross the application.
+%%% used across the application.
 %%% @end
 %%%-------------------------------------------------------------------
 -ifndef(CLUSTER_WORKER_GLOBAL_DEFINITIONS_HRL).
