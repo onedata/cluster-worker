@@ -4,6 +4,7 @@
 .dialyzer.plt
 .idea
 .rebar
+.rebar3
 
 *.iml
 *.sublime*
@@ -22,3 +23,4 @@ docs/_build/
 _build
 compile_commands.json
 cluster_manager
+ebin

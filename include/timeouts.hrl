@@ -5,7 +5,8 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
-%%% @doc dns listener starting & stopping
+%%% @doc
+%%% Macros defining timeouts for various operations in the system.
 %%% @end
 %%%--------------------------------------------------------------------
 -author("Jakub Kudzia").
@@ -34,3 +35,9 @@
 -define(DOCUMENT_AGGREGATE_SAVE_TIMEOUT, timer:minutes(5)).
 
 -define(DOCUMENT_BATCH_UPGRADE_TIMEOUT, timer:minutes(1)).
+
+% Maximum time the calling process will wait for Graph Sync client to start
+% (start returns after handshake is performed).
+-define(GS_CLIENT_HANDSHAKE_TIMEOUT, 10000).
+% Timeout when waiting for synchronous response from Graph Sync client process.
+-define(GS_CLIENT_REQUEST_TIMEOUT, 10000).

@@ -56,4 +56,19 @@
     value :: term()
 }).
 
+% Holds information about Graph Sync session
+-record(gs_session, {
+    id :: undefined | gs_protocol:session_id(),
+    client :: gs_protocol:client(),
+    protocol_version = 0 :: gs_protocol:protocol_version(),
+    conn_ref :: undefined | gs_server:conn_ref(),
+    translator :: gs_server:translator(),
+    subscriptions = [] :: ordsets:ordset(gs_persistence:subscription())
+}).
+
+% Holds a list of subscribers for certain resource.
+-record(gs_subscription, {
+    subscribers = [] :: ordsets:ordset(gs_persistence:subscriber())
+}).
+
 -endif.
