@@ -73,7 +73,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
-| {singleton | early_init, atom(), [any()]}].
+    | {singleton | early_init, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
