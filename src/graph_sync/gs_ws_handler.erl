@@ -39,7 +39,10 @@
     websocket_terminate/3
 ]).
 % API
--export([push/2]).
+-export([
+    push/2,
+    kill/1
+]).
 
 
 %%%===================================================================
@@ -209,9 +212,19 @@ websocket_terminate(_Reason, _Req, #state{session_id = SessionId}) ->
 %% (this can be a response to a request or a push message).
 %% @end
 %%--------------------------------------------------------------------
--spec push(pid(), gs_protocol:resp_wrapper() | gs_protocol:push_wrapper()) -> ok.
+-spec push(gs_server:conn_ref(), gs_protocol:resp_wrapper() | gs_protocol:push_wrapper()) -> ok.
 push(WebsocketPid, Msg) when WebsocketPid /= undefined ->
     WebsocketPid ! {push, Msg},
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Terminates websocket connection by given connection ref.
+%% @end
+%%--------------------------------------------------------------------
+-spec kill(gs_server:conn_ref()) -> ok.
+kill(WebsocketPid) when WebsocketPid /= undefined ->
+    WebsocketPid ! terminate,
     ok.
 
 %%%===================================================================

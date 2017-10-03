@@ -28,7 +28,8 @@
 
 
 %% API
--export([authorize/1, handshake/4, cleanup_client_session/1]).
+-export([authorize/1, handshake/4]).
+-export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
 
@@ -83,7 +84,7 @@ handshake(Client, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = H
                 protocol_version = Version,
                 translator = Translator
             }),
-            ?GS_LOGIC_PLUGIN:client_connected(Client),
+            ?GS_LOGIC_PLUGIN:client_connected(Client, ConnRef),
             Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
             {ok, gs_protocol:generate_success_response(Req, #gs_resp_handshake{
                 version = Version,
@@ -100,11 +101,23 @@ handshake(Client, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = H
 %%--------------------------------------------------------------------
 -spec cleanup_client_session(gs_protocol:session_id()) -> ok.
 cleanup_client_session(SessionId) ->
-    {ok, #gs_session{client = Client}} = gs_persistence:get_session(SessionId),
-    ?GS_LOGIC_PLUGIN:client_disconnected(Client),
+    {ok, #gs_session{
+        client = Client, conn_ref = ConnRef
+    }} = gs_persistence:get_session(SessionId),
+    ?GS_LOGIC_PLUGIN:client_disconnected(Client, ConnRef),
     gs_persistence:remove_all_subscriptions(SessionId),
     gs_persistence:delete_session(SessionId),
     ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Terminates a client connection by given connection ref.
+%% @end
+%%--------------------------------------------------------------------
+-spec terminate_connection(conn_ref()) -> ok.
+terminate_connection(ConnRef) ->
+    gs_ws_handler:kill(ConnRef).
 
 
 %%--------------------------------------------------------------------
