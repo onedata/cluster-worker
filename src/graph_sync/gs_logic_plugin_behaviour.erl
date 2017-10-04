@@ -110,7 +110,8 @@
 %% Callback called when a new client connects to the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_connected(gs_protocol:client()) -> ok.
+-callback client_connected(gs_protocol:client(), gs_server:connection_ref()) ->
+    ok.
 
 
 %%--------------------------------------------------------------------
@@ -118,7 +119,8 @@
 %% Callback called when a client disconnects from the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_disconnected(gs_protocol:client()) -> ok.
+-callback client_disconnected(gs_protocol:client(), gs_server:connection_ref()) ->
+    ok.
 
 
 %%--------------------------------------------------------------------

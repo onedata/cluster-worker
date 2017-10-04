@@ -26,8 +26,8 @@
     authorize_by_session_cookie/1,
     authorize_by_provider_cert/1,
     client_to_identity/1,
-    client_connected/1,
-    client_disconnected/1,
+    client_connected/2,
+    client_disconnected/2,
     is_authorized/5,
     root_client/0,
     guest_client/0,
@@ -48,8 +48,8 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_session_cookie, fun authorize_by_session_cookie/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_provider_cert, fun authorize_by_provider_cert/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_to_identity, fun client_to_identity/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_authorized, fun is_authorized/5),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, root_client, fun root_client/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, guest_client, fun guest_client/0),
@@ -98,10 +98,10 @@ root_client() -> ?ROOT_AUTH.
 guest_client() -> ?NOBODY_AUTH.
 
 
-client_connected(_) -> ok.
+client_connected(_, _) -> ok.
 
 
-client_disconnected(_) -> ok.
+client_disconnected(_, _) -> ok.
 
 
 is_authorized(?USER_AUTH(UserId), _AuthHint, #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
