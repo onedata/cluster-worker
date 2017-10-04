@@ -124,7 +124,7 @@ configure_throttling() ->
       DBMultip = application:get_env(?CLUSTER_WORKER_APP_NAME,
         throttling_db_param_strength, 1),
       MemMultip = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        throttling_mem_param_strength, 5),
+        throttling_mem_param_strength, 0),
 
       Parameters = [{TPMultip, TPRatio}, {DBMultip, DBRatio}, {MemMultip, MemRation}],
       ThrottlingBase0 = lists:foldl(fun({Multip, Ratio}, Acc) ->
@@ -226,7 +226,7 @@ verify_tp() ->
 
   Multip0 = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
   Multip = math:pow(Multip0, 3),
-  NewIdleTimeout = IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout),
+  NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
   application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
 
   {(ProcNum - DelayNum) / (MaxProcNum - DelayNum), ProcNum}.
