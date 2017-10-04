@@ -276,19 +276,7 @@ execute_local(#{model_name := MN, level := L,
     TpArgs = [Key, Link, Persistence],
     TPKey = {MN, Key, Link, L},
 
-    Proceed = case lists:member(Op, ?EXTENDED_ROUTING) of
-        true ->
-            caches_controller:throttle_get(MN);
-        _ ->
-            case lists:member(Op, [delete, delete_links]) of
-                true ->
-                    caches_controller:throttle_del(MN);
-                _ ->
-                    caches_controller:throttle(MN)
-            end
-    end,
-
-    case Proceed of
+    case caches_controller:throttle(MN) of
         ok ->
             datastore_doc:run_sync(TpArgs, TPKey, {Ctx, Msg});
         Error ->

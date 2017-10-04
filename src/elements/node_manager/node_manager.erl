@@ -51,12 +51,13 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
--define(EXOMETER_MODULES, [couchbase_batch, couchbase_pool, caches_controller]).
+-define(EXOMETER_MODULES,
+    [couchbase_batch, couchbase_pool, caches_controller, node_manager]).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0]).
+    cluster_worker_listeners/0, modules_hooks/0, init_report/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -64,9 +65,33 @@
 %% for tests
 -export([init_workers/0]).
 
+-define(EXOMETER_NAME(Param), [node_manager, Param]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+init_counters() ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_node_manager_time_span, 600000),
+    init_counter(processes_num, histogram, TimeSpan),
+    init_counter(memory_erlang, histogram, TimeSpan),
+    init_counter(memory_node, histogram, TimeSpan),
+    init_counter(cpu_node, histogram, TimeSpan).
+
+init_report() ->
+    init_report(processes_num),
+    init_report(memory_erlang),
+    init_report(memory_node),
+    init_report(cpu_node).
+
+init_counter(Param, Type, TimeSpan) ->
+    exometer:new(?EXOMETER_NAME(Param), Type, [{time_span, TimeSpan}]).
+
+init_report(Param) ->
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
+        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -214,6 +239,7 @@ init([]) ->
         erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         ?info("All checks performed"),
 
+        init_counters(),
         gen_server2:cast(self(), connect_to_cm),
 
         NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
@@ -758,7 +784,7 @@ check_port(Port) ->
 analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
-    {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
+    {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
     {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
@@ -771,6 +797,11 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
 
     MemUsage = monitoring:mem_usage(MonState),
+
+    exometer:update(?EXOMETER_NAME(processes_num), PNum),
+    exometer:update(?EXOMETER_NAME(memory_erlang), MemInt),
+    exometer:update(?EXOMETER_NAME(memory_node), MemUsage),
+    exometer:update(?EXOMETER_NAME(cpu_node), CPU * 100),
 
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
@@ -786,6 +817,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                 ]),
 
                 Procs = erlang:processes(),
+
                 SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) ->
                     {erlang:process_info(P, memory), P} end, Procs))),
                 MergedStacksMap = lists:foldl(fun(P, Map) ->

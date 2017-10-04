@@ -58,24 +58,21 @@
             {throttling_block_mem_error_ratio, 95},
             %% Number of tp processes to reduce tp process idle time
             {throttling_reduce_idle_time_memory_proc_number, 1000},
+            {throttling_min_idle_time_memory_proc_number, 30000},
             %% Number of tp processes to introduce delay
             {throttling_start_memory_proc_number, 100000},
             %% Number of tp processes to start throttling
             {throttling_max_memory_proc_number, 200000},
-            %% Number of tp processes allowed when throttling blocks actions
-            {throttling_block_memory_proc_number, 150000},
             %% Size of couch queue to start throttling
             {throttling_db_queue_limit, 15000},
             %% Size of couch queue to introduce delay
-            {throttling_delay_db_queue_size, 6000},
+            {throttling_delay_db_queue_size, 5000},
             %% Base time for throttling
-            {throttling_base_time_ms, 32},
-            %% Maximum throttling time
-            {throttling_max_time_ms, 2048},
+            {throttling_base_time_ms, 2048},
             %% Interval of throttling configuration when throttling is used
-            {throttling_active_check_interval_seconds, 5},
+            {throttling_active_check_interval_seconds, 1},
             %% Interval of throttling configuration
-            {throttling_check_interval_seconds, 5},
+            {throttling_check_interval_seconds, 2},
 
             {exometer_time_span, 600000},
             {exometer_logging_interval, 15000},
@@ -200,7 +197,7 @@
             %% ===================================================================
 
             %% Limit for the number of active tp processes.
-            {tp_processes_limit, 200},
+            {tp_processes_limit, 250000},
             %% Delay in ms between consecutive calls to tp_server logic
             %% terminate callback in case of an error
             {tp_server_terminate_retry_delay, 1000},
