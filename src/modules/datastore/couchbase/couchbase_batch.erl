@@ -87,8 +87,7 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 %%--------------------------------------------------------------------
 -spec decrease_batch_size() -> ok.
 decrease_batch_size() ->
-    ?info("Couchbase crud timeout - batch size checking ~p",
-        [erlang:process_info(self(), current_stacktrace)]),
+    ?info("Couchbase crud timeout - batch size checking"),
     case can_modify_batch_size() of
         true ->
             BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
