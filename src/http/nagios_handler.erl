@@ -20,7 +20,7 @@
 -include_lib("ctool/include/global_definitions.hrl").
 
 -export([init/3, handle/2, terminate/3]).
--export([get_cluster_status/1]).
+-export([get_cluster_status/1, check_listener/1]).
 
 -export_type([healthcheck_response/0]).
 
@@ -30,6 +30,9 @@
 -ifdef(TEST).
 -compile(export_all).
 -endif.
+
+-define(LOG(Msg), ?debug(Msg)).
+-define(LOG(Msg, Args), ?debug(Msg, Args)).
 
 %%%===================================================================
 %%% API
@@ -96,7 +99,7 @@ handle(Req, State) ->
                                         "error: " ++ atom_to_list(Desc);
                                     A when is_atom(A) -> atom_to_list(A);
                                     _ ->
-                                        ?error("Wrong nagios status: {~p, ~p} at node ~p",
+                                        ?LOG("Wrong nagios status: {~p, ~p} at node ~p",
                                             [Component, Status, Node]),
                                         "error: wrong_status"
                                 end,
@@ -258,6 +261,7 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
             end
         end, ok, NodeStatuses),
     % Sort node statuses by node name
+    ?LOG("Cluster status: ~p", [AppStatus]),
     {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, lists:usort(NodeStatuses)}}.
 
 
@@ -275,7 +279,7 @@ check_cm(Timeout) ->
             error
     catch
         exit:{noproc, _} ->
-            ?warning("cluster manager is not reachable"),
+            ?LOG("cluster manager is not reachable"),
             error;
         Type:Message ->
             ?error_stacktrace(
@@ -297,9 +301,12 @@ check_node_managers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    gen_server2:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout)
+                    Ans = gen_server2:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout),
+                    ?LOG("Healthcheck: node manager ~p, ans: ~p",
+                        [Node, Ans]),
+                    Ans
                 catch T:M ->
-                    ?error("Connection error to ~p at ~p: ~p:~p", [?NODE_MANAGER_NAME, Node, T, M]),
+                    ?LOG("Connection error to ~p at ~p: ~p:~p", [?NODE_MANAGER_NAME, Node, T, M]),
                     {error, timeout}
                 end,
             {Node, Result}
@@ -317,9 +324,12 @@ check_dispatchers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    gen_server2:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout)
+                    Ans = gen_server2:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout),
+                    ?LOG("Healthcheck: dispatcher ~p, ans: ~p",
+                        [Node, Ans]),
+                    Ans
                 catch T:M ->
-                    ?error("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, Node, T, M]),
+                    ?LOG("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, Node, T, M]),
                     {error, timeout}
                 end,
             {Node, Result}
@@ -335,13 +345,22 @@ check_dispatchers(Nodes, Timeout) ->
 -spec check_workers(Nodes :: [atom()], Workers :: [{Node :: atom(), WorkerName :: atom()}], Timeout :: integer()) ->
     [{Node :: atom(), [{Worker :: atom(), Status :: healthcheck_response()}]}].
 check_workers(Nodes, Workers, Timeout) ->
+    Node = node(),
     WorkerStatuses = utils:pmap(
         fun({WNode, WName}) ->
             Result =
                 try
-                    worker_proxy:call({WName, WNode}, healthcheck, Timeout)
+                    Ans = case WNode of
+                        Node ->
+                            worker_proxy:call_direct({WName, WNode}, healthcheck);
+                        _ ->
+                            worker_proxy:call({WName, WNode}, healthcheck, Timeout)
+                    end,
+                    ?LOG("Healthcheck: worker ~p, node ~p, ans: ~p",
+                        [WName, WNode, Ans]),
+                    Ans
                 catch T:M ->
-                    ?error("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, WNode, T, M]),
+                    ?LOG("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, WNode, T, M]),
                     {error, timeout}
                 end,
             {WNode, WName, Result}
@@ -362,15 +381,26 @@ check_listeners(Nodes, Listeners, Timeout) ->
         fun({LNode, LName}) ->
             Result =
                 try
-                    rpc:call(LNode, LName, healthcheck, [], Timeout)
+                    rpc:call(LNode, ?MODULE, check_listener, [LName], Timeout)
                 catch T:M ->
-                    ?error("Connection error during check of listener ~p at ~p: ~p:~p", [LName, LNode, T, M]),
+                    ?LOG("Connection error during check of listener ~p at ~p: ~p:~p", [LName, LNode, T, M]),
                     {error, timeout}
                 end,
             {LNode, LName, Result}
         end, Listeners),
     arrange_by_node(Nodes, ListenerStatuses).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks status of listener with additional logging of answer.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_listener(ListenerName :: atom()) -> healthcheck_response().
+check_listener(LName) ->
+    Ans = apply(LName, healthcheck, []),
+    ?LOG("Healthcheck: listener ~p, ans: ~p",
+        [LName, Ans]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
