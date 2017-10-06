@@ -18,6 +18,8 @@
 %% API
 -export([check_timeout/1, verify_batch_size_increase/3,
     init_counters/0, init_report/0]).
+% for eunit
+-export([decrease_batch_size/1]).
 
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
@@ -106,13 +108,13 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 
     case Check of
         timeout ->
-            exometer:update(?EXOMETER_NAME(timeouts), 1);
+            ok = exometer:update(?EXOMETER_NAME(timeouts), 1);
         _ ->
             ok = exometer:update(?EXOMETER_NAME(times),
                 round(lists:max(Times)/1000))
     end,
 
-    exometer:update(?EXOMETER_NAME(sizes), maps:size(Requests)),
+    ok = exometer:update(?EXOMETER_NAME(sizes), maps:size(Requests)),
 
     {ok, TimesDatapoints} =
         exometer:get_value(?EXOMETER_NAME(times), [max, mean, n]),
@@ -174,5 +176,5 @@ decrease_batch_size(BatchSize) ->
 set_batch_size(Size) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, Size),
-    exometer:update(?EXOMETER_NAME(sizes_config), Size),
+    ok = exometer:update(?EXOMETER_NAME(sizes_config), Size),
     ok.
