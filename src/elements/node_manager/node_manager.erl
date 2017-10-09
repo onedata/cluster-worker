@@ -163,6 +163,7 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit, true),
     try
+        ?info("Running 'before_init' procedures."),
         ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
         ?info("Plugin initialised"),
@@ -181,13 +182,7 @@ init([]) ->
                 end
             end, node_manager:listeners()),
 
-        ?info("Ports OK, starting listeners..."),
-
-        lists:foreach(fun(Module) ->
-            ok = erlang:apply(Module, start, []),
-            ?info("Listener: ~p started", [Module])
-        end, node_manager:listeners()),
-        ?info("All listeners started"),
+        ?info("Ports OK"),
 
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
@@ -356,7 +351,7 @@ handle_cast({cluster_status, CStatus}, #state{initialized = {false, TriesNum}} =
         ok ->
             % Cluster initialized, run after_init callback
             % of node_manager_plugin.
-            ?info("Cluster initialized. Running 'after_init' procedures."),
+            ?info("All nodes initialized. Running 'after_init' procedures."),
             ok = plugins:apply(node_manager_plugin, after_init, [[]]),
             {noreply, State#state{initialized = true}};
         {error, Error} ->
@@ -538,10 +533,18 @@ cm_conn_ack(State) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_finished(State :: term()) -> #state{}.
 cluster_init_finished(State) ->
+    ?info("Cluster initialized. Running 'on_cluster_initialized' procedures"),
+    plugins:apply(node_manager_plugin, on_cluster_initialized, []),
     ?info("Starting custom workers..."),
     Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
     init_workers(Workers),
     ?info("Custom workers started successfully"),
+    ?info("Starting listeners..."),
+    lists:foreach(fun(Module) ->
+        ok = erlang:apply(Module, start, []),
+        ?info("   * ~p started", [Module])
+    end, node_manager:listeners()),
+    ?info("All listeners started"),
     self() ! {timer, check_cluster_status},
     State.
 
