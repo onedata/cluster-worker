@@ -784,8 +784,7 @@ check_and_initialize_state(NodeToSync, Models) ->
 %%--------------------------------------------------------------------
 -spec cluster_initialized() -> ok.
 cluster_initialized() ->
-    {ok, MaxNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
-    tp:set_processes_limit(MaxNum).
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private

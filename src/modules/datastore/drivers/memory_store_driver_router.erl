@@ -276,7 +276,7 @@ execute_local(#{model_name := MN, level := L,
     TpArgs = [Key, Link, Persistence],
     TPKey = {MN, Key, Link, L},
 
-    case caches_controller:throttle(MN) of
+    case caches_controller:throttle_model(MN) of
         ok ->
             datastore_doc:run_sync(TpArgs, TPKey, {Ctx, Msg});
         Error ->

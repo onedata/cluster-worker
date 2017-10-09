@@ -23,7 +23,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([throttle/1,
+-export([throttle/0, throttle/1, throttle_model/1,
   get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0,
   get_hooks_throttling_config/1, init_counters/0, init_report/0]).
 % for tests
@@ -72,19 +72,28 @@ init_report(Name) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec throttle(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
-throttle(ModelName) ->
+throttle_model(ModelName) ->
   case lists:member(ModelName, datastore_config:throttled_models()) of
     true ->
-      case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-        {ok, ok} ->
+      throttle();
+    _ ->
+      ok
+  end.
+
+throttle() ->
+  throttle(default).
+
+throttle(Config) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+    {ok, ConfigList} ->
+      case proplists:get_value(Config, ConfigList) of
+        ok ->
           ok;
-        {ok, {throttle, Time}} ->
+        {throttle, Time} ->
           timer:sleep(Time),
           ok;
-        {ok, overloaded} ->
-          ?THROTTLING_ERROR;
-        _ ->
-          ok
+        overloaded ->
+          ?THROTTLING_ERROR
       end;
     _ ->
       ok
@@ -115,57 +124,32 @@ configure_throttling() ->
   Self = self(),
   spawn(fun() ->
     CheckInterval = try
-      {MemRation, MemUsage} = verify_memory(),
-      {TPRatio, TPNum} = verify_tp(),
-      {DBRatio, DBQueue} = verify_db(),
+      [TPNum, DBQueue, MemUsage] = Values = get_values_and_update_counters(),
+      set_idle_time(TPNum),
 
-      TPMultip = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        throttling_tp_param_strength, 1),
-      DBMultip = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        throttling_db_param_strength, 1),
-      MemMultip = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        throttling_mem_param_strength, 0),
+      {ok, Configs} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_config),
+      DefaultConfig = proplists:get_value(default, Configs),
+      ConfigResult = lists:foldl(fun({ConfigName, Config}, Acc) ->
+        [{ConfigName, configure_throttling(Values, Config, DefaultConfig)} | Acc]
+      end, [], Configs),
 
-      Parameters = [{TPMultip, TPRatio}, {DBMultip, DBRatio}, {MemMultip, MemRation}],
-      ThrottlingBase0 = lists:foldl(fun({Multip, Ratio}, Acc) ->
-        Acc + Multip * math:pow(max(0, Ratio), 3)
-      end, 0, Parameters),
+      application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
+        ConfigResult),
 
-      case ThrottlingBase0 of
-        0.0 ->
-          application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-            ok),
-          ?info("No throttling: tp num ~p, db queue ~p, mem usage ~p",
-            [TPNum, DBQueue, MemUsage]),
+      FilteredConfigResult = lists:filter(fun
+        ({_, ok}) -> false;
+        (_) -> true
+      end, ConfigResult),
+
+      case FilteredConfigResult of
+        [] ->
+          % TODO - change logs to debug
+          ?info("No throttling: config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+            [ConfigResult, TPNum, DBQueue, MemUsage]),
           plan_next_throttling_check();
         _ ->
-          Strength = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            throttling_strength, 5),
-
-          ThrottlingBase = math:exp(-1 * Strength * ThrottlingBase0),
-
-          case ThrottlingBase < 0.001 of
-            true ->
-              application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-                overloaded),
-
-              ?info("Throttling: overload, base ~p, tp ratio ~p, db ratio ~p, "
-              "mem ratio ~p, tp num ~p, db queue ~p, mem usage ~p",
-                [ThrottlingBase, TPRatio, DBRatio, MemRation,
-                  TPNum, DBQueue, MemUsage]);
-            _ ->
-              BaseTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                throttling_base_time_ms, 2048),
-              Time = round(BaseTime * (1 - ThrottlingBase)),
-              application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-                {throttle, Time}),
-
-              ?info("Throttling: time ~p, base ~p, tp ratio ~p, db ratio ~p, "
-              "mem ratio ~p, tp num ~p, db queue ~p, mem usage ~p",
-                [Time, ThrottlingBase, TPRatio, DBRatio, MemRation,
-                  TPNum, DBQueue, MemUsage])
-          end,
-
+          ?info("Throttling config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+            [ConfigResult, TPNum, DBQueue, MemUsage]),
           plan_next_throttling_check(true)
       end
     catch
@@ -206,68 +190,110 @@ get_hooks_throttling_config(Models) ->
 %%% Internal functions
 %%%===================================================================
 
+configure_throttling(Values, Config, DefaultConfig) ->
+  TPMultip = get_config_value(tp_param_strength, Config, DefaultConfig),
+  DBMultip = get_config_value(db_param_strength, Config, DefaultConfig),
+  MemMultip = get_config_value(mem_param_strength, Config, DefaultConfig),
+  Multipliers = [TPMultip, DBMultip, MemMultip],
+
+  GetFunctions = [fun get_tp_params/2, fun get_db_params/2,
+    fun get_memory_params/2],
+  Parameters = lists:zip(Multipliers, lists:zip(Values, GetFunctions)),
+
+  {ThrottlingBase0, MaxRatio} = lists:foldl(fun
+    ({0, {_,_}}, {Acc, Max}) ->
+      {Acc, Max};
+    ({Multip, {Value, GetFun}}, {Acc, Max}) ->
+      {Expected, Limit} = apply(GetFun, [Config, DefaultConfig]),
+      Ratio = (Value - Expected) / (Limit - Expected),
+      {Acc + Multip * math:pow(max(0, Ratio), 3), max(Ratio, Max)}
+  end, {0, 0}, Parameters),
+
+  case {ThrottlingBase0, MaxRatio >= 1.0} of
+    {0.0, _} ->
+      ok;
+    {_, true} ->
+      overloaded;
+    _ ->
+      Strength = get_config_value(strength, Config, DefaultConfig),
+      ThrottlingBase = math:exp(-1 * Strength * ThrottlingBase0),
+
+      BaseTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        throttling_base_time_ms, 2048),
+      Time = round(BaseTime * (1 - ThrottlingBase)),
+      {throttle, Time}
+  end.
+
+set_idle_time(ProcNum) ->
+  {ok, Idle1} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
+  {ok, Idle2} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_min_idle_time_memory_proc_number),
+
+  {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
+  {ok, MinIdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms),
+
+  Multip = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
+  NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
+
+  % TODO - debug
+  ?info("New idle time: ~p", [NewIdleTimeout]),
+
+  application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
+
+get_values_and_update_counters() ->
+  ProcNum = tp:get_processes_number(),
+  ok = exometer:update(?EXOMETER_NAME(tp), ProcNum),
+
+  QueueSize = lists:foldl(fun(Bucket, Acc) ->
+    couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
+  end, 0, couchbase_config:get_buckets()),
+  ok = exometer:update(?EXOMETER_NAME(db_queue), QueueSize),
+
+  MemoryUsage = case monitoring:get_memory_stats() of
+    [{<<"mem">>, MemUsage}] ->
+      MemUsage
+  end,
+
+  [ProcNum, QueueSize, MemoryUsage].
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Checks poll of tp processes and recommends throttling action.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_tp() ->
-  {TPAction :: non_neg_integer(), ProcNum :: non_neg_integer()}.
-verify_tp() ->
-  {ok, Idle1} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
-  {ok, Idle2} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_min_idle_time_memory_proc_number),
-  {ok, DelayNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number),
-  {ok, MaxProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
+%%-spec get_tp_params() ->
+%%  {TPAction :: non_neg_integer(), ProcNum :: non_neg_integer()}.
+get_tp_params(Config, Defaults) ->
+  Expected = get_config_value(tp_proc_expected, Config, Defaults),
+  Limit = get_config_value(tp_proc_limit, Config, Defaults),
 
-  ProcNum = tp:get_processes_number(),
-  ok = exometer:update(?EXOMETER_NAME(tp), ProcNum),
-  {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
-  {ok, MinIdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms),
-
-  Multip0 = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
-  Multip = math:pow(Multip0, 3),
-  NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
-  application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
-
-  {(ProcNum - DelayNum) / (MaxProcNum - DelayNum), ProcNum}.
+  {Expected, Limit}.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Checks queue fo datastore_pool and recommends throttling action.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_db() ->
-  {DBAction :: non_neg_integer(), QueueSize :: non_neg_integer(),
-    ReadDBAction :: non_neg_integer(), ReadQueueSize :: non_neg_integer()}.
-verify_db() ->
-  QueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
-  end, 0, couchbase_config:get_buckets()),
-  ok = exometer:update(?EXOMETER_NAME(db_queue), QueueSize),
+%%-spec get_db_params() ->
+%%  {DBAction :: non_neg_integer(), QueueSize :: non_neg_integer(),
+%%    ReadDBAction :: non_neg_integer(), ReadQueueSize :: non_neg_integer()}.
+get_db_params(Config, Defaults) ->
+  Expected = get_config_value(db_queue_expected, Config, Defaults),
+  Limit = get_config_value(db_queue_limit, Config, Defaults),
 
-  {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit),
-  {ok, Start} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size),
-
-  {(QueueSize - Start) / (Limit - Start), QueueSize}.
+  {Expected, Limit}.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Checks memory and recommends throttling action.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_memory() ->
-  {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
-verify_memory() ->
-  {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
-  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+%%-spec get_memory_params(Config, Defaults) ->
+%%  {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
+get_memory_params(Config, Defaults) ->
+  Expected = get_config_value(memory_expected, Config, Defaults),
+  Limit = get_config_value(memory_limit, Config, Defaults),
 
-  MemoryUsage = case monitoring:get_memory_stats() of
-                  [{<<"mem">>, MemUsage}] ->
-                    MemUsage
-                end,
-
-  {(MemoryUsage - MemCleanRatioThreshold) /
-    (MemRatioThreshold - MemCleanRatioThreshold), MemoryUsage}.
+  {Expected, Limit}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -290,3 +316,11 @@ plan_next_throttling_check(_) ->
 -spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().
 send_after(CheckInterval, Master, Message) ->
   erlang:send_after(CheckInterval, Master, Message).
+
+get_config_value(Name, Config, Defaults) ->
+  case proplists:get_value(Name, Config) of
+    undefined ->
+      proplists:get_value(Name, Defaults);
+    Value ->
+      Value
+  end.
