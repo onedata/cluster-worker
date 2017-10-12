@@ -18,7 +18,7 @@
   cached = false :: boolean(),
   master_pid :: pid(),
   last_ctx :: undefined | datastore_context:ctx(),
-  docs_keys = [] :: list()
+  full_keys = [] :: list()
 }).
 
 -endif.

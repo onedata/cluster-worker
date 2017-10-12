@@ -50,7 +50,7 @@
 -spec modify(Messages :: [message()], State :: state(), datastore_doc:rev()) ->
   {Answers :: list(), {true, change()} | false, NewState :: state()}.
 modify(Messages, #state{link_proc = LP, key = Key, cached = Cached,
-  master_pid = Master, docs_keys = DocsKeys} = State, _) ->
+  master_pid = Master, full_keys = FullKeys} = State, _) ->
   {A, Changes} = case LP of
     true ->
       memory_store_driver_links:handle_link_messages(Messages, Master);
@@ -65,9 +65,12 @@ modify(Messages, #state{link_proc = LP, key = Key, cached = Cached,
     {_, [{_K, Ctx} | _]} -> {{true, Changes}, State#state{last_ctx = Ctx}}
   end,
 
-  DocsKeys2 = DocsKeys ++ (Changes -- DocsKeys),
+  NewFullKeys = lists:map(fun({ChangeKey, ChangeCtx}) ->
+    couchbase_doc:set_prefix(ChangeCtx, ChangeKey)
+  end, Changes),
+  FullKeys2 = FullKeys ++ (NewFullKeys -- FullKeys),
 
-  {A, FinalChanges, FinalState#state{docs_keys = DocsKeys2}}.
+  {A, FinalChanges, FinalState#state{full_keys = FullKeys2}}.
 
 
 %%--------------------------------------------------------------------
@@ -93,8 +96,8 @@ init([Key, LinkProc, Cached]) ->
 -spec terminate(State :: state(), datastore_doc:rev()) -> ok | {error, term()}.
 terminate(#state{last_ctx = undefined}, _Rev) ->
   ok;
-terminate(#state{last_ctx = Ctx, docs_keys = DocsKeys}, _Rev) ->
-  datastore_cache:inactivate(Ctx, DocsKeys).
+terminate(#state{last_ctx = Ctx, full_keys = Keys}, _Rev) ->
+  datastore_cache:inactivate(Ctx, Keys).
 
 %%--------------------------------------------------------------------
 %% @doc

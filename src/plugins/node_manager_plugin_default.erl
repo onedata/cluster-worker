@@ -217,6 +217,7 @@ check_node_ip_address() ->
 clear_memory(_HighMemUse) ->
   ok.
 
+%%--------------------------------------------------------------------
 %% @doc
 %% Returns list of modules that register exometer reporters.
 %% @end

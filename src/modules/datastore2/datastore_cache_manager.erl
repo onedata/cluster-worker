@@ -174,12 +174,12 @@ inactive(disc) -> datastore_cache_inactive_disc_pool.
 %%--------------------------------------------------------------------
 -spec mark_active(pool(), entry()) -> boolean().
 mark_active(Pool, Entry = #entry{cache_key = CacheKey}) ->
-    MatchSpec = [{#entry{cache_key = CacheKey, _ = '_'}, [], [true]}],
-    case ets:select_delete(inactive(Pool), MatchSpec) of
-        1 ->
+    case ets:lookup(inactive(Pool), CacheKey) of
+        [_] ->
+            ets:delete(inactive(Pool), CacheKey),
             ets:insert(active(Pool), Entry),
             true;
-        0 ->
+        _ ->
             activate(Pool, Entry)
     end.
 
@@ -227,19 +227,19 @@ relocate(Pool, Entry) ->
         '$end_of_table' ->
             false;
         CacheKey ->
-            MatchSpec = [{#entry{cache_key = CacheKey, _ = '_'}, [], [true]}],
             case ets:lookup(inactive(Pool), CacheKey) of
                 [#entry{
                     driver = Driver,
                     driver_ctx = Ctx,
                     driver_key = Key
                 }] ->
-                    case ets:select_delete(inactive(Pool), MatchSpec) of
-                        1 ->
+                    case ets:lookup(inactive(Pool), CacheKey) of
+                        [_] ->
+                            ets:delete(inactive(Pool), CacheKey),
                             Driver:delete(Ctx, Key),
                             ets:insert(active(Pool), Entry),
                             true;
-                        0 ->
+                        _ ->
                             relocate(Pool, Entry)
                     end;
                 [] ->
