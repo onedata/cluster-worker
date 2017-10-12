@@ -140,8 +140,6 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
                 couchbase_pool_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
             NewValueFinal = max(MinBatchSize, min(NewValue, MaxBatchSize)),
 
-            ?info("hhhhh ~p", [{NewValue, NewValueFinal, Limit, Size, Mean}]),
-
             case {NewValueFinal > BatchSize, (Max < Limit) and (TimeoutsCount == 0)} of
                 {true, true} ->
                     set_batch_size(NewValueFinal);

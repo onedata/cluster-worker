@@ -23,7 +23,7 @@
 
 %% API
 -export([get/2, fetch/2, save/2, update/2, update/3, flush/2, flush/1]).
--export([inactivate/1]).
+-export([inactivate/1, inactivate/2]).
 
 -type ctx() :: #{prefix => binary(),
                  mutator_pid => pid(),
@@ -200,6 +200,20 @@ inactivate(#{disc_driver := undefined, mutator_pid := Pid}) ->
     datastore_cache_manager:mark_inactive(memory, Pid);
 inactivate(#{mutator_pid := Pid}) ->
     datastore_cache_manager:mark_inactive(disc, Pid).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Marks all values stored in memory as inactive, i.e. all inactivated entries
+%% may be removed from cache when its capacity limit is reached.
+%% @end
+%%--------------------------------------------------------------------
+-spec inactivate(ctx(), [datastore:key()]) -> boolean().
+inactivate(#{memory_driver := undefined}, _) ->
+    false;
+inactivate(#{disc_driver := undefined}, Keys) ->
+    datastore_cache_manager:mark_inactive(memory, Keys);
+inactivate(_, Keys) ->
+    datastore_cache_manager:mark_inactive(disc, Keys).
 
 %%%===================================================================
 %%% Internal functions

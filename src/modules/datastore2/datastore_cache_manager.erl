@@ -127,7 +127,7 @@ mark_active(Pool, Ctx, Key) ->
 %% Marks previously active entry/entries as inactive.
 %% @end
 %%--------------------------------------------------------------------
--spec mark_inactive(pool(), pid() | datastore:key()) -> boolean().
+-spec mark_inactive(pool(), pid() | datastore:key() | [datastore:key()]) -> boolean().
 mark_inactive(memory, Selector) ->
     Filter = fun
         (#entry{volatile = true}) ->
@@ -253,7 +253,7 @@ relocate(Pool, Entry) ->
 %% Selects active entries and inactivates them.
 %% @end
 %%--------------------------------------------------------------------
--spec mark_inactive(pool(), pid() | datastore:key(),
+-spec mark_inactive(pool(), pid() | datastore:key() | [datastore:key()],
     fun((datastore:key()) -> boolean())) -> boolean().
 mark_inactive(Pool, Pid, Filter) when is_pid(Pid) ->
     Entries = ets:select(active(Pool), [
@@ -263,6 +263,12 @@ mark_inactive(Pool, Pid, Filter) when is_pid(Pid) ->
     inactivate(Pool, Entries2);
 mark_inactive(Pool, Key, Filter) when is_binary(Key) ->
     Entries = ets:lookup(active(Pool), Key),
+    Entries2 = lists:filter(Filter, Entries),
+    inactivate(Pool, Entries2);
+mark_inactive(Pool, Keys, Filter) when is_list(Keys) ->
+    Entries = lists:foldl(fun(Key, Acc) ->
+        ets:lookup(active(Pool), Key) ++ Acc
+    end, [], Keys),
     Entries2 = lists:filter(Filter, Entries),
     inactivate(Pool, Entries2).
 

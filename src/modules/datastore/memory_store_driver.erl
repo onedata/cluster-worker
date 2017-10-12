@@ -50,7 +50,7 @@
 -spec modify(Messages :: [message()], State :: state(), datastore_doc:rev()) ->
   {Answers :: list(), {true, change()} | false, NewState :: state()}.
 modify(Messages, #state{link_proc = LP, key = Key, cached = Cached,
-  master_pid = Master} = State, _) ->
+  master_pid = Master, docs_keys = DocsKeys} = State, _) ->
   {A, Changes} = case LP of
     true ->
       memory_store_driver_links:handle_link_messages(Messages, Master);
@@ -65,7 +65,9 @@ modify(Messages, #state{link_proc = LP, key = Key, cached = Cached,
     {_, [{_K, Ctx} | _]} -> {{true, Changes}, State#state{last_ctx = Ctx}}
   end,
 
-  {A, FinalChanges, FinalState}.
+  DocsKeys2 = DocsKeys ++ (Changes -- DocsKeys),
+
+  {A, FinalChanges, FinalState#state{docs_keys = DocsKeys2}}.
 
 
 %%--------------------------------------------------------------------
@@ -91,8 +93,8 @@ init([Key, LinkProc, Cached]) ->
 -spec terminate(State :: state(), datastore_doc:rev()) -> ok | {error, term()}.
 terminate(#state{last_ctx = undefined}, _Rev) ->
   ok;
-terminate(#state{last_ctx = Ctx}, _Rev) ->
-  datastore_cache:inactivate(Ctx).
+terminate(#state{last_ctx = Ctx, docs_keys = DocsKeys}, _Rev) ->
+  datastore_cache:inactivate(Ctx, DocsKeys).
 
 %%--------------------------------------------------------------------
 %% @doc
