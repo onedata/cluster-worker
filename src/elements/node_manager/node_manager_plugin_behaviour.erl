@@ -156,5 +156,8 @@
 %%--------------------------------------------------------------------
 -callback clear_memory(HighMemUse :: boolean()) -> ok.
 
+%% @doc
+%% Returns list of modules that register exometer reporters.
+%% @end
 %%--------------------------------------------------------------------
 -callback modules_with_exometer() -> list().

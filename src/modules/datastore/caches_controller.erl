@@ -49,29 +49,32 @@
 %%% API
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
 init_counters() ->
   init_counter(tp),
   init_counter(db_queue).
 
-init_counter(Name) ->
-  exometer:new(?EXOMETER_NAME(Name), histogram, [{time_span,
-    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_base_time_span, 600000)}]).
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
 init_report() ->
   init_report(tp),
   init_report(db_queue).
 
-init_report(Name) ->
-  exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Name),
-    [min, max, median, mean, n],
-    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
-
 %%--------------------------------------------------------------------
 %% @doc
-%% Limits operation performance if needed.
+%% Limits operation performance depending on model name.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
+-spec throttle_model(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
 throttle_model(ModelName) ->
   case lists:member(ModelName, datastore_config:throttled_models()) of
     true ->
@@ -80,9 +83,21 @@ throttle_model(ModelName) ->
       ok
   end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv throttle(default).
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle() -> ok | ?THROTTLING_ERROR.
 throttle() ->
   throttle(default).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance for particular config.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle(Config :: atom()) -> ok | ?THROTTLING_ERROR.
 throttle(Config) ->
   case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
     {ok, ConfigList} ->
@@ -190,6 +205,14 @@ get_hooks_throttling_config(Models) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @private
+%% Configures throttling settings for particular config.
+%% @end
+%%--------------------------------------------------------------------
+-spec configure_throttling(Values :: [number()], Config :: list(),
+    DefaultConfig :: list()) -> ok | overloaded | {throttle, non_neg_integer()}.
 configure_throttling(Values, Config, DefaultConfig) ->
   TPMultip = get_config_value(tp_param_strength, Config, DefaultConfig),
   DBMultip = get_config_value(db_param_strength, Config, DefaultConfig),
@@ -224,6 +247,13 @@ configure_throttling(Values, Config, DefaultConfig) ->
       {throttle, Time}
   end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @private
+%% Sets idle time depending on tp process number.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_idle_time(ProcNum :: non_neg_integer()) -> ok.
 set_idle_time(ProcNum) ->
   {ok, Idle1} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
   {ok, Idle2} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_min_idle_time_memory_proc_number),
@@ -239,6 +269,14 @@ set_idle_time(ProcNum) ->
 
   application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @private
+%% Gets value of parameters used to configure throttling.
+%% Updates exometer counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_values_and_update_counters() -> [number()].
 get_values_and_update_counters() ->
   ProcNum = tp:get_processes_number(),
   ok = exometer:update(?EXOMETER_NAME(tp), ProcNum),
@@ -256,12 +294,13 @@ get_values_and_update_counters() ->
   [ProcNum, QueueSize, MemoryUsage].
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Checks poll of tp processes and recommends throttling action.
+%% Gets expected value and limit for tp proceses number.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec get_tp_params() ->
-%%  {TPAction :: non_neg_integer(), ProcNum :: non_neg_integer()}.
+-spec get_tp_params(Config :: list(), Defaults :: list()) ->
+  {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
 get_tp_params(Config, Defaults) ->
   Expected = get_config_value(tp_proc_expected, Config, Defaults),
   Limit = get_config_value(tp_proc_limit, Config, Defaults),
@@ -269,13 +308,13 @@ get_tp_params(Config, Defaults) ->
   {Expected, Limit}.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Checks queue fo datastore_pool and recommends throttling action.
+%% Gets expected value and limit for db queue.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec get_db_params() ->
-%%  {DBAction :: non_neg_integer(), QueueSize :: non_neg_integer(),
-%%    ReadDBAction :: non_neg_integer(), ReadQueueSize :: non_neg_integer()}.
+-spec get_db_params(Config :: list(), Defaults :: list()) ->
+  {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
 get_db_params(Config, Defaults) ->
   Expected = get_config_value(db_queue_expected, Config, Defaults),
   Limit = get_config_value(db_queue_limit, Config, Defaults),
@@ -283,12 +322,13 @@ get_db_params(Config, Defaults) ->
   {Expected, Limit}.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Checks memory and recommends throttling action.
+%% Gets expected value and limit for memory usage.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec get_memory_params(Config, Defaults) ->
-%%  {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
+-spec get_memory_params(Config :: list(), Defaults :: list()) ->
+  {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
 get_memory_params(Config, Defaults) ->
   Expected = get_config_value(memory_expected, Config, Defaults),
   Limit = get_config_value(memory_limit, Config, Defaults),
@@ -296,6 +336,7 @@ get_memory_params(Config, Defaults) ->
   {Expected, Limit}.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns time after which next throttling config should start.
 %% @end
@@ -317,6 +358,14 @@ plan_next_throttling_check(_) ->
 send_after(CheckInterval, Master, Message) ->
   erlang:send_after(CheckInterval, Master, Message).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets value from configuration
+%% @end
+%%--------------------------------------------------------------------
+-spec get_config_value(Name :: atom(), Config :: list(), Defaults :: list()) ->
+  term().
 get_config_value(Name, Config, Defaults) ->
   case proplists:get_value(Name, Config) of
     undefined ->
@@ -324,3 +373,27 @@ get_config_value(Name, Config, Defaults) ->
     Value ->
       Value
   end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes exometer counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Name :: atom()) -> ok.
+init_counter(Name) ->
+  exometer:new(?EXOMETER_NAME(Name), histogram, [{time_span,
+    application:get_env(?CLUSTER_WORKER_APP_NAME,
+      exometer_throttling_time_span, 600000)}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets exometer report connected with particular counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Name :: atom()) -> ok.
+init_report(Name) ->
+  exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Name),
+    [min, max, median, mean, n],
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).

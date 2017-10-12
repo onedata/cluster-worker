@@ -33,8 +33,12 @@
 %%% API
 %%%===================================================================
 
-% TODO - dodac liczenie statystyk dla ilosci procesow (nie tylko tp) oraz
-% sredniej wielkosci batcha
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
 init_counters() ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_batch_time_span, 600000),
@@ -45,20 +49,18 @@ init_counters() ->
     init_counter(sizes_config, histogram, TimeSpan),
     init_counter(timeouts, spiral, TimeSpan2).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
 init_report() ->
     HistogramReport = [min, max, median, mean, n],
     init_report(times, HistogramReport),
     init_report(sizes, HistogramReport),
     init_report(sizes_config, HistogramReport),
     init_report(timeouts, [count]).
-
-init_counter(Param, Type, TimeSpan) ->
-    exometer:new(?EXOMETER_NAME(Param), Type, [{time_span, TimeSpan}]).
-
-init_report(Param, Report) ->
-    % TODO - manipulacja poziomem logowania
-    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param), Report,
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,9 +93,8 @@ check_timeout(Responses) ->
 %% Checks if batch size can be increased and increases it if needed.
 %% @end
 %%--------------------------------------------------------------------
-% TODO - zle wyspecyfikowany typ
--spec verify_batch_size_increase([couchbase_crud:save_response()], list(), list()) ->
-    ok | timeout.
+-spec verify_batch_size_increase(couchbase_crud:save_requests_map(),
+    list(), list()) -> ok.
 verify_batch_size_increase(Requests, Times, Timeouts) ->
     Check = lists:foldl(fun
         (_, false) ->
@@ -173,8 +174,36 @@ decrease_batch_size(BatchSize) ->
     ?info("Timeout for batch with ~p elements, reset counters,"
         " decrease batch size to: ~p", [BatchSize, MinBatchSize]).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets batch size and updates exometer.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_batch_size(non_neg_integer()) -> ok.
 set_batch_size(Size) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, Size),
-    ok = exometer:update(?EXOMETER_NAME(sizes_config), Size),
-    ok.
+    ok = exometer:update(?EXOMETER_NAME(sizes_config), Size).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes exometer counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Param :: atom(), Type :: atom(),
+    TimeSpan :: non_neg_integer()) -> ok.
+init_counter(Param, Type, TimeSpan) ->
+    exometer:new(?EXOMETER_NAME(Param), Type, [{time_span, TimeSpan}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets exometer report connected with particular counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Param :: atom(), Report :: [atom()]) -> ok.
+init_report(Param, Report) ->
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param), Report,
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).

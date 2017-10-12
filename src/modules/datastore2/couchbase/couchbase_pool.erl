@@ -46,6 +46,12 @@
 %%% API
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
 init_counters() ->
     lists:foreach(fun(Bucket) ->
         lists:foreach(fun(Mode) ->
@@ -53,23 +59,18 @@ init_counters() ->
         end, get_modes())
     end, couchbase_config:get_buckets()).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
 init_report() ->
     lists:foreach(fun(Bucket) ->
         lists:foreach(fun(Mode) ->
             init_report(Bucket, Mode)
         end, get_modes())
     end, couchbase_config:get_buckets()).
-
-init_counter(Bucket, Mode) ->
-    Name = ?EXOMETER_NAME(Bucket, Mode),
-    exometer:new(Name, histogram, [{time_span,
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_time_span, 600000)}]).
-
-init_report(Bucket, Mode) ->
-    Name = ?EXOMETER_NAME(Bucket, Mode),
-    exometer_report:subscribe(exometer_report_lager, Name,
-        [min, max, median, mean],
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -236,3 +237,28 @@ get_next_worker_id(Bucket, Mode) ->
     Key = {next_worker_id, Bucket, Mode},
     Size = get_size(Bucket, Mode),
     ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 0}).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes exometer counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Bucket :: atom(), Mode :: atom()) -> ok.
+init_counter(Bucket, Mode) ->
+    Name = ?EXOMETER_NAME(Bucket, Mode),
+    exometer:new(Name, histogram, [{time_span,
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_pool_time_span, 600000)}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets exometer report connected with particular counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Bucket :: atom(), Mode :: atom()) -> ok.
+init_report(Bucket, Mode) ->
+    Name = ?EXOMETER_NAME(Bucket, Mode),
+    exometer_report:subscribe(exometer_report_lager, Name,
+        [min, max, median, mean],
+        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).

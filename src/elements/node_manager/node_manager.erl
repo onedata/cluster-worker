@@ -65,33 +65,35 @@
 %% for tests
 -export([init_workers/0]).
 
--define(EXOMETER_NAME(Param), [node_manager, Param]).
+-define(EXOMETER_NAME(Param), [?MODULE, Param]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
 init_counters() ->
-    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_node_manager_time_span, 600000),
-    init_counter(processes_num, histogram, TimeSpan),
-    init_counter(memory_erlang, histogram, TimeSpan),
-    init_counter(memory_node, histogram, TimeSpan),
-    init_counter(cpu_node, histogram, TimeSpan).
+    init_counter(processes_num),
+    init_counter(memory_erlang),
+    init_counter(memory_node),
+    init_counter(cpu_node).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
 init_report() ->
     init_report(processes_num),
     init_report(memory_erlang),
     init_report(memory_node),
     init_report(cpu_node).
-
-init_counter(Param, Type, TimeSpan) ->
-    exometer:new(?EXOMETER_NAME(Param), Type, [{time_span, TimeSpan}]).
-
-init_report(Param) ->
-    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
-        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
-            exometer_logging_interval, 1000)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -817,7 +819,6 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                 ]),
 
                 Procs = erlang:processes(),
-
                 SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) ->
                     {erlang:process_info(P, memory), P} end, Procs))),
                 MergedStacksMap = lists:foldl(fun(P, Map) ->
@@ -904,6 +905,13 @@ log_monitoring_stats(Format, Args) ->
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if reporter is alive. If not, starts it and subscribe for reports.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_exometer_reporters() -> ok.
 init_exometer_reporters() ->
     % TODO - co tu sie zawiesza?
     Find = lists:filter(fun
@@ -913,10 +921,12 @@ init_exometer_reporters() ->
     end, exometer_report:list_reporters()),
     case Find of
         [] ->
+            Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                exometer_logging_level, critical),
             exometer_report:remove_reporter(exometer_report_lager),
             ok = exometer_report:add_reporter(exometer_report_lager, [
                 {type_map,[{'_',integer}]},
-                {level, critical}
+                {level, Level}
             ]),
 
             Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
@@ -927,3 +937,28 @@ init_exometer_reporters() ->
         _ ->
             ok
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Param :: atom()) -> ok.
+init_counter(Param) ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_node_manager_time_span, 600000),
+    exometer:new(?EXOMETER_NAME(Param), histogram, [{time_span, TimeSpan}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Subscribe for reports for parameter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Param :: atom()) -> ok.
+init_report(Param) ->
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
+        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, 1000)),
+    ok.
