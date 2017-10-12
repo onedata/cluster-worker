@@ -110,8 +110,15 @@ commit(ModifiedKeys, _) ->
   {_Revs, NotSaved} = lists:foldl(fun
     ({_Flush, {ok, #document{key = K, rev = R}}}, {AccRev, AccErr}) ->
       {[{K, R} | AccRev], AccErr};
-    ({{Key, Ctx} = Flush, Error}, {AccRev, AccErr}) ->
-      ?error("Dump error ~p for ~p", [Error, Flush]),
+    ({{Key, Ctx}, {error, etimedout}}, {AccRev, AccErr}) ->
+      ?error("Cannot flush document to database - timeout"),
+      {AccRev, [{Key, Ctx} | AccErr]};
+    ({{Key, Ctx}, {error, timeout}}, {AccRev, AccErr}) ->
+      ?error("Cannot flush document to database - timeout"),
+      {AccRev, [{Key, Ctx} | AccErr]};
+    ({{Key, Ctx}, Error}, {AccRev, AccErr}) ->
+      ?error("Document flush to database error ~p for key ~p, context ~p",
+        [Error, Key, Ctx]),
       {AccRev, [{Key, Ctx} | AccErr]}
   end, {[], []}, lists:zip(ToFlush, AnsList)),
 
