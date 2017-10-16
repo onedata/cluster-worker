@@ -272,8 +272,8 @@ handle_cast(cm_conn_ack, State) ->
     NewState = cm_conn_ack(State),
     {noreply, NewState};
 
-handle_cast(cluster_init_finished, State) ->
-    NewState = cluster_init_finished(State),
+handle_cast({cluster_init_finished, Nodes}, State) ->
+    NewState = cluster_init_finished(State, Nodes),
     {noreply, NewState};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
@@ -531,10 +531,10 @@ cm_conn_ack(State) ->
 %% Receives information that cluster has been successfully initialized.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_init_finished(State :: term()) -> #state{}.
-cluster_init_finished(State) ->
+-spec cluster_init_finished(State :: term(), ClusterNodes :: [node()]) -> #state{}.
+cluster_init_finished(State, Nodes) ->
     ?info("Cluster initialized. Running 'on_cluster_initialized' procedures"),
-    plugins:apply(node_manager_plugin, on_cluster_initialized, []),
+    plugins:apply(node_manager_plugin, on_cluster_initialized, [Nodes]),
     ?info("Starting custom workers..."),
     Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
     init_workers(Workers),
