@@ -161,3 +161,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback modules_with_exometer() -> list().
+
+%% @doc
+%% Returns list of exometer reporters.
+%% @end
+%%--------------------------------------------------------------------
+-callback exometer_reporters() -> list().

@@ -51,13 +51,14 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
+-define(EXOMETER_REPORTERS, [{exometer_report_lager, ?MODULE}]).
 -define(EXOMETER_MODULES,
     [couchbase_batch, couchbase_pool, caches_controller, node_manager]).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0, init_report/0]).
+    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_reporter/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -94,6 +95,20 @@ init_report() ->
     init_report(memory_erlang),
     init_report(memory_node),
     init_report(cpu_node).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initialize exometer reporter used by storage_sync.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_reporter() -> ok.
+init_reporter() ->
+    Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_logging_level, debug),
+    ok = exometer_report:add_reporter(exometer_report_lager, [
+        {type_map,[{'_',integer}]},
+        {level, Level}
+    ]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -597,6 +612,7 @@ cm_conn_ack(State) ->
 cluster_init_finished(State) ->
     ?info("Cluster sucessfully initialized"),
     init_workers(),
+    init_exometer_reporters(),
     State.
 
 %%--------------------------------------------------------------------
@@ -927,28 +943,32 @@ log_monitoring_stats(Format, Args) ->
 %%--------------------------------------------------------------------
 -spec init_exometer_reporters() -> ok.
 init_exometer_reporters() ->
-    Find = lists:filter(fun
-        ({exometer_report_lager, Pid}) ->
-            erlang:is_process_alive(Pid);
-        (_) -> false
+    ExpectedReporters = ?EXOMETER_REPORTERS ++
+        plugins:apply(node_manager_plugin, exometer_reporters, []),
+    ReportersNames = lists:map(fun({Name, _Mod}) -> Name end, ExpectedReporters),
+    Find = lists:filtermap(fun({Reporter, Pid}) ->
+        case {lists:member(Reporter, ReportersNames), erlang:is_process_alive(Pid)} of
+            {true, true} -> {true, Reporter};
+            _ -> false
+        end
     end, exometer_report:list_reporters()),
-    case Find of
-        [] ->
-            Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                exometer_logging_level, debug),
-            exometer_report:remove_reporter(exometer_report_lager),
-            ok = exometer_report:add_reporter(exometer_report_lager, [
-                {type_map,[{'_',integer}]},
-                {level, Level}
-            ]),
 
+    ToStart = ReportersNames -- Find,
+    lists:foreach(fun(Reporter) ->
+        Module = proplists:get_value(Reporter, ExpectedReporters),
+        exometer_report:remove_reporter(Reporter),
+        Module:init_reporter()
+    end, ToStart),
+
+    case ToStart of
+        [] ->
+            ok;
+        _ ->
             Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
 
             lists:foreach(fun(Module) ->
                 Module:init_report()
-            end, ?EXOMETER_MODULES ++ Modules);
-        _ ->
-            ok
+            end, ?EXOMETER_MODULES ++ Modules)
     end.
 
 %%--------------------------------------------------------------------
