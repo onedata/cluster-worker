@@ -59,6 +59,7 @@ init() ->
     lists:foreach(fun(Pool) ->
         ets:new(active(Pool), [set, public, named_table, {keypos, 2}]),
         ets:new(inactive(Pool), [set, public, named_table, {keypos, 2}]),
+        ets:new(clear(Pool), [set, public, named_table]),
         SizeByPool = application:get_env(?CLUSTER_WORKER_APP_NAME,
             datastore_cache_size, []),
         MaxSize = proplists:get_value(Pool, SizeByPool, 500000),
@@ -169,6 +170,16 @@ inactive(disc) -> datastore_cache_inactive_disc_pool.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Returns name of table (for a pool) that keeps keys that are beeing cleared.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear(pool()) -> atom().
+clear(memory) -> datastore_cache_clear_memory_pool;
+clear(disc) -> datastore_cache_clear_disc_pool.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Tries to mark entry as active.
 %% @end
 %%--------------------------------------------------------------------
@@ -176,9 +187,21 @@ inactive(disc) -> datastore_cache_inactive_disc_pool.
 mark_active(Pool, Entry = #entry{cache_key = CacheKey}) ->
     case ets:lookup(inactive(Pool), CacheKey) of
         [_] ->
-            ets:delete(inactive(Pool), CacheKey),
-            ets:insert(active(Pool), Entry),
-            true;
+            case ets:insert_new(clear(Pool), {CacheKey, ok}) of
+                true ->
+                    case ets:lookup(inactive(Pool), CacheKey) of
+                        [_] ->
+                            ets:delete(inactive(Pool), CacheKey),
+                            ets:delete(clear(Pool), CacheKey),
+                            ets:insert(active(Pool), Entry),
+                            true;
+                        _ ->
+                            ets:delete(clear(Pool), CacheKey),
+                            activate(Pool, Entry)
+                    end;
+                _ ->
+                    activate(Pool, Entry)
+            end;
         _ ->
             activate(Pool, Entry)
     end.
@@ -227,22 +250,23 @@ relocate(Pool, Entry) ->
         '$end_of_table' ->
             false;
         CacheKey ->
-            case ets:lookup(inactive(Pool), CacheKey) of
-                [#entry{
-                    driver = Driver,
-                    driver_ctx = Ctx,
-                    driver_key = Key
-                }] ->
+            case ets:insert_new(clear(Pool), {CacheKey, ok}) of
+                true ->
                     case ets:lookup(inactive(Pool), CacheKey) of
-                        [_] ->
+                        [#entry{
+                            driver = Driver,
+                            driver_ctx = Ctx,
+                            driver_key = Key
+                        }] ->
                             ets:delete(inactive(Pool), CacheKey),
+                            ets:delete(clear(Pool), CacheKey),
                             Driver:delete(Ctx, Key),
                             ets:insert(active(Pool), Entry),
                             true;
-                        _ ->
+                        [] ->
                             relocate(Pool, Entry)
                     end;
-                [] ->
+                _ ->
                     relocate(Pool, Entry)
             end
     end.
