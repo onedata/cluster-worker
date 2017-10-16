@@ -927,7 +927,6 @@ log_monitoring_stats(Format, Args) ->
 %%--------------------------------------------------------------------
 -spec init_exometer_reporters() -> ok.
 init_exometer_reporters() ->
-    % TODO - co tu sie zawiesza?
     Find = lists:filter(fun
         ({exometer_report_lager, Pid}) ->
             erlang:is_process_alive(Pid);
@@ -936,7 +935,7 @@ init_exometer_reporters() ->
     case Find of
         [] ->
             Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                exometer_logging_level, critical),
+                exometer_logging_level, debug),
             exometer_report:remove_reporter(exometer_report_lager),
             ok = exometer_report:add_reporter(exometer_report_lager, [
                 {type_map,[{'_',integer}]},

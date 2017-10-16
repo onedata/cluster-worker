@@ -158,8 +158,7 @@ configure_throttling() ->
 
       case FilteredConfigResult of
         [] ->
-          % TODO - change logs to debug
-          ?info("No throttling: config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+          ?debug("No throttling: config: ~p, tp num ~p, db queue ~p, mem usage ~p",
             [ConfigResult, TPNum, DBQueue, MemUsage]),
           plan_next_throttling_check();
         _ ->
@@ -266,8 +265,7 @@ set_idle_time(ProcNum) ->
   Multip = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
   NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
 
-  % TODO - debug
-  ?info("New idle time: ~p", [NewIdleTimeout]),
+  ?debug("New idle time: ~p", [NewIdleTimeout]),
 
   application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
 
