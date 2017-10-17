@@ -67,7 +67,7 @@
 -export([init_workers/0]).
 
 -define(EXOMETER_COUNTERS,
-    [processes_num, memory_erlang, memory_node, cpu_node]]).
+    [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), [?MODULE, Param]).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 -define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
