@@ -36,6 +36,9 @@
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
+    couchbase_batch:init_counters(),
+    caches_controller:init_counters(),
+    couchbase_pool:init_counters(),
     datastore_cache_manager:init(),
 
     State2 = lists:foldl(fun(Model, StateAcc) ->

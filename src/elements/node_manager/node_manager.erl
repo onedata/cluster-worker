@@ -51,10 +51,14 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
+-define(EXOMETER_REPORTERS, [{exometer_report_lager, ?MODULE}]).
+-define(EXOMETER_MODULES,
+    [couchbase_batch, couchbase_pool, caches_controller, node_manager]).
+
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0]).
+    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_reporter/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -62,9 +66,51 @@
 %% for tests
 -export([init_workers/0]).
 
+-define(EXOMETER_COUNTERS,
+    [processes_num, memory_erlang, memory_node, cpu_node]).
+-define(EXOMETER_NAME(Param), [?MODULE, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    lists:foreach(fun(Name) ->
+        init_counter(Name)
+    end, ?EXOMETER_COUNTERS).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    lists:foreach(fun(Name) ->
+        init_report(Name)
+    end, ?EXOMETER_COUNTERS).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initialize exometer reporter used by storage_sync.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_reporter() -> ok.
+init_reporter() ->
+    Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_logging_level, debug),
+    ok = exometer_report:add_reporter(exometer_report_lager, [
+        {type_map,[{'_',integer}]},
+        {level, Level}
+    ]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -210,8 +256,11 @@ init([]) ->
         erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
+        {ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+        erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         ?info("All checks performed"),
 
+        init_counters(),
         gen_server2:cast(self(), connect_to_cm),
 
         NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
@@ -312,6 +361,14 @@ handle_cast(check_memory, State) ->
     erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
     spawn(fun() ->
         plugins:apply(node_manager_plugin, clear_memory, [false])
+    end),
+    {noreply, State};
+
+handle_cast(check_exometer, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+    erlang:send_after(Interval, self(), {timer, check_exometer}),
+    spawn(fun() ->
+        init_exometer_reporters()
     end),
     {noreply, State};
 
@@ -557,6 +614,7 @@ cm_conn_ack(State) ->
 cluster_init_finished(State) ->
     ?info("Cluster sucessfully initialized"),
     init_workers(),
+    init_exometer_reporters(),
     State.
 
 %%--------------------------------------------------------------------
@@ -760,7 +818,7 @@ check_port(Port) ->
 analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
-    {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
+    {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
     {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
@@ -773,6 +831,11 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
 
     MemUsage = monitoring:mem_usage(MonState),
+
+    exometer:update(?EXOMETER_NAME(processes_num), PNum),
+    exometer:update(?EXOMETER_NAME(memory_erlang), MemInt),
+    exometer:update(?EXOMETER_NAME(memory_node), MemUsage),
+    exometer:update(?EXOMETER_NAME(cpu_node), CPU * 100),
 
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
@@ -872,4 +935,65 @@ log_monitoring_stats(Format, Args) ->
         "/tmp/node_manager_monitoring.log"),
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if reporter is alive. If not, starts it and subscribe for reports.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_exometer_reporters() -> ok.
+init_exometer_reporters() ->
+    ExpectedReporters = ?EXOMETER_REPORTERS ++
+        plugins:apply(node_manager_plugin, exometer_reporters, []),
+    ReportersNames = lists:map(fun({Name, _Mod}) -> Name end, ExpectedReporters),
+    Find = lists:filtermap(fun({Reporter, Pid}) ->
+        case {lists:member(Reporter, ReportersNames), erlang:is_process_alive(Pid)} of
+            {true, true} -> {true, Reporter};
+            _ -> false
+        end
+    end, exometer_report:list_reporters()),
+
+    ToStart = ReportersNames -- Find,
+    lists:foreach(fun(Reporter) ->
+        Module = proplists:get_value(Reporter, ExpectedReporters),
+        exometer_report:remove_reporter(Reporter),
+        Module:init_reporter()
+    end, ToStart),
+
+    case ToStart of
+        [] ->
+            ok;
+        _ ->
+            Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
+
+            lists:foreach(fun(Module) ->
+                Module:init_report()
+            end, ?EXOMETER_MODULES ++ Modules)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Param :: atom()) -> ok.
+init_counter(Param) ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_node_manager_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    exometer:new(?EXOMETER_NAME(Param), histogram, [{time_span, TimeSpan}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Subscribe for reports for parameter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Param :: atom()) -> ok.
+init_report(Param) ->
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
+        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
     ok.

@@ -16,18 +16,54 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([check_timeout/1, verify_batch_size_increase/3]).
-%% For eunit
--export([decrease_batch_size/0]).
+-export([check_timeout/1, verify_batch_size_increase/3,
+    init_counters/0, init_report/0]).
+% for eunit
+-export([decrease_batch_size/1]).
 
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_durability_timeout, 60000)).
 
+-define(EXOMETER_NAME(Param), [batch_stats, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
+-define(MIN_BATCH_SIZE_DEFAULT, 50).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_batch_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    TimeSpan2 = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_timeouts_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    init_counter(times, histogram, TimeSpan),
+    init_counter(sizes, histogram, TimeSpan),
+    init_counter(sizes_config, histogram, TimeSpan),
+    init_counter(timeouts, spiral, TimeSpan2).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    HistogramReport = [min, max, median, mean, n],
+    init_report(times, HistogramReport),
+    init_report(sizes, HistogramReport),
+    init_report(sizes_config, HistogramReport),
+    init_report(timeouts, [count]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -49,7 +85,7 @@ check_timeout(Responses) ->
 
     case Check of
         timeout ->
-            decrease_batch_size(),
+            decrease_batch_size(length(Responses)),
             timeout;
         _ ->
             ok
@@ -60,17 +96,61 @@ check_timeout(Responses) ->
 %% Checks if batch size can be increased and increases it if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_batch_size_increase([couchbase_crud:save_response()], list(), list()) ->
-    ok | timeout.
+-spec verify_batch_size_increase(couchbase_crud:save_requests_map(),
+    list(), list()) -> ok.
 verify_batch_size_increase(Requests, Times, Timeouts) ->
-    BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size, 2000),
-    MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_max_batch_size, 2000),
-    case (BatchSize < MaxBatchSize)
-        andalso (maps:size(Requests) =:= BatchSize) of
+    Check = lists:foldl(fun
+        (_, false) ->
+            false;
+        (_, timeout) ->
+            timeout;
+        ({_, timeout}, _Acc) ->
+            timeout;
+        ({T, _}, _Acc) ->
+            T =< (min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4)
+    end, true, lists:zip(Times, Timeouts)),
+
+    case Check of
+        timeout ->
+            ok = exometer:update(?EXOMETER_NAME(timeouts), 1);
+        _ ->
+            ok = exometer:update(?EXOMETER_NAME(times),
+                round(lists:max(Times)/1000))
+    end,
+
+    ok = exometer:update(?EXOMETER_NAME(sizes), maps:size(Requests)),
+
+    {ok, TimesDatapoints} =
+        exometer:get_value(?EXOMETER_NAME(times), [max, mean, n]),
+    Max = proplists:get_value(max, TimesDatapoints),
+    Mean = proplists:get_value(mean, TimesDatapoints),
+    Number = proplists:get_value(n, TimesDatapoints),
+
+    {ok, [{count, TimeoutsCount}]} = exometer:get_value(?EXOMETER_NAME(timeouts), [count]),
+    {ok, [{mean, Size}]} = exometer:get_value(?EXOMETER_NAME(sizes), [mean]),
+    Limit = min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4,
+
+    MinNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        min_stats_number_to_reconfigure, 2),
+    case Number >= MinNum of
         true ->
-            verify_batches_times(Times, Timeouts);
+            NewValue = round(Limit * Size / Mean),
+            MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_max_batch_size, 2000),
+            MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_min_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
+            BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
+            NewValueFinal = max(MinBatchSize, min(NewValue, MaxBatchSize)),
+
+            case {NewValueFinal > BatchSize, (Max < Limit) and (TimeoutsCount == 0)} of
+                {true, true} ->
+                    set_batch_size(NewValueFinal);
+                {false, _} ->
+                    set_batch_size(NewValueFinal);
+                _ ->
+                    ok
+            end;
         _ ->
             ok
     end.
@@ -85,81 +165,47 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 %% Decreases batch size as a result of timeout.
 %% @end
 %%--------------------------------------------------------------------
--spec decrease_batch_size() -> ok.
-decrease_batch_size() ->
-    ?info("Couchbase crud timeout - batch size checking"),
-    case can_modify_batch_size() of
-        true ->
-            BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, 2000),
-            MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_min_batch_size, 250),
-            NewSize = max(round(BatchSize/2), MinBatchSize),
-            application:set_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, NewSize),
-            ?info("Decrease batch size to: ~p", [NewSize]),
-            save_modify_batch_size_time();
-        _ ->
-            ok
-    end.
+-spec decrease_batch_size(non_neg_integer()) -> ok.
+decrease_batch_size(BatchSize) ->
+    MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_min_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
+    set_batch_size(MinBatchSize),
+    exometer:reset(?EXOMETER_NAME(times)),
+    exometer:reset(?EXOMETER_NAME(sizes)),
+    ?info("Timeout for batch with ~p elements, reset counters,"
+        " decrease batch size to: ~p", [BatchSize, MinBatchSize]).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Checks if batch size can be modified.
+%% Sets batch size and updates exometer.
 %% @end
 %%--------------------------------------------------------------------
--spec can_modify_batch_size() -> boolean().
-can_modify_batch_size() ->
-    LastMod = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size_check_time, 0),
-    MinDiff = (?OP_TIMEOUT + ?DUR_TIMEOUT) / 1000,
-    (os:system_time(seconds) - LastMod) > MinDiff.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Saves batch modification time.
-%% @end
-%%--------------------------------------------------------------------
--spec save_modify_batch_size_time() -> ok.
-save_modify_batch_size_time() ->
-    T = os:system_time(seconds),
+-spec set_batch_size(non_neg_integer()) -> ok.
+set_batch_size(Size) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size_check_time, T).
+        couchbase_pool_batch_size, Size),
+    ok = exometer:update(?EXOMETER_NAME(sizes_config), Size).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Verifies if batch processing times allow increase of batch size and
-%% increases it if possible.
+%% Initializes exometer counter.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_batches_times(list(), list()) -> ok.
-verify_batches_times(CheckList, Timeouts) ->
-    Ans = lists:foldl(fun
-        (_, false) ->
-            false;
-        ({_, timeout}, _Acc) ->
-            false;
-        ({T, _}, _Acc) ->
-            T =< (min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4)
-    end, true, lists:zip(CheckList, Timeouts)),
+-spec init_counter(Param :: atom(), Type :: atom(),
+    TimeSpan :: non_neg_integer()) -> ok.
+init_counter(Param, Type, TimeSpan) ->
+    exometer:new(?EXOMETER_NAME(Param), Type, [{time_span, TimeSpan}]).
 
-    case {Ans, can_modify_batch_size()} of
-        {true, true} ->
-            BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, 2000),
-            MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_max_batch_size, 2000),
-            NewSize = min(round(BatchSize*2), MaxBatchSize),
-            application:set_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_pool_batch_size, NewSize),
-            ?info("Increase batch size to: ~p", [NewSize]),
-            save_modify_batch_size_time();
-        {true, _} ->
-            ?info("Couchbase crud max batch size write checking"),
-            ok;
-        _ ->
-            ok
-    end.
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets exometer report connected with particular counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Param :: atom(), Report :: [atom()]) -> ok.
+init_report(Param, Report) ->
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
+        Report, application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

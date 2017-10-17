@@ -70,29 +70,38 @@ throttling_test(Config) ->
             fun () -> [{<<"mem">>, MemUsage}] end)
     end,
 
-    {ok,TBT} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
-    {ok,TMMPC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
-    {ok,TBMPC} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_memory_proc_number),
+    DBLimit = 15000,
+    DBExp = 5000,
+    TPLimit = 200000,
+    TPExp = 100000,
+    MemLimit = 95,
+    MemExp = 90,
+    test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_config, [
+        {default, [
+            {base_time_ms, 2048},
+            {strength, 5},
+            {tp_param_strength, 1},
+            {db_param_strength, 1},
+            {mem_param_strength, 1},
+            {tp_proc_expected, TPExp},
+            {tp_proc_limit, TPLimit},
+            {db_queue_expected, DBExp},
+            {db_queue_limit, DBLimit},
+            {memory_expected, MemExp},
+            {memory_limit, MemLimit}
+        ]}
+    ]),
+
     TCI = 60,
     TOCI = 30,
-    TMT = 4*TBT,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds, TCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_active_check_interval_seconds, TOCI),
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
 
     VerifyInterval = fun(Ans) ->
         ?assertEqual(timer:seconds(TCI), Ans)
     end,
 
     VerifyIntervalTh = fun(Ans) ->
-        ?assertEqual(timer:seconds(TOCI), Ans)
-    end,
-
-    VerifyShortInterval = fun(Ans) ->
-        ?assert(timer:seconds(TCI) > Ans)
-    end,
-
-    VerifyIntervalOverload = fun(Ans) ->
         ?assertEqual(timer:seconds(TOCI), Ans)
     end,
 
@@ -110,11 +119,11 @@ throttling_test(Config) ->
 
 
         VerifyIntervalFun(A2),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model]))
+        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle_model, [throttled_model]))
     end,
 
     CheckThrottlingDefault = fun() ->
-        CheckThrottling(VerifyInterval, ok, undefined)
+        CheckThrottling(VerifyInterval, ok, [{default,ok}])
     end,
 
     CheckThrottlingAns = fun(Ans, C) ->
@@ -126,121 +135,111 @@ throttling_test(Config) ->
         ?assertEqual(Idle, Ans)
     end,
 
-    VerifyTPLimit = fun(Ans) ->
-        Idle = ?call(Worker1, tp, get_processes_limit, []),
-        ?assertEqual(Idle, Ans)
-    end,
-
     MockUsage(0,0,10),
     CheckThrottlingDefault(),
-    VerifyTPLimit(TMMPC),
 
-    DBLimit = 200,
-    DBLimitStartTh = DBLimit/2,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit, DBLimit),
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size, DBLimitStartTh),
+    MockUsage(DBExp + 1000, 0, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,10}}]),
 
-    MockUsage(DBLimitStartTh + 10,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    MockUsage(DBExp + 5000, 0, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,952}}]),
 
-    MockUsage(DBLimitStartTh + 2,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    MockUsage(DBExp + 9000, 0, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,1995}}]),
 
-    MockUsage(DBLimitStartTh - 10,0,10.0),
-    CheckThrottlingAns(ok, {throttle, TBT, true}),
+    MockUsage(DBLimit, 0, 10.0),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
 
-    MockUsage(DBLimitStartTh - 9,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
-    MockUsage(DBLimitStartTh - 8,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
-    MockUsage(DBLimitStartTh - 7,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+    MockUsage(0, TPExp + 10000, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,10}}]),
 
-    MockUsage(DBLimitStartTh - 9,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
-    VerifyTPLimit(TMMPC),
+    MockUsage(0, TPExp + 50000, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,952}}]),
 
-    MockUsage(DBLimit,0,10.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
-    VerifyTPLimit(TBMPC),
+    MockUsage(0, TPExp + 90000, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,1995}}]),
 
-    MockUsage(0,0,10.0),
-    CheckThrottlingDefault(),
-    VerifyTPLimit(TMMPC),
+    MockUsage(0, TPLimit, 10.0),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
 
-    TPLimit = 200,
-    TPStopLimit = DBLimit*4/5,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number, TPLimit),
-    IdleStart = 100,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number, IdleStart),
+
+
+    MockUsage(0, 0, MemExp + 0.5),
+    CheckThrottlingAns(ok, [{default,{throttle,10}}]),
+
+    MockUsage(0, 0, MemExp + 2.5),
+    CheckThrottlingAns(ok, [{default,{throttle,952}}]),
+
+    MockUsage(0, 0, MemExp + 4.5),
+    CheckThrottlingAns(ok, [{default,{throttle,1995}}]),
+
+    MockUsage(0, 0, MemLimit),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
+
+
+
+    MockUsage(DBExp + 1000, TPExp + 10000, MemExp + 0.5),
+    CheckThrottlingAns(ok, [{default,{throttle,30}}]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemExp + 2.5),
+    CheckThrottlingAns(ok, [{default,{throttle,1734}}]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemLimit),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
+
+    test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_config, [
+        {default, [
+            {base_time_ms, 2048},
+            {strength, 5},
+            {tp_param_strength, 1},
+            {db_param_strength, 1},
+            {mem_param_strength, 0},
+            {tp_proc_expected, TPExp},
+            {tp_proc_limit, TPLimit},
+            {db_queue_expected, DBExp},
+            {db_queue_limit, DBLimit},
+            {memory_expected, MemExp},
+            {memory_limit, MemLimit}
+        ]}
+    ]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemExp + 2.5),
+    CheckThrottlingAns(ok, [{default,{throttle,1461}}]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemLimit),
+    CheckThrottlingAns(ok, [{default,{throttle,1461}}]),
+
+
+    Idle1 = 100,
+    Idle2 = 1100,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number, Idle1),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_min_idle_time_memory_proc_number, Idle2),
     MaxIdle = 10000,
     MinIdle = 1000,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms, MaxIdle),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms, MinIdle),
 
+    MockUsage(0, 50, 10.0),
     CheckThrottlingDefault(),
     VerifyIdle(MaxIdle),
-    MockUsage(0, TPLimit + 10,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+
+    MockUsage(0, 100, 10.0),
+    CheckThrottlingDefault(),
+    VerifyIdle(MaxIdle),
+
+    MockUsage(0, 600, 10.0),
+    CheckThrottlingDefault(),
+    VerifyIdle((MinIdle + MaxIdle) div 2),
+
+    MockUsage(0, 1100, 10.0),
+    CheckThrottlingDefault(),
     VerifyIdle(MinIdle),
 
-    MockUsage(0, TPLimit + 20,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
-
-    MockUsage(0, TPLimit - 2,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
-
-    MockUsage(0,TPStopLimit-10,10.0),
+    MockUsage(0, 2000, 10.0),
     CheckThrottlingDefault(),
-    VerifyIdle(1500),
-
-    MockUsage(0,0,10.0),
-    CheckThrottlingDefault(),
-    VerifyIdle(MaxIdle),
-
-    TBMER = 95,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio, TBMER),
-    NMRTCC = 80,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, NMRTCC),
-    MemTh = (TBMER + NMRTCC)/2,
-
-    MockUsage(0,0,MemTh - 10.0),
-    CheckThrottlingDefault(),
-
-    MockUsage(0,0,MemTh + 1.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, false}),
-
-    MockUsage(0,0,MemTh + 5.0),
-    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
-
-    MockUsage(0,0,MemTh + 7.0),
-    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
-
-    MockUsage(0,0,TBMER + 1.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
-
-    MockUsage(0,0,MemTh + 1.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
-
-    MockUsage(0,0,MemTh - 1.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
-
-    MockUsage(0,0,MemTh - 5.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT/4), false}),
-
-    MockUsage(0,0,MemTh - 1.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
-
-    MockUsage(DBLimitStartTh + 10,0,10.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT), true}),
-
-    MockUsage(0,0,MemTh + 1.0),
-    CheckThrottling(VerifyShortInterval, ok, {throttle, 2*TBT, false}),
-
-    MockUsage(0,0,NMRTCC - 1.0),
-    CheckThrottlingDefault(),
+    VerifyIdle(MinIdle),
 
     ok.
 

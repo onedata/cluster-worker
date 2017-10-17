@@ -23,9 +23,9 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([throttle/1, throttle_get/1, throttle_del/1, throttle_del/2,
+-export([throttle/0, throttle/1, throttle_model/1,
   get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0,
-  get_hooks_throttling_config/1]).
+  get_hooks_throttling_config/1, init_counters/0, init_report/0]).
 % for tests
 -export([send_after/3]).
 
@@ -43,103 +43,78 @@
 
 -define(LEVEL_OVERRIDE(Level), [{level, Level}]).
 
+-define(EXOMETER_NAME(Param), [throttling_stats, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Limits operation performance if needed.
+%% Initializes exometer counters used by this module.
 %% @end
 %%--------------------------------------------------------------------
--spec throttle(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
-throttle(ModelName) ->
+-spec init_counters() -> ok.
+init_counters() ->
+  init_counter(tp),
+  init_counter(db_queue).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+  init_report(tp),
+  init_report(db_queue).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance depending on model name.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle_model(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
+throttle_model(ModelName) ->
   case lists:member(ModelName, datastore_config:throttled_models()) of
     true ->
-      case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-        {ok, ok} ->
+      throttle();
+    _ ->
+      ok
+  end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv throttle(default).
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle() -> ok | ?THROTTLING_ERROR.
+throttle() ->
+  throttle(default).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Limits operation performance for particular config.
+%% @end
+%%--------------------------------------------------------------------
+-spec throttle(Config :: atom()) -> ok | ?THROTTLING_ERROR.
+throttle(Config) ->
+  case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+    {ok, ConfigList} ->
+      case proplists:get_value(Config, ConfigList) of
+        ok ->
           ok;
-        {ok, {throttle, Time, _}} ->
+        {throttle, Time} ->
           timer:sleep(Time),
           ok;
-        {ok, {overloaded, _}} ->
-          ?THROTTLING_ERROR;
-        _ ->
-          ok
+        overloaded ->
+          ?THROTTLING_ERROR
       end;
     _ ->
       ok
   end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Limits get operation performance if needed.
-%% @end
-%%--------------------------------------------------------------------
--spec throttle_get(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
-throttle_get(ModelName) ->
-  case lists:member(ModelName, datastore_config:throttled_models()) of
-    true ->
-      case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-        {ok, ok} ->
-          ok;
-        {ok, {throttle, Time, _}} ->
-          case application:get_env(?CLUSTER_WORKER_APP_NAME, ?READ_THROTTLING_KEY) of
-            {ok, throttle} ->
-              timer:sleep(Time),
-              ok;
-            _ ->
-              ok
-          end;
-        {ok, {overloaded, _}} ->
-          ?THROTTLING_ERROR;
-        _ ->
-          ok
-      end;
-    _ ->
-      ok
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Limits delete operation performance if needed.
-%% @end
-%%--------------------------------------------------------------------
--spec throttle_del(ModelName :: model_behaviour:model_type()) -> ok | ?THROTTLING_ERROR.
-throttle_del(ModelName) ->
-  case lists:member(ModelName, datastore_config:throttled_models()) of
-    true ->
-      case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-        {ok, ok} ->
-          ok;
-        {ok, {throttle, Time, true}} ->
-          timer:sleep(Time),
-          ok;
-        {ok, {throttle, _, _}} ->
-          ok;
-        {ok, {overloaded, true}} ->
-          ?THROTTLING_ERROR;
-        {ok, {overloaded, _}} ->
-          ok;
-        _ ->
-          ok
-      end;
-    _ ->
-      ok
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Limits delete operation performance if needed.
-%% @end
-%%--------------------------------------------------------------------
--spec throttle_del(ModelName :: model_behaviour:model_type(), TmpAns) -> TmpAns | ?THROTTLING_ERROR when
-  TmpAns :: term().
-% TODO - delete when local cache is refactored
-throttle_del(ModelName, ok) ->
-  throttle_del(ModelName);
-throttle_del(_ModelName, TmpAns) ->
-  TmpAns.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -166,146 +141,32 @@ configure_throttling() ->
   Self = self(),
   spawn(fun() ->
     CheckInterval = try
-      % TODO - use info abut failed batch saves and length of queue to pool of processes dumping to disk
-      {MemAction, MemoryUsage} = verify_memory(),
-      {TPAction, ProcNum} = verify_tp(),
-      {DBAction, QueueSize, ReadDBAction, ReadQueueSize} = verify_db(),
-      Action = max(max(MemAction, TPAction), DBAction),
-      ReadAction = max(max(MemAction, TPAction), ReadDBAction),
+      [TPNum, DBQueue, MemUsage] = Values = get_values_and_update_counters(),
+      set_idle_time(TPNum),
 
-      case Action of
-        ?BLOCK_THROTTLING ->
-          application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-            {overloaded, MemAction =:= ?NO_THROTTLING}),
+      {ok, Configs} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_config),
+      DefaultConfig = proplists:get_value(default, Configs),
+      ConfigResult = lists:foldl(fun({ConfigName, Config}, Acc) ->
+        [{ConfigName, configure_throttling(Values, Config, DefaultConfig)} | Acc]
+      end, [], Configs),
 
-          {ok, NewProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_memory_proc_number),
-          tp:set_processes_limit(NewProcNum),
+      application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
+        ConfigResult),
 
-          case ReadAction of
-            ?NO_THROTTLING ->
-              application:set_env(?CLUSTER_WORKER_APP_NAME, ?READ_THROTTLING_KEY,
-                no_throttling);
-            _ ->
-              application:set_env(?CLUSTER_WORKER_APP_NAME, ?READ_THROTTLING_KEY,
-                throttle)
-          end,
+      FilteredConfigResult = lists:filter(fun
+        ({_, ok}) -> false;
+        (_) -> true
+      end, ConfigResult),
 
-          ?info("Throttling: overload mode started, mem: ~p, tp proc num ~p,
-          couch queue size: ~p, couch read queue size: ~p, read action ~p",
-            [MemoryUsage, ProcNum, QueueSize, ReadQueueSize, ReadAction]),
-          plan_next_throttling_check(true);
+      case FilteredConfigResult of
+        [] ->
+          ?debug("No throttling: config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+            [ConfigResult, TPNum, DBQueue, MemUsage]),
+          plan_next_throttling_check();
         _ ->
-          Oldthrottling = case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-            {ok, V} ->
-              case V of
-                {throttle, Time, _} ->
-                  Time;
-                Other ->
-                  Other
-              end;
-            _ ->
-              ok
-          end,
-
-          case {Action, Oldthrottling} of
-            {A, {overloaded, _}} when A < ?LIMIT_THROTTLING ->
-              {ok, NewProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
-              tp:set_processes_limit(NewProcNum);
-            _ ->
-              ok
-          end,
-
-          case {Action, Oldthrottling} of
-            {?NO_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p,
-              couch queue size: ~p, couch read queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
-              plan_next_throttling_check();
-            {?NO_THROTTLING, _} ->
-              application:unset_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY),
-              ok = node_management:delete(?MNESIA_THROTTLING_DATA_KEY),
-              ?info("Throttling: stop, mem: ~p, tp proc num ~p,
-              couch queue size: ~p, couch read queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
-              plan_next_throttling_check();
-            {?CONFIG_THROTTLING, ok} ->
-              ?debug("Throttling: no config needed, mem: ~p, tp proc num ~p,
-              couch queue size: ~p, couch read queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
-              plan_next_throttling_check(true);
-            {?LIMIT_THROTTLING, {overloaded, true}} when MemAction > ?NO_THROTTLING ->
-              application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY, {overloaded, false}),
-              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p,
-              couch queue size: ~p, couch read queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
-              plan_next_throttling_check(true);
-            {?LIMIT_THROTTLING, {overloaded, _}} ->
-              ?info("Throttling: continue overload, mem: ~p, tp proc num ~p,
-              couch queue size: ~p, couch read queue size: ~p",
-                [MemoryUsage, ProcNum, QueueSize, ReadQueueSize]),
-              plan_next_throttling_check(true);
-            _ ->
-              TimeBase = case Oldthrottling of
-                OT when is_integer(OT) ->
-                  OT;
-                _ ->
-                  {ok, DefaultTimeBase} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
-                  DefaultTimeBase
-              end,
-
-              {OldProcNum, OldQueueSize, OldMemory, LastInterval} =
-                case node_management:get(?MNESIA_THROTTLING_DATA_KEY) of
-                {ok, #document{value = #node_management{value = TD}}} ->
-                  TD;
-                {error, {not_found, _}} ->
-                  {0, 0, 0, 0}
-              end,
-
-              TPMultip = (TPAction > 0) andalso (ProcNum > OldProcNum),
-              MemoryMultip = (MemAction > 0) andalso (MemoryUsage > OldMemory),
-              DumpMultip = (DBAction > 0) andalso (QueueSize > OldQueueSize),
-              ThrottlingTime = case
-                {TPMultip or MemoryMultip or DumpMultip,
-                Action} of
-                {true, _} ->
-                  TB2 = 2 * TimeBase,
-                  {ok, MaxTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms),
-                  case TB2 > MaxTime of
-                    true ->
-                      MaxTime;
-                    _ ->
-                      TB2
-                  end;
-                {_, ?CONFIG_THROTTLING} ->
-                  max(round(TimeBase / 2), 1);
-                _ ->
-                  TimeBase
-              end,
-
-              {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
-              NextCheck = plan_next_throttling_check(MemoryUsage-OldMemory, MemRatioThreshold-MemoryUsage, LastInterval),
-
-              application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-                {throttle, ThrottlingTime, MemAction =:= ?NO_THROTTLING}),
-
-              case ReadAction of
-                ?NO_THROTTLING ->
-                  application:set_env(?CLUSTER_WORKER_APP_NAME, ?READ_THROTTLING_KEY,
-                    no_throttling);
-                _ ->
-                  application:set_env(?CLUSTER_WORKER_APP_NAME, ?READ_THROTTLING_KEY,
-                    throttle)
-              end,
-
-              {ok, _} = node_management:save(#document{key = ?MNESIA_THROTTLING_DATA_KEY,
-                value = #node_management{value = {ProcNum, QueueSize, MemoryUsage, NextCheck}}}),
-
-              ?info("Throttling: delay ~p ms used, mem: ~p, tp proc num ~p,
-              couch queue size: ~p, couch read queue size: ~p, read action ~p",
-                [ThrottlingTime, MemoryUsage, ProcNum, QueueSize, ReadQueueSize, ReadAction]),
-
-              NextCheck
-          end
+          ?info("Throttling config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+            [ConfigResult, TPNum, DBQueue, MemUsage]),
+          plan_next_throttling_check(true)
       end
     catch
       E1:E2 ->
@@ -349,117 +210,135 @@ get_hooks_throttling_config(Models) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Checks poll of tp processes and recommends throttling action.
+%% @private
+%% Configures throttling settings for particular config.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_tp() ->
-  {TPAction :: non_neg_integer(), ProcNum :: non_neg_integer()}.
-verify_tp() ->
-  {ok, StartNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
-  {ok, DelayNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_start_memory_proc_number),
-  {ok, MaxProcNum} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_max_memory_proc_number),
+-spec configure_throttling(Values :: [number()], Config :: list(),
+    DefaultConfig :: list()) -> ok | overloaded | {throttle, non_neg_integer()}.
+configure_throttling(Values, Config, DefaultConfig) ->
+  TPMultip = get_config_value(tp_param_strength, Config, DefaultConfig),
+  DBMultip = get_config_value(db_param_strength, Config, DefaultConfig),
+  MemMultip = get_config_value(mem_param_strength, Config, DefaultConfig),
+  Multipliers = [TPMultip, DBMultip, MemMultip],
 
-  ProcNum = tp:get_processes_number(),
-  {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
+  GetFunctions = [fun get_tp_params/2, fun get_db_params/2,
+    fun get_memory_params/2],
+  Parameters = lists:zip(Multipliers, lists:zip(Values, GetFunctions)),
 
-  NewIdleTimeout = case ProcNum < StartNum of
-    true ->
-      ?debug("Throttling: idle timeout: ~p", [IdleTimeout]),
-      IdleTimeout;
+  {ThrottlingBase0, MaxRatio} = lists:foldl(fun
+    ({0, {_,_}}, {Acc, Max}) ->
+      {Acc, Max};
+    ({Multip, {Value, GetFun}}, {Acc, Max}) ->
+      {Expected, Limit} = apply(GetFun, [Config, DefaultConfig]),
+      Ratio = (Value - Expected) / (Limit - Expected),
+      {Acc + Multip * math:pow(max(0, Ratio), 3), max(Ratio, Max)}
+  end, {0, 0}, Parameters),
+
+  case {ThrottlingBase0, MaxRatio >= 1.0} of
+    {0.0, _} ->
+      ok;
+    {_, true} ->
+      overloaded;
     _ ->
-      {ok, MinIdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms),
-      NID = round(max(IdleTimeout * (DelayNum * 9 / 10 - ProcNum) / DelayNum, MinIdleTimeout)),
-      ?info("Throttling: idle timeout: ~p", [NID]),
-      NID
-  end,
-  application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout),
+      Strength = get_config_value(strength, Config, DefaultConfig),
+      ThrottlingBase = math:exp(-1 * Strength * ThrottlingBase0),
 
-  TPAction = case ProcNum of
-    PN when PN >= (MaxProcNum * 4 / 5) ->
-      ?BLOCK_THROTTLING;
-    PN when PN >= DelayNum ->
-      ?LIMIT_THROTTLING;
-    DP when DP >= (DelayNum * 4 / 5) ->
-      ?CONFIG_THROTTLING;
-    _ ->
-      ?NO_THROTTLING
-  end,
-
-  {TPAction, ProcNum}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks queue fo datastore_pool and recommends throttling action.
-%% @end
-%%--------------------------------------------------------------------
--spec verify_db() ->
-  {DBAction :: non_neg_integer(), QueueSize :: non_neg_integer(),
-    ReadDBAction :: non_neg_integer(), ReadQueueSize :: non_neg_integer()}.
-verify_db() ->
-  QueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
-  end, 0, couchbase_config:get_buckets()),
-
-  ReadQueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_max_worker_queue_size(Bucket, read) + Acc
-  end, 0, couchbase_config:get_buckets()),
-
-  DBAction = get_db_action(QueueSize),
-  ReadDBAction = get_db_action(ReadQueueSize),
-
-  {DBAction, QueueSize, ReadDBAction, ReadQueueSize}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Advices action on the basis of db queue length.
-%% @end
-%%--------------------------------------------------------------------
--spec get_db_action(QueueSize :: non_neg_integer()) -> Action :: non_neg_integer().
-get_db_action(QueueSize) ->
-  {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_db_queue_limit),
-  {ok, Start} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_delay_db_queue_size),
-
-  case QueueSize of
-    DP when DP >= Limit ->
-      ?BLOCK_THROTTLING;
-    DP when DP >= Start ->
-      ?LIMIT_THROTTLING;
-    DP when DP >= Start/2 ->
-      ?CONFIG_THROTTLING;
-    _ ->
-      ?NO_THROTTLING
+      BaseTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        throttling_base_time_ms, 2048),
+      Time = round(BaseTime * (1 - ThrottlingBase)),
+      {throttle, Time}
   end.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Checks memory and recommends throttling action.
+%% @private
+%% Sets idle time depending on tp process number.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_memory() ->
-  {MemAction :: non_neg_integer(), MemoryUsage :: float()}.
-verify_memory() ->
-  {ok, MemRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio),
-  {ok, MemCleanRatioThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
+-spec set_idle_time(ProcNum :: non_neg_integer()) -> ok.
+set_idle_time(ProcNum) ->
+  {ok, Idle1} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number),
+  {ok, Idle2} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_min_idle_time_memory_proc_number),
 
-  MemoryUsage = case monitoring:get_memory_stats() of
-                  [{<<"mem">>, MemUsage}] ->
-                    MemUsage
-                end,
+  {ok, IdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms),
+  {ok, MinIdleTimeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms),
 
-  MemAction = case MemoryUsage of
-                MU when MU >= MemRatioThreshold ->
-                  ?BLOCK_THROTTLING;
-                MU when MU >= (MemRatioThreshold + MemCleanRatioThreshold)/2 ->
-                  ?LIMIT_THROTTLING;
-                MU when MU >= MemCleanRatioThreshold ->
-                  ?CONFIG_THROTTLING;
-                _ ->
-                  ?NO_THROTTLING
-              end,
+  Multip = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
+  NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
 
-  {MemAction, MemoryUsage}.
+  ?debug("New idle time: ~p", [NewIdleTimeout]),
+
+  application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
 
 %%--------------------------------------------------------------------
+%% @doc
+%% @private
+%% Gets value of parameters used to configure throttling.
+%% Updates exometer counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_values_and_update_counters() -> [number()].
+get_values_and_update_counters() ->
+  ProcNum = tp:get_processes_number(),
+  ok = exometer:update(?EXOMETER_NAME(tp), ProcNum),
+
+  QueueSize = lists:foldl(fun(Bucket, Acc) ->
+    couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
+  end, 0, couchbase_config:get_buckets()),
+  ok = exometer:update(?EXOMETER_NAME(db_queue), QueueSize),
+
+  MemoryUsage = case monitoring:get_memory_stats() of
+    [{<<"mem">>, MemUsage}] ->
+      MemUsage
+  end,
+
+  [ProcNum, QueueSize, MemoryUsage].
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets expected value and limit for tp proceses number.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_tp_params(Config :: list(), Defaults :: list()) ->
+  {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
+get_tp_params(Config, Defaults) ->
+  Expected = get_config_value(tp_proc_expected, Config, Defaults),
+  Limit = get_config_value(tp_proc_limit, Config, Defaults),
+
+  {Expected, Limit}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets expected value and limit for db queue.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_db_params(Config :: list(), Defaults :: list()) ->
+  {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
+get_db_params(Config, Defaults) ->
+  Expected = get_config_value(db_queue_expected, Config, Defaults),
+  Limit = get_config_value(db_queue_limit, Config, Defaults),
+
+  {Expected, Limit}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets expected value and limit for memory usage.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_memory_params(Config :: list(), Defaults :: list()) ->
+  {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
+get_memory_params(Config, Defaults) ->
+  Expected = get_config_value(memory_expected, Config, Defaults),
+  Limit = get_config_value(memory_limit, Config, Defaults),
+
+  {Expected, Limit}.
+
+%%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns time after which next throttling config should start.
 %% @end
@@ -474,31 +353,50 @@ plan_next_throttling_check(_) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns time after which next throttling config should start.
-%% Decreases interval if memory is growing too high.
-%% @end
-%%--------------------------------------------------------------------
--spec plan_next_throttling_check(MemoryChange :: float(), MemoryToStop :: float(), LastInterval :: integer()) ->
-  non_neg_integer().
-plan_next_throttling_check(_MemoryChange, _MemoryToStop, 0) ->
-  plan_next_throttling_check(true);
-plan_next_throttling_check(0.0, _MemoryToStop, _LastInterval) ->
-  plan_next_throttling_check(true);
-plan_next_throttling_check(MemoryChange, MemoryToStop, LastInterval) ->
-  Default = plan_next_throttling_check(true),
-  Corrected = round(LastInterval*MemoryToStop/MemoryChange),
-  case (Corrected < Default) and (Corrected >= 0) of
-    true ->
-      Corrected;
-    _ ->
-      Default
-  end.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% @equiv erlang:send_after but enables mocking.
 %% @end
 %%--------------------------------------------------------------------
 -spec send_after(CheckInterval :: non_neg_integer(), Master :: pid() | atom(), Message :: term()) -> reference().
 send_after(CheckInterval, Master, Message) ->
   erlang:send_after(CheckInterval, Master, Message).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets value from configuration
+%% @end
+%%--------------------------------------------------------------------
+-spec get_config_value(Name :: atom(), Config :: list(), Defaults :: list()) ->
+  term().
+get_config_value(Name, Config, Defaults) ->
+  case proplists:get_value(Name, Config) of
+    undefined ->
+      proplists:get_value(Name, Defaults);
+    Value ->
+      Value
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes exometer counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Name :: atom()) -> ok.
+init_counter(Name) ->
+  exometer:new(?EXOMETER_NAME(Name), histogram, [{time_span,
+    application:get_env(?CLUSTER_WORKER_APP_NAME,
+      exometer_throttling_time_span, ?EXOMETER_DEFAULT_TIME_SPAN)}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets exometer report connected with particular counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Name :: atom()) -> ok.
+init_report(Name) ->
+  exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Name),
+    [min, max, median, mean, n],
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval,
+      ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

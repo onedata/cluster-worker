@@ -17,7 +17,8 @@
   link_proc = false :: boolean(),
   cached = false :: boolean(),
   master_pid :: pid(),
-  last_ctx :: undefined | datastore_context:ctx()
+  last_ctx :: undefined | datastore_context:ctx(),
+  full_keys = [] :: list()
 }).
 
 -endif.
