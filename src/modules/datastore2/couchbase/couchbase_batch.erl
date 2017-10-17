@@ -183,8 +183,13 @@ decrease_batch_size(BatchSize) ->
 %%--------------------------------------------------------------------
 -spec set_batch_size(non_neg_integer()) -> ok.
 set_batch_size(Size) ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size, Size),
+    try
+        application:set_env(?CLUSTER_WORKER_APP_NAME,
+            couchbase_pool_batch_size, Size)
+    catch
+        _:_ ->
+            ok % can fail when application is stopping
+    end,
     ok = exometer:update(?EXOMETER_NAME(sizes_config), Size).
 
 %%--------------------------------------------------------------------
