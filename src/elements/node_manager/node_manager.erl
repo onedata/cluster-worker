@@ -66,7 +66,11 @@
 %% for tests
 -export([init_workers/0]).
 
+-define(EXOMETER_COUNTERS,
+    [processes_num, memory_erlang, memory_node, cpu_node]]).
 -define(EXOMETER_NAME(Param), [?MODULE, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
 
 %%%===================================================================
 %%% API
@@ -79,10 +83,9 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    init_counter(processes_num),
-    init_counter(memory_erlang),
-    init_counter(memory_node),
-    init_counter(cpu_node).
+    lists:foreach(fun(Name) ->
+        init_counter(Name)
+    end, ?EXOMETER_COUNTERS).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,10 +94,9 @@ init_counters() ->
 %%--------------------------------------------------------------------
 -spec init_report() -> ok.
 init_report() ->
-    init_report(processes_num),
-    init_report(memory_erlang),
-    init_report(memory_node),
-    init_report(cpu_node).
+    lists:foreach(fun(Name) ->
+        init_report(Name)
+    end, ?EXOMETER_COUNTERS).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -980,7 +982,7 @@ init_exometer_reporters() ->
 -spec init_counter(Param :: atom()) -> ok.
 init_counter(Param) ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_node_manager_time_span, 600000),
+        exometer_node_manager_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
     exometer:new(?EXOMETER_NAME(Param), histogram, [{time_span, TimeSpan}]).
 
 %%--------------------------------------------------------------------
@@ -993,5 +995,5 @@ init_counter(Param) ->
 init_report(Param) ->
     exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
         [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
-            exometer_logging_interval, 1000)),
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
     ok.

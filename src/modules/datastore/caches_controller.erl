@@ -44,6 +44,8 @@
 -define(LEVEL_OVERRIDE(Level), [{level, Level}]).
 
 -define(EXOMETER_NAME(Param), [throttling_stats, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
 
 %%%===================================================================
 %%% API
@@ -384,7 +386,7 @@ get_config_value(Name, Config, Defaults) ->
 init_counter(Name) ->
   exometer:new(?EXOMETER_NAME(Name), histogram, [{time_span,
     application:get_env(?CLUSTER_WORKER_APP_NAME,
-      exometer_throttling_time_span, 600000)}]).
+      exometer_throttling_time_span, ?EXOMETER_DEFAULT_TIME_SPAN)}]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -396,4 +398,5 @@ init_counter(Name) ->
 init_report(Name) ->
   exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Name),
     [min, max, median, mean, n],
-    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval,
+      ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

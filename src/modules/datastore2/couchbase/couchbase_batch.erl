@@ -27,6 +27,9 @@
     couchbase_durability_timeout, 60000)).
 
 -define(EXOMETER_NAME(Param), [batch_stats, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
 -define(MIN_BATCH_SIZE_DEFAULT, 50).
 
 %%%===================================================================
@@ -41,9 +44,9 @@
 -spec init_counters() -> ok.
 init_counters() ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_batch_time_span, 600000),
+        exometer_batch_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
     TimeSpan2 = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_timeouts_time_span, 600000),
+        exometer_timeouts_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
     init_counter(times, histogram, TimeSpan),
     init_counter(sizes, histogram, TimeSpan),
     init_counter(sizes_config, histogram, TimeSpan),
@@ -203,5 +206,6 @@ init_counter(Param, Type, TimeSpan) ->
 %%--------------------------------------------------------------------
 -spec init_report(Param :: atom(), Report :: [atom()]) -> ok.
 init_report(Param, Report) ->
-    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param), Report,
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
+        Report, application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).
