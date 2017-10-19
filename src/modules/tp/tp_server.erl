@@ -161,7 +161,7 @@ handle_info(Info, #state{module = Module, state = State} = S) ->
     State :: state()) -> term().
 terminate(Reason, #state{key = Key, module = Module, state = State}) ->
     Module:terminate(Reason, State),
-    tp_router:delete(Key, self()).
+    tp_router:delete(Key).
 
 %%--------------------------------------------------------------------
 %% @private

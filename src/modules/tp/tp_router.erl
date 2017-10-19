@@ -23,7 +23,7 @@
 -export([init/1, handle/1, cleanup/0]).
 
 %% API
--export([create/2, get/1, delete/2, size/0]).
+-export([create/2, get/1, delete/1, delete_stoped/1, size/0]).
 -export([supervisor_flags/0, supervisor_children_spec/0]).
 
 %%%===================================================================
@@ -113,12 +113,19 @@ get(Key) ->
 %% Deletes routing entry.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(tp:key(), tp:server()) -> ok.
-delete(Key, Pid) ->
-    case ets:select_delete(?TP_ROUTING_TABLE, [{{Key, Pid}, [], [true]}]) of
-        0 -> ok;
-        1 -> update_size(-1)
-    end,
+-spec delete(tp:key()) -> ok.
+delete(Key) ->
+    delete_stoped(Key),
+    update_size(-1),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes routing entry. Does not decrement counter.
+%% @end
+%%--------------------------------------------------------------------
+delete_stoped(Key) ->
+    ets:delete(?TP_ROUTING_TABLE, Key),
     ok.
 
 %%--------------------------------------------------------------------

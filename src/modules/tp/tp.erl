@@ -67,10 +67,10 @@ call(Module, Args, Key, Request, Timeout, Attempts) ->
                 gen_server:call(Pid, Request, Timeout)
             catch
                 _:{noproc, _} ->
-                    tp_router:delete(Key, Pid),
+                    tp_router:delete_stoped(Key),
                     call(Module, Args, Key, Request, Timeout);
                 exit:{normal, _} ->
-                    tp_router:delete(Key, Pid),
+                    tp_router:delete_stoped(Key),
                     call(Module, Args, Key, Request, Timeout);
                 _:{timeout, _} ->
                     call(Module, Args, Key, Request, Timeout, Attempts - 1);
