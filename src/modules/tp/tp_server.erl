@@ -70,7 +70,9 @@ init([Module, Args, Key]) ->
             {ok, State} = Module:init(Args),
             {ok, #state{module = Module, key = Key, state = State}};
         {error, already_exists} ->
-            ignore
+            ignore;
+        {error, Reason} ->
+            {stop, Reason}
     end.
 
 %%--------------------------------------------------------------------
