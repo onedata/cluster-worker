@@ -196,14 +196,21 @@ get_changes(Since, Until, #state{} = State) ->
         true ->
             {[], State};
         false ->
-            {ok, {Changes}} = couchbase_driver:query_view(Ctx,
+            QueryAns = couchbase_driver:query_view(Ctx,
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, jiffy:encode([Scope, Since])},
                     {endkey, jiffy:encode([Scope, Until2])},
                     {inclusive_end, false}
                 ]
             ),
-            {Changes, State#state{since = Until2}}
+
+            case QueryAns of
+                {ok, {Changes}} ->
+                    {Changes, State#state{since = Until2}};
+                Error ->
+                    ?error("Cannot get changes, error: ~p", [Error]),
+                    {[], State}
+            end
     end.
 
 %%--------------------------------------------------------------------
