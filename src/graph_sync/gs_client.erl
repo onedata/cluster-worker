@@ -186,6 +186,7 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             {reply, {text, json_utils:encode_map(JSONMap)}, NewState};
         {error, _} = Error ->
             ?error("Discarding GS request as it cannot be encoded: ~p", [Error]),
+            Pid ! {response, Error},
             {ok, State}
     end;
 
