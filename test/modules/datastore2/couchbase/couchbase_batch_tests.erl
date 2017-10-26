@@ -90,7 +90,7 @@ decrease_batch_size_should_change_size() ->
 batch_size_should_be_increased() ->
     put({[batch_stats, timeouts], [count]}, {ok, [{count, 0}]} ),
     put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean, n]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
+    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(500, application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -99,7 +99,7 @@ batch_size_should_be_increased() ->
 batch_size_should_not_be_increased_for_timeout() ->
     put({[batch_stats, timeouts], [count]}, {ok, [{count, 1}]} ),
     put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean, n]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
+    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, timeout, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -108,7 +108,7 @@ batch_size_should_not_be_increased_for_timeout() ->
 batch_size_should_not_be_increased_for_high_execution_time() ->
     put({[batch_stats, timeouts], [count]}, {ok, [{count, 0}]} ),
     put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean, n]}, {ok, [{mean, 1500}, {max, 15000}, {n, 50}]}),
+    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 1500}, {max, 15000}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -117,7 +117,7 @@ batch_size_should_not_be_increased_for_high_execution_time() ->
 batch_size_should_not_be_increased_over_max_batch_size() ->
     put({[batch_stats, timeouts], [count]}, {ok, [{count, 0}]} ),
     put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean, n]}, {ok, [{mean, 150}, {max, 1500}, {n, 50}]}),
+    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 150}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(2000, application:get_env(?CLUSTER_WORKER_APP_NAME,
