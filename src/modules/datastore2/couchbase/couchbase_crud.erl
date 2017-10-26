@@ -278,7 +278,7 @@ assign_seq(SeqsByScope, Requests) ->
                 {error, Reason} ->
                     {
                         SeqsByScope2,
-                        SaveResponses,
+                        SaveRequests,
                         [{Key, {error, Reason}} | SaveResponses]
                     }
             end;

@@ -121,18 +121,15 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
     ok = exometer:update(?EXOMETER_NAME(sizes), maps:size(Requests)),
 
     {ok, TimesDatapoints} =
-        exometer:get_value(?EXOMETER_NAME(times), [max, mean, n]),
+        exometer:get_value(?EXOMETER_NAME(times), [max, mean]),
     Max = proplists:get_value(max, TimesDatapoints),
     Mean = proplists:get_value(mean, TimesDatapoints),
-    Number = proplists:get_value(n, TimesDatapoints),
 
     {ok, [{count, TimeoutsCount}]} = exometer:get_value(?EXOMETER_NAME(timeouts), [count]),
     {ok, [{mean, Size}]} = exometer:get_value(?EXOMETER_NAME(sizes), [mean]),
     Limit = min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4,
 
-    MinNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        min_stats_number_to_reconfigure, 2),
-    case Number >= MinNum of
+    case Mean > 0 of
         true ->
             NewValue = round(Limit * Size / Mean),
             MaxBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,

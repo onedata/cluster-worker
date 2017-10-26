@@ -38,6 +38,9 @@
 
 -export_type([value_doc/0, value_link/0, message/0]).
 
+-define(DEFAULT_ERROR_SUSPENSION_TIME, timer:seconds(10)).
+-define(DEFAULT_THROTTLING_DB_QUEUE_SIZE, 2000).
+
 %%%===================================================================
 %%% API functions
 %%%===================================================================
@@ -151,16 +154,23 @@ merge_changes(Prev, Next) ->
 %%--------------------------------------------------------------------
 -spec commit_backoff(timeout()) -> timeout().
 commit_backoff(_T) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    memory_store_flush_error_suspension_ms),
+  Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    memory_store_flush_error_suspension_ms, ?DEFAULT_ERROR_SUSPENSION_TIME),
 
-  {ok, Base} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    throttling_delay_db_queue_size),
-  QueueSize = lists:foldl(fun(Bucket, Acc) ->
-    couchbase_pool:get_request_queue_size(Bucket) + Acc
-  end, 0, couchbase_config:get_buckets()),
+  try
+    Base = application:get_env(?CLUSTER_WORKER_APP_NAME,
+      throttling_delay_db_queue_size, ?DEFAULT_THROTTLING_DB_QUEUE_SIZE),
+    QueueSize = lists:foldl(fun(Bucket, Acc) ->
+      couchbase_pool:get_request_queue_size(Bucket) + Acc
+    end, 0, couchbase_config:get_buckets()),
 
-  min(10, max(round(QueueSize/Base), 1)) * Interval.
+    min(10, max(round(QueueSize/Base), 1)) * Interval
+  catch
+    E1:E2 ->
+      ?error_stacktrace("Cannot calculate commit backoff, error: ~p:~p",
+        [E1, E2]),
+      Interval
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
