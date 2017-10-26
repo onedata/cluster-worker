@@ -67,12 +67,8 @@ init([Module, Args, Key]) ->
     case tp_router:create(Key, self()) of
         ok ->
             process_flag(trap_exit, true),
-            case Module:init(Args) of
-                {ok, State} ->
-                    {ok, #state{module = Module, key = Key, state = State}};
-                Other ->
-                    Other
-            end;
+            {ok, State} = Module:init(Args),
+            {ok, #state{module = Module, key = Key, state = State}};
         {error, already_exists} ->
             ignore;
         {error, Reason} ->
@@ -161,7 +157,7 @@ handle_info(Info, #state{module = Module, state = State} = S) ->
     State :: state()) -> term().
 terminate(Reason, #state{key = Key, module = Module, state = State}) ->
     Module:terminate(Reason, State),
-    tp_router:delete(Key, self()).
+    tp_router:delete(Key).
 
 %%--------------------------------------------------------------------
 %% @private
