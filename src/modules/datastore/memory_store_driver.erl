@@ -38,6 +38,9 @@
 
 -export_type([value_doc/0, value_link/0, message/0]).
 
+-define(DEFAULT_ERROR_SUSPENSION_TIME, timer:seconds(10)).
+-define(DEFAULT_THROTTLING_DB_QUEUE_SIZE, 2000).
+
 %%%===================================================================
 %%% API functions
 %%%===================================================================
@@ -152,11 +155,11 @@ merge_changes(Prev, Next) ->
 -spec commit_backoff(timeout()) -> timeout().
 commit_backoff(_T) ->
   Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    memory_store_flush_error_suspension_ms, timer:seconds(10)),
+    memory_store_flush_error_suspension_ms, ?DEFAULT_ERROR_SUSPENSION_TIME),
 
   try
     Base = application:get_env(?CLUSTER_WORKER_APP_NAME,
-      throttling_delay_db_queue_size, 2000),
+      throttling_delay_db_queue_size, ?DEFAULT_THROTTLING_DB_QUEUE_SIZE),
     QueueSize = lists:foldl(fun(Bucket, Acc) ->
       couchbase_pool:get_request_queue_size(Bucket) + Acc
     end, 0, couchbase_config:get_buckets()),
