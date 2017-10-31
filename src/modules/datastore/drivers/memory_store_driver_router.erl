@@ -276,14 +276,27 @@ execute(Ctx, Key, Link, Msg) ->
     Link :: boolean(), {Op :: atom(), Args :: list()}) -> term().
 execute_local(#{model_name := MN, level := L,
     persistence := Persistence} = Ctx, Key, Link, {Op, _} = Msg) ->
-    TpArgs = [Key, Link, Persistence],
-    TPKey = {MN, Key, Link, L},
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, use_msd_hub, false) of
+        true ->
+            TpArgs = [Key, Persistence],
+            TPKey = Key,
 
-    case caches_controller:throttle_model(MN) of
-        ok ->
-            datastore_doc:run_sync(TpArgs, TPKey, {Ctx, Msg});
-        Error ->
-            Error
+            case caches_controller:throttle_model(MN) of
+                ok ->
+                    datastore_doc:run_sync(TpArgs, TPKey, {{MN, Link, L}, {Ctx, Msg}});
+                Error ->
+                    Error
+            end;
+        _ ->
+            TpArgs = [Key, Link, Persistence],
+            TPKey = {MN, Key, Link, L},
+
+            case caches_controller:throttle_model(MN) of
+                ok ->
+                    datastore_doc:run_sync(TpArgs, TPKey, {Ctx, Msg});
+                Error ->
+                    Error
+            end
     end.
 
 %%%===================================================================

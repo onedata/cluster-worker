@@ -75,6 +75,7 @@
             ]},
 
             {tp_subtrees_number, 10},
+            {use_msd_hub, true},
 
             % Interval between exometer reports
             {exometer_logging_interval, 15000},
