@@ -99,8 +99,8 @@ init([Key, LinkProc, Cached]) ->
 -spec terminate(State :: state(), datastore_doc:rev()) -> ok | {error, term()}.
 terminate(#state{last_ctx = undefined}, _Rev) ->
   ok;
-terminate(#state{last_ctx = Ctx, full_keys = Keys}, _Rev) ->
-  datastore_cache:inactivate(Ctx, Keys).
+terminate(#state{key = Key, last_ctx = Ctx, full_keys = Keys}, _Rev) ->
+  datastore_cache:inactivate(Ctx, Key, Keys).
 
 %%--------------------------------------------------------------------
 %% @doc

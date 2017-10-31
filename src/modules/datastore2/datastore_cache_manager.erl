@@ -56,6 +56,9 @@
 %%--------------------------------------------------------------------
 -spec init() -> ok.
 init() ->
+    Pools = datastore_multiplier:get_names(memory)
+        ++ datastore_multiplier:get_names(disc),
+
     lists:foreach(fun(Pool) ->
         ets:new(active(Pool), [set, public, named_table, {keypos, 2}]),
         ets:new(inactive(Pool), [set, public, named_table, {keypos, 2}]),
@@ -65,7 +68,7 @@ init() ->
         MaxSize = proplists:get_value(Pool, SizeByPool, 500000),
         ets:insert(active(Pool), #stats{key = size, value = 0}),
         ets:insert(active(Pool), #stats{key = max_size, value = MaxSize})
-    end, [memory, disc]).
+    end, Pools).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -154,8 +157,8 @@ mark_inactive(disc, Selector) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec active(pool()) -> atom().
-active(memory) -> datastore_cache_active_memory_pool;
-active(disc) -> datastore_cache_active_disc_pool.
+active(Pool) ->
+    list_to_atom("datastore_cache_active_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -164,8 +167,8 @@ active(disc) -> datastore_cache_active_disc_pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec inactive(pool()) -> atom().
-inactive(memory) -> datastore_cache_inactive_memory_pool;
-inactive(disc) -> datastore_cache_inactive_disc_pool.
+inactive(Pool) ->
+    list_to_atom("datastore_cache_inactive_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -174,8 +177,8 @@ inactive(disc) -> datastore_cache_inactive_disc_pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec clear(pool()) -> atom().
-clear(memory) -> datastore_cache_clear_memory_pool;
-clear(disc) -> datastore_cache_clear_disc_pool.
+clear(Pool) ->
+    list_to_atom("datastore_cache_clear_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private

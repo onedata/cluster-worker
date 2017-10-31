@@ -44,16 +44,19 @@
 %%--------------------------------------------------------------------
 -spec call(Function :: atom(), ctx(), Args :: [term()]) ->
     term().
-call(save, #{links_tree := {true, DocKey}} = Ctx, Args) ->
+call(save, #{links_tree := {true, DocKey}} = Ctx0, Args) ->
+    Ctx = datastore_multiplier:extend_name(DocKey, Ctx0),
     execute(Ctx, DocKey, true, {save, Args});
-call(Method, Ctx, [#document{key = Key} | _] = Args) ->
+call(Method, Ctx0, [#document{key = Key} | _] = Args) ->
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     execute(Ctx, Key, false, {Method, Args});
-call(Method, #{links_tree := LinkOp} = Ctx, Args) ->
+call(Method, #{links_tree := LinkOp} = Ctx0, Args) ->
+    [Key | _] = Args,
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     case lists:member(Method, ?EXTENDED_ROUTING) of
         true ->
             apply(?MODULE, Method, [Ctx | Args]);
         _ ->
-            [Key | _] = Args,
             case LinkOp of
                 false ->
                     execute(Ctx, Key, false, {Method, Args});

@@ -24,7 +24,8 @@
 
 %% API
 -export([create/2, get/1, delete/1, delete/2, size/0]).
--export([supervisor_flags/0, supervisor_children_spec/0]).
+-export([supervisor_flags/0, supervisor_children_spec/0,
+    main_supervisor_flags/0, main_supervisor_children_spec/0]).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -44,6 +45,15 @@ init(_Args) ->
         named_table,
         {read_concurrency, true}
     ]),
+
+    lists:foreach(fun(Name) ->
+        {ok, _} = supervisor:start_child(
+            ?TP_ROUTER_SUP,
+            {Name, {tp_subtree_supervisor, start_link, [Name]},
+                transient, infinity, supervisor, [tp_subtree_supervisor]}
+        )
+    end, datastore_multiplier:get_names(?TP_ROUTER_SUP)),
+
     {ok, #{}}.
 
 %%--------------------------------------------------------------------
@@ -149,9 +159,27 @@ size() ->
 %% Returns a tp_router supervisor flags.
 %% @end
 %%--------------------------------------------------------------------
+-spec main_supervisor_flags() -> supervisor:sup_flags().
+main_supervisor_flags() ->
+    #{strategy => one_for_one, intensity => 1, period => 5}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a tp_router supervisor flags.
+%% @end
+%%--------------------------------------------------------------------
 -spec supervisor_flags() -> supervisor:sup_flags().
 supervisor_flags() ->
     #{strategy => simple_one_for_one, intensity => 1, period => 5}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a children spec for a tp_router supervisor.
+%% @end
+%%--------------------------------------------------------------------
+-spec main_supervisor_children_spec() -> [supervisor:child_spec()].
+main_supervisor_children_spec() ->
+    [].
 
 %%--------------------------------------------------------------------
 %% @doc
