@@ -27,7 +27,7 @@
   key :: datastore:ext_key(),
   cached = false :: boolean(),
   master_pid :: pid(),
-  state_map :: #{}
+  state_map = #{}
 }).
 
 % Types
@@ -59,7 +59,7 @@ modify(Messages0, #state{key = Key, cached = Cached,
   Messages = split_messages(Messages0),
 
   {FinalAns, FinalChanges, FinalStateMap} = lists:foldl(fun({{_MN, Link, _Level} = BatchDesc, MessagesList}, {AnsAcc, ChangesAcc, SM}) ->
-    BatchState = case maps:get(BatchDesc, SM) of
+    BatchState = case maps:get(BatchDesc, SM, undefined) of
       undefined -> memory_store_driver:new_state(Link, Key, Cached, Master);
       BS -> BS
     end,
