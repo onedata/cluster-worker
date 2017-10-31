@@ -39,12 +39,14 @@
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
-    ets:new(?TP_ROUTING_TABLE, [
-        set,
-        public,
-        named_table,
-        {read_concurrency, true}
-    ]),
+    lists:foreach(fun(Name) ->
+        ets:new(Name, [
+            set,
+            public,
+            named_table,
+            {read_concurrency, true}
+        ])
+    end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
 
     lists:foreach(fun(Name) ->
         {ok, _} = supervisor:start_child(
@@ -78,7 +80,9 @@ handle(_Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
-    ets:delete(?TP_ROUTING_TABLE),
+    lists:foreach(fun(Name) ->
+        ets:delete(Name)
+    end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
     ok.
 
 %%%===================================================================
@@ -93,15 +97,16 @@ cleanup() ->
 %%--------------------------------------------------------------------
 -spec create(tp:key(), tp:server()) -> ok | {error, Reason :: term()}.
 create(Key, Pid) ->
-    case update_size(1) > tp:get_processes_limit() of
+    Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
+    case update_size(Table, 1) > tp:get_processes_limit() of
         true ->
-            update_size(-1),
+            update_size(Table, -1),
             {error, limit_exceeded};
         false ->
-            case ets:insert_new(?TP_ROUTING_TABLE, {Key, Pid}) of
+            case ets:insert_new(Table, {Key, Pid}) of
                 true -> ok;
                 false ->
-                    update_size(-1),
+                    update_size(Table, -1),
                     {error, already_exists}
             end
     end.
@@ -113,7 +118,8 @@ create(Key, Pid) ->
 %%--------------------------------------------------------------------
 -spec get(tp:key()) -> {ok, tp:server()} | {error, not_found}.
 get(Key) ->
-    case ets:lookup(?TP_ROUTING_TABLE, Key) of
+    Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
+    case ets:lookup(Table, Key) of
         [] -> {error, not_found};
         [{Key, Pid}] -> {ok, Pid}
     end.
@@ -125,8 +131,9 @@ get(Key) ->
 %%--------------------------------------------------------------------
 -spec delete(tp:key()) -> ok.
 delete(Key) ->
-    ets:delete(?TP_ROUTING_TABLE, Key),
-    update_size(-1),
+    Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
+    ets:delete(Table, Key),
+    update_size(Table, -1),
     ok.
 
 %%--------------------------------------------------------------------
@@ -136,9 +143,10 @@ delete(Key) ->
 %%--------------------------------------------------------------------
 -spec delete(tp:key(), tp:server()) -> ok.
 delete(Key, Pid) ->
-    case ets:select_delete(?TP_ROUTING_TABLE, [{{Key, Pid}, [], [true]}]) of
+    Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
+    case ets:select_delete(Table, [{{Key, Pid}, [], [true]}]) of
         0 -> ok;
-        1 -> update_size(-1)
+        1 -> update_size(Table, -1)
     end,
     ok.
 
@@ -149,10 +157,12 @@ delete(Key, Pid) ->
 %%--------------------------------------------------------------------
 -spec size() -> Size :: non_neg_integer().
 size() ->
-    case ets:lookup(?TP_ROUTING_TABLE, ?TP_ROUTING_TABLE_SIZE) of
-        [] -> 0;
-        [{?TP_ROUTING_TABLE_SIZE, Size}] -> Size
-    end.
+    lists:foldl(fun(Name, Acc) ->
+        case ets:lookup(Name, ?TP_ROUTING_TABLE_SIZE) of
+            [] -> Acc;
+            [{?TP_ROUTING_TABLE_SIZE, Size}] -> max(Size, Acc)
+        end
+    end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -207,7 +217,7 @@ supervisor_children_spec() ->
 %% Updates the routing table size by a difference.
 %% @end
 %%--------------------------------------------------------------------
--spec update_size(integer()) -> integer().
-update_size(Diff) ->
-    ets:update_counter(?TP_ROUTING_TABLE, ?TP_ROUTING_TABLE_SIZE,
+%%-spec update_size(integer()) -> integer().
+update_size(Table, Diff) ->
+    ets:update_counter(Table, ?TP_ROUTING_TABLE_SIZE,
         {2, Diff}, {?TP_ROUTING_TABLE_SIZE, 0}).

@@ -292,7 +292,7 @@ save_async(#{disc_driver := undefined} = Ctx, #document{key = Key} = Value, _) -
     case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
         true ->
             Result = MemoryDriver:save(MemoryCtx, Value),
-            inactivate_volatile(memory, Ctx, Key),
+            inactivate_volatile(Pool, Ctx, Key),
             ?FUTURE(memory, MemoryDriver, Result);
         false ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Value}})
@@ -309,7 +309,7 @@ save_async(Ctx, #document{key = Key} = Value, DiscFallback) ->
     case {datastore_cache_manager:mark_active(Pool, Ctx, Key), DiscFallback} of
         {true, _} ->
             Result = MemoryDriver:save(MemoryCtx, Value),
-            inactivate_volatile(disc, Ctx, Key),
+            inactivate_volatile(Pool, Ctx, Key),
             ?FUTURE(memory, MemoryDriver, Result);
         {false, true} ->
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Value));

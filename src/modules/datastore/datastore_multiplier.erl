@@ -27,7 +27,9 @@ extend_name(Key, #{table := Table} = Ctx) ->
   datastore_context:override(table, NewName, Ctx);
 extend_name(Key, #{memory_driver_ctx := #{table := Table}} = Ctx) ->
   NewName = list_to_atom(atom_to_list(Table) ++ get_num(Key)),
-  override_table(NewName, Ctx).
+  override_table(NewName, Ctx);
+extend_name(_Key, Name) ->
+  Name.
 
 get_names(Name) when is_atom(Name) ->
   lists:map(fun(Num) ->
