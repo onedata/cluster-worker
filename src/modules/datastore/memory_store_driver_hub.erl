@@ -65,7 +65,13 @@ modify(Messages0, #state{key = Key, cached = Cached,
     end,
     {A, Changes, NewState} =
       memory_store_driver:modify(MessagesList, BatchState, undefined),
-    {AnsAcc ++ A, ChangesAcc ++ Changes, maps:put(BatchDesc, NewState, SM)}
+      Changes2 = case {ChangesAcc, Changes} of
+        {{true, C1}, {true, C2}} -> {true, C1 ++ C2};
+        {{true, C1}, _} -> {true, C1};
+        {_, {true, C2}} -> {true, C2};
+        _ -> false
+      end,
+    {AnsAcc ++ A, Changes2, maps:put(BatchDesc, NewState, SM)}
   end, {[], [], SM0}, Messages),
 
   {FinalAns, FinalChanges, State#state{state_map = FinalStateMap}}.

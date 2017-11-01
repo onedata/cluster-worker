@@ -132,19 +132,22 @@ mark_active(Pool, Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec mark_inactive(pool(), pid() | datastore:key() | [datastore:key()]) -> boolean().
-mark_inactive(memory, Selector) ->
-    Filter = fun
-        (#entry{volatile = true}) ->
-            true;
-        (#entry{driver = Driver, driver_ctx = Ctx, driver_key = Key}) ->
-            case Driver:get(Ctx, Key) of
-                {ok, #document{deleted = Deleted}} -> Deleted;
-                {error, key_enoent} -> true
-            end
-    end,
-    mark_inactive(memory, Selector, Filter);
-mark_inactive(disc, Selector) ->
-    mark_inactive(disc, Selector, fun(_) -> true end).
+mark_inactive(Pool, Selector) ->
+    case lists:sublist(atom_to_list(Pool), 4) of
+        "disk" ->
+            mark_inactive(Pool, Selector, fun(_) -> true end);
+        _ ->
+            Filter = fun
+                (#entry{volatile = true}) ->
+                    true;
+                (#entry{driver = Driver, driver_ctx = Ctx, driver_key = Key}) ->
+                    case Driver:get(Ctx, Key) of
+                        {ok, #document{deleted = Deleted}} -> Deleted;
+                        {error, key_enoent} -> true
+                    end
+            end,
+            mark_inactive(Pool, Selector, Filter)
+    end.
 
 %%%===================================================================
 %%% Internal functions
