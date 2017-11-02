@@ -31,7 +31,8 @@
             cowboy,
             worker_pool,
             exometer_core,
-            exometer_lager
+            exometer_lager,
+            exometer_graphite
         ]},
         {mod, {cluster_worker_app, []}},
         {env, [

@@ -51,14 +51,17 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
--define(EXOMETER_REPORTERS, [{exometer_report_lager, ?MODULE}]).
+-define(EXOMETER_REPORTERS, [
+    {exometer_report_lager, ?MODULE},
+    {exometer_report_graphite, ?MODULE}
+]).
 -define(EXOMETER_MODULES,
     [couchbase_batch, couchbase_pool, caches_controller, node_manager]).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_reporter/0]).
+    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_reporter/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -71,6 +74,14 @@
 -define(EXOMETER_NAME(Param), [?MODULE, Param]).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 -define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
+-define(GRAPHITE_REPORTER_OPTS, [
+    graphite_api_key,
+    graphite_prefix,
+    graphite_host,
+    graphite_port,
+    graphite_connect_timeout
+]).
 
 %%%===================================================================
 %%% API
@@ -103,14 +114,17 @@ init_report() ->
 %% Initialize exometer reporter used by storage_sync.
 %% @end
 %%--------------------------------------------------------------------
--spec init_reporter() -> ok.
-init_reporter() ->
+-spec init_reporter(atom()) -> ok.
+init_reporter(exometer_report_lager) ->
     Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_logging_level, debug),
     ok = exometer_report:add_reporter(exometer_report_lager, [
         {type_map,[{'_',integer}]},
         {level, Level}
-    ]).
+    ]);
+init_reporter(exometer_report_graphite) ->
+    Opts = get_graphite_reporter_options(),
+    ok = exometer_report:add_reporter(exometer_report_graphite, Opts).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -959,7 +973,7 @@ init_exometer_reporters() ->
     lists:foreach(fun(Reporter) ->
         Module = proplists:get_value(Reporter, ExpectedReporters),
         exometer_report:remove_reporter(Reporter),
-        Module:init_reporter()
+        Module:init_reporter(Reporter)
     end, ToStart),
 
     case ToStart of
@@ -996,4 +1010,36 @@ init_report(Param) ->
     exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
         [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
             exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
+
+    exometer_report:subscribe(exometer_report_graphite, ?EXOMETER_NAME(Param),
+        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
     ok.
+
+%%-------------------------------------------------------------------
+%% @private
+%% @doc
+%% Reads graphite_reporter options from app.config.
+%% @end
+%%-------------------------------------------------------------------
+-spec get_graphite_reporter_options() -> proplists:proplist().
+get_graphite_reporter_options() ->
+    lists:foldl(fun(Opt, AccIn) ->
+        case application:get_env(?CLUSTER_WORKER_APP_NAME, Opt) of
+            {ok, Value} ->
+                [{strip_graphite_prefix(Opt), Value} | AccIn];
+            undefined -> AccIn
+        end
+    end, [], ?GRAPHITE_REPORTER_OPTS).
+
+%%-------------------------------------------------------------------
+%% @private
+%% @doc
+%% Strips "graphite_" prefix from option name.
+%% @end
+%%-------------------------------------------------------------------
+-spec strip_graphite_prefix(atom()) -> atom().
+strip_graphite_prefix(Option) ->
+    <<"graphite_", OptionBin/binary>> = atom_to_binary(Option, latin1),
+    binary_to_atom(OptionBin, latin1).
+
