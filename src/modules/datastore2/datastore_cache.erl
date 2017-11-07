@@ -197,9 +197,13 @@ flush(Ctx, Keys) when is_list(Keys) ->
 inactivate(#{memory_driver := undefined}) ->
     false;
 inactivate(#{disc_driver := undefined, mutator_pid := Pid}) ->
-    datastore_cache_manager:mark_inactive(memory, Pid);
+    lists:foldl(fun(Pool, Acc) ->
+        Acc or datastore_cache_manager:mark_inactive(Pool, Pid)
+    end, false, datastore_multiplier:get_names(memory));
 inactivate(#{mutator_pid := Pid}) ->
-    datastore_cache_manager:mark_inactive(disc, Pid).
+    lists:foldl(fun(Pool, Acc) ->
+        Acc or datastore_cache_manager:mark_inactive(Pool, Pid)
+    end, false, datastore_multiplier:get_names(disc)).
 
 %%--------------------------------------------------------------------
 %% @doc

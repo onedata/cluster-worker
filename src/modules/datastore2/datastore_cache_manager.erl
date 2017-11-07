@@ -134,7 +134,7 @@ mark_active(Pool, Ctx, Key) ->
 -spec mark_inactive(pool(), pid() | datastore:key() | [datastore:key()]) -> boolean().
 mark_inactive(Pool, Selector) ->
     case lists:sublist(atom_to_list(Pool), 4) of
-        "disk" ->
+        "disc" ->
             mark_inactive(Pool, Selector, fun(_) -> true end);
         _ ->
             Filter = fun
