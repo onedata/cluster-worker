@@ -26,7 +26,8 @@
 %% Helper functions
 -export([resolve_conflict/2, update_rev_if_needed/2, add_durability_to_memory/2,
   get_durability_from_memory/0, del_durability_from_memory/1,
-  add_to_proc_mem/3, get_from_proc_mem/2, increment_rev/2, rev_to_info/1]).
+  add_to_proc_mem/3, get_from_proc_mem/2, increment_rev/2, rev_to_info/1,
+  get_flush_min_interval/1, get_flush_max_interval/1]).
 
 % Types
 -type ctx() :: datastore_context:ctx().
