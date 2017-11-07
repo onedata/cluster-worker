@@ -32,7 +32,8 @@
 -type state() :: #state{}.
 -type batch_key() :: {model_behaviour:model_type(), boolean(),
   datastore:store_level()}.
--type message() :: {batch_key(), {ctx(), {atom(), list()}}}.
+-type message_body() :: memory_store_driver:message().
+-type message() :: {batch_key(), message_body()}.
 -type change() :: memory_store_driver:change().
 
 -define(DEFAULT_ERROR_SUSPENSION_TIME, timer:seconds(10)).
@@ -104,8 +105,8 @@ terminate(#state{state_map = SM}, _Rev) ->
 %%--------------------------------------------------------------------
 -spec commit(Modified :: change(), State :: state()) ->
   {true | {false, change()}, datastore_doc:rev()}.
-commit(ModifiedKeys, State) ->
-  memory_store_driver:commit(ModifiedKeys, State).
+commit(ModifiedKeys, _State) ->
+  memory_store_driver:commit(ModifiedKeys, memory_store_driver:new_state()).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -144,7 +145,7 @@ handle_committed(#state{} = State, _Rev) ->
 %% Splits messages list to chunks with similar batch key.
 %% @end
 %%--------------------------------------------------------------------
--spec split_messages([message()]) -> [{batch_key(), [message()]}].
+-spec split_messages([message()]) -> [{batch_key(), [message_body()]}].
 split_messages([]) ->
   [];
 split_messages([{BatchDesc, M} | Messages]) ->
@@ -156,8 +157,8 @@ split_messages([{BatchDesc, M} | Messages]) ->
 %% Splits messages list to chunks with similar batch key.
 %% @end
 %%--------------------------------------------------------------------
--spec split_messages([message()], [{batch_key(), [message()]}],
-    batch_key(), [message()]) -> [{batch_key(), [message()]}].
+-spec split_messages([message()], [{batch_key(), [message_body()]}],
+    batch_key(), [message_body()]) -> [{batch_key(), [message_body()]}].
 split_messages([], Ans, BD, List) ->
   [{BD, List} | Ans];
 split_messages([{BatchDesc, M} | Messages], Ans, BatchDesc, List) ->

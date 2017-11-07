@@ -22,7 +22,7 @@
 %% API
 % TODO - delete second arg of terminate and third arg of modify
 -export([modify/3, init/1, terminate/2, commit/2, merge_changes/2,
-  commit_backoff/1, handle_committed/2, new_state/4]).
+  commit_backoff/1, handle_committed/2, new_state/0, new_state/4]).
 %% Helper functions
 -export([resolve_conflict/2, update_rev_if_needed/2, add_durability_to_memory/2,
   get_durability_from_memory/0, del_durability_from_memory/1,
@@ -102,6 +102,15 @@ init([Key, LinkProc, Cached]) ->
 new_state(LinkProc, Key, Cached, Master) ->
   #state{link_proc = LinkProc, key = Key, cached = Cached,
     master_pid = Master, full_keys = []}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec new_state() -> state().
+new_state() ->
+  #state{}.
 
 %%--------------------------------------------------------------------
 %% @doc

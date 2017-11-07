@@ -70,7 +70,7 @@ get_names(#{memory_driver_ctx := #{table := Table}} = Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_name_extensions() ->
-  [non_neg_integer()].
+  [string()].
 get_name_extensions() ->
   Num = application:get_env(?CLUSTER_WORKER_APP_NAME,
     tp_subtrees_number, 10),
