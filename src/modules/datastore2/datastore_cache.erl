@@ -207,7 +207,7 @@ inactivate(#{mutator_pid := Pid}) ->
 %% may be removed from cache when its capacity limit is reached.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec inactivate(ctx(), [datastore:key()]) -> boolean().
+-spec inactivate(ctx(), datastore:key(), [datastore:key()]) -> boolean().
 inactivate(#{memory_driver := undefined}, _, _) ->
     false;
 inactivate(#{disc_driver := undefined}, Key, Keys) ->

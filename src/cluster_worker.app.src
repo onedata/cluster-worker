@@ -74,7 +74,11 @@
                 ]}
             ]},
 
+            % Number of tp subtrees
+            % (tree of tp_servers is divided into several subtrees)
             {tp_subtrees_number, 10},
+            % Enable memory store driver hub (calls to many connected documents
+            % are handled by single tp process)
             {use_msd_hub, true},
 
             % Interval between exometer reports

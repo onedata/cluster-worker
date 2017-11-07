@@ -13,9 +13,6 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_doc.hrl").
--include("modules/datastore/datastore_common.hrl").
--include("modules/datastore/datastore_models_def.hrl").
--include("modules/datastore/datastore_common_internal.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -33,12 +30,10 @@
 % Types
 -type ctx() :: datastore_context:ctx().
 -type state() :: #state{}.
--type value_doc() :: datastore:document() | undefined.
--type value_link() :: list().
--type message() :: {ctx(), {atom(), list()}}.
--type change() :: [{datastore:ext_key(), ctx()}].
-
--export_type([value_doc/0, value_link/0, message/0]).
+-type batch_key() :: {model_behaviour:model_type(), boolean(),
+  datastore:store_level()}.
+-type message() :: {batch_key(), {ctx(), {atom(), list()}}}.
+-type change() :: memory_store_driver:change().
 
 -define(DEFAULT_ERROR_SUSPENSION_TIME, timer:seconds(10)).
 -define(DEFAULT_THROTTLING_DB_QUEUE_SIZE, 2000).
@@ -58,35 +53,24 @@ modify(Messages0, #state{key = Key, cached = Cached,
   master_pid = Master, state_map = SM0} = State, _) ->
   Messages = split_messages(Messages0),
 
-  {FinalAns, FinalChanges, FinalStateMap} = lists:foldl(fun({{_MN, Link, _Level} = BatchDesc, MessagesList}, {AnsAcc, ChangesAcc, SM}) ->
-    BatchState = case maps:get(BatchDesc, SM, undefined) of
-      undefined -> memory_store_driver:new_state(Link, Key, Cached, Master);
-      BS -> BS
-    end,
-    {A, Changes, NewState} =
-      memory_store_driver:modify(MessagesList, BatchState, undefined),
-      Changes2 = case {ChangesAcc, Changes} of
-        {{true, C1}, {true, C2}} -> {true, C1 ++ C2};
-        {{true, C1}, _} -> {true, C1};
-        {_, {true, C2}} -> {true, C2};
-        _ -> false
+  {FinalAns, FinalChanges, FinalStateMap} = lists:foldl(
+    fun({{_MN, Link, _Level} = BatchDesc, MessagesList}, {AnsAcc, ChangesAcc, SM}) ->
+      BatchState = case maps:get(BatchDesc, SM, undefined) of
+        undefined -> memory_store_driver:new_state(Link, Key, Cached, Master);
+        BS -> BS
       end,
-    {AnsAcc ++ A, Changes2, maps:put(BatchDesc, NewState, SM)}
+      {A, Changes, NewState} =
+        memory_store_driver:modify(MessagesList, BatchState, undefined),
+        Changes2 = case {ChangesAcc, Changes} of
+          {{true, C1}, {true, C2}} -> {true, C1 ++ C2};
+          {{true, C1}, _} -> {true, C1};
+          {_, {true, C2}} -> {true, C2};
+          _ -> false
+        end,
+      {AnsAcc ++ A, Changes2, maps:put(BatchDesc, NewState, SM)}
   end, {[], [], SM0}, Messages),
 
   {FinalAns, FinalChanges, State#state{state_map = FinalStateMap}}.
-
-split_messages([]) ->
-  [];
-split_messages([{BatchDesc, M} | Messages]) ->
-  lists:reverse(split_messages(Messages, [], BatchDesc, [M])).
-
-split_messages([], Ans, BD, List) ->
-  [{BD, List} | Ans];
-split_messages([{BatchDesc, M} | Messages], Ans, BatchDesc, List) ->
-  split_messages(Messages, Ans, BatchDesc, List ++ [M]);
-split_messages([{BatchDesc, M} | Messages], Ans, BD, List) ->
-  split_messages(Messages, [{BD, List} | Ans], BatchDesc, [M]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -98,8 +82,8 @@ init([Key, Cached]) ->
   {ok, #datastore_doc_init{
     data = #state{key = Key, cached = Cached, master_pid = self()},
     idle_timeout = caches_controller:get_idle_timeout(),
-    min_commit_delay = get_flush_min_interval(Cached),
-    max_commit_delay = get_flush_max_interval(Cached)
+    min_commit_delay = memory_store_driver:get_flush_min_interval(Cached),
+    max_commit_delay = memory_store_driver:get_flush_max_interval(Cached)
   }}.
 
 %%--------------------------------------------------------------------
@@ -120,31 +104,8 @@ terminate(#state{state_map = SM}, _Rev) ->
 %%--------------------------------------------------------------------
 -spec commit(Modified :: change(), State :: state()) ->
   {true | {false, change()}, datastore_doc:rev()}.
-commit(ModifiedKeys, _) ->
-  ToFlush = lists:reverse(ModifiedKeys),
-  AnsList = datastore_cache:flush(ToFlush),
-
-  {_Revs, NotSaved} = lists:foldl(fun
-    ({_Flush, {ok, #document{key = K, rev = R}}}, {AccRev, AccErr}) ->
-      {[{K, R} | AccRev], AccErr};
-    ({{Key, Ctx}, {error, etimedout}}, {AccRev, AccErr}) ->
-      ?error("Cannot flush document to database - timeout"),
-      {AccRev, [{Key, Ctx} | AccErr]};
-    ({{Key, Ctx}, {error, timeout}}, {AccRev, AccErr}) ->
-      ?error("Cannot flush document to database - timeout"),
-      {AccRev, [{Key, Ctx} | AccErr]};
-    ({{Key, Ctx}, Error}, {AccRev, AccErr}) ->
-      ?error("Document flush to database error ~p for key ~p, context ~p",
-        [Error, Key, Ctx]),
-      {AccRev, [{Key, Ctx} | AccErr]}
-  end, {[], []}, lists:zip(ToFlush, AnsList)),
-
-  case NotSaved of
-    [] ->
-      {true, []};
-    _ ->
-      {{false, NotSaved}, []}
-  end.
+commit(ModifiedKeys, State) ->
+  memory_store_driver:commit(ModifiedKeys, State).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -153,10 +114,7 @@ commit(ModifiedKeys, _) ->
 %%--------------------------------------------------------------------
 -spec merge_changes(Prev :: change(), Next :: change()) -> change().
 merge_changes(Prev, Next) ->
-  FilteredPrev = lists:filter(fun({Key, _Ctx}) ->
-    not proplists:is_defined(Key, Next)
-  end, Prev),
-  Next ++ FilteredPrev.
+  memory_store_driver:merge_changes(Prev, Next).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -164,24 +122,8 @@ merge_changes(Prev, Next) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec commit_backoff(timeout()) -> timeout().
-commit_backoff(_T) ->
-  Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    memory_store_flush_error_suspension_ms, ?DEFAULT_ERROR_SUSPENSION_TIME),
-
-  try
-    Base = application:get_env(?CLUSTER_WORKER_APP_NAME,
-      throttling_delay_db_queue_size, ?DEFAULT_THROTTLING_DB_QUEUE_SIZE),
-    QueueSize = lists:foldl(fun(Bucket, Acc) ->
-      couchbase_pool:get_request_queue_size(Bucket) + Acc
-    end, 0, couchbase_config:get_buckets()),
-
-    min(10, max(round(QueueSize/Base), 1)) * Interval
-  catch
-    E1:E2 ->
-      ?error_stacktrace("Cannot calculate commit backoff, error: ~p:~p",
-        [E1, E2]),
-      Interval
-  end.
+commit_backoff(T) ->
+  memory_store_driver:commit_backoff(T).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -199,27 +141,26 @@ handle_committed(#state{} = State, _Rev) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns min interval between successful flush operations.
+%% Splits messages list to chunks with similar batch key.
 %% @end
 %%--------------------------------------------------------------------
--spec get_flush_min_interval(FlushDriver :: atom()) -> non_neg_integer().
-get_flush_min_interval(true) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    cache_to_disk_delay_ms),
-  Interval;
-get_flush_min_interval(_) ->
-  infinity.
+-spec split_messages([message()]) -> [{batch_key(), [message()]}].
+split_messages([]) ->
+  [];
+split_messages([{BatchDesc, M} | Messages]) ->
+  lists:reverse(split_messages(Messages, [], BatchDesc, [M])).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns max interval between successful flush operations.
+%% Splits messages list to chunks with similar batch key.
 %% @end
 %%--------------------------------------------------------------------
--spec get_flush_max_interval(FlushDriver :: atom()) -> non_neg_integer().
-get_flush_max_interval(true) ->
-  {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    cache_to_disk_force_delay_ms),
-  Interval;
-get_flush_max_interval(_) ->
-  infinity.
+-spec split_messages([message()], [{batch_key(), [message()]}],
+    batch_key(), [message()]) -> [{batch_key(), [message()]}].
+split_messages([], Ans, BD, List) ->
+  [{BD, List} | Ans];
+split_messages([{BatchDesc, M} | Messages], Ans, BatchDesc, List) ->
+  split_messages(Messages, Ans, BatchDesc, List ++ [M]);
+split_messages([{BatchDesc, M} | Messages], Ans, BD, List) ->
+  split_messages(Messages, [{BD, List} | Ans], BatchDesc, [M]).

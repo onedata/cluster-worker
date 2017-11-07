@@ -36,7 +36,7 @@
 -type message() :: {ctx(), {atom(), list()}}.
 -type change() :: [{datastore:ext_key(), ctx()}].
 
--export_type([value_doc/0, value_link/0, message/0]).
+-export_type([value_doc/0, value_link/0, message/0, change/0]).
 
 -define(DEFAULT_ERROR_SUSPENSION_TIME, timer:seconds(10)).
 -define(DEFAULT_THROTTLING_DB_QUEUE_SIZE, 2000).
@@ -44,10 +44,6 @@
 %%%===================================================================
 %%% API functions
 %%%===================================================================
-
-new_state(LP, Key, Cached, Master) ->
-  #state{link_proc = LP, key = Key, cached = Cached,
-    master_pid = Master, full_keys = []}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -94,6 +90,17 @@ init([Key, LinkProc, Cached]) ->
     min_commit_delay = get_flush_min_interval(Cached),
     max_commit_delay = get_flush_max_interval(Cached)
   }}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec new_state(LinkProc :: boolean(), Key :: datastore:ext_key(),
+    Cached :: boolean(), Master :: pid()) -> state().
+new_state(LinkProc, Key, Cached, Master) ->
+  #state{link_proc = LinkProc, key = Key, cached = Cached,
+    master_pid = Master, full_keys = []}.
 
 %%--------------------------------------------------------------------
 %% @doc

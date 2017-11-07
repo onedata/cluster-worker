@@ -6,7 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% TODO
+%%% Tree of tp_servers is divided into several
+%%% subtrees - this is supervisor of subtree.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(tp_subtree_supervisor).

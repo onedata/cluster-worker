@@ -152,7 +152,7 @@ delete(Key, Pid) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns routing table size.
+%% Returns largest routing table size.
 %% @end
 %%--------------------------------------------------------------------
 -spec size() -> Size :: non_neg_integer().
@@ -166,7 +166,7 @@ size() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns a tp_router supervisor flags.
+%% Returns a tp_router main supervisor flags.
 %% @end
 %%--------------------------------------------------------------------
 -spec main_supervisor_flags() -> supervisor:sup_flags().
@@ -184,7 +184,7 @@ supervisor_flags() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns a children spec for a tp_router supervisor.
+%% Returns a children spec for a main tp_router supervisor.
 %% @end
 %%--------------------------------------------------------------------
 -spec main_supervisor_children_spec() -> [supervisor:child_spec()].
@@ -217,7 +217,7 @@ supervisor_children_spec() ->
 %% Updates the routing table size by a difference.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec update_size(integer()) -> integer().
+-spec update_size(atom(), integer()) -> integer().
 update_size(Table, Diff) ->
     ets:update_counter(Table, ?TP_ROUTING_TABLE_SIZE,
         {2, Diff}, {?TP_ROUTING_TABLE_SIZE, 0}).
