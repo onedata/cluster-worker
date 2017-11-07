@@ -162,7 +162,7 @@ size() ->
             [] -> Acc;
             [{?TP_ROUTING_TABLE_SIZE, Size}] -> max(Size, Acc)
         end
-    end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
+    end, 0, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
 
 %%--------------------------------------------------------------------
 %% @doc

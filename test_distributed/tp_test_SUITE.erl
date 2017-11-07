@@ -12,8 +12,8 @@
 -module(tp_test_SUITE).
 -author("Krzysztof Trzepla").
 
--include("modules/tp/tp.hrl").
 -include("modules/datastore/datastore_doc.hrl").
+-include("global_definitions.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
@@ -76,6 +76,8 @@ all() ->
 -define(TP_KEY, <<"key">>).
 -define(TP_PID, pid).
 -define(TIMEOUT, timer:seconds(5)).
+-define(TP_ROUTING_TABLE, tp_routing_table1).
+-define(TP_ROUTER_SUP, tp_router_sup1).
 
 %%%===================================================================
 %%% Test functions
@@ -259,6 +261,10 @@ init_per_testcase(tp_server_call_should_pass_request_error = Case, Config) ->
     ]);
 init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Worker) ->
+        test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+            tp_subtrees_number, 1)
+    end, Workers),
     rpc:multicall(Workers, tp, set_processes_limit, [200]),
     test_utils:mock_new(Workers, ?TP_MODULE, [passthrough, non_strict]),
     test_utils:mock_expect(Workers, ?TP_MODULE, init,
