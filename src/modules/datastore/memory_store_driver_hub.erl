@@ -21,17 +21,15 @@
   commit_backoff/1, handle_committed/2]).
 
 -record(state, {
-  key :: datastore:ext_key(),
   cached = false :: boolean(),
   master_pid :: pid(),
   state_map = #{}
 }).
 
 % Types
--type ctx() :: datastore_context:ctx().
 -type state() :: #state{}.
 -type batch_key() :: {model_behaviour:model_type(), boolean(),
-  datastore:store_level()}.
+  datastore:store_level(), datastore:ext_key()}.
 -type message_body() :: memory_store_driver:message().
 -type message() :: {batch_key(), message_body()}.
 -type change() :: memory_store_driver:change().
@@ -50,12 +48,12 @@
 %%--------------------------------------------------------------------
 -spec modify(Messages :: [message()], State :: state(), datastore_doc:rev()) ->
   {Answers :: list(), {true, change()} | false, NewState :: state()}.
-modify(Messages0, #state{key = Key, cached = Cached,
+modify(Messages0, #state{cached = Cached,
   master_pid = Master, state_map = SM0} = State, _) ->
   Messages = split_messages(Messages0),
 
   {FinalAns, FinalChanges, FinalStateMap} = lists:foldl(
-    fun({{_MN, Link, _Level} = BatchDesc, MessagesList}, {AnsAcc, ChangesAcc, SM}) ->
+    fun({{_MN, Link, _Level, Key} = BatchDesc, MessagesList}, {AnsAcc, ChangesAcc, SM}) ->
       erase(),
       BatchState = case maps:get(BatchDesc, SM, undefined) of
         undefined -> memory_store_driver:new_state(Link, Key, Cached, Master);
@@ -80,9 +78,9 @@ modify(Messages0, #state{key = Key, cached = Cached,
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: list()) -> {ok, tp:init()}.
-init([Key, Cached]) ->
+init([Cached]) ->
   {ok, #datastore_doc_init{
-    data = #state{key = Key, cached = Cached, master_pid = self()},
+    data = #state{cached = Cached, master_pid = self()},
     idle_timeout = caches_controller:get_idle_timeout(),
     min_commit_delay = memory_store_driver:get_flush_min_interval(Cached),
     max_commit_delay = memory_store_driver:get_flush_max_interval(Cached)

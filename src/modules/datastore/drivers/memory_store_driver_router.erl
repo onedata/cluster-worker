@@ -277,15 +277,24 @@ execute(Ctx, Key, Link, Msg) ->
 -spec execute_local(ctx(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}) -> term().
 execute_local(#{model_name := MN, level := L,
-    persistence := Persistence} = Ctx, Key, Link, {Op, _} = Msg) ->
+    persistence := Persistence} = Ctx, Key, Link, Msg) ->
     case application:get_env(?CLUSTER_WORKER_APP_NAME, use_msd_hub, false) of
         true ->
-            TpArgs = [Key, Persistence],
-            TPKey = Key,
+            TpArgs = [Persistence],
+            TPKey0 = maps:get(tp_key, Ctx, Key),
+            BatchDesc = {MN, Link, L, Key},
+
+            TPKey = case application:get_env(?CLUSTER_WORKER_APP_NAME,
+                msd_hub_space_size, 0) of
+                0 ->
+                    TPKey0;
+                Size ->
+                    get_key_num(TPKey0, Size)
+            end,
 
             case caches_controller:throttle_model(MN) of
                 ok ->
-                    datastore_doc:run_sync(TpArgs, TPKey, {{MN, Link, L}, {Ctx, Msg}});
+                    datastore_doc:run_sync(TpArgs, TPKey, {BatchDesc, {Ctx, Msg}});
                 Error ->
                     Error
             end;
@@ -304,6 +313,20 @@ execute_local(#{model_name := MN, level := L,
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Maps key to area of key space.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_key_num(datastore:ext_key(), non_neg_integer()) ->
+    non_neg_integer().
+get_key_num(Key, SpaceSize) when is_binary(Key) ->
+    ID = binary:decode_unsigned(Key),
+    ID rem SpaceSize + 1;
+get_key_num(Key, SpaceSize) ->
+    get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).
 
 %%--------------------------------------------------------------------
 %% @private
