@@ -189,7 +189,7 @@ get_max_worker_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
         Key = {request_queue_size, Bucket, Mode, Id},
         ModeSize = ets:lookup_element(couchbase_pool_stats, Key, 2),
-        ok = exometer:update(?EXOMETER_NAME(Bucket, Mode), ModeSize),
+        exometer:update(?EXOMETER_NAME(Bucket, Mode), ModeSize),
         max(Size, ModeSize)
     end, 0, lists:seq(1, get_size(Bucket, Mode))).
 
