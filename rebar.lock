@@ -53,7 +53,7 @@
   0},
  {<<"exometer_graphite">>,
   {git,"https://github.com/jakud/exometer_graphite.git",
-       {ref,"7c2a7661f520f9c88c02f456ff19c2f93f250c0d"}},
+       {ref,"1ea3cd5aaaf3003f669bb24dfad06b34291efd02"}},
   0},
  {<<"exometer_lager">>,
   {git,"https://github.com/fairwaves/exometer_lager.git",
