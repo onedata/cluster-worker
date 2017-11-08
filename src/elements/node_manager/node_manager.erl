@@ -112,7 +112,7 @@ init_report() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initialize exometer reporter used by storage_sync.
+%% Initialize exometer reporter.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_reporter(atom()) -> ok.

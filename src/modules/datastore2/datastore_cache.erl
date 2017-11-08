@@ -56,7 +56,7 @@
     value = Value
 }).
 
--define(EXOMETER_NAME(Param), [datastore, Param]).
+-define(EXOMETER_NAME(Param), [datastore_opts_num, Param]).
 
 %%%===================================================================
 %%% API

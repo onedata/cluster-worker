@@ -89,12 +89,13 @@
 -define(LISTING_ROOT, <<"listing_root">>).
 
 -define(EXOMETER_COUNTERS,
-    [datastore_opts, cache_get, cache_fetch, cache_save, cache_flush,
+    [cache_get, cache_fetch, cache_save, cache_flush,
         save, update, create, create_or_update, get, delete, exists, add_links,
         set_links, create_link, delete_links, fetch_link, foreach_link]).
--define(EXOMETER_NAME(Param), [?MODULE, Param]).
+-define(EXOMETER_NAME(Param), [datastore_opts_num, Param]).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 -define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
 %% API
 -export([save/2, update/3, create/2, create_or_update/3,
     get/2, list/3, list_keys/3, del_list_info/3,
