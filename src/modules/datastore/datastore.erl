@@ -88,6 +88,13 @@
 
 -define(LISTING_ROOT, <<"listing_root">>).
 
+-define(EXOMETER_COUNTERS,
+    [datastore_opts, cache_get, cache_fetch, cache_save, cache_flush,
+        save, update, create, create_or_update, get, delete, exists, add_links,
+        set_links, create_link, delete_links, fetch_link, foreach_link]).
+-define(EXOMETER_NAME(Param), [?MODULE, Param]).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
 %% API
 -export([save/2, update/3, create/2, create_or_update/3,
     get/2, list/3, list_keys/3, del_list_info/3,
@@ -99,10 +106,33 @@
     initialize_state/1, check_and_initialize_state/2]).
 -export([normalize_link_target/2]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
+-export([init_counters/0, init_report/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    lists:foreach(fun(Name) ->
+        init_counter(Name)
+    end, ?EXOMETER_COUNTERS).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    lists:foreach(fun(Name) ->
+        init_report(Name)
+    end, ?EXOMETER_COUNTERS).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -795,6 +825,7 @@ cluster_initialized() ->
 -spec exec_driver(ctx(), Method :: store_driver_behaviour:driver_action(),
     [term()]) -> ok | {ok, term()} | generic_error().
 exec_driver(#{driver := Driver} = Ctx, Method, Args) ->
+    exometer:update(?EXOMETER_NAME(Method), 1),
     Return =
         case run_prehooks(Ctx, Method, Args) of
             ok ->
@@ -873,3 +904,32 @@ del_list_info(Ctx, Key, ok) ->
     delete_links(Ctx3, ?LISTING_ROOT, Key);
 del_list_info(_Ctx, _Key, Ans) ->
     Ans.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes counter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Param :: atom()) -> ok.
+init_counter(Param) ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    exometer:new(?EXOMETER_NAME(Param), spiral, [{time_span, TimeSpan}]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Subscribe for reports for parameter.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report(Param :: atom()) -> ok.
+init_report(Param) ->
+    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
+        [count], application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
+
+    exometer_report:subscribe(exometer_report_graphite, ?EXOMETER_NAME(Param),
+        [count], application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
+    ok.

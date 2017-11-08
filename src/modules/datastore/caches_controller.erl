@@ -399,4 +399,9 @@ init_report(Name) ->
   exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Name),
     [min, max, median, mean, n],
     application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval,
+      ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
+
+  exometer_report:subscribe(exometer_report_graphite, ?EXOMETER_NAME(Name),
+    [min, max, median, mean, n],
+    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval,
       ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

@@ -56,7 +56,8 @@
     {exometer_report_graphite, ?MODULE}
 ]).
 -define(EXOMETER_MODULES,
-    [couchbase_batch, couchbase_pool, caches_controller, node_manager]).
+    [couchbase_batch, couchbase_pool, caches_controller, node_manager,
+        datastore]).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,

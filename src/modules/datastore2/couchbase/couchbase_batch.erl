@@ -210,4 +210,8 @@ init_counter(Param, Type, TimeSpan) ->
 init_report(Param, Report) ->
     exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
         Report, application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
+
+    exometer_report:subscribe(exometer_report_graphite, ?EXOMETER_NAME(Param),
+        Report, application:get_env(?CLUSTER_WORKER_APP_NAME,
             exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

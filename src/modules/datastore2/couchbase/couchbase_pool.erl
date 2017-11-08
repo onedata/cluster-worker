@@ -41,6 +41,7 @@
 -export_type([mode/0, request/0, response/0, future/0]).
 
 -define(EXOMETER_NAME(Bucket, Mode), [db_queue_size, Bucket, Mode]).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
 
 %%%===================================================================
 %%% API
@@ -261,4 +262,10 @@ init_report(Bucket, Mode) ->
     Name = ?EXOMETER_NAME(Bucket, Mode),
     exometer_report:subscribe(exometer_report_lager, Name,
         [min, max, median, mean],
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval, 1000)).
+        application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
+
+    exometer_report:subscribe(exometer_report_graphite, Name,
+        [min, max, median, mean],
+        application:get_env(?CLUSTER_WORKER_APP_NAME,
+            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).
