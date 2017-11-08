@@ -52,17 +52,19 @@ call(Method, Ctx0, [#document{key = Key} | _] = Args) ->
     execute(Ctx, Key, false, {Method, Args});
 call(Method, #{links_tree := LinkOp} = Ctx0, Args) ->
     [Key | _] = Args,
-    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
+    {LinkTree, Ctx} = case LinkOp of
+        false ->
+            {false, datastore_multiplier:extend_name(Key, Ctx0)};
+        true ->
+            {true, datastore_multiplier:extend_name(Key, Ctx0)};
+        {true, DocKey} ->
+            {true, datastore_multiplier:extend_name(DocKey, Ctx0)}
+    end,
     case lists:member(Method, ?EXTENDED_ROUTING) of
         true ->
             apply(?MODULE, Method, [Ctx | Args]);
         _ ->
-            case LinkOp of
-                false ->
-                    execute(Ctx, Key, false, {Method, Args});
-                _ ->
-                    execute(Ctx, Key, true, {Method, Args})
-            end
+            execute(Ctx, Key, LinkTree, {Method, Args})
     end.
 
 %%%===================================================================

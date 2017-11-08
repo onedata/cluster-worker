@@ -56,20 +56,21 @@ modify(Messages0, #state{key = Key, cached = Cached,
 
   {FinalAns, FinalChanges, FinalStateMap} = lists:foldl(
     fun({{_MN, Link, _Level} = BatchDesc, MessagesList}, {AnsAcc, ChangesAcc, SM}) ->
+      erase(),
       BatchState = case maps:get(BatchDesc, SM, undefined) of
         undefined -> memory_store_driver:new_state(Link, Key, Cached, Master);
         BS -> BS
       end,
       {A, Changes, NewState} =
         memory_store_driver:modify(MessagesList, BatchState, undefined),
-        Changes2 = case {ChangesAcc, Changes} of
-          {{true, C1}, {true, C2}} -> {true, C1 ++ C2};
-          {{true, C1}, _} -> {true, C1};
-          {_, {true, C2}} -> {true, C2};
-          _ -> false
-        end,
+      Changes2 = case {ChangesAcc, Changes} of
+        {{true, C1}, {true, C2}} -> {true, C1 ++ C2};
+        {{true, C1}, _} -> {true, C1};
+        {_, {true, C2}} -> {true, C2};
+        _ -> false
+      end,
       {AnsAcc ++ A, Changes2, maps:put(BatchDesc, NewState, SM)}
-  end, {[], [], SM0}, Messages),
+  end, {[], false, SM0}, Messages),
 
   {FinalAns, FinalChanges, State#state{state_map = FinalStateMap}}.
 
@@ -115,7 +116,10 @@ commit(ModifiedKeys, _State) ->
 %%--------------------------------------------------------------------
 -spec merge_changes(Prev :: change(), Next :: change()) -> change().
 merge_changes(Prev, Next) ->
-  memory_store_driver:merge_changes(Prev, Next).
+  FilteredPrev = lists:filter(fun(Change) ->
+    not lists:member(Change, Next)
+  end, Prev),
+  Next ++ FilteredPrev.
 
 %%--------------------------------------------------------------------
 %% @doc
