@@ -22,11 +22,12 @@
 %% API
 % TODO - delete second arg of terminate and third arg of modify
 -export([modify/3, init/1, terminate/2, commit/2, merge_changes/2,
-  commit_backoff/1, handle_committed/2]).
+  commit_backoff/1, handle_committed/2, new_state/0, new_state/4]).
 %% Helper functions
 -export([resolve_conflict/2, update_rev_if_needed/2, add_durability_to_memory/2,
   get_durability_from_memory/0, del_durability_from_memory/1,
-  add_to_proc_mem/3, get_from_proc_mem/2, increment_rev/2, rev_to_info/1]).
+  add_to_proc_mem/3, get_from_proc_mem/2, increment_rev/2, rev_to_info/1,
+  get_flush_min_interval/1, get_flush_max_interval/1]).
 
 % Types
 -type ctx() :: datastore_context:ctx().
@@ -36,7 +37,7 @@
 -type message() :: {ctx(), {atom(), list()}}.
 -type change() :: [{datastore:ext_key(), ctx()}].
 
--export_type([value_doc/0, value_link/0, message/0]).
+-export_type([value_doc/0, value_link/0, message/0, change/0]).
 
 -define(DEFAULT_ERROR_SUSPENSION_TIME, timer:seconds(10)).
 -define(DEFAULT_THROTTLING_DB_QUEUE_SIZE, 2000).
@@ -93,14 +94,34 @@ init([Key, LinkProc, Cached]) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Returns state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec new_state(LinkProc :: boolean(), Key :: datastore:ext_key(),
+    Cached :: boolean(), Master :: pid()) -> state().
+new_state(LinkProc, Key, Cached, Master) ->
+  #state{link_proc = LinkProc, key = Key, cached = Cached,
+    master_pid = Master, full_keys = []}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec new_state() -> state().
+new_state() ->
+  #state{}.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Checks if memory store driver can be stopped.
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate(State :: state(), datastore_doc:rev()) -> ok | {error, term()}.
 terminate(#state{last_ctx = undefined}, _Rev) ->
   ok;
-terminate(#state{last_ctx = Ctx, full_keys = Keys}, _Rev) ->
-  datastore_cache:inactivate(Ctx, Keys).
+terminate(#state{key = Key, last_ctx = Ctx, full_keys = Keys}, _Rev) ->
+  datastore_cache:inactivate(Ctx, Key, Keys).
 
 %%--------------------------------------------------------------------
 %% @doc

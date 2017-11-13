@@ -16,7 +16,7 @@
   key :: datastore:ext_key(),
   link_proc = false :: boolean(),
   cached = false :: boolean(),
-  master_pid :: pid(),
+  master_pid :: undefined | pid(),
   last_ctx :: undefined | datastore_context:ctx(),
   full_keys = [] :: list()
 }).

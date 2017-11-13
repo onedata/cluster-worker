@@ -44,22 +44,27 @@
 %%--------------------------------------------------------------------
 -spec call(Function :: atom(), ctx(), Args :: [term()]) ->
     term().
-call(save, #{links_tree := {true, DocKey}} = Ctx, Args) ->
+call(save, #{links_tree := {true, DocKey}} = Ctx0, Args) ->
+    Ctx = datastore_multiplier:extend_name(DocKey, Ctx0),
     execute(Ctx, DocKey, true, {save, Args});
-call(Method, Ctx, [#document{key = Key} | _] = Args) ->
+call(Method, Ctx0, [#document{key = Key} | _] = Args) ->
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     execute(Ctx, Key, false, {Method, Args});
-call(Method, #{links_tree := LinkOp} = Ctx, Args) ->
+call(Method, #{links_tree := LinkOp} = Ctx0, Args) ->
+    [Key | _] = Args,
+    {LinkTree, Ctx} = case LinkOp of
+        false ->
+            {false, datastore_multiplier:extend_name(Key, Ctx0)};
+        true ->
+            {true, datastore_multiplier:extend_name(Key, Ctx0)};
+        {true, DocKey} ->
+            {true, datastore_multiplier:extend_name(DocKey, Ctx0)}
+    end,
     case lists:member(Method, ?EXTENDED_ROUTING) of
         true ->
             apply(?MODULE, Method, [Ctx | Args]);
         _ ->
-            [Key | _] = Args,
-            case LinkOp of
-                false ->
-                    execute(Ctx, Key, false, {Method, Args});
-                _ ->
-                    execute(Ctx, Key, true, {Method, Args})
-            end
+            execute(Ctx, Key, LinkTree, {Method, Args})
     end.
 
 %%%===================================================================
@@ -272,20 +277,56 @@ execute(Ctx, Key, Link, Msg) ->
 -spec execute_local(ctx(), Key :: datastore:ext_key(),
     Link :: boolean(), {Op :: atom(), Args :: list()}) -> term().
 execute_local(#{model_name := MN, level := L,
-    persistence := Persistence} = Ctx, Key, Link, {Op, _} = Msg) ->
-    TpArgs = [Key, Link, Persistence],
-    TPKey = {MN, Key, Link, L},
+    persistence := Persistence} = Ctx, Key, Link, Msg) ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, use_msd_hub, false) of
+        true ->
+            TpArgs = [Persistence],
+            TPKey0 = maps:get(tp_key, Ctx, Key),
+            BatchDesc = {MN, Link, L, Key},
 
-    case caches_controller:throttle_model(MN) of
-        ok ->
-            datastore_doc:run_sync(TpArgs, TPKey, {Ctx, Msg});
-        Error ->
-            Error
+            TPKey = case application:get_env(?CLUSTER_WORKER_APP_NAME,
+                msd_hub_space_size, 0) of
+                0 ->
+                    TPKey0;
+                Size ->
+                    get_key_num(TPKey0, Size)
+            end,
+
+            case caches_controller:throttle_model(MN) of
+                ok ->
+                    datastore_doc:run_sync(TpArgs, TPKey, {BatchDesc, {Ctx, Msg}});
+                Error ->
+                    Error
+            end;
+        _ ->
+            TpArgs = [Key, Link, Persistence],
+            TPKey = {MN, Key, Link, L},
+
+            case caches_controller:throttle_model(MN) of
+                ok ->
+                    datastore_doc:run_sync(TpArgs, TPKey, {Ctx, Msg});
+                Error ->
+                    Error
+            end
     end.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Maps key to area of key space.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_key_num(datastore:ext_key(), non_neg_integer()) ->
+    non_neg_integer().
+get_key_num(Key, SpaceSize) when is_binary(Key) ->
+    ID = binary:decode_unsigned(Key),
+    ID rem SpaceSize + 1;
+get_key_num(Key, SpaceSize) ->
+    get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).
 
 %%--------------------------------------------------------------------
 %% @private

@@ -481,7 +481,12 @@ schedule_terminate(#state{terminate_timer_ref = Ref} = State) ->
 %%--------------------------------------------------------------------
 -spec exec(atom(), list()) -> Result :: term().
 exec(Function, Args) ->
-    erlang:apply(memory_store_driver, Function, Args).
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, use_msd_hub, false) of
+        true ->
+            erlang:apply(memory_store_driver_hub, Function, Args);
+        _ ->
+            erlang:apply(memory_store_driver, Function, Args)
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
