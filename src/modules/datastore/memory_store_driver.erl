@@ -307,8 +307,25 @@ increment_rev(#{resolve_conflicts := true}, Doc) ->
 increment_rev(#{persistence := false}, Doc) ->
   Doc;
 increment_rev(Ctx, Doc) ->
-  {Doc2, _} = couchbase_doc:set_next_rev(Ctx, Doc),
-  Doc2.
+  set_next_rev(Ctx, Doc).
+
+set_next_rev(#{no_rev := true}, Doc) ->
+  Doc;
+set_next_rev(_Ctx, #document{rev = []} = Doc) ->
+  Hash = datastore_utils2:gen_key(),
+  Rev = <<(integer_to_binary(1))/binary, "-", Hash/binary>>,
+  Doc#document{rev = [Rev]};
+set_next_rev(_Ctx, #document{rev = [Rev0 | _] = Revs} = Doc) ->
+  [Gen0, _] = binary:split(Rev0, <<"-">>),
+  Gen = binary_to_integer(Gen0),
+  Gen2 = Gen + 1,
+  Hash = datastore_utils2:gen_key(),
+  Rev = <<(integer_to_binary(Gen2))/binary, "-", Hash/binary>>,
+  Length = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    couchbase_revision_history_length, 1),
+  Revs2 = lists:sublist([Rev | Revs], Length),
+
+  Doc#document{rev = Revs2}.
 
 %%--------------------------------------------------------------------
 %% @doc
