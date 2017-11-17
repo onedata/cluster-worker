@@ -114,8 +114,12 @@ commit(ModifiedKeys, _State) ->
 %%--------------------------------------------------------------------
 -spec merge_changes(Prev :: change(), Next :: change()) -> change().
 merge_changes(Prev, Next) ->
-  FilteredPrev = lists:filter(fun(Change) ->
-    not lists:member(Change, Next)
+  FilteredPrev = lists:filter(fun({Key, #{model_name := MN}}) ->
+    Old = proplists:get_all_values(Key, Next),
+    Found = lists:foldl(fun(#{model_name := MN2}, Acc) ->
+      Acc orelse (MN =:= MN2)
+    end, false, Old),
+    not Found
   end, Prev),
   Next ++ FilteredPrev.
 

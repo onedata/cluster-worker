@@ -307,8 +307,7 @@ increment_rev(#{resolve_conflicts := true}, Doc) ->
 increment_rev(#{persistence := false}, Doc) ->
   Doc;
 increment_rev(Ctx, Doc) ->
-  {Doc2, _} = couchbase_doc:set_next_rev(Ctx, Doc),
-  Doc2.
+  set_next_rev(Ctx, Doc).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -324,6 +323,31 @@ rev_to_info(Rev) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Creates and stores next revision hash in a document.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_next_rev(couchbase_driver:ctx(), datastore:document()) ->
+  datastore:document().
+set_next_rev(#{no_rev := true}, Doc) ->
+  Doc;
+set_next_rev(_Ctx, #document{rev = []} = Doc) ->
+  Hash = datastore_utils2:gen_key(),
+  Rev = <<"1-", Hash/binary>>,
+  Doc#document{rev = [Rev]};
+set_next_rev(_Ctx, #document{rev = [Rev0 | _] = Revs0} = Doc) ->
+  [Gen0, _] = binary:split(Rev0, <<"-">>),
+  Gen = binary_to_integer(Gen0) + 1,
+  Hash = datastore_utils2:gen_key(),
+  Rev = <<(integer_to_binary(Gen))/binary, "-", Hash/binary>>,
+  Length = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    couchbase_revision_history_length, 1),
+  Revs = lists:sublist([Rev | Revs0], Length),
+
+  Doc#document{rev = Revs}.
 
 %%--------------------------------------------------------------------
 %% @private
