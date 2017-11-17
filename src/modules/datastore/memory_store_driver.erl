@@ -336,7 +336,7 @@ set_next_rev(#{no_rev := true}, Doc) ->
   Doc;
 set_next_rev(_Ctx, #document{rev = []} = Doc) ->
   Hash = datastore_utils2:gen_key(),
-  Rev = <<(integer_to_binary(1))/binary, "-", Hash/binary>>,
+  Rev = <<"1-", Hash/binary>>,
   Doc#document{rev = [Rev]};
 set_next_rev(_Ctx, #document{rev = [Rev0 | _] = Revs0} = Doc) ->
   [Gen0, _] = binary:split(Rev0, <<"-">>),
