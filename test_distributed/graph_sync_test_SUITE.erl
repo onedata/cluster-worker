@@ -42,6 +42,8 @@
     gs_server_session_clearing_test_connection_level/1
 ]).
 
+-define(SSL_OPTS(_Config), [{secure, only_verify_peercert}, {cacerts, get_cacerts(_Config)}]).
+
 %%%===================================================================
 %%% API functions
 %%%===================================================================
@@ -69,7 +71,7 @@ handshake_test(Config) ->
             undefined,
             ?SUPPORTED_PROTO_VERSIONS,
             fun(_) -> ok end,
-            [{cacerts, get_cacerts(Config)}]
+            ?SSL_OPTS(Config)
         )
     ),
 
@@ -80,7 +82,7 @@ handshake_test(Config) ->
             {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
             ?SUPPORTED_PROTO_VERSIONS,
             fun(_) -> ok end,
-            [{cacerts, get_cacerts(Config)}]
+            ?SSL_OPTS(Config)
         )
     ),
 
@@ -91,7 +93,7 @@ handshake_test(Config) ->
             {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE},
             ?SUPPORTED_PROTO_VERSIONS,
             fun(_) -> ok end,
-            [{cacerts, get_cacerts(Config)}]
+            ?SSL_OPTS(Config)
         )
     ),
 
@@ -102,7 +104,7 @@ handshake_test(Config) ->
             {?GRAPH_SYNC_SESSION_COOKIE_NAME, <<"bkkwksdf">>},
             ?SUPPORTED_PROTO_VERSIONS,
             fun(_) -> ok end,
-            [{cacerts, get_cacerts(Config)}]
+            ?SSL_OPTS(Config)
         )
     ),
 
@@ -110,7 +112,7 @@ handshake_test(Config) ->
     Opts = [
         {keyfile, ?TEST_FILE(Config, "client_key.pem")},
         {certfile, ?TEST_FILE(Config, "client_cert.pem")},
-        {cacerts, get_cacerts(Config)}
+        {secure, only_verify_peercert}, {cacerts, get_cacerts(Config)}
     ],
     ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = {provider, ?PROVIDER_1}}},
@@ -130,7 +132,7 @@ handshake_test(Config) ->
             {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE},
             [lists:max(SuppVersions) + 1],
             fun(_) -> ok end,
-            [{cacerts, get_cacerts(Config)}]
+            ?SSL_OPTS(Config)
         )
     ),
     ok.
@@ -142,14 +144,14 @@ rpc_req_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(_) -> ok end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(_) -> ok end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
     ?assertMatch(
         {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
@@ -184,14 +186,14 @@ graph_req_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(_) -> ok end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(_) -> ok end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
@@ -317,7 +319,7 @@ subscribe_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
@@ -325,7 +327,7 @@ subscribe_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
@@ -431,7 +433,7 @@ unsubscribe_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
@@ -512,7 +514,7 @@ nosub_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
@@ -520,7 +522,7 @@ nosub_test(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
@@ -801,7 +803,7 @@ gs_server_session_clearing_test_connection_level(Config) ->
         {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE},
         ?SUPPORTED_PROTO_VERSIONS,
         fun(_) -> ok end,
-        [{cacerts, get_cacerts(Config)}]
+        ?SSL_OPTS(Config)
     ),
 
     GRI1 = #gri{type = od_user, id = ?USER_1, aspect = instance},
@@ -886,9 +888,9 @@ get_gs_ws_url(Config) ->
 
 
 get_cacerts(Config) ->
-    {ok, WebCaCertPem} = file:read_file(?TEST_FILE(Config, "web_cacert.pem")),
-    {ok, ServerCaCertPem} = file:read_file(?TEST_FILE(Config, "server_cacert.pem")),
-    lists:map(fun cert_decoder:pem_to_der/1, [WebCaCertPem, ServerCaCertPem]).
+    WebCaCertPemPath = ?TEST_FILE(Config, "web_cacert.pem"),
+    ServerCaCertPemPath = ?TEST_FILE(Config, "server_cacert.pem"),
+    cert_utils:load_ders(WebCaCertPemPath) ++ cert_utils:load_ders(ServerCaCertPemPath).
 
 
 start_gs_listener(Config, Node) ->

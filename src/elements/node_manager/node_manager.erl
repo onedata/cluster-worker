@@ -34,11 +34,9 @@
     {tp_router, [
         {supervisor_flags, tp_router:supervisor_flags()},
         {supervisor_children_spec, tp_router:supervisor_children_spec()}
-    ]},
-    {dns_worker, []}
+    ]}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
-    dns_listener,
     nagios_listener,
     redirector_listener
 ]).
@@ -46,7 +44,7 @@
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0]).
+    cluster_worker_listeners/0, get_cluster_nodes_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -130,6 +128,7 @@ stop() ->
 %% Returns node's IP address.
 %% @end
 %%--------------------------------------------------------------------
+-spec get_ip_address() -> inet:ip4_address().
 get_ip_address() ->
     gen_server2:call(?NODE_MANAGER_NAME, get_ip_address).
 
@@ -141,6 +140,7 @@ get_ip_address() ->
 %%--------------------------------------------------------------------
 refresh_ip_address() ->
     gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
+
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -272,8 +272,8 @@ handle_cast(cm_conn_ack, State) ->
     NewState = cm_conn_ack(State),
     {noreply, NewState};
 
-handle_cast(cluster_init_finished, State) ->
-    NewState = cluster_init_finished(State),
+handle_cast({cluster_init_finished, Nodes}, State) ->
+    NewState = cluster_init_finished(State, Nodes),
     {noreply, NewState};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
@@ -531,10 +531,10 @@ cm_conn_ack(State) ->
 %% Receives information that cluster has been successfully initialized.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_init_finished(State :: term()) -> #state{}.
-cluster_init_finished(State) ->
+-spec cluster_init_finished(State :: term(), ClusterNodes :: [node()]) -> #state{}.
+cluster_init_finished(State, Nodes) ->
     ?info("Cluster initialized. Running 'on_cluster_initialized' procedures"),
-    plugins:apply(node_manager_plugin, on_cluster_initialized, []),
+    plugins:apply(node_manager_plugin, on_cluster_initialized, [Nodes]),
     ?info("Starting custom workers..."),
     Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
     init_workers(Workers),
@@ -575,14 +575,12 @@ do_heartbeat(#state{monitoring_state = MonState, last_state_analysis = LSA} = _S
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Receives lb advices update from cluster manager and follows it to DNS worker and dispatcher.
+%% Receives lb advices update from cluster manager and follows it to dispatcher.
 %% @end
 %%--------------------------------------------------------------------
--spec update_lb_advices(State :: #state{}, LBAdvices) -> #state{} when
-    LBAdvices :: {load_balancing:dns_lb_advice(), load_balancing:dispatcher_lb_advice()}.
-update_lb_advices(State, {DNSAdvice, DispatcherAdvice}) ->
+-spec update_lb_advices(State :: #state{}, DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> #state{}.
+update_lb_advices(State, DispatcherAdvice) ->
     gen_server2:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
-    worker_proxy:call({dns_worker, node()}, {update_lb_advice, DNSAdvice}),
     State.
 
 
@@ -829,3 +827,14 @@ log_monitoring_stats(Format, Args) ->
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Fetch cluster nodes and their IPs from cluster manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_nodes_ips() ->
+    {ok, [{node(), inet:ip4_address()}]} | {error, cluster_not_ready}.
+get_cluster_nodes_ips() ->
+    gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).

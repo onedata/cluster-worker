@@ -53,6 +53,7 @@
 -define(ERROR_BAD_DATA(__Key), {error, {bad_data, __Key}}).
 -define(ERROR_BAD_VALUE_EMPTY(__Key), {error, {empty_value, __Key}}).
 -define(ERROR_BAD_VALUE_ATOM(__Key), {error, {bad_value_atom, __Key}}).
+-define(ERROR_BAD_VALUE_BOOLEAN(__Key), {error, {bad_value_boolean, __Key}}).
 -define(ERROR_BAD_VALUE_LIST_OF_ATOMS(__Key),
     {error, {bad_value_list_of_atoms, __Key}}
 ).
@@ -64,6 +65,9 @@
 -define(ERROR_BAD_VALUE_FLOAT(__Key), {error, {bad_value_float, __Key}}).
 -define(ERROR_BAD_VALUE_JSON(__Key), {error, {bad_value_json, __Key}}).
 -define(ERROR_BAD_VALUE_TOKEN(__Key), {error, {bad_value_token, __Key}}).
+-define(ERROR_BAD_VALUE_LIST_OF_IPV4_ADDRESSES(__Key), {error, {bad_value_list_of_ipv4_addresses, __Key}}).
+-define(ERROR_BAD_VALUE_DOMAIN(__Key), {error, {bad_value_domain, __Key}}).
+-define(ERROR_BAD_VALUE_SUBDOMAIN, {error, bad_value_subdomain}).
 -define(ERROR_BAD_VALUE_TOO_LOW(__Key, __Threshold),
     {error, {value_too_low, __Key, {min, __Threshold}}}
 ).
@@ -80,13 +84,12 @@
     {error, {list_of_values_not_allowed, __Key, {allowed, __AllowedVals}}}
 ).
 -define(ERROR_BAD_VALUE_ID_NOT_FOUND(__Key), {error, {id_not_found, __Key}}).
--define(ERROR_BAD_VALUE_ID_OCCUPIED(__Key), {error, {id_occupied, __Key}}).
+-define(ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(__Key), {error, {identifier_occupied, __Key}}).
 -define(ERROR_BAD_VALUE_BAD_TOKEN_TYPE(__Key), {error, {bad_token_type, __Key}}).
 -define(ERROR_BAD_VALUE_IDENTIFIER(__Key), {error, {bad_identifier, __Key}}).
 -define(ERROR_BAD_VALUE_ALIAS(__Key), {error, {bad_alias, __Key}}).
 -define(ERROR_BAD_VALUE_ALIAS_WRONG_PREFIX(__Key),
     {error, {bad_alias_wrong_prefix, __Key}}).
--define(ERROR_ALIAS_OCCUPIED(__Key), {error, {alias_occupied, __Key}}).
 % Errors connected with relations between entities
 -define(ERROR_RELATION_DOES_NOT_EXIST(__ChType, __ChId, __ParType, __ParId),
     {error, {relation_does_not_exist, __ChType, __ChId, __ParType, __ParId}}

@@ -21,13 +21,13 @@
 -define(NODE_3, 'worker3@host.com').
 -define(NODE_4, 'worker4@host.com').
 
--define(WORKER_1, dns_worker).
+-define(WORKER_1, first_worker).
 -define(WORKER_2, second_worker).
 -define(WORKER_3, other_worker).
 -define(WORKER_4, another_worker).
 
 -define(LISTENER_1, nagios_listener).
--define(LISTENER_2, dns_listener).
+-define(LISTENER_2, other_listener).
 -define(LISTENER_3, redirector_listener).
 
 % ClusterStatus is in form:

@@ -166,6 +166,13 @@ error_to_json(1, ?ERROR_BAD_VALUE_LIST_OF_ATOMS(Key)) ->
             <<"key">> => Key
         }
     };
+error_to_json(1, ?ERROR_BAD_VALUE_BOOLEAN(Key)) ->
+    #{
+        <<"id">> => <<"badValueBoolean">>,
+        <<"details">> => #{
+            <<"key">> => Key
+        }
+    };
 error_to_json(1, ?ERROR_BAD_VALUE_INTEGER(Key)) ->
     #{
         <<"id">> => <<"badValueInteger">>,
@@ -193,6 +200,24 @@ error_to_json(1, ?ERROR_BAD_VALUE_TOKEN(Key)) ->
         <<"details">> => #{
             <<"key">> => Key
         }
+    };
+error_to_json(1, ?ERROR_BAD_VALUE_LIST_OF_IPV4_ADDRESSES(Key)) ->
+    #{
+        <<"id">> => <<"badValueListOfIPv4Addresses">>,
+        <<"details">> => #{
+            <<"key">> => Key
+        }
+    };
+error_to_json(1, ?ERROR_BAD_VALUE_DOMAIN(Key)) ->
+    #{
+        <<"id">> => <<"badValueDomain">>,
+        <<"details">> => #{
+            <<"key">> => Key
+        }
+    };
+error_to_json(1, ?ERROR_BAD_VALUE_SUBDOMAIN) ->
+    #{
+        <<"id">> => <<"badValueSubdomain">>
     };
 error_to_json(1, ?ERROR_BAD_VALUE_TOO_LOW(Key, Threshold)) ->
     #{
@@ -242,9 +267,9 @@ error_to_json(1, ?ERROR_BAD_VALUE_ID_NOT_FOUND(Key)) ->
             <<"key">> => Key
         }
     };
-error_to_json(1, ?ERROR_BAD_VALUE_ID_OCCUPIED(Key)) ->
+error_to_json(1, ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(Key)) ->
     #{
-        <<"id">> => <<"badValueIdOccupied">>,
+        <<"id">> => <<"badValueIdentifierOccupied">>,
         <<"details">> => #{
             <<"key">> => Key
         }
@@ -273,13 +298,6 @@ error_to_json(1, ?ERROR_BAD_VALUE_ALIAS(Key)) ->
 error_to_json(1, ?ERROR_BAD_VALUE_ALIAS_WRONG_PREFIX(Key)) ->
     #{
         <<"id">> => <<"badValueAliasWrongPrefix">>,
-        <<"details">> => #{
-            <<"key">> => Key
-        }
-    };
-error_to_json(1, ?ERROR_ALIAS_OCCUPIED(Key)) ->
-    #{
-        <<"id">> => <<"aliasOccupied">>,
         <<"details">> => #{
             <<"key">> => Key
         }
@@ -403,6 +421,10 @@ json_to_error(1, #{<<"id">> := <<"badValueListOfStrings">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_LIST_OF_BINARIES(Key);
 
+json_to_error(1, #{<<"id">> := <<"badValueBoolean">>,
+    <<"details">> := #{<<"key">> := Key}}) ->
+    ?ERROR_BAD_VALUE_BOOLEAN(Key);
+
 json_to_error(1, #{<<"id">> := <<"badValueInteger">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_INTEGER(Key);
@@ -419,6 +441,15 @@ json_to_error(1, #{<<"id">> := <<"badValueToken">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_TOKEN(Key);
 
+json_to_error(1, #{<<"id">> := <<"badValueListOfIPv4Addresses">>,
+    <<"details">> := #{<<"key">> := Key}}) ->
+    ?ERROR_BAD_VALUE_LIST_OF_IPV4_ADDRESSES(Key);
+
+json_to_error(1, #{<<"id">> := <<"badValueDomain">>,
+    <<"details">> := #{<<"key">> := Key}}) ->
+    ?ERROR_BAD_VALUE_DOMAIN(Key);
+json_to_error(1, #{<<"id">> := <<"badValueSubdomain">>}) ->
+    ?ERROR_BAD_VALUE_SUBDOMAIN;
 json_to_error(1, #{<<"id">> := <<"badValueTooLow">>,
     <<"details">> := #{<<"key">> := Key, <<"limit">> := Limit}}) ->
     ?ERROR_BAD_VALUE_TOO_LOW(Key, Limit);
@@ -443,9 +474,9 @@ json_to_error(1, #{<<"id">> := <<"badValueIdNotFound">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_ID_NOT_FOUND(Key);
 
-json_to_error(1, #{<<"id">> := <<"badValueIdOccupied">>,
+json_to_error(1, #{<<"id">> := <<"badValueIdentifierOccupied">>,
     <<"details">> := #{<<"key">> := Key}}) ->
-    ?ERROR_BAD_VALUE_ID_OCCUPIED(Key);
+    ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(Key);
 
 json_to_error(1, #{<<"id">> := <<"badValueTokenType">>,
     <<"details">> := #{<<"key">> := Key}}) ->
@@ -462,10 +493,6 @@ json_to_error(1, #{<<"id">> := <<"badValueAlias">>,
 json_to_error(1, #{<<"id">> := <<"badValueAliasWrongPrefix">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_ALIAS_WRONG_PREFIX(Key);
-
-json_to_error(1, #{<<"id">> := <<"aliasOccupied">>,
-    <<"details">> := #{<<"key">> := Key}}) ->
-    ?ERROR_ALIAS_OCCUPIED(Key);
 
 json_to_error(1, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{

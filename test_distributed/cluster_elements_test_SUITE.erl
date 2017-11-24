@@ -249,9 +249,7 @@ cm_and_worker_test(Config) ->
 
     % then
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [datastore_worker, ping])),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping])),
-    ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [datastore_worker, ping])),
-    ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [dns_worker, ping])).
+    ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [datastore_worker, ping])).
 
 task_pool_test(Config) ->
     % given
