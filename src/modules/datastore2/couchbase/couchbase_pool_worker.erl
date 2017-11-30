@@ -16,7 +16,7 @@
 
 -behaviour(gen_server).
 
-% TODO - check why it has so many binaries with high reference count
+% TODO VFS-3871 - check why it has so many binaries with high reference count
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
