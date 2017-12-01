@@ -16,6 +16,8 @@
 
 -behaviour(gen_server).
 
+% TODO VFS-3871 - check why it has so many binaries with high reference count
+
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -218,6 +220,14 @@ process_requests(State) ->
     {Requests, Queue2} = dequeue(Size, Queue, []),
     State3 = State2#state{requests_queue = Queue2},
     handle_requests(Requests, State3),
+
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, couchbase_pool_gc, on) of
+        on ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
     case queue:is_empty(Queue2) of
         true -> State3;
         false -> process_requests(State3)

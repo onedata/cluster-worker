@@ -91,8 +91,9 @@
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB
             {procs_num_analysis_treshold, 20000},
-            {min_analysis_interval_sek, 10},
+            {min_analysis_interval_sek, 60},
             {max_analysis_interval_min, 15},
+            {monitoring_log_file_max_size, 524288000}, % 500 MB
             %% Additional monitoring of erlang schedulers
             {schedulers_monitoring, 'false'},
             %% How long task should wait between function calls (when function execution ends with error)
