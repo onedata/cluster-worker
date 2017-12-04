@@ -33,7 +33,7 @@
 
 -endif.
 
--ifndef(skip_debug).
+-ifndef(skip_exometer).
 
 -define(init_counters(Counters), exometer_utils:init_counters(Counters)).
 -define(init_reports(Counters), exometer_utils:init_reports(Counters)).
