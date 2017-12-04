@@ -21,6 +21,7 @@
 -behaviour(gen_server).
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include("elements/node_manager/node_manager.hrl").
 -include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -51,18 +52,10 @@
     {{datastore_worker, init}, {datastore, cluster_initialized, []}}
 ]).
 
--define(EXOMETER_REPORTERS, [
-    {exometer_report_lager, ?MODULE},
-    {exometer_report_graphite, ?MODULE}
-]).
--define(EXOMETER_MODULES,
-    [couchbase_batch, couchbase_pool, caches_controller, node_manager,
-        datastore]).
-
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_reporter/1]).
+    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_counters/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -72,21 +65,15 @@
 
 -define(EXOMETER_COUNTERS,
     [processes_num, memory_erlang, memory_node, cpu_node]).
--define(EXOMETER_NAME(Param), [?MODULE, Param]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
--define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
-
--define(GRAPHITE_REPORTER_OPTS, [
-    graphite_api_key,
-    graphite_prefix,
-    graphite_host,
-    graphite_port,
-    graphite_connect_timeout
-]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+% TODO - dodac funkcje ktora inicjuje odpowiedni counter po tym jak zmieni sie
+% zmienna srodowiskowa
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -95,9 +82,12 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    lists:foreach(fun(Name) ->
-        init_counter(Name)
-    end, ?EXOMETER_COUNTERS).
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_node_manager_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), histogram, TimeSpan}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -106,26 +96,10 @@ init_counters() ->
 %%--------------------------------------------------------------------
 -spec init_report() -> ok.
 init_report() ->
-    lists:foreach(fun(Name) ->
-        init_report(Name)
-    end, ?EXOMETER_COUNTERS).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Initialize exometer reporter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_reporter(atom()) -> ok.
-init_reporter(exometer_report_lager) ->
-    Level = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_logging_level, debug),
-    ok = exometer_report:add_reporter(exometer_report_lager, [
-        {type_map,[{'_',integer}]},
-        {level, Level}
-    ]);
-init_reporter(exometer_report_graphite) ->
-    Opts = get_graphite_reporter_options(),
-    ok = exometer_report:add_reporter(exometer_report_graphite, Opts).
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -241,6 +215,7 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit, true),
     try
+        ?init_exometer_counters,
         ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
         ?info("Plugin initialised"),
@@ -275,7 +250,6 @@ init([]) ->
         erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         ?info("All checks performed"),
 
-        init_counters(),
         gen_server2:cast(self(), connect_to_cm),
 
         NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
@@ -383,7 +357,7 @@ handle_cast(check_exometer, State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
     erlang:send_after(Interval, self(), {timer, check_exometer}),
     spawn(fun() ->
-        init_exometer_reporters()
+        ?init_exometer_reporters
     end),
     {noreply, State};
 
@@ -629,7 +603,6 @@ cm_conn_ack(State) ->
 cluster_init_finished(State) ->
     ?info("Cluster sucessfully initialized"),
     init_workers(),
-    init_exometer_reporters(),
     State.
 
 %%--------------------------------------------------------------------
@@ -951,96 +924,3 @@ log_monitoring_stats(Format, Args) ->
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Checks if reporter is alive. If not, starts it and subscribe for reports.
-%% @end
-%%--------------------------------------------------------------------
--spec init_exometer_reporters() -> ok.
-init_exometer_reporters() ->
-    ExpectedReporters = ?EXOMETER_REPORTERS ++
-        plugins:apply(node_manager_plugin, exometer_reporters, []),
-    ReportersNames = lists:map(fun({Name, _Mod}) -> Name end, ExpectedReporters),
-    Find = lists:filtermap(fun({Reporter, Pid}) ->
-        case {lists:member(Reporter, ReportersNames), erlang:is_process_alive(Pid)} of
-            {true, true} -> {true, Reporter};
-            _ -> false
-        end
-    end, exometer_report:list_reporters()),
-
-    ToStart = ReportersNames -- Find,
-    lists:foreach(fun(Reporter) ->
-        Module = proplists:get_value(Reporter, ExpectedReporters),
-        exometer_report:remove_reporter(Reporter),
-        Module:init_reporter(Reporter)
-    end, ToStart),
-
-    case ToStart of
-        [] ->
-            ok;
-        _ ->
-            Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
-
-            lists:foreach(fun(Module) ->
-                Module:init_report()
-            end, ?EXOMETER_MODULES ++ Modules)
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes counter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_counter(Param :: atom()) -> ok.
-init_counter(Param) ->
-    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_node_manager_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
-    exometer:new(?EXOMETER_NAME(Param), histogram, [{time_span, TimeSpan}]).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Subscribe for reports for parameter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_report(Param :: atom()) -> ok.
-init_report(Param) ->
-    exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Param),
-        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
-            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
-
-    exometer_report:subscribe(exometer_report_graphite, ?EXOMETER_NAME(Param),
-        [min, max, median, mean, n], application:get_env(?CLUSTER_WORKER_APP_NAME,
-            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
-    ok.
-
-%%-------------------------------------------------------------------
-%% @private
-%% @doc
-%% Reads graphite_reporter options from app.config.
-%% @end
-%%-------------------------------------------------------------------
--spec get_graphite_reporter_options() -> proplists:proplist().
-get_graphite_reporter_options() ->
-    lists:foldl(fun(Opt, AccIn) ->
-        case application:get_env(?CLUSTER_WORKER_APP_NAME, Opt) of
-            {ok, Value} ->
-                [{strip_graphite_prefix(Opt), Value} | AccIn];
-            undefined -> AccIn
-        end
-    end, [], ?GRAPHITE_REPORTER_OPTS).
-
-%%-------------------------------------------------------------------
-%% @private
-%% @doc
-%% Strips "graphite_" prefix from option name.
-%% @end
-%%-------------------------------------------------------------------
--spec strip_graphite_prefix(atom()) -> atom().
-strip_graphite_prefix(Option) ->
-    <<"graphite_", OptionBin/binary>> = atom_to_binary(Option, latin1),
-    binary_to_atom(OptionBin, latin1).
-

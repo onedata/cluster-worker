@@ -13,6 +13,7 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 
 %% API
 -export([post_async/3, post/3, wait/1]).
@@ -40,8 +41,8 @@
 
 -export_type([mode/0, request/0, response/0, future/0]).
 
--define(EXOMETER_NAME(Bucket, Mode), [db_queue_size, Bucket, Mode]).
--define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+-define(EXOMETER_NAME(Bucket, Mode), ?exometer_name(?MODULE, Bucket, Mode)).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 
 %%%===================================================================
 %%% API
@@ -54,11 +55,14 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    lists:foreach(fun(Bucket) ->
-        lists:foreach(fun(Mode) ->
-            init_counter(Bucket, Mode)
-        end, get_modes())
-    end, couchbase_config:get_buckets()).
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_pool_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Counters = lists:foldl(fun(Bucket, Acc1) ->
+        lists:foldl(fun(Mode, Acc2) ->
+            [{?EXOMETER_NAME(Bucket, Mode), histogram, TimeSpan} | Acc2]
+        end, Acc1, get_modes())
+    end, [], couchbase_config:get_buckets()),
+    ?init_counters(Counters).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -67,11 +71,12 @@ init_counters() ->
 %%--------------------------------------------------------------------
 -spec init_report() -> ok.
 init_report() ->
-    lists:foreach(fun(Bucket) ->
-        lists:foreach(fun(Mode) ->
-            init_report(Bucket, Mode)
-        end, get_modes())
-    end, couchbase_config:get_buckets()).
+    Reports = lists:foldl(fun(Bucket, Acc1) ->
+        lists:foldl(fun(Mode, Acc2) ->
+            [{?EXOMETER_NAME(Bucket, Mode), [min, max, median, mean, n]} | Acc2]
+        end, Acc1, get_modes())
+    end, [], couchbase_config:get_buckets()),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -189,7 +194,7 @@ get_max_worker_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
         Key = {request_queue_size, Bucket, Mode, Id},
         ModeSize = ets:lookup_element(couchbase_pool_stats, Key, 2),
-        exometer:update(?EXOMETER_NAME(Bucket, Mode), ModeSize),
+        ?update_counter(?EXOMETER_NAME(Bucket, Mode), ModeSize),
         max(Size, ModeSize)
     end, 0, lists:seq(1, get_size(Bucket, Mode))).
 
@@ -238,34 +243,3 @@ get_next_worker_id(Bucket, Mode) ->
     Key = {next_worker_id, Bucket, Mode},
     Size = get_size(Bucket, Mode),
     ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 0}).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes exometer counter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_counter(Bucket :: atom(), Mode :: atom()) -> ok.
-init_counter(Bucket, Mode) ->
-    Name = ?EXOMETER_NAME(Bucket, Mode),
-    exometer:new(Name, histogram, [{time_span,
-        application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_pool_time_span, 600000)}]).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sets exometer report connected with particular counter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_report(Bucket :: atom(), Mode :: atom()) -> ok.
-init_report(Bucket, Mode) ->
-    Name = ?EXOMETER_NAME(Bucket, Mode),
-    exometer_report:subscribe(exometer_report_lager, Name,
-        [min, max, median, mean],
-        application:get_env(?CLUSTER_WORKER_APP_NAME,
-            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
-
-    exometer_report:subscribe(exometer_report_graphite, Name,
-        [min, max, median, mean],
-        application:get_env(?CLUSTER_WORKER_APP_NAME,
-            exometer_logging_interval, ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

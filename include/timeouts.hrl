@@ -5,7 +5,7 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
-%%% @doc dns listener starting & stopping
+%%% @doc Definitions of timeouts
 %%% @end
 %%%--------------------------------------------------------------------
 -author("Jakub Kudzia").

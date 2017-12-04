@@ -15,6 +15,7 @@
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
@@ -43,9 +44,10 @@
 
 -define(LEVEL_OVERRIDE(Level), [{level, Level}]).
 
--define(EXOMETER_NAME(Param), [throttling_stats, Param]).
+-define(EXOMETER_COUNTERS, [tp, db_queue]).
+
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
--define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
 
 %%%===================================================================
 %%% API
@@ -58,8 +60,12 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-  init_counter(tp),
-  init_counter(db_queue).
+  TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    exometer_throttling_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+  Counters = lists:map(fun(Name) ->
+    {?EXOMETER_NAME(Name), histogram, TimeSpan}
+  end, ?EXOMETER_COUNTERS),
+  ?init_counters(Counters).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,8 +74,10 @@ init_counters() ->
 %%--------------------------------------------------------------------
 -spec init_report() -> ok.
 init_report() ->
-  init_report(tp),
-  init_report(db_queue).
+  Reports = lists:map(fun(Name) ->
+    {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+  end, ?EXOMETER_COUNTERS),
+  ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -281,12 +289,12 @@ set_idle_time(ProcNum) ->
 -spec get_values_and_update_counters() -> [number()].
 get_values_and_update_counters() ->
   ProcNum = tp:get_processes_number(),
-  ok = exometer:update(?EXOMETER_NAME(tp), ProcNum),
+  ok = ?update_counter(?EXOMETER_NAME(tp), ProcNum),
 
   QueueSize = lists:foldl(fun(Bucket, Acc) ->
     couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
   end, 0, couchbase_config:get_buckets()),
-  ok = exometer:update(?EXOMETER_NAME(db_queue), QueueSize),
+  ok = ?update_counter(?EXOMETER_NAME(db_queue), QueueSize),
 
   MemoryUsage = case monitoring:get_memory_stats() of
     [{<<"mem">>, MemUsage}] ->
@@ -375,33 +383,3 @@ get_config_value(Name, Config, Defaults) ->
     Value ->
       Value
   end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes exometer counter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_counter(Name :: atom()) -> ok.
-init_counter(Name) ->
-  exometer:new(?EXOMETER_NAME(Name), histogram, [{time_span,
-    application:get_env(?CLUSTER_WORKER_APP_NAME,
-      exometer_throttling_time_span, ?EXOMETER_DEFAULT_TIME_SPAN)}]).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sets exometer report connected with particular counter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_report(Name :: atom()) -> ok.
-init_report(Name) ->
-  exometer_report:subscribe(exometer_report_lager, ?EXOMETER_NAME(Name),
-    [min, max, median, mean, n],
-    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval,
-      ?EXOMETER_DEFAULT_LOGGING_INTERVAL)),
-
-  exometer_report:subscribe(exometer_report_graphite, ?EXOMETER_NAME(Name),
-    [min, max, median, mean, n],
-    application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_logging_interval,
-      ?EXOMETER_DEFAULT_LOGGING_INTERVAL)).

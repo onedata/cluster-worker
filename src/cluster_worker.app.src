@@ -239,10 +239,23 @@
             %% ===================================================================
             %% EXOMETER
             %% ===================================================================
+
             % Interval between exometer reports
             {exometer_logging_interval, 15000},
             % Interval between checking if exometer reporters are alive
             {exometer_check_interval_seconds, 15000},
+            % List of exometer counters that should be off or atom 'all'
+            {excluded_exometer_counters, []},
+
+            {counter_name_prefixes, [comp, cluster_worker]},
+
+            % Should lager reporter be on
+            {exometer_lager_reporter, true},
+            % Logging level of lager reporter
+            {exometer_logging_level, debug},
+
+            % Should graphite reporter be active and namespaces used
+            {integrate_with_graphite, false},
             % address of graphite db
             {graphite_host, "172.17.0.2"},
             % graphite port

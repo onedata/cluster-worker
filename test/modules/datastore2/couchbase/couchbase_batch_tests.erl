@@ -57,9 +57,9 @@ couchbase_batch_verification_test_() ->
 check_timeout_should_return_ok_for_empty_list() ->
     ?assertEqual(ok, couchbase_batch:check_timeout([])),
 
-    ?assertEqual(undefined, get({[batch_stats, times], reset})),
-    ?assertEqual(undefined, get({[batch_stats, sizes], reset})),
-    ?assertEqual(undefined, get([batch_stats, sizes_config])).
+    ?assertEqual(undefined, get({[mod, couchbase_batch, times], reset})),
+    ?assertEqual(undefined, get({[mod, couchbase_batch, sizes], reset})),
+    ?assertEqual(undefined, get([mod, couchbase_batch, sizes_config])).
 
 check_timeout_should_return_ok_for_list_without_error() ->
     ?assertEqual(ok, couchbase_batch:check_timeout(
@@ -83,41 +83,41 @@ decrease_batch_size_should_change_size() ->
         couchbase_pool_batch_size, undefined)),
 
 
-    ?assertEqual(ok, get({[batch_stats, times], reset})),
-    ?assertEqual(ok, get({[batch_stats, sizes], reset})),
-    ?assertEqual([25], get([batch_stats, sizes_config])).
+    ?assertEqual(ok, get({[mod, couchbase_batch, times], reset})),
+    ?assertEqual(ok, get({[mod, couchbase_batch, sizes], reset})),
+    ?assertEqual([25], get([mod, couchbase_batch, sizes_config])).
 
 batch_size_should_be_increased() ->
-    put({[batch_stats, timeouts], [count]}, {ok, [{count, 0}]} ),
-    put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
+    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 0}]} ),
+    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(500, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
 batch_size_should_not_be_increased_for_timeout() ->
-    put({[batch_stats, timeouts], [count]}, {ok, [{count, 1}]} ),
-    put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
+    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 1}]} ),
+    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, timeout, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
 batch_size_should_not_be_increased_for_high_execution_time() ->
-    put({[batch_stats, timeouts], [count]}, {ok, [{count, 0}]} ),
-    put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 1500}, {max, 15000}, {n, 50}]}),
+    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 0}]} ),
+    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 1500}, {max, 15000}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
 batch_size_should_not_be_increased_over_max_batch_size() ->
-    put({[batch_stats, timeouts], [count]}, {ok, [{count, 0}]} ),
-    put({[batch_stats, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[batch_stats, times], [max, mean]}, {ok, [{mean, 150}, {max, 1500}, {n, 50}]}),
+    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 0}]} ),
+    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 150}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(2000, application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -143,17 +143,17 @@ setup() ->
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_durability_timeout, 60000),
 
-    meck:new(exometer),
-    meck:expect(exometer, reset,
+    meck:new(exometer_utils),
+    meck:expect(exometer_utils, reset,
         fun(Name) -> put({Name, reset}, ok) end),
-    meck:expect(exometer, update,
+    meck:expect(exometer_utils, update_counter,
         fun(Name, Value) -> add_to_list(Name, Value), ok end),
-    meck:expect(exometer, get_value,
+    meck:expect(exometer_utils, get_value,
         fun(Name, Value) -> get({Name, Value}) end),
     ok.
 
 cleanup(_) ->
-    meck:unload(exometer),
+    meck:unload(exometer_utils),
     ok.
 
 %%%===================================================================
