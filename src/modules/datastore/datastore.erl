@@ -127,7 +127,7 @@ init_counters() ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
     Counters = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), counter, TimeSpan}
+        {?EXOMETER_NAME(Name), counter}
     end, ?EXOMETER_COUNTERS),
     Counters2 = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), histogram, TimeSpan}
