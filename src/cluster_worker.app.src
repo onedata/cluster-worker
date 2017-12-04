@@ -245,6 +245,8 @@
             % Interval between checking if exometer reporters are alive
             {exometer_check_interval_seconds, 15000},
             % List of exometer counters that should be off or atom 'all'
+            % e.g., [[mod, datastore, save_time]]
+            % to apply - use exometer_utils:init_exometer_counters()
             {excluded_exometer_counters, []},
 
             {counter_name_prefixes, [comp, cluster_worker]},

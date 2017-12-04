@@ -51,7 +51,8 @@ init_counters() ->
     Counters = [
         {?EXOMETER_NAME(times), histogram, TimeSpan},
         {?EXOMETER_NAME(sizes), histogram, TimeSpan},
-        {?EXOMETER_NAME(timeouts), spiral, TimeSpan2}
+        {?EXOMETER_NAME(timeouts), spiral, TimeSpan2},
+        {?EXOMETER_NAME(timeouts_history), counter, TimeSpan2}
     ],
     exometer_utils:init_counters(Counters),
 
@@ -73,7 +74,8 @@ init_report() ->
         {?EXOMETER_NAME(times), HistogramReport},
         {?EXOMETER_NAME(sizes), HistogramReport},
         {?EXOMETER_NAME(sizes_config), HistogramReport},
-        {?EXOMETER_NAME(timeouts), [count]}
+        {?EXOMETER_NAME(timeouts), [count]},
+        {?EXOMETER_NAME(timeouts_history), [count]}
     ],
     ?init_reports(Reports).
 
@@ -125,7 +127,8 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 
         case Check of
             timeout ->
-                ok = exometer_utils:update_counter(?EXOMETER_NAME(timeouts), 1);
+                ok = exometer_utils:update_counter(?EXOMETER_NAME(timeouts)),
+                ok = ?update_counter(?EXOMETER_NAME(timeouts_history));
             _ ->
                 ok = exometer_utils:update_counter(?EXOMETER_NAME(times),
                     round(lists:max(Times)/1000))

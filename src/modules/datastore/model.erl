@@ -11,6 +11,7 @@
 -module(model).
 -author("Michal Wrzeszcz").
 
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_engine.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
@@ -22,6 +23,9 @@
 -export([create_datastore_context/3, create_datastore_context/4, is_link_op/1,
   execute/3, execute_with_default_context/3, execute_with_default_context/4,
   make_memory_ctx/2, make_disk_ctx/1, make_disk_ctx/3, validate_model_config/1]).
+
+-define(EXOMETER_NAME(Param), ?exometer_name(datastore,
+  list_to_atom(atom_to_list(Param) ++ "_time"))).
 
 %%%===================================================================
 %%% API
@@ -84,7 +88,10 @@ create_datastore_context(Method, Args, TargetMod, DefaultsOverride) ->
 -spec execute(datastore:ctx(), Fun :: atom(), [term()]) ->
   term().
 execute(Context, Fun, Args) ->
-  apply(datastore, Fun, [Context | Args]).
+  {Time, Ans} = timer:tc(erlang, apply,
+    [datastore, Fun, [Context | Args]]),
+  ?update_counter(?EXOMETER_NAME(Fun), Time),
+  Ans.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -108,7 +115,10 @@ execute_with_default_context(Model, Fun, Args) ->
 execute_with_default_context(#model_config{} = Model, Fun, Args,
     DefaultsOverride) ->
   Context = create_datastore_context(Fun, Args, Model, DefaultsOverride),
-  execute(Context, Fun, set_version(Args, Model));
+  {Time, Ans} = timer:tc(erlang, apply,
+    [datastore, Fun, [Context | set_version(Args, Model)]]),
+  ?update_counter(?EXOMETER_NAME(Fun), Time),
+  Ans;
 execute_with_default_context(Model, Fun, Args, DefaultsOverride) ->
   execute_with_default_context(Model:model_init(), Fun, Args, DefaultsOverride).
 

@@ -93,6 +93,10 @@
     [cache_get, cache_fetch, cache_save, cache_flush,
         save, update, create, create_or_update, get, delete, exists, add_links,
         set_links, create_link, delete_links, fetch_link, foreach_link]).
+-define(EXOMETER_HISTOGRAM_COUNTERS,
+    [save_time, update_time, create_time, create_or_update_time, get_time,
+        delete_time, exists_time, add_links_time, set_links_time,
+        create_link_time, delete_links_time, fetch_link_time, foreach_link_time]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 
@@ -123,9 +127,12 @@ init_counters() ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
     Counters = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), spiral, TimeSpan}
+        {?EXOMETER_NAME(Name), counter, TimeSpan}
     end, ?EXOMETER_COUNTERS),
-    ?init_counters(Counters).
+    Counters2 = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), histogram, TimeSpan}
+    end, ?EXOMETER_HISTOGRAM_COUNTERS),
+    ?init_counters(Counters ++ Counters2).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -137,7 +144,10 @@ init_report() ->
     Reports = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), [count]}
     end, ?EXOMETER_COUNTERS),
-    ?init_reports(Reports).
+    Reports2 = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+    end, ?EXOMETER_HISTOGRAM_COUNTERS),
+    ?init_reports(Reports ++ Reports2).
 
 %%--------------------------------------------------------------------
 %% @doc

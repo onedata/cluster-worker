@@ -16,7 +16,7 @@
 %% API
 -export([init_counters/1, update_counter/1, update_counter/2, init_reports/1,
   init_reports/2, init_exometer_counters/0, init_exometer_reporters/0,
-  init_reporter/1, get_value/2, reset/1]).
+  init_exometer_reporters/1, init_reporter/1, get_value/2, reset/1]).
 
 -define(EXOMETER_REPORTERS, [
   {exometer_report_lager, ?MODULE},
@@ -147,8 +147,7 @@ init_exometer_counters() ->
   lists:foreach(fun(Module) ->
     Module:init_counters()
   end, ?EXOMETER_MODULES ++ Modules),
-
-  init_exometer_reporters().
+  init_exometer_reports().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -157,6 +156,15 @@ init_exometer_counters() ->
 %%--------------------------------------------------------------------
 -spec init_exometer_reporters() -> ok.
 init_exometer_reporters() ->
+  init_exometer_reporters(true).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if reporter is alive. If not, starts it and subscribe for reports.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_exometer_reporters(InitReports :: boolean()) -> ok.
+init_exometer_reporters(InitReports) ->
   GraphiteOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
     integrate_with_graphite, false),
   ExpectedReporters0 = case GraphiteOn of
@@ -188,16 +196,27 @@ init_exometer_reporters() ->
     Module:init_reporter(Reporter)
   end, ToStart),
 
-  case ToStart of
-    [] ->
+  case {ToStart, InitReports} of
+    {[], _} ->
       ok;
+    {_, true} ->
+      init_exometer_reports();
     _ ->
-      Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
-
-      lists:foreach(fun(Module) ->
-        Module:init_report()
-      end, ?EXOMETER_MODULES ++ Modules)
+      ok
   end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if reporter is alive. If not, starts it and subscribe for reports.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_exometer_reports() -> ok.
+init_exometer_reports() ->
+  Modules = plugins:apply(node_manager_plugin, modules_with_exometer, []),
+
+  lists:foreach(fun(Module) ->
+    Module:init_report()
+  end, ?EXOMETER_MODULES ++ Modules).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -233,7 +252,7 @@ init_counter(Param, Type, TimeSpan) ->
     true ->
       exometer:delete(extend_counter_name(Param));
     _ ->
-      exometer:new(extend_counter_name(Param), Type,
+      catch exometer:new(extend_counter_name(Param), Type,
         [{time_span, TimeSpan}])
   end,
   ok.

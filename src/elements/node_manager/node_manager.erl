@@ -215,6 +215,7 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit, true),
     try
+        ?init_exometer_reporters(false),
         ?init_exometer_counters,
         ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
