@@ -52,6 +52,9 @@ init_counters([]) ->
   ok;
 init_counters([{Param, Type, TimeSpan} | Tail]) ->
   init_counter(Param, Type, TimeSpan),
+  init_counters(Tail);
+init_counters([{Param, Type} | Tail]) ->
+  init_counter(Param, Type),
   init_counters(Tail).
 
 %%--------------------------------------------------------------------
@@ -255,6 +258,22 @@ init_counter(Param, Type, TimeSpan) ->
     _ ->
       catch exometer:new(extend_counter_name(Param), Type,
         [{time_span, TimeSpan}])
+  end,
+  ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes exometer counter if it is not at excluded list.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counter(Param :: list(), Type :: atom()) -> ok.
+init_counter(Param, Type) ->
+  case is_counter_excluded(Param) of
+    true ->
+      exometer:delete(extend_counter_name(Param));
+    _ ->
+      catch exometer:new(extend_counter_name(Param), Type)
   end,
   ok.
 
