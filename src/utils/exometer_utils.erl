@@ -89,11 +89,12 @@ update_counter(Param, Value) ->
 %% Gets exometer counter if it is not at excluded list.
 %% @end
 %%--------------------------------------------------------------------
--spec get_value(Param :: list(), Types :: [atom()]) -> list().
+-spec get_value(Param :: list(), Types :: [atom()]) ->
+  {ok, any()} | {error, not_found}.
 get_value(Param, Types) ->
   case is_counter_excluded(Param) of
     true ->
-      [];
+      {ok, []};
     _ ->
       exometer:get_value(extend_counter_name(Param), Types)
   end.
