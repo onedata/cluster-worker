@@ -169,7 +169,8 @@ get_or_create_tp_server(Module, Args, Key) ->
 -spec create_tp_server(module(), args(), key()) ->
     {ok, server()} | {error, Reason :: term()}.
 create_tp_server(Module, Args, Key) ->
-    case supervisor:start_child(?TP_ROUTER_SUP, [Module, Args, Key]) of
+    SupName = datastore_multiplier:extend_name(Key, ?TP_ROUTER_SUP),
+    case supervisor:start_child(SupName, [Module, Args, Key]) of
         {ok, undefined} -> get_or_create_tp_server(Module, Args, Key);
         {ok, Pid} -> {ok, Pid};
         {error, Reason} -> {error, Reason}

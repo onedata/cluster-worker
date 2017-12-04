@@ -738,10 +738,16 @@ init_drivers(Configs, _NodeToSync) ->
     catch ets:new(?CHANGES_COUNTERS, [named_table, public, set]),
     lists:foreach(
         fun(Config)->
-            ok = apply(?LOCAL_SLAVE_DRIVER, init,
-                [model:make_memory_ctx(Config, true), []]),
-            ok = apply(?GLOBAL_SLAVE_DRIVER, init,
-                [model:make_memory_ctx(Config, false), []])
+            LocalCtx = model:make_memory_ctx(Config, true),
+            GlobalCtx = model:make_memory_ctx(Config, false),
+
+            lists:foreach(fun(Config2) ->
+                ok = apply(?LOCAL_SLAVE_DRIVER, init, [Config2, []])
+            end, datastore_multiplier:get_names(LocalCtx)),
+
+            lists:foreach(fun(Config2) ->
+                ok = apply(?GLOBAL_SLAVE_DRIVER, init, [Config2, []])
+            end, datastore_multiplier:get_names(GlobalCtx))
         end, Configs).
 
 %%--------------------------------------------------------------------

@@ -14,6 +14,7 @@
 
 -include("modules/datastore/datastore.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
+-include("global_definitions.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
@@ -265,7 +266,7 @@ save_should_overwrite_value_in_memory(Config) ->
     ),
     Key1 = ?KEY(1),
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key1)]
+        [disc1, ?CACHE_KEY(Key1)]
     )),
     ?assertMatch({ok, memory, #document{}},
         rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC(2)])
@@ -284,7 +285,7 @@ save_should_not_overwrite_value_in_memory(Config) ->
     ),
     Key1 = ?KEY(1),
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key1)]
+        [disc1, ?CACHE_KEY(Key1)]
     )),
     ?assertMatch({ok, memory, #document{}},
         rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC(2)])
@@ -334,7 +335,7 @@ parallel_save_should_not_overflow_cache_size(Config) ->
         case rpc:call(Worker, datastore_cache, save, [?CTX, Doc]) of
             {ok, memory, #document{}} ->
                 ?assertEqual(true, rpc:call(Worker, datastore_cache_manager,
-                    mark_inactive, [disc, ?CACHE_KEY(Key)]
+                    mark_inactive, [disc1, ?CACHE_KEY(Key)]
                 )),
                 ok;
             {ok, disc, #document{}} ->
@@ -343,7 +344,7 @@ parallel_save_should_not_overflow_cache_size(Config) ->
     end, [?DOC(N) || N <- lists:seq(1, ThrNum)]),
     ?assert(lists:all(fun(Result) -> Result =:= ok end, Results)),
     ?assertEqual(cache_size(?FUNCTION_NAME), rpc:call(Worker,
-        datastore_cache_manager, get_size, [disc])),
+        datastore_cache_manager, get_size, [disc1])),
     ?assertEqual(cache_size(?FUNCTION_NAME), length(rpc:call(Worker,
         ets, tab2list, [?FUNCTION_NAME]))).
 
@@ -408,20 +409,20 @@ flush_should_return_missing_error(Config) ->
 mark_active_should_activate_new_entry(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_active,
-        [disc, ?CTX, ?KEY]
+        [disc1, ?CTX, ?KEY]
     )).
 
 mark_active_should_fail_on_full_cache(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(false, rpc:call(Worker, datastore_cache_manager, mark_active,
-        [disc, ?CTX, ?KEY]
+        [disc1, ?CTX, ?KEY]
     )).
 
 mark_active_should_ignore_active_entry(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC]),
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_active,
-        [disc, ?CTX, ?KEY]
+        [disc1, ?CTX, ?KEY]
     )).
 
 mark_inactive_should_deactivate_active_entry(Config) ->
@@ -429,7 +430,7 @@ mark_inactive_should_deactivate_active_entry(Config) ->
     rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC]),
     Key = ?KEY,
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key)]
+        [disc1, ?CACHE_KEY(Key)]
     )).
 
 mark_inactive_should_deactivate_deleted_entry(Config) ->
@@ -439,7 +440,7 @@ mark_inactive_should_deactivate_deleted_entry(Config) ->
     ]),
     Key = ?KEY,
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [memory, ?CACHE_KEY(Key)]
+        [memory1, ?CACHE_KEY(Key)]
     )).
 
 mark_inactive_should_not_deactivate_not_deleted_entry(Config) ->
@@ -447,27 +448,27 @@ mark_inactive_should_not_deactivate_not_deleted_entry(Config) ->
     rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC]),
     Key = ?KEY,
     ?assertEqual(false, rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [memory, ?CACHE_KEY(Key)]
+        [memory1, ?CACHE_KEY(Key)]
     )).
 
 mark_inactive_should_ignore_not_active_entry(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Key = ?KEY,
     ?assertEqual(false, rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key)]
+        [disc1, ?CACHE_KEY(Key)]
     )).
 
 mark_inactive_should_enable_entries_removal(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ok = rpc:call(Worker, erlang, apply, [fun(Ctx, Docs) ->
+    ?assertEqual(ok, rpc:call(Worker, erlang, apply, [fun(Ctx, Docs) ->
         lists:foreach(fun(Doc) ->
             ?assertMatch({ok, memory, _}, datastore_cache:save(Ctx, Doc))
         end, Docs),
         ?assertEqual(true, datastore_cache:inactivate(Ctx))
-    end, [?CTX, [?DOC(1), ?DOC(2), ?DOC(3)]]]),
+    end, [?CTX, [?DOC(1), ?DOC(2), ?DOC(3)]]])),
     lists:foreach(fun(N) ->
         ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_active,
-            [disc, ?CTX, ?KEY(N)]
+            [disc1, ?CTX, ?KEY(N)]
         ))
     end, lists:seq(4, 6)),
     lists:foreach(fun(N) ->
@@ -481,10 +482,10 @@ mark_active_should_reactivate_inactive_entry(Config) ->
     rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC]),
     Key = ?KEY,
     rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key)]
+        [disc1, ?CACHE_KEY(Key)]
     ),
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_active,
-        [disc, ?CTX, ?KEY]
+        [disc1, ?CTX, ?KEY]
     )).
 
 mark_active_should_remove_inactive_entry(Config) ->
@@ -492,10 +493,10 @@ mark_active_should_remove_inactive_entry(Config) ->
     rpc:call(Worker, datastore_cache, save, [?CTX, ?DOC(1)]),
     Key1 = ?KEY(1),
     rpc:call(Worker, datastore_cache_manager, mark_inactive,
-        [disc, ?CACHE_KEY(Key1)]
+        [disc1, ?CACHE_KEY(Key1)]
     ),
     ?assertEqual(true, rpc:call(Worker, datastore_cache_manager, mark_active,
-        [disc, ?CTX, ?KEY(2)]
+        [disc1, ?CTX, ?KEY(2)]
     )),
     ?assertEqual({error, key_enoent},
         rpc:call(Worker, datastore_cache, get, [?CTX, ?KEY(1)])
@@ -511,8 +512,8 @@ init_per_testcase(Case, Config) ->
         ?MEM_DRV:init(#{table => Case}, []),
         receive _ -> ok end
     end),
-    rpc:call(Worker, datastore_cache_manager, reset, [memory, cache_size(Case)]),
-    rpc:call(Worker, datastore_cache_manager, reset, [disc, cache_size(Case)]),
+    rpc:call(Worker, datastore_cache_manager, reset, [memory1, cache_size(Case)]),
+    rpc:call(Worker, datastore_cache_manager, reset, [disc1, cache_size(Case)]),
     test_utils:mock_new(Worker, ?MODEL, [passthrough, non_strict]),
     test_utils:mock_expect(Worker, ?MODEL, model_init, fun() ->
         #model_config{version = 1}
@@ -520,6 +521,8 @@ init_per_testcase(Case, Config) ->
     test_utils:mock_expect(Worker, ?MODEL, record_struct, fun(1) ->
         {record, [{field, string}]}
     end),
+
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME, tp_subtrees_number, 1),
     Config.
 
 end_per_testcase(_Case, Config) ->

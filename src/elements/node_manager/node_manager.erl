@@ -36,8 +36,8 @@
         {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
     ]},
     {early_init, tp_router, [
-        {supervisor_flags, tp_router:supervisor_flags()},
-        {supervisor_children_spec, tp_router:supervisor_children_spec()}
+        {supervisor_flags, tp_router:main_supervisor_flags()},
+        {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
     ]},
     {dns_worker, []}
 ]).
@@ -840,23 +840,66 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                 ]),
 
                 Procs = erlang:processes(),
-                SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) ->
-                    {erlang:process_info(P, memory), P} end, Procs))),
-                MergedStacksMap = lists:foldl(fun(P, Map) ->
-                    case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
+
+                % Gather processes info
+                ExtendedProcs = lists:map(fun(P) ->
+                    {P, erlang:process_info(P),
+                        erlang:process_info(P, current_stacktrace),
+                        erlang:process_info(P, memory),
+                        erlang:process_info(P, binary)}
+                end, Procs),
+
+                % Sort by memory usage
+                SortedProcs = lists:reverse(lists:sort(lists:map(fun({P, PI, CS, M, _}) ->
+                    {M, P, PI, CS} end, ExtendedProcs))),
+
+                % Sort by binary memory usage
+                SortedProcsBin = lists:reverse(lists:sort(lists:map(fun({P, PI, CS, _, Bin}) ->
+                    case Bin of
+                        {binary, BinList} ->
+                            M = get_binary_size(BinList),
+                            {M, P, PI, CS, Bin};
+                        _ ->
+                            {0, P, PI, CS, Bin}
+                    end
+                end, ExtendedProcs))),
+
+                % Merge processes with similar stacktrace and find groups
+                % that use a lot of memory
+                MergedStacksMap = lists:foldl(fun({_, _, CS, PMem, _}, Map) ->
+                    case {CS, PMem} of
                         {{current_stacktrace, K}, {memory, M}} ->
                             {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
                             maps:put(K, {M + M2, Num + 1, K}, Map);
                         _ ->
                             Map
                     end
-                end, #{}, Procs),
+                end, #{}, ExtendedProcs),
                 MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
 
                 MergedStacksMap2 = maps:map(fun(K, {M, N, K}) ->
                     {N, M, K} end, MergedStacksMap),
                 MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
 
+                % Merge processes with similar stacktrace and find groups
+                % that use a lot of memory to store binaries
+                MergedStacksBinMap = lists:foldl(fun({_, _, CS, _, Bin}, Map) ->
+                    case {CS, Bin} of
+                        {{current_stacktrace, K}, {binary, BinList}} ->
+                            M = get_binary_size(BinList),
+                            {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
+                            maps:put(K, {M + M2, Num + 1, K}, Map);
+                        _ ->
+                            Map
+                    end
+                end, #{}, ExtendedProcs),
+                MergedStacksBin = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksBinMap))), 5),
+
+                MergedStacksBinMap2 = maps:map(fun(K, {M, N, K}) ->
+                    {N, M, K} end, MergedStacksBinMap),
+                MergedStacksBin2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksBinMap2))), 5),
+
+                % Get names of processes if defined and log
                 GetName = fun(P) ->
                     All = erlang:registered(),
                     lists:foldl(fun(Name, Acc) ->
@@ -870,16 +913,26 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                 end,
 
                 TopProcesses = lists:map(
-                    fun({M, P}) ->
-                        {M, erlang:process_info(P, current_stacktrace), erlang:process_info(P, message_queue_len),
-                            erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
-                            erlang:process_info(P, total_heap_size), P, GetName(P)}
+                    fun({M, P, PI, CS}) ->
+                        {M, CS, PI, P, GetName(P)}
                     end, lists:sublist(SortedProcs, 5)),
-                log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
-                "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
-                    TopProcesses, MergedStacks, MergedStacks2
+
+                TopProcessesBin = lists:map(
+                    fun({M, P, PI, CS, Bin}) ->
+                        {M, CS, PI, Bin, P, GetName(P)}
+                    end, lists:sublist(SortedProcsBin, 5)),
+
+                log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
+                "single proc memory cosumption (binary): ~p~n"
+                "aggregated memory consumption: ~p~n"
+                "simmilar procs: ~p~n"
+                "aggregated memory consumption (binary): ~p~n"
+                "simmilar procs (binary): ~p", [
+                    length(Procs), TopProcesses, TopProcessesBin, MergedStacks,
+                    MergedStacks2, MergedStacksBin, MergedStacksBin2
                 ]),
 
+                % Log schedulers info
                 log_monitoring_stats("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
                 NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
@@ -912,6 +965,18 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Returns sum of sizes of binaries listed by process_info.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_binary_size(list()) -> non_neg_integer().
+get_binary_size(BinList) ->
+    lists:foldl(fun({_, S, _}, Acc) ->
+        S + Acc
+    end, 0, BinList).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Analyse monitoring state and log result.
 %% @end
 %%--------------------------------------------------------------------
@@ -922,6 +987,19 @@ log_monitoring_stats(Format, Args) ->
         lager_util:localtime_ms(Now))),
     LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
         "/tmp/node_manager_monitoring.log"),
+    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        monitoring_log_file_max_size, 524288000), % 500 MB
+
+    case filelib:file_size(LogFile) > MaxSize of
+       true ->
+           LogFile2 = LogFile ++ ".1",
+           file:delete(LogFile2),
+           file:rename(LogFile, LogFile2),
+           ok;
+        _ ->
+           ok
+    end,
+
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.

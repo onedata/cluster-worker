@@ -52,7 +52,7 @@
 
             %% Number of tp processes to reduce tp process idle time
             {throttling_reduce_idle_time_memory_proc_number, 1000},
-            {throttling_min_idle_time_memory_proc_number, 30000},
+            {throttling_min_idle_time_memory_proc_number, 10000},
             %% Interval of throttling configuration when throttling is used
             {throttling_active_check_interval_seconds, 1},
             %% Interval of throttling configuration
@@ -75,11 +75,26 @@
                 ]}
             ]},
 
+            % Number of tp subtrees
+            % (tree of tp_servers is divided into several subtrees)
+            {tp_subtrees_number, 10},
+            % Enable memory store driver hub (calls to many connected documents
+            % are handled by single tp process)
+            {use_msd_hub, true},
+            % Size of tp key space (0 - unlimited)
+            {msd_hub_space_size, 0},
+
+            % Interval between exometer reports
+            {exometer_logging_interval, 15000},
+            % Interval between checking if exometer reporters are alive
+            {exometer_check_interval_seconds, 15000},
+
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB
             {procs_num_analysis_treshold, 20000},
-            {min_analysis_interval_sek, 10},
+            {min_analysis_interval_sek, 60},
             {max_analysis_interval_min, 15},
+            {monitoring_log_file_max_size, 524288000}, % 500 MB
             %% Additional monitoring of erlang schedulers
             {schedulers_monitoring, 'false'},
             %% How long task should wait between function calls (when function execution ends with error)
