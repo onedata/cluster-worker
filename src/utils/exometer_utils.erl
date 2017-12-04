@@ -16,7 +16,8 @@
 %% API
 -export([init_counters/1, update_counter/1, update_counter/2, init_reports/1,
   init_reports/2, init_exometer_counters/0, init_exometer_reporters/0,
-  init_exometer_reporters/1, init_reporter/1, get_value/2, reset/1]).
+  init_exometer_reporters/1, init_reporter/1, get_value/2, reset/1,
+  extend_counter_name/1]).
 
 -define(EXOMETER_REPORTERS, [
   {exometer_report_lager, ?MODULE},
@@ -47,7 +48,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec init_counters([{Param :: list(), Type :: atom(),
-    TimeSpan :: non_neg_integer()}]) -> ok.
+    TimeSpan :: non_neg_integer()} | {Param :: list(), Type :: atom()}]) -> ok.
 init_counters([]) ->
   ok;
 init_counters([{Param, Type, TimeSpan} | Tail]) ->
@@ -239,6 +240,17 @@ init_reporter(exometer_report_graphite) ->
   Opts = get_graphite_reporter_options(),
   ok = exometer_report:add_reporter(exometer_report_graphite, Opts).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Extends counter name with prefix.
+%% @end
+%%--------------------------------------------------------------------
+-spec extend_counter_name(Param :: list()) -> list().
+extend_counter_name(Name) ->
+  Prefixes = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    counter_name_prefixes, []),
+  Prefixes ++ Name.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -353,15 +365,3 @@ is_counter_excluded(Param) ->
   Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
     excluded_exometer_counters, []),
   Excluded =:= all orelse lists:member(Param, Excluded).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Extends counter name with prefix.
-%% @end
-%%--------------------------------------------------------------------
--spec extend_counter_name(Param :: list()) -> list().
-extend_counter_name(Name) ->
-  Prefixes = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    counter_name_prefixes, []),
-  Prefixes ++ Name.
