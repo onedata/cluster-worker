@@ -16,7 +16,7 @@
 %%% Macros that allows disabling exometer
 %%%===================================================================
 
-%-define(skip_exometer, 1).
+-define(skip_exometer, 1).
 
 -ifdef(skip_exometer).
 
