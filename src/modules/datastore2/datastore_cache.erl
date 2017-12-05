@@ -19,6 +19,7 @@
 -module(datastore_cache).
 -author("Krzysztof Trzepla").
 
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 
 %% API
@@ -56,6 +57,8 @@
     value = Value
 }).
 
+-define(EXOMETER_NAME(Param), [datastore_opts_num, Param]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -70,6 +73,7 @@
 get(Ctx, <<_/binary>> = Key) ->
     hd(get(Ctx, [Key]));
 get(Ctx, Keys) when is_list(Keys) ->
+    ?update_counter(?EXOMETER_NAME(cache_get), length(Keys)),
     lists:map(fun
         ({ok, memory, Value}) -> {ok, Value};
         ({error, Reason}) -> {error, Reason}
@@ -88,6 +92,7 @@ get(Ctx, Keys) when is_list(Keys) ->
 fetch(Ctx, <<_/binary>> = Key) ->
     hd(fetch(Ctx, [Key]));
 fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
+    ?update_counter(?EXOMETER_NAME(cache_fetch), length(Keys)),
     Futures = lists:map(fun
         ({_Key, {ok, memory, Value}}) ->
             ?FUTURE(memory, MemoryDriver, {ok, Value});
@@ -118,6 +123,7 @@ fetch(#{memory_driver := MemoryDriver} = Ctx, Keys) when is_list(Keys) ->
 save(Ctx, #document{} = Value) ->
     hd(save(Ctx, [Value]));
 save(Ctx, Values) when is_list(Values) ->
+    ?update_counter(?EXOMETER_NAME(cache_save), length(Values)),
     lists:map(fun
         ({error, {enomem, _Value}}) -> {error, enomem};
         (Other) -> Other
@@ -166,6 +172,7 @@ update(Ctx, Updates) when is_list(Updates) ->
 %%--------------------------------------------------------------------
 -spec flush([{key(), ctx()}]) -> [{ok, value()} | {error, term()}].
 flush(List) ->
+    ?update_counter(?EXOMETER_NAME(cache_flush), length(List)),
     Futures = [flush_async(Ctx, Key) || {Key, Ctx} <- List],
     lists:map(fun
         ({ok, disc, Value}) -> {ok, Value};
@@ -182,6 +189,7 @@ flush(List) ->
 flush(Ctx, <<_/binary>> = Key) ->
     hd(flush(Ctx, [Key]));
 flush(Ctx, Keys) when is_list(Keys) ->
+    ?update_counter(?EXOMETER_NAME(cache_flush), length(Keys)),
     lists:map(fun
         ({ok, disc, Value}) -> {ok, Value};
         ({error, Reason}) -> {error, Reason}

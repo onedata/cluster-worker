@@ -11,6 +11,7 @@
 -module(datastore).
 -author("Rafal Slota").
 
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models_def.hrl").
 -include("modules/datastore/datastore_common.hrl").
 -include("modules/datastore/datastore_common_internal.hrl").
@@ -88,6 +89,17 @@
 
 -define(LISTING_ROOT, <<"listing_root">>).
 
+-define(EXOMETER_COUNTERS,
+    [cache_get, cache_fetch, cache_save, cache_flush,
+        save, update, create, create_or_update, get, delete, exists, add_links,
+        set_links, create_link, delete_links, fetch_link, foreach_link]).
+-define(EXOMETER_HISTOGRAM_COUNTERS,
+    [save_time, update_time, create_time, create_or_update_time, get_time,
+        delete_time, exists_time, add_links_time, set_links_time,
+        create_link_time, delete_links_time, fetch_link_time, foreach_link_time]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+
 %% API
 -export([save/2, update/3, create/2, create_or_update/3,
     get/2, list/3, list_keys/3, del_list_info/3,
@@ -99,10 +111,43 @@
     initialize_state/1, check_and_initialize_state/2]).
 -export([normalize_link_target/2]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
+-export([init_counters/0, init_report/0]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), counter}
+    end, ?EXOMETER_COUNTERS),
+    Counters2 = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), histogram, TimeSpan}
+    end, ?EXOMETER_HISTOGRAM_COUNTERS),
+    ?init_counters(Counters ++ Counters2).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [count]}
+    end, ?EXOMETER_COUNTERS),
+    Reports2 = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+    end, ?EXOMETER_HISTOGRAM_COUNTERS),
+    ?init_reports(Reports ++ Reports2).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -801,6 +846,7 @@ cluster_initialized() ->
 -spec exec_driver(ctx(), Method :: store_driver_behaviour:driver_action(),
     [term()]) -> ok | {ok, term()} | generic_error().
 exec_driver(#{driver := Driver} = Ctx, Method, Args) ->
+    ?update_counter(?EXOMETER_NAME(Method), 1),
     Return =
         case run_prehooks(Ctx, Method, Args) of
             ok ->

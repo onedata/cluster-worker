@@ -1,0 +1,66 @@
+%%%-------------------------------------------------------------------
+%%% @author Michal Wrzeszcz
+%%% @copyright (C) 2013 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
+%%% @end
+%%%-------------------------------------------------------------------
+%%% @doc
+%%%
+%%% @end
+%%%-------------------------------------------------------------------
+-ifndef(EXOMETER_UTILS_HRL).
+-define(EXOMETER_UTILS_HRL, 1).
+
+%%%===================================================================
+%%% Macros that allows disabling exometer
+%%%===================================================================
+
+%-define(skip_exometer, 1).
+
+-ifdef(skip_exometer).
+
+-define(init_counters(_Counters), ok).
+-define(init_reports(_Reports), ok).
+-define(init_reports(_Reports, _Reporters), ok).
+-define(update_counter(_Param), ok).
+-define(update_counter(_Param, _Value), ok).
+-define(get_value(_Param, _Type), ok).
+-define(reset(_Param), ok).
+-define(init_exometer_reporters, ok).
+-define(init_exometer_reporters(_InitReports), ok).
+-define(init_exometer_counters, ok).
+
+-endif.
+
+-ifndef(skip_exometer).
+
+-define(init_counters(Counters), exometer_utils:init_counters(Counters)).
+-define(init_reports(Counters), exometer_utils:init_reports(Counters)).
+-define(init_reports(Reports, Reporters),
+  exometer_utils:init_reports(Reports, Reporters)).
+-define(update_counter(Param), exometer_utils:update_counter(Param)).
+-define(update_counter(Param, Value),
+  exometer_utils:update_counter(Param, Value)).
+-define(get_value(Param, Type), exometer_utils:get_value(Param, Type)).
+-define(reset(Param), exometer_utils:reset(Param)).
+-define(init_exometer_reporters, exometer_utils:init_exometer_reporters()).
+-define(init_exometer_reporters(InitReports),
+  exometer_utils:init_exometer_reporters(InitReports)).
+-define(init_exometer_counters, exometer_utils:init_exometer_counters()).
+
+-endif.
+
+%%%===================================================================
+%%% Macros for creation exometer counters' names
+%%%===================================================================
+
+-define(exometer_name(Module, Name), [mod, Module, Name]).
+
+-define(exometer_name(Module, Submodule, Name),
+  [mod, Module, submod, Submodule, Name]).
+
+-define(exometer_name(Module, Submodule, Thread, Name),
+  [thread, Thread, mod, Module, submod, Submodule, Name]).
+
+-endif.
