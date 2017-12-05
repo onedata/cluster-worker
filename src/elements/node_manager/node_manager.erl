@@ -72,9 +72,6 @@
 %%% API
 %%%===================================================================
 
-% TODO - dodac funkcje ktora inicjuje odpowiedni counter po tym jak zmieni sie
-% zmienna srodowiskowa
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Initializes all counters.
