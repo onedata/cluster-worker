@@ -29,7 +29,6 @@
 -define(reset(_Param), ok).
 -define(init_exometer_reporters, ok).
 -define(init_exometer_reporters(_InitReports), ok).
--define(init_exometer_counters, ok).
 
 -endif.
 
@@ -47,7 +46,6 @@
 -define(init_exometer_reporters, exometer_utils:init_exometer_reporters()).
 -define(init_exometer_reporters(InitReports),
   exometer_utils:init_exometer_reporters(InitReports)).
--define(init_exometer_counters, exometer_utils:init_exometer_counters()).
 
 -endif.
 

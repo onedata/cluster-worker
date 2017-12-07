@@ -112,6 +112,7 @@
 -export([normalize_link_target/2]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
 -export([init_counters/0, init_report/0]).
+-export([single_error_log/2, single_error_log/3, single_error_log/4]).
 
 %%%===================================================================
 %%% API
@@ -142,7 +143,7 @@ init_counters() ->
 -spec init_report() -> ok.
 init_report() ->
     Reports = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), [count]}
+        {?EXOMETER_NAME(Name), [value]}
     end, ?EXOMETER_COUNTERS),
     Reports2 = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
@@ -925,3 +926,24 @@ del_list_info(Ctx, Key, ok) ->
     delete_links(Ctx3, ?LISTING_ROOT, Key);
 del_list_info(_Ctx, _Key, Ans) ->
     Ans.
+
+single_error_log(LogKey, Log) ->
+    single_error_log(LogKey, Log, [], 500).
+
+single_error_log(LogKey, Log, Args) ->
+    single_error_log(LogKey, Log, Args, 500).
+
+single_error_log(LogKey, Log, Args, SleepTime) ->
+    case ets:lookup(?LOCAL_STATE, LogKey) of
+        [] ->
+            case ets:insert_new(?LOCAL_STATE, {LogKey, ok}) of
+                true ->
+                    ?error(Log, Args),
+                    timer:sleep(SleepTime),
+                    ets:delete(?LOCAL_STATE, LogKey);
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
