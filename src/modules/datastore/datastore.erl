@@ -538,6 +538,48 @@ initialize_minimal_env(DBNodes) ->
     {ok, _} = datastore_worker:init(DBNodes),
     ok.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, [])
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string()) -> ok.
+single_error_log(LogKey, Log) ->
+    single_error_log(LogKey, Log, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, Args, 500)
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()]) -> ok.
+single_error_log(LogKey, Log, Args) ->
+    single_error_log(LogKey, Log, Args, 500).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Logs error. If any other process tries to log with same key,
+%% the message is not logged.
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()], FreezeTime :: non_neg_integer()) -> ok.
+single_error_log(LogKey, Log, Args, FreezeTime) ->
+    case ets:lookup(?LOCAL_STATE, LogKey) of
+        [] ->
+            case ets:insert_new(?LOCAL_STATE, {LogKey, ok}) of
+                true ->
+                    ?error(Log, Args),
+                    timer:sleep(FreezeTime),
+                    ets:delete(?LOCAL_STATE, LogKey),
+                    ok;
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -926,24 +968,3 @@ del_list_info(Ctx, Key, ok) ->
     delete_links(Ctx3, ?LISTING_ROOT, Key);
 del_list_info(_Ctx, _Key, Ans) ->
     Ans.
-
-single_error_log(LogKey, Log) ->
-    single_error_log(LogKey, Log, [], 500).
-
-single_error_log(LogKey, Log, Args) ->
-    single_error_log(LogKey, Log, Args, 500).
-
-single_error_log(LogKey, Log, Args, SleepTime) ->
-    case ets:lookup(?LOCAL_STATE, LogKey) of
-        [] ->
-            case ets:insert_new(?LOCAL_STATE, {LogKey, ok}) of
-                true ->
-                    ?error(Log, Args),
-                    timer:sleep(SleepTime),
-                    ets:delete(?LOCAL_STATE, LogKey);
-                _ ->
-                    ok
-            end;
-        _ ->
-            ok
-    end.

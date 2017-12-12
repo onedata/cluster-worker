@@ -799,8 +799,9 @@ check_port(Port) ->
 %% Analyse monitoring state and log result.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(), SchedulerInfo :: undefined | list(),
-    LastAnalysisTime :: erlang:timestamp()) -> erlang:timestamp().
+-spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
+    SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
+        LastAnalysisPid :: pid() | undefined}) -> erlang:timestamp().
 analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
@@ -841,12 +842,10 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
 
-                log_monitoring_stats("xxxx ~p", [self()]),
                 % Gather processes info
                 {ProcNum, {Top5M, Top5B, CS_Map, CS_Bin_Map}} =
                     get_procs_stats(),
 
-                log_monitoring_stats("xxxx2: ~p", [{ProcNum, maps:size(CS_Map), maps:size(CS_Bin_Map)}]),
                 % Merge processes with similar stacktrace and find groups
                 % that use a lot of memory
                 MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Map))), 5),
@@ -881,7 +880,6 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
                             erlang:process_info(P, message_queue_len)}
                     end, lists:reverse(Top5B)),
 
-                log_monitoring_stats("xxxx3 ~p", [self()]),
                 log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
                 "single proc memory cosumption (binary): ~p~n"
                 "aggregated memory consumption: ~p~n"
@@ -922,12 +920,36 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
             {LastAnalysisTime, LastAnalysisPid}
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets statistics for processes (processes number and processes that use
+%% a lot of memory).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_procs_stats() -> {ProcNum :: non_neg_integer(),
+    {Top5Mem :: [{Memory :: non_neg_integer(), Value :: term()}],
+        Top5Bin :: [{MemoryBin :: non_neg_integer(), Value :: term()}],
+        CS_Map :: #{}, CS_Bin_Map :: #{}}}.
 get_procs_stats() ->
     Procs = erlang:processes(),
     PNum = length(Procs),
 
     {PNum, get_procs_stats(Procs, {[], [], #{}, #{}}, 0)}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets statistics for processes that use a lot of memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_procs_stats([pid()],
+    {TmpTop5Mem :: [{TmpMemory :: non_neg_integer(), TmpValue :: term()}],
+        TmpTop5Bin :: [{TmpMemoryBin :: non_neg_integer(), TmpValue :: term()}],
+        TmpCS_Map :: #{}, TmpCS_Bin_Map :: #{}}, Count :: non_neg_integer()) ->
+    {Top5Mem :: [{Memory :: non_neg_integer(), Value :: term()}],
+        Top5Bin :: [{MemoryBin :: non_neg_integer(), Value :: term()}],
+        CS_Map :: #{}, CS_Bin_Map :: #{}}.
 get_procs_stats([], Ans, _Count) ->
     Ans;
 get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
@@ -959,8 +981,18 @@ get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
             ok
     end,
 
-    get_procs_stats(Procs, {Top5Mem2, Top5Bin2, CS_Map2, CS_Bin_Map2}, Count + 1).
+    get_procs_stats(Procs, {Top5Mem2, Top5Bin2, CS_Map2, CS_Bin_Map2},
+        Count + 1).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sums utilization of memory of processes with similar stacktrace.
+%% @end
+%%--------------------------------------------------------------------
+-spec top_five(Memory :: non_neg_integer(), Value :: term(),
+    Acc :: [{non_neg_integer(), term()}]) ->
+    NewAcc :: [{non_neg_integer(), term()}].
 top_five(M, Value, []) ->
     [{M, Value}];
 top_five(M, Value, [{Min, _} | Top4] = Top5) ->
@@ -975,6 +1007,14 @@ top_five(M, Value, [{Min, _} | Top4] = Top5) ->
             end
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sums utilization of memory of processes with similar stacktrace.
+%% @end
+%%--------------------------------------------------------------------
+-spec merge_stacks(Stacktrace :: term(), Memory :: non_neg_integer(),
+    Acc :: #{}) -> NewAcc :: #{}.
 merge_stacks(CS, M, Map) ->
     case CS of
         {current_stacktrace, K} ->
@@ -984,6 +1024,13 @@ merge_stacks(CS, M, Map) ->
             Map
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tries to find process name.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_process_name(pid(), [atom()]) -> atom().
 get_process_name(P, All) ->
     lists:foldl(fun(Name, Acc) ->
         case whereis(Name) of
