@@ -570,6 +570,7 @@ flush_links() ->
 %%%===================================================================
 
 setup() ->
+    ets:new(datastore_local_state, [named_table, public, bag]),
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_delay_ms, 5000),
     application:set_env(?CLUSTER_WORKER_APP_NAME, cache_to_disk_force_delay_ms, 10000),
     application:set_env(?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms, 60000),
@@ -614,6 +615,7 @@ teardown(_) ->
     meck:unload(memory_store_driver_links),
     meck:unload(datastore_cache),
     meck:unload(memory_store_driver_docs),
+    ets:delete(datastore_local_state),
     ok.
 
 %%%===================================================================
