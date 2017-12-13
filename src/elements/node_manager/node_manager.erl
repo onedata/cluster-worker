@@ -612,7 +612,8 @@ cluster_init_finished(State) ->
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: #state{}) -> {monitoring:node_monitoring_state(), {integer(), integer(), integer()}}.
+-spec do_heartbeat(State :: #state{}) ->
+    {monitoring:node_monitoring_state(), {erlang:timestamp(), pid()}}.
 do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
     scheduler_info = SchedulerInfo} = _State) ->
     NewMonState = monitoring:update(MonState),
@@ -801,7 +802,7 @@ check_port(Port) ->
 %%--------------------------------------------------------------------
 -spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
     SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
-        LastAnalysisPid :: pid() | undefined}) -> erlang:timestamp().
+        LastAnalysisPid :: pid() | undefined}) -> {erlang:timestamp(), pid()}.
 analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
@@ -975,7 +976,7 @@ get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
     CS_Bin_Map2 = merge_stacks(CS, Bin, CS_Bin_Map),
 
     case Count rem 25000 of
-        true ->
+        0 ->
             erlang:garbage_collect();
         _ ->
             ok
