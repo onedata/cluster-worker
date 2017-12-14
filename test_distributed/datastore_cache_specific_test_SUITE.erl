@@ -115,9 +115,6 @@ dump_global_cache_test(Config) ->
 
     ?assertMatch({ok, #document{value = V2, rev = Rev3}},
         ?call_store(Node, TestRecord, get, [Key]), 2),
-
-    timer:sleep(20000),
-
     ok.
 
 operations_sequence_global_cache_test(Config) ->
