@@ -21,7 +21,7 @@
 -define(TASK_SAVE_TIMEOUT, timer:seconds(30)).
 
 %%worker_proxy
--define(DEFAULT_REQUEST_TIMEOUT, timer:minutes(20)).
+-define(DEFAULT_REQUEST_TIMEOUT, timer:seconds(30)).
 
 %%timeout for request to couchdb in form of hackney option
 -define(DEFAULT_DB_REQUEST_TIMEOUT_OPT, [{recv_timeout, timer:minutes(3)}]).
