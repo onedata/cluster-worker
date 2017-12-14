@@ -51,12 +51,12 @@ init_counters() ->
     Counters = [
         {?EXOMETER_NAME(times), histogram, TimeSpan},
         {?EXOMETER_NAME(sizes), histogram, TimeSpan},
-        {?EXOMETER_NAME(timeouts), spiral, TimeSpan2},
-        {?EXOMETER_NAME(timeouts_history), counter}
+        {?EXOMETER_NAME(timeouts), spiral, TimeSpan2}
     ],
     exometer_utils:init_counters(Counters),
 
     Counters2 = [
+        {?EXOMETER_NAME(timeouts_history), counter},
         {?EXOMETER_NAME(sizes_config), histogram, TimeSpan}
     ],
     ?init_counters(Counters2).
@@ -75,7 +75,7 @@ init_report() ->
         {?EXOMETER_NAME(sizes), HistogramReport},
         {?EXOMETER_NAME(sizes_config), HistogramReport},
         {?EXOMETER_NAME(timeouts), [count]},
-        {?EXOMETER_NAME(timeouts_history), [count]}
+        {?EXOMETER_NAME(timeouts_history), [value]}
     ],
     ?init_reports(Reports).
 

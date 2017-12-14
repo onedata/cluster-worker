@@ -112,6 +112,7 @@
 -export([normalize_link_target/2]).
 -export([initialize_minimal_env/0, initialize_minimal_env/1]).
 -export([init_counters/0, init_report/0]).
+-export([single_error_log/2, single_error_log/3, single_error_log/4]).
 
 %%%===================================================================
 %%% API
@@ -142,7 +143,7 @@ init_counters() ->
 -spec init_report() -> ok.
 init_report() ->
     Reports = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), [count]}
+        {?EXOMETER_NAME(Name), [value]}
     end, ?EXOMETER_COUNTERS),
     Reports2 = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
@@ -537,6 +538,48 @@ initialize_minimal_env(DBNodes) ->
     {ok, _} = datastore_worker:init(DBNodes),
     ok.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, [])
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string()) -> ok.
+single_error_log(LogKey, Log) ->
+    single_error_log(LogKey, Log, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, Args, 500)
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()]) -> ok.
+single_error_log(LogKey, Log, Args) ->
+    single_error_log(LogKey, Log, Args, 500).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Logs error. If any other process tries to log with same key,
+%% the message is not logged.
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()], FreezeTime :: non_neg_integer()) -> ok.
+single_error_log(LogKey, Log, Args, FreezeTime) ->
+    case ets:lookup(?LOCAL_STATE, LogKey) of
+        [] ->
+            case ets:insert_new(?LOCAL_STATE, {LogKey, ok}) of
+                true ->
+                    ?error(Log, Args),
+                    timer:sleep(FreezeTime),
+                    ets:delete(?LOCAL_STATE, LogKey),
+                    ok;
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
 
 %%%===================================================================
 %%% Internal functions
