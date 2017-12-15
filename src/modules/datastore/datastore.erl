@@ -200,10 +200,14 @@ delete_links(Ctx, Key, TreeId, Links) ->
 %% Marks document links in provided revisions as deleted.
 %% @end
 %%--------------------------------------------------------------------
--spec mark_links_deleted(ctx(), key(), tree_id(), [{link_name(), link_rev()}]) ->
-    [ok | {error, term()}].
+-spec mark_links_deleted(ctx(), key(), tree_id(),
+    [link_name() | {link_name(), link_rev()}]) -> [ok | {error, term()}].
 mark_links_deleted(Ctx, Key, TreeId, Links) ->
-    datastore_hooks:wrap(Ctx, mark_links_deleted, [Ctx, Key, TreeId, Links], fun
+    Links2 = lists:map(fun
+        ({LinkName, LinkRev}) -> {LinkName, LinkRev};
+        (LinkName) -> {LinkName, undefined}
+    end, Links),
+    datastore_hooks:wrap(Ctx, mark_links_deleted, [Ctx, Key, TreeId, Links2], fun
         (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
     end).
 

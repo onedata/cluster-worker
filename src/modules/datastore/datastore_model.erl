@@ -244,7 +244,7 @@ delete_links(Ctx, Key, TreeId, Link) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec mark_links_deleted(ctx(), key(), tree_id(),
-    one_or_many({link_name(), link_rev()})) ->
+    one_or_many(link_name() | {link_name(), link_rev()})) ->
     one_or_many(ok | {error, term()}).
 mark_links_deleted(Ctx, Key, TreeId, Links) when is_list(Links) ->
     datastore_apply(Ctx, Key, fun datastore:mark_links_deleted/4, [
