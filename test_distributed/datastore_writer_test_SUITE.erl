@@ -164,8 +164,8 @@ datastore_writer_should_terminate_when_idle_timeout_exceeded(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     IdleTimeout = ?config(idle_timeout, Config),
 
-    ?assertEqual(ok, rpc:call(Worker, datastore_writer, call, [
-        ?CTX, ?KEY, test_call, [ok]
+    ?assertEqual(<<"ok">>, rpc:call(Worker, datastore_writer, call, [
+        ?CTX, ?KEY, test_call, [<<"ok">>]
     ])),
     ?assertMatch({ok, _}, rpc:call(Worker, tp_router, get, [?KEY])),
     ?assertEqual({error, not_found}, rpc:call(Worker, tp_router, get, [?KEY]),
