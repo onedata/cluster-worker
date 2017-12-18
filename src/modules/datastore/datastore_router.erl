@@ -45,18 +45,7 @@ route(Ctx, Key, Function, Args) ->
 %%--------------------------------------------------------------------
 -spec process(module(), atom(), list()) -> term().
 process(Module, Function, Args = [#{model := Model} | _]) ->
-    GetFunctions = [get, exists, get_links, fold_links],
-    DeleteFunctions = [delete, delete_links],
-    Proceed = case lists:member(Function, GetFunctions) of
-        true ->
-            datastore_throttling:throttle_get(Model);
-        _ ->
-            case lists:member(Function, DeleteFunctions) of
-                true -> datastore_throttling:throttle_delete(Model);
-                _ -> datastore_throttling:throttle(Model)
-            end
-    end,
-    case Proceed of
+    case datastore_throttling:throttle_model(Model) of
         ok -> erlang:apply(Module, Function, Args);
         {error, Reason} -> {error, Reason}
     end.

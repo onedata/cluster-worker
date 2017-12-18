@@ -37,7 +37,6 @@
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
     datastore_cache_manager:init(),
-    datastore_throttling:init(),
     ets:new(?CHANGES_COUNTERS, [named_table, public, set]),
     case init_models() of
         ok -> {ok, #{}};

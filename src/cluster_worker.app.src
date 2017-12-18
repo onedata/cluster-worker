@@ -47,34 +47,31 @@
             {worker_load_memory_size, 1000},
             %% Memory usage level above which caches will be cleared
             {node_mem_ratio_to_clear_cache, 90},
-            {erlang_mem_to_clear_cache_mb, 5000},
-            %% Memory clearing will be stopped if memory usage less than {mem_clearing_ratio_to_stop}% clearing levels
-            {mem_clearing_ratio_to_stop, 75},
-            %% Time to wait before memory check during clearing procedure
-            {clearing_time_to_refresh_stats, 5000},
 
-            %% Memory percent that results in blocking operations on mnesia
-            {throttling_block_mem_error_ratio, 95},
             %% Number of tp processes to reduce tp process idle time
             {throttling_reduce_idle_time_memory_proc_number, 1000},
-            %% Number of tp processes to introduce delay
-            {throttling_start_memory_proc_number, 100000},
-            %% Number of tp processes to start throttling
-            {throttling_max_memory_proc_number, 200000},
-            %% Number of tp processes allowed when throttling blocks actions
-            {throttling_block_memory_proc_number, 150000},
-            %% Size of couch queue to start throttling
-            {throttling_db_queue_limit, 15000},
-            %% Size of couch queue to introduce delay
-            {throttling_delay_db_queue_size, 6000},
-            %% Base time for throttling
-            {throttling_base_time_ms, 32},
-            %% Maximum throttling time
-            {throttling_max_time_ms, 2048},
+            {throttling_min_idle_time_memory_proc_number, 10000},
             %% Interval of throttling configuration when throttling is used
-            {throttling_active_check_interval_seconds, 15},
+            {throttling_active_check_interval_seconds, 1},
             %% Interval of throttling configuration
-            {throttling_check_interval_seconds, 15},
+            {throttling_check_interval_seconds, 2},
+
+            % Throttlers configuration
+            {throttling_config, [
+                {default, [
+                    {base_time_ms, 2048},
+                    {strength, 5},
+                    {tp_param_strength, 1},
+                    {db_param_strength, 1},
+                    {mem_param_strength, 0},
+                    {tp_proc_expected, 100000},
+                    {tp_proc_limit, 200000},
+                    {db_queue_expected, 5000},
+                    {db_queue_limit, 15000},
+                    {memory_expected, 90},
+                    {memory_limit, 95}
+                ]}
+            ]},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB
@@ -175,7 +172,7 @@
             %% DATASTORE
             %% ===================================================================
 
-            {tp_processes_limit, 200},
+            {tp_processes_limit, 250000},
 
             {datastore_doc_commit_retry_delay, 5000},
             {datastore_doc_revisions_history_length, 1},
