@@ -23,7 +23,7 @@
 -export([init/1, handle/1, cleanup/0]).
 
 %% API
--export([create/2, get/1, delete/2, size/0]).
+-export([create/2, get/1, delete/1, delete/2, size/0]).
 -export([supervisor_flags/0, supervisor_children_spec/0]).
 
 %%%===================================================================
@@ -107,6 +107,17 @@ get(Key) ->
         [] -> {error, not_found};
         [{Key, Pid}] -> {ok, Pid}
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes routing key.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete(tp:key()) -> ok.
+delete(Key) ->
+    ets:delete(?TP_ROUTING_TABLE, Key),
+    update_size(-1),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
