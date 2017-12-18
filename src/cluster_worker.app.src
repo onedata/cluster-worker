@@ -30,7 +30,8 @@
             hackney,
             web_client,
             cowboy,
-            worker_pool
+            worker_pool,
+            exometer_core
         ]},
         {mod, {cluster_worker_app, []}},
         {env, [
