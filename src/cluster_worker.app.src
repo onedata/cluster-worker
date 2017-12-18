@@ -104,8 +104,6 @@
             {memory_store_idle_timeout_ms, 30000},
             %% Minimal idle time of memory store process
             {memory_store_min_idle_timeout_ms, 100},
-            %% Time between flush operations after fail
-            {memory_store_flush_error_suspension_ms, 10000},
             %% Period between checkings of tasks lists (to find tasks without owner)
             {task_checking_period_minutes, 5},
             %% Heap size limit for changes stream (it works all the time and must be limited)
