@@ -195,7 +195,14 @@ wait(Futures) when is_list(Futures) ->
 -spec inactivate(pid()) -> boolean().
 inactivate(MutatorPid) when is_pid(MutatorPid) ->
     datastore_cache_manager:mark_inactive(memory, MutatorPid) or
-    datastore_cache_manager:mark_inactive(disc, MutatorPid).
+    datastore_cache_manager:mark_inactive(disc, MutatorPid);
+inactivate(KeysMap) ->
+    lists:foreach(fun
+        ({K, #{memory_driver := undefined}}) ->
+            datastore_cache_manager:mark_inactive(memory, K);
+        ({K, _Ctx}) ->
+            datastore_cache_manager:mark_inactive(disc, K)
+    end, maps:to_list(KeysMap)).
 
 %%--------------------------------------------------------------------
 %% @doc
