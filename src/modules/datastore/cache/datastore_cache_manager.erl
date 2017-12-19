@@ -283,7 +283,8 @@ mark_inactive(Pool, Pid, Filter) when is_pid(Pid) ->
     ]),
     Entries2 = lists:filter(Filter, Entries),
     inactivate(Pool, Entries2);
-mark_inactive(Pool, Key, Filter) when is_binary(Key) ->
+mark_inactive(Pool, Key, Filter) ->
+    %when is_binary(Key) -> % TODO - all test should use binaries
     Entries = ets:lookup(active(Pool), Key),
     Entries2 = lists:filter(Filter, Entries),
     inactivate(Pool, Entries2).
