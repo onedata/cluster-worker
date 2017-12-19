@@ -12,7 +12,6 @@
 -module(datastore_writer_test_SUITE).
 -author("Krzysztof Trzepla").
 
--include("modules/tp/tp.hrl").
 -include("datastore_test_utils.hrl").
 
 %% export for ct
@@ -55,6 +54,9 @@ all() ->
     "Maximal delay before single operation.")).
 
 -define(TIMEOUT, timer:seconds(5)).
+
+-define(TP_ROUTING_TABLE, tp_routing_table1).
+-define(TP_ROUTER_SUP, tp_router_sup1).
 
 %%%===================================================================
 %%% Test functions
