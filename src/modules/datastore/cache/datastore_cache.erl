@@ -81,6 +81,7 @@ get(Ctx, Keys) when is_list(Keys) ->
     (ctx(), [key()]) -> [{ok, durability(), doc()} | {error, term()}].
 fetch(Ctx, <<_/binary>> = Key) ->
     hd(fetch(Ctx, [Key]));
+% TODO - single context for many keys!!!! Remove all.
 fetch(Ctx, Keys) when is_list(Keys) ->
     Results = fetch_local_or_remote(Ctx, Keys),
     Results2 = cache_disc_or_remote_results(Ctx, Keys, Results),
