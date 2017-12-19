@@ -57,6 +57,9 @@
 %%--------------------------------------------------------------------
 -spec init() -> ok.
 init() ->
+    Pools = datastore_multiplier:get_names(memory)
+        ++ datastore_multiplier:get_names(disc),
+
     lists:foreach(fun(Pool) ->
         ets:new(active(Pool), [set, public, named_table, {keypos, 2}]),
         ets:new(inactive(Pool), [set, public, named_table, {keypos, 2}]),
@@ -66,7 +69,7 @@ init() ->
         MaxSize = proplists:get_value(Pool, SizeByPool, 500000),
         ets:insert(active(Pool), #stats{key = size, value = 0}),
         ets:insert(active(Pool), #stats{key = max_size, value = MaxSize})
-    end, [memory, disc]).
+    end, Pools).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -128,19 +131,22 @@ mark_active(Pool, Ctx = #{mutator_pid := _}, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec mark_inactive(pool(), pid() | datastore:key()) -> boolean().
-mark_inactive(memory, Selector) ->
-    Filter = fun
-        (#entry{volatile = true}) ->
-            true;
-        (#entry{key = Key, driver = Driver, driver_ctx = Ctx}) ->
-            case Driver:get(Ctx, Key) of
-                {ok, #document{deleted = Deleted}} -> Deleted;
-                {error, not_found} -> true
-            end
-    end,
-    mark_inactive(memory, Selector, Filter);
-mark_inactive(disc, Selector) ->
-    mark_inactive(disc, Selector, fun(_) -> true end).
+mark_inactive(Pool, Selector) ->
+    case lists:sublist(atom_to_list(Pool), 4) of
+        "disc" ->
+            mark_inactive(Pool, Selector, fun(_) -> true end);
+        _ ->
+            Filter = fun
+                (#entry{volatile = true}) ->
+                    true;
+                (#entry{key = Key, driver = Driver, driver_ctx = Ctx}) ->
+                    case Driver:get(Ctx, Key) of
+                        {ok, #document{deleted = Deleted}} -> Deleted;
+                        {error, not_found} -> true
+                    end
+            end,
+            mark_inactive(Pool, Selector, Filter)
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -153,8 +159,8 @@ mark_inactive(disc, Selector) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec active(pool()) -> atom().
-active(memory) -> datastore_cache_active_memory_pool;
-active(disc) -> datastore_cache_active_disc_pool.
+active(Pool) ->
+    list_to_atom("datastore_cache_active_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -163,8 +169,8 @@ active(disc) -> datastore_cache_active_disc_pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec inactive(pool()) -> atom().
-inactive(memory) -> datastore_cache_inactive_memory_pool;
-inactive(disc) -> datastore_cache_inactive_disc_pool.
+inactive(Pool) ->
+    list_to_atom("datastore_cache_inactive_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -172,9 +178,8 @@ inactive(disc) -> datastore_cache_inactive_disc_pool.
 %% Returns name of table (for a pool) that keeps keys that are beeing cleared.
 %% @end
 %%--------------------------------------------------------------------
--spec clear(pool()) -> atom().
-clear(memory) -> datastore_cache_clear_memory_pool;
-clear(disc) -> datastore_cache_clear_disc_pool.
+clear(Pool) ->
+    list_to_atom("datastore_cache_clear_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private

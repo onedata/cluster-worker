@@ -32,8 +32,8 @@
         {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
     ]},
     {tp_router, [
-        {supervisor_flags, tp_router:supervisor_flags()},
-        {supervisor_children_spec, tp_router:supervisor_children_spec()}
+        {supervisor_flags, tp_router:main_supervisor_flags()},
+        {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
     ]}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [

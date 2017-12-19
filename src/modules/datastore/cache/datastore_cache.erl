@@ -194,14 +194,21 @@ wait(Futures) when is_list(Futures) ->
 %%--------------------------------------------------------------------
 -spec inactivate(pid()) -> boolean().
 inactivate(MutatorPid) when is_pid(MutatorPid) ->
-    datastore_cache_manager:mark_inactive(memory, MutatorPid) or
-    datastore_cache_manager:mark_inactive(disc, MutatorPid);
+    lists:foldl(fun(Pool, Acc) ->
+        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
+    end, false, datastore_multiplier:get_names(memory)),
+
+    lists:foldl(fun(Pool, Acc) ->
+        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
+    end, false, datastore_multiplier:get_names(disc));
 inactivate(KeysMap) ->
     lists:foreach(fun
         ({K, #{memory_driver := undefined}}) ->
-            datastore_cache_manager:mark_inactive(memory, K);
+            Pool = datastore_multiplier:extend_name(K, memory),
+            datastore_cache_manager:mark_inactive(Pool, K);
         ({K, _Ctx}) ->
-            datastore_cache_manager:mark_inactive(disc, K)
+            Pool = datastore_multiplier:extend_name(K, disc),
+            datastore_cache_manager:mark_inactive(Pool, K)
     end, maps:to_list(KeysMap)).
 
 %%--------------------------------------------------------------------
@@ -214,9 +221,11 @@ inactivate(KeysMap) ->
 inactivate(#{memory_driver := undefined}, _Key) ->
     false;
 inactivate(#{disc_driver := undefined}, Key) ->
-    datastore_cache_manager:mark_inactive(memory, Key);
+    Pool = datastore_multiplier:extend_name(Key, memory),
+    datastore_cache_manager:mark_inactive(Pool, Key);
 inactivate(_Ctx, Key) ->
-    datastore_cache_manager:mark_inactive(disc, Key).
+    Pool = datastore_multiplier:extend_name(Key, disc),
+    datastore_cache_manager:mark_inactive(Pool, Key).
 
 %%%===================================================================
 %%% Internal functions
@@ -352,7 +361,8 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _) ->
         memory_driver_ctx := MemoryCtx
     } = Ctx,
 
-    case datastore_cache_manager:mark_active(memory, Ctx, Key) of
+    Pool = datastore_multiplier:extend_name(Key, memory),
+    case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
         true ->
             ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
         false ->
@@ -366,7 +376,8 @@ save_async(Ctx, Key, Doc, DiscFallback) ->
         disc_driver_ctx := DiscCtx
     } = Ctx,
 
-    case {datastore_cache_manager:mark_active(disc, Ctx, Key), DiscFallback} of
+    Pool = datastore_multiplier:extend_name(Key, disc),
+    case {datastore_cache_manager:mark_active(Pool, Ctx, Key), DiscFallback} of
         {true, _} ->
             ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
         {false, true} ->

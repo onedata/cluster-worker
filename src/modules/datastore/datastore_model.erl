@@ -64,7 +64,12 @@ init(#{
     memory_driver_ctx := Ctx,
     memory_driver_opts := Opts
 }) ->
-    Driver:init(Ctx, Opts);
+    lists:foldl(fun
+        (Ctx2, ok) ->
+            Driver:init(Ctx2, Opts);
+        (_, Error) ->
+            Error
+    end, ok, datastore_multiplier:get_names(Ctx));
 init(Ctx) ->
     init(datastore_model_default:set_defaults(Ctx)).
 
@@ -287,7 +292,8 @@ get_links_trees(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply(ctx(), key(), fun(), list()) -> term().
-datastore_apply(Ctx, Key, Fun, Args) ->
+datastore_apply(Ctx0, Key, Fun, Args) ->
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     Ctx2 = datastore_model_default:set_defaults(Ctx),
     UniqueKey = get_unique_key(Ctx2, Key),
     erlang:apply(Fun, [Ctx2, UniqueKey | Args]).
@@ -300,7 +306,8 @@ datastore_apply(Ctx, Key, Fun, Args) ->
 %%--------------------------------------------------------------------
 -spec add_fold_link(ctx(), key(), {ok, doc()} | {error, term()}) ->
     {ok, doc()} | {error, term()}.
-add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
+add_fold_link(Ctx0 = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     Ctx2 = Ctx#{sync_enabled => false},
     ModelKey = atom_to_binary(Model, utf8),
     case add_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
@@ -319,7 +326,8 @@ add_fold_link(_Ctx, _Key, Result) ->
 %%--------------------------------------------------------------------
 -spec delete_fold_link(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
-delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
+delete_fold_link(Ctx0 = #{model := Model, fold_enabled := true}, Key, ok) ->
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     Ctx2 = Ctx#{sync_enabled => false},
     ModelKey = atom_to_binary(Model, utf8),
     case delete_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
@@ -337,7 +345,8 @@ delete_fold_link(_Ctx, _Key, Result) ->
 %%--------------------------------------------------------------------
 -spec delete_all_links(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
-delete_all_links(Ctx, Key, ok) ->
+delete_all_links(Ctx0, Key, ok) ->
+    Ctx = datastore_multiplier:extend_name(Key, Ctx0),
     Result = fold_links(Ctx, Key, all, fun
         (#link{tree_id = TreeId, name = Name, rev = Rev}, Acc) ->
             Links = maps:get(TreeId, Acc, []),
