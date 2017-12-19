@@ -25,7 +25,8 @@
 %% API
 -export([create/2, get/1, delete/1, delete/2, size/0]).
 -export([supervisor_flags/0, supervisor_children_spec/0,
-    main_supervisor_flags/0, main_supervisor_children_spec/0]).
+    main_supervisor_flags/0, main_supervisor_children_spec/0,
+    init_supervisors/0]).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -47,14 +48,6 @@ init(_Args) ->
         {read_concurrency, true}
         ])
     end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
-
-    lists:foreach(fun(Name) ->
-        {ok, _} = supervisor:start_child(
-            ?TP_ROUTER_SUP,
-            {Name, {tp_subtree_supervisor, start_link, [Name]},
-                transient, infinity, supervisor, [tp_subtree_supervisor]}
-        )
-    end, datastore_multiplier:get_names(?TP_ROUTER_SUP)),
 
     {ok, #{}}.
 
@@ -88,6 +81,21 @@ cleanup() ->
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes subtrees supervisors.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_supervisors() -> ok.
+init_supervisors() ->
+    lists:foreach(fun(Name) ->
+        {ok, _} = supervisor:start_child(
+            ?TP_ROUTER_SUP,
+            {Name, {tp_subtree_supervisor, start_link, [Name]},
+                transient, infinity, supervisor, [tp_subtree_supervisor]}
+        )
+    end, datastore_multiplier:get_names(?TP_ROUTER_SUP)).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -378,9 +378,10 @@ assert_in_memory(Worker, Model, Key, Deleted) ->
         undefined ->
             ok;
         Driver ->
+            Ctx = datastore_multiplier:extend_name(Key, ?MEM_CTX(Model)),
             ?assertMatch({ok, #document{deleted = Deleted}},
                 rpc:call(Worker, Driver, get, [
-                    ?MEM_CTX(Model), ?UNIQUE_KEY(Model, Key)
+                    Ctx, ?UNIQUE_KEY(Model, Key)
                 ])
             )
     end.

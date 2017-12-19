@@ -16,6 +16,8 @@
 %% API
 -export([extend_name/2, get_names/1]).
 
+-type ctx() :: ctx() | datastore:memory_driver_ctx().
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -25,13 +27,13 @@
 %% Extends the name with namespace extension calculated using key.
 %% @end
 %%--------------------------------------------------------------------
--spec extend_name(datastore:key(), atom() | datastore:ctx()) ->
-  atom() | datastore:ctx().
+-spec extend_name(datastore:key(), atom() | ctx()) ->
+  atom() | ctx().
 extend_name(Key, Name) when is_atom(Name) ->
   list_to_atom(atom_to_list(Name) ++ get_num(Key));
 extend_name(Key, #{table := Table} = Ctx) ->
   NewName = list_to_atom(atom_to_list(Table) ++ get_num(Key)),
-  datastore_context:override(table, NewName, Ctx);
+  override_context(table, NewName, Ctx);
 extend_name(Key, #{memory_driver_ctx := #{table := Table}} = Ctx) ->
   NewName = list_to_atom(atom_to_list(Table) ++ get_num(Key)),
   override_table(NewName, Ctx);
@@ -43,8 +45,8 @@ extend_name(_Key, Name) ->
 %% Returns all namespaces connected with particular name.
 %% @end
 %%--------------------------------------------------------------------
--spec get_names(atom() | datastore:ctx()) ->
-  [atom() | datastore:ctx()].
+-spec get_names(atom() | ctx()) ->
+  [atom() | ctx()].
 get_names(Name) when is_atom(Name) ->
   lists:map(fun(Num) ->
     list_to_atom(atom_to_list(Name) ++ Num)
@@ -52,7 +54,7 @@ get_names(Name) when is_atom(Name) ->
 get_names(#{table := Table} = Ctx) ->
   lists:map(fun(Num) ->
     NewName = list_to_atom(atom_to_list(Table) ++ Num),
-    datastore_context:override(table, NewName, Ctx)
+    override_context(table, NewName, Ctx)
   end, get_name_extensions());
 get_names(#{memory_driver_ctx := #{table := Table}} = Ctx) ->
   lists:map(fun(Num) ->
@@ -65,6 +67,7 @@ get_names(#{memory_driver_ctx := #{table := Table}} = Ctx) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns all namespaces' suffixes.
 %% @end
@@ -79,6 +82,7 @@ get_name_extensions() ->
   end, lists:seq(1, Num)).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns namespace's suffix for a key.
 %% @end
@@ -94,13 +98,25 @@ get_num(Key) ->
   get_num(crypto:hash(md5, term_to_binary(Key))).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Overrides memory driver table name in context.
 %% @end
 %%--------------------------------------------------------------------
--spec override_table(atom(), datastore:ctx()) ->
-  datastore:ctx().
+-spec override_table(atom(), ctx()) ->
+  ctx().
 override_table(Name, Ctx) ->
   MemCtx = maps:get(memory_driver_ctx, Ctx),
-  datastore_context:override(memory_driver_ctx,
-    datastore_context:override(table, Name, MemCtx), Ctx).
+  override_context(memory_driver_ctx,
+    override_context(table, Name, MemCtx), Ctx).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Overrides context parameter. To be used only by model.erl.
+%% @end
+%%--------------------------------------------------------------------
+-spec override_context(Key :: atom(), Value :: term(), ctx()) ->
+  ctx().
+override_context(Key, Value, Ctx) ->
+  maps:put(Key, Value, Ctx).

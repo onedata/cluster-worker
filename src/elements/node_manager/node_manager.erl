@@ -34,7 +34,7 @@
     {tp_router, [
         {supervisor_flags, tp_router:main_supervisor_flags()},
         {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
-    ]}
+    ], init_supervisors}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
     nagios_listener,
@@ -87,7 +87,8 @@ modules() ->
     CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
     lists:map(fun
         ({Module, _}) -> Module;
-        ({singleton, Module, _}) -> Module
+        ({singleton, Module, _}) -> Module;
+        ({Module, _, _}) -> Module
     end, DefaultWorkers ++ CustomWorkers).
 
 %%--------------------------------------------------------------------
@@ -643,7 +644,10 @@ init_workers(Workers) ->
                     ok = start_worker(Module, Args);
                 already_started ->
                     ok
-            end
+            end;
+        ({Module, Args, AfterInitFun}) ->
+            ok = start_worker(Module, Args),
+            ok = apply(Module, AfterInitFun, [])
     end, Workers),
     ok.
 
