@@ -373,8 +373,8 @@ init_per_suite(Config) ->
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
-    application:set_env(cluster_worker, tp_subtrees_number, 1),
-    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 1),
+    application:set_env(cluster_worker, tp_subtrees_number, 10),
+    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
     Config.
 
 %%%===================================================================
