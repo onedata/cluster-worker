@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1]).
+-export([all/0, init_per_suite/1, init_per_testcase/2]).
 
 %% tests
 -export([
@@ -369,6 +369,17 @@ get_links_trees_should_return_all_trees(Config) ->
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(Config).
+
+init_per_testcase(_, Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    application:load(cluster_worker),
+    application:set_env(cluster_worker, tp_subtrees_number, 1),
+    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 1),
+    Config.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 assert_in_memory(Worker, Model, Key) ->
     assert_in_memory(Worker, Model, Key, false).
