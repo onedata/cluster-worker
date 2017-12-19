@@ -52,7 +52,6 @@ all() ->
     ]).
 
 -define(MODEL, ets_cached_model).
--define(MEM_CTX, ?MEM_CTX(?MODEL)).
 -define(CTX, #{
     model => ?MODEL,
     mutator_pid => self(),
@@ -62,6 +61,7 @@ all() ->
     disc_driver_ctx => ?DISC_CTX,
     remote_driver => ?REMOTE_DRV
 }).
+-define(CTX(Key), datastore_multiplier:extend_name(?KEY, ?CTX)).
 
 %%%===================================================================
 %%% Test functions
@@ -70,7 +70,7 @@ all() ->
 add_link_should_save_link_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, add, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
             ?LINK_NAME, ?LINK_TARGET
         ]]
     )),
@@ -82,7 +82,7 @@ add_link_should_save_link_in_memory(Config) ->
 add_link_should_save_link_on_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, add, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
             ?LINK_NAME, ?LINK_TARGET
         ]]
     )),
@@ -94,12 +94,12 @@ add_link_should_save_link_on_disc(Config) ->
 get_link_should_return_target_from_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, add, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
             ?LINK_NAME, ?LINK_TARGET
         ]]
     )),
     {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, get, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, get, [
             ?LINK_NAME
         ]]
     )),
@@ -111,12 +111,12 @@ get_link_should_return_target_from_memory(Config) ->
 get_link_should_return_target_from_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, add, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
             ?LINK_NAME, ?LINK_TARGET
         ]]
     )),
     {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, get, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, get, [
             ?LINK_NAME
         ]]
     )),
@@ -128,12 +128,12 @@ get_link_should_return_target_from_disc(Config) ->
 delete_link_should_delete_link_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, add, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
             ?LINK_NAME, ?LINK_TARGET
         ]]
     )),
     ?assertMatch({ok, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, delete, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, delete, [
             ?LINK_NAME
         ]]
     )).
@@ -141,12 +141,12 @@ delete_link_should_delete_link_in_memory(Config) ->
 delete_link_should_delete_link_on_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, add, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
             ?LINK_NAME, ?LINK_TARGET
         ]]
     )),
     ?assertMatch({ok, _}, rpc:call(Worker,
-        datastore_links_crud, apply, [?CTX, ?KEY, ?LINK_TREE_ID, delete, [
+        datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, delete, [
             ?LINK_NAME
         ]]
     )).
@@ -154,26 +154,26 @@ delete_link_should_delete_link_on_disc(Config) ->
 tree_fold_should_return_all_targets(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     LinksNum = 1000,
-    AllLinks = add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID, LinksNum),
-    Links = fold_links(Worker, ?CTX, ?KEY, #{}),
+    AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
+    Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{}),
     ?assertEqual(get_expected_links(AllLinks), Links).
 
 tree_fold_should_return_targets_from_offset(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     LinksNum = 1000,
-    AllLinks = add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID, LinksNum),
+    AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
     lists:foreach(fun(Offset) ->
-        Links = fold_links(Worker, ?CTX, ?KEY, #{offset => Offset}),
+        Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{offset => Offset}),
         ?assertEqual(get_expected_links(AllLinks, Offset), Links)
     end, lists:seq(0, LinksNum)).
 
 tree_fold_should_return_targets_from_link(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     LinksNum = 1000,
-    AllLinks = add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID, LinksNum),
+    AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
     Names = lists:map(fun(#link{name = Name}) -> Name end, AllLinks),
     lists:foreach(fun({Offset, Name}) ->
-        Links = fold_links(Worker, ?CTX, ?KEY, #{
+        Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
             prev_tree_id => ?LINK_TREE_ID,
             prev_link_name => Name
         }),
@@ -183,19 +183,19 @@ tree_fold_should_return_targets_from_link(Config) ->
 tree_fold_should_return_targets_limited_by_size(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     LinksNum = 1000,
-    AllLinks = add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID, LinksNum),
+    AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
     lists:foreach(fun(Size) ->
-        Links = fold_links(Worker, ?CTX, ?KEY, #{size => Size}),
+        Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{size => Size}),
         ?assertEqual(get_expected_links(AllLinks, 0, Size), Links)
     end, lists:seq(0, LinksNum)).
 
 tree_fold_should_return_targets_from_offset_and_limited_by_size(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     LinksNum = 100,
-    AllLinks = add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID, LinksNum),
+    AllLinks = add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID, LinksNum),
     lists:foreach(fun(Offset) ->
         lists:foreach(fun(Size) ->
-            Links = fold_links(Worker, ?CTX, ?KEY, #{
+            Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
                 offset => Offset,
                 size => Size
             }),
@@ -208,9 +208,9 @@ multi_tree_fold_should_return_all_targets(Config) ->
     TreesNum = 5,
     LinksNum = 500,
     AllLinks = lists:flatten(lists:map(fun(N) ->
-        add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID(N), LinksNum)
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
     end, lists:seq(1, TreesNum))),
-    Links = fold_links(Worker, ?CTX, ?KEY, #{}),
+    Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{}),
     ?assertEqual(get_expected_links(AllLinks), Links).
 
 multi_tree_fold_should_return_targets_from_link(Config) ->
@@ -218,13 +218,13 @@ multi_tree_fold_should_return_targets_from_link(Config) ->
     TreesNum = 5,
     LinksNum = 500,
     AllLinks = lists:flatten(lists:map(fun(N) ->
-        add_links(Worker, ?CTX, ?KEY, ?LINK_TREE_ID(N), LinksNum)
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
     end, lists:seq(1, TreesNum))),
     LinkPoints = lists:map(fun(#link{tree_id = TreeId, name = Name}) ->
         {Name, TreeId}
     end, AllLinks),
     lists:foreach(fun({Offset, {Name, TreeId}}) ->
-        Links = fold_links(Worker, ?CTX, ?KEY, #{
+        Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
             prev_tree_id => TreeId,
             prev_link_name => Name
         }),
@@ -240,8 +240,13 @@ init_per_suite(Config) ->
 
 init_per_testcase(Case, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    rpc:call(Worker, datastore_cache_manager, reset, [disc]),
-    rpc:call(Worker, datastore_cache_manager, resize, [disc, cache_size(Case)]),
+
+    application:load(cluster_worker),
+    application:set_env(cluster_worker, tp_subtrees_number, 1),
+    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 1),
+
+    rpc:call(Worker, datastore_cache_manager, reset, [disc1]),
+    rpc:call(Worker, datastore_cache_manager, resize, [disc1, cache_size(Case)]),
     Config.
 
 %%%===================================================================
