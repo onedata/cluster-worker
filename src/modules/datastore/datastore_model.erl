@@ -79,6 +79,8 @@ init(Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_unique_key(ctx(), key()) -> key().
+% TODO - allow routing via generic key without model
+% problem with links application that need such routing key
 get_unique_key(#{model := Model}, Key) ->
     datastore_utils:gen_key(atom_to_binary(Model, utf8), Key).
 
