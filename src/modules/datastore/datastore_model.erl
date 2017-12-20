@@ -294,8 +294,8 @@ get_links_trees(Ctx, Key) ->
 -spec datastore_apply(ctx(), key(), fun(), list()) -> term().
 datastore_apply(Ctx0, Key, Fun, Args) ->
     Ctx = datastore_model_default:set_defaults(Ctx0),
-    Ctx2 = datastore_multiplier:extend_name(Key, Ctx),
-    UniqueKey = get_unique_key(Ctx2, Key),
+    UniqueKey = get_unique_key(Ctx, Key),
+    Ctx2 = datastore_multiplier:extend_name(UniqueKey, Ctx),
     erlang:apply(Fun, [Ctx2, UniqueKey | Args]).
 
 %%--------------------------------------------------------------------
