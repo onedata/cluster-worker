@@ -208,13 +208,15 @@ update_node(NodeId, Node, State = #state{
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_node(node_id(), state()) -> {ok | {error, term()}, state()}.
-delete_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
-    case datastore_doc:delete(Ctx, NodeId, Batch) of
-        {ok, Batch2} ->
-            {ok, State#state{batch = Batch2}};
-        {{error, Reason}, Batch2} ->
-            {{error, Reason}, State#state{batch = Batch2}}
-    end.
+delete_node(_NodeId, State = #state{ctx = _Ctx, batch = _Batch}) ->
+    % TODO VFS-3908 - set document to expire
+%%    case datastore_doc:delete(Ctx, NodeId, Batch) of
+%%        {ok, Batch2} ->
+%%            {ok, State#state{batch = Batch2}};
+%%        {{error, Reason}, Batch2} ->
+%%            {{error, Reason}, State#state{batch = Batch2}}
+%%    end.
+    {ok, State}.
 
 %%--------------------------------------------------------------------
 %% @doc
