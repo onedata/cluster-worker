@@ -32,7 +32,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback authorize_by_session_cookie(SessionCookie :: binary()) ->
-    false | {true, gs_protocol:client()} | {error, term()}.
+    false | {true, gs_protocol:client()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -42,7 +42,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback authorize_by_token(Token :: binary()) ->
-    false | {true, gs_protocol:client()} | {error, term()}.
+    false | {true, gs_protocol:client()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -53,7 +53,7 @@
 %%--------------------------------------------------------------------
 -callback authorize_by_macaroons(Macaroon :: binary(),
     DischargeMacaroons :: [binary()]) ->
-    false | {true, gs_protocol:client()} | {error, term()}.
+    false | {true, gs_protocol:client()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -64,17 +64,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback authorize_by_basic_auth(UserPasswdB64 :: binary()) ->
-    false | {true, gs_protocol:client()} | {error, term()}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Tries to authorize requesting client by provider certificate. Will be called
-%% only if a certificate was sent in the request.
-%% @end
-%%--------------------------------------------------------------------
--callback authorize_by_provider_cert(PeerCert :: public_key:der_encoded()) ->
-    false | {true, gs_protocol:client()} | {error, term()}.
+    false | {true, gs_protocol:client()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------

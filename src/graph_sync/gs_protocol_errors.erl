@@ -13,7 +13,7 @@
 -module(gs_protocol_errors).
 -author("Lukasz Opiola").
 
--include("api_errors.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 
 -export([error_to_json/2, json_to_error/2]).
 

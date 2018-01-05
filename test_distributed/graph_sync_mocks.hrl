@@ -14,6 +14,8 @@
 -ifndef(GS_CHANNEL_MOCKS_HRL).
 -define(GS_CHANNEL_MOCKS_HRL, 1).
 
+-include("graph_sync/graph_sync.hrl").
+
 -define(GS_PORT, 8443).
 -define(GS_LISTENER_ID, "gs_listener_id").
 -define(GS_HTTPS_ACCEPTORS, 50).
@@ -35,8 +37,8 @@
 -define(USER_2_COOKIE, <<"user2Cookie">>).
 
 -define(USER_DATA_WITHOUT_GRI(__UserId), case __UserId of
-   ?USER_1 -> #{<<"name">> => <<"mockUser1Name">>};
-   ?USER_2 -> #{<<"name">> => <<"mockUser2Name">>}
+    ?USER_1 -> #{<<"name">> => <<"mockUser1Name">>};
+    ?USER_2 -> #{<<"name">> => <<"mockUser2Name">>}
 end).
 
 -define(USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE, <<"noAccessName">>).
@@ -48,6 +50,8 @@ end).
 -define(SPACE_1_NAME, <<"space1Name">>).
 
 -define(PROVIDER_1, <<"provider1Id">>).
+
+-define(PROVIDER_1_MACAROON, <<"provider1macaroon">>).
 
 
 
