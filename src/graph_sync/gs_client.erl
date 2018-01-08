@@ -14,7 +14,7 @@
 
 -behaviour(websocket_client_handler_behaviour).
 
--include("api_errors.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -52,15 +52,14 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv start_link(URL, Cookie, SupportedVersions, PushCallback, []).
+%% @equiv start_link(URL, Authorization, SupportedVersions, PushCallback, []).
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(URL :: string() | binary(), Cookie :: websocket_req:cookie(),
-    SupportedVersions :: [gs_protocol:protocol_version()],
-    PushCallback :: push_callback()) ->
+-spec start_link(URL :: string() | binary(), websocket_req:authorization(),
+    SupportedVersions :: [gs_protocol:protocol_version()], push_callback()) ->
     {ok, client_ref(), gs_protocol:handshake_resp()} | gs_protocol:error().
-start_link(URL, Cookie, SupportedVersions, PushCallback) ->
-    start_link(URL, Cookie, SupportedVersions, PushCallback, []).
+start_link(URL, Authorization, SupportedVersions, PushCallback) ->
+    start_link(URL, Authorization, SupportedVersions, PushCallback, []).
 
 
 %%--------------------------------------------------------------------
@@ -71,14 +70,14 @@ start_link(URL, Cookie, SupportedVersions, PushCallback) ->
 %% Allows to pass options to websocket_client:start_link.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(URL :: string() | binary(), Cookie :: websocket_req:cookie(),
-    SupportedVersions :: [gs_protocol:protocol_version()],
-    PushCallback :: push_callback(), Opts :: list()) ->
+-spec start_link(URL :: string() | binary(), websocket_req:authorization(),
+    SupportedVersions :: [gs_protocol:protocol_version()], push_callback(),
+    Opts :: list()) ->
     {ok, client_ref(), gs_protocol:handshake_resp()} | gs_protocol:error().
-start_link(URL, Cookie, SupportedVersions, PushCallback, Opts) when is_binary(URL) ->
-    start_link(binary_to_list(URL), Cookie, SupportedVersions, PushCallback, Opts);
-start_link(URL, Cookie, SupportedVersions, PushCallback, Opts) ->
-    case websocket_client:start_link(URL, Cookie, ?MODULE, [], Opts) of
+start_link(URL, Authorization, SupportedVersions, PushCallback, Opts) when is_binary(URL) ->
+    start_link(binary_to_list(URL), Authorization, SupportedVersions, PushCallback, Opts);
+start_link(URL, Authorization, SupportedVersions, PushCallback, Opts) ->
+    case websocket_client:start_link(URL, Authorization, ?MODULE, [], Opts) of
         {ok, Pid} ->
             Pid ! {init, self(), SupportedVersions, PushCallback},
             receive

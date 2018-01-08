@@ -12,7 +12,7 @@
 -module(graph_sync_mocks).
 -author("Lukasz Opiola").
 
--include("api_errors.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("graph_sync_mocks.hrl").
@@ -24,7 +24,7 @@
 ]).
 -export([
     authorize_by_session_cookie/1,
-    authorize_by_provider_cert/1,
+    authorize_by_macaroons/2,
     client_to_identity/1,
     client_connected/2,
     client_disconnected/2,
@@ -46,7 +46,7 @@ mock_callbacks(Config) ->
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_session_cookie, fun authorize_by_session_cookie/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_provider_cert, fun authorize_by_provider_cert/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_macaroons, fun authorize_by_macaroons/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_to_identity, fun client_to_identity/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
@@ -81,10 +81,13 @@ authorize_by_session_cookie(SessionCookie) ->
     end.
 
 
-authorize_by_provider_cert(_ProviderCert) ->
-    % Accept any certs, this callback is called only if any peer certificates
-    % are given.
-    {true, ?PROVIDER_AUTH(?PROVIDER_1)}.
+authorize_by_macaroons(Macaroon, DischargeMacaroons) ->
+    case {Macaroon, DischargeMacaroons} of
+        {?PROVIDER_1_MACAROON, []} ->
+            {true, ?PROVIDER_AUTH(?PROVIDER_1)};
+        _ ->
+            ?ERROR_UNAUTHORIZED
+    end.
 
 
 client_to_identity(?NOBODY_AUTH) -> nobody;

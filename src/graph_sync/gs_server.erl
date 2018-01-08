@@ -13,7 +13,7 @@
 -module(gs_server).
 -author("Lukasz Opiola").
 
--include("api_errors.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -46,15 +46,15 @@
 -spec authorize(cowboy_req:req()) -> {ok, gs_protocol:client()} | gs_protocol:error().
 authorize(Req) ->
     case authorize_by_session_cookie(Req) of
-        {true, Client} ->
-            {ok, Client};
-        ?ERROR_UNAUTHORIZED ->
+        {true, CookieClient} ->
+            {ok, CookieClient};
+        {error, _} ->
             ?ERROR_UNAUTHORIZED;
         false ->
-            case authorize_by_provider_cert(Req) of
-                {true, ProviderClient} ->
-                    {ok, ProviderClient};
-                ?ERROR_UNAUTHORIZED ->
+            case authorize_by_macaroon(Req) of
+                {true, MacaroonClient} ->
+                    {ok, MacaroonClient};
+                {error, _} ->
                     ?ERROR_UNAUTHORIZED;
                 false ->
                     {ok, ?GS_LOGIC_PLUGIN:guest_client()}
@@ -243,11 +243,13 @@ handle_request(Session, #gs_req{auth_override = AuthOverride} = Req) ->
             ?GS_LOGIC_PLUGIN:authorize_by_basic_auth(UserPasswdB64)
     end,
     case AuthResult of
-        {ok, Client} ->
+        {true, Client} ->
             handle_request(
                 Session#gs_session{client = Client},
                 Req#gs_req{auth_override = undefined}
             );
+        false ->
+            ?ERROR_UNAUTHORIZED;
         {error, _} = Error ->
             Error
     end;
@@ -456,14 +458,14 @@ authorize_by_session_cookie(Req) ->
 %% {error, term()} - authorization invalid
 %% @end
 %%--------------------------------------------------------------------
--spec authorize_by_provider_cert(cowboy_req:req()) ->
+-spec authorize_by_macaroon(cowboy_req:req()) ->
     {true, gs_protocol:client()} | false | gs_protocol:error().
-authorize_by_provider_cert(Req) ->
-    case ssl:peercert(cowboy_req:get(socket, Req)) of
-        {ok, PeerCert} ->
-            ?GS_LOGIC_PLUGIN:authorize_by_provider_cert(PeerCert);
-        {error, no_peercert} ->
-            false
+authorize_by_macaroon(Req) ->
+    case get_macaroon(Req) of
+        undefined ->
+            false;
+        Macaroon ->
+            ?GS_LOGIC_PLUGIN:authorize_by_macaroons(Macaroon, [])
     end.
 
 
@@ -474,12 +476,27 @@ authorize_by_provider_cert(Req) ->
 %% NOTE! This should be used instead of cowboy_req:cookie as it contains a bug.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cookie(Name :: binary(), Req :: cowboy_req:req()) ->
-    binary() | undefined.
+-spec get_cookie(Name :: binary(), cowboy_req:req()) -> binary() | undefined.
 get_cookie(Name, Req) ->
     try
         {Value, _Req} = cowboy_req:cookie(Name, Req),
         Value
     catch _:_ ->
         undefined
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns macaroon from "macaroon" or "X-Auth-token" header, if present.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_macaroon(cowboy_req:req()) -> binary() | undefined.
+get_macaroon(Req) ->
+    {MacaroonHeader, _} = cowboy_req:header(<<"macaroon">>, Req),
+    {XAuthTokenHeader, _} = cowboy_req:header(<<"x-auth-token">>, Req),
+    % X-Auth-Token is an alias for macaroon header, check if any of them is given.
+    case MacaroonHeader of
+        <<_/binary>> -> MacaroonHeader;
+        _ -> XAuthTokenHeader
     end.
