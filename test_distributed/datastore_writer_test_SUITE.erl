@@ -188,8 +188,11 @@ init_per_testcase(_Case, Config) ->
             cluster_worker, Env, Value
         ])
     end, [
+        {tp_subtrees_number, 1},
         {throttling_idle_time, IdleTimeout},
         {datastore_writer_idle_timeout, IdleTimeout},
+        {memory_store_idle_timeout_ms, IdleTimeout},
+        {memory_store_min_idle_timeout_ms, IdleTimeout},
         {datastore_writer_flush_delay, FlushDelay}
     ]),
 
