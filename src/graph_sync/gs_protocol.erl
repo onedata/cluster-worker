@@ -13,7 +13,7 @@
 -module(gs_protocol).
 -author("Lukasz Opiola").
 
--include("api_errors.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -483,7 +483,7 @@ encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
         <<"version">> => Version,
         <<"sessionId">> => SessionId,
         <<"identity">> => identity_to_json(Identity),
-        <<"attributes">> => Attributes
+        <<"attributes">> => undefined_to_null(Attributes)
     }.
 
 
@@ -671,7 +671,7 @@ decode_response_handshake(_, DataJSON) ->
         version = Version,
         session_id = null_to_undefined(SessionId),
         identity = json_to_identity(Identity),
-        attributes = Attributes
+        attributes = null_to_undefined(Attributes)
     }.
 
 

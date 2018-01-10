@@ -15,7 +15,7 @@
 
 -ifdef(TEST).
 
--include("api_errors.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
