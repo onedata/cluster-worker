@@ -41,10 +41,13 @@
     redirector_listener
 ]).
 
+-define(HELPER_ETS, node_manager_helper_ets).
+
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
     cluster_worker_listeners/0, get_cluster_nodes_ips/0]).
+-export([single_error_log/2, single_error_log/3, single_error_log/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -142,6 +145,48 @@ get_ip_address() ->
 refresh_ip_address() ->
     gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, [])
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string()) -> ok.
+single_error_log(LogKey, Log) ->
+    single_error_log(LogKey, Log, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, Args, 500)
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()]) -> ok.
+single_error_log(LogKey, Log, Args) ->
+    single_error_log(LogKey, Log, Args, 500).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Logs error. If any other process tries to log with same key,
+%% the message is not logged.
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()], FreezeTime :: non_neg_integer()) -> ok.
+single_error_log(LogKey, Log, Args, FreezeTime) ->
+    case ets:lookup(?HELPER_ETS, LogKey) of
+        [] ->
+            case ets:insert_new(?HELPER_ETS, {LogKey, ok}) of
+                true ->
+                    ?error(Log, Args),
+                    timer:sleep(FreezeTime),
+                    ets:delete(?HELPER_ETS, LogKey),
+                    ok;
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -164,6 +209,8 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit, true),
     try
+        catch ets:new(?HELPER_ETS, [named_table, public, set]),
+
         ?info("Running 'before_init' procedures."),
         ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
@@ -558,7 +605,8 @@ cluster_init_finished(State, Nodes) ->
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: #state{}) -> {monitoring:node_monitoring_state(), {integer(), integer(), integer()}}.
+-spec do_heartbeat(State :: #state{}) ->
+    {monitoring:node_monitoring_state(), {erlang:timestamp(), pid()}}.
 do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
     scheduler_info = SchedulerInfo} = _State) ->
     NewMonState = monitoring:update(MonState),
@@ -713,12 +761,13 @@ check_port(Port) ->
 %% Analyse monitoring state and log result.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(), SchedulerInfo :: undefined | list(),
-    LastAnalysisTime :: erlang:timestamp()) -> erlang:timestamp().
-analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
+-spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
+    SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
+        LastAnalysisPid :: pid() | undefined}) -> {erlang:timestamp(), pid()}.
+analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
-    {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
+    {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
     {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
@@ -734,58 +783,71 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
 
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
-    case (TimeDiff >= timer:minutes(MaxInterval)) orelse
-        ((TimeDiff >= timer:seconds(MinInterval)) andalso
-            ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold) orelse (MemUsage >= MemToStartCleaning))) of
+    MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
+    MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),
+    MinTresholdExceeded = (MemInt >= MemThreshold) orelse
+        (PNum >= ProcThreshold) orelse (MemUsage >= MemToStartCleaning),
+    LastPidAlive = LastAnalysisPid =/= undefined andalso
+        erlang:is_process_alive(LastAnalysisPid),
+    case (MaxTimeExceeded orelse (MinTimeExceeded andalso MinTresholdExceeded))
+        andalso not LastPidAlive of
         true ->
-            spawn(fun() ->
+            Pid = spawn(fun() ->
                 log_monitoring_stats("Monitoring state: ~p", [MonState]),
                 log_monitoring_stats("Erlang ets mem usage: ~p", [
                     lists:reverse(lists:sort(lists:map(fun(N) ->
                         {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
 
-                Procs = erlang:processes(),
-                SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) ->
-                    {erlang:process_info(P, memory), P} end, Procs))),
-                MergedStacksMap = lists:foldl(fun(P, Map) ->
-                    case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
-                        {{current_stacktrace, K}, {memory, M}} ->
-                            {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
-                            maps:put(K, {M + M2, Num + 1, K}, Map);
-                        _ ->
-                            Map
-                    end
-                end, #{}, Procs),
-                MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
+                % Gather processes info
+                {ProcNum, {Top5M, Top5B, CS_Map, CS_Bin_Map}} =
+                    get_procs_stats(),
+
+                % Merge processes with similar stacktrace and find groups
+                % that use a lot of memory
+                MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Map))), 5),
 
                 MergedStacksMap2 = maps:map(fun(K, {M, N, K}) ->
-                    {N, M, K} end, MergedStacksMap),
+                    {N, M, K} end, CS_Map),
                 MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
 
-                GetName = fun(P) ->
-                    All = erlang:registered(),
-                    lists:foldl(fun(Name, Acc) ->
-                        case whereis(Name) of
-                            P ->
-                                Name;
-                            _ ->
-                                Acc
-                        end
-                    end, non, All)
-                end,
+                % Merge processes with similar stacktrace and find groups
+                % that use a lot of memory to store binaries
+                MergedStacksBin = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Bin_Map))), 5),
+
+                MergedStacksBinMap2 = maps:map(fun(K, {M, N, K}) ->
+                    {N, M, K} end, CS_Bin_Map),
+                MergedStacksBin2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksBinMap2))), 5),
+
+                All = erlang:registered(),
 
                 TopProcesses = lists:map(
-                    fun({M, P}) ->
-                        {M, erlang:process_info(P, current_stacktrace), erlang:process_info(P, message_queue_len),
-                            erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
-                            erlang:process_info(P, total_heap_size), P, GetName(P)}
-                    end, lists:sublist(SortedProcs, 5)),
-                log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
-                "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
-                    TopProcesses, MergedStacks, MergedStacks2
+                    fun({M, {P, CS}}) ->
+                        {M, CS, P, get_process_name(P, All),
+                            erlang:process_info(P, current_function),
+                            erlang:process_info(P, initial_call),
+                            erlang:process_info(P, message_queue_len)}
+                    end, lists:reverse(Top5M)),
+
+                TopProcessesBin = lists:map(
+                    fun({M, {P, CS, BL}}) ->
+                        {M, CS, P, get_process_name(P, All), BL,
+                            erlang:process_info(P, current_function),
+                            erlang:process_info(P, initial_call),
+                            erlang:process_info(P, message_queue_len)}
+                    end, lists:reverse(Top5B)),
+
+                log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
+                "single proc memory cosumption (binary): ~p~n"
+                "aggregated memory consumption: ~p~n"
+                "simmilar procs: ~p~n"
+                "aggregated memory consumption (binary): ~p~n"
+                "simmilar procs (binary): ~p", [
+                    ProcNum, TopProcesses, TopProcessesBin, MergedStacks,
+                    MergedStacks2, MergedStacksBin, MergedStacksBin2
                 ]),
 
+                % Log schedulers info
                 log_monitoring_stats("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
                 NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
@@ -810,10 +872,143 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                         ok
                 end
             end),
-            Now;
+            {Now, Pid};
         _ ->
-            LastAnalysisTime
+            {LastAnalysisTime, LastAnalysisPid}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets statistics for processes (processes number and processes that use
+%% a lot of memory).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_procs_stats() -> {ProcNum :: non_neg_integer(),
+    {Top5Mem :: [{Memory :: non_neg_integer(), Value :: term()}],
+        Top5Bin :: [{MemoryBin :: non_neg_integer(), Value :: term()}],
+        CS_Map :: #{}, CS_Bin_Map :: #{}}}.
+get_procs_stats() ->
+    Procs = erlang:processes(),
+    PNum = length(Procs),
+
+    {PNum, get_procs_stats(Procs, {[], [], #{}, #{}}, 0)}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets statistics for processes that use a lot of memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_procs_stats([pid()],
+    {TmpTop5Mem :: [{TmpMemory :: non_neg_integer(), TmpValue :: term()}],
+        TmpTop5Bin :: [{TmpMemoryBin :: non_neg_integer(), TmpValue :: term()}],
+        TmpCS_Map :: #{}, TmpCS_Bin_Map :: #{}}, Count :: non_neg_integer()) ->
+    {Top5Mem :: [{Memory :: non_neg_integer(), Value :: term()}],
+        Top5Bin :: [{MemoryBin :: non_neg_integer(), Value :: term()}],
+        CS_Map :: #{}, CS_Bin_Map :: #{}}.
+get_procs_stats([], Ans, _Count) ->
+    Ans;
+get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
+    CS = erlang:process_info(P, current_stacktrace),
+
+    ProcMem = case erlang:process_info(P, memory) of
+        {memory, M} ->
+            M;
+        _ ->
+            0
+    end,
+
+    {Bin, BinList} = case erlang:process_info(P, binary) of
+        {binary, BL} ->
+            {get_binary_size(BL), BL};
+        _ ->
+            {0, []}
+    end,
+
+    Top5Mem2 = top_five(ProcMem, {P, CS}, Top5Mem),
+    Top5Bin2 = top_five(Bin, {P, CS, BinList}, Top5Bin),
+    CS_Map2 = merge_stacks(CS, ProcMem, CS_Map),
+    CS_Bin_Map2 = merge_stacks(CS, Bin, CS_Bin_Map),
+
+    case Count rem 25000 of
+        0 ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
+    get_procs_stats(Procs, {Top5Mem2, Top5Bin2, CS_Map2, CS_Bin_Map2},
+        Count + 1).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sums utilization of memory of processes with similar stacktrace.
+%% @end
+%%--------------------------------------------------------------------
+-spec top_five(Memory :: non_neg_integer(), Value :: term(),
+    Acc :: [{non_neg_integer(), term()}]) ->
+    NewAcc :: [{non_neg_integer(), term()}].
+top_five(M, Value, []) ->
+    [{M, Value}];
+top_five(M, Value, [{Min, _} | Top4] = Top5) ->
+    case length(Top5) < 5 of
+        true -> lists:sort([{M, Value} | Top5]);
+        _ ->
+            case M > Min of
+                true ->
+                    lists:sort([{M, Value} | Top4]);
+                _ ->
+                    Top5
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sums utilization of memory of processes with similar stacktrace.
+%% @end
+%%--------------------------------------------------------------------
+-spec merge_stacks(Stacktrace :: term(), Memory :: non_neg_integer(),
+    Acc :: #{}) -> NewAcc :: #{}.
+merge_stacks(CS, M, Map) ->
+    case CS of
+        {current_stacktrace, K} ->
+            {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
+            maps:put(K, {M + M2, Num + 1, K}, Map);
+        _ ->
+            Map
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tries to find process name.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_process_name(pid(), [atom()]) -> atom().
+get_process_name(P, All) ->
+    lists:foldl(fun(Name, Acc) ->
+        case whereis(Name) of
+            P ->
+                Name;
+            _ ->
+                Acc
+        end
+    end, non, All).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns sum of sizes of binaries listed by process_info.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_binary_size(list()) -> non_neg_integer().
+get_binary_size(BinList) ->
+    lists:foldl(fun({_, S, _}, Acc) ->
+        S + Acc
+    end, 0, BinList).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -828,6 +1023,19 @@ log_monitoring_stats(Format, Args) ->
         lager_util:localtime_ms(Now))),
     LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
         "/tmp/node_manager_monitoring.log"),
+    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        monitoring_log_file_max_size, 524288000), % 500 MB
+
+    case filelib:file_size(LogFile) > MaxSize of
+        true ->
+            LogFile2 = LogFile ++ ".1",
+            file:delete(LogFile2),
+            file:rename(LogFile, LogFile2),
+            ok;
+        _ ->
+            ok
+    end,
+
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.

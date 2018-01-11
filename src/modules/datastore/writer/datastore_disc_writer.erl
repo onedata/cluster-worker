@@ -212,8 +212,15 @@ force_flush(CachedKeys, Delay) ->
             ok;
         NotFlushedWithReason ->
             CachedKeys2 = lists:foldl(fun({{Key, Ctx}, {error, Reason}}, Map) ->
-                ?error("Failed to flush document ~p using context ~p due to:
-                ~p. Retrying after ~p ms...", [Key, Ctx, Reason, Delay]),
+                LogKey = case Reason of
+                    etimedout -> flush_etimedout;
+                    timeout -> flush_timeout;
+                    etmpfail -> flush_etmpfail;
+                    _ -> flush_other_error
+                end,
+                node_manager:single_error_log(LogKey, "Failed to flush document
+                    ~p using context ~p due to: ~p. Retrying after ~p ms...",
+                    [Key, Ctx, Reason, Delay]),
                 maps:put(Key, Ctx, Map)
             end, #{}, NotFlushedWithReason),
             timer:sleep(Delay),
