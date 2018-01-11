@@ -513,6 +513,9 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 -spec cm_conn_ack(State :: term()) -> #state{}.
 cm_conn_ack(State = #state{cm_con_status = connected}) ->
     ?info("Successfully connected to cluster manager"),
+    ?info("Starting default workers..."),
+    init_workers(cluster_worker_modules()),
+    ?info("Default workers started successfully"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
@@ -533,9 +536,6 @@ cm_conn_ack(State) ->
 cluster_init_finished(State, Nodes) ->
     ?info("Cluster initialized. Running 'on_cluster_initialized' procedures"),
     plugins:apply(node_manager_plugin, on_cluster_initialized, [Nodes]),
-    ?info("Starting default workers..."),
-    init_workers(cluster_worker_modules()),
-    ?info("Default workers started successfully"),
     ?info("Starting custom workers..."),
     Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
     init_workers(Workers),
