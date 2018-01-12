@@ -6,7 +6,7 @@ Brings up a set of cluster-worker nodes. They can create separate clusters.
 """
 
 import os
-from . import docker, common, worker, gui, panel, location_service_bootstrap
+from . import docker, common, worker, gui, panel
 
 def up(image, bindir, dns_server, uid, config_path, logdir=None,
        dnsconfig_path=None, storages_dockers=None, luma_config=None):
@@ -28,15 +28,6 @@ class OZWorkerConfigurator:
     def tweak_config(self, cfg, uid, instance):
         sys_config = cfg['nodes']['node']['sys.config'][self.app_name()]
         sys_config['external_ip'] = {'string': 'IP_PLACEHOLDER'}
-
-        if 'location_service_bootstrap_nodes' in sys_config:
-            sys_config['location_service_bootstrap_nodes'] = map(lambda name:
-                location_service_bootstrap.format_if_test_node(name, uid),
-                sys_config['location_service_bootstrap_nodes'])
-
-        if 'http_domain' in sys_config:
-            domain = worker.cluster_domain(instance, uid)
-            sys_config['http_domain'] = {'string': domain}
 
         if 'onepanel_rest_url' in sys_config:
             rest_url = sys_config['onepanel_rest_url']
@@ -97,7 +88,7 @@ sed -i.bak s/onedata.org/{domain}/g /root/bin/node/data/dns.config
         return 1124
 
     def couchbase_buckets(self):
-        return {"onedata": 1024, "location_service": 100}
+        return {"onedata": 1024}
 
     def app_name(self):
         return "oz_worker"
@@ -106,7 +97,10 @@ sed -i.bak s/onedata.org/{domain}/g /root/bin/node/data/dns.config
         return "zone_domains"
 
     def domain_env_name(self):
-        return "zone_domain"
+        return "http_domain"
 
     def nodes_list_attribute(self):
         return "oz_worker_nodes"
+
+    def has_dns_server(self):
+        return True
