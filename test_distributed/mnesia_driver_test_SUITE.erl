@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1]).
+-export([all/0, init_per_suite/1, init_per_testcase/2]).
 
 %% tests
 -export([
@@ -46,6 +46,7 @@ all() ->
 
 -define(MODEL, mnesia_only_model).
 -define(CTX, ?MEM_CTX(?MODEL)).
+-define(CTX(Key), datastore_multiplier:extend_name(?KEY, ?CTX)).
 -define(VALUE, ?VALUE(1)).
 -define(VALUE(N), ?MODEL_VALUE(?MODEL, N)).
 -define(DOC, ?DOC(1)).
@@ -58,7 +59,7 @@ all() ->
 save_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, mnesia_driver, save, [
-        ?CTX, ?KEY, ?DOC
+        ?CTX(?KEY), ?KEY, ?DOC
     ])),
     ?assertEqual(?KEY, Doc#document.key),
     ?assertEqual(?VALUE, Doc#document.value),
@@ -72,26 +73,26 @@ save_should_return_doc(Config) ->
 get_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, mnesia_driver, save, [
-        ?CTX, ?KEY, ?DOC
+        ?CTX(?KEY), ?KEY, ?DOC
     ])),
     ?assertEqual({ok, Doc}, rpc:call(Worker, mnesia_driver, get, [
-        ?CTX, ?KEY
+        ?CTX(?KEY), ?KEY
     ])).
 
 get_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual({error, not_found}, rpc:call(Worker, mnesia_driver, get, [
-        ?CTX, ?KEY
+        ?CTX(?KEY), ?KEY
     ])).
 
 update_should_change_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, Doc} = ?assertMatch({ok, _}, rpc:call(Worker, mnesia_driver, save, [
-        ?CTX, ?KEY, ?DOC
+        ?CTX(?KEY), ?KEY, ?DOC
     ])),
     Value = ?VALUE(2),
     {ok, Doc2} = ?assertMatch({ok, _}, rpc:call(Worker, mnesia_driver, save, [
-        ?CTX, ?KEY, ?DOC#document{value = Value}
+        ?CTX(?KEY), ?KEY, ?DOC#document{value = Value}
     ])),
     ?assertEqual(?KEY, Doc2#document.key),
     ?assertEqual(Value, Doc2#document.value),
@@ -105,11 +106,11 @@ update_should_change_doc(Config) ->
 delete_should_remove_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({ok, _}, rpc:call(Worker, mnesia_driver, save, [
-        ?CTX, ?KEY, ?DOC
+        ?CTX(?KEY), ?KEY, ?DOC
     ])),
-    ?assertEqual(ok, rpc:call(Worker, mnesia_driver, delete, [?CTX, ?KEY])),
+    ?assertEqual(ok, rpc:call(Worker, mnesia_driver, delete, [?CTX(?KEY), ?KEY])),
     ?assertEqual({error, not_found}, rpc:call(Worker, mnesia_driver, get, [
-        ?CTX, ?KEY
+        ?CTX(?KEY), ?KEY
     ])).
 
 save_get_delete_should_return_success(Config) ->
@@ -128,19 +129,19 @@ save_get_delete_should_return_success_base(Config) ->
 
     lists:foreach(fun(N) ->
         ?assertMatch({ok, #document{}}, rpc:call(Worker, mnesia_driver, save, [
-            ?CTX, ?KEY(N), ?DOC(N)
+            ?CTX(?KEY(N)), ?KEY(N), ?DOC(N)
         ]))
     end, lists:seq(1, OpsNum)),
 
     lists:foreach(fun(N) ->
         ?assertMatch({ok, #document{}}, rpc:call(Worker, mnesia_driver, get, [
-            ?CTX, ?KEY(N)
+            ?CTX(?KEY(N)), ?KEY(N)
         ]))
     end, lists:seq(1, OpsNum)),
 
     lists:foreach(fun(N) ->
         ?assertEqual(ok, rpc:call(Worker, mnesia_driver, delete, [
-            ?CTX, ?KEY(N)
+            ?CTX(?KEY(N)), ?KEY(N)
         ]))
     end, lists:seq(1, OpsNum)).
 
@@ -150,3 +151,10 @@ save_get_delete_should_return_success_base(Config) ->
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite([?MODEL], Config).
+
+init_per_testcase(_, Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    application:load(cluster_worker),
+    application:set_env(cluster_worker, tp_subtrees_number, 1),
+    test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 1),
+    Config.

@@ -27,6 +27,7 @@
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
     cached_keys_in_flush = #{} :: cached_keys(),
+    keys_to_inactivate = #{} :: cached_keys(),
     requests_ref = undefined :: undefined | reference(),
     flush_ref = undefined :: undefined | reference()
 }).
@@ -93,7 +94,8 @@ handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State2)};
 handle_call({terminate, Requests}, _From, State = #state{
-    disc_writer_pid = Pid
+    disc_writer_pid = Pid,
+    keys_to_inactivate = ToInactivate
 }) ->
     State2 = #state{
         cached_keys_to_flush = CachedKeysToFlush,
@@ -101,7 +103,7 @@ handle_call({terminate, Requests}, _From, State = #state{
     } = handle_requests(Requests, State),
     CachedKeys = maps:merge(CachedKeysInFlush, CachedKeysToFlush),
     gen_server:call(Pid, {terminate, CachedKeys}, infinity),
-    datastore_cache:inactivate(self()),
+    datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -189,13 +191,17 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_requests(list(), state()) -> state().
-handle_requests(Requests, State = #state{cached_keys_to_flush = CachedKeys}) ->
+handle_requests(Requests, State = #state{
+    cached_keys_to_flush = CachedKeys,
+    keys_to_inactivate = ToInactivate
+}) ->
     Batch = datastore_doc_batch:init(),
     {Responses, Batch2} = batch_requests(Requests, [], Batch),
     Batch3 = datastore_doc_batch:apply(Batch2),
     Batch4 = send_responses(Responses, Batch3),
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
-    State#state{cached_keys_to_flush = maps:merge(CachedKeys, CachedKeys2)}.
+    State#state{cached_keys_to_flush = maps:merge(CachedKeys, CachedKeys2),
+        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys2)}.
 
 %%--------------------------------------------------------------------
 %% @private

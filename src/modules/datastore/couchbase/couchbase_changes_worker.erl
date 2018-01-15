@@ -205,11 +205,19 @@ fetch_changes(#state{
     Ctx = #{bucket => Bucket},
     Design = couchbase_changes:design(),
     View = couchbase_changes:view(),
-    {ok, {Changes}} = couchbase_driver:query_view(Ctx, Design, View, [
+    QueryAns = couchbase_driver:query_view(Ctx, Design, View, [
         {startkey, jiffy:encode([Scope, SeqSafe2])},
         {endkey, jiffy:encode([Scope, Seq2])},
         {inclusive_end, true}
     ]),
+
+    Changes = case QueryAns of
+        {ok, {Changes0}} ->
+            Changes0;
+        Error ->
+            ?error("Cannot fetch changes, error: ~p", [Error]),
+            []
+    end,
 
     State2 = #state{
         seq_safe = SeqSafe3
@@ -316,7 +324,10 @@ ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope}) ->
                     Ignore
             end;
         {error, not_found} ->
-            undefined
+            undefined;
+        Error ->
+            ?error("Error during ignore change procedure ~p", [Error]),
+            false
     end.
 
 %%--------------------------------------------------------------------

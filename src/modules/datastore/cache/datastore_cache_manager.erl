@@ -57,15 +57,19 @@
 %%--------------------------------------------------------------------
 -spec init() -> ok.
 init() ->
+    Pools = datastore_multiplier:get_names(memory)
+        ++ datastore_multiplier:get_names(disc),
+
     lists:foreach(fun(Pool) ->
         ets:new(active(Pool), [set, public, named_table, {keypos, 2}]),
         ets:new(inactive(Pool), [set, public, named_table, {keypos, 2}]),
+        ets:new(clear(Pool), [set, public, named_table]),
         SizeByPool = application:get_env(?CLUSTER_WORKER_APP_NAME,
             datastore_cache_size, []),
         MaxSize = proplists:get_value(Pool, SizeByPool, 500000),
         ets:insert(active(Pool), #stats{key = size, value = 0}),
         ets:insert(active(Pool), #stats{key = max_size, value = MaxSize})
-    end, [memory, disc]).
+    end, Pools).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -127,19 +131,22 @@ mark_active(Pool, Ctx = #{mutator_pid := _}, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec mark_inactive(pool(), pid() | datastore:key()) -> boolean().
-mark_inactive(memory, Selector) ->
-    Filter = fun
-        (#entry{volatile = true}) ->
-            true;
-        (#entry{key = Key, driver = Driver, driver_ctx = Ctx}) ->
-            case Driver:get(Ctx, Key) of
-                {ok, #document{deleted = Deleted}} -> Deleted;
-                {error, not_found} -> true
-            end
-    end,
-    mark_inactive(memory, Selector, Filter);
-mark_inactive(disc, Selector) ->
-    mark_inactive(disc, Selector, fun(_) -> true end).
+mark_inactive(Pool, Selector) ->
+    case lists:sublist(atom_to_list(Pool), 4) of
+        "disc" ->
+            mark_inactive(Pool, Selector, fun(_) -> true end);
+        _ ->
+            Filter = fun
+                (#entry{volatile = true}) ->
+                    true;
+                (#entry{key = Key, driver = Driver, driver_ctx = Ctx}) ->
+                    case Driver:get(Ctx, Key) of
+                        {ok, #document{deleted = Deleted}} -> Deleted;
+                        {error, not_found} -> true
+                    end
+            end,
+            mark_inactive(Pool, Selector, Filter)
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -152,8 +159,8 @@ mark_inactive(disc, Selector) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec active(pool()) -> atom().
-active(memory) -> datastore_cache_active_memory_pool;
-active(disc) -> datastore_cache_active_disc_pool.
+active(Pool) ->
+    list_to_atom("datastore_cache_active_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -162,8 +169,17 @@ active(disc) -> datastore_cache_active_disc_pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec inactive(pool()) -> atom().
-inactive(memory) -> datastore_cache_inactive_memory_pool;
-inactive(disc) -> datastore_cache_inactive_disc_pool.
+inactive(Pool) ->
+    list_to_atom("datastore_cache_inactive_pool_" ++ atom_to_list(Pool)).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns name of table (for a pool) that keeps keys that are beeing cleared.
+%% @end
+%%--------------------------------------------------------------------
+clear(Pool) ->
+    list_to_atom("datastore_cache_clear_pool_" ++ atom_to_list(Pool)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -173,12 +189,24 @@ inactive(disc) -> datastore_cache_inactive_disc_pool.
 %%--------------------------------------------------------------------
 -spec mark_active(pool(), entry()) -> boolean().
 mark_active(Pool, Entry = #entry{key = Key}) ->
-    MatchSpec = [{#entry{key = Key, _ = '_'}, [], [true]}],
-    case ets:select_delete(inactive(Pool), MatchSpec) of
-        1 ->
-            ets:insert(active(Pool), Entry),
-            true;
-        0 ->
+    case ets:lookup(inactive(Pool), Key) of
+        [_] ->
+            case ets:insert_new(clear(Pool), {Key, ok}) of
+                true ->
+                    case ets:lookup(inactive(Pool), Key) of
+                        [_] ->
+                            ets:delete(inactive(Pool), Key),
+                            ets:delete(clear(Pool), Key),
+                            ets:insert(active(Pool), Entry),
+                            true;
+                        _ ->
+                            ets:delete(clear(Pool), Key),
+                            activate(Pool, Entry)
+                    end;
+                _ ->
+                    activate(Pool, Entry)
+            end;
+        _ ->
             activate(Pool, Entry)
     end.
 
@@ -226,21 +254,22 @@ relocate(Pool, Entry) ->
         '$end_of_table' ->
             false;
         Key ->
-            MatchSpec = [{#entry{key = Key, _ = '_'}, [], [true]}],
-            case ets:lookup(inactive(Pool), Key) of
-                [#entry{
-                    driver = Driver,
-                    driver_ctx = Ctx
-                }] ->
-                    case ets:select_delete(inactive(Pool), MatchSpec) of
-                        1 ->
+            case ets:insert_new(clear(Pool), {Key, ok}) of
+                true ->
+                    case ets:lookup(inactive(Pool), Key) of
+                        [#entry{
+                            driver = Driver,
+                            driver_ctx = Ctx
+                        }] ->
+                            ets:delete(inactive(Pool), Key),
+                            ets:delete(clear(Pool), Key),
                             Driver:delete(Ctx, Key),
                             ets:insert(active(Pool), Entry),
                             true;
-                        0 ->
+                        [] ->
                             relocate(Pool, Entry)
                     end;
-                [] ->
+                _ ->
                     relocate(Pool, Entry)
             end
     end.
@@ -259,7 +288,8 @@ mark_inactive(Pool, Pid, Filter) when is_pid(Pid) ->
     ]),
     Entries2 = lists:filter(Filter, Entries),
     inactivate(Pool, Entries2);
-mark_inactive(Pool, Key, Filter) when is_binary(Key) ->
+mark_inactive(Pool, Key, Filter) ->
+    %when is_binary(Key) -> % TODO VFS-3974 - all test should use binaries
     Entries = ets:lookup(active(Pool), Key),
     Entries2 = lists:filter(Filter, Entries),
     inactivate(Pool, Entries2).

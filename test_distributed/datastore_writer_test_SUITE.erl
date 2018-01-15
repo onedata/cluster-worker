@@ -12,7 +12,6 @@
 -module(datastore_writer_test_SUITE).
 -author("Krzysztof Trzepla").
 
--include("modules/tp/tp.hrl").
 -include("datastore_test_utils.hrl").
 
 %% export for ct
@@ -55,6 +54,9 @@ all() ->
     "Maximal delay before single operation.")).
 
 -define(TIMEOUT, timer:seconds(5)).
+
+-define(TP_ROUTING_TABLE, tp_routing_table1).
+-define(TP_ROUTER_SUP, tp_router_sup1).
 
 %%%===================================================================
 %%% Test functions
@@ -164,8 +166,8 @@ datastore_writer_should_terminate_when_idle_timeout_exceeded(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     IdleTimeout = ?config(idle_timeout, Config),
 
-    ?assertEqual(ok, rpc:call(Worker, datastore_writer, call, [
-        ?CTX, ?KEY, test_call, [ok]
+    ?assertEqual(<<"ok">>, rpc:call(Worker, datastore_writer, call, [
+        ?CTX, ?KEY, test_call, [<<"ok">>]
     ])),
     ?assertMatch({ok, _}, rpc:call(Worker, tp_router, get, [?KEY])),
     ?assertEqual({error, not_found}, rpc:call(Worker, tp_router, get, [?KEY]),
@@ -186,8 +188,11 @@ init_per_testcase(_Case, Config) ->
             cluster_worker, Env, Value
         ])
     end, [
+        {tp_subtrees_number, 1},
         {throttling_idle_time, IdleTimeout},
         {datastore_writer_idle_timeout, IdleTimeout},
+        {memory_store_idle_timeout_ms, IdleTimeout},
+        {memory_store_min_idle_timeout_ms, IdleTimeout},
         {datastore_writer_flush_delay, FlushDelay}
     ]),
 

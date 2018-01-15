@@ -34,6 +34,7 @@
 -define(MEM_DRV(Model), datastore_test_utils:get_memory_driver(Model)).
 -define(MEM_CTX(Model), #{table => ?TABLE(Model)}).
 -define(TABLE(Model), list_to_atom(atom_to_list(Model) ++ "_table")).
+-define(TABLE1(Model), list_to_atom(atom_to_list(Model) ++ "_table1")).
 
 -define(DISC_DRV, couchbase_driver).
 -define(DISC_DRV(Model), datastore_test_utils:get_disc_driver(Model)).
