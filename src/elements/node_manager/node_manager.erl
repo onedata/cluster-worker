@@ -931,7 +931,9 @@ get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
     CS_Map2 = merge_stacks(CS, ProcMem, CS_Map),
     CS_Bin_Map2 = merge_stacks(CS, Bin, CS_Bin_Map),
 
-    case Count rem 25000 of
+    GC_Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        proc_stats_analysis_gc_interval, 25000),
+    case Count rem GC_Interval of
         0 ->
             erlang:garbage_collect();
         _ ->
