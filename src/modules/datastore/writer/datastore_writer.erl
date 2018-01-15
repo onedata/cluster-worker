@@ -56,6 +56,8 @@
 -type fold_acc() :: datastore_links:fold_acc().
 -type fold_opts() :: datastore_links:fold_opts().
 -type state() :: #state{}.
+-type tp_key() :: datastore:key() | non_neg_integer()
+    | {doc | links, datastore:key()}.
 
 %%%===================================================================
 %%% API
@@ -186,7 +188,7 @@ fetch_links_trees(Ctx, Key) ->
 %% with a key.
 %% @end
 %%--------------------------------------------------------------------
--spec call(ctx(), {doc | links, key()}, atom(), list()) -> term().
+-spec call(ctx(), tp_key(), atom(), list()) -> term().
 call(Ctx, Key, Function, Args) ->
     case call_async(Ctx, Key, Function, Args) of
         {ok, Ref} -> wait(Ref);
@@ -198,7 +200,7 @@ call(Ctx, Key, Function, Args) ->
 %% Multiplies requests handling error.
 %% @end
 %%--------------------------------------------------------------------
--spec multi_call(ctx(), {doc | links, key()}, atom(), list(), non_neg_integer()) ->
+-spec multi_call(ctx(), tp_key(), atom(), list(), non_neg_integer()) ->
     term().
 multi_call(Ctx, Key, Function, Args, Size) ->
     case call(Ctx, Key, Function, Args) of
@@ -213,7 +215,7 @@ multi_call(Ctx, Key, Function, Args, Size) ->
 %% {@link wait/1} to collect result.
 %% @end
 %%--------------------------------------------------------------------
--spec call_async(ctx(), {doc | links, key()}, atom(), list()) ->
+-spec call_async(ctx(), tp_key(), atom(), list()) ->
     {ok, reference()} | {error, term()}.
 call_async(Ctx, Key, Function, Args) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -389,6 +391,13 @@ schedule_terminate(State = #state{terminate_timer_ref = Ref}) ->
     erlang:cancel_timer(Ref),
     schedule_terminate(State#state{terminate_timer_ref = undefined}).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets tp routing key.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_key(datastore:key(), atom()) -> tp_key().
 get_key(Key, Type) ->
     case application:get_env(?CLUSTER_WORKER_APP_NAME, aggregate_tp, false) of
         true ->
