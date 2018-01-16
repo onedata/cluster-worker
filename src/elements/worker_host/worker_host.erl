@@ -300,7 +300,18 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
             Plugin:handle(Msg)
         catch
             Type:Error ->
-                ?error_stacktrace("Worker plug-in ~p error: ~p:~p, on request: ~p", [Plugin, Type, Error, Request]),
+                LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
+                {MsgFormat, FormatArgs} = case LogRequest of
+                    true ->
+                        MF = "Worker plug-in ~p error: ~p:~p, on request: ~p",
+                        FA = [Plugin, Type, Error, Request],
+                        {MF, FA};
+                    _ ->
+                        MF = "Worker plug-in ~p error: ~p:~p",
+                        FA = [Plugin, Type, Error],
+                        {MF, FA}
+                end,
+                ?error_stacktrace(MsgFormat, FormatArgs),
                 worker_plugin_error
         end,
     send_response(Plugin, BeforeProcessingRequest, Request, Response).

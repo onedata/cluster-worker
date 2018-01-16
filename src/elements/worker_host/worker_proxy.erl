@@ -259,8 +259,19 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
             receive
                 #worker_answer{id = MsgId, response = Response} -> Response
             after Timeout ->
-                ?error("Worker: ~p, request: ~p exceeded timeout of ~p ms",
-                    [WorkerRef, Request, Timeout]),
+                LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
+                {MsgFormat, FormatArgs} = case LogRequest of
+                    true ->
+                        MF = "Worker: ~p, request: ~p exceeded timeout of ~p ms",
+                        FA = [WorkerRef, Request, Timeout],
+                        {MF, FA};
+                    _ ->
+                        MF = "Worker: ~p, exceeded timeout of ~p ms",
+                        FA = [WorkerRef, Timeout],
+                        {MF, FA}
+                end,
+
+                ?error(MsgFormat, FormatArgs),
                 {error, timeout}
             end;
         Error ->
