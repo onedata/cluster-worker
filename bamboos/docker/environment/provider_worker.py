@@ -113,10 +113,13 @@ class ProviderWorkerConfigurator:
         return "provider_domains"
 
     def domain_env_name(self):
-        return "provider_domain"
+        return "test_web_cert_domain"
 
     def nodes_list_attribute(self):
         return "op_worker_nodes"
+
+    def has_dns_server(self):
+        return False
 
 
 def create_storages(storages, op_nodes, op_config, bindir, storages_dockers):
