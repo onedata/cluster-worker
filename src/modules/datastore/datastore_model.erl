@@ -64,7 +64,12 @@ init(#{
     memory_driver_ctx := Ctx,
     memory_driver_opts := Opts
 }) ->
-    Driver:init(Ctx, Opts);
+    lists:foldl(fun
+        (Ctx2, ok) ->
+            Driver:init(Ctx2, Opts);
+        (_, Error) ->
+            Error
+    end, ok, datastore_multiplier:get_names(Ctx));
 init(Ctx) ->
     init(datastore_model_default:set_defaults(Ctx)).
 
@@ -74,6 +79,8 @@ init(Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_unique_key(ctx(), key()) -> key().
+% TODO - VFS-3975 - allow routing via generic key without model
+% problem with links application that need such routing key
 get_unique_key(#{model := Model}, Key) ->
     datastore_utils:gen_key(atom_to_binary(Model, utf8), Key).
 
@@ -287,9 +294,10 @@ get_links_trees(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply(ctx(), key(), fun(), list()) -> term().
-datastore_apply(Ctx, Key, Fun, Args) ->
-    Ctx2 = datastore_model_default:set_defaults(Ctx),
-    UniqueKey = get_unique_key(Ctx2, Key),
+datastore_apply(Ctx0, Key, Fun, Args) ->
+    Ctx = datastore_model_default:set_defaults(Ctx0),
+    UniqueKey = get_unique_key(Ctx, Key),
+    Ctx2 = datastore_multiplier:extend_name(UniqueKey, Ctx),
     erlang:apply(Fun, [Ctx2, UniqueKey | Args]).
 
 %%--------------------------------------------------------------------

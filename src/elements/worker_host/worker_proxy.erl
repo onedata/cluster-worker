@@ -293,7 +293,12 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
                         {MF, FA}
                 end,
 
-                ?error(MsgFormat, FormatArgs),
+                WorkerName = case WorkerRef of
+                    {Name, _Node} -> Name;
+                    Name -> Name
+                end,
+                LogKey = list_to_atom("proxy_timeout_" ++ atom_to_list(WorkerName)),
+                node_manager:single_error_log(LogKey, MsgFormat, FormatArgs),
                 {error, timeout}
             end;
         Error ->

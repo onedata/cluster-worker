@@ -25,7 +25,9 @@
   task_control = false,
   last_cache_cleaning = {0,0,0},
   cache_cleaning_pid = undefined :: undefined | pid(),
-  last_state_analysis = {0,0,0},
+  last_state_analysis = {{0,0,0}, undefined}
+    :: {erlang:timestamp(), undefined | pid()}, % {timestamp of last_analysis,
+      % pid that performs analysis}
   throttling = true
 }).
 
