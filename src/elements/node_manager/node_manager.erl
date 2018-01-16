@@ -47,7 +47,8 @@
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
     cluster_worker_listeners/0, get_cluster_nodes_ips/0]).
--export([single_error_log/2, single_error_log/3, single_error_log/4]).
+-export([single_error_log/2, single_error_log/3, single_error_log/4,
+    log_monitoring_stats/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -187,6 +188,34 @@ single_error_log(LogKey, Log, Args, FreezeTime) ->
         _ ->
             ok
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Log monitoring result.
+%% @end
+%%--------------------------------------------------------------------
+-spec log_monitoring_stats(LogFile :: string(),
+    Format :: io:format(), Args :: [term()]) -> ok.
+log_monitoring_stats(LogFile, Format, Args) ->
+    Now = os:timestamp(),
+    {Date, Time} = lager_util:format_time(lager_util:maybe_utc(
+        lager_util:localtime_ms(Now))),
+    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        monitoring_log_file_max_size, 524288000), % 500 MB
+
+    case filelib:file_size(LogFile) > MaxSize of
+        true ->
+            LogFile2 = LogFile ++ ".1",
+            file:delete(LogFile2),
+            file:rename(LogFile, LogFile2),
+            ok;
+        _ ->
+            ok
+    end,
+
+    file:write_file(LogFile,
+        io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
+    ok.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -1015,33 +1044,15 @@ get_binary_size(BinList) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Analyse monitoring state and log result.
+%% Log monitoring result.
 %% @end
 %%--------------------------------------------------------------------
 -spec log_monitoring_stats(Format :: io:format(), Args :: [term()]) -> ok.
 log_monitoring_stats(Format, Args) ->
-    Now = os:timestamp(),
-    {Date, Time} = lager_util:format_time(lager_util:maybe_utc(
-        lager_util:localtime_ms(Now))),
     LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
         "/tmp/node_manager_monitoring.log"),
-    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        monitoring_log_file_max_size, 524288000), % 500 MB
 
-    case filelib:file_size(LogFile) > MaxSize of
-        true ->
-            LogFile2 = LogFile ++ ".1",
-            file:delete(LogFile2),
-            file:rename(LogFile, LogFile2),
-            ok;
-        _ ->
-            ok
-    end,
-
-    file:write_file(LogFile,
-        io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
-    ok.
-
+    log_monitoring_stats(LogFile, Format, Args).
 
 %%--------------------------------------------------------------------
 %% @doc
