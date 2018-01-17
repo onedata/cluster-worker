@@ -19,6 +19,7 @@
 -module(datastore_cache).
 -author("Krzysztof Trzepla").
 
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
@@ -26,6 +27,7 @@
 -export([flush/1, flush/2]).
 -export([flush_async/2, wait/1]).
 -export([inactivate/1, inactivate/2]).
+-export([init_counters/0, init_report/0]).
 
 -record(future, {
     durability :: undefined | durability(),
@@ -50,9 +52,39 @@
     value = Value
 }).
 
+-define(EXOMETER_COUNTERS,
+        [get, fetch, save, flush]). 
+
+
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), counter}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [value]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -64,6 +96,7 @@
 get(Ctx, <<_/binary>> = Key) ->
     hd(get(Ctx, [Key]));
 get(Ctx, Keys) when is_list(Keys) ->
+    ?update_counter(?EXOMETER_NAME(cache_get), length(Keys)),
     lists:map(fun
         ({ok, memory, Doc}) -> {ok, Doc};
         ({error, Reason}) -> {error, Reason}
@@ -82,6 +115,7 @@ get(Ctx, Keys) when is_list(Keys) ->
 fetch(Ctx, <<_/binary>> = Key) ->
     hd(fetch(Ctx, [Key]));
 fetch(Ctx, Keys) when is_list(Keys) ->
+    ?update_counter(?EXOMETER_NAME(cache_fetch), length(Keys)),
     Results = fetch_local_or_remote(Ctx, Keys),
     Results2 = cache_disc_or_remote_results(Ctx, Keys, Results),
 
@@ -104,6 +138,7 @@ fetch(Ctx, Keys) when is_list(Keys) ->
 -spec save([{ctx(), key(), doc()}]) ->
     [{ok, durability(), doc()} | {error, term()}].
 save(Items) when is_list(Items) ->
+    ?update_counter(?EXOMETER_NAME(cache_save), length(Items)),
     lists:map(fun
         ({error, {enomem, _Doc}}) -> {error, enomem};
         (Other) -> Other
@@ -126,6 +161,7 @@ save(Ctx, Key, Doc) ->
 %%--------------------------------------------------------------------
 -spec flush([{ctx(), key()}]) -> [{ok, doc()} | {error, term()}].
 flush(Items) when is_list(Items) ->
+    ?update_counter(?EXOMETER_NAME(cache_flush), length(Items)),
     lists:map(fun
         ({ok, disc, Doc}) -> {ok, Doc};
         ({error, Reason}) -> {error, Reason}

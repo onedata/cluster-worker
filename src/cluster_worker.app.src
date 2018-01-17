@@ -31,7 +31,9 @@
             web_client,
             cowboy,
             worker_pool,
-            exometer_core
+            exometer_core,
+            exometer_lager,
+            exometer_graphite
         ]},
         {mod, {cluster_worker_app, []}},
         {env, [
@@ -73,6 +75,11 @@
                     {memory_limit, 95}
                 ]}
             ]},
+
+            % Interval between exometer reports
+            {exometer_logging_interval, 15000},
+            % Interval between checking if exometer reporters are alive
+            {exometer_check_interval_seconds, 15000},
 
             % Number of tp subtrees
             % (tree of tp_servers is divided into several subtrees)
@@ -199,6 +206,39 @@
             {couchbase_changes_batch_size, 200},
             {couchbase_changes_update_interval, 1000},
             {couchbase_changes_stream_batch_size, 200},
-            {couchbase_changes_stream_update_interval, 1000}
+            {couchbase_changes_stream_update_interval, 1000},
+
+            %% ===================================================================
+            %% EXOMETER
+            %% ===================================================================
+
+            % Interval between exometer reports
+            {exometer_logging_interval, 15000},
+            % Interval between checking if exometer reporters are alive
+            {exometer_check_interval_seconds, 15000},
+            % List of exometer counters that should be off or atom 'all'
+            % e.g., [[mod, datastore, save_time]]
+            % to apply - use exometer_utils:init_exometer_counters()
+            {excluded_exometer_counters, []},
+
+            {counter_name_prefixes, [comp, cluster_worker]},
+
+            % Should lager reporter be on
+            {exometer_lager_reporter, true},
+            % Logging level of lager reporter
+            {exometer_logging_level, debug},
+
+            % Should graphite reporter be active and namespaces used
+            {integrate_with_graphite, false},
+            % address of graphite db
+            {graphite_host, "172.17.0.2"},
+            % graphite port
+            {graphite_port, 2003},
+            % api key for graphite
+            {graphite_api_key, <<"example_key">>},
+            % graphite metrics prefix
+            {graphite_prefix, <<"onedata">>},
+            % graphite connection timeout
+            {graphite_connect_timeout, 5000}
         ]}
     ]}.

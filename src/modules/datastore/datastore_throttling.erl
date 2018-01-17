@@ -14,13 +14,15 @@
 -author("Michal Wrzeszcz").
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("elements/task_manager/task_manager.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([throttle/0, throttle/1, throttle_model/1,
-    get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0]).
+    get_idle_timeout/0, configure_throttling/0, plan_next_throttling_check/0, 
+    init_counters/0, init_report/0]).
 % for tests
 -export([send_after/3]).
 
@@ -30,9 +32,40 @@
 -define(MEMORY_PROC_IDLE_KEY, throttling_idle_time).
 -define(THROTTLING_ERROR, {error, load_to_high}).
 
+-define(EXOMETER_COUNTERS, [tp, db_queue]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+  TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    exometer_throttling_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+  Counters = lists:map(fun(Name) ->
+    {?EXOMETER_NAME(Name), histogram, TimeSpan}
+  end, ?EXOMETER_COUNTERS),
+  ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+  Reports = lists:map(fun(Name) ->
+    {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+  end, ?EXOMETER_COUNTERS),
+  ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -230,12 +263,12 @@ set_idle_time(ProcNum) ->
 -spec get_values_and_update_counters() -> [number()].
 get_values_and_update_counters() ->
     ProcNum = tp:get_processes_number(),
-%%    ok = ?update_counter(?EXOMETER_NAME(tp), ProcNum),
+    ok = ?update_counter(?EXOMETER_NAME(tp), ProcNum),
 
     QueueSize = lists:foldl(fun(Bucket, Acc) ->
         couchbase_pool:get_max_worker_queue_size(Bucket) + Acc
     end, 0, couchbase_config:get_buckets()),
-%%    ok = ?update_counter(?EXOMETER_NAME(db_queue), QueueSize),
+    ok = ?update_counter(?EXOMETER_NAME(db_queue), QueueSize),
 
     MemoryUsage = case monitoring:get_memory_stats() of
         [{<<"mem">>, MemUsage}] ->

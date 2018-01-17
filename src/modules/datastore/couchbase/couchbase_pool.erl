@@ -13,6 +13,7 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 
 %% API
 -export([post_async/3, post/3, wait/1]).
@@ -20,6 +21,7 @@
 -export([get_request_queue_size/1, get_request_queue_size/2,
     get_max_worker_queue_size/1, get_max_worker_queue_size/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
+-export([init_counters/0, init_report/0]).
 
 -type mode() :: changes | read | write.
 -type ctx() :: couchbase_driver:ctx().
@@ -43,9 +45,42 @@
 
 -export_type([mode/0, request/0, response/0, future/0]).
 
+-define(EXOMETER_NAME(Bucket, Mode),  ?exometer_name(?MODULE, Bucket, Mode)).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_pool_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Counters = lists:foldl(fun(Bucket, Acc1) ->
+        lists:foldl(fun(Mode, Acc2) ->
+            [{?EXOMETER_NAME(Bucket, Mode), histogram, TimeSpan} | Acc2]
+        end, Acc1, get_modes())
+    end, [], couchbase_config:get_buckets()),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:foldl(fun(Bucket, Acc1) ->
+        lists:foldl(fun(Mode, Acc2) ->
+            [{?EXOMETER_NAME(Bucket, Mode), [min, max, median, mean, n]} | Acc2]
+        end, Acc1, get_modes())
+    end, [], couchbase_config:get_buckets()),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -162,7 +197,9 @@ get_max_worker_queue_size(Bucket) ->
 get_max_worker_queue_size(Bucket, Mode) ->
     lists:foldl(fun(Id, Size) ->
         Key = {request_queue_size, Bucket, Mode, Id},
-        max(Size, ets:lookup_element(couchbase_pool_stats, Key, 2))
+        ModeSize = ets:lookup_element(couchbase_pool_stats, Key, 2),
+        ?update_counter(?EXOMETER_NAME(Bucket, Mode), ModeSize),
+        max(Size, ModeSize)
     end, 0, lists:seq(1, get_size(Bucket, Mode))).
 
 %%--------------------------------------------------------------------
