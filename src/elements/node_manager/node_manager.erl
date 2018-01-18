@@ -55,7 +55,7 @@
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_counters/0]).
+    cluster_worker_listeners/0, modules_hooks/0, init_report/0, init_counters/0, start_worker/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -190,6 +190,33 @@ get_ip_address() ->
 %%--------------------------------------------------------------------
 refresh_ip_address() ->
     gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts worker node with dedicated supervisor as brother. Both entities
+%% are started under MAIN_WORKER_SUPERVISOR supervision.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
+start_worker(Module, Args) ->
+    try
+        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
+        WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
+        {ok, _} = supervisor:start_child(
+            ?MAIN_WORKER_SUPERVISOR_NAME,
+            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
+        ),
+        {ok, _} = supervisor:start_child(
+            ?MAIN_WORKER_SUPERVISOR_NAME,
+            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
+        ),
+        ?info("Worker: ~s started", [Module])
+    catch
+        _:Error ->
+            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
+            {error, Error}
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -737,34 +764,6 @@ init_workers() ->
     end, plugins:apply(node_manager_plugin, modules_with_args, [])),
     ?info("All workers started"),
     ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Starts worker node with dedicated supervisor as brother. Both entities
-%% are started under MAIN_WORKER_SUPERVISOR supervision.
-%% @end
-%%--------------------------------------------------------------------
--spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
-start_worker(Module, Args) ->
-    try
-        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
-        WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
-        {ok, _} = supervisor:start_child(
-            ?MAIN_WORKER_SUPERVISOR_NAME,
-            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
-        ),
-        {ok, _} = supervisor:start_child(
-            ?MAIN_WORKER_SUPERVISOR_NAME,
-            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
-        ),
-        ?info("Worker: ~s started", [Module])
-    catch
-        _:Error ->
-            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
-            {error, Error}
-    end.
-
 
 %%--------------------------------------------------------------------
 %% @private
