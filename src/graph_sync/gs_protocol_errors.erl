@@ -292,6 +292,10 @@ error_to_json(1, ?ERROR_BAD_VALUE_LOGIN) ->
     #{
         <<"id">> => <<"badValueLogin">>
     };
+error_to_json(1, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
+    #{
+        <<"id">> => <<"subdomainDelegationDisabled">>
+    };
 error_to_json(1, ?ERROR_RELATION_DOES_NOT_EXIST(ChType, ChId, ParType, ParId)) ->
     #{
         <<"id">> => <<"relationDoesNotExist">>,
@@ -478,6 +482,9 @@ json_to_error(1, #{<<"id">> := <<"badValueIntentifier">>,
 
 json_to_error(1, #{<<"id">> := <<"badValueLogin">>}) ->
     ?ERROR_BAD_VALUE_LOGIN;
+
+json_to_error(1, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
+    ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;
 
 json_to_error(1, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{
