@@ -50,8 +50,8 @@
             {node_mem_ratio_to_clear_cache, 90},
 
             %% Number of tp processes to reduce tp process idle time
-            {throttling_reduce_idle_time_memory_proc_number, 1000},
-            {throttling_min_idle_time_memory_proc_number, 10000},
+            {throttling_reduce_idle_time_memory_proc_number, 200},
+            {throttling_min_idle_time_memory_proc_number, 1000},
             %% Interval of throttling configuration when throttling is used
             {throttling_active_check_interval_seconds, 1},
             %% Interval of throttling configuration
@@ -76,7 +76,7 @@
 
             % Number of tp subtrees
             % (tree of tp_servers is divided into several subtrees)
-            {tp_subtrees_number, 10},
+            {tp_subtrees_number, 50},
             % Enable handling of link and doc calls in single tp proc
             {aggregate_tp, true},
             % Size of tp key space (0 - unlimited)
@@ -167,6 +167,9 @@
             %% DATASTORE
             %% ===================================================================
 
+            %% Maps to an 'order' parameter of a bp_tree library
+            {datastore_links_tree_order, 128},
+
             {tp_processes_limit, 250000},
 
             {datastore_doc_commit_retry_delay, 5000},
@@ -174,7 +177,7 @@
             {datastore_doc_mutators_history_length, 1},
 
             {datastore_cache_size, [
-                {memory, 100000},
+                {memory, 500000},
                 {disc, 500000}
             ]},
 
