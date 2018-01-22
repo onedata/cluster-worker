@@ -123,19 +123,21 @@ configure_throttling() ->
 
             case FilteredConfigResult of
                 [] ->
-                    ?debug("No throttling: config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+                    log_monitoring_stats("No throttling: config: ~p, tp num ~p, db queue ~p, mem usage ~p",
                         [ConfigResult, TPNum, DBQueue, MemUsage]),
                     plan_next_throttling_check();
                 _ ->
-                    ?info("Throttling config: ~p, tp num ~p, db queue ~p, mem usage ~p",
-                        [ConfigResult, TPNum, DBQueue, MemUsage]),
+                    Msg = "Throttling config: ~p, tp num ~p, db queue ~p, mem usage ~p",
+                    Args = [ConfigResult, TPNum, DBQueue, MemUsage],
+                    ?info(Msg, Args),
+                    log_monitoring_stats(Msg, Args),
                     plan_next_throttling_check(true)
             end
         catch
             E1:E2 ->
                 % Debug log only, possible during start of the system when connection to
                 % database is not ready
-                ?debug_stacktrace("Error during throttling configuration: ~p:~p", [E1, E2]),
+                log_monitoring_stats("Error during throttling configuration: ~p:~p", [E1, E2]),
                 plan_next_throttling_check()
         end,
         ?MODULE:send_after(CheckInterval, Self, {timer, configure_throttling})
@@ -214,7 +216,7 @@ set_idle_time(ProcNum) ->
     Multip = max(0, min(1, (ProcNum - Idle1) / (Idle2 - Idle1))),
     NewIdleTimeout = round(IdleTimeout - Multip * (IdleTimeout - MinIdleTimeout)),
 
-    ?debug("New idle time: ~p", [NewIdleTimeout]),
+    log_monitoring_stats("New idle time: ~p", [NewIdleTimeout]),
 
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
 
@@ -322,3 +324,16 @@ get_config_value(Name, Config, Defaults) ->
         Value ->
             Value
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Log monitoring result.
+%% @end
+%%--------------------------------------------------------------------
+-spec log_monitoring_stats(Format :: io:format(), Args :: [term()]) -> ok.
+log_monitoring_stats(Format, Args) ->
+    LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_log_file,
+        "/tmp/throttling_monitoring.log"),
+
+    node_manager:log_monitoring_stats(LogFile, Format, Args).
