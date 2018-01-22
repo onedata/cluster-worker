@@ -18,7 +18,6 @@
 -type model() :: datastore_model:model().
 
 -define(DEFAULT_MODELS, [
-    cached_identity,
     links_forest,
     links_mask,
     links_mask_root,
