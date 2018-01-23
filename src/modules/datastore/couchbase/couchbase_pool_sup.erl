@@ -53,6 +53,8 @@ register_worker(Bucket, Mode, Id, Worker) ->
 %% Returns CouchBase pool worker.
 %% @end
 %%--------------------------------------------------------------------
+-spec get_worker(couchbase_config:bucket(), couchbase_pool:mode(),
+    couchbase_pool_worker:id()) -> pid().
 get_worker(Bucket, Mode, Id) ->
     ets:lookup_element(couchbase_pool_workers, {Bucket, Mode, Id}, 2).
 

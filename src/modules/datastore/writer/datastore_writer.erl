@@ -25,7 +25,7 @@
 -export([add_links/4, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
 %% For ct tests
--export([call/4, call_async/4, wait/1]).
+-export([call/4, call_async/4, wait/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -191,7 +191,7 @@ fetch_links_trees(Ctx, Key) ->
 -spec call(ctx(), tp_key(), atom(), list()) -> term().
 call(Ctx, Key, Function, Args) ->
     case call_async(Ctx, Key, Function, Args) of
-        {ok, Ref} -> wait(Ref);
+        {{ok, Ref}, Pid} -> wait(Ref, Pid);
         {error, Reason} -> {error, Reason}
     end.
 
@@ -216,7 +216,7 @@ multi_call(Ctx, Key, Function, Args, Size) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_async(ctx(), tp_key(), atom(), list()) ->
-    {ok, reference()} | {error, term()}.
+    {{ok, reference()}, pid()} | {error, term()}.
 call_async(Ctx, Key, Function, Args) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         datastore_writer_request_queueing_timeout, timer:minutes(1)),
@@ -230,14 +230,20 @@ call_async(Ctx, Key, Function, Args) ->
 %% Waits for a completion of asynchronous call to datastore writer.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(reference()) -> term() | {error, timeout}.
-wait(Ref) ->
+-spec wait(reference(), pid()) -> term() | {error, timeout}.
+wait(Ref, Pid) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         datastore_writer_request_handling_timeout, timer:minutes(10)),
     receive
         {Ref, Response} -> Response
     after
-        Timeout -> {error, timeout}
+        Timeout ->
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    wait(Ref, Pid);
+                _ ->
+                    {error, timeout}
+            end
     end.
 
 %%%===================================================================

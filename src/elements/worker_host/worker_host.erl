@@ -145,9 +145,9 @@ handle_call(_Request, _From, State) ->
     Timeout :: non_neg_integer() | infinity.
 %% Spawning migrated to worker proxy
 %% There is still need for responding to {timer, term()} requests
-handle_cast(#worker_request{} = Req, State = #host_state{plugin = Plugin}) ->
-    spawn(fun() -> proc_request(Plugin, Req) end),
-    {noreply, State};
+%%handle_cast(#worker_request{} = Req, State = #host_state{plugin = Plugin}) ->
+%%    spawn(fun() -> proc_request(Plugin, Req) end),
+%%    {noreply, State};
 
 handle_cast({progress_report, Report}, State) ->
     NewLoadInfo = save_progress(Report, State#host_state.load_info),

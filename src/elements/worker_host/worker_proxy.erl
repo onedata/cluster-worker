@@ -277,10 +277,29 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
             Args = prepare_args(Name, Request, MsgId),
-            execute(Args, Node, ExecOption, Timeout),
-            receive
-                #worker_answer{id = MsgId, response = Response} -> Response
-            after Timeout ->
+            ExecuteAns = execute(Args, Node, ExecOption, Timeout),
+            receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
+        Error ->
+            Error
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for worker answer.
+%% @end
+%%--------------------------------------------------------------------
+-spec receive_loop(ExecuteAns :: term(), MsgId :: term(), Timeout :: timeout(),
+    WorkerRef :: request_dispatcher:worker_ref(), Request :: term()) ->
+    Result :: term() | {error, term()}.
+receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
+    receive
+        #worker_answer{id = MsgId, response = Response} -> Response
+    after Timeout ->
+        case is_pid(ExecuteAns) and erlang:is_process_alive(ExecuteAns) of
+            true ->
+                receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
+            _ ->
                 LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
                 {MsgFormat, FormatArgs} = case LogRequest of
                     true ->
@@ -300,9 +319,7 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
                 LogKey = list_to_atom("proxy_timeout_" ++ atom_to_list(WorkerName)),
                 node_manager:single_error_log(LogKey, MsgFormat, FormatArgs),
                 {error, timeout}
-            end;
-        Error ->
-            Error
+        end
     end.
 
 %%--------------------------------------------------------------------
@@ -317,12 +334,15 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
 -spec execute(Args :: list(), node(), ExecOption :: execute_type(),
     Timeout ::non_neg_integer() | undefined) -> term().
 execute(Args, _Node, direct, _Timeout) ->
+    % TODO - sprawdzic uzycia bo troche bez sensu zaimplementowane
     apply(worker_host, proc_request, Args);
 execute(Args, Node, spawn, _Timeout) ->
     spawn(Node, worker_host, proc_request, Args);
 execute(Args, _Node, {pool, call, PoolName}, Timeout) ->
+    % TODO - jak na to czekamy?
     worker_pool:call(PoolName, {worker_host, proc_request, Args}, worker_pool:default_strategy(), Timeout);
 execute(Args, _Node, {pool, cast, PoolName}, _) ->
+    % TODO - jak na to czekamy?
     worker_pool:cast(PoolName, {worker_host, proc_request, Args}).
 
 
