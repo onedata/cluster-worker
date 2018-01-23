@@ -13,11 +13,11 @@
 -author("Michał Wrzeszcz").
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([check_timeout/1, verify_batch_size_increase/3]).
--export([init_counters/0]).
+-export([check_timeout/1, verify_batch_size_increase/3, init_counters/0, init_report/0]).
 % for eunit
 -export([decrease_batch_size/1]).
 
@@ -26,7 +26,7 @@
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_durability_timeout, 60000)).
 
--define(EXOMETER_NAME(Param), [batch_stats, Param]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 
 -define(MIN_BATCH_SIZE_DEFAULT, 50).
@@ -46,9 +46,37 @@ init_counters() ->
         exometer_batch_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
     TimeSpan2 = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_timeouts_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
-    init_counter(times, histogram, TimeSpan),
-    init_counter(sizes, histogram, TimeSpan),
-    init_counter(timeouts, spiral, TimeSpan2).
+
+    Counters = [
+        {?EXOMETER_NAME(times), histogram, TimeSpan},
+        {?EXOMETER_NAME(sizes), histogram, TimeSpan},
+        {?EXOMETER_NAME(timeouts), spiral, TimeSpan2}
+    ],
+    exometer_utils:init_counters(Counters),
+
+    Counters2 = [
+        {?EXOMETER_NAME(timeouts_history), counter},
+        {?EXOMETER_NAME(sizes_config), histogram, TimeSpan}
+    ],
+    ?init_counters(Counters2).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    HistogramReport = [min, max, median, mean, n],
+
+    Reports = [
+        {?EXOMETER_NAME(times), HistogramReport},
+        {?EXOMETER_NAME(sizes), HistogramReport},
+        {?EXOMETER_NAME(sizes_config), HistogramReport},
+        {?EXOMETER_NAME(timeouts), [count]},
+        {?EXOMETER_NAME(timeouts_history), [value]}
+    ],
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -98,31 +126,22 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 
         case Check of
             timeout ->
-                ok = exometer_utils:update(?EXOMETER_NAME(timeouts), 1);
-%%                ok = exometer_utils:update_counter(?EXOMETER_NAME(timeouts)),
-%%                ok = ?update_counter(?EXOMETER_NAME(timeouts_history));
+                ok = exometer_utils:update_counter(?EXOMETER_NAME(timeouts)),
+                ok = ?update_counter(?EXOMETER_NAME(timeouts_history));
             _ ->
-                ok = exometer:update(?EXOMETER_NAME(times),
+                ok = exometer_utils:update_counter(?EXOMETER_NAME(times),
                     round(lists:max(Times)/1000))
-%%                ok = exometer_utils:update_counter(?EXOMETER_NAME(times),
-%%                    round(lists:max(Times)/1000))
         end,
 
-        ok = exometer:update(?EXOMETER_NAME(sizes), maps:size(Requests)),
+        ok = exometer_utils:update_counter(?EXOMETER_NAME(sizes), maps:size(Requests)),
 
         {ok, TimesDatapoints} =
-            exometer:get_value(?EXOMETER_NAME(times), [max, mean]),
-%%        ok = exometer_utils:update_counter(?EXOMETER_NAME(sizes), maps:size(Requests)),
-%%
-%%        {ok, TimesDatapoints} =
-%%            exometer_utils:get_value(?EXOMETER_NAME(times), [max, mean]),
+            exometer_utils:get_value(?EXOMETER_NAME(times), [max, mean]),
         Max = proplists:get_value(max, TimesDatapoints),
         Mean = proplists:get_value(mean, TimesDatapoints),
 
-        {ok, [{count, TimeoutsCount}]} = exometer:get_value(?EXOMETER_NAME(timeouts), [count]),
-        {ok, [{mean, Size}]} = exometer:get_value(?EXOMETER_NAME(sizes), [mean]),
-%%        {ok, [{count, TimeoutsCount}]} = exometer_utils:get_value(?EXOMETER_NAME(timeouts), [count]),
-%%        {ok, [{mean, Size}]} = exometer_utils:get_value(?EXOMETER_NAME(sizes), [mean]),
+        {ok, [{count, TimeoutsCount}]} = exometer_utils:get_value(?EXOMETER_NAME(timeouts), [count]),
+        {ok, [{mean, Size}]} = exometer_utils:get_value(?EXOMETER_NAME(sizes), [mean]),
         Limit = min(?OP_TIMEOUT, ?DUR_TIMEOUT) / 4,
 
         case Mean > 0 of
@@ -169,10 +188,8 @@ decrease_batch_size(BatchSize) ->
         MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_pool_min_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
         set_batch_size(MinBatchSize),
-%%        exometer_utils:reset(?EXOMETER_NAME(times)),
-%%        exometer_utils:reset(?EXOMETER_NAME(sizes)),
-        exometer:reset(?EXOMETER_NAME(times)),
-        exometer:reset(?EXOMETER_NAME(sizes)),
+        exometer_utils:reset(?EXOMETER_NAME(times)),
+        exometer_utils:reset(?EXOMETER_NAME(sizes)),
         ?info("Timeout for batch with ~p elements, reset counters,"
         " decrease batch size to: ~p", [BatchSize, MinBatchSize])
     catch
@@ -195,16 +212,5 @@ set_batch_size(Size) ->
     catch
         _:_ ->
             ok % can fail when application is stopping
-    end.
-%%    ok = ?update_counter(?EXOMETER_NAME(sizes_config), Size).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes exometer counter.
-%% @end
-%%--------------------------------------------------------------------
--spec init_counter(Param :: atom(), Type :: atom(),
-    TimeSpan :: non_neg_integer()) -> ok.
-init_counter(Param, Type, TimeSpan) ->
-    exometer:new(?EXOMETER_NAME(Param), Type, [{time_span, TimeSpan}]).
+    end,
+    ok = ?update_counter(?EXOMETER_NAME(sizes_config), Size).

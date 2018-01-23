@@ -16,6 +16,7 @@
 -behaviour(worker_plugin_behaviour).
 
 -include("modules/datastore/datastore.hrl").
+-include("exometer_utils.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% worker_plugin_behaviour callbacks
@@ -23,6 +24,16 @@
 
 %% API
 -export([supervisor_flags/0, supervisor_children_spec/0]).
+-export([init_counters/0, init_report/0]).
+
+-define(EXOMETER_COUNTERS,
+    [save, update, create, create_or_update, get, delete, exists, add_links, 
+		set_links, create_link, delete_links, fetch_link, foreach_link,
+        mark_links_deleted, get_links, fold_links, get_links_trees
+    ]).
+
+-define(EXOMETER_NAME(Param), ?exometer_name(datastore, Param)).
+
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -37,7 +48,6 @@
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
     datastore_cache_manager:init(),
-    couchbase_batch:init_counters(),
     ets:new(?CHANGES_COUNTERS, [named_table, public, set]),
     case init_models() of
         ok -> {ok, #{}};
@@ -71,6 +81,31 @@ cleanup() ->
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), counter}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [value]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Reports).
+
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -21,6 +21,7 @@
 -behaviour(gen_server).
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include("elements/node_manager/node_manager.hrl").
 -include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -49,6 +50,7 @@
     cluster_worker_listeners/0, get_cluster_nodes_ips/0]).
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
+-export([init_report/0, init_counters/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -56,9 +58,39 @@
 %% for tests
 -export([init_workers/0, init_workers/1]).
 
+-define(EXOMETER_COUNTERS,
+            [processes_num, memory_erlang, memory_node, cpu_node]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_node_manager_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), histogram, TimeSpan}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -238,6 +270,8 @@ log_monitoring_stats(LogFile, Format, Args) ->
 init([]) ->
     process_flag(trap_exit, true),
     try
+        ?init_exometer_reporters(false),
+        ?init_exometer_counters,
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
 
         ?info("Running 'before_init' procedures."),
@@ -264,6 +298,8 @@ init([]) ->
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
+		{ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+        erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
 
@@ -367,6 +403,14 @@ handle_cast(check_memory, State) ->
     erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
     spawn(fun() ->
         plugins:apply(node_manager_plugin, clear_memory, [false])
+    end),
+    {noreply, State};
+
+handle_cast(check_exometer, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+    erlang:send_after(Interval, self(), {timer, check_exometer}),
+    spawn(fun() ->
+        ?init_exometer_reporters
     end),
     {noreply, State};
 
@@ -809,6 +853,11 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
 
     MemUsage = monitoring:mem_usage(MonState),
+
+    exometer:update(?EXOMETER_NAME(processes_num), PNum),
+    exometer:update(?EXOMETER_NAME(memory_erlang), MemInt),
+    exometer:update(?EXOMETER_NAME(memory_node), MemUsage),
+    exometer:update(?EXOMETER_NAME(cpu_node), CPU * 100),
 
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
