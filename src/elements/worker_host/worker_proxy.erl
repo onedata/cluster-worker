@@ -28,7 +28,7 @@
 
 
 -type execute_type() :: direct | spawn | {pool, call | cast, worker_pool:name()}.
-
+-type timeout_spec() :: timeout() | {timeout(), fun(() -> ok)}.
 
 %%%===================================================================
 %%% API
@@ -51,7 +51,7 @@ call(WorkerRef, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
-    Timeout :: timeout()) -> Result :: term() | {error, term()}.
+    Timeout :: timeout_spec()) -> Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout) ->
     call(WorkerRef, Request, Timeout, spawn).
 
@@ -73,7 +73,8 @@ call_direct(WorkerRef, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_direct(WorkerRef :: request_dispatcher:worker_ref(),
-    Request :: term(), Timeout :: timeout()) -> Result :: term() | {error, term()}.
+    Request :: term(), Timeout :: timeout_spec()) ->
+    Result :: term() | {error, term()}.
 call_direct(WorkerRef, Request, Timeout) ->
     call(WorkerRef, Request, Timeout, direct).
 
@@ -97,7 +98,8 @@ call_pool(WorkerRef, Request, PoolName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_pool(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
-    worker_pool:name(), Timeout :: timeout()) -> Result :: term() | {error, term()}.
+    worker_pool:name(), Timeout :: timeout_spec()) ->
+    Result :: term() | {error, term()}.
 call_pool(WorkerRef, Request, PoolName, Timeout) ->
     call(WorkerRef, Request, Timeout, {pool, call, PoolName}).
 
@@ -120,7 +122,7 @@ multicall(WorkerName, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec multicall(WorkerName :: request_dispatcher:worker_name(),
-    Request :: term(), Timeout :: timeout()) ->
+    Request :: term(), Timeout :: timeout_spec()) ->
     [{Node :: node(), ok | {ok, term()} | {error, term()}}].
 multicall(WorkerName, Request, Timeout) ->
     {ok, Nodes} = request_dispatcher:get_worker_nodes(WorkerName),
@@ -271,7 +273,8 @@ multicast(WorkerName, Request, ReplyTo, MsgId) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
-    Timeout :: timeout(), execute_type()) -> Result :: term() | {error, term()}.
+    Timeout :: timeout_spec(), execute_type()) ->
+    Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout, ExecOption) ->
     MsgId = make_ref(),
     case choose_node(WorkerRef) of
@@ -289,26 +292,31 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
 %% Waits for worker answer.
 %% @end
 %%--------------------------------------------------------------------
--spec receive_loop(ExecuteAns :: term(), MsgId :: term(), Timeout :: timeout(),
-    WorkerRef :: request_dispatcher:worker_ref(), Request :: term()) ->
-    Result :: term() | {error, term()}.
+-spec receive_loop(ExecuteAns :: term(), MsgId :: term(),
+    Timeout :: timeout_spec(), WorkerRef :: request_dispatcher:worker_ref(),
+    Request :: term()) -> Result :: term() | {error, term()}.
 receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
+    {AfterTime, TimeoutFun} = case Timeout of
+        {_Time, _Fun} -> Timeout;
+        _ -> {Timeout, fun() -> ok end}
+    end,
     receive
         #worker_answer{id = MsgId, response = Response} -> Response
-    after Timeout ->
+    after AfterTime ->
         case is_pid(ExecuteAns) and erlang:is_process_alive(ExecuteAns) of
             true ->
+                TimeoutFun(),
                 receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
             _ ->
                 LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
                 {MsgFormat, FormatArgs} = case LogRequest of
                     true ->
                         MF = "Worker: ~p, request: ~p exceeded timeout of ~p ms",
-                        FA = [WorkerRef, Request, Timeout],
+                        FA = [WorkerRef, Request, AfterTime],
                         {MF, FA};
                     _ ->
                         MF = "Worker: ~p, exceeded timeout of ~p ms",
-                        FA = [WorkerRef, Timeout],
+                        FA = [WorkerRef, AfterTime],
                         {MF, FA}
                 end,
 
