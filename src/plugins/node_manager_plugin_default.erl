@@ -20,6 +20,7 @@
 -export([before_init/1, on_cluster_initialized/1, after_init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([check_node_ip_address/0, clear_memory/1]).
+-export([modules_with_exometer/0, exometer_reporters/0]).
 
 -type model() :: datastore_model:model().
 -type record_version() :: datastore_model:record_version().
@@ -208,3 +209,22 @@ check_node_ip_address() ->
 -spec clear_memory(HighMemUse :: boolean()) -> ok.
 clear_memory(_HighMemUse) ->
     ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns list of modules that register exometer reporters.
+%% @end
+%%--------------------------------------------------------------------
+-spec modules_with_exometer() -> list().
+modules_with_exometer() ->
+  [].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns list of exometer reporters.
+%% @end
+%%--------------------------------------------------------------------
+-spec exometer_reporters() -> list().
+exometer_reporters() ->
+  [].
+

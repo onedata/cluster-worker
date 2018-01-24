@@ -31,7 +31,9 @@
             web_client,
             cowboy,
             worker_pool,
-            exometer_core
+            exometer_core,
+            exometer_lager,
+            exometer_graphite
         ]},
         {mod, {cluster_worker_app, []}},
         {env, [
@@ -50,8 +52,8 @@
             {node_mem_ratio_to_clear_cache, 90},
 
             %% Number of tp processes to reduce tp process idle time
-            {throttling_reduce_idle_time_memory_proc_number, 1000},
-            {throttling_min_idle_time_memory_proc_number, 10000},
+            {throttling_reduce_idle_time_memory_proc_number, 200},
+            {throttling_min_idle_time_memory_proc_number, 1000},
             %% Interval of throttling configuration when throttling is used
             {throttling_active_check_interval_seconds, 1},
             %% Interval of throttling configuration
@@ -65,8 +67,8 @@
                     {tp_param_strength, 1},
                     {db_param_strength, 1},
                     {mem_param_strength, 0},
-                    {tp_proc_expected, 100000},
-                    {tp_proc_limit, 200000},
+                    {tp_proc_expected, 20000},
+                    {tp_proc_limit, 40000},
                     {db_queue_expected, 5000},
                     {db_queue_limit, 15000},
                     {memory_expected, 90},
@@ -74,9 +76,14 @@
                 ]}
             ]},
 
+            % Interval between exometer reports
+            {exometer_logging_interval, 15000},
+            % Interval between checking if exometer reporters are alive
+            {exometer_check_interval_seconds, 15000},
+
             % Number of tp subtrees
             % (tree of tp_servers is divided into several subtrees)
-            {tp_subtrees_number, 10},
+            {tp_subtrees_number, 50},
             % Enable handling of link and doc calls in single tp proc
             {aggregate_tp, true},
             % Size of tp key space (0 - unlimited)
@@ -167,6 +174,9 @@
             %% DATASTORE
             %% ===================================================================
 
+            %% Maps to an 'order' parameter of a bp_tree library
+            {datastore_links_tree_order, 128},
+
             {tp_processes_limit, 250000},
 
             {datastore_doc_commit_retry_delay, 5000},
@@ -174,7 +184,7 @@
             {datastore_doc_mutators_history_length, 1},
 
             {datastore_cache_size, [
-                {memory, 100000},
+                {memory, 500000},
                 {disc, 500000}
             ]},
 
@@ -196,6 +206,39 @@
             {couchbase_changes_batch_size, 200},
             {couchbase_changes_update_interval, 1000},
             {couchbase_changes_stream_batch_size, 200},
-            {couchbase_changes_stream_update_interval, 1000}
+            {couchbase_changes_stream_update_interval, 1000},
+
+            %% ===================================================================
+            %% EXOMETER
+            %% ===================================================================
+
+            % Interval between exometer reports
+            {exometer_logging_interval, 15000},
+            % Interval between checking if exometer reporters are alive
+            {exometer_check_interval_seconds, 15000},
+            % List of exometer counters that should be off or atom 'all'
+            % e.g., [[mod, datastore, save_time]]
+            % to apply - use exometer_utils:init_exometer_counters()
+            {excluded_exometer_counters, []},
+
+            {counter_name_prefixes, [comp, cluster_worker]},
+
+            % Should lager reporter be on
+            {exometer_lager_reporter, true},
+            % Logging level of lager reporter
+            {exometer_logging_level, debug},
+
+            % Should graphite reporter be active and namespaces used
+            {integrate_with_graphite, false},
+            % address of graphite db
+            {graphite_host, "172.17.0.2"},
+            % graphite port
+            {graphite_port, 2003},
+            % api key for graphite
+            {graphite_api_key, <<"example_key">>},
+            % graphite metrics prefix
+            {graphite_prefix, <<"onedata">>},
+            % graphite connection timeout
+            {graphite_connect_timeout, 5000}
         ]}
     ]}.

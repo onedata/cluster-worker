@@ -14,6 +14,9 @@
 
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include("exometer_utils.hrl").
+-include("global_definitions.hrl").
+
 
 %% API
 -export([init/1, get_unique_key/2]).
@@ -24,6 +27,7 @@
 -export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
+-export([init_counters/0, init_report/0]).
 
 -type model() :: module().
 -type record() :: tuple().
@@ -47,9 +51,47 @@
 
 -export_type([model/0, record/0, record_struct/0, record_version/0]).
 
+-define(EXOMETER_HISTOGRAM_COUNTERS,
+    [save_time, update_time, create_time, create_or_update_time, get_time,
+        delete_time, exists_time, add_links_time, set_links_time,
+        create_link_time, delete_links_time, fetch_link_time, foreach_link_time,
+        mark_links_deleted_time, get_links_time, fold_links_time,
+        get_links_trees_time
+    ]).
+
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
+  list_to_atom(atom_to_list(Param) ++ "_time"))).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), histogram, TimeSpan}
+    end, ?EXOMETER_HISTOGRAM_COUNTERS),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+    end, ?EXOMETER_HISTOGRAM_COUNTERS),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -93,7 +135,7 @@ get_unique_key(#{model := Model}, Key) ->
 create(Ctx, Doc = #document{key = undefined}) ->
     save(Ctx, Doc);
 create(Ctx, Doc = #document{key = Key}) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:create/3, [Doc]),
+    Result = datastore_apply(Ctx, Key, fun datastore:create/3, create, [Doc]),
     add_fold_link(Ctx, Key, Result).
 
 %%--------------------------------------------------------------------
@@ -107,7 +149,7 @@ save(Ctx, Doc = #document{key = undefined}) ->
     Doc2 = Doc#document{key = datastore_utils:gen_key()},
     save(Ctx2, Doc2);
 save(Ctx, Doc = #document{key = Key}) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:save/3, [Doc]),
+    Result = datastore_apply(Ctx, Key, fun datastore:save/3, save, [Doc]),
     add_fold_link(Ctx, Key, Result).
 
 %%--------------------------------------------------------------------
@@ -117,7 +159,7 @@ save(Ctx, Doc = #document{key = Key}) ->
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff) ->
-    datastore_apply(Ctx, Key, fun datastore:update/3, [Diff]).
+    datastore_apply(Ctx, Key, fun datastore:update/3, update, [Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -128,7 +170,7 @@ update(Ctx, Key, Diff) ->
 -spec update(ctx(), key(), diff(), record() | doc()) ->
     {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff, Default = #document{}) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:update/4, [
+    Result = datastore_apply(Ctx, Key, fun datastore:update/4, update, [
         Diff, Default
     ]),
     add_fold_link(Ctx, Key, Result);
@@ -142,7 +184,7 @@ update(Ctx, Key, Diff, Default) ->
 %%--------------------------------------------------------------------
 -spec get(ctx(), key()) -> {ok, doc()} | {error, term()}.
 get(Ctx, Key) ->
-    datastore_apply(Ctx, Key, fun datastore:get/2, []).
+    datastore_apply(Ctx, Key, fun datastore:get/2, get, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -151,7 +193,7 @@ get(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec exists(ctx(), key()) -> {ok, boolean()} | {error, term()}.
 exists(Ctx, Key) ->
-    datastore_apply(Ctx, Key, fun datastore:exists/2, []).
+    datastore_apply(Ctx, Key, fun datastore:exists/2, exists, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -169,7 +211,7 @@ delete(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), pred()) -> ok | {error, term()}.
 delete(Ctx, Key, Pred) ->
-    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, [Pred]),
+    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).
 
@@ -216,7 +258,7 @@ fold_keys(_Ctx, _Fun, _Acc) ->
     one_or_many({link_name(), link_target()})) ->
     one_or_many({ok, link()} | {error, term()}).
 add_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:add_links/4, [TreeId, Links]);
+    datastore_apply(Ctx, Key, fun datastore:add_links/4, add_links, [TreeId, Links]);
 add_links(Ctx, Key, TreeId, Link) ->
     hd(add_links(Ctx, Key, TreeId, [Link])).
 
@@ -228,7 +270,7 @@ add_links(Ctx, Key, TreeId, Link) ->
 -spec get_links(ctx(), key(), tree_ids(), one_or_many(link_name())) ->
     one_or_many({ok, [link()]} | {error, term()}).
 get_links(Ctx, Key, TreeIds, LinkNames) when is_list(LinkNames) ->
-    datastore_apply(Ctx, Key, fun datastore:get_links/4, [TreeIds, LinkNames]);
+    datastore_apply(Ctx, Key, fun datastore:get_links/4, get_links, [TreeIds, LinkNames]);
 get_links(Ctx, Key, TreeIds, LinkName) ->
     hd(get_links(Ctx, Key, TreeIds, [LinkName])).
 
@@ -241,7 +283,7 @@ get_links(Ctx, Key, TreeIds, LinkName) ->
     one_or_many(link_name() | {link_name(), link_rev()})) ->
     one_or_many(ok | {error, term()}).
 delete_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:delete_links/4, [TreeId, Links]);
+    datastore_apply(Ctx, Key, fun datastore:delete_links/4, delete_links, [TreeId, Links]);
 delete_links(Ctx, Key, TreeId, Link) ->
     hd(delete_links(Ctx, Key, TreeId, [Link])).
 
@@ -254,7 +296,7 @@ delete_links(Ctx, Key, TreeId, Link) ->
     one_or_many(link_name() | {link_name(), link_rev()})) ->
     one_or_many(ok | {error, term()}).
 mark_links_deleted(Ctx, Key, TreeId, Links) when is_list(Links) ->
-    datastore_apply(Ctx, Key, fun datastore:mark_links_deleted/4, [
+    datastore_apply(Ctx, Key, fun datastore:mark_links_deleted/4, mark_links_deleted, [
         TreeId, Links
     ]);
 mark_links_deleted(Ctx, Key, TreeId, Link) ->
@@ -268,7 +310,7 @@ mark_links_deleted(Ctx, Key, TreeId, Link) ->
 -spec fold_links(ctx(), key(), tree_ids(), fold_fun(link()), fold_acc(),
     fold_opts()) -> {ok, fold_acc()} | {error, term()}.
 fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
-    datastore_apply(Ctx, Key, fun datastore:fold_links/6, [
+    datastore_apply(Ctx, Key, fun datastore:fold_links/6, fold_links, [
         TreeIds, Fun, Acc, Opts
     ]).
 
@@ -280,7 +322,7 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 %%--------------------------------------------------------------------
 -spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 get_links_trees(Ctx, Key) ->
-    datastore_apply(Ctx, Key, fun datastore:get_links_trees/2, []).
+    datastore_apply(Ctx, Key, fun datastore:get_links_trees/2, get_links_trees, []).
 
 %%%===================================================================
 %%% Internal functions
@@ -293,12 +335,17 @@ get_links_trees(Ctx, Key) ->
 %% function call to the {@link datastore} module.
 %% @end
 %%--------------------------------------------------------------------
--spec datastore_apply(ctx(), key(), fun(), list()) -> term().
-datastore_apply(Ctx0, Key, Fun, Args) ->
+-spec datastore_apply(ctx(), key(), fun(), atom(), list()) -> term().
+datastore_apply(Ctx0, Key, Fun, FunName, Args) ->
+    Before = os:timestamp(),
     Ctx = datastore_model_default:set_defaults(Ctx0),
     UniqueKey = get_unique_key(Ctx, Key),
     Ctx2 = datastore_multiplier:extend_name(UniqueKey, Ctx),
-    erlang:apply(Fun, [Ctx2, UniqueKey | Args]).
+	Ans = erlang: apply(Fun, [Ctx2, UniqueKey | Args]),
+    After = os:timestamp(),
+	?update_counter(?EXOMETER_NAME(FunName), timer:now_diff(After, Before)),
+    Ans.
+
 
 %%--------------------------------------------------------------------
 %% @private
