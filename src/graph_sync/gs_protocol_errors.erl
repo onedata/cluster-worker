@@ -288,19 +288,9 @@ error_to_json(1, ?ERROR_BAD_VALUE_IDENTIFIER(Key)) ->
             <<"key">> => Key
         }
     };
-error_to_json(1, ?ERROR_BAD_VALUE_ALIAS(Key)) ->
+error_to_json(1, ?ERROR_BAD_VALUE_LOGIN) ->
     #{
-        <<"id">> => <<"badValueAlias">>,
-        <<"details">> => #{
-            <<"key">> => Key
-        }
-    };
-error_to_json(1, ?ERROR_BAD_VALUE_ALIAS_WRONG_PREFIX(Key)) ->
-    #{
-        <<"id">> => <<"badValueAliasWrongPrefix">>,
-        <<"details">> => #{
-            <<"key">> => Key
-        }
+        <<"id">> => <<"badValueLogin">>
     };
 error_to_json(1, ?ERROR_RELATION_DOES_NOT_EXIST(ChType, ChId, ParType, ParId)) ->
     #{
@@ -486,13 +476,8 @@ json_to_error(1, #{<<"id">> := <<"badValueIntentifier">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_IDENTIFIER(Key);
 
-json_to_error(1, #{<<"id">> := <<"badValueAlias">>,
-    <<"details">> := #{<<"key">> := Key}}) ->
-    ?ERROR_BAD_VALUE_ALIAS(Key);
-
-json_to_error(1, #{<<"id">> := <<"badValueAliasWrongPrefix">>,
-    <<"details">> := #{<<"key">> := Key}}) ->
-    ?ERROR_BAD_VALUE_ALIAS_WRONG_PREFIX(Key);
+json_to_error(1, #{<<"id">> := <<"badValueLogin">>}) ->
+    ?ERROR_BAD_VALUE_LOGIN;
 
 json_to_error(1, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{

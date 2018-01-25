@@ -584,8 +584,7 @@ encode_decode_error_test() ->
         ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(<<"spaceId">>),
         ?ERROR_BAD_VALUE_BAD_TOKEN_TYPE(<<"supportToken">>),
         ?ERROR_BAD_VALUE_IDENTIFIER(<<"id">>),
-        ?ERROR_BAD_VALUE_ALIAS(<<"alias">>),
-        ?ERROR_BAD_VALUE_ALIAS_WRONG_PREFIX(<<"alias">>),
+        ?ERROR_BAD_VALUE_LOGIN,
         ?ERROR_RELATION_DOES_NOT_EXIST(od_user, <<"user1">>, od_space, <<"space1">>),
         ?ERROR_RELATION_ALREADY_EXISTS(od_user, <<"user1">>, od_space, <<"space1">>),
         ?ERROR_CANNOT_DELETE_ENTITY(od_user, <<"user1">>)
