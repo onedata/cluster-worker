@@ -179,10 +179,6 @@
 
             {tp_processes_limit, 250000},
 
-            {datastore_doc_commit_retry_delay, 5000},
-            {datastore_doc_revisions_history_length, 1},
-            {datastore_doc_mutators_history_length, 1},
-
             {datastore_cache_size, [
                 {memory, 500000},
                 {disc, 500000}
@@ -211,6 +207,7 @@
             %% ===================================================================
             %% EXOMETER
             %% ===================================================================
+
 
             % Interval between exometer reports
             {exometer_logging_interval, 15000},
