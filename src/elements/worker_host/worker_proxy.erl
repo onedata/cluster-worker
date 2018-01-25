@@ -340,7 +340,7 @@ receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec execute(Args :: list(), node(), ExecOption :: execute_type(),
-    Timeout ::non_neg_integer() | undefined) -> term().
+    Timeout :: timeout_spec() | undefined) -> term().
 execute(Args, _Node, direct, _Timeout) ->
     % TODO - sprawdzic uzycia bo troche bez sensu zaimplementowane
     apply(worker_host, proc_request, Args);
