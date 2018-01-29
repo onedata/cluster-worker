@@ -219,6 +219,10 @@ error_to_json(1, ?ERROR_BAD_VALUE_SUBDOMAIN) ->
     #{
         <<"id">> => <<"badValueSubdomain">>
     };
+error_to_json(1, ?ERROR_BAD_VALUE_EMAIL) ->
+    #{
+        <<"id">> => <<"badValueEmail">>
+    };
 error_to_json(1, ?ERROR_BAD_VALUE_TOO_LOW(Key, Threshold)) ->
     #{
         <<"id">> => <<"badValueTooLow">>,
@@ -444,6 +448,8 @@ json_to_error(1, #{<<"id">> := <<"badValueDomain">>,
     ?ERROR_BAD_VALUE_DOMAIN(Key);
 json_to_error(1, #{<<"id">> := <<"badValueSubdomain">>}) ->
     ?ERROR_BAD_VALUE_SUBDOMAIN;
+json_to_error(1, #{<<"id">> := <<"badValueEmail">>}) ->
+    ?ERROR_BAD_VALUE_EMAIL;
 json_to_error(1, #{<<"id">> := <<"badValueTooLow">>,
     <<"details">> := #{<<"key">> := Key, <<"limit">> := Limit}}) ->
     ?ERROR_BAD_VALUE_TOO_LOW(Key, Limit);
