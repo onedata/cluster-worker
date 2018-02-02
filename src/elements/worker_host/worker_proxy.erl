@@ -342,15 +342,15 @@ receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
 -spec execute(Args :: list(), node(), ExecOption :: execute_type(),
     Timeout :: timeout_spec() | undefined) -> term().
 execute(Args, _Node, direct, _Timeout) ->
-    % TODO - sprawdzic uzycia bo troche bez sensu zaimplementowane
+    % TODO VFS-4025 check usage - not optimal implementation
     apply(worker_host, proc_request, Args);
 execute(Args, Node, spawn, _Timeout) ->
     spawn(Node, worker_host, proc_request, Args);
 execute(Args, _Node, {pool, call, PoolName}, Timeout) ->
-    % TODO - jak na to czekamy?
+    % TODO VFS-4025
     worker_pool:call(PoolName, {worker_host, proc_request, Args}, worker_pool:default_strategy(), Timeout);
 execute(Args, _Node, {pool, cast, PoolName}, _) ->
-    % TODO - jak na to czekamy?
+    % TODO VFS-4025
     worker_pool:cast(PoolName, {worker_host, proc_request, Args}).
 
 
