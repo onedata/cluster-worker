@@ -12,7 +12,7 @@
   0},
  {<<"cberl">>,
   {git,"https://github.com/onedata/cberl.git",
-       {ref,"e5551e73e51703174f25a2233b84a5f3f2806a88"}},
+       {ref,"b498022bd29abc75e12dd1092238d84835b579aa"}},
   0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},3},
  {<<"cluster_manager">>,
