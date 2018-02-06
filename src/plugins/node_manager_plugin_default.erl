@@ -79,8 +79,8 @@ listeners() -> node_manager:cluster_worker_listeners().
 %% List of modules with configs to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
--spec modules_with_args() ->
-    [{module(), list()} | {singleton, module(), list()}].
+-spec modules_with_args() -> [{module(), list()}
+    | {module(), list(), [atom()]} | {singleton, module(), list()}].
 modules_with_args() -> [].
 
 %%--------------------------------------------------------------------
