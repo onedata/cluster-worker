@@ -23,17 +23,15 @@
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
 
--define(EXOMETER_HISTOGRAM_COUNTERS,
-    [save_time, update_time, create_time, create_or_update_time, get_time,
-        delete_time, exists_time, add_links_time, set_links_time,
-        create_link_time, delete_links_time, fetch_link_time, foreach_link_time,
-        mark_links_deleted_time, get_links_time, fold_links_time, 
-        get_links_trees_time
+-define(EXOMETER_COUNTERS,
+    [save, update, create, create_or_update, get, delete, exists, add_links, 
+        set_links, create_link, delete_links, fetch_link, foreach_link, 
+        mark_links_deleted, get_links, fold_links, get_links_trees
     ]). 
 
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
         list_to_atom(atom_to_list(Param) ++ "_time"))).
--define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(datastore, Param)).
+-define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
 
 %%%===================================================================
@@ -49,10 +47,13 @@
 init_counters() ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
-    Counters = lists:map(fun(Name) ->
+    Histograms = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), histogram, TimeSpan}
-    end, ?EXOMETER_HISTOGRAM_COUNTERS),
-    ?init_counters(Counters).
+    end, ?EXOMETER_COUNTERS),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_DATASTORE_NAME(Name), counter}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters ++ Histograms).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -61,10 +62,13 @@ init_counters() ->
 %%--------------------------------------------------------------------
 -spec init_report() -> ok.
 init_report() ->
-    Reports = lists:map(fun(Name) ->
+    Histograms = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
-    end, ?EXOMETER_HISTOGRAM_COUNTERS),
-    ?init_reports(Reports).
+    end, ?EXOMETER_COUNTERS),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_DATASTORE_NAME(Name), [value]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Histograms ++ Counters).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -90,7 +94,7 @@ route(Ctx, Key, Function, Args) ->
 process(Module, Function, Args = [#{model := Model} | _]) ->
     case datastore_throttling:throttle_model(Model) of
         ok -> 
-            ?update_counter(?EXOMETER_DATASTORE_NAME(Function), 1),
+            ?update_counter(?EXOMETER_DATASTORE_NAME(Function)),
             {Time, Ans} = timer:tc(erlang, apply, [Module, Function, Args]),
             ?update_counter(?EXOMETER_NAME(Function), Time),
             Ans;
