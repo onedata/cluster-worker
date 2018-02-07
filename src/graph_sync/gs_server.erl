@@ -478,12 +478,7 @@ authorize_by_macaroon(Req) ->
 %%--------------------------------------------------------------------
 -spec get_cookie(Name :: binary(), cowboy_req:req()) -> binary() | undefined.
 get_cookie(Name, Req) ->
-    try
-        {Value, _Req} = cowboy_req:cookie(Name, Req),
-        Value
-    catch _:_ ->
-        undefined
-    end.
+    proplists:get_value(Name, cowboy_req:parse_cookies(Req)).
 
 
 %%--------------------------------------------------------------------
@@ -493,8 +488,8 @@ get_cookie(Name, Req) ->
 %%--------------------------------------------------------------------
 -spec get_macaroon(cowboy_req:req()) -> binary() | undefined.
 get_macaroon(Req) ->
-    {MacaroonHeader, _} = cowboy_req:header(<<"macaroon">>, Req),
-    {XAuthTokenHeader, _} = cowboy_req:header(<<"x-auth-token">>, Req),
+    MacaroonHeader = cowboy_req:header(<<"macaroon">>, Req),
+    XAuthTokenHeader = cowboy_req:header(<<"x-auth-token">>, Req),
     % X-Auth-Token is an alias for macaroon header, check if any of them is given.
     case MacaroonHeader of
         <<_/binary>> -> MacaroonHeader;

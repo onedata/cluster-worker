@@ -45,8 +45,6 @@ port() ->
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-    {ok, Port} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_nagios_port),
     {ok, NbAcceptors} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         http_number_of_acceptors),
     {ok, MaxKeepAlive} = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -54,22 +52,23 @@ start() ->
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         http_socket_timeout_seconds),
 
-    Dispatch = [
+    Dispatch = cowboy_router:compile([
         {'_', [
             {"/nagios/[...]", nagios_handler, []}
         ]}
-    ],
+    ]),
 
     % Start the listener for nagios handler
-    Result = cowboy:start_http(?NAGIOS_LISTENER, NbAcceptors,
+    Result = cowboy:start_clear(?NAGIOS_LISTENER,
         [
             {ip, {0, 0, 0, 0}},
-            {port, Port}
-        ], [
-            {env, [{dispatch, cowboy_router:compile(Dispatch)}]},
-            {max_keepalive, MaxKeepAlive},
-            {timeout, timer:seconds(Timeout)}
-        ]),
+            {port, port()},
+            {num_acceptors, NbAcceptors}
+        ], #{
+            env => #{dispatch => Dispatch},
+            max_keepalive => MaxKeepAlive,
+            request_timeout => timer:seconds(Timeout)
+        }),
     case Result of
         {ok, _} -> ok;
         _ -> Result
@@ -83,10 +82,10 @@ start() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
-    case catch cowboy:stop_listener(?NAGIOS_LISTENER) of
-        (ok) ->
+    case cowboy:stop_listener(?NAGIOS_LISTENER) of
+        ok ->
             ok;
-        (Error) ->
+        {error, Error} ->
             ?error("Error on stopping listener ~p: ~p",
                 [?NAGIOS_LISTENER, Error]),
             {error, nagios_stop_error}
@@ -100,7 +99,7 @@ stop() ->
 %%--------------------------------------------------------------------
 -spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
-    Endpoint = <<"http://127.0.0.1:", (integer_to_binary(port()))/binary>>,
+    Endpoint = str_utils:format_bin("http://127.0.0.1:~B", [port()]),
     case http_client:get(Endpoint) of
         {ok, _, _, _} -> ok;
         _ -> {error, server_not_responding}

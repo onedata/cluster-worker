@@ -9,35 +9,23 @@
 %%% @end
 %%%--------------------------------------------------------------------
 -module(redirector_handler).
+-behaviour(cowboy_handler).
+
 -author("Lukasz Opiola").
 
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init/3, handle/2, terminate/3]).
+-export([init/2]).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Cowboy handler callback, no state is required
-%% @end
-%%--------------------------------------------------------------------
--spec init(term(), term(), term()) -> {ok, term(), []}.
-init(_Type, Req, _Opts) ->
-    {ok, Req, []}.
-
-%%--------------------------------------------------------------------
-%% @doc
+%% @doc Cowboy handler callback.
 %% Handles a request returning a HTTP Redirect (301 - Moved permanently).
 %% @end
 %%--------------------------------------------------------------------
--spec handle(term(), term()) -> {ok, term(), term()}.
-handle(Req, State) ->
-    {FullHostname, _} = cowboy_req:host(Req),
-    {Qs, _} = cowboy_req:qs(Req),
+-spec init(cowboy_req:req(), term()) -> {ok, cowboy_req:req(), term()}.
+init(#{host := FullHostname, path := Path, qs := Qs} = Req, State) ->
     QsString = case str_utils:to_binary(Qs) of
         <<"">> -> <<"">>;
         <<"undefined">> -> <<"">>;
@@ -50,18 +38,8 @@ handle(Req, State) ->
         _ ->
             FullHostname
     end,
-    {Path, _} = cowboy_req:path(Req),
-    {ok, Req2} = cowboy_req:reply(301, [
-        {<<"location">>,
-            <<"https://", Hostname/binary, Path/binary, QsString/binary>>},
-        {<<"content-type">>, <<"text/html">>}
-    ], <<"">>, Req),
-    {ok, Req2, State}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Cowboy handler callback, no cleanup needed
-%%--------------------------------------------------------------------
--spec terminate(term(), term(), term()) -> ok.
-terminate(_Reason, _Req, _State) ->
-    ok.
+    NewReq = cowboy_req:reply(301, #{
+        <<"location">> => <<"https://", Hostname/binary, Path/binary, QsString/binary>>,
+        <<"content-type">> => <<"text/html">>
+    }, Req),
+    {ok, NewReq, State}.

@@ -10,16 +10,17 @@
 %%% @end
 %%%--------------------------------------------------------------------
 -module(nagios_handler).
+-behaviour(cowboy_handler).
+
 -author("Lukasz Opiola").
 
--behaviour(cowboy_http_handler).
 
 -include("global_definitions.hrl").
 -include_lib("xmerl/include/xmerl.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
--export([init/3, handle/2, terminate/3]).
+-export([init/2]).
 -export([get_cluster_status/1, check_listener/1]).
 
 -export_type([healthcheck_response/0]).
@@ -34,27 +35,14 @@
 -define(LOG(Msg), ?debug(Msg)).
 -define(LOG(Msg, Args), ?debug(Msg, Args)).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Cowboy handler callback, no state is required
+%% @doc Cowboy handler callback.
+%% Handles a request returning current version of Onezone.
 %% @end
 %%--------------------------------------------------------------------
--spec init(term(), term(), term()) -> {ok, cowboy_req:req(), term()}.
-init(_Type, Req, _Opts) ->
-    {ok, Req, []}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles a request producing an XML response.
-%% @end
-%%--------------------------------------------------------------------
--spec handle(term(), term()) -> {ok, cowboy_req:req(), term()}.
-handle(Req, State) ->
+-spec init(cowboy_req:req(), term()) -> {ok, cowboy_req:req(), term()}.
+init(#{method := <<"GET">>} = Req, State) ->
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
     {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
     CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
@@ -84,55 +72,50 @@ handle(Req, State) ->
             end,
             Status
     end,
-    NewReq =
-        case ClusterStatus of
-            error ->
-                {ok, Req2} = cowboy_req:reply(500, Req),
-                Req2;
-            {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, NodeStatuses}} ->
-                MappedClusterState = lists:map(
-                    fun({Node, NodeStatus, NodeComponents}) ->
-                        NodeDetails = lists:map(
-                            fun({Component, Status}) ->
-                                StatusList = case Status of
-                                    {error, Desc} ->
-                                        "error: " ++ atom_to_list(Desc);
-                                    A when is_atom(A) -> atom_to_list(A);
-                                    _ ->
-                                        ?LOG("Wrong nagios status: {~p, ~p} at node ~p",
-                                            [Component, Status, Node]),
-                                        "error: wrong_status"
-                                end,
-                                {Component, [{status, StatusList}], []}
-                            end, NodeComponents),
-                        {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
-                        {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
-                    end, NodeStatuses),
+    NewReq = case ClusterStatus of
+        error ->
+            cowboy_req:reply(500, Req);
+        {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, NodeStatuses}} ->
+            MappedClusterState = lists:map(
+                fun({Node, NodeStatus, NodeComponents}) ->
+                    NodeDetails = lists:map(
+                        fun({Component, Status}) ->
+                            StatusList = case Status of
+                                {error, Desc} ->
+                                    "error: " ++ atom_to_list(Desc);
+                                A when is_atom(A) ->
+                                    atom_to_list(A);
+                                _ ->
+                                    ?LOG("Wrong nagios status: {~p, ~p} at node ~p",
+                                        [Component, Status, Node]),
+                                    "error: wrong_status"
+                            end,
+                            {Component, [{status, StatusList}], []}
+                        end, NodeComponents),
+                    {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
+                    {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
+                end, NodeStatuses
+            ),
 
-                {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(erlang:timestamp()),
-                DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
+            {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(erlang:timestamp()),
+            DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
 
-                % Create the reply
-                HealthData = {healthdata, [{date, DateString}, {status, atom_to_list(AppStatus)}], MappedClusterState},
-                Content = lists:flatten([HealthData]),
-                Export = xmerl:export_simple(Content, xmerl_xml),
-                Reply = io_lib:format("~s", [lists:flatten(Export)]),
+            % Create the reply
+            HealthData = {healthdata, [{date, DateString},
+                {status, atom_to_list(AppStatus)}], MappedClusterState},
+            Content = lists:flatten([HealthData]),
+            Export = xmerl:export_simple(Content, xmerl_xml),
+            Reply = io_lib:format("~s", [lists:flatten(Export)]),
 
-                % Send the reply
-                {ok, Req2} = cowboy_req:reply(200, [{<<"content-type">>, <<"application/xml">>}], Reply, Req),
-                Req2
-        end,
+            % Send the reply
+            cowboy_req:reply(200,
+                #{<<"content-type">> => <<"application/xml">>}, Reply, Req
+            )
+    end,
+    {ok, NewReq, State};
+init(Req, State) ->
+    NewReq = cowboy_req:reply(405, #{<<"allow">> => <<"GET">>}, Req),
     {ok, NewReq, State}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Cowboy handler callback, no cleanup needed.
-%% @end
-%%--------------------------------------------------------------------
--spec terminate(term(), term(), term()) -> ok.
-terminate(_Reason, _Req, _State) ->
-    ok.
 
 
 %% ====================================================================
