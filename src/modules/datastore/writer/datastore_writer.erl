@@ -301,8 +301,6 @@ handle_cast({mark_disc_writer_idle, Ref}, State = #state{
     {noreply, State#state{disc_writer_state = idle}};
 handle_cast({mark_disc_writer_idle, _}, State = #state{}) ->
     {noreply, State};
-handle_cast(handle_requests, State) ->
-    {noreply, handle_requests(State)};
 handle_cast(Request, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -322,14 +320,14 @@ handle_info({terminate, MsgRef}, State = #state{
     terminate_msg_ref = MsgRef,
     cache_writer_pid = Pid
 }) ->
-    gen_server:call(Pid, terminate, infinity),
-    {stop, normal, schedule_terminate(State)};
+    case gen_server:call(Pid, terminate, infinity) of
+        ok -> {stop, normal, State};
+        _ -> {noreply, schedule_terminate(State)}
+    end;
 handle_info({terminate, MsgRef}, State = #state{terminate_msg_ref = MsgRef}) ->
     {noreply, schedule_terminate(State)};
 handle_info({terminate, _}, State = #state{}) ->
     {noreply, State};
-handle_info({'EXIT', normal, Reason}, State = #state{}) ->
-    {stop, Reason, State};
 handle_info({'EXIT', _, Reason}, State = #state{}) ->
     {stop, Reason, State};
 handle_info(Info, State = #state{}) ->
@@ -374,17 +372,12 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle
 }) ->
     Ref = make_ref(),
-    case gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity) of
-        ok ->
-            State#state{
-                requests = [],
-                cache_writer_state = {active, Ref},
-                disc_writer_state = {active, Ref}
-            };
-        _ ->
-            gen_server:cast(self(), handle_requests),
-            State
-    end.
+    gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity),
+    State#state{
+        requests = [],
+        cache_writer_state = {active, Ref},
+        disc_writer_state = {active, Ref}
+    }.
 
 -spec schedule_terminate(state()) -> state().
 schedule_terminate(State = #state{terminate_timer_ref = undefined}) ->

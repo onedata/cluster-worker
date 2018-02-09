@@ -146,7 +146,7 @@ handle_cast(Request, #state{} = State) ->
 -spec handle_info(Info :: timeout() | term(), State :: state()) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, State :: term(), NewState :: state()}.
+    {stop, Reason :: term(), NewState :: state()}.
 handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,

@@ -89,10 +89,7 @@ handle_call({flush, Ref, CachedKeys}, From, State = #state{
     {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
     gen_server:cast(CacheWriterPid, {flushed, Ref, maps:from_list(NotFlushed)}),
     {noreply, State};
-handle_call(terminate, From,
-    State = #state{master_pid = MasterPid}) ->
-    gen_server:reply(From, ok),
-    gen_server:cast(MasterPid, terminated),
+handle_call(terminate, _From, State) ->
     {stop, normal, ok, State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
