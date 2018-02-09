@@ -26,10 +26,10 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    cached_keys_in_flush = #{} :: cached_keys(),
     keys_to_inactivate = #{} :: cached_keys(),
     requests_ref = undefined :: undefined | reference(),
-    flush_ref = undefined :: undefined | reference()
+    flush_ref = undefined :: undefined | reference(),
+    status = normal :: normal | terminating | resuming
 }).
 
 -type ctx() :: datastore:ctx().
@@ -93,18 +93,15 @@ handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
     State2 = handle_requests(Requests, State#state{requests_ref = Ref}),
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State2)};
-handle_call({terminate, Requests}, _From, State = #state{
-    disc_writer_pid = Pid,
-    keys_to_inactivate = ToInactivate
-}) ->
-    State2 = #state{
-        cached_keys_to_flush = CachedKeysToFlush,
-        cached_keys_in_flush = CachedKeysInFlush
-    } = handle_requests(Requests, State),
-    CachedKeys = maps:merge(CachedKeysInFlush, CachedKeysToFlush),
-    gen_server:call(Pid, {terminate, CachedKeys}, infinity),
-    datastore_cache:inactivate(ToInactivate),
-    {stop, normal, ok, State2};
+handle_call(terminate, _From, #state{
+    status = normal,
+    flush_ref = undefined,
+    cached_keys_to_flush = CachedKeysToFlush,
+    disc_writer_pid = Pid} = State) ->
+    gen_server:call(Pid, {terminate, CachedKeysToFlush}, infinity),
+    {reply, ok, State#state{status = terminating}};
+handle_call(terminate, _From, State) ->
+    {reply, working, State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -124,9 +121,20 @@ handle_cast({flushed, NotFlushed}, State = #state{
 }) ->
     {noreply, schedule_flush(State#state{
         cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
-        cached_keys_in_flush = #{},
         flush_ref = undefined
     })};
+handle_cast(terminated, #state{
+    master_pid = MasterPid,
+    status = terminating,
+    keys_to_inactivate = ToInactivate
+} = State) ->
+    datastore_cache:inactivate(ToInactivate),
+    gen_server:cast(MasterPid, terminated),
+    {stop, normal, State};
+handle_cast(terminated, #state{master_pid = MasterPid} = State) ->
+    {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
+    gen_server:cast(MasterPid, resumed),
+    {noreply, State#state{disc_writer_pid = DiscWriterPid, status = normal}};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -140,17 +148,19 @@ handle_cast(Request, #state{} = State) ->
 -spec handle_info(Info :: timeout() | term(), State :: state()) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}.
+    {stop, State :: term(), NewState :: state()}.
 handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,
-    cached_keys_to_flush = CachedKeys
+    cached_keys_to_flush = CachedKeys,
+    status = normal
 }) ->
     gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
     {noreply, State#state{
-        cached_keys_to_flush = #{},
-        cached_keys_in_flush = CachedKeys
+        cached_keys_to_flush = #{}
     }};
+handle_info(flush, State = #state{}) ->
+    {noreply, schedule_flush(State#state{flush_ref = undefined})};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -200,7 +210,8 @@ handle_requests(Requests, State = #state{
     Batch3 = datastore_doc_batch:apply(Batch2),
     Batch4 = send_responses(Responses, Batch3),
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
-    State#state{cached_keys_to_flush = maps:merge(CachedKeys, CachedKeys2),
+    State2 = set_status(State),
+    State2#state{cached_keys_to_flush = maps:merge(CachedKeys, CachedKeys2),
         keys_to_inactivate = maps:merge(ToInactivate, CachedKeys2)}.
 
 %%--------------------------------------------------------------------
@@ -433,3 +444,15 @@ schedule_flush(State = #state{}) ->
 -spec set_mutator_pid(ctx()) -> ctx().
 set_mutator_pid(Ctx) ->
     Ctx#{mutator_pid => self()}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets status filed of state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_status(state()) -> state().
+set_status(#state{status = normal} = State) ->
+    State;
+set_status(State) ->
+    State#state{status = resuming}.

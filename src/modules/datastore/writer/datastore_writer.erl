@@ -37,7 +37,8 @@
     cache_writer_state = idle :: idle | {active, reference()},
     disc_writer_state = idle :: idle | {active, reference()},
     terminate_msg_ref :: undefined | reference(),
-    terminate_timer_ref :: undefined | reference()
+    terminate_timer_ref :: undefined | reference(),
+    status = normal :: normal | terminating
 }).
 
 -type ctx() :: datastore:ctx().
@@ -276,7 +277,8 @@ handle_call({handle, Request}, {Pid, _Tag}, State = #state{
 }) ->
     Ref = make_ref(),
     State2 = State#state{requests = [{Pid, Ref, Request} | Requests]},
-    {reply, {ok, Ref}, schedule_terminate(handle_requests(State2))};
+    State3 = schedule_terminate(handle_requests(State2)),
+    {reply, {ok, Ref}, State3#state{status = normal}};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -301,6 +303,16 @@ handle_cast({mark_disc_writer_idle, Ref}, State = #state{
     {noreply, State#state{disc_writer_state = idle}};
 handle_cast({mark_disc_writer_idle, _}, State = #state{}) ->
     {noreply, State};
+handle_cast(handle_requests, State) ->
+    {noreply, handle_requests(State)};
+handle_cast(resumed, State) ->
+    {noreply, schedule_terminate(State#state{status = normal})};
+handle_cast(terminated, State = #state{status = terminating}) ->
+    {stop, normal, State};
+handle_cast(terminated, State = #state{}) ->
+    {ok, Pid} = datastore_cache_writer:start_link(self()),
+    State2 = State#state{cache_writer_pid = Pid, status = normal},
+    {noreply, schedule_terminate(State2)};
 handle_cast(Request, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -317,9 +329,14 @@ handle_cast(Request, State = #state{}) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_info({terminate, MsgRef}, State = #state{
     requests = [], cache_writer_state = idle, disc_writer_state = idle,
-    terminate_msg_ref = MsgRef
+    terminate_msg_ref = MsgRef,
+    cache_writer_pid = Pid
 }) ->
-    {stop, normal, State};
+    NewStatus = case gen_server:call(Pid, terminate, infinity) of
+        ok -> terminating;
+        _ -> normal
+    end,
+    {noreply, State#state{status = NewStatus}};
 handle_info({terminate, MsgRef}, State = #state{terminate_msg_ref = MsgRef}) ->
     {noreply, schedule_terminate(State)};
 handle_info({terminate, _}, State = #state{}) ->
@@ -341,10 +358,7 @@ handle_info(Info, State = #state{}) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, State = #state{
-    requests = Requests, cache_writer_pid = Pid
-}) ->
-    gen_server:call(Pid, {terminate, Requests}, infinity),
+terminate(Reason, State = #state{}) ->
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------
@@ -371,12 +385,17 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle
 }) ->
     Ref = make_ref(),
-    gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity),
-    State#state{
-        requests = [],
-        cache_writer_state = {active, Ref},
-        disc_writer_state = {active, Ref}
-    }.
+    case gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity) of
+        ok ->
+            State#state{
+                requests = [],
+                cache_writer_state = {active, Ref},
+                disc_writer_state = {active, Ref}
+            };
+        _ ->
+            gen_server:cast(self(), handle_requests),
+            State
+    end.
 
 -spec schedule_terminate(state()) -> state().
 schedule_terminate(State = #state{terminate_timer_ref = undefined}) ->

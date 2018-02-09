@@ -89,10 +89,13 @@ handle_call({flush, Ref, CachedKeys}, From, State = #state{
     {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
     gen_server:cast(CacheWriterPid, {flushed, maps:from_list(NotFlushed)}),
     {noreply, State};
-handle_call({terminate, CachedKeys}, _From, State = #state{}) ->
+handle_call({terminate, CachedKeys}, From,
+    State = #state{master_pid = MasterPid}) ->
+    gen_server:reply(From, ok),
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
         timer:seconds(5)),
     force_flush(CachedKeys, Delay),
+    gen_server:cast(MasterPid, terminated),
     {stop, normal, ok, State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
