@@ -37,8 +37,7 @@
     cache_writer_state = idle :: idle | {active, reference()},
     disc_writer_state = idle :: idle | {active, reference()},
     terminate_msg_ref :: undefined | reference(),
-    terminate_timer_ref :: undefined | reference(),
-    status = normal :: normal | terminating
+    terminate_timer_ref :: undefined | reference()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -277,8 +276,7 @@ handle_call({handle, Request}, {Pid, _Tag}, State = #state{
 }) ->
     Ref = make_ref(),
     State2 = State#state{requests = [{Pid, Ref, Request} | Requests]},
-    State3 = schedule_terminate(handle_requests(State2)),
-    {reply, {ok, Ref}, State3#state{status = normal}};
+    {reply, {ok, Ref}, schedule_terminate(handle_requests(State2))};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -305,14 +303,6 @@ handle_cast({mark_disc_writer_idle, _}, State = #state{}) ->
     {noreply, State};
 handle_cast(handle_requests, State) ->
     {noreply, handle_requests(State)};
-handle_cast(resumed, State) ->
-    {noreply, schedule_terminate(State#state{status = normal})};
-handle_cast(terminated, State = #state{status = terminating}) ->
-    {stop, normal, State};
-handle_cast(terminated, State = #state{}) ->
-    {ok, Pid} = datastore_cache_writer:start_link(self()),
-    State2 = State#state{cache_writer_pid = Pid, status = normal},
-    {noreply, schedule_terminate(State2)};
 handle_cast(Request, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -332,15 +322,14 @@ handle_info({terminate, MsgRef}, State = #state{
     terminate_msg_ref = MsgRef,
     cache_writer_pid = Pid
 }) ->
-    NewStatus = case gen_server:call(Pid, terminate, infinity) of
-        ok -> terminating;
-        _ -> normal
-    end,
-    {noreply, State#state{status = NewStatus}};
+    gen_server:call(Pid, terminate, infinity),
+    {stop, normal, schedule_terminate(State)};
 handle_info({terminate, MsgRef}, State = #state{terminate_msg_ref = MsgRef}) ->
     {noreply, schedule_terminate(State)};
 handle_info({terminate, _}, State = #state{}) ->
     {noreply, State};
+handle_info({'EXIT', normal, Reason}, State = #state{}) ->
+    {stop, Reason, State};
 handle_info({'EXIT', _, Reason}, State = #state{}) ->
     {stop, Reason, State};
 handle_info(Info, State = #state{}) ->
