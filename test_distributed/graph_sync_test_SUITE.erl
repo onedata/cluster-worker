@@ -912,7 +912,7 @@ start_gs_listener(Config, Node) ->
             {certfile, ?TEST_FILE(Config, "web_cert.pem")},
             {cacerts, get_cacerts(Config)},
             {verify, verify_peer},
-            {ciphers, ssl:cipher_suites() -- ssl_utils:weak_ciphers()}
+            {ciphers, ssl_utils:safe_ciphers()}
         ], cowboy_protocol,
         [
             {env, [{dispatch, cowboy_router:compile([

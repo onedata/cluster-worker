@@ -52,11 +52,9 @@
 -export_type([model/0, record/0, record_struct/0, record_version/0]).
 
 -define(EXOMETER_HISTOGRAM_COUNTERS,
-    [save_time, update_time, create_time, create_or_update_time, get_time,
-        delete_time, exists_time, add_links_time, set_links_time,
-        create_link_time, delete_links_time, fetch_link_time, foreach_link_time,
-        mark_links_deleted_time, get_links_time, fold_links_time,
-        get_links_trees_time
+    [save, update, create, create_or_update, get, delete, exists, add_links, 
+        set_links, create_link, delete_links, fetch_link, foreach_link, 
+        mark_links_deleted, get_links, fold_links, get_links_trees
     ]).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,

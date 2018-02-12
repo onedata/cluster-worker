@@ -35,7 +35,7 @@
     {tp_router, [
         {supervisor_flags, tp_router:main_supervisor_flags()},
         {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
-    ], init_supervisors}
+    ], [supervisor_first, {posthook, init_supervisors}]}
 ]).
 -define(CLUSTER_WORKER_LISTENERS, [
     nagios_listener,
@@ -47,7 +47,7 @@
 %% API
 -export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, get_cluster_nodes_ips/0]).
+    cluster_worker_listeners/0, get_cluster_nodes_ips/0, start_worker/2]).
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
@@ -99,7 +99,7 @@ init_report() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
-    | {singleton, atom(), [any()]}].
+    | {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
@@ -248,6 +248,64 @@ log_monitoring_stats(LogFile, Format, Args) ->
     file:write_file(LogFile,
         io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
     ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts worker node with dedicated supervisor as brother. Both entities
+%% are started under MAIN_WORKER_SUPERVISOR supervision.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
+start_worker(Module, Args) ->
+    start_worker(Module, Args, []).
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts worker node with dedicated supervisor as brother. Both entities
+%% are started under MAIN_WORKER_SUPERVISOR supervision.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_worker(Module :: atom(), Args :: term(), Options :: list()) ->
+    ok | {error, term()}.
+start_worker(Module, Args, Options) ->
+    try
+        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
+        WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
+
+            case lists:member(supervisor_first, Options) of
+                true ->
+                    {ok, _} = supervisor:start_child(
+                        ?MAIN_WORKER_SUPERVISOR_NAME,
+                        {Module, {worker_host, start_link,
+                            [Module, Args, LoadMemorySize]}, transient, 5000,
+                            worker, [worker_host]}
+                    ),
+                    {ok, _} = supervisor:start_child(
+                        ?MAIN_WORKER_SUPERVISOR_NAME,
+                        {WorkerSupervisorName, {worker_host_sup, start_link,
+                            [WorkerSupervisorName, Args]}, transient, infinity,
+                            supervisor, [worker_host_sup]}
+                    );
+                _ ->
+                    {ok, _} = supervisor:start_child(
+                        ?MAIN_WORKER_SUPERVISOR_NAME,
+                        {WorkerSupervisorName, {worker_host_sup, start_link,
+                            [WorkerSupervisorName, Args]}, transient, infinity,
+                            supervisor, [worker_host_sup]}
+                    ),
+                    {ok, _} = supervisor:start_child(
+                        ?MAIN_WORKER_SUPERVISOR_NAME,
+                        {Module, {worker_host, start_link,
+                            [Module, Args, LoadMemorySize]}, transient, 5000,
+                            worker, [worker_host]}
+                    )
+            end,
+        ?info("Worker: ~s started", [Module])
+    catch
+        _:Error ->
+            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
+            {error, Error}
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -766,39 +824,22 @@ init_workers(Workers) ->
                 already_started ->
                     ok
             end;
-        ({Module, Args, AfterInitFun}) ->
-            ok = start_worker(Module, Args),
-            ok = apply(Module, AfterInitFun, [])
+        ({Module, Args, Options}) ->
+            case proplists:get_value(prehook, Options) of
+              undefined ->
+                ok;
+              Prehook ->
+                ok = apply(Module, Prehook, [])
+            end,
+            ok = start_worker(Module, Args, Options),
+            case proplists:get_value(posthook, Options) of
+              undefined ->
+                ok;
+              Posthook ->
+                ok = apply(Module, Posthook, [])
+            end
     end, Workers),
     ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Starts worker node with dedicated supervisor as brother. Both entities
-%% are started under MAIN_WORKER_SUPERVISOR supervision.
-%% @end
-%%--------------------------------------------------------------------
--spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
-start_worker(Module, Args) ->
-    try
-        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
-        WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
-        {ok, _} = supervisor:start_child(
-            ?MAIN_WORKER_SUPERVISOR_NAME,
-            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
-        ),
-        {ok, _} = supervisor:start_child(
-            ?MAIN_WORKER_SUPERVISOR_NAME,
-            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
-        ),
-        ?info("Worker: ~s started", [Module])
-    catch
-        _:Error ->
-            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
-            {error, Error}
-    end.
-
 
 %%--------------------------------------------------------------------
 %% @private
