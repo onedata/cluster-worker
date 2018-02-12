@@ -13,6 +13,7 @@
 -module(datastore_cache_writer).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -98,7 +99,6 @@ handle_call(terminate, _From, #state{
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
     gen_server:call(Pid, terminate, infinity),
-    % TODO - dezaktywowac jak sie za duzo zbierze
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State};
 handle_call(terminate, _From, State) ->
@@ -121,18 +121,18 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys,
     requests_ref = Ref
 }) ->
-    {noreply, schedule_flush(State#state{
+    {noreply, schedule_flush(check_inactivate(State#state{
         cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
         flush_ref = undefined,
         requests_ref = undefined
-    })};
+    }))};
 handle_cast({flushed, _Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys
 }) ->
-    {noreply, schedule_flush(State#state{
+    {noreply, schedule_flush(check_inactivate(State#state{
         cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
         flush_ref = undefined
-    })};
+    }))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -438,3 +438,20 @@ schedule_flush(State = #state{}) ->
 -spec set_mutator_pid(ctx()) -> ctx().
 set_mutator_pid(Ctx) ->
     Ctx#{mutator_pid => self()}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inactivates keys if too many keys are stored in state.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_inactivate(state()) -> state().
+check_inactivate(#state{keys_to_inactivate = ToInactivate} = State) ->
+    Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
+    case maps:size(ToInactivate) > Max of
+        true ->
+            datastore_cache:inactivate(ToInactivate),
+            State#state{keys_to_inactivate = #{}};
+        _ ->
+            State
+    end.

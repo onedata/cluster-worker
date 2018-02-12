@@ -228,7 +228,7 @@ wait(Futures) when is_list(Futures) ->
 %% limit is reached.
 %% @end
 %%--------------------------------------------------------------------
--spec inactivate(pid()) -> boolean().
+-spec inactivate(pid() | map()) -> boolean().
 inactivate(MutatorPid) when is_pid(MutatorPid) ->
     lists:foldl(fun(Pool, Acc) ->
         Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
@@ -245,7 +245,8 @@ inactivate(KeysMap) ->
         ({K, _Ctx}) ->
             Pool = datastore_multiplier:extend_name(K, disc),
             datastore_cache_manager:mark_inactive(Pool, K)
-    end, maps:to_list(KeysMap)).
+    end, maps:to_list(KeysMap)),
+    true.
 
 %%--------------------------------------------------------------------
 %% @doc
