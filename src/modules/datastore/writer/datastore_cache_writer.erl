@@ -13,6 +13,7 @@
 -module(datastore_cache_writer).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -26,7 +27,6 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    cached_keys_in_flush = #{} :: cached_keys(),
     keys_to_inactivate = #{} :: cached_keys(),
     requests_ref = undefined :: undefined | reference(),
     flush_ref = undefined :: undefined | reference()
@@ -93,18 +93,16 @@ handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
     State2 = handle_requests(Requests, State#state{requests_ref = Ref}),
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State2)};
-handle_call({terminate, Requests}, _From, State = #state{
-    disc_writer_pid = Pid,
-    keys_to_inactivate = ToInactivate
-}) ->
-    State2 = #state{
-        cached_keys_to_flush = CachedKeysToFlush,
-        cached_keys_in_flush = CachedKeysInFlush
-    } = handle_requests(Requests, State),
-    CachedKeys = maps:merge(CachedKeysInFlush, CachedKeysToFlush),
-    gen_server:call(Pid, {terminate, CachedKeys}, infinity),
+handle_call(terminate, _From, #state{
+    requests_ref = undefined,
+    cached_keys_to_flush = #{},
+    keys_to_inactivate = ToInactivate,
+    disc_writer_pid = Pid} = State) ->
+    gen_server:call(Pid, terminate, infinity),
     datastore_cache:inactivate(ToInactivate),
-    {stop, normal, ok, State2};
+    {stop, normal, ok, State};
+handle_call(terminate, _From, State) ->
+    {reply, working, State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -119,14 +117,22 @@ handle_call(Request, _From, State = #state{}) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_cast({flushed, NotFlushed}, State = #state{
+handle_cast({flushed, Ref, NotFlushed}, State = #state{
+    cached_keys_to_flush = CachedKeys,
+    requests_ref = Ref
+}) ->
+    {noreply, schedule_flush(check_inactivate(State#state{
+        cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
+        flush_ref = undefined,
+        requests_ref = undefined
+    }))};
+handle_cast({flushed, _Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys
 }) ->
-    {noreply, schedule_flush(State#state{
+    {noreply, schedule_flush(check_inactivate(State#state{
         cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
-        cached_keys_in_flush = #{},
         flush_ref = undefined
-    })};
+    }))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -148,8 +154,7 @@ handle_info(flush, State = #state{
 }) ->
     gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
     {noreply, State#state{
-        cached_keys_to_flush = #{},
-        cached_keys_in_flush = CachedKeys
+        cached_keys_to_flush = #{}
     }};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
@@ -433,3 +438,20 @@ schedule_flush(State = #state{}) ->
 -spec set_mutator_pid(ctx()) -> ctx().
 set_mutator_pid(Ctx) ->
     Ctx#{mutator_pid => self()}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Inactivates keys if too many keys are stored in state.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_inactivate(state()) -> state().
+check_inactivate(#state{keys_to_inactivate = ToInactivate} = State) ->
+    Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
+    case maps:size(ToInactivate) > Max of
+        true ->
+            datastore_cache:inactivate(ToInactivate),
+            State#state{keys_to_inactivate = #{}};
+        _ ->
+            State
+    end.

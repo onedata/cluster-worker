@@ -87,12 +87,9 @@ handle_call({flush, Ref, CachedKeys}, From, State = #state{
             ok
     end,
     {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
-    gen_server:cast(CacheWriterPid, {flushed, maps:from_list(NotFlushed)}),
+    gen_server:cast(CacheWriterPid, {flushed, Ref, maps:from_list(NotFlushed)}),
     {noreply, State};
-handle_call({terminate, CachedKeys}, _From, State = #state{}) ->
-    Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
-        timer:seconds(5)),
-    force_flush(CachedKeys, Delay),
+handle_call(terminate, _From, State) ->
     {stop, normal, ok, State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -187,42 +184,3 @@ wait_flushed(RequestFutures) ->
         ({_, {error, disc_driver_undefined}}) -> false;
         ({{Key, Ctx}, Error = {error, _}}) -> {true, {{Key, Ctx}, Error}}
     end, lists:zip(Requests, Responses)).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Synchronously flushes datastore documents from cache to disc.
-%% @end
-%%--------------------------------------------------------------------
--spec flush(cached_keys()) -> [{{key(), ctx()}, {error, term()}}].
-flush(CachedKeys) ->
-    wait_flushed(flush_async(CachedKeys)).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Synchronously flushes datastore documents from cache to disc.
-%% Repeats flush for documents that haven't been successfully flushed.
-%% @end
-%%--------------------------------------------------------------------
--spec force_flush(cached_keys(), non_neg_integer()) -> ok.
-force_flush(CachedKeys, Delay) ->
-    case flush(CachedKeys) of
-        [] ->
-            ok;
-        NotFlushedWithReason ->
-            CachedKeys2 = lists:foldl(fun({{Key, Ctx}, {error, Reason}}, Map) ->
-                LogKey = case Reason of
-                    etimedout -> flush_etimedout;
-                    timeout -> flush_timeout;
-                    etmpfail -> flush_etmpfail;
-                    _ -> flush_other_error
-                end,
-                node_manager:single_error_log(LogKey, "Failed to flush document
-                    ~p using context ~p due to: ~p. Retrying after ~p ms...",
-                    [Key, Ctx, Reason, Delay]),
-                maps:put(Key, Ctx, Map)
-            end, #{}, NotFlushedWithReason),
-            timer:sleep(Delay),
-            force_flush(CachedKeys2, min(2 * Delay, timer:minutes(5)))
-    end.

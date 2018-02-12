@@ -317,9 +317,13 @@ handle_cast(Request, State = #state{}) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_info({terminate, MsgRef}, State = #state{
     requests = [], cache_writer_state = idle, disc_writer_state = idle,
-    terminate_msg_ref = MsgRef
+    terminate_msg_ref = MsgRef,
+    cache_writer_pid = Pid
 }) ->
-    {stop, normal, State};
+    case gen_server:call(Pid, terminate, infinity) of
+        ok -> {stop, normal, State};
+        _ -> {noreply, schedule_terminate(State)}
+    end;
 handle_info({terminate, MsgRef}, State = #state{terminate_msg_ref = MsgRef}) ->
     {noreply, schedule_terminate(State)};
 handle_info({terminate, _}, State = #state{}) ->
@@ -341,10 +345,7 @@ handle_info(Info, State = #state{}) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, State = #state{
-    requests = Requests, cache_writer_pid = Pid
-}) ->
-    gen_server:call(Pid, {terminate, Requests}, infinity),
+terminate(Reason, State = #state{}) ->
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------
