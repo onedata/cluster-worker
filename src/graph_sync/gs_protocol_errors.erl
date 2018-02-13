@@ -100,13 +100,28 @@ error_to_json(1, ?ERROR_BAD_MACAROON) ->
     #{
         <<"id">> => <<"badMacaroon">>
     };
-error_to_json(1, ?ERROR_BAD_BASIC_CREDENTIALS) ->
+error_to_json(1, ?ERROR_MACAROON_INVALID) ->
     #{
-        <<"id">> => <<"badBasicCredentials">>
+        <<"id">> => <<"macaroonInvalid">>
+    };
+error_to_json(1, ?ERROR_MACAROON_EXPIRED) ->
+    #{
+        <<"id">> => <<"macaroonExpired">>
+    };
+error_to_json(1, ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl)) ->
+    #{
+        <<"id">> => <<"macaroonTtlTooLong">>,
+        <<"details">> => #{
+            <<"maxTtl">> => MaxTtl
+        }
     };
 error_to_json(1, ?ERROR_MALFORMED_DATA) ->
     #{
         <<"id">> => <<"malformedData">>
+    };
+error_to_json(1, ?ERROR_BAD_BASIC_CREDENTIALS) ->
+    #{
+        <<"id">> => <<"badBasicCredentials">>
     };
 error_to_json(1, ?ERROR_MISSING_REQUIRED_VALUE(Key)) ->
     #{
@@ -389,11 +404,21 @@ json_to_error(1, #{<<"id">> := <<"forbidden">>}) ->
 json_to_error(1, #{<<"id">> := <<"badMacaroon">>}) ->
     ?ERROR_BAD_MACAROON;
 
-json_to_error(1, #{<<"id">> := <<"badBasicCredentials">>}) ->
-    ?ERROR_BAD_BASIC_CREDENTIALS;
+json_to_error(1, #{<<"id">> := <<"macaroonInvalid">>}) ->
+    ?ERROR_MACAROON_INVALID;
+
+json_to_error(1, #{<<"id">> := <<"macaroonExpired">>}) ->
+    ?ERROR_MACAROON_EXPIRED;
+
+json_to_error(1, #{<<"id">> := <<"macaroonTtlTooLong">>,
+    <<"details">> := #{<<"maxTtl">> := MaxTtl}}) ->
+    ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl);
 
 json_to_error(1, #{<<"id">> := <<"malformedData">>}) ->
     ?ERROR_MALFORMED_DATA;
+
+json_to_error(1, #{<<"id">> := <<"badBasicCredentials">>}) ->
+    ?ERROR_BAD_BASIC_CREDENTIALS;
 
 json_to_error(1, #{<<"id">> := <<"missingRequiredValue">>,
     <<"details">> := #{<<"key">> := Key}}) ->
