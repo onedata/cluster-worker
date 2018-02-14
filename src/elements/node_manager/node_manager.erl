@@ -329,7 +329,7 @@ init([]) ->
     process_flag(trap_exit, true),
     try
         ?init_exometer_reporters(false),
-        ?init_exometer_counters,
+        exometer_utils:init_exometer_counters(),
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
 
         ?info("Running 'before_init' procedures."),
