@@ -98,10 +98,10 @@ tp_get_processes_number_should_return_value(Config) ->
 
 tp_server_call_should_return_response(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(reply, rpc:call(Worker, tp, call, [
+    ?assertMatch({reply, _}, rpc:call(Worker, tp, call, [
         ?TP_MODULE, ?TP_ARGS, ?TP_KEY, reply
     ])),
-    ?assertEqual(reply, rpc:call(Worker, tp, call, [
+    ?assertMatch({reply, _}, rpc:call(Worker, tp, call, [
         ?TP_MODULE, ?TP_ARGS, ?TP_KEY, reply_hibernate
     ])),
     ?assertMatch({error, _}, rpc:call(Worker, tp, call, [
@@ -110,7 +110,7 @@ tp_server_call_should_return_response(Config) ->
     ?assertMatch({error, _}, rpc:call(Worker, tp, call, [
         ?TP_MODULE, ?TP_ARGS, ?TP_KEY, noreply_hibernate
     ])),
-    ?assertEqual(reply, rpc:call(Worker, tp, call, [
+    ?assertMatch({reply, _}, rpc:call(Worker, tp, call, [
         ?TP_MODULE, ?TP_ARGS, ?TP_KEY, stop_reply
     ])),
     ?assertEqual(0, rpc:call(Worker, tp, get_processes_number, []), 30),
@@ -123,7 +123,7 @@ tp_server_multiple_requests_should_create_single_process(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Self = self(),
     utils:pforeach(fun(_) ->
-        ?assertEqual(reply, rpc:call(Worker, tp, call, [
+        ?assertMatch({reply, _}, rpc:call(Worker, tp, call, [
             ?TP_MODULE, ?TP_ARGS, ?TP_KEY, reply
         ])),
         Self ! done

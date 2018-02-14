@@ -41,7 +41,7 @@
                    {delete_design_doc, design()} |
                    {query_view, design(), view(), [view_opt()]}.
 -type response() :: ok | {ok, term()} | {ok, term(), term()} | {error, term()}.
--type future() :: reference().
+-type future() :: {reference(), pid()}.
 
 -export_type([mode/0, request/0, response/0, future/0]).
 
@@ -87,14 +87,15 @@ init_report() ->
 %% Schedules request execution on a worker pool.
 %% @end
 %%--------------------------------------------------------------------
--spec post_async(couchbase_config:bucket(), mode(), request()) -> future().
+-spec post_async(couchbase_config:bucket(), mode(), request()) ->
+    future().
 post_async(Bucket, Mode, Request) ->
     Ref = make_ref(),
     Id = get_next_worker_id(Bucket, Mode),
     Worker = couchbase_pool_sup:get_worker(Bucket, Mode, Id),
     update_request_queue_size(Bucket, Mode, Id, 1),
     Worker ! {post, {Ref, self(), Request}},
-    Ref.
+    {Ref, Worker}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -111,12 +112,18 @@ post(Bucket, Mode, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec wait(future()) -> response().
-wait(Future) ->
+wait({Future, Worker} = WaitData) ->
     Timeout = get_timeout(),
     receive
         {Future, Response} -> Response
     after
-        Timeout -> {error, timeout}
+        Timeout ->
+            case erlang:is_process_alive(Worker) of
+                true ->
+                    wait(WaitData);
+                _ ->
+                    {error, timeout}
+            end
     end.
 
 %%--------------------------------------------------------------------
