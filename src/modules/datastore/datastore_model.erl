@@ -422,3 +422,15 @@ delete_all_links(Ctx, Key, ok) ->
     end;
 delete_all_links(_Ctx, _Key, Result) ->
     Result.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets head of the list.
+%% @end
+%%--------------------------------------------------------------------
+-spec hd(term()) -> term().
+hd(List) when is_list(List) ->
+    erlang:hd(List);
+hd(Term) ->
+    Term.
