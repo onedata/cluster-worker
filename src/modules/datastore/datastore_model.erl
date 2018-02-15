@@ -258,7 +258,7 @@ fold_keys(_Ctx, _Fun, _Acc) ->
 add_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
     datastore_apply(Ctx, Key, fun datastore:add_links/4, add_links, [TreeId, Links]);
 add_links(Ctx, Key, TreeId, Link) ->
-    ?MODULE:hd(add_links(Ctx, Key, TreeId, [Link])).
+    hd_if_list(add_links(Ctx, Key, TreeId, [Link])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -270,7 +270,7 @@ add_links(Ctx, Key, TreeId, Link) ->
 get_links(Ctx, Key, TreeIds, LinkNames) when is_list(LinkNames) ->
     datastore_apply(Ctx, Key, fun datastore:get_links/4, get_links, [TreeIds, LinkNames]);
 get_links(Ctx, Key, TreeIds, LinkName) ->
-    ?MODULE:hd(get_links(Ctx, Key, TreeIds, [LinkName])).
+    hd_if_list(get_links(Ctx, Key, TreeIds, [LinkName])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -283,7 +283,7 @@ get_links(Ctx, Key, TreeIds, LinkName) ->
 delete_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
     datastore_apply(Ctx, Key, fun datastore:delete_links/4, delete_links, [TreeId, Links]);
 delete_links(Ctx, Key, TreeId, Link) ->
-    ?MODULE:hd(delete_links(Ctx, Key, TreeId, [Link])).
+    hd_if_list(delete_links(Ctx, Key, TreeId, [Link])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -298,7 +298,7 @@ mark_links_deleted(Ctx, Key, TreeId, Links) when is_list(Links) ->
         TreeId, Links
     ]);
 mark_links_deleted(Ctx, Key, TreeId, Link) ->
-    ?MODULE:hd(mark_links_deleted(Ctx, Key, TreeId, [Link])).
+    hd_if_list(mark_links_deleted(Ctx, Key, TreeId, [Link])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -426,11 +426,11 @@ delete_all_links(_Ctx, _Key, Result) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets head of the list.
+%% Gets head of the list if term is list or return term.
 %% @end
 %%--------------------------------------------------------------------
--spec hd(term()) -> term().
-hd(List) when is_list(List) ->
-    erlang:hd(List);
-hd(Term) ->
+-spec hd_if_list(term()) -> term().
+hd_if_list(List) when is_list(List) ->
+    hd(List);
+hd_if_list(Term) ->
     Term.
