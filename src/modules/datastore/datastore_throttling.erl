@@ -226,8 +226,7 @@ configure_throttling(Values, Config, DefaultConfig) ->
             Strength = get_config_value(strength, Config, DefaultConfig),
             ThrottlingBase = math:exp(-1 * Strength * ThrottlingBase0),
 
-            BaseTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                throttling_base_time_ms, 2048),
+            BaseTime = get_config_value(base_time_ms, Config, DefaultConfig),
             Time = round(BaseTime * (1 - ThrottlingBase)),
             {throttle, Time}
     end.
