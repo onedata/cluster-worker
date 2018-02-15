@@ -28,7 +28,7 @@
 
 
 -type execute_type() :: direct | spawn | {pool, call | cast, worker_pool:name()}.
-
+-type timeout_spec() :: timeout() | {timeout(), fun(() -> ok)}.
 
 %%%===================================================================
 %%% API
@@ -51,7 +51,7 @@ call(WorkerRef, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
-    Timeout :: timeout()) -> Result :: term() | {error, term()}.
+    Timeout :: timeout_spec()) -> Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout) ->
     call(WorkerRef, Request, Timeout, spawn).
 
@@ -73,7 +73,8 @@ call_direct(WorkerRef, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_direct(WorkerRef :: request_dispatcher:worker_ref(),
-    Request :: term(), Timeout :: timeout()) -> Result :: term() | {error, term()}.
+    Request :: term(), Timeout :: timeout_spec()) ->
+    Result :: term() | {error, term()}.
 call_direct(WorkerRef, Request, Timeout) ->
     call(WorkerRef, Request, Timeout, direct).
 
@@ -97,7 +98,8 @@ call_pool(WorkerRef, Request, PoolName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call_pool(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
-    worker_pool:name(), Timeout :: timeout()) -> Result :: term() | {error, term()}.
+    worker_pool:name(), Timeout :: timeout_spec()) ->
+    Result :: term() | {error, term()}.
 call_pool(WorkerRef, Request, PoolName, Timeout) ->
     call(WorkerRef, Request, Timeout, {pool, call, PoolName}).
 
@@ -120,7 +122,7 @@ multicall(WorkerName, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec multicall(WorkerName :: request_dispatcher:worker_name(),
-    Request :: term(), Timeout :: timeout()) ->
+    Request :: term(), Timeout :: timeout_spec()) ->
     [{Node :: node(), ok | {ok, term()} | {error, term()}}].
 multicall(WorkerName, Request, Timeout) ->
     {ok, Nodes} = request_dispatcher:get_worker_nodes(WorkerName),
@@ -271,25 +273,50 @@ multicast(WorkerName, Request, ReplyTo, MsgId) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
-    Timeout :: timeout(), execute_type()) -> Result :: term() | {error, term()}.
+    Timeout :: timeout_spec(), execute_type()) ->
+    Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout, ExecOption) ->
     MsgId = make_ref(),
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
             Args = prepare_args(Name, Request, MsgId),
-            execute(Args, Node, ExecOption, Timeout),
-            receive
-                #worker_answer{id = MsgId, response = Response} -> Response
-            after Timeout ->
+            ExecuteAns = execute(Args, Node, ExecOption, Timeout),
+            receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
+        Error ->
+            Error
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for worker answer.
+%% @end
+%%--------------------------------------------------------------------
+-spec receive_loop(ExecuteAns :: term(), MsgId :: term(),
+    Timeout :: timeout_spec(), WorkerRef :: request_dispatcher:worker_ref(),
+    Request :: term()) -> Result :: term() | {error, term()}.
+receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
+    {AfterTime, TimeoutFun} = case Timeout of
+        {_Time, _Fun} -> Timeout;
+        _ -> {Timeout, fun() -> ok end}
+    end,
+    receive
+        #worker_answer{id = MsgId, response = Response} -> Response
+    after AfterTime ->
+        case is_pid(ExecuteAns) and erlang:is_process_alive(ExecuteAns) of
+            true ->
+                TimeoutFun(),
+                receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
+            _ ->
                 LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
                 {MsgFormat, FormatArgs} = case LogRequest of
                     true ->
                         MF = "Worker: ~p, request: ~p exceeded timeout of ~p ms",
-                        FA = [WorkerRef, Request, Timeout],
+                        FA = [WorkerRef, Request, AfterTime],
                         {MF, FA};
                     _ ->
                         MF = "Worker: ~p, exceeded timeout of ~p ms",
-                        FA = [WorkerRef, Timeout],
+                        FA = [WorkerRef, AfterTime],
                         {MF, FA}
                 end,
 
@@ -300,9 +327,7 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
                 LogKey = list_to_atom("proxy_timeout_" ++ atom_to_list(WorkerName)),
                 node_manager:single_error_log(LogKey, MsgFormat, FormatArgs),
                 {error, timeout}
-            end;
-        Error ->
-            Error
+        end
     end.
 
 %%--------------------------------------------------------------------
@@ -315,14 +340,17 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec execute(Args :: list(), node(), ExecOption :: execute_type(),
-    Timeout ::non_neg_integer() | undefined) -> term().
+    Timeout :: timeout_spec() | undefined) -> term().
 execute(Args, _Node, direct, _Timeout) ->
+    % TODO VFS-4025 check usage - not optimal implementation
     apply(worker_host, proc_request, Args);
 execute(Args, Node, spawn, _Timeout) ->
     spawn(Node, worker_host, proc_request, Args);
 execute(Args, _Node, {pool, call, PoolName}, Timeout) ->
+    % TODO VFS-4025
     worker_pool:call(PoolName, {worker_host, proc_request, Args}, worker_pool:default_strategy(), Timeout);
 execute(Args, _Node, {pool, cast, PoolName}, _) ->
+    % TODO VFS-4025
     worker_pool:cast(PoolName, {worker_host, proc_request, Args}).
 
 

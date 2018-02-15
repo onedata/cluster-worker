@@ -57,14 +57,14 @@ call(Module, Args, Key, Request, Timeout) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call(module(), args(), key(), request(), timeout(), non_neg_integer()) ->
-    response() | {error, Reason :: term()}.
+    {response(), pid()} | {error, Reason :: term()}.
 call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
     {error, timeout};
 call(Module, Args, Key, Request, Timeout, Attempts) ->
     case get_or_create_tp_server(Module, Args, Key) of
         {ok, Pid} ->
             try
-                gen_server:call(Pid, Request, Timeout)
+                {gen_server:call(Pid, Request, Timeout), Pid}
             catch
                 _:{noproc, _} ->
                     tp_router:delete(Key, Pid),
