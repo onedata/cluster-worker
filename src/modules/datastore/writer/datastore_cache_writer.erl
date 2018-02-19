@@ -198,14 +198,18 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_requests(list(), state()) -> state().
 handle_requests(Requests, State = #state{
     cached_keys_to_flush = CachedKeys,
-    keys_to_inactivate = ToInactivate
+    keys_to_inactivate = ToInactivate,
+    master_pid = Pid
 }) ->
     Batch = datastore_doc_batch:init(),
     {Responses, Batch2} = batch_requests(Requests, [], Batch),
     Batch3 = datastore_doc_batch:apply(Batch2),
     Batch4 = send_responses(Responses, Batch3),
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
-    State#state{cached_keys_to_flush = maps:merge(CachedKeys, CachedKeys2),
+
+    NewKeys = maps:merge(CachedKeys, CachedKeys2),
+    tp_router:update_process_size(Pid, maps:size(NewKeys)),
+    State#state{cached_keys_to_flush = NewKeys,
         keys_to_inactivate = maps:merge(ToInactivate, CachedKeys2)}.
 
 %%--------------------------------------------------------------------

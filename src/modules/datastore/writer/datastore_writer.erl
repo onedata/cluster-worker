@@ -352,6 +352,7 @@ handle_info(Info, State = #state{}) ->
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
 terminate(Reason, State = #state{}) ->
+    tp_router:delete_process_size(self()),
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------

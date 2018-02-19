@@ -16,5 +16,6 @@
 -define(TP_ROUTING_TABLE, tp_routing_table).
 -define(TP_ROUTING_TABLE_SIZE, tp_routing_table_size).
 -define(TP_PROCESSES_LIMIT, tp_processes_limit).
+-define(TP_SIZE_TABLE, tp_size_table).
 
 -endif.

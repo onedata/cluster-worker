@@ -24,6 +24,7 @@
 
 %% API
 -export([create/2, get/1, delete/1, delete/2, size/0]).
+-export([update_process_size/2, delete_process_size/1, get_process_size_sum/0]).
 -export([supervisor_flags/0, supervisor_children_spec/0,
     main_supervisor_flags/0, main_supervisor_children_spec/0,
     init_supervisors/0]).
@@ -48,6 +49,15 @@ init(_Args) ->
         {read_concurrency, true}
         ])
     end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
+
+    lists:foreach(fun(Name) ->
+        ets:new(Name, [
+            set,
+            public,
+            named_table,
+            {read_concurrency, true}
+        ])
+    end, datastore_multiplier:get_names(?TP_SIZE_TABLE)),
 
     {ok, #{}}.
 
@@ -76,6 +86,10 @@ cleanup() ->
     lists:foreach(fun(Name) ->
         ets:delete(Name)
     end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
+
+    lists:foreach(fun(Name) ->
+        ets:delete(Name)
+    end, datastore_multiplier:get_names(?TP_SIZE_TABLE)),
     ok.
 
 %%%===================================================================
@@ -214,6 +228,38 @@ supervisor_children_spec() ->
         type => worker,
         modules => [tp_server]
     }].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts size of tp process.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_process_size(pid(), non_neg_integer()) -> true.
+update_process_size(Proc, Size) ->
+    Table = datastore_multiplier:extend_name(Proc, ?TP_SIZE_TABLE),
+    ets:insert(Table, {Proc, Size}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inserts size of tp process.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_process_size(pid()) -> true.
+delete_process_size(Proc) ->
+    Table = datastore_multiplier:extend_name(Proc, ?TP_SIZE_TABLE),
+    ets:delete(Table, Proc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns sum of sizes of all processes.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_process_size_sum() -> non_neg_integer().
+get_process_size_sum() ->
+    lists:foldl(fun(Name, Acc) ->
+        List = ets:tab2list(Name),
+        lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
+    end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
 
 %%%===================================================================
 %%% Internal functions
