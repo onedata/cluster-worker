@@ -119,18 +119,24 @@ handle_call(Request, _From, State = #state{}) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_cast({flushed, Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys,
-    requests_ref = Ref
+    requests_ref = Ref,
+    master_pid = Pid
 }) ->
+    NewKeys = maps:merge(NotFlushed, CachedKeys),
+    tp_router:update_process_size(Pid, maps:size(NewKeys)),
     {noreply, schedule_flush(check_inactivate(State#state{
-        cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
+        cached_keys_to_flush = NewKeys,
         flush_ref = undefined,
         requests_ref = undefined
     }))};
 handle_cast({flushed, _Ref, NotFlushed}, State = #state{
-    cached_keys_to_flush = CachedKeys
+    cached_keys_to_flush = CachedKeys,
+    master_pid = Pid
 }) ->
+    NewKeys = maps:merge(NotFlushed, CachedKeys),
+    tp_router:update_process_size(Pid, maps:size(NewKeys)),
     {noreply, schedule_flush(check_inactivate(State#state{
-        cached_keys_to_flush = maps:merge(NotFlushed, CachedKeys),
+        cached_keys_to_flush = NewKeys,
         flush_ref = undefined
     }))};
 handle_cast(Request, #state{} = State) ->
@@ -152,6 +158,7 @@ handle_info(flush, State = #state{
     requests_ref = Ref,
     cached_keys_to_flush = CachedKeys
 }) ->
+    tp_router:delete_process_size(Pid),
     gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
     {noreply, State#state{
         cached_keys_to_flush = #{}
