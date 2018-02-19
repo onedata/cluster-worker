@@ -27,7 +27,7 @@
 %% Extends the name with namespace extension calculated using key.
 %% @end
 %%--------------------------------------------------------------------
--spec extend_name(datastore:key(), atom() | ctx()) ->
+-spec extend_name(datastore:key() | pid(), atom() | ctx()) ->
   atom() | ctx().
 extend_name(Key, Name) when is_atom(Name) ->
   list_to_atom(atom_to_list(Name) ++ get_num(Key));
@@ -87,8 +87,7 @@ get_name_extensions() ->
 %% Returns namespace's suffix for a key.
 %% @end
 %%--------------------------------------------------------------------
--spec get_num(datastore:key()) ->
-  [non_neg_integer()].
+-spec get_num(datastore:key() | pid()) -> [non_neg_integer()].
 get_num(Key) when is_binary(Key) ->
   MaxNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
     tp_subtrees_number, 10),
