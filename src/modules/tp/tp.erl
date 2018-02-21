@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/tp/tp.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([call/4, call/5, call/6, cast/4, send/4]).
@@ -61,7 +62,13 @@ call(Module, Args, Key, Request, Timeout) ->
 call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
     {error, timeout};
 call(Module, Args, Key, Request, Timeout, Attempts) ->
+    Self = self(),
     case get_or_create_tp_server(Module, Args, Key) of
+        {ok, Self} ->
+            ?critical("Tp self call, args: ~p, stacktrace ~p",
+                [{Module, Args, Key, Request},
+                    erlang:process_info(Self, current_stacktrace)]),
+            {error, self_call};
         {ok, Pid} ->
             try
                 {gen_server:call(Pid, Request, Timeout), Pid}
