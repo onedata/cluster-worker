@@ -144,6 +144,9 @@ websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) -
             {ok, State}
     end;
 
+websocket_handle({ping, <<"">>}, _, State) ->
+    {ok, State};
+
 websocket_handle(Msg, _, State) ->
     ?warning("Unexpected frame in GS client: ~p", [Msg]),
     {ok, State}.

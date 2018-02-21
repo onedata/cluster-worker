@@ -903,28 +903,29 @@ get_cacerts(Config) ->
 
 
 start_gs_listener(Config, Node) ->
-    ok = rpc:call(Node, application, ensure_started, [ssl]),
-    {ok, _} = rpc:call(Node, ranch, start_listener, [
-        ?GS_LISTENER_ID, ?GS_HTTPS_ACCEPTORS,
-        ranch_ssl, [
+    ok = rpc:call(Node, application, ensure_started, [cowboy]),
+    {ok, _} = rpc:call(Node, cowboy, start_tls, [
+        ?GS_LISTENER_ID,
+        [
             {port, ?GS_PORT},
+            {num_acceptors, ?GS_HTTPS_ACCEPTORS},
             {keyfile, ?TEST_FILE(Config, "web_key.pem")},
             {certfile, ?TEST_FILE(Config, "web_cert.pem")},
             {cacerts, get_cacerts(Config)},
             {verify, verify_peer},
             {ciphers, ssl_utils:safe_ciphers()}
-        ], cowboy_protocol,
-        [
-            {env, [{dispatch, cowboy_router:compile([
+        ],
+        #{
+            env => #{dispatch => cowboy_router:compile([
                 {'_', [
                     {"/[...]", gs_ws_handler, [?GS_EXAMPLE_TRANSLATOR]}
                 ]}
-            ])}]}
-        ]
+            ])}
+        }
     ]).
 
 stop_gs_listener(Node) ->
-    rpc:call(Node, ranch, stop_listener, [?GS_LISTENER_ID]).
+    rpc:call(Node, cowboy, stop_listener, [?GS_LISTENER_ID]).
 
 
 %%%===================================================================
