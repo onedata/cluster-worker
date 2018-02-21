@@ -13,6 +13,8 @@
 -module(gs_ws_handler).
 -author("Lukasz Opiola").
 
+-behaviour(cowboy_websocket).
+
 -include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -30,13 +32,17 @@
 
 -type state() :: #pre_handshake_state{} | #state{}.
 
+-define(KEEPALIVE_INTERVAL,
+    application:get_env(cluster_worker, websocket_keepalive, timer:seconds(30))
+).
+
 %% Cowboy WebSocket handler callbacks
 -export([
-    init/3,
-    websocket_init/3,
-    websocket_handle/3,
-    websocket_info/3,
-    websocket_terminate/3
+    init/2,
+    websocket_init/1,
+    websocket_handle/2,
+    websocket_info/2,
+    terminate/3
 ]).
 % API
 -export([
@@ -54,55 +60,47 @@
 %% Upgrades the protocol to WebSocket.
 %% @end
 %%--------------------------------------------------------------------
--spec init({TransportName, ProtocolName}, Req, Opts) ->
-    {upgrade, protocol, cowboy_websocket} when
-    TransportName :: tcp | ssl | atom(),
-    ProtocolName :: http | atom(),
-    Req :: cowboy_req:req(),
-    Opts :: any().
-init(_Protocol, _Req, _Opts) ->
-    {upgrade, protocol, cowboy_websocket}.
+-spec init(Req :: cowboy_req:req(), Opts :: any()) ->
+    {ok, cowboy_req:req(), no_state} |
+    {cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
+init(Req, [Translator]) ->
+    case gs_server:authorize(Req) of
+        {ok, Client} ->
+            State = #pre_handshake_state{
+                client = Client, translator = Translator
+            },
+            {cowboy_websocket, Req, State};
+        ?ERROR_UNAUTHORIZED ->
+            NewReq = cowboy_req:reply(401, Req),
+            {ok, NewReq, no_state}
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes the state for a session.
+%% Initialize timer between sending keepalives/ping frames.
 %% @end
 %%--------------------------------------------------------------------
--spec websocket_init(TransportName, Req, Opts) ->
-    {ok, Req, State} | {ok, Req, State, hibernate} |
-    {ok, Req, State, Timeout} | {ok, Req, State, Timeout, hibernate} |
-    {shutdown, Req} when
-    TransportName :: tcp | ssl | atom(),
-    Req :: cowboy_req:req(),
-    Opts :: any(),
-    State :: state(),
-    Timeout :: timeout().
-websocket_init(_Transport, Req, [Translator]) ->
-    case gs_server:authorize(Req) of
-        {ok, Client} ->
-            {ok, Req, #pre_handshake_state{
-                client = Client, translator = Translator
-            }};
-        ?ERROR_UNAUTHORIZED ->
-            {ok, NewReq} = cowboy_req:reply(401, Req),
-            {shutdown, NewReq}
-    end.
+-spec websocket_init(State :: state()) -> {ok, State :: state()}.
+websocket_init(State) ->
+    erlang:send_after(?KEEPALIVE_INTERVAL, self(), keepalive),
+    {ok, State}.
+
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Handles the data received from Websocket.
 %% @end
 %%--------------------------------------------------------------------
--spec websocket_handle(InFrame, Req, State) ->
-    {ok, Req, State} | {ok, Req, State, hibernate} |
-    {reply, OutFrame | [OutFrame], Req, State} |
-    {reply, OutFrame | [OutFrame], Req, State, hibernate} |
-    {shutdown, Req, State} when
+-spec websocket_handle(InFrame, State) ->
+    {ok, State} | {ok, State, hibernate} |
+    {reply, OutFrame | [OutFrame], State} |
+    {reply, OutFrame | [OutFrame], State, hibernate} |
+    {stop, State} when
     InFrame :: {text | binary | ping | pong, binary()},
-    Req :: cowboy_req:req(),
     State :: state(),
     OutFrame :: cowboy_websocket:frame().
-websocket_handle({text, Data}, Req, #pre_handshake_state{} = State) ->
+websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     #pre_handshake_state{client = Client, translator = Translator} = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
@@ -129,25 +127,29 @@ websocket_handle({text, Data}, Req, #pre_handshake_state{} = State) ->
             {gs_protocol:generate_error_push_message(Error), State}
     end,
     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
-    {reply, {text, json_utils:encode_map(JSONMap)}, Req, NewState};
+    {reply, {text, json_utils:encode_map(JSONMap)}, NewState};
 
-websocket_handle({text, Data}, Req, State) ->
+websocket_handle({text, Data}, State) ->
     #state{session_id = SessionId, protocol_version = ProtocolVersion} = State,
     case decode_body(ProtocolVersion, Data) of
         {ok, Requests} ->
             % process_request_async should not crash, but if it does,
             % cowboy will log the error.
             process_request_async(SessionId, Requests),
-            {ok, Req, State};
+            {ok, State};
         {error, _} = Error ->
             ErrorMsg = gs_protocol:generate_error_push_message(Error),
             {ok, ErrorJSONMap} = gs_protocol:encode(ProtocolVersion, ErrorMsg),
-            {reply, {text, json_utils:encode_map(ErrorJSONMap)}, Req, State}
+            {reply, {text, json_utils:encode_map(ErrorJSONMap)}, State}
     end;
 
-websocket_handle(Msg, Req, State) ->
+websocket_handle(pong, State) ->
+    {ok, State};
+
+websocket_handle(Msg, State) ->
     ?warning("Unexpected frame in GS websocket handler: ~p", [Msg]),
-    {ok, Req, State}.
+    {ok, State}.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -155,22 +157,25 @@ websocket_handle(Msg, Req, State) ->
 %% the connection.
 %% @end
 %%--------------------------------------------------------------------
--spec websocket_info(Info, Req, State) ->
-    {ok, Req, State} | {ok, Req, State, hibernate} |
-    {reply, OutFrame | [OutFrame], Req, State} |
-    {reply, OutFrame | [OutFrame], Req, State, hibernate} |
-    {shutdown, Req, State} when
+-spec websocket_info(Info, State) ->
+    {ok, State} | {ok, State, hibernate} |
+    {reply, OutFrame | [OutFrame], State} |
+    {reply, OutFrame | [OutFrame], State, hibernate} |
+    {stop, State} when
     Info :: any(),
-    Req :: cowboy_req:req(),
     State :: state(),
     OutFrame :: cowboy_websocket:frame().
-websocket_info(terminate, Req, State) ->
-    {shutdown, Req, State};
+websocket_info(terminate, State) ->
+    {stop, State};
 
-websocket_info({push, Msg}, Req, #state{protocol_version = ProtoVer} = State) ->
+websocket_info(keepalive, State) ->
+    erlang:send_after(?KEEPALIVE_INTERVAL, self(), keepalive),
+    {reply, ping, State};
+
+websocket_info({push, Msg}, #state{protocol_version = ProtoVer} = State) ->
     try
         {ok, JSONMap} = gs_protocol:encode(ProtoVer, Msg),
-        {reply, {text, json_utils:encode_map(JSONMap)}, Req, State}
+        {reply, {text, json_utils:encode_map(JSONMap)}, State}
     catch
         Type:Message ->
             ?error_stacktrace(
@@ -178,27 +183,29 @@ websocket_info({push, Msg}, Req, #state{protocol_version = ProtoVer} = State) ->
                 "it cannot be encoded - ~p:~p~nMessage: ~p", [
                 Type, Message, Msg
             ]),
-            {ok, Req, State}
+            {ok, State}
     end;
 
-websocket_info(Msg, Req, State) ->
+websocket_info(Msg, State) ->
     ?warning("Unexpected message in GS websocket handler: ~p", [Msg]),
-    {ok, Req, State}.
+    {ok, State}.
+
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Performs any necessary cleanup.
 %% @end
 %%--------------------------------------------------------------------
--spec websocket_terminate(Reason, Req, State) -> ok when
-    Reason :: {normal, shutdown | timeout} | {remote, closed} |
-    {remote, cowboy_websocket:close_code(), binary()} |
-    {error, badencoding | badframe | closed | atom()},
+-spec terminate(Reason, Req, State) -> ok when
+    Reason :: normal | stop | timeout |
+    remote | {remote, cow_ws:close_code(), binary()} |
+    {error, badencoding | badframe | closed | atom()} |
+    {crash, error | exit | throw, any()},
     Req :: cowboy_req:req(),
     State :: state().
-websocket_terminate(_Reason, _Req, #pre_handshake_state{}) ->
+terminate(_Reason, _Req, #pre_handshake_state{}) ->
     ok;
-websocket_terminate(_Reason, _Req, #state{session_id = SessionId}) ->
+terminate(_Reason, _Req, #state{session_id = SessionId}) ->
     gs_server:cleanup_client_session(SessionId),
     ok.
 

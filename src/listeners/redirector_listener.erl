@@ -49,26 +49,25 @@ port() ->
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-    {ok, RedirectPort} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_redirect_port),
     {ok, RedirectNbAcceptors} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         http_number_of_http_acceptors),
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         http_socket_timeout_seconds),
-    RedirectDispatch = [
+
+    RedirectDispatch = cowboy_router:compile([
         {'_', [
             {'_', redirector_handler, []}
         ]}
-    ],
-    Result = cowboy:start_http(?HTTP_REDIRECTOR_LISTENER, RedirectNbAcceptors,
+    ]),
+    Result = cowboy:start_clear(?HTTP_REDIRECTOR_LISTENER,
         [
-            {port, RedirectPort}
-        ],
-        [
-            {env, [{dispatch, cowboy_router:compile(RedirectDispatch)}]},
-            {max_keepalive, 1},
-            {timeout, timer:seconds(Timeout)}
-        ]),
+            {port, port()},
+            {num_acceptors, RedirectNbAcceptors}
+        ], #{
+            env => #{dispatch => RedirectDispatch},
+            max_keepalive => 1,
+            request_timeout => timer:seconds(Timeout)
+        }),
     case Result of
         {ok, _} -> ok;
         _ -> Result
@@ -82,10 +81,10 @@ start() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
-    case catch cowboy:stop_listener(?HTTP_REDIRECTOR_LISTENER) of
-        (ok) ->
+    case cowboy:stop_listener(?HTTP_REDIRECTOR_LISTENER) of
+        ok ->
             ok;
-        (Error) ->
+        {error, Error} ->
             ?error("Error on stopping listener ~p: ~p",
                 [?HTTP_REDIRECTOR_LISTENER, Error]),
             {error, redirector_stop_error}
@@ -99,7 +98,7 @@ stop() ->
 %%--------------------------------------------------------------------
 -spec healthcheck() -> ok | {error, server_not_responding}.
 healthcheck() ->
-    Endpoint = <<"http://127.0.0.1:", (integer_to_binary(port()))/binary>>,
+    Endpoint = str_utils:format_bin("http://127.0.0.1:~B", [port()]),
     case http_client:get(Endpoint) of
         {ok, _, _, _} -> ok;
         _ -> {error, server_not_responding}
