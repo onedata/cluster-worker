@@ -72,6 +72,7 @@ start_link(MasterPid) ->
     {stop, Reason :: term()} | ignore.
 init([MasterPid]) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
+    put(tp_master, MasterPid),
     {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid}}.
 
 %%--------------------------------------------------------------------

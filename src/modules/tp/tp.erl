@@ -62,12 +62,20 @@ call(Module, Args, Key, Request, Timeout) ->
 call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
     {error, timeout};
 call(Module, Args, Key, Request, Timeout, Attempts) ->
-    Self = self(),
+    TPMaster = get(tp_master),
+
+    case TPMaster of
+        undefined ->
+            ok;
+        _ ->
+            ?critical("Tp internal call, args: ~p",
+                [{Module, Args, Key, Request}])
+    end,
+
     case get_or_create_tp_server(Module, Args, Key) of
-        {ok, Self} ->
-            ?critical("Tp self call, args: ~p, stacktrace ~p",
-                [{Module, Args, Key, Request},
-                    erlang:process_info(Self, current_stacktrace)]),
+        {ok, TPMaster} ->
+            ?critical("Tp self call, args: ~p",
+                [{Module, Args, Key, Request}]),
             {error, self_call};
         {ok, Pid} ->
             try
