@@ -16,7 +16,6 @@
 %% This record is used by node_manager (it contains its state).
 %% It hold the status of connection to cluster manager.
 -record(state, {
-  node_ip = {127, 0, 0, 1} :: inet:ipv4_address(),
   cm_con_status = not_connected :: not_connected | connected | registered,
   initialized = {false, 0} :: true | {false, TriesNum :: non_neg_integer()},
   monitoring_state = undefined :: monitoring:node_monitoring_state(),

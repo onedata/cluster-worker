@@ -255,12 +255,9 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 %%--------------------------------------------------------------------
 -spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
 check_cm(Timeout) ->
-    try node_manager:get_cluster_nodes_ips() of
-        {ok, NodesIPs} ->
-            {Nodes, _} = lists:unzip(NodesIPs),
-            Nodes;
-        {error, cluster_not_ready} ->
-            error
+    try node_manager:get_cluster_nodes() of
+        {ok, Nodes} -> Nodes;
+        {error, cluster_not_ready} -> error
     catch
         exit:{noproc, _} ->
             ?LOG("cluster manager is not reachable"),
