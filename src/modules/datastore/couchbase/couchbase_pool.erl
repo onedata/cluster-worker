@@ -19,7 +19,7 @@
 -export([post_async/3, post/3, wait/1]).
 -export([get_timeout/0, get_modes/0, get_size/2]).
 -export([get_request_queue_size/1, get_request_queue_size/2,
-    get_max_worker_queue_size/1, get_max_worker_queue_size/2,
+    get_worker_queue_size_stats/1, get_worker_queue_size_stats/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
 -export([init_counters/0, init_report/0]).
 
@@ -185,29 +185,31 @@ get_request_queue_size(Bucket, Mode) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns maximal queue size for given bucket and all modes.
+%% Returns {max, sum} of queue sizes for given bucket and all modes.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_worker_queue_size(couchbase_config:bucket()) -> non_neg_integer().
-get_max_worker_queue_size(Bucket) ->
-    lists:foldl(fun(Mode, Size) ->
-        max(Size, get_max_worker_queue_size(Bucket, Mode))
-    end, 0, get_modes()).
+-spec get_worker_queue_size_stats(couchbase_config:bucket()) ->
+    {Max :: non_neg_integer(), Sum :: non_neg_integer()}.
+get_worker_queue_size_stats(Bucket) ->
+    lists:foldl(fun(Mode, {Max, Sum}) ->
+        {M, S} = get_worker_queue_size_stats(Bucket, Mode),
+        {max(Max, M), Sum + S}
+    end, {0, 0}, get_modes()).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns maximal queue size for given bucket and mode.
+%% Returns {max, sum} of queue sizes for given bucket and mode.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_worker_queue_size(couchbase_config:bucket(), mode()) ->
-    non_neg_integer().
-get_max_worker_queue_size(Bucket, Mode) ->
-    lists:foldl(fun(Id, Size) ->
+-spec get_worker_queue_size_stats(couchbase_config:bucket(), mode()) ->
+    {Max :: non_neg_integer(), Sum :: non_neg_integer()}.
+get_worker_queue_size_stats(Bucket, Mode) ->
+    lists:foldl(fun(Id, {Max, Sum}) ->
         Key = {request_queue_size, Bucket, Mode, Id},
         ModeSize = ets:lookup_element(couchbase_pool_stats, Key, 2),
         ?update_counter(?EXOMETER_NAME(Bucket, Mode), ModeSize),
-        max(Size, ModeSize)
-    end, 0, lists:seq(1, get_size(Bucket, Mode))).
+        {max(Max, ModeSize), Sum + ModeSize}
+    end, {0, 0}, lists:seq(1, get_size(Bucket, Mode))).
 
 %%--------------------------------------------------------------------
 %% @doc
