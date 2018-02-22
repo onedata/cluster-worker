@@ -163,16 +163,6 @@ stop() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns node's IP address.
-%% @end
-%%--------------------------------------------------------------------
--spec get_ip_address() -> inet:ip4_address().
-get_ip_address() ->
-    gen_server2:call(?NODE_MANAGER_NAME, get_ip_address).
-
-
-%%--------------------------------------------------------------------
-%% @doc
 %% @equiv single_error_log(LogKey, Log, [])
 %% @end
 %%--------------------------------------------------------------------
@@ -390,10 +380,6 @@ handle_call(healthcheck, _From, #state{cm_con_status = registered} = State) ->
     {reply, ok, State};
 handle_call(healthcheck, _From, State) ->
     {reply, out_of_sync, State};
-
-handle_call(get_ip_address, _From, State) ->
-    IP = application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, {127,0,0,1}),
-    {reply, IP, State};
 
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
@@ -1144,6 +1130,17 @@ log_monitoring_stats(Format, Args) ->
 
     log_monitoring_stats(LogFile, Format, Args).
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns node's IP address.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_ip_address() -> inet:ip4_address().
+get_ip_address() ->
+    application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, {127,0,0,1}).
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Fetches cluster nodes from cluster manager.
@@ -1158,10 +1155,10 @@ get_cluster_nodes() ->
 %% Get up to date information about IPs in the cluster.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cluster_ips() -> [binary()] | no_return().
+-spec get_cluster_ips() -> [inet:ip4_address()] | no_return().
 get_cluster_ips() ->
     {ok, Nodes} = get_cluster_nodes(),
 
     lists:map(fun(Node) ->
-        gen_server2:call({?NODE_MANAGER_NAME, Node}, get_ip_address)
+        {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
     end, Nodes).
