@@ -65,7 +65,7 @@ call(Module, Args, Key, Request, Timeout) ->
 call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
     {error, timeout};
 call(Module, Args, Key, Request, Timeout, Attempts) ->
-    TPMaster = datastore_cache_writer:get_master(),
+    TPMaster = datastore_cache_writer:get_master_pid(),
 
     case TPMaster of
         undefined ->

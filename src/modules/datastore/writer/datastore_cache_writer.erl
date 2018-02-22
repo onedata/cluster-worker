@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/1, save_master/1, get_master/0]).
+-export([start_link/1, save_master_pid/1, get_master_pid/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -62,8 +62,8 @@ start_link(MasterPid) ->
 %% Saves pid of master process in memory.
 %% @end
 %%--------------------------------------------------------------------
--spec save_master(pid()) -> ok.
-save_master(MasterPid) ->
+-spec save_master_pid(pid()) -> ok.
+save_master_pid(MasterPid) ->
     put(tp_master, MasterPid),
     ok.
 
@@ -72,8 +72,8 @@ save_master(MasterPid) ->
 %% Gets pid of master process from memory.
 %% @end
 %%--------------------------------------------------------------------
--spec get_master() -> pid() | undefined.
-get_master() ->
+-spec get_master_pid() -> pid() | undefined.
+get_master_pid() ->
     get(tp_master).
 
 %%%===================================================================
@@ -91,7 +91,7 @@ get_master() ->
     {stop, Reason :: term()} | ignore.
 init([MasterPid]) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
-    save_master(MasterPid),
+    save_master_pid(MasterPid),
     {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid}}.
 
 %%--------------------------------------------------------------------
