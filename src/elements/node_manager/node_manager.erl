@@ -392,8 +392,8 @@ handle_call(healthcheck, _From, State) ->
     {reply, out_of_sync, State};
 
 handle_call(get_ip_address, _From, State) ->
-    NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
-    {reply, NodeIP, State};
+    IP = application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, {127,0,0,1}),
+    {reply, IP, State};
 
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
