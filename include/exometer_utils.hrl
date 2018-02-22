@@ -46,7 +46,6 @@
 -define(init_exometer_reporters, exometer_utils:init_exometer_reporters()).
 -define(init_exometer_reporters(InitReports),
   exometer_utils:init_exometer_reporters(InitReports)).
--define(init_exometer_counters, exometer_utils:init_exometer_counters()).
 
 -endif.
 
