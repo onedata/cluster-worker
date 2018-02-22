@@ -303,7 +303,8 @@ receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
     receive
         #worker_answer{id = MsgId, response = Response} -> Response
     after AfterTime ->
-        case is_pid(ExecuteAns) and erlang:is_process_alive(ExecuteAns) of
+        case is_pid(ExecuteAns) andalso
+            rpc:call(node(ExecuteAns), erlang, is_process_alive, [ExecuteAns]) of
             true ->
                 TimeoutFun(),
                 receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);

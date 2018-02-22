@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/tp/tp.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([call/4, call/5, call/6, cast/4, send/4]).
@@ -28,6 +29,8 @@
 -type response() :: term().
 
 -export_type([key/0, args/0, state/0, server/0, request/0, response/0]).
+
+-define(monitor_internal_calls, 1).
 
 %%%===================================================================
 %%% API
@@ -58,6 +61,47 @@ call(Module, Args, Key, Request, Timeout) ->
 %%--------------------------------------------------------------------
 -spec call(module(), args(), key(), request(), timeout(), non_neg_integer()) ->
     {response(), pid()} | {error, Reason :: term()}.
+-ifdef(monitor_internal_calls).
+call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
+    {error, timeout};
+call(Module, Args, Key, Request, Timeout, Attempts) ->
+    TPMaster = datastore_cache_writer:get_master_pid(),
+
+    case TPMaster of
+        undefined ->
+            ok;
+        _ ->
+            % Log call from the inside of tp process - it is always an error
+            % but results in deadlock only if it is call to own master
+            ?critical("Tp internal call, args: ~p",
+                [{Module, Args, Key, Request}])
+    end,
+
+    case get_or_create_tp_server(Module, Args, Key) of
+        {ok, TPMaster} ->
+            ?critical("Tp self call, args: ~p",
+                [{Module, Args, Key, Request}]),
+            {error, self_call};
+        {ok, Pid} ->
+            try
+                {gen_server:call(Pid, Request, Timeout), Pid}
+            catch
+                _:{noproc, _} ->
+                    tp_router:delete(Key, Pid),
+                    call(Module, Args, Key, Request, Timeout);
+                exit:{normal, _} ->
+                    tp_router:delete(Key, Pid),
+                    call(Module, Args, Key, Request, Timeout);
+                _:{timeout, _} ->
+                    call(Module, Args, Key, Request, Timeout, Attempts - 1);
+                _:Reason ->
+                    {error, {Reason, erlang:get_stacktrace()}}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+-endif.
+-ifndef(monitor_internal_calls).
 call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
     {error, timeout};
 call(Module, Args, Key, Request, Timeout, Attempts) ->
@@ -80,6 +124,7 @@ call(Module, Args, Key, Request, Timeout, Attempts) ->
         {error, Reason} ->
             {error, Reason}
     end.
+-endif.
 
 %%--------------------------------------------------------------------
 %% @doc
