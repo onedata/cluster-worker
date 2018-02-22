@@ -425,9 +425,6 @@ delete_all_links(_Ctx, _Key, Result) ->
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Gets head of the list if term is list or return term.
-%% @end
 %%--------------------------------------------------------------------
 -spec hd_if_list(term()) -> term().
 hd_if_list(List) when is_list(List) ->

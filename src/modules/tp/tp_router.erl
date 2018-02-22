@@ -241,7 +241,7 @@ update_process_size(Proc, Size) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Inserts size of tp process.
+%% Deletes size of tp process for ets.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_process_size(pid()) -> true.
