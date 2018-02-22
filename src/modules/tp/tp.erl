@@ -65,12 +65,14 @@ call(Module, Args, Key, Request, Timeout) ->
 call(_Module, _Args, _Key, _Request, _Timeout, 0) ->
     {error, timeout};
 call(Module, Args, Key, Request, Timeout, Attempts) ->
-    TPMaster = get(tp_master),
+    TPMaster = datastore_cache_writer:get_master(),
 
     case TPMaster of
         undefined ->
             ok;
         _ ->
+            % Log call from the inside of tp process - it is always an error
+            % but results in deadlock only if it is call to own master
             ?critical("Tp internal call, args: ~p",
                 [{Module, Args, Key, Request}])
     end,
