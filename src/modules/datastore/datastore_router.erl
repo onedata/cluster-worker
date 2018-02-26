@@ -32,7 +32,7 @@
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
         list_to_atom(atom_to_list(Param) ++ "_time"))).
 -define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(?MODULE, Param)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
+-define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
 
 %%%===================================================================
 %%% API
@@ -45,10 +45,10 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_datastore_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
+        exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
     Histograms = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), histogram, TimeSpan}
+        {?EXOMETER_NAME(Name), uniform, [{size, Size}]}
     end, ?EXOMETER_COUNTERS),
     Counters = lists:map(fun(Name) ->
         {?EXOMETER_DATASTORE_NAME(Name), counter}
