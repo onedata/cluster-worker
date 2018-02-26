@@ -1138,7 +1138,10 @@ log_monitoring_stats(Format, Args) ->
 %%--------------------------------------------------------------------
 -spec get_ip_address() -> inet:ip4_address().
 get_ip_address() ->
-    application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, {127,0,0,1}).
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, undefined) of
+        undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
+        {_, _, _, _} = IP -> IP
+    end.
 
 
 %%--------------------------------------------------------------------
