@@ -191,7 +191,7 @@ decrease_batch_size(BatchSize) ->
         exometer_utils:reset(?EXOMETER_NAME(times)),
         exometer_utils:reset(?EXOMETER_NAME(sizes)),
         ?info("Timeout for batch with ~p elements, reset counters,"
-        " decrease batch size to: ~p, stacktrance ~p", [BatchSize, MinBatchSize,
+        " decrease batch size to: ~p, stacktrace ~p", [BatchSize, MinBatchSize,
             erlang:process_info(self(), current_stacktrace)])
     catch
         E1:E2 ->

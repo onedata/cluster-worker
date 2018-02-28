@@ -337,7 +337,7 @@ get_links_trees(Ctx, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes call with on all tp subtrees.
+%% Executes call on all tp subtrees.
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply_all_subtrees(ctx(), fun(), key(), list()) -> term().

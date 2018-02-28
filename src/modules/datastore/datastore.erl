@@ -157,7 +157,7 @@ delete(Ctx, Key, Pred) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes all document from a model if.
+%% Removes all documents from a model.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_all(ctx(), key()) -> ok | {error, term()}.
