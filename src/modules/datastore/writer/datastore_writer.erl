@@ -380,6 +380,14 @@ handle_requests(State = #state{
 }) ->
     Ref = make_ref(),
     gen_server:call(Pid, {handle, Ref, lists:reverse(Requests)}, infinity),
+
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
+        on ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
     State#state{
         requests = [],
         cache_writer_state = {active, Ref},

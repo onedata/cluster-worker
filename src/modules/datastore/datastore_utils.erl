@@ -86,7 +86,8 @@ is_greater_rev(Rev1, Rev2) ->
         {false, true, _, _} -> false;
         {false, false, true, false} -> true;
         {false, false, false, true} -> false;
-        {false, false, false, false} -> false
+        % TODO VFS-4145 - change to false when remote driver flushes documents
+        {false, false, false, false} -> true
     end.
 
 %%--------------------------------------------------------------------

@@ -34,7 +34,7 @@
 
 -define(EXOMETER_COUNTERS, [tp, db_queue_max, db_queue_sum, tp_size_sum]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 -define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
 
 %%%===================================================================
@@ -165,7 +165,6 @@ configure_throttling() ->
                     Msg = "Throttling config: ~p, tp num ~p, db queue max ~p,
                     db queue sum ~p, tp sizes sum ~p, mem usage ~p",
                     Args = [ConfigResult, TPNum, DBQueueMax, DBQueueSum, TPSizesSum, MemUsage],
-                    ?info(Msg, Args),
                     log_monitoring_stats(Msg, Args),
                     plan_next_throttling_check(true)
             end

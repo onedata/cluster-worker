@@ -16,7 +16,7 @@
 
 %% API
 -export([init/2]).
--export([save/3, get/2, delete/2]).
+-export([save/3, get/2, delete/2, delete_all/1]).
 
 -type table() :: atom().
 -type ctx() :: #{table => table()}.
@@ -83,4 +83,14 @@ get(#{table := Table}, Key) ->
 -spec delete(ctx(), key()) -> ok.
 delete(#{table := Table}, Key) ->
     ets:delete(Table, Key),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Removes all values from ETS.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_all(ctx()) -> ok.
+delete_all(#{table := Table}) ->
+    ets:delete_all_objects(Table),
     ok.

@@ -17,7 +17,7 @@
 %% API
 -export([create/3, save/3, update/3, update/4]).
 -export([get/2, exists/2]).
--export([delete/3]).
+-export([delete/3, delete_all/2]).
 -export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, get_links_trees/2]).
 
@@ -154,6 +154,24 @@ delete(Ctx, Key, Pred) ->
     datastore_hooks:wrap(Ctx, delete, [Ctx, Key, Pred], fun
         (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
     end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Removes all documents from a model.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_all(ctx(), key()) -> ok | {error, term()}.
+delete_all(#{disc_driver := DD}, _Key) when DD =/= undefined ->
+  {error, not_supported};
+delete_all(#{
+  memory_driver := ets_driver,
+  memory_driver_ctx := MemoryCtx
+} = Ctx, Key) ->
+  datastore_hooks:wrap(Ctx, delete_all, [Ctx, Key], fun
+    (_Function, _Args) -> ets_driver:delete_all(MemoryCtx)
+  end);
+delete_all(_, _) ->
+  {error, not_supported}.
 
 %%--------------------------------------------------------------------
 %% @doc

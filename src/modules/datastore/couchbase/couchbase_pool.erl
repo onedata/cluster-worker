@@ -46,7 +46,7 @@
 -export_type([mode/0, request/0, response/0, future/0]).
 
 -define(EXOMETER_NAME(Bucket, Mode),  ?exometer_name(?MODULE, Bucket, Mode)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 
 %%%===================================================================
 %%% API

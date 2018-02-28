@@ -22,12 +22,14 @@
 -export([init/1, get_unique_key/2]).
 -export([create/2, save/2, update/3, update/4]).
 -export([get/2, exists/2]).
--export([delete/2, delete/3]).
+-export([delete/2, delete/3, delete_all/1]).
 -export([fold/3, fold_keys/3]).
 -export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
 -export([init_counters/0, init_report/0]).
+%% for rpc
+-export([datastore_apply_all_subtrees/4]).
 
 -type model() :: module().
 -type record() :: tuple().
@@ -54,12 +56,12 @@
 -define(EXOMETER_HISTOGRAM_COUNTERS,
     [save, update, create, create_or_update, get, delete, exists, add_links, 
         set_links, create_link, delete_links, fetch_link, foreach_link, 
-        mark_links_deleted, get_links, fold_links, get_links_trees
+        mark_links_deleted, get_links, fold_links, get_links_trees, delete_all
     ]).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
   list_to_atom(atom_to_list(Param) ++ "_time"))).
--define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 
 %%%===================================================================
 %%% API
@@ -215,6 +217,17 @@ delete(Ctx, Key, Pred) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Removes all model documents from a datastore.
+%% WARNING: should be used only on models that save all documents
+%% with volatile flag.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_all(ctx()) -> ok | {error, term()}.
+delete_all(Ctx) ->
+    datastore_apply_all(Ctx, <<>>, fun datastore:delete_all/2, delete_all, []).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Calls Fun(Doc, Acc) for each model document in a datastore.
 %% @end
 %%--------------------------------------------------------------------
@@ -322,6 +335,22 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 get_links_trees(Ctx, Key) ->
     datastore_apply(Ctx, Key, fun datastore:get_links_trees/2, get_links_trees, []).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes call on all tp subtrees.
+%% @end
+%%--------------------------------------------------------------------
+-spec datastore_apply_all_subtrees(ctx(), fun(), key(), list()) -> term().
+datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args) ->
+    lists:foldl(fun
+        (Ctx2, ok) ->
+            erlang:apply(Fun, [Ctx2, UniqueKey | Args]);
+        (Ctx2, {ok, _}) ->
+            erlang:apply(Fun, [Ctx2, UniqueKey | Args]);
+        (_, Error) ->
+            Error
+    end, ok, datastore_multiplier:get_names(Ctx)).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -339,11 +368,45 @@ datastore_apply(Ctx0, Key, Fun, FunName, Args) ->
     Ctx = datastore_model_default:set_defaults(Ctx0),
     UniqueKey = get_unique_key(Ctx, Key),
     Ctx2 = datastore_multiplier:extend_name(UniqueKey, Ctx),
-	Ans = erlang: apply(Fun, [Ctx2, UniqueKey | Args]),
+    Ans = erlang:apply(Fun, [Ctx2, UniqueKey | Args]),
     After = os:timestamp(),
-	?update_counter(?EXOMETER_NAME(FunName), timer:now_diff(After, Before)),
+    ?update_counter(?EXOMETER_NAME(FunName), timer:now_diff(After, Before)),
     Ans.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Fills context with default parameters, generates unique key and forwards
+%% function call to the {@link datastore} module.
+%% Executes call with all multiplies contexts.
+%% @end
+%%--------------------------------------------------------------------
+-spec datastore_apply_all(ctx(), key(), fun(), atom(), list()) -> term().
+datastore_apply_all(Ctx0, Key, Fun, FunName, Args) ->
+    Before = os:timestamp(),
+    Ctx = datastore_model_default:set_defaults(Ctx0),
+    UniqueKey = get_unique_key(Ctx, Key),
+    Routing = maps:get(routing, Ctx, global),
+
+    Ans = case Routing of
+        global ->
+            lists:foldl(fun
+                (Node, ok) ->
+                    rpc:call(Node, ?MODULE, datastore_apply_all_subtrees,
+                        [Ctx, Fun, UniqueKey, Args]);
+                (Node, {ok, _}) ->
+                    rpc:call(Node, ?MODULE, datastore_apply_all_subtrees,
+                        [Ctx, Fun, UniqueKey, Args]);
+                (_, Error) ->
+                    Error
+            end, ok, consistent_hasing:get_all_nodes());
+        _ ->
+            datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args)
+    end,
+
+    After = os:timestamp(),
+    ?update_counter(?EXOMETER_NAME(FunName), timer:now_diff(After, Before)),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @private

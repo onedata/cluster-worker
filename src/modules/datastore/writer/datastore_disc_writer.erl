@@ -12,6 +12,7 @@
 -module(datastore_disc_writer).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -88,6 +89,14 @@ handle_call({flush, Ref, CachedKeys}, From, State = #state{
     end,
     {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
     gen_server:cast(CacheWriterPid, {flushed, Ref, maps:from_list(NotFlushed)}),
+
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
+        on ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
     {noreply, State};
 handle_call(terminate, _From, State) ->
     {stop, normal, ok, State};

@@ -32,7 +32,7 @@
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
         list_to_atom(atom_to_list(Param) ++ "_time"))).
 -define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(?MODULE, Param)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 
 %%%===================================================================
 %%% API
