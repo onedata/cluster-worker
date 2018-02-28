@@ -306,7 +306,7 @@ get_relocate_key_match(Table) ->
             undefined;
         _ ->
             Max = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                datastore_cache_relocate_match_max_chunk, match),
+                datastore_cache_relocate_match_max_chunk, 100),
             case ets:match(Table, '$1', min(Max, Size)) of
                 '$end_of_table' ->
                     undefined;

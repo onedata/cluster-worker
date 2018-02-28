@@ -218,6 +218,8 @@ delete(Ctx, Key, Pred) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Removes all model documents from a datastore.
+%% WARNING: should be used only on models that save all documents
+%% with volatile flag.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_all(ctx()) -> ok | {error, term()}.
