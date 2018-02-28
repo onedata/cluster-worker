@@ -20,6 +20,7 @@
 %% tests
 -export([
     create_should_succeed/1,
+    delete_all_should_succeed/1,
     create_should_return_already_exists_error/1,
     save_should_succeed/1,
     update_should_succeed/1,
@@ -46,6 +47,7 @@
 all() ->
     ?ALL([
         create_should_succeed,
+        delete_all_should_succeed,
         create_should_return_already_exists_error,
         save_should_succeed,
         update_should_succeed,
@@ -87,6 +89,16 @@ create_should_succeed(Config) ->
         assert_in_memory(Worker, Model, Key),
         assert_on_disc(Worker, Model, Key)
     end, ?TEST_MODELS).
+
+delete_all_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_only_model,
+    {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
+        rpc:call(Worker, Model, create, [?DOC(Model)])
+    ),
+    ?assertMatch(ok, rpc:call(Worker, Model, delete_all, [])),
+    assert_not_in_memory(Worker, Model, Key).
+
 
 create_should_return_already_exists_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -392,6 +404,20 @@ assert_in_memory(Worker, Model, Key, Deleted) ->
             Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, Key),
                 ?MEM_CTX(Model)),
             ?assertMatch({ok, #document{deleted = Deleted}},
+                rpc:call(Worker, Driver, get, [
+                    Ctx, ?UNIQUE_KEY(Model, Key)
+                ])
+            )
+    end.
+
+assert_not_in_memory(Worker, Model, Key) ->
+    case ?MEM_DRV(Model) of
+        undefined ->
+            ok;
+        Driver ->
+            Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, Key),
+                ?MEM_CTX(Model)),
+            ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
                     Ctx, ?UNIQUE_KEY(Model, Key)
                 ])

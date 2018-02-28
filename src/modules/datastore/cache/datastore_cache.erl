@@ -239,11 +239,11 @@ inactivate(MutatorPid) when is_pid(MutatorPid) ->
     end, false, datastore_multiplier:get_names(disc));
 inactivate(KeysMap) ->
     lists:foreach(fun
-        ({K, #{memory_driver := undefined}}) ->
-            Pool = datastore_multiplier:extend_name(K, memory),
+        ({K, #{disc_driver := DD}}) when DD =/= undefined ->
+            Pool = datastore_multiplier:extend_name(K, disc),
             datastore_cache_manager:mark_inactive(Pool, K);
         ({K, _Ctx}) ->
-            Pool = datastore_multiplier:extend_name(K, disc),
+            Pool = datastore_multiplier:extend_name(K, memory),
             datastore_cache_manager:mark_inactive(Pool, K)
     end, maps:to_list(KeysMap)),
     true.
@@ -358,23 +358,25 @@ fetch_local_or_remote(Ctx, Keys) ->
 -spec cache_disc_or_remote_results(ctx(), [key()],
     [{ok, durability(), doc()} | {error, term()}]) ->
     [{ok, durability(), doc()} | {error, term()}].
-cache_disc_or_remote_results(Ctx, Keys, Results) ->
+cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD =/= undefined ->
     Futures = lists:map(fun
         ({_Key, {ok, memory, Doc}}) ->
             ?FUTURE(memory, {ok, Doc});
         ({Key, {ok, disc, Doc}}) ->
-            save_async(Ctx, Key, Doc, false);
+            save_async(Ctx, Key, Doc, false, true);
         ({Key, {ok, remote, Doc}}) ->
-            save_async(Ctx, Key, Doc, true);
+            save_async(Ctx, Key, Doc, true, true);
         ({Key, {error, not_found}}) ->
             Doc = #document{key = Key, value = undefined, deleted = true},
-            save_async(Ctx, Key, Doc, false),
+            save_async(Ctx, Key, Doc, false, true),
             ?FUTURE({error, not_found});
         ({_Key, {error, Reason}}) ->
             ?FUTURE({error, Reason})
     end, lists:zip(Keys, Results)),
 
-    wait(Futures).
+    wait(Futures);
+cache_disc_or_remote_results(_Ctx, _Keys, Results) ->
+    Results.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -384,15 +386,26 @@ cache_disc_or_remote_results(Ctx, Keys, Results) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), key(), doc(), boolean()) -> future().
-save_async(#{memory_driver := undefined} = Ctx, Key, Doc, true) ->
+save_async(Ctx, Key, Doc, DiscFallback) ->
+    save_async(Ctx, Key, Doc, DiscFallback, false).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Asynchronously stores values in memory or, if cache is full and disc fallback
+%% is enabled, on disc.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_async(ctx(), key(), doc(), boolean(), boolean()) -> future().
+save_async(#{memory_driver := undefined} = Ctx, Key, Doc, true, _) ->
     #{
         disc_driver := DiscDriver,
         disc_driver_ctx := DiscCtx
     } = Ctx,
     ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
-save_async(#{memory_driver := undefined}, _Key, Doc, false) ->
+save_async(#{memory_driver := undefined}, _Key, Doc, false, _) ->
     ?FUTURE(memory, undefined, {error, {enomem, Doc}});
-save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _) ->
+save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _, _) ->
     #{
         memory_driver := MemoryDriver,
         memory_driver_ctx := MemoryCtx
@@ -405,7 +418,7 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _) ->
         false ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end;
-save_async(Ctx, Key, Doc, DiscFallback) ->
+save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
     #{
         memory_driver := MemoryDriver,
         memory_driver_ctx := MemoryCtx,
@@ -416,7 +429,14 @@ save_async(Ctx, Key, Doc, DiscFallback) ->
     Pool = datastore_multiplier:extend_name(Key, disc),
     case {datastore_cache_manager:mark_active(Pool, Ctx, Key), DiscFallback} of
         {true, _} ->
-            ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
+            Ans = ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc)),
+            case Inactivate of
+              true ->
+                datastore_cache_manager:mark_inactive(Pool, Key);
+              _ ->
+                ok
+            end,
+            Ans;
         {false, true} ->
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
         {false, false} ->

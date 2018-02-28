@@ -96,6 +96,9 @@ mock_model(Model) ->
         {delete, fun(Key) ->
             datastore_model:delete(get_ctx(Model), Key)
         end},
+        {delete_all, fun() ->
+            datastore_model:delete_all(get_ctx(Model))
+        end},
         {delete, fun(Key, Pred) ->
             datastore_model:delete(get_ctx(Model), Key, Pred)
         end},

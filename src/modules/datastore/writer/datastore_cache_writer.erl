@@ -28,6 +28,7 @@
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
     keys_to_inactivate = #{} :: cached_keys(),
+    keys_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
     flush_ref = undefined :: undefined | reference()
 }).
@@ -176,12 +177,22 @@ handle_cast(Request, #state{} = State) ->
 handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,
-    cached_keys_to_flush = CachedKeys
+    cached_keys_to_flush = CachedKeys,
+    keys_to_inactivate = ToInactivate
 }) ->
     tp_router:delete_process_size(Pid),
     gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
+
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
+        on ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
     {noreply, State#state{
-        cached_keys_to_flush = #{}
+        cached_keys_to_flush = #{},
+        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys)
     }};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
@@ -225,7 +236,7 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_requests(list(), state()) -> state().
 handle_requests(Requests, State = #state{
     cached_keys_to_flush = CachedKeys,
-    keys_to_inactivate = ToInactivate,
+    keys_times = KeysTimes,
     master_pid = Pid
 }) ->
     Batch = datastore_doc_batch:init(),
@@ -236,8 +247,12 @@ handle_requests(Requests, State = #state{
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
-    State#state{cached_keys_to_flush = NewKeys,
-        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys2)}.
+
+    Timestamp = os:timestamp(),
+    Times = maps:map(fun(_K, _V) -> Timestamp end, NewKeys),
+    KeysTimes2 = maps:merge(KeysTimes, Times),
+
+    State#state{cached_keys_to_flush = NewKeys, keys_times = KeysTimes2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -477,12 +492,31 @@ set_mutator_pid(Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_inactivate(state()) -> state().
-check_inactivate(#state{keys_to_inactivate = ToInactivate} = State) ->
+check_inactivate(#state{
+  keys_to_inactivate = ToInactivate,
+  cached_keys_to_flush = CachedKeys,
+  keys_times = KeysTimes
+} = State) ->
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
+    Exclude = maps:keys(CachedKeys),
+    ToInactivate2 = maps:without(Exclude, ToInactivate),
+    ExcludeMap = maps:with(Exclude, ToInactivate),
     case maps:size(ToInactivate) > Max of
         true ->
-            datastore_cache:inactivate(ToInactivate),
-            State#state{keys_to_inactivate = #{}};
+            datastore_cache:inactivate(ToInactivate2),
+            State#state{keys_to_inactivate = ExcludeMap};
         _ ->
-            State
+            MaxTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                tp_active_mem_sek, 1),
+            MaxTimeUS = timer:seconds(MaxTime) * 1000,
+            Now = os:timestamp(),
+
+            ToInactivate3 = maps:filter(fun(K, _V) ->
+                KeyTime = maps:get(K, KeysTimes, {0,0,0}),
+                timer:now_diff(Now, KeyTime) > MaxTimeUS
+            end, ToInactivate2),
+
+            ExcludeMap2 = maps:without(maps:keys(ToInactivate3), ToInactivate2),
+            datastore_cache:inactivate(ToInactivate3),
+            State#state{keys_to_inactivate = maps:merge(ExcludeMap, ExcludeMap2)}
     end.

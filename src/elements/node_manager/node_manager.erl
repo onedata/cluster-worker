@@ -61,7 +61,7 @@
 -define(EXOMETER_COUNTERS,
             [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 
 %%%===================================================================
 %%% API
@@ -948,13 +948,26 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
                             erlang:process_info(P, message_queue_len)}
                     end, lists:reverse(Top5M)),
 
-                TopProcessesBin = lists:map(
-                    fun({M, {P, CS, BL}}) ->
-                        {M, CS, P, get_process_name(P, All), BL,
-                            erlang:process_info(P, current_function),
-                            erlang:process_info(P, initial_call),
-                            erlang:process_info(P, message_queue_len)}
-                    end, lists:reverse(Top5B)),
+                AddBL = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                    include_binary_list_in_monitoring_reoport, false),
+                TopProcessesBin = case AddBL of
+                    true ->
+                        lists:map(
+                            fun({M, {P, CS, BL}}) ->
+                                {M, CS, P, get_process_name(P, All), BL,
+                                    erlang:process_info(P, current_function),
+                                    erlang:process_info(P, initial_call),
+                                    erlang:process_info(P, message_queue_len)}
+                            end, lists:reverse(Top5B));
+                    _ ->
+                        lists:map(
+                            fun({M, {P, CS, _BL}}) ->
+                                {M, CS, P, get_process_name(P, All),
+                                    erlang:process_info(P, current_function),
+                                    erlang:process_info(P, initial_call),
+                                    erlang:process_info(P, message_queue_len)}
+                            end, lists:reverse(Top5B))
+                end,
 
                 log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
                 "single proc memory cosumption (binary): ~p~n"

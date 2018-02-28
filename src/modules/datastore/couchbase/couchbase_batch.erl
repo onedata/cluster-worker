@@ -27,9 +27,9 @@
     couchbase_durability_timeout, 60000)).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 600000).
+-define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 
--define(MIN_BATCH_SIZE_DEFAULT, 50).
+-define(MIN_BATCH_SIZE_DEFAULT, 10).
 
 %%%===================================================================
 %%% API
@@ -191,7 +191,8 @@ decrease_batch_size(BatchSize) ->
         exometer_utils:reset(?EXOMETER_NAME(times)),
         exometer_utils:reset(?EXOMETER_NAME(sizes)),
         ?info("Timeout for batch with ~p elements, reset counters,"
-        " decrease batch size to: ~p", [BatchSize, MinBatchSize])
+        " decrease batch size to: ~p, stacktrance ~p", [BatchSize, MinBatchSize,
+            erlang:process_info(self(), current_stacktrace)])
     catch
         E1:E2 ->
             ?error_stacktrace("Error during decrease of couchbase"

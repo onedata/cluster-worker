@@ -29,6 +29,7 @@
 -record(entry, {
     key :: key() | '_',
     mutator_pid :: pid() | '_',
+    % TODO VFS-4143 - fix size control with volatile
     volatile :: boolean() | '_',
     driver :: datastore:memory_driver() | '_',
     driver_ctx :: datastore:memory_driver_ctx() | '_'
@@ -57,19 +58,19 @@
 %%--------------------------------------------------------------------
 -spec init() -> ok.
 init() ->
-    Pools = datastore_multiplier:get_names(memory)
-        ++ datastore_multiplier:get_names(disc),
-
-    lists:foreach(fun(Pool) ->
-        ets:new(active(Pool), [set, public, named_table, {keypos, 2}]),
-        ets:new(inactive(Pool), [set, public, named_table, {keypos, 2}]),
-        ets:new(clear(Pool), [set, public, named_table]),
-        SizeByPool = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            datastore_cache_size, []),
-        MaxSize = proplists:get_value(Pool, SizeByPool, 500000),
-        ets:insert(active(Pool), #stats{key = size, value = 0}),
-        ets:insert(active(Pool), #stats{key = max_size, value = MaxSize})
-    end, Pools).
+    lists:foreach(fun(PoolType) ->
+        Pools = datastore_multiplier:get_names(PoolType),
+        lists:foreach(fun(Pool) ->
+            ets:new(active(Pool), [set, public, named_table, {keypos, 2}]),
+            ets:new(inactive(Pool), [set, public, named_table, {keypos, 2}]),
+            ets:new(clear(Pool), [set, public, named_table]),
+            SizeByPool = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                datastore_cache_size, []),
+            MaxSize = proplists:get_value(PoolType, SizeByPool, 500000),
+            ets:insert(active(Pool), #stats{key = size, value = 0}),
+            ets:insert(active(Pool), #stats{key = max_size, value = MaxSize})
+        end, Pools)
+    end, [memory, disc]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -250,8 +251,8 @@ activate(Pool, Entry = #entry{}) ->
 %%--------------------------------------------------------------------
 -spec relocate(pool(), entry()) -> boolean().
 relocate(Pool, Entry) ->
-    case ets:first(inactive(Pool)) of
-        '$end_of_table' ->
+    case get_relocate_key(inactive(Pool)) of
+        undefined ->
             false;
         Key ->
             case ets:insert_new(clear(Pool), {Key, ok}) of
@@ -267,11 +268,108 @@ relocate(Pool, Entry) ->
                             ets:insert(active(Pool), Entry),
                             true;
                         [] ->
+                            ets:delete(clear(Pool), Key),
                             relocate(Pool, Entry)
                     end;
                 _ ->
                     relocate(Pool, Entry)
             end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns key to be relocated.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_relocate_key(atom()) -> key().
+get_relocate_key(Table) ->
+    AddBL = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        datastore_cache_relocate_method, match),
+    case AddBL of
+        match -> get_relocate_key_match(Table);
+        slot -> get_relocate_key_slot(Table)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns key to be relocated. Uses method that base on ets:match fun.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_relocate_key_match(atom()) -> key().
+get_relocate_key_match(Table) ->
+    Size = ets:info(Table, size),
+
+    case Size of
+        0 ->
+            undefined;
+        _ ->
+            Max = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                datastore_cache_relocate_match_max_chunk, match),
+            case ets:match(Table, '$1', min(Max, Size)) of
+                '$end_of_table' ->
+                    undefined;
+                {List, _} ->
+                    case length(List) of
+                        0 ->
+                            undefined;
+                        Size2 ->
+                            [#entry{key = Key}] = lists:nth(rand:uniform(Size2), List),
+                            Key
+                    end
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns key to be relocated. Uses method that base on ets:slot fun.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_relocate_key_slot(atom()) -> key().
+get_relocate_key_slot(Table) ->
+    Size = ets:info(Table, size),
+    case Size of
+        0 -> undefined;
+        _ ->
+            get_relocate_key_slot(Table, Size)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns key to be relocated. Uses method that base on ets:slot fun.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_relocate_key_slot(atom(), non_neg_integer()) -> key().
+get_relocate_key_slot(Table, 0) ->
+    get_relocate_key_slot(Table);
+get_relocate_key_slot(Table, Size) ->
+    try
+        Num = rand:uniform(Size) - 1,
+        get_key_from_slot(Table, Num)
+    catch
+        _:badarg ->
+            get_relocate_key_slot(Table, round(Size / 2))
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns first key starting from particular slot.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_key_from_slot(atom(), non_neg_integer()) -> key().
+get_key_from_slot(Table, Num) ->
+    List = ets:slot(Table, Num),
+    Size = length(List),
+    case Size of
+        0 ->
+            get_key_from_slot(Table, Num + 1);
+        _ ->
+            #entry{key = Key} = lists:nth(rand:uniform(Size), List),
+            Key
     end.
 
 %%--------------------------------------------------------------------

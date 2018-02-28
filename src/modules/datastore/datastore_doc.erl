@@ -223,6 +223,7 @@ delete(Ctx, Key, Batch) ->
 -spec delete(ctx(), key(), pred(value()), batch()) ->
     {ok | {error, term()}, batch()}.
 delete(Ctx, Key, Pred, Batch) ->
+    % TODO VFS-4144 - delete documents on memory_only models immediately
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, #document{deleted = true}}, Batch2} ->
             {ok, Batch2};
