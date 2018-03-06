@@ -45,12 +45,13 @@
 -define(HELPER_ETS, node_manager_helper_ets).
 
 %% API
--export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
+-export([start_link/0, stop/0, get_ip_address/0,
     modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, get_cluster_nodes_ips/0, start_worker/2]).
+    cluster_worker_listeners/0, start_worker/2]).
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
+-export([get_cluster_nodes/0, get_cluster_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -159,24 +160,6 @@ start_link() ->
 stop() ->
     gen_server2:cast(?NODE_MANAGER_NAME, stop).
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns node's IP address.
-%% @end
-%%--------------------------------------------------------------------
--spec get_ip_address() -> inet:ip4_address().
-get_ip_address() ->
-    gen_server2:call(?NODE_MANAGER_NAME, get_ip_address).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Tries to contact GR and refresh node's IP Address.
-%% @end
-%%--------------------------------------------------------------------
-refresh_ip_address() ->
-    gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -362,11 +345,9 @@ init([]) ->
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
+        MonitoringState = monitoring:start(),
 
-        NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
-        MonitoringState = monitoring:start(NodeIP),
-
-        {ok, #state{node_ip = NodeIP,
+        {ok, #state{
             cm_con_status = not_connected,
             monitoring_state = MonitoringState}}
     catch
@@ -399,9 +380,6 @@ handle_call(healthcheck, _From, #state{cm_con_status = registered} = State) ->
     {reply, ok, State};
 handle_call(healthcheck, _From, State) ->
     {reply, out_of_sync, State};
-
-handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
-    {reply, IPAddress, State};
 
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
@@ -556,11 +534,6 @@ handle_cast({update_lb_advices, Advices}, State) ->
 
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
-
-handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
-    NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
-    NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
-    {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -1157,12 +1130,42 @@ log_monitoring_stats(Format, Args) ->
 
     log_monitoring_stats(LogFile, Format, Args).
 
+
 %%--------------------------------------------------------------------
 %% @doc
-%% Fetch cluster nodes and their IPs from cluster manager.
+%% Returns node's IP address.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cluster_nodes_ips() ->
-    {ok, [{node(), inet:ip4_address()}]} | {error, cluster_not_ready}.
-get_cluster_nodes_ips() ->
+-spec get_ip_address() -> inet:ip4_address().
+get_ip_address() ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, undefined) of
+        {_, _, _, _} = IP -> IP;
+        IPAsList when is_list(IPAsList) ->
+            {ok, IP} = inet:parse_ipv4strict_address(IPAsList),
+            IP;
+        undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
+        _ -> {127, 0, 0, 1}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Fetches cluster nodes from cluster manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_nodes() -> {ok, [node()]} | {error, cluster_not_ready}.
+get_cluster_nodes() ->
     gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Get up to date information about IPs in the cluster.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_ips() -> [inet:ip4_address()] | no_return().
+get_cluster_ips() ->
+    {ok, Nodes} = get_cluster_nodes(),
+
+    lists:map(fun(Node) ->
+        {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
+    end, Nodes).

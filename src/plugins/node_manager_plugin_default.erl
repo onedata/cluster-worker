@@ -19,7 +19,7 @@
 -export([renamed_models/0, listeners/0, modules_with_args/0]).
 -export([before_init/1, on_cluster_initialized/1, after_init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([check_node_ip_address/0, clear_memory/1]).
+-export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
 
 -type model() :: datastore_model:model().
@@ -187,17 +187,6 @@ terminate(_Reason, State) ->
     Extra :: term()) -> {ok, NewState :: state()} | {error, Reason :: term()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks IP address of this node (it assumes a 127.0.0.1).
-%% @end
-%%--------------------------------------------------------------------
--spec check_node_ip_address() ->
-    IPV4Addr :: {A :: byte(), B :: byte(), C :: byte(), D :: byte()}.
-check_node_ip_address() ->
-    ?info("IP of node defaulting to 127.0.0.1", []),
-    {127, 0, 0, 1}.
 
 %%--------------------------------------------------------------------
 %% @doc
