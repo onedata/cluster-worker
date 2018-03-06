@@ -146,7 +146,7 @@ ct_command = ['ct_run',
               'and', 'cth_logger', 'and', 'cth_env_up', 'and', 'cth_mock',
               'and', 'cth_posthook',
               '-noshell',
-              '-name', 'testmaster@testmaster.{0}.dev.docker'.format(uid),
+              '-name', 'testmaster@testmaster.{0}.test'.format(uid),
               '-include', '../include', '../_build/default/lib']
 
 code_paths = ['-pa']
@@ -308,6 +308,14 @@ volumes = []
 if os.path.isdir(expanduser('~/.docker')):
     volumes += [(expanduser('~/.docker'), '/tmp/docker_config', 'ro')]
 
+if "bamboo_agentId" in os.environ:
+    containers = docker.ps(all=True, quiet=True)
+    if containers:
+        docker.remove(containers, force=True)
+    volumes = docker.list_volumes(quiet=True)
+    if volumes:
+        docker.remove_volumes(volumes)
+
 ret = docker.run(tty=True,
                  rm=True,
                  interactive=True,
@@ -317,7 +325,7 @@ ret = docker.run(tty=True,
                           ('/var/run/docker.sock', 'rw'),
                           (HOST_STORAGE_PATH, 'rw')],
                  name='testmaster_{0}'.format(uid),
-                 hostname='testmaster.{0}.dev.docker'.format(uid),
+                 hostname='testmaster.{0}.test'.format(uid),
                  image=args.image,
                  command=['python', '-c', command])
 
