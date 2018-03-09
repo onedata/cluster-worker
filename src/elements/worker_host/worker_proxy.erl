@@ -189,10 +189,6 @@ cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Asynchronously send request to worker, answer is expected at ReplyTo
-%% process/gen_server. Answer is expected to have MsgId.
-%% Answer is a 'worker_answer' record.
-%% Returns pid of process that processes request.
 %% @equiv cast_and_monitor(WorkerRef, Request, {proc, self()}, MsgId).
 %% @end
 %%--------------------------------------------------------------------
