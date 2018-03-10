@@ -24,7 +24,8 @@
 -export([call/2, call/3, call_direct/2, call_direct/3,
     call_pool/3, call_pool/4, multicall/2, multicall/3,
     cast/2, cast/3, cast/4, cast/5, multicast/2, multicast/3,
-    multicast/4, cast_pool/3, cast_pool/4, cast_pool/5]).
+    multicast/4, cast_pool/3, cast_pool/4, cast_pool/5,
+    cast_and_monitor/3, cast_and_monitor/4]).
 
 
 -type execute_type() :: direct | spawn | {pool, call | cast, worker_pool:name()}.
@@ -182,6 +183,35 @@ cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
             Args = prepare_args(Name, Request, MsgId, ReplyTo),
             execute(Args, Node, ExecOption, undefined),
             ok;
+        Error ->
+            Error
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv cast_and_monitor(WorkerRef, Request, {proc, self()}, MsgId).
+%% @end
+%%--------------------------------------------------------------------
+-spec cast_and_monitor(WorkerRef :: request_dispatcher:worker_ref(),
+    Request :: term(), MsgId :: term() | undefined) -> pid() | {error, term()}.
+cast_and_monitor(WorkerRef, Request, MsgId) ->
+    cast_and_monitor(WorkerRef, Request, {proc, self()}, MsgId).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Asynchronously send request to worker, answer is expected at ReplyTo
+%% process/gen_server. Answer is expected to have MsgId.
+%% Answer is a 'worker_answer' record.
+%% Returns pid of process that processes request.
+%% @end
+%%--------------------------------------------------------------------
+-spec cast_and_monitor(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
+    ReplyTo :: process_ref(), MsgId :: term() | undefined) -> pid() | {error, term()}.
+cast_and_monitor(WorkerRef, Request, ReplyTo, MsgId) ->
+    case choose_node(WorkerRef) of
+        {ok, Name, Node} ->
+            Args = prepare_args(Name, Request, MsgId, ReplyTo),
+            execute(Args, Node, spawn, undefined);
         Error ->
             Error
     end.
