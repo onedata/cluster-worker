@@ -29,7 +29,7 @@
     code_change/3]).
 
 %% for timer:tc
--export([wait/1]).
+-export([wait/2]).
 
 -type id() :: non_neg_integer().
 -type request() :: {reference(), pid(), couchbase_pool:request()}.
@@ -329,10 +329,18 @@ handle_requests_batch(Connection, RequestsBatch) ->
     RemoveRequests = maps:get(delete, RequestsBatch),
 
     SaveResponses = handle_save_requests_batch(Connection, SaveRequests),
+
+    T1 = erlang:monotonic_time(),
     GetResponses = couchbase_crud:get(Connection, GetRequests),
-    couchbase_batch:check_timeout(GetResponses),
+    Time = erlang:convert_time_unit(erlang:monotonic_time() - T1,
+        native, micro_seconds),
+    couchbase_batch:check_timeout(GetResponses, get, Time),
+
+    T2 = erlang:monotonic_time(),
     DeleteResponses = couchbase_crud:delete(Connection, RemoveRequests),
-    couchbase_batch:check_timeout(DeleteResponses),
+    Time2 = erlang:convert_time_unit(erlang:monotonic_time() - T2,
+        native, micro_seconds),
+    couchbase_batch:check_timeout(DeleteResponses, delete, Time2),
 
     #{
         save => SaveResponses,
@@ -359,7 +367,8 @@ handle_save_requests_batch(Connection, Requests) ->
         timer:tc(couchbase_crud, store_change_docs, [
             Connection, SaveRequests
         ]),
-    AnalyseAns1 = couchbase_batch:check_timeout(SaveResponses2),
+    AnalyseAns1 = couchbase_batch:check_timeout(SaveResponses2,
+        store_change_docs, Time1),
 
     WaitChangeDocsDurable = fun() ->
         couchbase_crud:wait_change_docs_durable(
@@ -368,14 +377,15 @@ handle_save_requests_batch(Connection, Requests) ->
     end,
     {Time2, {AnalyseAns2, {SaveRequests3, SaveResponses3}}} =
         timer:tc(?MODULE, wait, [
-            WaitChangeDocsDurable
+            WaitChangeDocsDurable, wait_change_docs_durable
         ]),
 
     {Time3, {SaveRequests4, SaveResponses4}} =
         timer:tc(couchbase_crud, store_docs, [
             Connection, SaveRequests3
         ]),
-    AnalyseAns3 = couchbase_batch:check_timeout(SaveResponses4),
+    AnalyseAns3 = couchbase_batch:check_timeout(SaveResponses4, store_docs,
+        Time3),
 
     WaitDocsDurable = fun() ->
         couchbase_crud:wait_docs_durable(
@@ -384,7 +394,7 @@ handle_save_requests_batch(Connection, Requests) ->
     end,
     {Time4, {AnalyseAns4, {SaveRequests5, SaveResponses5}}} =
         timer:tc(?MODULE, wait, [
-            WaitDocsDurable
+            WaitDocsDurable, wait_docs_durable
         ]),
 
     Times = [Time1, Time2, Time3, Time4],
@@ -397,15 +407,15 @@ handle_save_requests_batch(Connection, Requests) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv wait(WaitFun, 5).
+%% @equiv wait(WaitFun, 5, FunName).
 %% @end
 %%--------------------------------------------------------------------
 -spec wait(WaitFun :: fun(() ->
-    {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]})) ->
-    {ok | timeout,
+    {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}),
+    atom()) -> {ok | timeout,
         {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
-wait(WaitFun) ->
-    wait(WaitFun, 5).
+wait(WaitFun, FunName) ->
+    wait(WaitFun, 5, FunName).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -415,13 +425,16 @@ wait(WaitFun) ->
 %%--------------------------------------------------------------------
 -spec wait(WaitFun :: fun(() ->
     {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}),
-    Num :: non_neg_integer()) -> {ok | timeout,
+    Num :: non_neg_integer(), atom()) -> {ok | timeout,
     {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
-wait(WaitFun, Num) ->
+wait(WaitFun, Num, FunName) ->
+    T1 = erlang:monotonic_time(),
     {_, SaveResponses} = Ans = WaitFun(),
-    case couchbase_batch:check_timeout(SaveResponses) of
+    Time = erlang:convert_time_unit(erlang:monotonic_time() - T1,
+        native, micro_seconds),
+    case couchbase_batch:check_timeout(SaveResponses, FunName, Time) of
         timeout when Num > 1 ->
-            wait(WaitFun, Num - 1);
+            wait(WaitFun, Num - 1, FunName);
         ok when Num =:= 5 ->
             {ok, Ans};
         _ ->
@@ -447,9 +460,19 @@ handle_request(_Connection, {delete, _, Key}, ResponsesBatch) ->
     RemoveResponses = maps:get(delete, ResponsesBatch),
     get_response(Key, RemoveResponses);
 handle_request(Connection, {get_counter, Key, Default}, _) ->
-    couchbase_crud:get_counter(Connection, Key, Default);
+    T1 = erlang:monotonic_time(),
+    Ans = couchbase_crud:get_counter(Connection, Key, Default),
+    Time = erlang:convert_time_unit(erlang:monotonic_time() - T1,
+        native, micro_seconds),
+    couchbase_batch:check_timeout([Ans], get_counter, Time),
+    Ans;
 handle_request(Connection, {update_counter, Key, Delta, Default}, _) ->
-    couchbase_crud:update_counter(Connection, Key, Delta, Default);
+    T1 = erlang:monotonic_time(),
+    Ans = couchbase_crud:update_counter(Connection, Key, Delta, Default),
+    Time = erlang:convert_time_unit(erlang:monotonic_time() - T1,
+        native, micro_seconds),
+    couchbase_batch:check_timeout([Ans], update_counter, Time),
+    Ans;
 handle_request(Connection, {save_design_doc, DesignName, EJson}, _) ->
     couchbase_view:save_design_doc(Connection, DesignName, EJson);
 handle_request(Connection, {get_design_doc, DesignName}, _) ->
