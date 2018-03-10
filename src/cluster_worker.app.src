@@ -227,6 +227,9 @@
             {couchbase_changes_stream_batch_size, 200},
             {couchbase_changes_stream_update_interval, 1000},
 
+            % Scope of cberl instance: pool, mode, node
+            {cberl_instance_scope, mode},
+
             %% ===================================================================
             %% EXOMETER
             %% ===================================================================

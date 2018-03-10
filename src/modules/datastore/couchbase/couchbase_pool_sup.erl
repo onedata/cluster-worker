@@ -92,13 +92,31 @@ init([]) ->
         public, named_table, {write_concurrency, true}
     ]),
 
+    Scope = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        cberl_instance_scope, mode),
+
+    Client0 = case Scope of
+        node ->
+            {ok, Cli0} = cberl_nif:new(),
+            Cli0;
+        _ ->
+            undefined
+    end,
     DbHosts = couchbase_config:get_hosts(),
     {ok, {#{strategy => one_for_one, intensity => 5, period => 1},
         lists:foldl(fun(Bucket, Specs) ->
             lists:foldl(fun(Mode, Specs2) ->
+                Client = case Scope of
+                    mode ->
+                        {ok, Cli} = cberl_nif:new(),
+                        Cli;
+                    _ ->
+                        Client0
+                end,
+
                 PoolSize = couchbase_pool:get_size(Bucket, Mode),
                 lists:foldl(fun(Id, Specs3) ->
-                    [worker_spec(Bucket, Mode, Id, DbHosts) | Specs3]
+                    [worker_spec(Bucket, Mode, Id, DbHosts, Client) | Specs3]
                 end, Specs2, lists:seq(1, PoolSize))
             end, Specs, couchbase_pool:get_modes())
         end, [], couchbase_config:get_buckets())
@@ -115,10 +133,10 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec worker_spec(couchbase_config:bucket(), couchbase_pool:type(),
-    couchbase_pool_worker:id(), [couchbase_driver:db_host()]) ->
-    supervisor:child_spec().
-worker_spec(Bucket, Mode, Id, DbHosts) ->
-    Args = [Bucket, Mode, Id, DbHosts],
+    couchbase_pool_worker:id(), [couchbase_driver:db_host()],
+    cberl_nif:client()) -> supervisor:child_spec().
+worker_spec(Bucket, Mode, Id, DbHosts, Client) ->
+    Args = [Bucket, Mode, Id, DbHosts, Client],
     #{
         id => {Bucket, Mode, Id},
         start => {couchbase_pool_worker, start_link, Args},
