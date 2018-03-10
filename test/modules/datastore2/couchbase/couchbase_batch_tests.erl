@@ -55,7 +55,7 @@ couchbase_batch_verification_test_() ->
 %%%===================================================================
 
 check_timeout_should_return_ok_for_empty_list() ->
-    ?assertEqual(ok, couchbase_batch:check_timeout([])),
+    ?assertEqual(ok, couchbase_batch:check_timeout([], test, 0)),
 
     ?assertEqual(undefined, get({[mod, couchbase_batch, times], reset})),
     ?assertEqual(undefined, get({[mod, couchbase_batch, sizes], reset})),
@@ -63,19 +63,19 @@ check_timeout_should_return_ok_for_empty_list() ->
 
 check_timeout_should_return_ok_for_list_without_error() ->
     ?assertEqual(ok, couchbase_batch:check_timeout(
-        [{key, ok}, {key2, ok}, {key3, ok}])).
+        [{key, ok}, {key2, ok}, {key3, ok}], test, 0)).
 
 check_timeout_should_return_ok_for_list_with_non_timeout_error() ->
     ?assertEqual(ok, couchbase_batch:check_timeout(
-        [{key, ok}, {key2, ok}, {key3, {error, error}}])).
+        [{key, ok}, {key2, ok}, {key3, {error, error}}], test, 0)).
 
 check_timeout_should_return_timeout_for_list_with_timeout() ->
     ?assertEqual(timeout, couchbase_batch:check_timeout(
-        [{key, ok}, {key2, {error, etimedout}}, {key3, ok}])).
+        [{key, ok}, {key2, {error, etimedout}}, {key3, ok}], test, 0)).
 
 check_timeout_should_return_timeout_for_list_with_etimedout() ->
     ?assertEqual(timeout, couchbase_batch:check_timeout(
-        [{key, ok}, {key2, {error, timeout}}, {key3, ok}])).
+        [{key, ok}, {key2, {error, timeout}}, {key3, ok}], test, 0)).
 
 decrease_batch_size_should_change_size() ->
     couchbase_batch:decrease_batch_size([]),

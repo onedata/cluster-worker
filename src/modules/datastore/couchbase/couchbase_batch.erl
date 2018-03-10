@@ -100,7 +100,8 @@ init_report() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_timeout([couchbase_crud:delete_response()]
-    | [couchbase_crud:get_response()] | [couchbase_crud:save_response()],
+    | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]
+    | [{ok, cberl:cas(), non_neg_integer()} | {error, term()}],
     atom(), non_neg_integer()) -> ok | timeout.
 check_timeout(Responses, Name, Time) ->
     ?update_counter(?EXOMETER_CRUD_NAME(Name), Time),
