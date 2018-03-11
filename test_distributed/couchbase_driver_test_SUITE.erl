@@ -128,7 +128,7 @@ all() ->
 
 cberl_test(Config) ->
     ?PERFORMANCE(Config, [
-        {repeats, 3},
+        {repeats, 100},
         {success_rate, 100},
         {parameters, [
             ?PERF_PARAM(ops_list, [store, store_durable, get, get_empty],
@@ -142,8 +142,8 @@ cberl_test(Config) ->
         {description, "Tests operations on cberl_nif"},
         ?PERF_CFG(basic_config, [
             [{name, proprocs_per_opc_num}, {value, 50}],
-            [{name, batch_size}, {value, 2000}],
-            [{name, repeats}, {value, 100}]
+            [{name, batch_size}, {value, 1000}],
+            [{name, repeats}, {value, 20}]
         ])
     ]).
 cberl_test_base(Config) ->
@@ -152,7 +152,7 @@ cberl_test_base(Config) ->
     BatchSize = ?config(batch_size, Config),
     Repeats = ?config(repeats, Config),
 
-    Timeout = timer:seconds(60),
+    Timeout = timer:seconds(120),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Self = self(),
 

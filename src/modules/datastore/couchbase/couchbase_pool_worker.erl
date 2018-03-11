@@ -419,7 +419,7 @@ handle_save_requests_batch(Connection, Requests) ->
     atom()) -> {ok | timeout,
         {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
 wait(WaitFun, FunName) ->
-    wait(WaitFun, 5, FunName).
+    wait(WaitFun, 2, FunName).
 
 %%--------------------------------------------------------------------
 %% @private
