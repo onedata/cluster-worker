@@ -24,7 +24,7 @@
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_durability_timeout, 60000)).
+    couchbase_durability_timeout, 300000) / 5).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
@@ -121,7 +121,7 @@ check_timeout(Responses, Name, Time) ->
 
     case Check of
         timeout ->
-            decrease_batch_size(length(Responses)),
+            decrease_batch_size(Responses),
             timeout;
         _ ->
             ok
@@ -205,17 +205,18 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 %% Decreases batch size as a result of timeout.
 %% @end
 %%--------------------------------------------------------------------
--spec decrease_batch_size(non_neg_integer()) -> ok.
-decrease_batch_size(BatchSize) ->
+-spec decrease_batch_size(list()) -> ok.
+decrease_batch_size(Batch) ->
     try
+        BatchSize = length(Batch),
         MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_pool_min_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
         set_batch_size(MinBatchSize),
         exometer_utils:reset(?EXOMETER_NAME(times)),
         exometer_utils:reset(?EXOMETER_NAME(sizes)),
         ?info("Timeout for batch with ~p elements, reset counters,"
-        " decrease batch size to: ~p, stacktrace ~p", [BatchSize, MinBatchSize,
-            erlang:process_info(self(), current_stacktrace)])
+        " decrease batch size to: ~p, batch: ~p, stacktrace ~p", [BatchSize, MinBatchSize,
+            Batch, erlang:process_info(self(), current_stacktrace)])
     catch
         E1:E2 ->
             ?error_stacktrace("Error during decrease of couchbase"
