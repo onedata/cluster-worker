@@ -439,7 +439,7 @@ wait(WaitFun, Num, FunName) ->
     case couchbase_batch:check_timeout(SaveResponses, FunName, Time) of
         timeout when Num > 1 ->
             wait(WaitFun, Num - 1, FunName);
-        ok when Num =:= 5 ->
+        ok when Num =:= 2 ->
             {ok, Ans};
         _ ->
             {timeout, Ans}

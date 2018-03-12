@@ -140,7 +140,7 @@ setup() ->
     application:set_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_operation_timeout, 60000),
     application:set_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_durability_timeout, 60000),
+        couchbase_durability_timeout, 300000),
 
     meck:new(exometer_utils),
     meck:expect(exometer_utils, reset,
