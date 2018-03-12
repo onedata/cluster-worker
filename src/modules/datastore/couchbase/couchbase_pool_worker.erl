@@ -204,7 +204,7 @@ get_connect_opts() ->
         {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
         {view_timeout, couchbase_view_timeout, timer:seconds(120)},
         {durability_interval, couchbase_durability_interval, 500},
-        {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
+        {durability_timeout, couchbase_durability_timeout, timer:seconds(300)},
         {http_timeout, couchbase_http_timeout, timer:seconds(60)}
     ]).
 
