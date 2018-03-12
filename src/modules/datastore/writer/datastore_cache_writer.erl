@@ -149,7 +149,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         cached_keys_to_flush = NewKeys,
         flush_ref = undefined,
         requests_ref = undefined
-    }))};
+    }), 0)};
 handle_cast({flushed, _Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys,
     master_pid = Pid
@@ -159,7 +159,7 @@ handle_cast({flushed, _Ref, NotFlushed}, State = #state{
     {noreply, schedule_flush(check_inactivate(State#state{
         cached_keys_to_flush = NewKeys,
         flush_ref = undefined
-    }))};
+    }), 0)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -467,12 +467,22 @@ send_response({Pid, Ref, Responses}, Batch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_flush(state()) -> state().
-schedule_flush(State = #state{flush_ref = undefined}) ->
+schedule_flush(State) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
         timer:seconds(1)),
+    schedule_flush(State, Delay).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Schedules flush.
+%% @end
+%%--------------------------------------------------------------------
+-spec schedule_flush(state(), non_neg_integer()) -> state().
+schedule_flush(State = #state{flush_ref = undefined}, Delay) ->
     erlang:send_after(Delay, self(), flush),
     State#state{flush_ref = make_ref()};
-schedule_flush(State = #state{}) ->
+schedule_flush(State = #state{}, _Delay) ->
     State.
 
 %%--------------------------------------------------------------------
