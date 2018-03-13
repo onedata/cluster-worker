@@ -63,9 +63,12 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), key(), value()) -> couchbase_pool:future().
-save_async(#{bucket := Bucket} = Ctx, Key, Value) ->
+save_async(#{bucket := Bucket, answer_to := Pid} = Ctx, Key, Value) ->
     Mode = maps:get(pool_mode, Ctx, write),
-    couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Key, Value}).
+    couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Key, Value}, Pid);
+save_async(#{bucket := Bucket} = Ctx, Key, Value) ->
+  Mode = maps:get(pool_mode, Ctx, write),
+  couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Key, Value}).
 
 %%--------------------------------------------------------------------
 %% @doc

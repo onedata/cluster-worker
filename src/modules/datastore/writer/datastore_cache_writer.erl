@@ -27,7 +27,6 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    cached_keys_in_flush = #{} :: cached_keys(),
     keys_to_inactivate = #{} :: cached_keys(),
     keys_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
@@ -179,29 +178,29 @@ handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,
     cached_keys_to_flush = CachedKeys,
-    cached_keys_in_flush = KeysInFlush,
     keys_to_inactivate = ToInactivate
 }) ->
+    % TODO - nie zliczac przy szybkim flush
     tp_router:delete_process_size(Pid),
 
-    {KeysInFlush2, CachedKeys2} =
-        case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
-            on ->
-                KIF = maps:keys(KeysInFlush),
-                CachedKeysWithout = maps:without(KIF, CachedKeys),
-                CachedKeysLeft = maps:with(KIF, CachedKeys),
-                case CachedKeysWithout of
-                    #{} ->
-                        {KeysInFlush, CachedKeys};
-                    _ ->
-                        Futures = datastore_disc_writer:flush_async(CachedKeysWithout),
-                        gen_server:cast(Pid, {wait_flush, Ref, Futures}),
-                        {maps:merge(KeysInFlush, CachedKeysWithout), CachedKeysLeft}
-                end;
-            _ ->
-                gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
-                {#{}, #{}}
-        end,
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+        on ->
+            % TODO!!!!! przekazac do odpowiedz pid disk writera, albo w ogole sie pozbyc disk writera (na to ticket)!!!
+            CachedKeys2 = maps:map(fun
+                (_K, #{
+                    disc_driver_ctx := DiscCtx
+                } = Ctx) ->
+                    maps:put(disc_driver_ctx,
+                        maps:put(answer_to, Pid, DiscCtx), Ctx);
+                (_K, Ctx) ->
+                    Ctx
+            end, CachedKeys),
+
+            Futures = datastore_disc_writer:flush_async(CachedKeys2),
+            gen_server:cast(Pid, {wait_flush, Ref, Futures});
+        _ ->
+            gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity)
+    end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
         on ->
@@ -211,9 +210,8 @@ handle_info(flush, State = #state{
     end,
 
     {noreply, State#state{
-        cached_keys_to_flush = CachedKeys2,
-        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys),
-        cached_keys_in_flush = KeysInFlush2
+        cached_keys_to_flush = #{},
+        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys)
     }};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),

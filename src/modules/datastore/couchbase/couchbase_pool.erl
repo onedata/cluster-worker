@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([post_async/3, post/3, wait/1]).
+-export([post_async/3, post_async/4, post/3, wait/1]).
 -export([get_timeout/0, get_modes/0, get_size/2]).
 -export([get_request_queue_size/1, get_request_queue_size/2,
     get_worker_queue_size_stats/1, get_worker_queue_size_stats/2,
@@ -91,11 +91,14 @@ init_report() ->
 -spec post_async(couchbase_config:bucket(), mode(), request()) ->
     future().
 post_async(Bucket, Mode, Request) ->
+    post_async(Bucket, Mode, Request, self()).
+
+post_async(Bucket, Mode, Request, ResponseTo) ->
     Ref = make_ref(),
     Id = get_worker_id(Bucket, Mode),
     Worker = couchbase_pool_sup:get_worker(Bucket, Mode, Id),
     update_request_queue_size(Bucket, Mode, Id, 1),
-    Worker ! {post, {Ref, self(), Request}},
+    Worker ! {post, {Ref, ResponseTo, Request}},
     {Ref, Worker}.
 
 %%--------------------------------------------------------------------
