@@ -268,6 +268,9 @@ handle_requests(Requests, #state{} = State) ->
         connection = Connection
     } = State,
 
+    Delta = -length(Requests),
+    couchbase_pool:update_request_queue_size(Bucket, Mode, Id, Delta),
+
     RequestsBatch = batch_requests(Requests),
     ResponsesBatch = handle_requests_batch(Connection, RequestsBatch),
     lists:foreach(fun({Ref, From, Request}) ->
@@ -279,8 +282,7 @@ handle_requests(Requests, #state{} = State) ->
         From ! {Ref, Response}
     end, Requests),
 
-    Delta = -length(Requests),
-    couchbase_pool:update_request_queue_size(Bucket, Mode, Id, Delta).
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
