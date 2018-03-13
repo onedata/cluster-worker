@@ -14,6 +14,7 @@
 
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([post_async/3, post/3, wait/1]).
@@ -244,17 +245,27 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
 %%% Internal functions
 %%%===================================================================
 
-get_worker_id(Bucket, Mode) ->
+get_worker_id(Bucket, write = Mode) ->
     Key = {next_worker_id, Bucket, Mode},
-    Id = ets:lookup_element(couchbase_pool_stats, Key, 2),
+    Id = case ets:lookup(couchbase_pool_stats, Key) of
+        [{Key, ID}] -> ID;
+        _ -> 1
+    end,
+
     WorkerKey = {request_queue_size, Bucket, Mode, Id},
-    Size = ets:lookup_element(couchbase_pool_stats, WorkerKey, 2),
+    Size = case ets:lookup(couchbase_pool_stats, WorkerKey) of
+        [{Key, S}] -> S;
+        _ -> 0
+    end,
+
     MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, 1000),
     case Size < MaxSize of
         true -> Id;
         _ -> get_next_worker_id(Bucket, Mode)
-    end.
+    end;
+get_worker_id(Bucket, Mode) ->
+    get_next_worker_id(Bucket, Mode).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -264,6 +275,10 @@ get_worker_id(Bucket, Mode) ->
 %%--------------------------------------------------------------------
 -spec get_next_worker_id(couchbase_config:bucket(), mode()) ->
     couchbase_pool_worker:id().
+get_next_worker_id(Bucket, write = Mode) ->
+    Key = {next_worker_id, Bucket, Mode},
+    Size = get_size(Bucket, Mode),
+    ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 1});
 get_next_worker_id(Bucket, Mode) ->
     Key = {next_worker_id, Bucket, Mode},
     Size = get_size(Bucket, Mode),
