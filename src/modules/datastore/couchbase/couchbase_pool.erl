@@ -257,7 +257,7 @@ get_worker_id(Bucket, write = Mode) ->
 
     WorkerKey = {request_queue_size, Bucket, Mode, Id},
     Size = case ets:lookup(couchbase_pool_stats, WorkerKey) of
-        [{Key, S}] -> S;
+        [{WorkerKey, S}] -> S;
         _ -> 0
     end,
 

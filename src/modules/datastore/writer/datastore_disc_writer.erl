@@ -112,6 +112,7 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(Info, #state{} = State) ->
+    self() ! Info,
     ?log_bad_request(Info),
     {noreply, State}.
 
@@ -197,4 +198,9 @@ wait_features(Futures, Ref, State = #state{
             ok
     end,
 
-    {noreply, State}.
+    receive
+        {wait_flush, Ref2, Futures2} ->
+            wait_features(Futures2, Ref2, State)
+        after 0 ->
+            {noreply, State}
+    end.

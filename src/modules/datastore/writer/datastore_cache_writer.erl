@@ -194,33 +194,39 @@ handle_info(flush, State = #state{
         on ->
             KiFKeys = maps:keys(KiF),
             ToFlush = maps:without(KiFKeys, CachedKeys),
-            Waiting = maps:with(KiFKeys, CachedKeys),
 
-            KiF2 = maps:fold(fun(K, _V, Acc) ->
-                maps:put(K, Ref, Acc)
-            end, KiF, ToFlush),
-
-            % TODO!!!!! pozbyc disk writera (na to ticket)!!!
-            ToFlush2 = maps:map(fun
-                (_K, #{
-                    disc_driver_ctx := DiscCtx
-                } = Ctx) ->
-                    maps:put(disc_driver_ctx,
-                        maps:put(answer_to, Pid, DiscCtx), Ctx);
-                (_K, Ctx) ->
-                    Ctx
-            end, ToFlush),
-
-            case maps:size(Waiting) of
+            case maps:size(ToFlush) of
                 0 ->
-                    tp_router:delete_process_size(Pid);
-                Size ->
-                    tp_router:update_process_size(Pid, Size)
-            end,
+                    {CachedKeys, KiF};
+                _ ->
+                    Waiting = maps:with(KiFKeys, CachedKeys),
 
-            Futures = datastore_disc_writer:flush_async(ToFlush2),
-            gen_server:cast(Pid, {wait_flush, Ref, Futures}),
-            {Waiting, KiF2};
+                    KiF2 = maps:fold(fun(K, _V, Acc) ->
+                        maps:put(K, Ref, Acc)
+                    end, KiF, ToFlush),
+
+                    % TODO!!!!! pozbyc disk writera (na to ticket)!!!
+                    ToFlush2 = maps:map(fun
+                        (_K, #{
+                            disc_driver_ctx := DiscCtx
+                        } = Ctx) ->
+                            maps:put(disc_driver_ctx,
+                                maps:put(answer_to, Pid, DiscCtx), Ctx);
+                        (_K, Ctx) ->
+                            Ctx
+                    end, ToFlush),
+
+                    case maps:size(Waiting) of
+                        0 ->
+                            tp_router:delete_process_size(Pid);
+                        Size ->
+                            tp_router:update_process_size(Pid, Size)
+                    end,
+
+                    Futures = datastore_disc_writer:flush_async(ToFlush2),
+                    gen_server:cast(Pid, {wait_flush, Ref, Futures}),
+                    {Waiting, KiF2}
+            end;
         _ ->
             tp_router:delete_process_size(Pid),
             gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
