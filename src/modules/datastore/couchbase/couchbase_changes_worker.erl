@@ -230,8 +230,6 @@ fetch_changes(#state{
         Seq2 -> erlang:send_after(0, self(), update);
         _ -> erlang:send_after(Interval, self(), update)
     end,
-    ?info("changes_worker: ~p", [{Changes, State2}]),
-
     State2.
 
 %%--------------------------------------------------------------------

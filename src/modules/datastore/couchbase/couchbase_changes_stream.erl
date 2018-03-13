@@ -129,7 +129,6 @@ handle_cast(Request, #state{} = State) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(update, #state{since = Since, until = Until} = State) ->
     {Changes, State2} = get_changes(Since, Until, State),
-    ?info("changes_stream: ~p", [{Changes, State2}]),
     Docs = get_docs(Changes, State2),
     stream_docs(Docs, State2),
     case State2#state.since >= Until of

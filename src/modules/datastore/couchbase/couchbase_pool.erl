@@ -91,7 +91,7 @@ init_report() ->
     future().
 post_async(Bucket, Mode, Request) ->
     Ref = make_ref(),
-    Id = get_next_worker_id(Bucket, Mode),
+    Id = get_worker_id(Bucket, Mode),
     Worker = couchbase_pool_sup:get_worker(Bucket, Mode, Id),
     update_request_queue_size(Bucket, Mode, Id, 1),
     Worker ! {post, {Ref, self(), Request}},
@@ -243,6 +243,18 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_worker_id(Bucket, Mode) ->
+    Key = {next_worker_id, Bucket, Mode},
+    Id = ets:lookup_element(couchbase_pool_stats, Key, 2),
+    WorkerKey = {request_queue_size, Bucket, Mode, Id},
+    Size = ets:lookup_element(couchbase_pool_stats, WorkerKey, 2),
+    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_batch_size, 1000),
+    case Size < MaxSize of
+        true -> Id;
+        _ -> get_next_worker_id(Bucket, Mode)
+    end.
 
 %%--------------------------------------------------------------------
 %% @private

@@ -217,7 +217,7 @@ get_connect_opts() ->
 -spec process_requests(state()) -> state().
 process_requests(State) ->
     Size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size, 2000),
+        couchbase_pool_batch_size, 1000),
     State2 = receive_pending_requests(State),
     #state{requests_queue = Queue} = State2,
     {Requests, Queue2} = dequeue(Size, Queue, []),
@@ -485,6 +485,13 @@ handle_request(Connection, {delete_design_doc, DesignName}, _) ->
     couchbase_view:delete_design_doc(Connection, DesignName);
 handle_request(Connection, {query_view, DesignName, ViewName, Opts}, _) ->
     couchbase_view:query(Connection, DesignName, ViewName, Opts).
+%%handle_request(Connection, test_, _) ->
+%%    Path = <<"_design/", DesignName/binary>>,
+%%    parse_design_doc_response(delete,
+%%        cberl:http(Connection, view, delete, Path, <<>>, <<>>, ?TIMEOUT)
+%%    ).
+
+
 
 %%--------------------------------------------------------------------
 %% @private

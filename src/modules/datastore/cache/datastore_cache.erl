@@ -21,7 +21,6 @@
 
 -include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get/2, fetch/2, save/1, save/3]).
@@ -33,8 +32,7 @@
 -record(future, {
     durability :: undefined | durability(),
     driver :: undefined | datastore:driver(),
-    value :: {ok, doc()} | {error, term()} | couchbase_pool:future(),
-    ctx
+    value :: {ok, doc()} | {error, term()} | couchbase_pool:future()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -198,7 +196,7 @@ flush_async(Ctx, Key) ->
 
     case MemoryDriver:get(MemoryCtx, Key) of
         {ok, Doc} ->
-            ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc))#future{ctx = Ctx};
+            ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
         {error, Reason} ->
             ?FUTURE(memory, MemoryDriver, {error, Reason})
     end.
@@ -214,24 +212,10 @@ wait(#future{durability = Durability, value = {ok, Doc = #document{}}}) ->
     {ok, Durability, Doc};
 wait(#future{value = {error, Reason}}) ->
     {error, Reason};
-wait(#future{durability = Durability, driver = Driver, value = Value, ctx = Ctx}) ->
+wait(#future{durability = Durability, driver = Driver, value = Value}) ->
     case Driver:wait(Value) of
-        {ok, Doc} ->
-            case Ctx of
-                #{sync_enabled := true} ->
-                    ?info("durability ~p", [{Driver, Durability, Doc, Ctx}]);
-                _ ->
-                    ok
-            end,
-            {ok, Durability, Doc};
-        {ok, _Cas, Doc} ->
-            case Ctx of
-                #{sync_enabled := true} ->
-                    ?info("durability ~p", [{Driver, Durability, Doc, Ctx}]);
-                _ ->
-                    ok
-            end,
-            {ok, Durability, Doc};
+        {ok, Doc} -> {ok, Durability, Doc};
+        {ok, _Cas, Doc} -> {ok, Durability, Doc};
         {error, Reason} -> {error, Reason}
     end;
 wait(Futures) when is_list(Futures) ->
