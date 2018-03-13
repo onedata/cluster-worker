@@ -27,6 +27,7 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
+    cached_keys_in_flush = #{} :: cached_keys(),
     keys_to_inactivate = #{} :: cached_keys(),
     keys_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
@@ -178,10 +179,29 @@ handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,
     cached_keys_to_flush = CachedKeys,
+    cached_keys_in_flush = KeysInFlush,
     keys_to_inactivate = ToInactivate
 }) ->
     tp_router:delete_process_size(Pid),
-    gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
+
+    {KeysInFlush2, CachedKeys2} =
+        case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+            on ->
+                KIF = maps:keys(KeysInFlush),
+                CachedKeysWithout = maps:without(KIF, CachedKeys),
+                CachedKeysLeft = maps:with(KIF, CachedKeys),
+                case CachedKeysWithout of
+                    #{} ->
+                        {KeysInFlush, CachedKeys};
+                    _ ->
+                        Futures = datastore_disc_writer:flush_async(CachedKeysWithout),
+                        gen_server:cast(Pid, {wait_flush, Ref, Futures}),
+                        {maps:merge(KeysInFlush, CachedKeysWithout), CachedKeysLeft}
+                end;
+            _ ->
+                gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
+                {#{}, #{}}
+        end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
         on ->
@@ -191,8 +211,9 @@ handle_info(flush, State = #state{
     end,
 
     {noreply, State#state{
-        cached_keys_to_flush = #{},
-        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys)
+        cached_keys_to_flush = CachedKeys2,
+        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys),
+        cached_keys_in_flush = KeysInFlush2
     }};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
@@ -482,8 +503,14 @@ schedule_flush(State) ->
 schedule_flush(State = #state{flush_ref = undefined}, Delay) ->
     erlang:send_after(Delay, self(), flush),
     State#state{flush_ref = make_ref()};
-schedule_flush(State = #state{}, _Delay) ->
-    State.
+schedule_flush(State = #state{}, Delay) ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+        on ->
+            erlang:send_after(Delay, self(), flush),
+            State#state{flush_ref = make_ref()};
+        _ ->
+            State
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
