@@ -45,7 +45,7 @@
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_durability_timeout, 60000)).
+    couchbase_durability_timeout, 300000)).
 
 %%%===================================================================
 %%% API

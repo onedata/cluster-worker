@@ -12,6 +12,7 @@
 -module(couchbase_driver_test_SUITE).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
 -include("datastore_test_utils.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
@@ -51,12 +52,14 @@
     query_view_should_return_missing_error/1,
     query_view_should_parse_empty_opts/1,
     query_view_should_parse_all_opts/1,
-    get_buckets_should_return_all_buckets/1
+    get_buckets_should_return_all_buckets/1,
+    cberl_test/1
 ]).
 
 %% test_bases
 -export([
-    save_get_delete_should_return_success_base/1
+    save_get_delete_should_return_success_base/1,
+    cberl_test_base/1
 ]).
 
 all() ->
@@ -90,16 +93,21 @@ all() ->
         query_view_should_return_missing_error,
         query_view_should_parse_empty_opts,
         query_view_should_parse_all_opts,
-        get_buckets_should_return_all_buckets
+        get_buckets_should_return_all_buckets,
+        cberl_test
     ], [
-        save_get_delete_should_return_success
+        save_get_delete_should_return_success,
+        cberl_test
     ]).
 
 -define(MODEL, disc_only_model).
 -define(CTX, ?DISC_CTX).
+-define(EMPTY_KEY(N), ?TERM("key_empty", N)).
+-define(DURABLE_KEY(N), ?TERM("key_durable", N)).
 -define(VALUE, ?MODEL_VALUE(?MODEL, 1)).
 -define(DOC, ?DOC(1)).
 -define(DOC(N), ?BASE_DOC(?KEY(N), ?VALUE)).
+-define(DURABLE_DOC(N), ?BASE_DOC(?DURABLE_KEY(N), ?VALUE)).
 -define(VIEW_FUNCTION, <<"function (doc, meta) {\r\n"
                          "  emit(meta.id, null);\r\n"
                          "}\r\n">>).
@@ -117,6 +125,189 @@ all() ->
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
+
+cberl_test(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, 100},
+        {success_rate, 100},
+        {parameters, [
+            ?PERF_PARAM(ops_list, [store, store_durable, get, get_empty],
+                "", "List of operations on cberl"),
+            ?PERF_PARAM(procs_per_op, 10, "",
+                "Number of processes that execute each operation"),
+            ?PERF_PARAM(batch_size, 100, "",
+                "Batch size (numer of docs/keys in each batch)"),
+            ?PERF_PARAM(repeats, 20, "", "List of operations on cberl")
+        ]},
+        {description, "Tests operations on cberl_nif"},
+        ?PERF_CFG(basic_config, [
+            [{name, proprocs_per_opc_num}, {value, 50}],
+            [{name, batch_size}, {value, 1000}],
+            [{name, repeats}, {value, 20}]
+        ])
+    ]).
+cberl_test_base(Config) ->
+    OpsList = ?config(ops_list, Config),
+    ProcsPerOperation = ?config(procs_per_op, Config),
+    BatchSize = ?config(batch_size, Config),
+    Repeats = ?config(repeats, Config),
+
+    Timeout = timer:seconds(120),
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+
+    Fun = fun(OperationType, ProcNum) ->
+        spawn_link(Worker, fun() ->
+            try
+                DbHosts = couchbase_config:get_hosts(),
+                Host = lists:foldl(fun(DbHost, Acc) ->
+                    <<Acc/binary, ";", DbHost/binary>>
+                end, hd(DbHosts), tl(DbHosts)),
+                Opts = get_connect_opts(),
+                [Bucket] = couchbase_config:get_buckets(),
+
+                {ok, Client} = cberl_nif:new(),
+                {ok, Ref} = cberl_nif:connect(
+                    self(), Client, Host, <<>>, <<>>, Bucket, Opts
+                ),
+                {ok, Connection} = receive
+                    {Ref, {ok, C}} ->
+                        {ok, C};
+                    {Ref, {error, Reason}} ->
+                        {error, Reason}
+                after
+                    Timeout -> {error, timeout}
+                end,
+                From = self(),
+
+                Response2 = lists:foldl(fun(Num0, Acc) ->
+                    Requests = lists:map(fun(Num) ->
+                        get_request(Num, OperationType)
+                    end, lists:seq(Num0 * BatchSize + 1 + ProcNum * Repeats * (BatchSize + 1),
+                        Num0 * (BatchSize + 1) + ProcNum * Repeats * (BatchSize + 1))),
+
+                    T1 = erlang:monotonic_time(),
+                    {ok, Ref2} = apply(cberl_nif, map_to_cberl_req(OperationType),
+                        [From, Client, Connection, Requests]),
+                    {ok, Response, ResponseList} = receive
+                        {Ref2, R} ->
+                            Time = erlang:convert_time_unit(erlang:monotonic_time() - T1,
+                                native, micro_seconds),
+                            {ok, AnsList} = R,
+                            lists:foreach(fun(A) ->
+                                 case A of
+                                     {_, {ok, _}} -> ok;
+                                     {_, {ok, _, _, _}} -> ok;
+                                     {_, {error, key_enoent}} -> ok
+                                 end
+                            end, AnsList),
+                            {ok, Time, AnsList}
+                    after
+                        Timeout -> {error, timeout}
+                    end,
+
+                    case OperationType of
+                        store_durable ->
+                            DurableRequests = lists:map(fun({K, {ok, Cas}}) ->
+                                {K, Cas}
+                            end, ResponseList),
+
+                            T2 = erlang:monotonic_time(),
+                            {ok, Ref3} = apply(cberl_nif, durability,
+                                [From, Client, Connection, DurableRequests, {1, -1}]),
+
+                            {ok, Response2} = receive
+                                {Ref3, R2} ->
+                                    Time2 = erlang:convert_time_unit(erlang:monotonic_time() - T2,
+                                        native, micro_seconds),
+                                    {ok, AnsList2} = R2,
+                                    lists:foreach(fun(A) ->
+                                        case A of
+                                            {_, {ok, _}} -> ok;
+                                            {_, {ok, _, _, _}} -> ok;
+                                            {_, {error, key_enoent}} -> ok
+                                        end
+                                    end, AnsList2),
+                                    {ok, Time2}
+                            after
+                                Timeout -> {error, timeout}
+                            end,
+
+                            Acc + Response + Response2;
+                        _ ->
+                            Acc + Response
+                    end
+                end, 0, lists:seq(1, Repeats)),
+
+                Self ! {self(), Response2}
+            catch
+                E1:E2 ->
+                    Self ! {self(), {error, {E1, E2, erlang:get_stacktrace()}}}
+            end
+        end)
+    end,
+
+    Pids = lists:foldl(fun(Num, Acc1) ->
+        Acc1 ++ lists:foldl(fun(Op, Acc2) ->
+            [{Fun(Op, Num), Op} | Acc2]
+        end, [], OpsList)
+    end, [], lists:seq(1, ProcsPerOperation)),
+
+    FinalAns0 = lists:foldl(fun({Pid, Op}, Acc) ->
+        {ok, Ans} = receive
+            {Pid, A} -> {ok, A}
+        after
+            5*Timeout -> {error, timeout}
+        end,
+        Value = maps:get(Op, Acc),
+        maps:put(Op, Value + Ans, Acc)
+    end, maps:from_list(lists:map(fun(O) -> {O, 0} end, OpsList)), Pids),
+
+    FinalAns = maps:map(fun(_K, V) -> V / Repeats/ ProcsPerOperation end, FinalAns0),
+
+    ct:print("Avg batch times: ~p", [FinalAns]),
+
+    lists:foldl(fun({K, V}, Acc) ->
+        [#parameter{name = K, value = V, unit = "us",
+            description = "Time of operation"} | Acc]
+    end, [], maps:to_list(FinalAns)).
+
+get_request(Num, store) ->
+    Key = ?KEY(Num),
+    Value = iolist_to_binary(jiffy:encode(datastore_json:encode(?DOC(Num)))),
+    {3, Key, Value, 1, 0, 0};
+get_request(Num, store_durable) ->
+    Key = ?DURABLE_KEY(Num),
+    Value = iolist_to_binary(jiffy:encode(datastore_json:encode(?DURABLE_DOC(Num)))),
+    {3, Key, Value, 1, 0, 0};
+get_request(Num, get) ->
+    Key = ?KEY(Num),
+    {Key, 0, false};
+get_request(Num, get_empty) ->
+    Key = ?EMPTY_KEY(Num),
+    {Key, 0, false}.
+
+map_to_cberl_req(store_durable) ->
+    store;
+map_to_cberl_req(get_empty) ->
+    get;
+map_to_cberl_req(R) ->
+    R.
+
+get_connect_opts() ->
+    lists:map(fun({OptName, EnvName, OptDefault}) ->
+        OptValue = application:get_env(
+            ?CLUSTER_WORKER_APP_NAME, EnvName, OptDefault
+        ),
+        {OptName, 1000 * OptValue}
+    end, [
+        {operation_timeout, couchbase_operation_timeout, timer:seconds(60)},
+        {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
+        {view_timeout, couchbase_view_timeout, timer:seconds(120)},
+        {durability_interval, couchbase_durability_interval, 500},
+        {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
+        {http_timeout, couchbase_http_timeout, timer:seconds(60)}
+    ]).
 
 save_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
