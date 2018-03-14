@@ -17,7 +17,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([check_timeout/3, verify_batch_size_increase/3, init_counters/0, init_report/0]).
+-export([check_timeout/3, verify_batch_size_increase/3,
+    init_counters/0, init_report/0]).
 % for eunit
 -export([decrease_batch_size/1]).
 
@@ -121,7 +122,7 @@ check_timeout(Responses, Name, Time) ->
 
     case Check of
         timeout ->
-            decrease_batch_size(Responses),
+            decrease_batch_size(length(Responses)),
             timeout;
         _ ->
             ok
@@ -205,18 +206,16 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
 %% Decreases batch size as a result of timeout.
 %% @end
 %%--------------------------------------------------------------------
--spec decrease_batch_size(list()) -> ok.
-decrease_batch_size(Batch) ->
+-spec decrease_batch_size(non_neg_integer()) -> ok.
+decrease_batch_size(BatchSize) ->
     try
-        BatchSize = length(Batch),
         MinBatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_pool_min_batch_size, ?MIN_BATCH_SIZE_DEFAULT),
         set_batch_size(MinBatchSize),
         exometer_utils:reset(?EXOMETER_NAME(times)),
         exometer_utils:reset(?EXOMETER_NAME(sizes)),
         ?info("Timeout for batch with ~p elements, reset counters,"
-        " decrease batch size to: ~p, batch: ~p, stacktrace ~p", [BatchSize, MinBatchSize,
-            Batch, erlang:process_info(self(), current_stacktrace)])
+        " decrease batch size to: ~p", [BatchSize, MinBatchSize])
     catch
         E1:E2 ->
             ?error_stacktrace("Error during decrease of couchbase"
