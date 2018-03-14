@@ -238,7 +238,7 @@
             % size) or round_robin
             {couchbase_pool_worker_algorithm, big_batch},
             % Should tp flush documents faster if possible
-            {tp_fast_flush, on},
+            {tp_fast_flush, off},
             % Should couchbase pool worker wait on documents durability during
             % documents and seq numbers write
             {wait_durable, false},
