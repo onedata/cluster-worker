@@ -24,7 +24,8 @@
                  pool_mode => couchbase_pool:mode(),
                  cas => cberl:cas(),
                  no_seq => boolean(),
-                 no_durability => boolean()}.
+                 no_durability => boolean(),
+                 answer_to => pid()}.
 -type key() :: datastore:key().
 -type value() :: datastore:doc() | cberl:value().
 -type item() :: {ctx(), key(), value()}.
