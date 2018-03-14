@@ -487,11 +487,6 @@ handle_request(Connection, {delete_design_doc, DesignName}, _) ->
     couchbase_view:delete_design_doc(Connection, DesignName);
 handle_request(Connection, {query_view, DesignName, ViewName, Opts}, _) ->
     couchbase_view:query(Connection, DesignName, ViewName, Opts).
-%%handle_request(Connection, test_, _) ->
-%%    Path = <<"_design/", DesignName/binary>>,
-%%    parse_design_doc_response(delete,
-%%        cberl:http(Connection, view, delete, Path, <<>>, <<>>, ?TIMEOUT)
-%%    ).
 
 
 

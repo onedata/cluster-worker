@@ -13,9 +13,10 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
--export([get_hosts/0, get_buckets/0]).
+-export([get_hosts/0, get_buckets/0, get_flush_queue_size/0]).
 
 -type host() :: binary().
 -type bucket() :: binary().
@@ -60,3 +61,22 @@ get_buckets() ->
                 couchbase_buckets, Ans),
             Ans
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+
+%% @end
+%%--------------------------------------------------------------------
+get_flush_queue_size() ->
+    DbHost = utils:random_element(get_hosts()),
+    Buckets = get_buckets(),
+
+    lists:foldl(fun(Bucket, Max) ->
+        Url = <<DbHost/binary, ":8091/pools/default/buckets/",
+            Bucket/binary, "/stats">>,
+        {ok, 200, _, Body} = http_client:get(Url),
+        BucketSize = lists:last(maps:get(<<"disk_write_queue">>,
+            maps:get(<<"samples">>,
+                maps:get(<<"op">>, jiffy:decode(Body, [return_maps]))))),
+        max(BucketSize, Max)
+    end, 0, Buckets).
