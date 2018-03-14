@@ -17,19 +17,26 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([check_timeout/1, verify_batch_size_increase/3, init_counters/0, init_report/0]).
+-export([check_timeout/3, verify_batch_size_increase/3,
+    init_counters/0, init_report/0]).
 % for eunit
 -export([decrease_batch_size/1]).
 
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
-    couchbase_durability_timeout, 60000)).
+    couchbase_durability_timeout, 300000) / 5).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 
 -define(MIN_BATCH_SIZE_DEFAULT, 10).
+
+-define(CRUD_TIMES_COUNTERS, [get, delete, store_change_docs,
+    wait_change_docs_durable, store_docs, wait_docs_durable,
+    get_counter, update_counter]).
+-define(EXOMETER_CRUD_NAME(Param),
+    ?EXOMETER_NAME(list_to_atom(atom_to_list(Param) ++ "_crud_time"))).
 
 %%%===================================================================
 %%% API
@@ -58,7 +65,12 @@ init_counters() ->
         {?EXOMETER_NAME(timeouts_history), counter},
         {?EXOMETER_NAME(sizes_config), histogram, TimeSpan}
     ],
-    ?init_counters(Counters2).
+
+    Counters3 = lists:map(fun(Name) ->
+        {?EXOMETER_CRUD_NAME(Name), histogram, TimeSpan}
+    end, ?CRUD_TIMES_COUNTERS),
+
+    ?init_counters(Counters2 ++ Counters3).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -76,7 +88,12 @@ init_report() ->
         {?EXOMETER_NAME(timeouts), [count]},
         {?EXOMETER_NAME(timeouts_history), [value]}
     ],
-    ?init_reports(Reports).
+
+    Reports2 = lists:map(fun(Name) ->
+        {?EXOMETER_CRUD_NAME(Name), HistogramReport}
+    end, ?CRUD_TIMES_COUNTERS),
+
+    ?init_reports(Reports ++ Reports2).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,13 +101,20 @@ init_report() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_timeout([couchbase_crud:delete_response()]
-    | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]) ->
-    ok | timeout.
-check_timeout(Responses) ->
+    | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]
+    | [{ok, cberl:cas(), non_neg_integer()} | {error, term()}],
+    atom(), non_neg_integer()) -> ok | timeout.
+check_timeout(Responses, Name, Time) ->
+    ?update_counter(?EXOMETER_CRUD_NAME(Name), Time),
+
     Check = lists:foldl(fun
         ({_Key, {error, etimedout}}, _) ->
             timeout;
         ({_Key, {error, timeout}}, _) ->
+            timeout;
+        ({error, etimedout}, _) ->
+            timeout;
+        ({error, timeout}, _) ->
             timeout;
         (_, TmpAns) ->
             TmpAns
@@ -191,8 +215,7 @@ decrease_batch_size(BatchSize) ->
         exometer_utils:reset(?EXOMETER_NAME(times)),
         exometer_utils:reset(?EXOMETER_NAME(sizes)),
         ?info("Timeout for batch with ~p elements, reset counters,"
-        " decrease batch size to: ~p, stacktrace ~p", [BatchSize, MinBatchSize,
-            erlang:process_info(self(), current_stacktrace)])
+        " decrease batch size to: ~p", [BatchSize, MinBatchSize])
     catch
         E1:E2 ->
             ?error_stacktrace("Error during decrease of couchbase"
