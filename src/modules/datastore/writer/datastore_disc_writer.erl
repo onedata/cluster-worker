@@ -178,6 +178,14 @@ wait_flushed(RequestFutures) ->
         ({{Key, Ctx}, Error = {error, _}}) -> {true, {{Key, Ctx}, Error}}
     end, lists:zip(Requests, Responses)).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for features to be fulfilled.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_features([{{key(), ctx()}, datastore_cache:future()}], reference(),
+    state()) -> {noreply, state()}.
 wait_features(Futures, Ref, State = #state{
     master_pid = MasterPid, cache_writer_pid = CacheWriterPid
 }) ->

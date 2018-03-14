@@ -325,7 +325,7 @@ get_db_max_params(Config, Defaults) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Gets expected value and limit for db flush queue.
+%% Gets expected value and limit for db flush queue parameter.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_flush_queue_params(Config :: list(), Defaults :: list()) ->

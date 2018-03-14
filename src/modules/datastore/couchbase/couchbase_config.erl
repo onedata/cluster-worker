@@ -13,7 +13,6 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get_hosts/0, get_buckets/0, get_flush_queue_size/0]).
@@ -64,9 +63,10 @@ get_buckets() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-
+%% Returns size of couchbase disk write queue.
 %% @end
 %%--------------------------------------------------------------------
+-spec get_flush_queue_size() -> non_neg_integer().
 get_flush_queue_size() ->
     DbHost = utils:random_element(get_hosts()),
     Buckets = get_buckets(),

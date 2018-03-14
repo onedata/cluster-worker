@@ -86,6 +86,7 @@ init_report() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Schedules request execution on a worker pool.
+%% @equiv post_async(Bucket, Mode, Request, self())
 %% @end
 %%--------------------------------------------------------------------
 -spec post_async(couchbase_config:bucket(), mode(), request()) ->
@@ -93,6 +94,13 @@ init_report() ->
 post_async(Bucket, Mode, Request) ->
     post_async(Bucket, Mode, Request, self()).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Schedules request execution on a worker pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec post_async(couchbase_config:bucket(), mode(), request(), pid()) ->
+    future().
 post_async(Bucket, Mode, Request, ResponseTo) ->
     Ref = make_ref(),
     Id = get_worker_id(Bucket, Mode),
@@ -248,27 +256,42 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
 %%% Internal functions
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns next worker ID.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_worker_id(couchbase_config:bucket(), mode()) ->
+    couchbase_pool_worker:id().
 get_worker_id(Bucket, write = Mode) ->
-    Key = {next_worker_id, Bucket, Mode},
-    Id = case ets:lookup(couchbase_pool_stats, Key) of
-        [{Key, ID}] -> ID;
-        _ -> 1
-    end,
+    Alg = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_pool_worker_algorithm, big_batch),
+    case Alg of
+        round_robin ->
+            get_next_worker_id(Bucket, Mode, 0);
+        _ ->
+            Key = {next_worker_id, Bucket, Mode},
+            Id = case ets:lookup(couchbase_pool_stats, Key) of
+                [{Key, ID}] -> ID;
+                _ -> 1
+            end,
 
-    WorkerKey = {request_queue_size, Bucket, Mode, Id},
-    Size = case ets:lookup(couchbase_pool_stats, WorkerKey) of
-        [{WorkerKey, S}] -> S;
-        _ -> 0
-    end,
+            WorkerKey = {request_queue_size, Bucket, Mode, Id},
+            Size = case ets:lookup(couchbase_pool_stats, WorkerKey) of
+                [{WorkerKey, S}] -> S;
+                _ -> 0
+            end,
 
-    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_batch_size, 1000),
-    case Size < MaxSize of
-        true -> Id;
-        _ -> get_next_worker_id(Bucket, Mode)
+            MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                couchbase_pool_batch_size, 1000),
+            case Size < MaxSize of
+                true -> Id;
+                _ -> get_next_worker_id(Bucket, Mode, 1)
+            end
     end;
 get_worker_id(Bucket, Mode) ->
-    get_next_worker_id(Bucket, Mode).
+    get_next_worker_id(Bucket, Mode, 0).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -276,13 +299,10 @@ get_worker_id(Bucket, Mode) ->
 %% Returns next worker ID.
 %% @end
 %%--------------------------------------------------------------------
--spec get_next_worker_id(couchbase_config:bucket(), mode()) ->
+-spec get_next_worker_id(couchbase_config:bucket(), mode(), non_neg_integer()) ->
     couchbase_pool_worker:id().
-get_next_worker_id(Bucket, write = Mode) ->
+get_next_worker_id(Bucket, Mode, StartNum) ->
     Key = {next_worker_id, Bucket, Mode},
     Size = get_size(Bucket, Mode),
-    ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 1});
-get_next_worker_id(Bucket, Mode) ->
-    Key = {next_worker_id, Bucket, Mode},
-    Size = get_size(Bucket, Mode),
-    ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1}, {Key, 0}).
+    ets:update_counter(couchbase_pool_stats, Key, {2, 1, Size, 1},
+        {Key, StartNum}).

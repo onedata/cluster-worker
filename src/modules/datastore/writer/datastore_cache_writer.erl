@@ -27,7 +27,7 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    keys_in_flush = #{},
+    keys_in_flush = #{} :: #{key() => reference()},
     keys_to_inactivate = #{} :: cached_keys(),
     keys_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
@@ -205,7 +205,7 @@ handle_info(flush, State = #state{
                         maps:put(K, Ref, Acc)
                     end, KiF, ToFlush),
 
-                    % TODO!!!!! pozbyc disk writera (na to ticket)!!!
+                    % TODO VFS-4221 - remove datastore_disc_writer
                     ToFlush2 = maps:map(fun
                         (_K, #{
                             disc_driver_ctx := DiscCtx

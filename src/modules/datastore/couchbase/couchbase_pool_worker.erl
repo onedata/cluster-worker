@@ -488,8 +488,6 @@ handle_request(Connection, {delete_design_doc, DesignName}, _) ->
 handle_request(Connection, {query_view, DesignName, ViewName, Opts}, _) ->
     couchbase_view:query(Connection, DesignName, ViewName, Opts).
 
-
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
