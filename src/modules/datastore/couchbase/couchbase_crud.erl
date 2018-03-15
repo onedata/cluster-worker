@@ -419,11 +419,16 @@ prepare_durable(Requests) ->
 wait_durable(_Connection, []) ->
     [];
 wait_durable(Connection, Requests) ->
-    case cberl:bulk_durability(Connection, Requests, {1, -1}, ?DUR_TIMEOUT) of
-        {ok, Responses} ->
-            Responses;
-        {error, Reason} ->
-            [{Key, {error, Reason}} || {Key, _} <- Requests]
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, wait_durable, false) of
+        true ->
+            case cberl:bulk_durability(Connection, Requests, {1, -1}, ?DUR_TIMEOUT) of
+                {ok, Responses} ->
+                    Responses;
+                {error, Reason} ->
+                    [{Key, {error, Reason}} || {Key, _} <- Requests]
+            end;
+        _ ->
+            lists:map(fun({Key, Cas}) -> {Key, {ok, Cas}} end, Requests)
     end.
 
 %%--------------------------------------------------------------------

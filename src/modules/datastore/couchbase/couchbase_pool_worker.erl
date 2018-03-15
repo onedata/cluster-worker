@@ -22,7 +22,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/4]).
+-export([start_link/5]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -62,9 +62,10 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(couchbase_config:bucket(), couchbase_pool:mode(), id(),
-    couchbase_driver:db_host()) -> {ok, pid()} | {error, term()}.
-start_link(Bucket, Mode, Id, DbHosts) ->
-    gen_server:start_link(?MODULE, [Bucket, Mode, Id, DbHosts], []).
+    couchbase_driver:db_host(), cberl_nif:client()) ->
+    {ok, pid()} | {error, term()}.
+start_link(Bucket, Mode, Id, DbHosts, Client) ->
+    gen_server:start_link(?MODULE, [Bucket, Mode, Id, DbHosts, Client], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -79,7 +80,7 @@ start_link(Bucket, Mode, Id, DbHosts) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Bucket, Mode, Id, DbHosts]) ->
+init([Bucket, Mode, Id, DbHosts, Client]) ->
     process_flag(trap_exit, true),
 
     Host = lists:foldl(fun(DbHost, Acc) ->
@@ -88,7 +89,10 @@ init([Bucket, Mode, Id, DbHosts]) ->
     Opts = get_connect_opts(),
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_config_total_timeout, timer:seconds(30)),
-    {ok, Connection} = cberl:connect(Host, <<>>, <<>>, Bucket, Opts, Timeout),
+    {ok, Connection} = case Client of
+        undefined -> cberl:connect(Host, <<>>, <<>>, Bucket, Opts, Timeout);
+        _ -> cberl:connect(Host, <<>>, <<>>, Bucket, Opts, Timeout, Client)
+    end,
 
     couchbase_pool:reset_request_queue_size(Bucket, Mode, Id),
     couchbase_pool_sup:register_worker(Bucket, Mode, Id, self()),
@@ -264,6 +268,9 @@ handle_requests(Requests, #state{} = State) ->
         connection = Connection
     } = State,
 
+    Delta = -length(Requests),
+    couchbase_pool:update_request_queue_size(Bucket, Mode, Id, Delta),
+
     RequestsBatch = batch_requests(Requests),
     ResponsesBatch = handle_requests_batch(Connection, RequestsBatch),
     lists:foreach(fun({Ref, From, Request}) ->
@@ -275,8 +282,7 @@ handle_requests(Requests, #state{} = State) ->
         From ! {Ref, Response}
     end, Requests),
 
-    Delta = -length(Requests),
-    couchbase_pool:update_request_queue_size(Bucket, Mode, Id, Delta).
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private

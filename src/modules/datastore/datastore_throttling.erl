@@ -32,7 +32,8 @@
 -define(MEMORY_PROC_IDLE_KEY, throttling_idle_time).
 -define(THROTTLING_ERROR, {error, load_to_high}).
 
--define(EXOMETER_COUNTERS, [tp, db_queue_max, db_queue_sum, tp_size_sum]).
+-define(EXOMETER_COUNTERS, [tp, db_queue_max, db_queue_sum,
+    db_flush_queue, tp_size_sum]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
 -define(EXOMETER_DEFAULT_LOGGING_INTERVAL, 60000).
@@ -137,8 +138,8 @@ configure_throttling() ->
     Self = self(),
     spawn(fun() ->
         CheckInterval = try
-            [TPNum, DBQueueMax, DBQueueSum, TPSizesSum, MemUsage] = Values =
-                get_values_and_update_counters(),
+            [TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage] =
+                Values = get_values_and_update_counters(),
             set_idle_time(TPNum),
 
             {ok, Configs} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_config),
@@ -158,13 +159,13 @@ configure_throttling() ->
             case FilteredConfigResult of
                 [] ->
                     log_monitoring_stats("No throttling: config: ~p, tp num ~p,
-                    db queue max ~p, db queue sum ~p, tp sizes sum ~p, mem usage ~p",
-                        [ConfigResult, TPNum, DBQueueMax, DBQueueSum, TPSizesSum, MemUsage]),
+                    db queue max ~p, flush queue ~p, db queue sum ~p, tp sizes sum ~p, mem usage ~p",
+                        [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage]),
                     plan_next_throttling_check();
                 _ ->
                     Msg = "Throttling config: ~p, tp num ~p, db queue max ~p,
-                    db queue sum ~p, tp sizes sum ~p, mem usage ~p",
-                    Args = [ConfigResult, TPNum, DBQueueMax, DBQueueSum, TPSizesSum, MemUsage],
+                    db queue sum ~p, flush queue ~p, tp sizes sum ~p, mem usage ~p",
+                    Args = [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage],
                     log_monitoring_stats(Msg, Args),
                     plan_next_throttling_check(true)
             end
@@ -172,7 +173,8 @@ configure_throttling() ->
             E1:E2 ->
                 % Debug log only, possible during start of the system when connection to
                 % database is not ready
-                log_monitoring_stats("Error during throttling configuration: ~p:~p", [E1, E2]),
+                log_monitoring_stats("Error during throttling configuration: "
+                    "~p:~p, ~p", [E1, E2, erlang:get_stacktrace()]),
                 plan_next_throttling_check()
         end,
         ?MODULE:send_after(CheckInterval, Self, {timer, configure_throttling})
@@ -203,13 +205,16 @@ plan_next_throttling_check() ->
 configure_throttling(Values, Config, DefaultConfig) ->
     TPMultip = get_config_value(tp_param_strength, Config, DefaultConfig),
     DBMaxMultip = get_config_value(db_max_param_strength, Config, DefaultConfig),
+    FlushQueueMultip = get_config_value(flush_queue_param_strength, Config, DefaultConfig),
     DBSumMultip = get_config_value(db_sum_param_strength, Config, DefaultConfig),
     TPSumMultip = get_config_value(tp_size_sum_param_strength, Config, DefaultConfig),
     MemMultip = get_config_value(mem_param_strength, Config, DefaultConfig),
-    Multipliers = [TPMultip, DBMaxMultip, DBSumMultip, TPSumMultip, MemMultip],
+    Multipliers = [TPMultip, DBMaxMultip, FlushQueueMultip, DBSumMultip,
+        TPSumMultip, MemMultip],
 
     GetFunctions = [fun get_tp_params/2, fun get_db_max_params/2,
-        fun get_db_sum_params/2, fun get_tp_sum_params/2, fun get_memory_params/2],
+        fun get_flush_queue_params/2, fun get_db_sum_params/2,
+        fun get_tp_sum_params/2, fun get_memory_params/2],
     Parameters = lists:zip(Multipliers, lists:zip(Values, GetFunctions)),
 
     {ThrottlingBase0, MaxRatio} = lists:foldl(fun
@@ -273,11 +278,13 @@ get_values_and_update_counters() ->
         {max(Max, M), Sum + S}
     end, {0, 0}, couchbase_config:get_buckets()),
     TPSizesSum = tp_router:get_process_size_sum(),
+    FlushQueue = couchbase_config:get_flush_queue_size(),
 
-    QueueSizeSum2 = QueueSizeSum + TPSizesSum,
+    QueueSizeSum2 = QueueSizeSum + TPSizesSum + FlushQueue,
 
     ok = ?update_counter(?EXOMETER_NAME(db_queue_max), QueueSizeMax),
     ok = ?update_counter(?EXOMETER_NAME(db_queue_sum), QueueSizeSum2),
+    ok = ?update_counter(?EXOMETER_NAME(db_flush_queue), QueueSizeSum2),
     ok = ?update_counter(?EXOMETER_NAME(tp_size_sum), TPSizesSum),
 
     MemoryUsage = case monitoring:get_memory_stats() of
@@ -285,7 +292,7 @@ get_values_and_update_counters() ->
             MemUsage
     end,
 
-    [ProcNum, QueueSizeMax, QueueSizeSum2, TPSizesSum, MemoryUsage].
+    [ProcNum, QueueSizeMax, FlushQueue, QueueSizeSum2, TPSizesSum, MemoryUsage].
 
 %%--------------------------------------------------------------------
 %% @private
@@ -312,6 +319,20 @@ get_tp_params(Config, Defaults) ->
 get_db_max_params(Config, Defaults) ->
     Expected = get_config_value(db_queue_max_expected, Config, Defaults),
     Limit = get_config_value(db_queue_max_limit, Config, Defaults),
+
+    {Expected, Limit}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets expected value and limit for db flush queue parameter.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_flush_queue_params(Config :: list(), Defaults :: list()) ->
+    {Expected :: non_neg_integer(), Limit :: non_neg_integer()}.
+get_flush_queue_params(Config, Defaults) ->
+    Expected = get_config_value(db_flush_queue_expected, Config, Defaults),
+    Limit = get_config_value(db_flush_queue_limit, Config, Defaults),
 
     {Expected, Limit}.
 

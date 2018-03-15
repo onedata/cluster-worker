@@ -70,10 +70,12 @@
             % - limit - requests are blocked when limit is reached,
             % - strength (higher strength results in higher delay when
             %       expected value is exceeded).
-            % There are 5 parameters:
+            % There are 6 parameters:
             % - tp_proc - max number of tp processes in tp subtree,
             % - db_queue_max - max number of documents in db queue,
+            % - flush_queue - number of documents in couchbase disk write queue,
             % - db_queue_sum - sum of numbers of documents in all db queue +
+            %       number of documents in couchbase disk write queue +
             %       number of documents waiting to be flushed in tp processes,
             % - tp_size - number of documents waiting to be flushed in tp processes,
             % - memory - memory usage in percent.
@@ -83,6 +85,7 @@
                     {strength, 20},
                     {tp_param_strength, 1},
                     {db_max_param_strength, 1},
+                    {flush_queue_param_strength, 0},
                     {db_sum_param_strength, 0},
                     {tp_size_sum_param_strength, 1},
                     {mem_param_strength, 0},
@@ -90,6 +93,8 @@
                     {tp_proc_limit, 40000},
                     {db_queue_max_expected, 4000},
                     {db_queue_max_limit, 40000},
+                    {db_flush_queue_expected, 100000},
+                    {db_flush_queue_limit, 500000},
                     {db_queue_sum_expected, 40000},
                     {db_queue_sum_limit, 100000},
                     {tp_size_sum_expected, 60000},
@@ -226,6 +231,17 @@
             {couchbase_changes_update_interval, 1000},
             {couchbase_changes_stream_batch_size, 200},
             {couchbase_changes_stream_update_interval, 1000},
+
+            % Scope of cberl instance: pool, mode, node
+            {cberl_instance_scope, mode},
+            % Algorithm of couchbase pool worker: big_batch (maximizes batch
+            % size) or round_robin
+            {couchbase_pool_worker_algorithm, big_batch},
+            % Should tp flush documents faster if possible
+            {tp_fast_flush, on},
+            % Should couchbase pool worker wait on documents durability during
+            % documents and seq numbers write
+            {wait_durable, false},
 
             %% ===================================================================
             %% EXOMETER

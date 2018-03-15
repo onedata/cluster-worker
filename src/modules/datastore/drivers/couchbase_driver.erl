@@ -24,7 +24,8 @@
                  pool_mode => couchbase_pool:mode(),
                  cas => cberl:cas(),
                  no_seq => boolean(),
-                 no_durability => boolean()}.
+                 no_durability => boolean(),
+                 answer_to => pid()}.
 -type key() :: datastore:key().
 -type value() :: datastore:doc() | cberl:value().
 -type item() :: {ctx(), key(), value()}.
@@ -63,9 +64,12 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec save_async(ctx(), key(), value()) -> couchbase_pool:future().
-save_async(#{bucket := Bucket} = Ctx, Key, Value) ->
+save_async(#{bucket := Bucket, answer_to := Pid} = Ctx, Key, Value) ->
     Mode = maps:get(pool_mode, Ctx, write),
-    couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Key, Value}).
+    couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Key, Value}, Pid);
+save_async(#{bucket := Bucket} = Ctx, Key, Value) ->
+  Mode = maps:get(pool_mode, Ctx, write),
+  couchbase_pool:post_async(Bucket, Mode, {save, Ctx, Key, Value}).
 
 %%--------------------------------------------------------------------
 %% @doc

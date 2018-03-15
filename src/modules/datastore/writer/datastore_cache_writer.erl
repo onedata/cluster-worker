@@ -27,6 +27,7 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
+    keys_in_flush = #{} :: #{key() => reference()},
     keys_to_inactivate = #{} :: cached_keys(),
     keys_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
@@ -140,26 +141,33 @@ handle_call(Request, _From, State = #state{}) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_cast({flushed, Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys,
-    requests_ref = Ref,
-    master_pid = Pid
+    requests_ref = CurrentRef,
+    master_pid = Pid,
+    keys_in_flush = KIF
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
+
+    KIF2 = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+        on ->
+            maps:filter(fun(_K, V) ->
+                V =/= Ref
+            end, KIF);
+        _ ->
+            #{}
+    end,
+
+    NewRef = case Ref of
+        CurrentRef -> undefined;
+        _ -> CurrentRef
+    end,
+
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
     {noreply, schedule_flush(check_inactivate(State#state{
         cached_keys_to_flush = NewKeys,
         flush_ref = undefined,
-        requests_ref = undefined
-    }))};
-handle_cast({flushed, _Ref, NotFlushed}, State = #state{
-    cached_keys_to_flush = CachedKeys,
-    master_pid = Pid
-}) ->
-    NewKeys = maps:merge(NotFlushed, CachedKeys),
-    tp_router:update_process_size(Pid, maps:size(NewKeys)),
-    {noreply, schedule_flush(check_inactivate(State#state{
-        cached_keys_to_flush = NewKeys,
-        flush_ref = undefined
-    }))};
+        requests_ref = NewRef,
+        keys_in_flush = KIF2
+    }), 0)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -177,11 +185,56 @@ handle_cast(Request, #state{} = State) ->
 handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,
+    keys_in_flush = KiF,
     cached_keys_to_flush = CachedKeys,
     keys_to_inactivate = ToInactivate
 }) ->
-    tp_router:delete_process_size(Pid),
-    gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
+    {NewCachedKeys, NewKiF} =
+        case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+        on ->
+            KiFKeys = maps:keys(KiF),
+            ToFlush = maps:without(KiFKeys, CachedKeys),
+
+            case maps:size(ToFlush) of
+                0 ->
+                    {CachedKeys, KiF};
+                _ ->
+                    Waiting = maps:with(KiFKeys, CachedKeys),
+
+                    KiF2 = maps:fold(fun(K, _V, Acc) ->
+                        maps:put(K, Ref, Acc)
+                    end, KiF, ToFlush),
+
+                    % TODO VFS-4221 - remove datastore_disc_writer
+                    ToFlush2 = maps:map(fun
+                        (_K, #{
+                            disc_driver_ctx := DiscCtx
+                        } = Ctx) ->
+                            maps:put(disc_driver_ctx,
+                                maps:put(answer_to, Pid, DiscCtx), Ctx);
+                        (_K, Ctx) ->
+                            Ctx
+                    end, ToFlush),
+
+                    case maps:size(Waiting) of
+                        0 ->
+                            tp_router:delete_process_size(Pid);
+                        Size ->
+                            tp_router:update_process_size(Pid, Size)
+                    end,
+
+                    Futures = datastore_disc_writer:flush_async(ToFlush2),
+                    gen_server:cast(Pid, {wait_flush, Ref, Futures}),
+                    {Waiting, KiF2}
+            end;
+        _ ->
+            tp_router:delete_process_size(Pid),
+            gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
+            KiF2 = maps:fold(fun(K, _V, Acc) ->
+                maps:put(K, Ref, Acc)
+            end, KiF, CachedKeys),
+            {#{}, KiF2}
+    end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
         on ->
@@ -191,7 +244,8 @@ handle_info(flush, State = #state{
     end,
 
     {noreply, State#state{
-        cached_keys_to_flush = #{},
+        cached_keys_to_flush = NewCachedKeys,
+        keys_in_flush = NewKiF,
         keys_to_inactivate = maps:merge(ToInactivate, CachedKeys)
     }};
 handle_info(Info, #state{} = State) ->
@@ -467,13 +521,29 @@ send_response({Pid, Ref, Responses}, Batch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_flush(state()) -> state().
-schedule_flush(State = #state{flush_ref = undefined}) ->
+schedule_flush(State) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
         timer:seconds(1)),
+    schedule_flush(State, Delay).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Schedules flush.
+%% @end
+%%--------------------------------------------------------------------
+-spec schedule_flush(state(), non_neg_integer()) -> state().
+schedule_flush(State = #state{flush_ref = undefined}, Delay) ->
     erlang:send_after(Delay, self(), flush),
     State#state{flush_ref = make_ref()};
-schedule_flush(State = #state{}) ->
-    State.
+schedule_flush(State = #state{}, Delay) ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+        on ->
+            erlang:send_after(Delay, self(), flush),
+            State#state{flush_ref = make_ref()};
+        _ ->
+            State
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -493,12 +563,13 @@ set_mutator_pid(Ctx) ->
 %%--------------------------------------------------------------------
 -spec check_inactivate(state()) -> state().
 check_inactivate(#state{
-  keys_to_inactivate = ToInactivate,
-  cached_keys_to_flush = CachedKeys,
-  keys_times = KeysTimes
+    keys_to_inactivate = ToInactivate,
+    cached_keys_to_flush = CachedKeys,
+    keys_in_flush = KiF,
+    keys_times = KeysTimes
 } = State) ->
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
-    Exclude = maps:keys(CachedKeys),
+    Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF),
     ToInactivate2 = maps:without(Exclude, ToInactivate),
     ExcludeMap = maps:with(Exclude, ToInactivate),
     case maps:size(ToInactivate) > Max of

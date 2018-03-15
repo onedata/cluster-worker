@@ -16,7 +16,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2]).
+-export([start_link/2, flush_async/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -75,29 +75,10 @@ init([MasterPid, CacheWriterPid]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call({flush, Ref, CachedKeys}, From, State = #state{
-    master_pid = MasterPid, cache_writer_pid = CacheWriterPid
-}) ->
+handle_call({flush, Ref, CachedKeys}, From, State) ->
     Futures = flush_async(CachedKeys),
     gen_server:reply(From, ok),
-    NotFlushedWithReason = wait_flushed(Futures),
-    case NotFlushedWithReason of
-        [] ->
-            gen_server:cast(MasterPid, {mark_disc_writer_idle, Ref});
-        _ ->
-            ok
-    end,
-    {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
-    gen_server:cast(CacheWriterPid, {flushed, Ref, maps:from_list(NotFlushed)}),
-
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
-        on ->
-            erlang:garbage_collect();
-        _ ->
-            ok
-    end,
-
-    {noreply, State};
+    wait_features(Futures, Ref, State);
 handle_call(terminate, _From, State) ->
     {stop, normal, ok, State};
 handle_call(Request, _From, State = #state{}) ->
@@ -114,6 +95,8 @@ handle_call(Request, _From, State = #state{}) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
+handle_cast({wait_flush, Ref, Futures}, State) ->
+    wait_features(Futures, Ref, State);
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -129,7 +112,8 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_info(Info, #state{} = State) ->
-    ?log_bad_request(Info),
+    self() ! Info,
+    ?debug("Datastore_disc_writer info ~p", [Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -193,3 +177,38 @@ wait_flushed(RequestFutures) ->
         ({_, {error, disc_driver_undefined}}) -> false;
         ({{Key, Ctx}, Error = {error, _}}) -> {true, {{Key, Ctx}, Error}}
     end, lists:zip(Requests, Responses)).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Waits for features to be fulfilled.
+%% @end
+%%--------------------------------------------------------------------
+-spec wait_features([{{key(), ctx()}, datastore_cache:future()}], reference(),
+    state()) -> {noreply, state()}.
+wait_features(Futures, Ref, State = #state{
+    master_pid = MasterPid, cache_writer_pid = CacheWriterPid
+}) ->
+    NotFlushedWithReason = wait_flushed(Futures),
+    case NotFlushedWithReason of
+        [] ->
+            gen_server:cast(MasterPid, {mark_disc_writer_idle, Ref});
+        _ ->
+            ok
+    end,
+    {NotFlushed, _} = lists:unzip(NotFlushedWithReason),
+    gen_server:cast(CacheWriterPid, {flushed, Ref, maps:from_list(NotFlushed)}),
+
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
+        on ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
+    receive
+        {wait_flush, Ref2, Futures2} ->
+            wait_features(Futures2, Ref2, State)
+        after 0 ->
+            {noreply, State}
+    end.
