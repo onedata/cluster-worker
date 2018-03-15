@@ -259,7 +259,7 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns next worker ID.
+%% Returns worker ID to be used by next operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker_id(couchbase_config:bucket(), mode()) ->
