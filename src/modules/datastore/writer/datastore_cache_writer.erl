@@ -190,7 +190,7 @@ handle_info(flush, State = #state{
     keys_to_inactivate = ToInactivate
 }) ->
     {NewCachedKeys, NewKiF} =
-        case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, off) of
+        case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             KiFKeys = maps:keys(KiF),
             ToFlush = maps:without(KiFKeys, CachedKeys),
