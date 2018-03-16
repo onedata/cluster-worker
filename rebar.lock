@@ -12,7 +12,7 @@
   0},
  {<<"cberl">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/cberl.git",
-       {ref,"16fa4833ce1bcb2e8d8abd7bdf61aa3bcbad1027"}},
+       {ref,"5e146a60eff43d10c55a374ad54a68260d5e8743"}},
   0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},3},
  {<<"cluster_manager">>,
