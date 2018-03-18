@@ -194,14 +194,16 @@ get_query_param({group_level, Level}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_views(term()) -> list().
-get_views([]) ->
-    [];
 get_views([Element | Tail]) ->
     get_views(Element) ++ get_views(Tail);
 get_views({Element}) ->
     get_views(Element);
 get_views({<<"views">>, {Views}}) ->
-    lists:map(fun({Name, _}) -> Name end, Views).
+    lists:map(fun({Name, _}) -> {Name, false} end, Views);
+get_views({<<"spatial">>, {Views}}) ->
+    lists:map(fun({Name, _}) -> {Name, true} end, Views);
+get_views(_) ->
+    [].
 
 %%--------------------------------------------------------------------
 %% @private
@@ -217,9 +219,9 @@ test_views(_Connection, _DesignName, _Views, 0, _SleepTime) ->
     {error, cannot_query_views};
 test_views(Connection, DesignName, Views, Repeats, SleepTime) ->
     timer:sleep(SleepTime),
-    Views2 = lists:foldl(fun(View, Acc) ->
-        case query(Connection, DesignName, View, [
-            {stale, false}, {key, <<"key">>}]) of
+    Views2 = lists:foldl(fun({Name, Spatial} = View, Acc) ->
+        case query(Connection, DesignName, Name, [
+            {stale, false}, {key, <<"key">>}, {spatial, Spatial}]) of
             {ok, _} -> Acc;
             _ -> [View | Acc]
         end
