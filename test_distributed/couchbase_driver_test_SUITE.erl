@@ -129,7 +129,7 @@ all() ->
 cberl_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 100},
-        {success_rate, 100},
+        {success_rate, 95},
         {parameters, [
             ?PERF_PARAM(ops_list, [store, store_durable, get, get_empty],
                 "", "List of operations on cberl"),
@@ -137,13 +137,20 @@ cberl_test(Config) ->
                 "Number of processes that execute each operation"),
             ?PERF_PARAM(batch_size, 100, "",
                 "Batch size (numer of docs/keys in each batch)"),
-            ?PERF_PARAM(repeats, 20, "", "List of operations on cberl")
+            ?PERF_PARAM(repeats, 20, "", "List of operations on cberl"),
+            ?PERF_PARAM(single_client, true, "", "Use one client for all connections")
         ]},
         {description, "Tests operations on cberl_nif"},
-        ?PERF_CFG(basic_config, [
-            [{name, proprocs_per_opc_num}, {value, 50}],
+        ?PERF_CFG(single_client, [
+            [{name, procs_per_op}, {value, 50}],
             [{name, batch_size}, {value, 1000}],
-            [{name, repeats}, {value, 20}]
+            [{name, repeats}, {value, 10}]
+        ]),
+        ?PERF_CFG(many_clients, [
+            [{name, procs_per_op}, {value, 1}],
+            [{name, batch_size}, {value, 1000}],
+            [{name, repeats}, {value, 20}],
+            [{name, single_client}, {value, false}]
         ])
     ]).
 cberl_test_base(Config) ->
@@ -151,10 +158,22 @@ cberl_test_base(Config) ->
     ProcsPerOperation = ?config(procs_per_op, Config),
     BatchSize = ?config(batch_size, Config),
     Repeats = ?config(repeats, Config),
+    SingleClient = ?config(single_client, Config),
 
-    Timeout = timer:seconds(120),
+    Timeout = timer:seconds(180),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Self = self(),
+
+    ClientPid = spawn(Worker, fun() ->
+        Cli = case SingleClient of
+            true ->
+                {ok, C} = cberl_nif:new(),
+                C;
+            _ ->
+                undefined
+        end,
+        client_proc(Cli)
+    end),
 
     Fun = fun(OperationType, ProcNum) ->
         spawn_link(Worker, fun() ->
@@ -166,7 +185,17 @@ cberl_test_base(Config) ->
                 Opts = get_connect_opts(),
                 [Bucket] = couchbase_config:get_buckets(),
 
-                {ok, Client} = cberl_nif:new(),
+                {ok, Client} = case SingleClient of
+                    false ->
+                        cberl_nif:new();
+                    _ ->
+                        ClientPid ! {get_client, self()},
+                        receive
+                            {client, Cli} ->
+                                {ok, Cli}
+                        end
+                end,
+
                 {ok, Ref} = cberl_nif:connect(
                     self(), Client, Host, <<>>, <<>>, Bucket, Opts
                 ),
@@ -239,7 +268,7 @@ cberl_test_base(Config) ->
                     end
                 end, 0, lists:seq(1, Repeats)),
 
-                Self ! {self(), Response2}
+                Self ! {self(), {ok, Response2}}
             catch
                 E1:E2 ->
                     Self ! {self(), {error, {E1, E2, erlang:get_stacktrace()}}}
@@ -255,7 +284,9 @@ cberl_test_base(Config) ->
 
     FinalAns0 = lists:foldl(fun({Pid, Op}, Acc) ->
         {ok, Ans} = receive
-            {Pid, A} -> {ok, A}
+            {Pid, A} ->
+                ?assertMatch({ok, _}, A),
+                A
         after
             5*Timeout -> {error, timeout}
         end,
@@ -266,48 +297,12 @@ cberl_test_base(Config) ->
     FinalAns = maps:map(fun(_K, V) -> V / Repeats/ ProcsPerOperation end, FinalAns0),
 
     ct:print("Avg batch times: ~p", [FinalAns]),
+    ClientPid ! stop,
 
     lists:foldl(fun({K, V}, Acc) ->
         [#parameter{name = K, value = V, unit = "us",
             description = "Time of operation"} | Acc]
     end, [], maps:to_list(FinalAns)).
-
-get_request(Num, store) ->
-    Key = ?KEY(Num),
-    Value = iolist_to_binary(jiffy:encode(datastore_json:encode(?DOC(Num)))),
-    {3, Key, Value, 1, 0, 0};
-get_request(Num, store_durable) ->
-    Key = ?DURABLE_KEY(Num),
-    Value = iolist_to_binary(jiffy:encode(datastore_json:encode(?DURABLE_DOC(Num)))),
-    {3, Key, Value, 1, 0, 0};
-get_request(Num, get) ->
-    Key = ?KEY(Num),
-    {Key, 0, false};
-get_request(Num, get_empty) ->
-    Key = ?EMPTY_KEY(Num),
-    {Key, 0, false}.
-
-map_to_cberl_req(store_durable) ->
-    store;
-map_to_cberl_req(get_empty) ->
-    get;
-map_to_cberl_req(R) ->
-    R.
-
-get_connect_opts() ->
-    lists:map(fun({OptName, EnvName, OptDefault}) ->
-        OptValue = application:get_env(
-            ?CLUSTER_WORKER_APP_NAME, EnvName, OptDefault
-        ),
-        {OptName, 1000 * OptValue}
-    end, [
-        {operation_timeout, couchbase_operation_timeout, timer:seconds(60)},
-        {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
-        {view_timeout, couchbase_view_timeout, timer:seconds(120)},
-        {durability_interval, couchbase_durability_interval, 500},
-        {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
-        {http_timeout, couchbase_http_timeout, timer:seconds(60)}
-    ]).
 
 save_should_return_doc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -638,3 +633,53 @@ get_buckets_should_return_all_buckets(Config) ->
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(Config).
+
+%%%===================================================================
+%%% Cberl test helper functions
+%%%===================================================================
+
+client_proc(Client) ->
+    receive
+        {get_client, Pid} ->
+            Pid ! {client, Client},
+            client_proc(Client);
+        stop ->
+            ok
+    end.
+
+get_request(Num, store) ->
+    Key = ?KEY(Num),
+    Value = iolist_to_binary(jiffy:encode(datastore_json:encode(?DOC(Num)))),
+    {3, Key, Value, 1, 0, 0};
+get_request(Num, store_durable) ->
+    Key = ?DURABLE_KEY(Num),
+    Value = iolist_to_binary(jiffy:encode(datastore_json:encode(?DURABLE_DOC(Num)))),
+    {3, Key, Value, 1, 0, 0};
+get_request(Num, get) ->
+    Key = ?KEY(Num),
+    {Key, 0, false};
+get_request(Num, get_empty) ->
+    Key = ?EMPTY_KEY(Num),
+    {Key, 0, false}.
+
+map_to_cberl_req(store_durable) ->
+    store;
+map_to_cberl_req(get_empty) ->
+    get;
+map_to_cberl_req(R) ->
+    R.
+
+get_connect_opts() ->
+    lists:map(fun({OptName, EnvName, OptDefault}) ->
+        OptValue = application:get_env(
+            ?CLUSTER_WORKER_APP_NAME, EnvName, OptDefault
+        ),
+        {OptName, 1000 * OptValue}
+    end, [
+        {operation_timeout, couchbase_operation_timeout, timer:seconds(60)},
+        {config_total_timeout, couchbase_config_total_timeout, timer:seconds(30)},
+        {view_timeout, couchbase_view_timeout, timer:seconds(120)},
+        {durability_interval, couchbase_durability_interval, 500},
+        {durability_timeout, couchbase_durability_timeout, timer:seconds(60)},
+        {http_timeout, couchbase_http_timeout, timer:seconds(60)}
+    ]).

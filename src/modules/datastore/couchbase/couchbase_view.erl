@@ -37,9 +37,17 @@ save_design_doc(Connection, DesignName, EJson) ->
     Path = <<"_design/", DesignName/binary>>,
     Body = jiffy:encode(EJson),
     ContentType = <<"application/json">>,
-    parse_design_doc_response(save,
+    Ans = parse_design_doc_response(save,
         cberl:http(Connection, view, put, Path, ContentType, Body, ?TIMEOUT)
-    ).
+    ),
+
+    case Ans of
+        ok ->
+            Views = get_views(EJson),
+            test_views(Connection, DesignName, Views, 5, 0);
+        _ ->
+            Ans
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -178,3 +186,44 @@ get_query_param({group, true}) -> <<"group=true">>;
 get_query_param({group, false}) -> <<"group=false">>;
 get_query_param({group_level, Level}) ->
     <<"group_level=", (integer_to_binary(Level))/binary>>.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Get views list from ejson.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_views(term()) -> list().
+get_views([Element | Tail]) ->
+    get_views(Element) ++ get_views(Tail);
+get_views({Element}) ->
+    get_views(Element);
+get_views({<<"views">>, {Views}}) ->
+    lists:map(fun({Name, _}) -> {Name, false} end, Views);
+get_views({<<"spatial">>, {Views}}) ->
+    lists:map(fun({Name, _}) -> {Name, true} end, Views);
+get_views(_) ->
+    [].
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tests if all views can be queried.
+%% @end
+%%--------------------------------------------------------------------
+-spec test_views(cberl:connection(), couchbase_driver:design(),
+    list(), non_neg_integer(), non_neg_integer()) -> ok | {error, term()}.
+test_views(_Connection, _DesignName, [], _Repeats, _SleepTime) ->
+    ok;
+test_views(_Connection, _DesignName, _Views, 0, _SleepTime) ->
+    {error, cannot_query_views};
+test_views(Connection, DesignName, Views, Repeats, SleepTime) ->
+    timer:sleep(SleepTime),
+    Views2 = lists:foldl(fun({Name, Spatial} = View, Acc) ->
+        case query(Connection, DesignName, Name, [
+            {stale, false}, {key, <<"key">>}, {spatial, Spatial}]) of
+            {error, {_, <<"view_undefined">>}} -> [View | Acc];
+            _ -> Acc
+        end
+    end, [], Views),
+    test_views(Connection, DesignName, Views2, Repeats - 1, SleepTime * 2 + 100).

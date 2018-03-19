@@ -95,23 +95,21 @@ init([]) ->
     Scope = application:get_env(?CLUSTER_WORKER_APP_NAME,
         cberl_instance_scope, mode),
 
-    Client0 = case Scope of
+    {ok, Client0} = case Scope of
         node ->
-            {ok, Cli0} = cberl_nif:new(),
-            Cli0;
+            cberl_nif:new();
         _ ->
-            undefined
+            {ok, undefined}
     end,
     DbHosts = couchbase_config:get_hosts(),
     {ok, {#{strategy => one_for_one, intensity => 5, period => 1},
         lists:foldl(fun(Bucket, Specs) ->
             lists:foldl(fun(Mode, Specs2) ->
-                Client = case Scope of
+                {ok, Client} = case Scope of
                     mode ->
-                        {ok, Cli} = cberl_nif:new(),
-                        Cli;
+                        cberl_nif:new();
                     _ ->
-                        Client0
+                        {ok, Client0}
                 end,
 
                 PoolSize = couchbase_pool:get_size(Bucket, Mode),
