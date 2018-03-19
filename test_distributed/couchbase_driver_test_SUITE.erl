@@ -138,19 +138,19 @@ cberl_test(Config) ->
             ?PERF_PARAM(batch_size, 100, "",
                 "Batch size (numer of docs/keys in each batch)"),
             ?PERF_PARAM(repeats, 20, "", "List of operations on cberl"),
-            ?PERF_PARAM(single_client, false, "", "Use one client for all connections")
+            ?PERF_PARAM(single_client, true, "", "Use one client for all connections")
         ]},
         {description, "Tests operations on cberl_nif"},
         ?PERF_CFG(single_client, [
             [{name, procs_per_op}, {value, 50}],
             [{name, batch_size}, {value, 1000}],
-            [{name, repeats}, {value, 20}],
-            [{name, single_client}, {value, true}]
+            [{name, repeats}, {value, 20}]
         ]),
         ?PERF_CFG(many_clients, [
-            [{name, procs_per_op}, {value, 5}],
+            [{name, procs_per_op}, {value, 1}],
             [{name, batch_size}, {value, 1000}],
-            [{name, repeats}, {value, 20}]
+            [{name, repeats}, {value, 20}],
+            [{name, single_client}, {value, false}]
         ])
     ]).
 cberl_test_base(Config) ->
