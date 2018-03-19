@@ -129,7 +129,7 @@ all() ->
 cberl_test(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 100},
-        {success_rate, 100},
+        {success_rate, 95},
         {parameters, [
             ?PERF_PARAM(ops_list, [store, store_durable, get, get_empty],
                 "", "List of operations on cberl"),
@@ -144,7 +144,7 @@ cberl_test(Config) ->
         ?PERF_CFG(single_client, [
             [{name, procs_per_op}, {value, 50}],
             [{name, batch_size}, {value, 1000}],
-            [{name, repeats}, {value, 20}]
+            [{name, repeats}, {value, 10}]
         ]),
         ?PERF_CFG(many_clients, [
             [{name, procs_per_op}, {value, 1}],
@@ -160,7 +160,7 @@ cberl_test_base(Config) ->
     Repeats = ?config(repeats, Config),
     SingleClient = ?config(single_client, Config),
 
-    Timeout = timer:seconds(120),
+    Timeout = timer:seconds(180),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Self = self(),
 
