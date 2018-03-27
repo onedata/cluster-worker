@@ -133,7 +133,7 @@ init([], _) ->
     {close, Reply :: binary(), state()}.
 websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) ->
     try
-        JSONMap = json_utils:decode_map(Data),
+        JSONMap = json_utils:decode(Data),
         {ok, DecodedRecord} = gs_protocol:decode(ProtoVer, JSONMap),
         handle_message(DecodedRecord, State)
     catch
@@ -173,7 +173,7 @@ websocket_info({init, CallerPid, SupportedVersions, PushCallback}, _, State) ->
         push_callback = PushCallback,
         handshake_status = {pending, Id, CallerPid}
     },
-    {reply, {text, json_utils:encode_map(JSONMap)}, NewState};
+    {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
 websocket_info({push, Data}, _, State) ->
     {reply, {text, Data}, State};
@@ -185,7 +185,7 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             NewState = State#state{
                 promises = maps:put(Id, Pid, State#state.promises)
             },
-            {reply, {text, json_utils:encode_map(JSONMap)}, NewState};
+            {reply, {text, json_utils:encode(JSONMap)}, NewState};
         {error, _} = Error ->
             ?error("Discarding GS request as it cannot be encoded: ~p", [Error]),
             Pid ! {response, Error},

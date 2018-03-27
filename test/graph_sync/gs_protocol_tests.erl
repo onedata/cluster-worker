@@ -529,8 +529,8 @@ encode_decode_message_test() ->
         fun(Request) ->
             {ok, Encoded} = gs_protocol:encode(1, Request),
             true = is_map(Encoded),
-            EncodedJSON = json_utils:encode_map(Encoded),
-            DecodedJSON = json_utils:decode_map(EncodedJSON),
+            EncodedJSON = json_utils:encode(Encoded),
+            DecodedJSON = json_utils:decode(EncodedJSON),
             {ok, Decoded} = gs_protocol:decode(1, DecodedJSON),
             ?assertEqual(Decoded, Request)
         end, RequestsToCheck),
@@ -602,8 +602,8 @@ encode_decode_error_test() ->
             }},
             {ok, Encoded} = gs_protocol:encode(1, WrappedError),
             true = is_map(Encoded),
-            EncodedJSON = json_utils:encode_map(Encoded),
-            DecodedJSON = json_utils:decode_map(EncodedJSON),
+            EncodedJSON = json_utils:encode(Encoded),
+            DecodedJSON = json_utils:decode(EncodedJSON),
             {ok, Decoded} = gs_protocol:decode(1, DecodedJSON),
             ?assertEqual(Decoded#gs_push.message#gs_push_error.error, Expected)
         end, ErrorsToCheck).
