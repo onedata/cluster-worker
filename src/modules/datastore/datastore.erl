@@ -39,7 +39,8 @@
                  disc_driver => disc_driver(),
                  disc_driver_ctx => disc_driver_ctx(),
                  remote_driver => remote_driver(),
-                 remote_driver_ctx => remote_driver_ctx()}.
+                 remote_driver_ctx => remote_driver_ctx(),
+                 include_deleted => boolean()}.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
 -type disc_driver() :: undefined | couchbase_driver.
