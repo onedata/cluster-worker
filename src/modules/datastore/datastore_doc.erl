@@ -160,6 +160,7 @@ update(Ctx, Key, Diff, Default, Batch) ->
 -spec get(ctx(), key()) -> {ok, doc(value())} | {error, term()}.
 get(#{include_deleted := true} = Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
+        {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
         {error, not_found} -> datastore_writer:fetch(Ctx, Key);
         {error, Reason} -> {error, Reason}
@@ -193,7 +194,12 @@ exists(Ctx, Key) ->
 -spec fetch(ctx(), key(), undefined | batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 fetch(#{include_deleted := true} = Ctx, Key, Batch) ->
-    fetch_deleted(Ctx, Key, Batch);
+    case fetch_deleted(Ctx, Key, Batch) of
+        {{ok, #document{value = undefined, deleted = true}}, Batch2} ->
+            {{error, not_found}, Batch2};
+        {Result, Batch2} ->
+            {Result, Batch2}
+    end;
 fetch(Ctx, Key, Batch) ->
     case fetch_deleted(Ctx, Key, Batch) of
         {{ok, #document{deleted = true}}, Batch2} ->
