@@ -339,7 +339,7 @@ init([]) ->
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
-		{ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+        {ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
         erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
@@ -464,12 +464,17 @@ handle_cast(force_check_tasks, State) ->
     spawn(task_manager, check_and_rerun_all, []),
     {noreply, State};
 
-handle_cast(do_heartbeat, State) ->
+handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
     Self = self(),
     spawn(fun() ->
         {NewMonState, NewLSA} = do_heartbeat(State),
         gen_server2:cast(?NODE_MANAGER_NAME, {heartbeat_state_update, {NewMonState, NewLSA}}),
-        {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
+        {ok, Interval} = case Status of
+            registered ->
+                application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_registered_interval);
+            _ ->
+                application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval)
+        end,
         erlang:send_after(Interval, Self, {timer, do_heartbeat})
     end),
     {noreply, State};

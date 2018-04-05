@@ -136,49 +136,64 @@ get_idle_timeout() ->
 -spec configure_throttling() -> ok.
 configure_throttling() ->
     Self = self(),
-    spawn(fun() ->
-        CheckInterval = try
-            [TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage] =
-                Values = get_values_and_update_counters(),
-            set_idle_time(TPNum),
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, spawn_throttling_config, false) of
+        true ->
+            spawn(fun() ->
+                configure_throttling(Self)
+            end);
+        _ ->
+            configure_throttling(Self)
+    end,
+    ok.
 
-            {ok, Configs} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_config),
-            DefaultConfig = proplists:get_value(default, Configs),
-            ConfigResult = lists:foldl(fun({ConfigName, Config}, Acc) ->
-                [{ConfigName, configure_throttling(Values, Config, DefaultConfig)} | Acc]
-            end, [], Configs),
+%%--------------------------------------------------------------------
+%% @doc
+%% Configures throttling settings.
+%% @end
+%%--------------------------------------------------------------------
+-spec configure_throttling(pid()) -> ok.
+configure_throttling(SendTo) ->
+    CheckInterval = try
+        [TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage] =
+            Values = get_values_and_update_counters(),
+        set_idle_time(TPNum),
 
-            application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-                ConfigResult),
+        {ok, Configs} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_config),
+        DefaultConfig = proplists:get_value(default, Configs),
+        ConfigResult = lists:foldl(fun({ConfigName, Config}, Acc) ->
+            [{ConfigName, configure_throttling(Values, Config, DefaultConfig)} | Acc]
+        end, [], Configs),
 
-            FilteredConfigResult = lists:filter(fun
-                ({_, ok}) -> false;
-                (_) -> true
-            end, ConfigResult),
+        application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
+            ConfigResult),
 
-            case FilteredConfigResult of
-                [] ->
-                    log_monitoring_stats("No throttling: config: ~p, tp num ~p,
+        FilteredConfigResult = lists:filter(fun
+            ({_, ok}) -> false;
+            (_) -> true
+        end, ConfigResult),
+
+        case FilteredConfigResult of
+            [] ->
+                log_monitoring_stats("No throttling: config: ~p, tp num ~p,
                     db queue max ~p, flush queue ~p, db queue sum ~p, tp sizes sum ~p, mem usage ~p",
-                        [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage]),
-                    plan_next_throttling_check();
-                _ ->
-                    Msg = "Throttling config: ~p, tp num ~p, db queue max ~p,
+                    [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage]),
+                plan_next_throttling_check();
+            _ ->
+                Msg = "Throttling config: ~p, tp num ~p, db queue max ~p,
                     db queue sum ~p, flush queue ~p, tp sizes sum ~p, mem usage ~p",
-                    Args = [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage],
-                    log_monitoring_stats(Msg, Args),
-                    plan_next_throttling_check(true)
-            end
-        catch
-            E1:E2 ->
-                % Debug log only, possible during start of the system when connection to
-                % database is not ready
-                log_monitoring_stats("Error during throttling configuration: "
-                    "~p:~p, ~p", [E1, E2, erlang:get_stacktrace()]),
-                plan_next_throttling_check()
-        end,
-        ?MODULE:send_after(CheckInterval, Self, {timer, configure_throttling})
-    end),
+                Args = [ConfigResult, TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage],
+                log_monitoring_stats(Msg, Args),
+                plan_next_throttling_check(true)
+        end
+    catch
+        E1:E2 ->
+            % Debug log only, possible during start of the system when connection to
+            % database is not ready
+            log_monitoring_stats("Error during throttling configuration: "
+            "~p:~p, ~p", [E1, E2, erlang:get_stacktrace()]),
+            plan_next_throttling_check()
+    end,
+    ?MODULE:send_after(CheckInterval, SendTo, {timer, configure_throttling}),
     ok.
 
 %%--------------------------------------------------------------------
