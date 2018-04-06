@@ -463,11 +463,14 @@ delete_all_links(Ctx, Key, ok) ->
         {ok, Trees} ->
             maps:fold(fun
                 (TreeId, Links, ok) ->
-                    Deleted = case maps:find(local_links_tree_id, Ctx) of
-                        {ok, LocalTreeId} when LocalTreeId == TreeId ->
+                    Deleted = case {maps:find(local_links_tree_id, Ctx),
+                        maps:find(sync_enabled, Ctx)} of
+                        {{ok, LocalTreeId}, _} when LocalTreeId == TreeId ->
                             delete_links(Ctx, Key, TreeId, Links);
+                        {_, {ok, true}} ->
+                            mark_links_deleted(Ctx, Key, TreeId, Links);
                         _ ->
-                            mark_links_deleted(Ctx, Key, TreeId, Links)
+                            delete_links(Ctx, Key, TreeId, Links)
                     end,
                     Deleted2 = lists:filter(fun
                         ({error, _}) -> true;
