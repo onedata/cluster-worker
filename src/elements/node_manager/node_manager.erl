@@ -376,9 +376,15 @@ init([]) ->
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
 
-handle_call(healthcheck, _From, #state{cm_con_status = registered} = State) ->
+handle_call(healthcheck, _From,
+    #state{cm_con_status = registered, initialized = true} = State) ->
     {reply, ok, State};
 handle_call(healthcheck, _From, State) ->
+    {reply, out_of_sync, State};
+
+handle_call(internal_healthcheck, _From, #state{cm_con_status = registered} = State) ->
+    {reply, ok, State};
+handle_call(internal_healthcheck, _From, State) ->
     {reply, out_of_sync, State};
 
 handle_call(disable_task_control, _From, State) ->
@@ -489,7 +495,7 @@ handle_cast(check_cluster_status, State) ->
     spawn(fun() ->
         {ok, Timeout} = application:get_env(
             ?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
-        Status = case nagios_handler:get_cluster_status(Timeout) of
+        Status = case nagios_handler:get_cluster_status(Timeout, internal_healthcheck) of
             {ok, {_AppName, ok, _NodeStatuses}} ->
                 ok;
             {ok, {_AppName, GenericError, NodeStatuses}}  ->

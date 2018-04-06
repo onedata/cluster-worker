@@ -21,7 +21,7 @@
 -include_lib("ctool/include/global_definitions.hrl").
 
 -export([init/2]).
--export([get_cluster_status/1, check_listener/1]).
+-export([get_cluster_status/1, get_cluster_status/2, check_listener/1]).
 
 -export_type([healthcheck_response/0]).
 
@@ -118,9 +118,20 @@ init(Req, State) ->
     {ok, NewReq, State}.
 
 
-%% ====================================================================
-%% Internal Functions
-%% ====================================================================
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv get_cluster_status(Timeout, healthcheck)
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
+    Status :: healthcheck_response(),
+    ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
+    {node(), Status, [
+    {ModuleName :: module(), Status}
+    ]}
+    ]}.
+get_cluster_status(Timeout) ->
+    get_cluster_status(Timeout, healthcheck).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -146,20 +157,22 @@ init(Req, State) ->
 %% If cluster manager cannot be contacted, the function returns 'error' atom.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
+-spec get_cluster_status(Timeout :: integer(),
+    NodeManagerCheck :: healthcheck | internal_healthcheck) ->
+    error | {ok, ClusterStatus} when
     Status :: healthcheck_response(),
     ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
     {node(), Status, [
     {ModuleName :: module(), Status}
     ]}
     ]}.
-get_cluster_status(Timeout) ->
+get_cluster_status(Timeout, NodeManagerCheck) ->
     case check_cm(Timeout) of
         error ->
             error;
         Nodes ->
             try
-                NodeManagerStatuses = check_node_managers(Nodes, Timeout),
+                NodeManagerStatuses = check_node_managers(Nodes, Timeout, NodeManagerCheck),
                 DispatcherStatuses = check_dispatchers(Nodes, Timeout),
                 Workers = lists:foldl(fun(Name, Acc) ->
                     case request_dispatcher:get_worker_nodes(Name) of
@@ -182,6 +195,9 @@ get_cluster_status(Timeout) ->
             end
     end.
 
+%% ====================================================================
+%% Internal Functions
+%% ====================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -276,13 +292,15 @@ check_cm(Timeout) ->
 %% Contacts node managers on given nodes for healthcheck. The check is performed in parallel (one proces per node).
 %% @end
 %%--------------------------------------------------------------------
--spec check_node_managers(Nodes :: [atom()], Timeout :: integer()) -> [healthcheck_response()].
-check_node_managers(Nodes, Timeout) ->
+-spec check_node_managers(Nodes :: [atom()], Timeout :: integer(),
+    NodeManagerCheck :: healthcheck | internal_healthcheck) ->
+    [healthcheck_response()].
+check_node_managers(Nodes, Timeout, NodeManagerCheck) ->
     utils:pmap(
         fun(Node) ->
             Result =
                 try
-                    Ans = gen_server2:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout),
+                    Ans = gen_server2:call({?NODE_MANAGER_NAME, Node}, NodeManagerCheck, Timeout),
                     ?LOG("Healthcheck: node manager ~p, ans: ~p",
                         [Node, Ans]),
                     Ans
