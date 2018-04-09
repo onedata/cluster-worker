@@ -15,7 +15,7 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2]).
 
 %% tests
 -export([
@@ -388,6 +388,9 @@ init_per_testcase(_, Config) ->
     application:set_env(cluster_worker, tp_subtrees_number, 10),
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
     Config.
+
+end_per_suite(_Config) ->
+    ok.
 
 %%%===================================================================
 %%% Internal functions
