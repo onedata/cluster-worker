@@ -127,7 +127,7 @@ websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
             {gs_protocol:generate_error_push_message(Error), State}
     end,
     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
-    {reply, {text, json_utils:encode_map(JSONMap)}, NewState};
+    {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
 websocket_handle({text, Data}, State) ->
     #state{session_id = SessionId, protocol_version = ProtocolVersion} = State,
@@ -140,7 +140,7 @@ websocket_handle({text, Data}, State) ->
         {error, _} = Error ->
             ErrorMsg = gs_protocol:generate_error_push_message(Error),
             {ok, ErrorJSONMap} = gs_protocol:encode(ProtocolVersion, ErrorMsg),
-            {reply, {text, json_utils:encode_map(ErrorJSONMap)}, State}
+            {reply, {text, json_utils:encode(ErrorJSONMap)}, State}
     end;
 
 websocket_handle(pong, State) ->
@@ -175,7 +175,7 @@ websocket_info(keepalive, State) ->
 websocket_info({push, Msg}, #state{protocol_version = ProtoVer} = State) ->
     try
         {ok, JSONMap} = gs_protocol:encode(ProtoVer, Msg),
-        {reply, {text, json_utils:encode_map(JSONMap)}, State}
+        {reply, {text, json_utils:encode(JSONMap)}, State}
     catch
         Type:Message ->
             ?error_stacktrace(
@@ -284,7 +284,7 @@ process_request_async(SessionId, Request) ->
     {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | gs_protocol:error().
 decode_body(ProtocolVersion, Data) ->
     try
-        case json_utils:decode_map(Data) of
+        case json_utils:decode(Data) of
             #{<<"batch">> := BatchList} ->
                 {ok, lists:map(fun(JSONMap) ->
                     {ok, Request} = gs_protocol:decode(ProtocolVersion, JSONMap),
