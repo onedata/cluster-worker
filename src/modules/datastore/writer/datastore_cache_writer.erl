@@ -144,17 +144,25 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     cached_keys_to_flush = CachedKeys,
     requests_ref = CurrentRef,
     master_pid = Pid,
-    keys_in_flush = KIF
+    keys_in_flush = KIF,
+    flush_times = FT
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
-    KIF2 = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+    {KIF2, FT2} = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
-            maps:filter(fun(_K, V) ->
+            Filtered = maps:filter(fun(_K, V) ->
                 V =/= Ref
-            end, KIF);
+            end, KIF),
+
+            Timestamp = os:timestamp(),
+            NewFT = maps:fold(fun(K, _V, Acc) ->
+                maps:put(K, Timestamp, Acc)
+            end, FT, maps:without(maps:keys(Filtered), KIF)),
+
+            {Filtered, NewFT};
         _ ->
-            #{}
+            {#{}, #{}}
     end,
 
     NewRef = case Ref of
@@ -167,7 +175,8 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         cached_keys_to_flush = NewKeys,
         flush_ref = undefined,
         requests_ref = NewRef,
-        keys_in_flush = KIF2
+        keys_in_flush = KIF2,
+        flush_times = FT2
     }), 0)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
