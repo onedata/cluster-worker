@@ -53,12 +53,13 @@
 %%% Macros for creation exometer counters' names
 %%%===================================================================
 
--define(exometer_name(Module, Name), [mod, Module, Name]).
+-define(exometer_name(Module, Name), 
+  ?exometer_name(Module, none, Name)).
 
 -define(exometer_name(Module, Submodule, Name),
-  [mod, Module, submod, Submodule, Name]).
+  ?exometer_name(0, Module, none, Name)).
 
--define(exometer_name(Module, Submodule, Thread, Name),
+-define(exometer_name(Thread, Module, Submodule, Name),
   [thread, Thread, mod, Module, submod, Submodule, Name]).
 
 -endif.

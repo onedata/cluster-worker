@@ -57,9 +57,9 @@ couchbase_batch_verification_test_() ->
 check_timeout_should_return_ok_for_empty_list() ->
     ?assertEqual(ok, couchbase_batch:check_timeout([], test, 0)),
 
-    ?assertEqual(undefined, get({[mod, couchbase_batch, times], reset})),
-    ?assertEqual(undefined, get({[mod, couchbase_batch, sizes], reset})),
-    ?assertEqual(undefined, get([mod, couchbase_batch, sizes_config])).
+    ?assertEqual(undefined, get({[thread, 0, mod, couchbase_batch, submod, none, times], reset})),
+    ?assertEqual(undefined, get({[thread, 0, mod, couchbase_batch, submod, none, sizes], reset})),
+    ?assertEqual(undefined, get([thread, 0, mod, couchbase_batch, submod, none, sizes_config])).
 
 check_timeout_should_return_ok_for_list_without_error() ->
     ?assertEqual(ok, couchbase_batch:check_timeout(
@@ -82,41 +82,41 @@ decrease_batch_size_should_change_size() ->
     ?assertEqual(25, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)),
 
-    ?assertEqual(ok, get({[mod, couchbase_batch, times], reset})),
-    ?assertEqual(ok, get({[mod, couchbase_batch, sizes], reset})).
-%    ?assertEqual([25], get([mod, couchbase_batch, sizes_config])).
+    ?assertEqual(ok, get({[thread, 0, mod, couchbase_batch, submod, none, times], reset})),
+    ?assertEqual(ok, get({[thread, 0, mod, couchbase_batch, submod, none, sizes], reset})).
+%    ?assertEqual([25], get([thread, 0, mod, couchbase_batch, submod, none, sizes_config])).
 
 batch_size_should_be_increased() ->
-    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 0}]} ),
-    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, timeouts], [count]}, {ok, [{count, 0}]} ),
+    put({[thread, 0, mod, couchbase_batch, submod, none, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(500, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
 batch_size_should_not_be_increased_for_timeout() ->
-    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 1}]} ),
-    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, timeouts], [count]}, {ok, [{count, 1}]} ),
+    put({[thread, 0, mod, couchbase_batch, submod, none, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, times], [max, mean]}, {ok, [{mean, 1500}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, timeout, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
 batch_size_should_not_be_increased_for_high_execution_time() ->
-    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 0}]} ),
-    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 1500}, {max, 15000}, {n, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, timeouts], [count]}, {ok, [{count, 0}]} ),
+    put({[thread, 0, mod, couchbase_batch, submod, none, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, times], [max, mean]}, {ok, [{mean, 1500}, {max, 15000}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(100, application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_batch_size, undefined)).
 
 batch_size_should_not_be_increased_over_max_batch_size() ->
-    put({[mod, couchbase_batch, timeouts], [count]}, {ok, [{count, 0}]} ),
-    put({[mod, couchbase_batch, sizes], [mean]}, {ok, [{mean, 50}]}),
-    put({[mod, couchbase_batch, times], [max, mean]}, {ok, [{mean, 150}, {max, 1500}, {n, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, timeouts], [count]}, {ok, [{count, 0}]} ),
+    put({[thread, 0, mod, couchbase_batch, submod, none, sizes], [mean]}, {ok, [{mean, 50}]}),
+    put({[thread, 0, mod, couchbase_batch, submod, none, times], [max, mean]}, {ok, [{mean, 150}, {max, 1500}, {n, 50}]}),
     ?assertEqual(ok, couchbase_batch:verify_batch_size_increase(get_response_map(100),
         [4, 50, 1, 5], [ok, ok, ok, ok])),
     ?assertEqual(2000, application:get_env(?CLUSTER_WORKER_APP_NAME,
