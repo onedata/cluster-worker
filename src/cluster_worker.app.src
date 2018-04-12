@@ -240,6 +240,12 @@
             % Should couchbase pool worker wait on documents durability during
             % documents and seq numbers write
             {wait_durable, false},
+            % Min number of seconds to wait between flushes
+            {flush_key_cooldown_sek, 3},
+            % Time before key inactivation
+            {tp_active_mem_sek, 5},
+            % Max keys in tp memory
+            {max_key_tp_mem, 100},
 
             %% ===================================================================
             %% EXOMETER

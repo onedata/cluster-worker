@@ -200,7 +200,7 @@ handle_info(flush, State = #state{
     keys_to_inactivate = ToInactivate,
     flush_times = FT
 }) ->
-    {NewCachedKeys, NewKiF, NewFT} =
+    {NewCachedKeys, NewKiF, NewFT, Schedule} =
         case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             KiFKeys = maps:keys(KiF),
@@ -216,9 +216,11 @@ handle_info(flush, State = #state{
                 timer:now_diff(Now, FlushTime) > CooldownUS
             end, ToFlush0),
 
-            case maps:size(ToFlush) of
-                0 ->
-                    {CachedKeys, KiF, FT};
+            case {maps:size(ToFlush), maps:size(ToFlush0)} of
+                {0, 0} ->
+                    {CachedKeys, KiF, FT, false};
+                {0, _} ->
+                    {CachedKeys, KiF, FT, true};
                 _ ->
                     Waiting = maps:without(maps:keys(ToFlush), CachedKeys),
 
@@ -252,7 +254,7 @@ handle_info(flush, State = #state{
                         maps:put(K, Timestamp, Acc)
                     end, FT, ToFlush2),
 
-                    {Waiting, KiF2, FT2}
+                    {Waiting, KiF2, FT2, false}
             end;
         _ ->
             tp_router:delete_process_size(Pid),
@@ -261,7 +263,7 @@ handle_info(flush, State = #state{
                 maps:put(K, Ref, Acc)
             end, KiF, CachedKeys),
 
-            {#{}, KiF2, #{}}
+            {#{}, KiF2, #{}, false}
     end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
@@ -271,12 +273,19 @@ handle_info(flush, State = #state{
             ok
     end,
 
-    {noreply, State#state{
+    State2 = State#state{
         cached_keys_to_flush = NewCachedKeys,
         keys_in_flush = NewKiF,
         keys_to_inactivate = maps:merge(ToInactivate, CachedKeys),
         flush_times = NewFT
-    }};
+    },
+
+    State3 = case Schedule of
+        true -> schedule_flush(State2);
+        _ -> State2
+    end,
+
+    {noreply, State3};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.

@@ -13,6 +13,7 @@
 -author("Krzysztof Trzepla").
 
 -include("datastore_test_utils.hrl").
+-include("global_definitions.hrl").
 
 %% export for ct
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
@@ -133,8 +134,11 @@ datastore_writer_should_retry_cache_flush(Config) ->
         ?CTX, ?KEY, test_call, [{flush_error, 1}]
     ]),
 
+    {ok, Cooldown} = test_utils:get_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+        flush_key_cooldown_sek),
+
     ?assertReceivedEqual({not_flushed, 1}, 2 * FlushDelay),
-    ?assertReceivedEqual({not_flushed, 1}, 2 * FlushDelay),
+    ?assertReceivedEqual({not_flushed, 1}, 2 * FlushDelay + timer:seconds(Cooldown)),
     {ok, Pid} = ?assertMatch({ok, _}, rpc:call(Worker, tp_router, get, [?KEY])),
     exit(Pid, kill).
 
