@@ -30,6 +30,7 @@
     keys_in_flush = #{} :: #{key() => reference()},
     keys_to_inactivate = #{} :: cached_keys(),
     keys_times = #{} :: #{key() => erlang:timestamp()},
+    flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
     flush_ref = undefined :: undefined | reference()
 }).
@@ -187,19 +188,30 @@ handle_info(flush, State = #state{
     requests_ref = Ref,
     keys_in_flush = KiF,
     cached_keys_to_flush = CachedKeys,
-    keys_to_inactivate = ToInactivate
+    keys_to_inactivate = ToInactivate,
+    flush_times = FT
 }) ->
-    {NewCachedKeys, NewKiF} =
+    {NewCachedKeys, NewKiF, NewFT} =
         case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             KiFKeys = maps:keys(KiF),
-            ToFlush = maps:without(KiFKeys, CachedKeys),
+            ToFlush0 = maps:without(KiFKeys, CachedKeys),
+
+            Cooldown = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                flush_key_cooldown_sek, 3),
+            CooldownUS = timer:seconds(Cooldown) * 1000,
+
+            Now = os:timestamp(),
+            ToFlush = maps:filter(fun(K, _V) ->
+                FlushTime = maps:get(K, FT, {0,0,0}),
+                timer:now_diff(Now, FlushTime) > CooldownUS
+            end, ToFlush0),
 
             case maps:size(ToFlush) of
                 0 ->
-                    {CachedKeys, KiF};
+                    {CachedKeys, KiF, FT};
                 _ ->
-                    Waiting = maps:with(KiFKeys, CachedKeys),
+                    Waiting = maps:without(maps:keys(ToFlush), CachedKeys),
 
                     KiF2 = maps:fold(fun(K, _V, Acc) ->
                         maps:put(K, Ref, Acc)
@@ -225,7 +237,13 @@ handle_info(flush, State = #state{
 
                     Futures = datastore_disc_writer:flush_async(ToFlush2),
                     gen_server:cast(Pid, {wait_flush, Ref, Futures}),
-                    {Waiting, KiF2}
+
+                    Timestamp = os:timestamp(),
+                    FT2 = maps:fold(fun(K, _V, Acc) ->
+                        maps:put(K, Timestamp, Acc)
+                    end, FT, ToFlush2),
+
+                    {Waiting, KiF2, FT2}
             end;
         _ ->
             tp_router:delete_process_size(Pid),
@@ -233,7 +251,8 @@ handle_info(flush, State = #state{
             KiF2 = maps:fold(fun(K, _V, Acc) ->
                 maps:put(K, Ref, Acc)
             end, KiF, CachedKeys),
-            {#{}, KiF2}
+
+            {#{}, KiF2, #{}}
     end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
@@ -246,7 +265,8 @@ handle_info(flush, State = #state{
     {noreply, State#state{
         cached_keys_to_flush = NewCachedKeys,
         keys_in_flush = NewKiF,
-        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys)
+        keys_to_inactivate = maps:merge(ToInactivate, CachedKeys),
+        flush_times = NewFT
     }};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
@@ -566,7 +586,8 @@ check_inactivate(#state{
     keys_to_inactivate = ToInactivate,
     cached_keys_to_flush = CachedKeys,
     keys_in_flush = KiF,
-    keys_times = KeysTimes
+    keys_times = KeysTimes,
+    flush_times = FT
 } = State) ->
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
     Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF),
@@ -575,10 +596,12 @@ check_inactivate(#state{
     case maps:size(ToInactivate) > Max of
         true ->
             datastore_cache:inactivate(ToInactivate2),
-            State#state{keys_to_inactivate = ExcludeMap};
+            State#state{keys_to_inactivate = ExcludeMap,
+                keys_times = maps:with(Exclude, KeysTimes),
+                flush_times = maps:with(Exclude, FT)};
         _ ->
             MaxTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                tp_active_mem_sek, 1),
+                tp_active_mem_sek, 5),
             MaxTimeUS = timer:seconds(MaxTime) * 1000,
             Now = os:timestamp(),
 
@@ -589,5 +612,9 @@ check_inactivate(#state{
 
             ExcludeMap2 = maps:without(maps:keys(ToInactivate3), ToInactivate2),
             datastore_cache:inactivate(ToInactivate3),
-            State#state{keys_to_inactivate = maps:merge(ExcludeMap, ExcludeMap2)}
+            NewToInactivate = maps:merge(ExcludeMap, ExcludeMap2),
+            NewToInactivateKeys = maps:keys(NewToInactivate),
+            State#state{keys_to_inactivate = NewToInactivate,
+                keys_times = maps:with(NewToInactivateKeys, KeysTimes),
+                flush_times = maps:with(NewToInactivateKeys, FT)}
     end.
