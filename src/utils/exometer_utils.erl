@@ -48,11 +48,11 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec init_counters([{Param :: list(), Type :: atom(),
-    TimeSpan :: non_neg_integer()} | {Param :: list(), Type :: atom()}]) -> ok.
+    Options:: proplists:proplist()} | {Param :: list(), Type :: atom()}]) -> ok.
 init_counters([]) ->
   ok;
-init_counters([{Param, Type, TimeSpan} | Tail]) ->
-  init_counter(Param, Type, TimeSpan),
+init_counters([{Param, Type, Options} | Tail]) ->
+  init_counter(Param, Type, Options),
   init_counters(Tail);
 init_counters([{Param, Type} | Tail]) ->
   init_counter(Param, Type),
@@ -262,14 +262,13 @@ extend_counter_name(Name) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init_counter(Param :: list(), Type :: atom(),
-    TimeSpan :: non_neg_integer()) -> ok.
-init_counter(Param, Type, TimeSpan) ->
+    Options :: proplists:proplist()) -> ok.
+init_counter(Param, Type, Options) ->
   case is_counter_excluded(Param) of
     true ->
       exometer:delete(extend_counter_name(Param));
     _ ->
-      catch exometer:new(extend_counter_name(Param), Type,
-        [{time_span, TimeSpan}])
+      catch exometer:new(extend_counter_name(Param), Type, Options)
   end,
   ok.
 

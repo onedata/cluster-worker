@@ -47,7 +47,7 @@
 -export_type([mode/0, request/0, response/0, future/0]).
 
 -define(EXOMETER_NAME(Bucket, Mode),  ?exometer_name(?MODULE, Bucket, Mode)).
--define(EXOMETER_DEFAULT_TIME_SPAN, 10000).
+-define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
 
 %%%===================================================================
 %%% API
@@ -60,11 +60,11 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        exometer_pool_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
+        exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
     Counters = lists:foldl(fun(Bucket, Acc1) ->
         lists:foldl(fun(Mode, Acc2) ->
-            [{?EXOMETER_NAME(Bucket, Mode), histogram, TimeSpan} | Acc2]
+            [{?EXOMETER_NAME(Bucket, Mode), uniform, [{size, Size}]} | Acc2]
         end, Acc1, get_modes())
     end, [], couchbase_config:get_buckets()),
     ?init_counters(Counters).
