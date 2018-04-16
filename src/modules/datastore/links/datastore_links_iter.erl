@@ -14,6 +14,7 @@
 
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([init/3, init/4, terminate/1]).
@@ -51,8 +52,10 @@
                     {prev_tree_id, tree_id()} |
                     {prev_link_name, link_name()} |
                     {offset, non_neg_integer()} |
-                    {size, non_neg_integer()}.
+                    {size, non_neg_integer()} |
+                    {token, token()}.
 -type fold_opts() :: maps:map([fold_opt()]).
+-type token() :: #link_token{}.
 
 -export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0]).
 
@@ -158,12 +161,26 @@ fold(Fun, Acc, ForestIt, Opts) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fold(ctx(), key(), all | tree_id(), fold_fun(), fold_acc(),
-    fold_opts()) -> {ok, fold_acc()} | {error, term()}.
+    fold_opts()) -> Result | {Result, token()}
+    when Result :: {ok, fold_acc()} | {error, term()}.
+fold(_Ctx, _Key, _TreeId, Fun, Acc, #{token := Token} = Opts)
+    when Token#link_token.forest =/= undefined ->
+    ForestIt = Token#link_token.forest,
+    {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt, Opts),
+    IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
+    {Ans, #link_token{forest = ForestIt2, is_last = IsLast}};
 fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
     case init(Ctx, Key, TreeId, datastore_doc_batch:init()) of
         {ok, ForestIt} ->
-            {Result, _} = fold(Fun, Acc, ForestIt, Opts),
-            Result;
+            {Result, ForestIt2} = fold(Fun, Acc, ForestIt, Opts),
+            case maps:get(token, Opts, undefined) of
+                undefined ->
+                    Result;
+                _ ->
+                    IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
+                    Token = #link_token{forest = ForestIt2, is_last = IsLast},
+                    {Result, Token}
+            end;
         {{error, Reason}, _Batch} ->
             {error, Reason}
     end.
@@ -277,6 +294,7 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
         [#link{tree_id = TreeId, name = Name, target = Target, rev = Rev} | Acc]
     end,
     {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch),
+
     {Result, Tree3} = case bp_tree:fold(FoldInit, Fun, [], Tree) of
         {{ok, {Links, NodeId}}, Tree2} ->
             {{ok, #tree_it{

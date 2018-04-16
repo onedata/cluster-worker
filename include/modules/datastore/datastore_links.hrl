@@ -46,4 +46,9 @@
     tails :: #{links_tree:id() => datastore:key()}
 }).
 
+-record(link_token, {
+    forest,
+    is_last = false :: boolean()
+}).
+
 -endif.
