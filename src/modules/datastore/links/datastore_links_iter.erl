@@ -18,7 +18,7 @@
 
 %% API
 -export([init/3, init/4, terminate/1]).
--export([get/2, fold/4, fold/6]).
+-export([get/2, fold/4, fold/6, fold/7]).
 
 -record(tree_it, {
     links = [] :: [link()],
@@ -157,32 +157,54 @@ fold(Fun, Acc, ForestIt, Opts) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates links forest tree iterator and calls {@link fold/4}.
+%% Calls {@link fold/6} and deletes forest iterator from answer.
 %% @end
 %%--------------------------------------------------------------------
 -spec fold(ctx(), key(), all | tree_id(), fold_fun(), fold_acc(),
     fold_opts()) -> Result | {Result, token()}
     when Result :: {ok, fold_acc()} | {error, term()}.
-fold(_Ctx, _Key, _TreeId, Fun, Acc, #{token := Token} = Opts)
+fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
+    {Result, _ForestIt} = fold(Ctx, Key, TreeId, Fun, Acc, Opts,
+        datastore_doc_batch:init()),
+    Result.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates links forest tree iterator and calls {@link fold/4}.
+%% @end
+%%--------------------------------------------------------------------
+-spec fold(ctx(), key(), all | tree_id(), fold_fun(), fold_acc(),
+    fold_opts(), datastore_doc_batch:batch()) ->
+    {Result | {Result, token()}, forest_it()}
+    when Result :: {ok, fold_acc()} | {error, term()}.
+fold(Ctx, Key, TreeId, Fun, Acc, #{token := Token} = Opts, InitBatch)
     when Token#link_token.forest =/= undefined ->
     ForestIt = Token#link_token.forest,
     {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt, Opts),
-    IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
-    {Ans, #link_token{forest = ForestIt2, is_last = IsLast}};
-fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
-    case init(Ctx, Key, TreeId, datastore_doc_batch:init()) of
+
+    case Ans of
+        {ok, _} ->
+            IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
+            {{Ans, #link_token{forest = ForestIt2, is_last = IsLast}}, ForestIt2};
+        Error ->
+            ?warning("Cannot fold links for args ~p by token: ~p",
+                [{Ctx, Key, TreeId, Opts}, Error]),
+            fold(Ctx, Key, TreeId, Fun, Acc, Opts#{token := #link_token{}}, InitBatch)
+    end;
+fold(Ctx, Key, TreeId, Fun, Acc, Opts, InitBatch) ->
+    case init(Ctx, Key, TreeId, InitBatch) of
         {ok, ForestIt} ->
-            {Result, ForestIt2} = fold(Fun, Acc, ForestIt, Opts),
+            {Result, ForestIt2} = Ans = fold(Fun, Acc, ForestIt, Opts),
             case maps:get(token, Opts, undefined) of
                 undefined ->
-                    Result;
+                    Ans;
                 _ ->
                     IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
                     Token = #link_token{forest = ForestIt2, is_last = IsLast},
-                    {Result, Token}
+                    {{Result, Token}, ForestIt2}
             end;
-        {{error, Reason}, _Batch} ->
-            {error, Reason}
+        Other ->
+            Other
     end.
 
 %%%===================================================================

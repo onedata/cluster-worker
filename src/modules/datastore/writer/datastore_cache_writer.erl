@@ -402,9 +402,14 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch) ->
 batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
-            links_forest_apply(Ctx, Key, TreeIds, Batch3, fun(ForestIt) ->
-                datastore_links:get(LinkName, ForestIt)
-            end)
+            Ctx2 = set_mutator_pid(Ctx),
+            case datastore_links_iter:init(Ctx2, Key, TreeIds, Batch3) of
+                {ok, ForestIt} ->
+                    {Result, ForestIt2} = datastore_links:get(LinkName, ForestIt),
+                    {Result, datastore_links_iter:terminate(ForestIt2)};
+                {{error, Reason}, ForestIt} ->
+                    {{error, Reason}, datastore_links_iter:terminate(ForestIt)}
+            end
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
@@ -428,9 +433,10 @@ batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch) ->
     end, {[], Batch}, Links);
 batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch) ->
     batch_apply(Batch, fun(Batch2) ->
-        links_forest_apply(Ctx, Key, TreeIds, Batch2, fun(ForestIt) ->
-            datastore_links:fold(Fun, Acc, ForestIt, Opts)
-        end)
+        Ctx2 = set_mutator_pid(Ctx),
+        {Result, ForestIt} = datastore_links_iter:fold(Ctx2, Key, TreeIds,
+            Fun, Acc, Opts, Batch2),
+        {Result, datastore_links_iter:terminate(ForestIt)}
     end);
 batch_request({fetch_links_trees, [Ctx, Key]}, Batch) ->
     batch_apply(Batch, fun(Batch2) ->
@@ -493,24 +499,6 @@ links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
         {{error, Reason}, Mask} ->
             {_, Batch2} = datastore_links_mask:terminate(Mask),
             {{error, Reason}, Batch2}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Applies request on a links tree forest.
-%% @end
-%%--------------------------------------------------------------------
--spec links_forest_apply(ctx(), key(), tree_ids(), batch(),
-    fun((forest_it()) -> {term(), forest_it()})) -> {term(), batch()}.
-links_forest_apply(Ctx, Key, TreeIds, Batch, Fun) ->
-    Ctx2 = set_mutator_pid(Ctx),
-    case datastore_links_iter:init(Ctx2, Key, TreeIds, Batch) of
-        {ok, ForestIt} ->
-            {Result, ForestIt2} = Fun(ForestIt),
-            {Result, datastore_links_iter:terminate(ForestIt2)};
-        {{error, Reason}, ForestIt} ->
-            {{error, Reason}, datastore_links_iter:terminate(ForestIt)}
     end.
 
 %%--------------------------------------------------------------------

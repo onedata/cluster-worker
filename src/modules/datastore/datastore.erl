@@ -236,7 +236,8 @@ mark_links_deleted(Ctx, Key, TreeId, Links) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fold_links(ctx(), key(), tree_ids(), fold_fun(link()), fold_acc(),
-    fold_opts()) -> {ok, fold_acc()} | {error, term()}.
+    fold_opts()) -> {ok, fold_acc()} |
+    {{ok, fold_acc()}, datastore_links_iter:token()} | {error, term()}.
 fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
     datastore_hooks:wrap(Ctx, fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts],
         fun(Function, Args) ->

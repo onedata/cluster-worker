@@ -41,6 +41,7 @@
     delete_links_should_ignore_missing_links/1,
     mark_links_deleted_should_succeed/1,
     fold_links_should_succeed/1,
+    fold_links_token_should_succeed/1,
     get_links_trees_should_return_all_trees/1
 ]).
 
@@ -68,6 +69,7 @@ all() ->
         delete_links_should_ignore_missing_links,
         mark_links_deleted_should_succeed,
         fold_links_should_succeed,
+        fold_links_token_should_succeed,
         get_links_trees_should_return_all_trees
     ]).
 
@@ -356,6 +358,40 @@ fold_links_should_succeed(Config) ->
             ?assertEqual(Target, Link#link.target)
         end, lists:zip(ExpectedLinks2, lists:reverse(Links)))
     end, ?TEST_MODELS).
+
+fold_links_token_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        LinksNum = 1000,
+        ExpectedLinks = lists:map(fun(N) ->
+            {?LINK_NAME(N), ?LINK_TARGET(N)}
+        end, lists:seq(1, LinksNum)),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID, ExpectedLinks
+        ])),
+        ExpectedLinks2 = lists:sort(ExpectedLinks),
+        Links = fold_links_token(?KEY, Worker, Model,
+            #{token => #link_token{}, size => 100}),
+        lists:foreach(fun({{Name, Target}, Link = #link{}}) ->
+            ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
+            ?assertEqual(Name, Link#link.name),
+            ?assertEqual(Target, Link#link.target)
+        end, lists:zip(ExpectedLinks2, Links))
+    end, ?TEST_MODELS).
+
+fold_links_token(Key, Worker, Model, Opts) ->
+    {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, Model, fold_links,
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], Opts]
+    )),
+    Reversed = lists:reverse(Links),
+    case Token#link_token.is_last of
+        true ->
+            Reversed;
+        _ ->
+            ct:print("xxxxx"),
+            Opts2 = Opts#{token => Token},
+            Reversed ++ fold_links_token(Key, Worker, Model, Opts2)
+    end.
 
 get_links_trees_should_return_all_trees(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
