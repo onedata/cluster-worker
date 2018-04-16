@@ -294,7 +294,6 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
         [#link{tree_id = TreeId, name = Name, target = Target, rev = Rev} | Acc]
     end,
     {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch),
-
     {Result, Tree3} = case bp_tree:fold(FoldInit, Fun, [], Tree) of
         {{ok, {Links, NodeId}}, Tree2} ->
             {{ok, #tree_it{
