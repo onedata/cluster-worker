@@ -32,7 +32,8 @@
     keys_times = #{} :: #{key() => erlang:timestamp()},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
-    flush_ref = undefined :: undefined | reference()
+    flush_ref = undefined :: undefined | reference(),
+    link_tokens = #{} :: datastore_doc_batch:cached_token_map()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -329,12 +330,17 @@ code_change(_OldVsn, State, _Extra) ->
 handle_requests(Requests, State = #state{
     cached_keys_to_flush = CachedKeys,
     keys_times = KeysTimes,
-    master_pid = Pid
+    master_pid = Pid,
+    link_tokens = LT
 }) ->
-    Batch = datastore_doc_batch:init(),
+    Batch0 = datastore_doc_batch:init(),
+    Batch = datastore_doc_batch:set_link_tokens(Batch0, LT),
     {Responses, Batch2} = batch_requests(Requests, [], Batch),
     Batch3 = datastore_doc_batch:apply(Batch2),
     Batch4 = send_responses(Responses, Batch3),
+
+    LT2 = datastore_doc_batch:get_link_tokens(Batch4),
+
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
@@ -344,7 +350,8 @@ handle_requests(Requests, State = #state{
     Times = maps:map(fun(_K, _V) -> Timestamp end, NewKeys),
     KeysTimes2 = maps:merge(KeysTimes, Times),
 
-    State#state{cached_keys_to_flush = NewKeys, keys_times = KeysTimes2}.
+    State#state{cached_keys_to_flush = NewKeys, keys_times = KeysTimes2,
+        link_tokens = LT2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -434,9 +441,44 @@ batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch) ->
 batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch) ->
     batch_apply(Batch, fun(Batch2) ->
         Ctx2 = set_mutator_pid(Ctx),
+        CacheToken = application:get_env(?CLUSTER_WORKER_APP_NAME,
+            cache_fold_token, true),
+
+        Opts2 = case CacheToken of
+            true ->
+                case maps:get(token, Opts, undefined) of
+                    undefined ->
+                        Opts;
+                    OriginalToken ->
+                        CachedToken = datastore_doc_batch:get_link_token(
+                            Batch2, OriginalToken),
+                        maps:put(token, CachedToken, Opts)
+                end;
+            _ ->
+                Opts
+        end,
+
         {Result, ForestIt} = datastore_links_iter:fold(Ctx2, Key, TreeIds,
-            Fun, Acc, Opts, Batch2),
-        {Result, datastore_links_iter:terminate(ForestIt)}
+            Fun, Acc, Opts2, Batch2),
+
+        Batch3 = datastore_links_iter:terminate(ForestIt),
+        {Result2, Batch4} = case CacheToken of
+            true ->
+                case maps:get(token, Opts, undefined) of
+                    undefined ->
+                        {Result, Batch3};
+                    OldToken ->
+                        {Result0, Token} = Result,
+                        {NewToken, NewBatch} =
+                            datastore_doc_batch:set_link_token(Batch3, Token,
+                                OldToken),
+                        {{Result0, NewToken}, NewBatch}
+                end;
+            _ ->
+                {Result, Batch3}
+        end,
+
+        {Result2, Batch4}
     end);
 batch_request({fetch_links_trees, [Ctx, Key]}, Batch) ->
     batch_apply(Batch, fun(Batch2) ->
@@ -593,13 +635,16 @@ check_inactivate(#state{
     cached_keys_to_flush = CachedKeys,
     keys_in_flush = KiF,
     keys_times = KeysTimes,
-    flush_times = FT
+    flush_times = FT,
+    link_tokens = LT
 } = State) ->
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
     Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF),
     ToInactivate2 = maps:without(Exclude, ToInactivate),
     ExcludeMap = maps:with(Exclude, ToInactivate),
-    case maps:size(ToInactivate) > Max of
+    Now = os:timestamp(),
+
+    State2 = case maps:size(ToInactivate) > Max of
         true ->
             datastore_cache:inactivate(ToInactivate2),
             State#state{keys_to_inactivate = ExcludeMap,
@@ -609,7 +654,6 @@ check_inactivate(#state{
             MaxTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 tp_active_mem_sek, 5),
             MaxTimeUS = timer:seconds(MaxTime) * 1000,
-            Now = os:timestamp(),
 
             ToInactivate3 = maps:filter(fun(K, _V) ->
                 KeyTime = maps:get(K, KeysTimes, {0,0,0}),
@@ -623,4 +667,13 @@ check_inactivate(#state{
             State#state{keys_to_inactivate = NewToInactivate,
                 keys_times = maps:with(NewToInactivateKeys, KeysTimes),
                 flush_times = maps:with(NewToInactivateKeys, FT)}
-    end.
+    end,
+
+    MaxLinkTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        fold_cache_timeout, timer:seconds(30)),
+    MaxLinkTimeUS = MaxLinkTime * 1000,
+    LT2 = maps:filter(fun(_K, {_, Time}) ->
+        timer:now_diff(Now, Time) =< MaxLinkTimeUS
+    end, LT),
+
+    State2#state{link_tokens = LT2}.

@@ -388,7 +388,6 @@ fold_links_token(Key, Worker, Model, Opts) ->
         true ->
             Reversed;
         _ ->
-            ct:print("xxxxx"),
             Opts2 = Opts#{token => Token},
             Reversed ++ fold_links_token(Key, Worker, Model, Opts2)
     end.

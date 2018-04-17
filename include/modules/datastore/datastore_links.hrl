@@ -47,7 +47,8 @@
 }).
 
 -record(link_token, {
-    forest,
+    restart_token :: undefined | datastore_links_iter:forest_it() |
+        {cached_token, reference()},
     is_last = false :: boolean()
 }).
 

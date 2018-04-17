@@ -178,14 +178,14 @@ fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
     {Result | {Result, token()}, forest_it()}
     when Result :: {ok, fold_acc()} | {error, term()}.
 fold(Ctx, Key, TreeId, Fun, Acc, #{token := Token} = Opts, InitBatch)
-    when Token#link_token.forest =/= undefined ->
-    ForestIt = Token#link_token.forest,
+    when Token#link_token.restart_token =/= undefined ->
+    ForestIt = Token#link_token.restart_token,
     {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt, Opts),
 
     case Ans of
         {ok, _} ->
             IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
-            {{Ans, #link_token{forest = ForestIt2, is_last = IsLast}}, ForestIt2};
+            {{Ans, #link_token{restart_token = ForestIt2, is_last = IsLast}}, ForestIt2};
         Error ->
             ?warning("Cannot fold links for args ~p by token: ~p",
                 [{Ctx, Key, TreeId, Opts}, Error]),
@@ -200,7 +200,7 @@ fold(Ctx, Key, TreeId, Fun, Acc, Opts, InitBatch) ->
                     Ans;
                 _ ->
                     IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
-                    Token = #link_token{forest = ForestIt2, is_last = IsLast},
+                    Token = #link_token{restart_token = ForestIt2, is_last = IsLast},
                     {{Result, Token}, ForestIt2}
             end;
         Other ->
