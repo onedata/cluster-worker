@@ -180,7 +180,8 @@ fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
 fold(Ctx, Key, TreeId, Fun, Acc, #{token := Token} = Opts, InitBatch)
     when Token#link_token.restart_token =/= undefined ->
     ForestIt = Token#link_token.restart_token,
-    {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt, Opts),
+    {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt,
+        maps:remove(offset, Opts)),
 
     case Ans of
         {ok, _} ->
