@@ -44,7 +44,9 @@
     fold_links_should_succeed/1,
     fold_links_token_should_succeed/1,
     get_links_trees_should_return_all_trees/1,
-    fold_links_token_should_succeed_after_token_timeout/1
+    fold_links_token_should_succeed_after_token_timeout/1,
+    links_performance/1,
+    links_performance_base/1
 ]).
 
 all() ->
@@ -73,13 +75,19 @@ all() ->
         fold_links_should_succeed,
         fold_links_token_should_succeed,
         get_links_trees_should_return_all_trees,
-        fold_links_token_should_succeed_after_token_timeout
+        fold_links_token_should_succeed_after_token_timeout,
+        links_performance
+    ], [
+        links_performance
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
 -define(DOC(Key, Model), ?BASE_DOC(Key, ?MODEL_VALUE(Model))).
 
 -define(ATTEMPTS, 30).
+
+-define(REPEATS, 3).
+-define(SUCCESS_RATE, 100).
 
 %%%===================================================================
 %%% Test functions
@@ -424,6 +432,102 @@ get_links_trees_should_return_all_trees(Config) ->
         end, TreeIds)
     end, ?TEST_MODELS).
 
+links_performance(Config) ->
+    ?PERFORMANCE(Config, [
+        {repeats, ?REPEATS},
+        {success_rate, ?SUCCESS_RATE},
+        {parameters, [
+            [{name, links_num}, {value, 10000}, {description, "Number of links listed during the test."}]
+        ]},
+        {description, "Lists large number of links"},
+        {config, [{name, small},
+            {parameters, [
+                [{name, links_num}, {value, 5000}]
+            ]},
+            {description, "Small number of links"}
+        ]},
+        {config, [{name, medium},
+            {parameters, [
+                [{name, links_num}, {value, 20000}]
+            ]},
+            {description, "Medium number of links"}
+        ]},
+        {config, [{name, big},
+            {parameters, [
+                [{name, links_num}, {value, 50000}]
+            ]},
+            {description, "High number of links"}
+        ]},
+        {config, [{name, large},
+            {parameters, [
+                [{name, links_num}, {value, 100000}]
+            ]},
+            {description, "Very high number of links"}
+        ]}
+    ]).
+links_performance_base(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_only_model,
+    LinksNum = ?config(links_num, Config),
+
+    ExpectedLinks = lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum)),
+    ExpectedLinkNames = lists:map(fun(N) ->
+        ?LINK_NAME(N)
+    end, lists:seq(1, LinksNum)),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, ExpectedLinks
+    ])),
+
+    % Init tp
+    ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
+    )),
+
+    T0 = os:timestamp(),
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+    )),
+    T1 = os:timestamp(),
+    ?assertEqual(LinksNum, length(Links)),
+
+    T2 = os:timestamp(),
+    Links2 = fold_links_offset(?KEY, Worker, Model,
+        #{size => 100, offset => 0}, LinksNum),
+    T3 = os:timestamp(),
+    ?assertEqual(LinksNum, length(Links2)),
+
+    T4 = os:timestamp(),
+    Links3 = fold_links_offset(?KEY, Worker, Model,
+        #{size => 2000, offset => 0}, LinksNum),
+    T5 = os:timestamp(),
+    ?assertEqual(LinksNum, length(Links3)),
+
+    T6 = os:timestamp(),
+    Links4 = fold_links_token(?KEY, Worker, Model,
+        #{size => 100, offset => 0, token => #link_token{}}),
+    T7 = os:timestamp(),
+    ?assertEqual(LinksNum, length(Links4)),
+
+    T8 = os:timestamp(),
+    Links5 = fold_links_token(?KEY, Worker, Model,
+        #{size => 2000, offset => 0, token => #link_token{}}),
+    T9 = os:timestamp(),
+    ?assertEqual(LinksNum, length(Links5)),
+
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        ?KEY, ?LINK_TREE_ID, ExpectedLinkNames
+    ])),
+
+    TimeDiff1 = timer:now_diff(T1, T0),
+    TimeDiff2 = timer:now_diff(T3, T2),
+    TimeDiff3 = timer:now_diff(T5, T4),
+    TimeDiff4 = timer:now_diff(T7, T6),
+    TimeDiff5 = timer:now_diff(T9, T8),
+    ct:print("Results: ~p",
+        [{TimeDiff1, TimeDiff2, TimeDiff3, TimeDiff4, TimeDiff5}]).
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -517,4 +621,19 @@ fold_links_token_sleep(Key, Worker, Model, Opts) ->
             Opts2 = Opts#{token => Token, offset => Offset + length(Reversed)},
             timer:sleep(timer:seconds(10)),
             Reversed ++ fold_links_token_sleep(Key, Worker, Model, Opts2)
+    end.
+
+fold_links_offset(Key, Worker, Model, Opts, ExpectedSize) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], Opts]
+    )),
+    LinksLength = length(Links),
+    case LinksLength >= ExpectedSize of
+        true ->
+            Links;
+        _ ->
+            Offset = maps:get(offset, Opts),
+            Opts2 = Opts#{offset => Offset + LinksLength},
+            Links ++ fold_links_offset(Key, Worker, Model, Opts2,
+                ExpectedSize - LinksLength)
     end.
