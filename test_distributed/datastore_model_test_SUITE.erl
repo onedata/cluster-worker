@@ -470,55 +470,65 @@ links_performance_base(Config) ->
     Model = ets_only_model,
     LinksNum = ?config(links_num, Config),
 
+    KeyNum = case get(key_num) of
+        undefined ->
+            0;
+        N ->
+            N
+    end,
+    put(key_num, KeyNum + 1),
+    Key = ?KEY(KeyNum),
+
     ExpectedLinks = lists:map(fun(N) ->
         {?LINK_NAME(N), ?LINK_TARGET(N)}
     end, lists:seq(1, LinksNum)),
-    ExpectedLinkNames = lists:map(fun(N) ->
-        ?LINK_NAME(N)
-    end, lists:seq(1, LinksNum)),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-        ?KEY, ?LINK_TREE_ID, ExpectedLinks
+        Key, ?LINK_TREE_ID, ExpectedLinks
     ])),
 
     % Init tp
     ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
-        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
     )),
 
     T0 = os:timestamp(),
     {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
-        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
     )),
     T1 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links)),
 
     T2 = os:timestamp(),
-    Links2 = fold_links_offset(?KEY, Worker, Model,
+    Links2 = fold_links_offset(Key, Worker, Model,
         #{size => 100, offset => 0}, LinksNum),
     T3 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links2)),
 
     T4 = os:timestamp(),
-    Links3 = fold_links_offset(?KEY, Worker, Model,
+    Links3 = fold_links_offset(Key, Worker, Model,
         #{size => 2000, offset => 0}, LinksNum),
     T5 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links3)),
 
     T6 = os:timestamp(),
-    Links4 = fold_links_token(?KEY, Worker, Model,
+    Links4 = fold_links_token(Key, Worker, Model,
         #{size => 100, offset => 0, token => #link_token{}}),
     T7 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links4)),
 
     T8 = os:timestamp(),
-    Links5 = fold_links_token(?KEY, Worker, Model,
+    Links5 = fold_links_token(Key, Worker, Model,
         #{size => 2000, offset => 0, token => #link_token{}}),
     T9 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links5)),
 
-    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-        ?KEY, ?LINK_TREE_ID, ExpectedLinkNames
-    ])),
+    % TODO - delete performance
+%%    ExpectedLinkNames = lists:map(fun(N) ->
+%%        ?LINK_NAME(N)
+%%    end, lists:seq(1, LinksNum)),
+%%    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+%%        Key, ?LINK_TREE_ID, ExpectedLinkNames
+%%    ])),
 
     TimeDiff1 = timer:now_diff(T1, T0),
     TimeDiff2 = timer:now_diff(T3, T2),
