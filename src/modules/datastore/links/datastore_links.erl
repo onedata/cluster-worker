@@ -193,7 +193,8 @@ mark_deleted(LinkName, LinkRev, Mask) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fold(fold_fun(), fold_acc(), forest_it(), fold_opts()) ->
-    {{ok, fold_acc()} | {error, term()}, forest_it()}.
+    {{ok, fold_acc()} | {{ok, fold_acc()}, datastore_links_iter:token()} |
+    {error, term()}, forest_it()}.
 fold(Fun, Acc, ForestIt, Opts) ->
     datastore_links_iter:fold(Fun, Acc, ForestIt, Opts).
 

@@ -31,7 +31,9 @@
     tree_fold_should_return_targets_limited_by_size/1,
     tree_fold_should_return_targets_from_offset_and_limited_by_size/1,
     multi_tree_fold_should_return_all_targets/1,
-    multi_tree_fold_should_return_targets_from_link/1
+    multi_tree_fold_should_return_targets_from_offset_and_limited_by_size/1,
+    multi_tree_fold_should_return_targets_from_link/1,
+    multi_tree_fold_should_return_targets_with_token/1
 ]).
 
 all() ->
@@ -48,7 +50,9 @@ all() ->
         tree_fold_should_return_targets_limited_by_size,
         tree_fold_should_return_targets_from_offset_and_limited_by_size,
         multi_tree_fold_should_return_all_targets,
-        multi_tree_fold_should_return_targets_from_link
+        multi_tree_fold_should_return_targets_from_offset_and_limited_by_size,
+        multi_tree_fold_should_return_targets_from_link,
+        multi_tree_fold_should_return_targets_with_token
     ]).
 
 -define(MODEL, ets_cached_model).
@@ -213,6 +217,34 @@ multi_tree_fold_should_return_all_targets(Config) ->
     Links = fold_links(Worker, ?CTX(?KEY), ?KEY, #{}),
     ?assertEqual(get_expected_links(AllLinks), Links).
 
+
+multi_tree_fold_should_return_targets_from_offset_and_limited_by_size(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 500,
+    Incr = 100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = lists:foldl(fun(Offset, Acc) ->
+        Acc ++ fold_links(Worker, ?CTX(?KEY), ?KEY, #{offset => Offset, size => Incr})
+    end, [], lists:seq(0, TreesNum * LinksNum, Incr)),
+    ?assertEqual(get_expected_links(AllLinks), Links).
+
+multi_tree_fold_should_return_targets_with_token(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 500,
+    Incr = 100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = fold_links_token(Worker, ?CTX(?KEY), ?KEY,
+            #{token => #link_token{}, offset => 0, size => Incr}),
+    ?assertEqual(get_expected_links(AllLinks), Links).
+
 multi_tree_fold_should_return_targets_from_link(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     TreesNum = 5,
@@ -275,6 +307,21 @@ fold_links(Worker, Ctx, Key, Opts) ->
         end, [], Opts]
     )),
     lists:reverse(Links).
+
+fold_links_token(Worker, Ctx, Key, Opts) ->
+    {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, datastore_links_iter,
+        fold, [Ctx, Key, all, fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end, [], Opts]
+    )),
+    Reversed = lists:reverse(Links),
+    case Token#link_token.is_last of
+        true ->
+            Reversed;
+        _ ->
+            Opts2 = Opts#{token => Token},
+            Reversed ++ fold_links_token(Worker, Ctx, Key, Opts2)
+    end.
 
 get_expected_links(Links) ->
     get_expected_links(Links, 0).

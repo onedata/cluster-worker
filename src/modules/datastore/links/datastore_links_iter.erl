@@ -14,10 +14,11 @@
 
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([init/3, init/4, terminate/1]).
--export([get/2, fold/4, fold/6]).
+-export([get/2, fold/4, fold/6, fold/7]).
 
 -record(tree_it, {
     links = [] :: [link()],
@@ -51,8 +52,10 @@
                     {prev_tree_id, tree_id()} |
                     {prev_link_name, link_name()} |
                     {offset, non_neg_integer()} |
-                    {size, non_neg_integer()}.
+                    {size, non_neg_integer()} |
+                    {token, token()}.
 -type fold_opts() :: maps:map([fold_opt()]).
+-type token() :: #link_token{}.
 
 -export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0]).
 
@@ -154,18 +157,55 @@ fold(Fun, Acc, ForestIt, Opts) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Calls {@link fold/6} and deletes forest iterator from answer.
+%% @end
+%%--------------------------------------------------------------------
+-spec fold(ctx(), key(), all | tree_id(), fold_fun(), fold_acc(),
+    fold_opts()) -> Result | {Result, token()}
+    when Result :: {ok, fold_acc()} | {error, term()}.
+fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
+    {Result, _ForestIt} = fold(Ctx, Key, TreeId, Fun, Acc, Opts,
+        datastore_doc_batch:init()),
+    Result.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Creates links forest tree iterator and calls {@link fold/4}.
 %% @end
 %%--------------------------------------------------------------------
 -spec fold(ctx(), key(), all | tree_id(), fold_fun(), fold_acc(),
-    fold_opts()) -> {ok, fold_acc()} | {error, term()}.
-fold(Ctx, Key, TreeId, Fun, Acc, Opts) ->
-    case init(Ctx, Key, TreeId, datastore_doc_batch:init()) of
+    fold_opts(), datastore_doc_batch:batch()) ->
+    {Result | {Result, token()}, forest_it()}
+    when Result :: {ok, fold_acc()} | {error, term()}.
+fold(Ctx, Key, TreeId, Fun, Acc, #{token := Token} = Opts, InitBatch)
+    when Token#link_token.restart_token =/= undefined ->
+    ForestIt = Token#link_token.restart_token,
+    {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt,
+        maps:remove(offset, Opts)),
+
+    case Ans of
+        {ok, _} ->
+            IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
+            {{Ans, #link_token{restart_token = ForestIt2, is_last = IsLast}}, ForestIt2};
+        Error ->
+            ?warning("Cannot fold links for args ~p by token: ~p",
+                [{Ctx, Key, TreeId, Opts}, Error]),
+            fold(Ctx, Key, TreeId, Fun, Acc, Opts#{token := #link_token{}}, InitBatch)
+    end;
+fold(Ctx, Key, TreeId, Fun, Acc, Opts, InitBatch) ->
+    case init(Ctx, Key, TreeId, InitBatch) of
         {ok, ForestIt} ->
-            {Result, _} = fold(Fun, Acc, ForestIt, Opts),
-            Result;
-        {{error, Reason}, _Batch} ->
-            {error, Reason}
+            {Result, ForestIt2} = Ans = fold(Fun, Acc, ForestIt, Opts),
+            case maps:get(token, Opts, undefined) of
+                undefined ->
+                    Ans;
+                _ ->
+                    IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
+                    Token = #link_token{restart_token = ForestIt2, is_last = IsLast},
+                    {{Result, Token}, ForestIt2}
+            end;
+        Other ->
+            Other
     end.
 
 %%%===================================================================

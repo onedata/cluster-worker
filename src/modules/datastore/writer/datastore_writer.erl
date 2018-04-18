@@ -168,7 +168,8 @@ mark_links_deleted(Ctx, Key, TreeId, Links) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fold_links(ctx(), key(), tree_ids(), fold_fun(), fold_acc(),
-    fold_opts()) -> {ok, fold_acc()} | {error, term()}.
+    fold_opts()) -> {ok, fold_acc()} |
+    {{ok, fold_acc()}, datastore_links_iter:token()} | {error, term()}.
 fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
     call(Ctx, get_key(Key, links), fold_links, [Key, TreeIds, Fun, Acc, Opts]).
 

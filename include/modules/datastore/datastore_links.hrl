@@ -46,4 +46,10 @@
     tails :: #{links_tree:id() => datastore:key()}
 }).
 
+-record(link_token, {
+    restart_token :: undefined | datastore_links_iter:forest_it() |
+        {cached_token, reference()},
+    is_last = false :: boolean()
+}).
+
 -endif.

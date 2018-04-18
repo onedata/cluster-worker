@@ -28,16 +28,20 @@
 -author("Krzysztof Trzepla").
 
 -include("modules/datastore/datastore_models.hrl").
+-include("modules/datastore/datastore_links.hrl").
 
 %% API
 -export([init/0, apply/1, terminate/1]).
 -export([init_request/2, terminate_request/2]).
 -export([save/4, fetch/3]).
+-export([get_link_token/2, set_link_token/3,
+    get_link_tokens/1, set_link_tokens/2]).
 
 -record(batch, {
     cache = #{} :: #{key() => entry()},
     requests = #{} :: #{request_ref() => [key()]},
-    request_ref = undefined :: undefined | request_ref()
+    request_ref = undefined :: undefined | request_ref(),
+    link_tokens = #{} :: cached_token_map()
 }).
 
 -record(entry, {
@@ -52,6 +56,8 @@
 -type entry() :: #entry{}.
 -type request_ref() :: reference().
 -type cached_keys() :: #{key() => ctx()}.
+-type cached_token_map() ::
+    #{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
 -opaque batch() :: #batch{}.
 
 -export_type([batch/0]).
@@ -186,3 +192,55 @@ fetch(Ctx, Key, Batch = #batch{cache = Cache}) ->
                     {{error, Reason}, Batch}
             end
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets link token from cache in batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_token(batch(), datastore_links_iter:token()) ->
+    datastore_links_iter:token().
+get_link_token(Batch,
+    #link_token{restart_token = {cached_token, Token}} = FullToken) ->
+    {Token2, _} = maps:get(Token, Batch#batch.link_tokens, {undefined, ok}),
+    FullToken#link_token{restart_token = Token2};
+get_link_token(_Batch, Token) ->
+    Token.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Puts link token in batch's cache.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_link_token(batch(), datastore_links_iter:token(),
+    datastore_links_iter:token()) -> {datastore_links_iter:token(), batch()}.
+set_link_token(Batch, #link_token{restart_token = Token} = FullToken,
+    #link_token{restart_token = {cached_token, Token2}}) ->
+    Tokens = Batch#batch.link_tokens,
+    {FullToken#link_token{restart_token = {cached_token, Token2}},
+        Batch#batch{link_tokens =
+        maps:put(Token2, {Token, os:timestamp()}, Tokens)}};
+set_link_token(Batch, Token, #link_token{} = OldToken) ->
+    Token2 = erlang:make_ref(),
+    set_link_token(Batch, Token,
+        OldToken#link_token{restart_token = {cached_token, Token2}});
+set_link_token(Batch, Token, _OldToken) ->
+    set_link_token(Batch, Token, #link_token{}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets link token cache from batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_tokens(batch()) -> cached_token_map().
+get_link_tokens(Batch) ->
+    Batch#batch.link_tokens.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets link token cache from batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_link_tokens(batch(), cached_token_map()) -> batch().
+set_link_tokens(Batch, Tokens) ->
+    Batch#batch{link_tokens = Tokens}.

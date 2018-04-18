@@ -228,6 +228,12 @@ init_per_testcase(_Case, Config) ->
                 maps:put(Response, ?CTX, Map)
             end, #{}, Responses)
     end),
+    test_utils:mock_expect(Workers, ?DOC_BATCH, set_link_tokens, fun(Batch, _Tokens) ->
+        Batch
+    end),
+    test_utils:mock_expect(Workers, ?DOC_BATCH, get_link_tokens, fun(_Batch) ->
+        #{}
+    end),
     test_utils:mock_new(Workers, ?CACHE),
     test_utils:mock_expect(Workers, ?CACHE, flush_async, fun(_, Response) ->
         Response
