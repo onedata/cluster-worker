@@ -221,7 +221,7 @@ fetch_changes(#state{
 
     State2 = #state{
         seq_safe = SeqSafe3
-    } = process_changes(SeqSafe2, Seq2 + 1, Changes, State),
+    } = process_changes(SeqSafe2, Seq2 + 1, Changes, State, []),
 
     ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
     gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
@@ -243,34 +243,31 @@ fetch_changes(#state{
 %% @end
 %%--------------------------------------------------------------------
 -spec process_changes(couchbase_changes:seq(), couchbase_changes:seq(),
-    [couchbase_changes:change()], state()) -> state().
-process_changes(Seq, Seq, [], State) ->
+    [couchbase_changes:change()], state(), [pid()]) -> state().
+process_changes(Seq, Seq, [], State, _WorkersChecked) ->
     State;
-process_changes(SeqSafe, Seq, [], State) ->
-    % TODO - remove this case?
-    Timeout = 2 * couchbase_pool:get_timeout(),
-    case ignore_change(SeqSafe, State, Timeout, 500) of
-        true ->
+process_changes(SeqSafe, Seq, [], State, WorkersChecked) ->
+    case ignore_change(SeqSafe, State, WorkersChecked, true) of
+        {true, WorkersChecked2} ->
             process_changes(SeqSafe + 1, Seq, [], State#state{
                 seq_safe = SeqSafe
-            });
-        false ->
+            }, WorkersChecked2);
+        _ ->
             State
     end;
-process_changes(SeqSafe, Seq, [Change | _] = Changes, State) ->
+process_changes(SeqSafe, Seq, [Change | _] = Changes, State, WorkersChecked) ->
     case lists:keyfind(<<"key">>, 1, Change) of
         {<<"key">>, [_, SeqSafe]} ->
             process_changes(SeqSafe + 1, Seq, tl(Changes), State#state{
                 seq_safe = SeqSafe
-            });
+            }, WorkersChecked);
         {<<"key">>, [_, _]} ->
-            Timeout = 2 * couchbase_pool:get_timeout(),
-            case ignore_change(SeqSafe, State, Timeout, 500) of
-                true ->
+            case ignore_change(SeqSafe, State, WorkersChecked, true) of
+                {true, WorkersChecked2} ->
                     process_changes(SeqSafe + 1, Seq, Changes, State#state{
                         seq_safe = SeqSafe
-                    });
-                false ->
+                    }, WorkersChecked2);
+                _ ->
                     State
             end
     end.
@@ -279,55 +276,48 @@ process_changes(SeqSafe, Seq, [Change | _] = Changes, State) ->
 %% @private
 %% @doc
 %% Check whether provided sequence number can be ignored.
-%% Retries when status is undefined.
 %% @end
 %%--------------------------------------------------------------------
--spec ignore_change(couchbase_changes:seq(), state(), timeout(), timeout()) ->
-    boolean().
-ignore_change(Seq, State, Timeout, Delay) when Timeout =< Delay ->
-    case ignore_change(Seq, State) of
-        undefined -> true;
-        Ignore -> Ignore
-    end;
-ignore_change(Seq, State, Timeout, Delay) ->
-    case ignore_change(Seq, State) of
-        undefined ->
-            timer:sleep(Delay),
-            ignore_change(Seq, State, Timeout - Delay, Delay);
-        Ignore ->
-            Ignore
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Check whether provided sequence number can be ignored.
-%% @end
-%%--------------------------------------------------------------------
--spec ignore_change(couchbase_changes:seq(), state()) -> boolean() | undefined.
-ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope}) ->
+-spec ignore_change(couchbase_changes:seq(), state(), [pid()], boolean()) -> 
+    {boolean(), [pid()]}.
+ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope},
+    WorkersChecked, Retry) ->
     Ctx = #{bucket => Bucket},
     ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
     case couchbase_driver:get(Ctx, ChangeKey) of
         {ok, _, {Props}} ->
             {<<"key">>, Key} = lists:keyfind(<<"key">>, 1, Props),
-            {<<"pid">>, Term} = lists:keyfind(<<"pid">>, 1, Props),
-            Pid = binary_to_term(base64:decode(Term)),
             case ignore_change(Seq, Key, State) of
                 undefined ->
-                    wait_for_worker(Pid),
+                    {<<"pid">>, Term} = lists:keyfind(<<"pid">>, 1, Props),
+                    Pid = binary_to_term(base64:decode(Term)),
+                    WorkersChecked2 = wait_for_worker(Pid, WorkersChecked),
                     case ignore_change(Seq, Key, State) of
-                        undefined -> true;
-                        Ignore -> Ignore
+                        undefined -> {true, WorkersChecked2};
+                        Ignore -> {Ignore, WorkersChecked2}
                     end;
                 Ignore ->
-                    Ignore
+                    {Ignore, WorkersChecked}
             end;
         {error, not_found} ->
-            undefined;
+            case Retry of
+                true ->
+                    WorkersChecked2 = lists:foldl(fun(Pid, Acc2) ->
+                        wait_for_worker(Pid, Acc2)
+                    end, [], couchbase_pool:get_workers(write)),
+                    ignore_change(Seq, State, WorkersChecked2, false);
+                _ ->
+                    case check_reconect_retry() of
+                        true ->
+                            timer:sleep(1000),
+                            ignore_change(Seq, State, WorkersChecked, false);
+                        _ ->
+                            {true, WorkersChecked}
+                    end
+            end;
         Error ->
             ?error("Error during ignore change procedure ~p", [Error]),
-            false
+            {false, WorkersChecked}
     end.
 
 %%--------------------------------------------------------------------
@@ -354,13 +344,35 @@ ignore_change(Seq, Key, #state{bucket = Bucket}) ->
 %% Waits until CouchBase pool worker complete current action.
 %% @end
 %%--------------------------------------------------------------------
--spec wait_for_worker(pid()) -> ok.
-wait_for_worker(Pid) ->
-    try
-        pong = gen_server:call(Pid, ping, couchbase_pool:get_timeout()),
-        ok
-    catch
-        _:{noproc, _} -> ok;
-        exit:{normal, _} -> ok;
-        _:{timeout, _} -> wait_for_worker(Pid)
+-spec wait_for_worker(pid(), [pid()]) -> [pid()].
+wait_for_worker(Pid, WorkersChecked) ->
+    case lists:member(Pid, WorkersChecked) of
+        true ->
+            WorkersChecked;
+        _ ->
+            try
+                pong = gen_server:call(Pid, ping, couchbase_pool:get_timeout()),
+                [Pid | WorkersChecked]
+            catch
+                _:{noproc, _} -> [Pid | WorkersChecked];
+                exit:{normal, _} -> [Pid | WorkersChecked];
+                _:{timeout, _} -> wait_for_worker(Pid, WorkersChecked)
+            end
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Checks if ignore check should be retry because of reconnects to db.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_reconect_retry() -> boolean().
+check_reconect_retry() ->
+    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_restart_timeout, timer:minutes(1)),
+    TimeoutUs = Timeout * 1000,
+    StartTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        db_connection_timestamp, {0, 0, 0}),
+
+    Now = os:timestamp(),
+    timer:now_diff(Now, StartTime) < TimeoutUs.
