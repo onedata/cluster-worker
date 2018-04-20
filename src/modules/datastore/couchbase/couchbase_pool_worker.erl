@@ -169,17 +169,15 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) when
-    Reason =:= normal ; Reason =:= shutdown ->
-    catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
-    ?log_terminate(Reason, State);
-terminate({shutdown, _} = Reason, #state{bucket = Bucket, mode = Mode, id = Id}
-    = State) ->
-    catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
-    ?log_terminate(Reason, State);
 terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME, db_connection_timestamp,
-        os:timestamp()),
+    case Reason of
+        normal -> ok;
+        shutdown -> ok;
+        {shutdown, _} -> ok;
+        _ ->
+            application:set_env(?CLUSTER_WORKER_APP_NAME, db_connection_timestamp,
+                os:timestamp())
+    end,
     catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
     ?log_terminate(Reason, State).
 
