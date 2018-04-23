@@ -23,6 +23,9 @@
 -export([get/2, delete/2]).
 -export([get_counter/3, update_counter/4]).
 
+% for tests
+-export([prepare_store/1, prepare_change_store/1]).
+
 -type save_request() :: {couchbase_driver:ctx(), couchbase_driver:key(),
                          couchbase_driver:value()}.
 -type get_request() :: couchbase_driver:key().
@@ -87,7 +90,7 @@ terminate_save_requests(SaveRequests) ->
 -spec store_change_docs(cberl:connection(), save_requests_map()) ->
     {save_requests_map(), [save_response()]}.
 store_change_docs(Connection, SaveRequests) ->
-    {ChangeStoreRequests, ChangeKeys} = prepare_change_store(SaveRequests),
+    {ChangeStoreRequests, ChangeKeys} = ?MODULE:prepare_change_store(SaveRequests),
     ChangeStoreResponses = store(Connection, ChangeStoreRequests),
     ChangeStoreResponses2 = replace_change_keys(ChangeKeys, ChangeStoreResponses),
     update_save_requests(ChangeStoreResponses2, SaveRequests).
@@ -115,7 +118,7 @@ wait_change_docs_durable(Connection, SaveRequests) ->
 -spec store_docs(cberl:connection(), save_requests_map()) ->
     {save_requests_map(), [save_response()]}.
 store_docs(Connection, SaveRequests) ->
-    {StoreRequests, SaveRequests2, SaveResponses} = prepare_store(SaveRequests),
+    {StoreRequests, SaveRequests2, SaveResponses} = ?MODULE:prepare_store(SaveRequests),
     StoreResponses = store(Connection, StoreRequests),
     {SaveRequests3, SaveResponses2} = update_save_requests(
         StoreResponses, SaveRequests2

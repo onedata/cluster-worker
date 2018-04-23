@@ -13,6 +13,7 @@
 -author("Krzysztof Trzepla").
 
 -include("datastore_test_utils.hrl").
+-include("global_definitions.hrl").
 
 %% export for ct
 -export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
@@ -31,7 +32,11 @@
     stream_should_return_all_changes_except_mutator/1,
     stream_should_return_changes_from_finite_range/1,
     stream_should_return_changes_from_infinite_range/1,
-    cancel_stream_should_stop_worker/1
+    cancel_stream_should_stop_worker/1,
+    stream_should_ignore_changes/1,
+    stream_should_ignore_changes2/1,
+    stream_should_ignore_changes3/1,
+    stream_should_ignore_changes4/1
 ]).
 
 %% test_bases
@@ -53,7 +58,11 @@ all() ->
         stream_should_return_all_changes_except_mutator,
         stream_should_return_changes_from_finite_range,
         stream_should_return_changes_from_infinite_range,
-        cancel_stream_should_stop_worker
+        cancel_stream_should_stop_worker,
+        stream_should_ignore_changes,
+        stream_should_ignore_changes2,
+        stream_should_ignore_changes3,
+        stream_should_ignore_changes4
     ], [
         stream_should_return_last_changes
     ]).
@@ -301,6 +310,294 @@ cancel_stream_should_stop_worker(Config) ->
     ?assertEqual(ok, rpc:call(Worker, couchbase_changes, cancel_stream, [Pid])),
     ?assertReceivedMatch({error, 1, shutdown}, ?TIMEOUT).
 
+stream_should_ignore_changes(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = 50,
+    SinceStart = 10,
+    Since = 51,
+    Until = 90,
+
+    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(1, DocNum))),
+
+    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(1, DocNum))),
+
+    Callback = fun(Any) -> Self ! Any end,
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
+        [?BUCKET, ?SCOPE, Callback, [{since, SinceStart}, {until, Until}]]
+    )),
+    assert_all(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since, Until - 1)),
+    ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
+
+stream_should_ignore_changes2(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = 50,
+    Since = 10,
+    Until = 40,
+    WrongSeqs = [20,25,30,35],
+
+    test_utils:mock_new(Worker, couchbase_crud, [passthrough, non_strict]),
+    test_utils:mock_expect(Worker, couchbase_crud, prepare_store, fun(Requests) ->
+        maps:fold(fun
+            (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Requests2, Responses}) ->
+                case is_record(Value, document) andalso
+                    lists:member(Value#document.seq, WrongSeqs) of
+                    true ->
+                        {
+                            StoreRequests,
+                            Requests2,
+                            [{Key, {error, error}} | Responses]
+                        };
+                    _ ->
+                        try
+                            EJson = datastore_json:encode(Value),
+                            Cas = maps:get(cas, Ctx, 0),
+                            {
+                                [{set, Key, EJson, json, Cas, 0} | StoreRequests],
+                                maps:put(Key, {Ctx, {ok, Cas, Value}}, Requests2),
+                                Responses
+                            }
+                        catch
+                            _:Reason ->
+                                Reason2 = {Reason, erlang:get_stacktrace()},
+                                {
+                                    StoreRequests,
+                                    Requests2,
+                                    [{Key, {error, Reason2}} | Responses]
+                                }
+                        end
+                end
+        end, {[], #{}, []}, Requests)
+    end),
+
+    SaveAns = utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(1, DocNum)),
+    ?assertAllMatch({ok, _, _},
+        SaveAns -- lists:duplicate(length(WrongSeqs), {error,error})),
+
+    Callback = fun(Any) -> Self ! Any end,
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
+        [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]
+    )),
+    assert_all(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since, Until - 1) -- WrongSeqs),
+    ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
+
+stream_should_ignore_changes3(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = 50,
+    Since = 10,
+    Until = 40,
+
+    test_utils:mock_new(Worker, couchbase_crud, [passthrough, non_strict]),
+    test_utils:mock_expect(Worker, couchbase_crud, prepare_change_store, fun(Requests) ->
+        maps:fold(fun
+            (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
+                {ChangeStoreRequests, ChangeKeys};
+            (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
+                case is_record(Doc, document) of
+                    true ->
+                        #document{scope = Scope, seq = Seq} = Doc,
+                        ChangeKey = couchbase_changes:get_change_key(Scope, Seq + 1000),
+                        EJson = #{
+                            <<"_record">> => <<"seq">>,
+                            <<"key">> => Key,
+                            <<"pid">> => base64:encode(term_to_binary(self()))
+                        },
+                        {
+                            [{set, ChangeKey, EJson, json, 0, 0} | ChangeStoreRequests],
+                            maps:put(ChangeKey, Key, ChangeKeys)
+                        };
+                    _ ->
+                        #document{scope = Scope, seq = Seq} = Doc,
+                        ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
+                        EJson = #{
+                            <<"_record">> => <<"seq">>,
+                            <<"key">> => Key,
+                            <<"pid">> => base64:encode(term_to_binary(self()))
+                        },
+                        {
+                            [{set, ChangeKey, EJson, json, 0, 0} | ChangeStoreRequests],
+                            maps:put(ChangeKey, Key, ChangeKeys)
+                        }
+                    end;
+            (_Key, {_, _}, {ChangeStoreRequests, ChangeKeys}) ->
+                {ChangeStoreRequests, ChangeKeys}
+        end, {[], #{}}, Requests)
+    end),
+
+    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(1, DocNum))),
+
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_restart_timeout, timer:minutes(1)),
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+        db_connection_timestamp, os:timestamp()),
+    Callback = fun(Any) -> Self ! Any end,
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
+        [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]
+    )),
+    assert_all(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since, Until - 1)),
+    ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
+
+stream_should_ignore_changes4(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = 50,
+    Since = 10,
+    Until = 40,
+    WrongSeqs = [20,25,30,35],
+
+    DocNum2 = 100,
+    Since2 = 60,
+    Until2 = 90,
+    WrongSeqs2 = [70,75,80,85],
+    WrongSeqsSum = WrongSeqs ++ WrongSeqs2,
+
+    test_utils:mock_new(Worker, couchbase_crud, [passthrough, non_strict]),
+    test_utils:mock_expect(Worker, couchbase_crud, prepare_store, fun(Requests) ->
+        maps:fold(fun
+            (Key, {Ctx, {ok, _, Value}}, {StoreRequests, Requests2, Responses}) ->
+                case is_record(Value, document) andalso
+                    lists:member(Value#document.seq, WrongSeqsSum) of
+                    true ->
+                        {
+                            StoreRequests,
+                            Requests2,
+                            [{Key, {error, error}} | Responses]
+                        };
+                    _ ->
+                        try
+                            EJson = datastore_json:encode(Value),
+                            Cas = maps:get(cas, Ctx, 0),
+                            {
+                                [{set, Key, EJson, json, Cas, 0} | StoreRequests],
+                                maps:put(Key, {Ctx, {ok, Cas, Value}}, Requests2),
+                                Responses
+                            }
+                        catch
+                            _:Reason ->
+                                Reason2 = {Reason, erlang:get_stacktrace()},
+                                {
+                                    StoreRequests,
+                                    Requests2,
+                                    [{Key, {error, Reason2}} | Responses]
+                                }
+                        end
+                end
+        end, {[], #{}, []}, Requests)
+    end),
+
+    test_utils:mock_expect(Worker, couchbase_crud, prepare_change_store, fun(Requests) ->
+        maps:fold(fun
+            (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
+                {ChangeStoreRequests, ChangeKeys};
+            (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
+                case is_record(Doc, document) andalso
+                    lists:member(Doc#document.seq, WrongSeqsSum) of
+                    true ->
+                        #document{scope = Scope, seq = Seq} = Doc,
+                        ChangeKey = couchbase_changes:get_change_key(Scope, Seq + 1000),
+                        EJson = #{
+                            <<"_record">> => <<"seq">>,
+                            <<"key">> => Key,
+                            <<"pid">> => base64:encode(term_to_binary(self()))
+                        },
+                        {
+                            [{set, ChangeKey, EJson, json, 0, 0} | ChangeStoreRequests],
+                            maps:put(ChangeKey, Key, ChangeKeys)
+                        };
+                    _ ->
+                        #document{scope = Scope, seq = Seq} = Doc,
+                        ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
+                        EJson = #{
+                            <<"_record">> => <<"seq">>,
+                            <<"key">> => Key,
+                            <<"pid">> => base64:encode(term_to_binary(self()))
+                        },
+                        {
+                            [{set, ChangeKey, EJson, json, 0, 0} | ChangeStoreRequests],
+                            maps:put(ChangeKey, Key, ChangeKeys)
+                        }
+                end;
+            (_Key, {_, _}, {ChangeStoreRequests, ChangeKeys}) ->
+                {ChangeStoreRequests, ChangeKeys}
+        end, {[], #{}}, Requests)
+    end),
+
+    SaveAns = utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(1, DocNum)),
+    ?assertAllMatch({ok, _, _},
+        SaveAns -- lists:duplicate(length(WrongSeqs), {error,error})),
+
+    T1 = os:timestamp(),
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_restart_timeout, timer:minutes(1)),
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+        db_connection_timestamp, T1),
+
+    Callback = fun(Any) -> Self ! Any end,
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
+        [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]
+    )),
+    assert_all(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since, Until - 1) -- WrongSeqs),
+
+    ?assert(timer:now_diff(os:timestamp(), T1) >= timer:minutes(1) * 1000),
+    ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT),
+
+    SaveAns2 = utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(DocNum + 1, DocNum2)),
+    ?assertAllMatch({ok, _, _},
+        SaveAns2 -- lists:duplicate(length(WrongSeqs2), {error,error})),
+
+    T2 = os:timestamp(),
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
+        [?BUCKET, ?SCOPE, Callback, [{since, Since2}, {until, Until2}]]
+    )),
+    assert_all(fun(SeqList) ->
+        {ok, Docs} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        lists:foldl(fun(Doc, SeqList2) ->
+            ?assert(lists:member(Doc#document.seq, SeqList2)),
+            lists:delete(Doc#document.seq, SeqList2)
+        end, SeqList, Docs)
+    end, lists:seq(Since2, Until2 - 1) -- WrongSeqs2),
+
+    ?assert(timer:now_diff(os:timestamp(), T2) =< timer:seconds(20) * 1000),
+    ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -335,7 +632,8 @@ end_per_testcase(Case, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, couchbase_changes, stop,
         [?BUCKET, get_scope(Case)]
-    )).
+    )),
+    test_utils:mock_unload(Worker, couchbase_crud).
 
 %%%===================================================================
 %%% Internal functions

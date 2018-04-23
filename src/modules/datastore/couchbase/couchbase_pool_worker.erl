@@ -82,6 +82,8 @@ start_link(Bucket, Mode, Id, DbHosts, Client) ->
     {stop, Reason :: term()} | ignore.
 init([Bucket, Mode, Id, DbHosts, Client]) ->
     process_flag(trap_exit, true),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, db_connection_timestamp,
+        os:timestamp()),
 
     Host = lists:foldl(fun(DbHost, Acc) ->
         <<Acc/binary, ";", DbHost/binary>>
@@ -168,6 +170,14 @@ handle_info(Info, #state{} = State) ->
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
 terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) ->
+    case Reason of
+        normal -> ok;
+        shutdown -> ok;
+        {shutdown, _} -> ok;
+        _ ->
+            application:set_env(?CLUSTER_WORKER_APP_NAME, db_connection_timestamp,
+                os:timestamp())
+    end,
     catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
     ?log_terminate(Reason, State).
 

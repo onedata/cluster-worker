@@ -23,6 +23,7 @@
     get_worker_queue_size_stats/1, get_worker_queue_size_stats/2,
     reset_request_queue_size/3, update_request_queue_size/4]).
 -export([init_counters/0, init_report/0]).
+-export([get_workers/1, get_workers/2]).
 
 -type mode() :: changes | read | write.
 -type ctx() :: couchbase_driver:ctx().
@@ -251,6 +252,29 @@ update_request_queue_size(Bucket, Mode, Id, Delta) ->
     Key = {request_queue_size, Bucket, Mode, Id},
     ets:update_counter(couchbase_pool_stats, Key, {2, Delta}, {Key, 0}),
     ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns all workers for mode.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_workers(mode()) -> [pid()].
+get_workers(Mode) ->
+    lists:foldl(fun(Bucket, Acc1) ->
+        Acc1 ++ get_workers(Bucket, Mode)
+    end, [], couchbase_config:get_buckets()).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns all workers for bucket and mode.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_workers(couchbase_config:bucket(), mode()) -> [pid()].
+get_workers(Bucket, Mode) ->
+    Size = get_size(Bucket, Mode),
+    lists:map(fun(Id) ->
+        couchbase_pool_sup:get_worker(Bucket, Mode, Id)
+    end, lists:seq(1, Size)).
 
 %%%===================================================================
 %%% Internal functions
