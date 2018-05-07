@@ -16,6 +16,7 @@ It should be included as rebar dependency in final application. Its behaviour ma
  - From shell using script "cluster_worker" with argument "console" or "start". To generate start script, release of application must be created.
 
 To prepare cluster_worker to be started:
+ - Use command "make submodules" to initialize submodules
  - Use command "./make.py" to generate release,
  - Use "./make.py compile" to compile code only (faster than building release).
 
