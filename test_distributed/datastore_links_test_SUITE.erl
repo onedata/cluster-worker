@@ -33,6 +33,12 @@
     multi_tree_fold_should_return_all_targets/1,
     multi_tree_fold_should_return_targets_from_offset_and_limited_by_size/1,
     multi_tree_fold_should_return_targets_from_link/1,
+    multi_tree_fold_should_return_all_using_ids/1,
+    multi_tree_fold_should_return_all_using_ids_with_tree/1,
+    multi_tree_fold_should_return_all_using_not_existing_ids/1,
+    multi_tree_fold_should_return_all_using_id_with_offset/1,
+    multi_tree_fold_should_return_all_using_id_with_neg_offset/1,
+    multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset/1,
     multi_tree_fold_should_return_targets_with_token/1
 ]).
 
@@ -52,6 +58,12 @@ all() ->
         multi_tree_fold_should_return_all_targets,
         multi_tree_fold_should_return_targets_from_offset_and_limited_by_size,
         multi_tree_fold_should_return_targets_from_link,
+        multi_tree_fold_should_return_all_using_ids,
+        multi_tree_fold_should_return_all_using_ids_with_tree,
+        multi_tree_fold_should_return_all_using_not_existing_ids,
+        multi_tree_fold_should_return_all_using_id_with_offset,
+        multi_tree_fold_should_return_all_using_id_with_neg_offset,
+        multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset,
         multi_tree_fold_should_return_targets_with_token
     ]).
 
@@ -263,6 +275,98 @@ multi_tree_fold_should_return_targets_from_link(Config) ->
         ?assertEqual(get_expected_links(AllLinks, Offset), Links)
     end, lists:zip(lists:seq(1, TreesNum * LinksNum), lists:sort(LinkPoints))).
 
+multi_tree_fold_should_return_all_using_ids(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 500,
+    Incr = 100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = fold_links_id(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => <<>>}),
+    ?assertEqual(get_expected_links(AllLinks), Links).
+
+multi_tree_fold_should_return_all_using_ids_with_tree(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 500,
+    Incr = 100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = fold_links_id_and_tree(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => <<>>}),
+    ?assertEqual(get_expected_links(AllLinks), Links).
+
+multi_tree_fold_should_return_all_using_not_existing_ids(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 1000,
+    Incr = 100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = fold_links_non_existing_id(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => <<>>}),
+
+    ?assertEqual(get_expected_links(AllLinks), Links).
+
+multi_tree_fold_should_return_all_using_id_with_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 500,
+    Incr = 100,
+    Offset = 50,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = fold_links_id_and_tree(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => <<>>, offset => Offset}),
+    Check = filter_expected_links(get_expected_links(AllLinks), [], Offset, Incr),
+    ?assertEqual(Check, Links).
+
+multi_tree_fold_should_return_all_using_id_with_neg_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 1000,
+    Incr = 450,
+    Offset = -250,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    ExpectedLinks = get_expected_links(AllLinks),
+    #link{name = StartName} = lists:nth(abs(Offset) + 1, ExpectedLinks),
+    Links = fold_links_id_and_neg_offset(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => StartName, offset => Offset}, [], false),
+    ?assertEqual(ExpectedLinks, Links),
+
+    #link{name = StartName2} = lists:nth(abs(Offset) + 6, ExpectedLinks),
+    Links2 = fold_links_id_and_neg_offset(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => StartName2, offset => Offset}, [], false),
+    ?assert(length(ExpectedLinks) > length(Links2)).
+
+multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 1000,
+    Incr = 100,
+    Offset = -50,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    ExpectedLinks = get_expected_links(AllLinks),
+    #link{name = StartName} = lists:nth(abs(Offset), ExpectedLinks),
+    Links = fold_links_id_and_neg_offset(Worker, ?CTX(?KEY), ?KEY, #{size => Incr,
+        prev_link_name => <<StartName/binary, ".....">>, offset => Offset}, [], true),
+    ?assertEqual(ExpectedLinks, Links).
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -308,6 +412,80 @@ fold_links(Worker, Ctx, Key, Opts) ->
     )),
     lists:reverse(Links).
 
+fold_links_id(Worker, Ctx, Key, #{prev_link_name := StartLink} = Opts) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter,
+        fold, [Ctx, Key, all, fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end, [], Opts]
+    )),
+
+    Filtered = lists:filter(fun(#link{name = Name}) ->
+        Name =/= StartLink
+    end, Links),
+    case Filtered of
+        [Last | _] ->
+            Opts2 = Opts#{prev_link_name => Last#link.name},
+            lists:reverse(Filtered) ++ fold_links_id(Worker, Ctx, Key, Opts2);
+        _ ->
+            []
+    end.
+
+fold_links_non_existing_id(Worker, Ctx, Key, Opts) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter,
+        fold, [Ctx, Key, all, fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end, [], Opts]
+    )),
+
+    case Links of
+        [Last | _] ->
+            LastBin = Last#link.name,
+            Opts2 = Opts#{prev_link_name => <<LastBin/binary, ".....">>},
+            lists:reverse(Links) ++ fold_links_non_existing_id(Worker, Ctx, Key, Opts2);
+        _ ->
+            []
+    end.
+
+fold_links_id_and_neg_offset(Worker, Ctx, Key, Opts, TmpAns, ExtendName) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter,
+        fold, [Ctx, Key, all, fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end, [], Opts]
+    )),
+
+    Links2 = Links -- TmpAns,
+
+    case Links2 of
+        [Last | _] ->
+            Opts2 = case ExtendName of
+                true ->
+                    LastBin = Last#link.name,
+                    Opts#{prev_link_name => <<LastBin/binary, ".....">>};
+                _ ->
+                    Opts#{prev_link_name => Last#link.name}
+            end,
+            fold_links_id_and_neg_offset(Worker, Ctx, Key, Opts2, TmpAns ++ lists:reverse(Links2), ExtendName);
+        _ ->
+            TmpAns
+    end.
+
+fold_links_id_and_tree(Worker, Ctx, Key, Opts) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, datastore_links_iter,
+        fold, [Ctx, Key, all, fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+        end, [], Opts]
+    )),
+
+    case Links of
+        [Last | _] ->
+            Reversed = lists:reverse(Links),
+            Opts2 = Opts#{prev_link_name => Last#link.name,
+                prev_tree_id => Last#link.tree_id},
+            Reversed ++ fold_links_id_and_tree(Worker, Ctx, Key, Opts2);
+        _ ->
+            []
+    end.
+
 fold_links_token(Worker, Ctx, Key, Opts) ->
     {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, datastore_links_iter,
         fold, [Ctx, Key, all, fun(Link, Acc) ->
@@ -337,3 +515,20 @@ get_expected_links(Links, Offset, Size) ->
         {Name1, TreeId1} < {Name2, TreeId2}
     end, Links),
     lists:sublist(SortedLinks, Offset + 1, Size).
+
+filter_expected_links(Links, Acc, Offset, Size) ->
+    Length = length(Links),
+    case Length =< Offset of
+        true ->
+            Acc;
+        _ ->
+            Links2 = lists:sublist(Links, Offset + 1, Length),
+            case length(Links2) =< Size of
+                true ->
+                    Acc ++ Links2;
+                _ ->
+                    Links3 = lists:sublist(Links2, Size),
+                    Links4 = lists:sublist(Links2, Size + 1, Length),
+                    filter_expected_links(Links4, Acc ++ Links3, Offset, Size)
+            end
+    end.
