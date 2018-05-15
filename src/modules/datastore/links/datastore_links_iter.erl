@@ -308,7 +308,7 @@ init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
             {{error, Reason}, ForestIt2}
     end, {ok, ForestIt}, TreeIds),
 
-    add_prev_fold_nodes(Ans, Opts, [], false).
+    add_prev_fold_nodes(Ans, Opts, [], []).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -316,9 +316,9 @@ init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
 %% Adds previous nodes to forest_it (used during listing with neg offset).
 %% @end
 %%--------------------------------------------------------------------
--spec add_prev_fold_nodes({ok | {error, term()}, forest_it()}, fold_opts(), list(), boolean()) ->
+-spec add_prev_fold_nodes({ok | {error, term()}, forest_it()}, fold_opts(), list(), list()) ->
     {ok | {error, term()}, forest_it()}.
-add_prev_fold_nodes({ok, #forest_it{heap = Heap} = ForestIt} = Ans,
+add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt} = Ans,
     #{offset := Offset, prev_link_name := Name} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
     HeapList = gb_trees:to_list(Heap),
     Keys = lists:foldl(fun({_, #tree_it{links = Links}}, Acc) ->
@@ -327,81 +327,88 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap} = ForestIt} = Ans,
     Keys2 = lists:sort(Keys),
 
     OffsetAbs = abs(Offset),
+    % TODO tu zwracamy co doczytujemy (przekazane w contiune lub wszystkie minus empty)
     Continue = case ForceContinue of
-        true ->
-            true;
-        _ ->
+        [] ->
             case length(Keys) > OffsetAbs of
                 true ->
-                    lists:nth(OffsetAbs, Keys2) >= Name;
+                    {lists:nth(OffsetAbs, Keys2) >= Name, TreeIds -- EmptyTrees};
                 _ ->
-                    true
-            end
+                    {true, TreeIds -- EmptyTrees}
+            end;
+        _ ->
+            {true, ForceContinue}
     end,
 
     case Continue of
-        true ->
+        {true, FoldIds} ->
             Ans2 = lists:foldl(fun
                 ({{Name, TreeId} = ItKey, #tree_it{links = Links} = TreeIt},
                     {ok, #forest_it{heap = TmpHeap} = ForestIt2, TmpEmptyTrees}) ->
-                    case init_tree_fold(TreeId, ForestIt2, #{node_prev_to_key => Name}) of
-                        {{ok, #tree_it{links = [#link{name = FirstName} | _] = Links2}}, ForestIt3} ->
-                            ForestIt4 = ForestIt3#forest_it{
-                                heap = gb_trees:insert({FirstName, TreeId},
-                                    TreeIt#tree_it{links = Links2 ++ Links}, TmpHeap)
-                            },
-
-                            {ok, ForestIt4, TmpEmptyTrees};
-                        {{error, first_node}, ForestIt3} ->
-                            ForestIt4 = ForestIt3#forest_it{
+                    case lists:member(TreeId, FoldIds) of
+                        false ->
+                            ForestIt4 = ForestIt2#forest_it{
                                 heap = gb_trees:insert(ItKey, TreeIt, TmpHeap)
                             },
 
-                            {ok, ForestIt4, [TreeId | TmpEmptyTrees]};
-                        {{error, Reason}, ForestIt3} ->
-                            {{error, Reason}, ForestIt3}
+                            {ok, ForestIt4, TmpEmptyTrees};
+                        _ ->
+                            case init_tree_fold(TreeId, ForestIt2, #{node_prev_to_key => Name}) of
+                                {{ok, #tree_it{links = [#link{name = FirstName} | _] = Links2}}, ForestIt3} ->
+                                    ForestIt4 = ForestIt3#forest_it{
+                                        heap = gb_trees:insert({FirstName, TreeId},
+                                            TreeIt#tree_it{links = Links2 ++ Links}, TmpHeap)
+                                    },
+
+                                    {ok, ForestIt4, TmpEmptyTrees};
+                                {{error, first_node}, ForestIt3} ->
+                                    ForestIt4 = ForestIt3#forest_it{
+                                        heap = gb_trees:insert(ItKey, TreeIt, TmpHeap)
+                                    },
+
+                                    {ok, ForestIt4, [TreeId | TmpEmptyTrees]};
+                                {{error, Reason}, ForestIt3} ->
+                                    {{error, Reason}, ForestIt3}
+                            end
                     end;
                 (_, {{error, Reason}, ForestIt2}) ->
                     {{error, Reason}, ForestIt2}
-            end, {ok, ForestIt#forest_it{heap = gb_trees:empty()}, []}, HeapList),
+            end, {ok, ForestIt#forest_it{heap = gb_trees:empty()}, EmptyTrees}, HeapList),
 
-            add_prev_fold_nodes(Ans2, Opts, EmptyTrees, false);
+            add_prev_fold_nodes(Ans2, Opts, EmptyTrees, []);
         _ ->
             SmallerKeys = lists:takewhile(fun(Key) -> Key < Name end, Keys2),
             FirstIncluded = lists:nth(length(SmallerKeys) + Offset + 1, Keys2),
 
-            FoldAns = lists:foldl(fun
-                ({{_, ItTree}, #tree_it{links = [First | _] = Links} = TreeIt},
-                    #forest_it{heap = TmpHeap} = ForestIt2) ->
-                    FilteredLinks = lists:dropwhile(fun(#link{name = Key}) ->
-                        Key < FirstIncluded end, Links),
-                    case FilteredLinks of
-                        [#link{name = ItName} = First | _] ->
-                            case lists:member(ItTree, EmptyTrees) of
-                                true ->
-                                    TreeIt2 = TreeIt#tree_it{links = FilteredLinks},
-                                    ForestIt2#forest_it{
-                                        heap = gb_trees:insert({ItName, ItTree}, TreeIt2, TmpHeap)
-                                    };
-                                _ ->
-                                    continue
-                            end;
-                        [#link{name = ItName} | _] ->
-                            TreeIt2 = TreeIt#tree_it{links = FilteredLinks},
-                            ForestIt2#forest_it{
-                                heap = gb_trees:insert({ItName, ItTree}, TreeIt2, TmpHeap)
-                            };
-                        _ ->
-                            ForestIt2
-                    end;
-                (_, continue) ->
-                    continue
-            end, ForestIt#forest_it{heap = gb_trees:empty()}, HeapList),
+            FoldAns = lists:foldl(fun({{_, ItTree}, #tree_it{links = [First | _] = Links} = TreeIt},
+                {#forest_it{heap = TmpHeap} = ForestIt2, ContinueList}) ->
+                FilteredLinks = lists:dropwhile(fun(#link{name = Key}) ->
+                    Key < FirstIncluded end, Links),
+                case FilteredLinks of
+                    [#link{name = ItName} = First | _] ->
+                        case lists:member(ItTree, EmptyTrees) of
+                            true ->
+                                TreeIt2 = TreeIt#tree_it{links = FilteredLinks},
+                                {ForestIt2#forest_it{
+                                    heap = gb_trees:insert({ItName, ItTree}, TreeIt2, TmpHeap)
+                                }, ContinueList};
+                            _ ->
+                                {ForestIt2, [ItTree | ContinueList]}
+                        end;
+                    [#link{name = ItName} | _] ->
+                        TreeIt2 = TreeIt#tree_it{links = FilteredLinks},
+                        {ForestIt2#forest_it{
+                            heap = gb_trees:insert({ItName, ItTree}, TreeIt2, TmpHeap)
+                        }, ContinueList};
+                    _ ->
+                        {ForestIt2, ContinueList}
+                end
+            end, {ForestIt#forest_it{heap = gb_trees:empty()}, []}, HeapList),
             case FoldAns of
-                continue ->
-                    add_prev_fold_nodes(Ans, Opts, EmptyTrees, true);
-                _ ->
-                    {ok, FoldAns}
+                {FinalAns, []} ->
+                    {ok, FinalAns};
+                {_, ContinueIds} ->
+                    add_prev_fold_nodes(Ans, Opts, EmptyTrees, ContinueIds)
             end
     end;
 add_prev_fold_nodes({ok, ForestIt, NewEmptyTrees}, Opts, _EmptyTrees, ForceContinue) ->
