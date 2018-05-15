@@ -14,6 +14,7 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include("modules/datastore/datastore_links.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -33,20 +34,20 @@
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
     flush_ref = undefined :: undefined | reference(),
-    link_tokens = #{} :: datastore_doc_batch:cached_token_map()
+    link_tokens = #{} :: cached_token_map()
 }).
 
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
 -type tree_id() :: datastore_links:tree_id().
--type tree_ids() :: datastore_links:tree_ids().
--type forest_it() :: datastore_links:forest_it().
 -type tree() :: datastore_links:tree().
 -type mask() :: datastore_links_mask:mask().
 -type batch() :: datastore_doc_batch:batch().
 -type cached_keys() :: datastore_doc_batch:cached_keys().
 -type request() :: term().
 -type state() :: #state{}.
+-type cached_token_map() ::
+    #{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
 
 %%%===================================================================
 %%% API
@@ -333,14 +334,10 @@ handle_requests(Requests, State = #state{
     master_pid = Pid,
     link_tokens = LT
 }) ->
-    Batch0 = datastore_doc_batch:init(),
-    Batch = datastore_doc_batch:set_link_tokens(Batch0, LT),
-    {Responses, Batch2} = batch_requests(Requests, [], Batch),
+    Batch = datastore_doc_batch:init(),
+    {Responses, Batch2, LT2} = batch_requests(Requests, [], Batch, LT),
     Batch3 = datastore_doc_batch:apply(Batch2),
     Batch4 = send_responses(Responses, Batch3),
-
-    LT2 = datastore_doc_batch:get_link_tokens(Batch4),
-
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
@@ -359,12 +356,20 @@ handle_requests(Requests, State = #state{
 %% Batches requests.
 %% @end
 %%--------------------------------------------------------------------
--spec batch_requests(list(), list(), batch()) -> {list(), batch()}.
-batch_requests([], Responses, Batch) ->
-    {lists:reverse(Responses), Batch};
-batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch) ->
-    {Response, Batch2} = batch_request(Request, Batch),
-    batch_requests(Requests, [{Pid, Ref, Response} | Responses], Batch2).
+-spec batch_requests(list(), list(), batch(), cached_token_map()) ->
+    {list(), batch(), cached_token_map()}.
+batch_requests([], Responses, Batch, LinkTokens) ->
+    {lists:reverse(Responses), Batch, LinkTokens};
+batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch, LinkTokens) ->
+    case batch_request(Request, Batch, LinkTokens) of
+        {Response, Batch2, LinkTokens2} ->
+            batch_requests(Requests, [{Pid, Ref, Response} | Responses],
+                Batch2, LinkTokens2);
+        {Response, Batch2} ->
+            % Request does not use tokens
+            batch_requests(Requests, [{Pid, Ref, Response} | Responses],
+                Batch2, LinkTokens)
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -372,32 +377,33 @@ batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch) ->
 %% Batches request.
 %% @end
 %%--------------------------------------------------------------------
--spec batch_request(term(), batch()) -> {term(), batch()}.
-batch_request({create, [Ctx, Key, Doc]}, Batch) ->
+-spec batch_request(term(), batch(), cached_token_map()) ->
+    {term(), batch()} | {term(), batch(), cached_token_map()}.
+batch_request({create, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:create(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
-batch_request({save, [Ctx, Key, Doc]}, Batch) ->
+batch_request({save, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:save(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
-batch_request({update, [Ctx, Key, Diff]}, Batch) ->
+batch_request({update, [Ctx, Key, Diff]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Batch2)
     end);
-batch_request({update, [Ctx, Key, Diff, Doc]}, Batch) ->
+batch_request({update, [Ctx, Key, Diff, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Doc, Batch2)
     end);
-batch_request({fetch, [Ctx, Key]}, Batch) ->
+batch_request({fetch, [Ctx, Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:fetch(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request({delete, [Ctx, Key, Pred]}, Batch) ->
+batch_request({delete, [Ctx, Key, Pred]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:delete(set_mutator_pid(Ctx), Key, Pred, Batch2)
     end);
-batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch) ->
+batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkTarget}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
@@ -406,7 +412,7 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch) ->
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, Links);
-batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch) ->
+batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             Ctx2 = set_mutator_pid(Ctx),
@@ -420,7 +426,7 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch) ->
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
-batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch) ->
+batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
@@ -429,7 +435,7 @@ batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch) ->
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, Links);
-batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch) ->
+batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             links_mask_apply(Ctx, Key, TreeId, Batch3, fun(Mask) ->
@@ -438,53 +444,50 @@ batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch) ->
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, Links);
-batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch) ->
-    batch_apply(Batch, fun(Batch2) ->
-        Ctx2 = set_mutator_pid(Ctx),
-        CacheToken = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            cache_fold_token, true),
+batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch, LinkTokens) ->
+    Ref = make_ref(),
+    Batch2 = datastore_doc_batch:init_request(Ref, Batch),
 
-        Opts2 = case CacheToken of
-            true ->
-                case maps:get(token, Opts, undefined) of
-                    undefined ->
-                        Opts;
-                    OriginalToken ->
-                        CachedToken = datastore_doc_batch:get_link_token(
-                            Batch2, OriginalToken),
-                        maps:put(token, CachedToken, Opts)
-                end;
-            _ ->
-                Opts
-        end,
+    Ctx2 = set_mutator_pid(Ctx),
+    CacheToken = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        cache_fold_token, true),
 
-        {Result, ForestIt} = datastore_links_iter:fold(Ctx2, Key, TreeIds,
-            Fun, Acc, Opts2, Batch2),
+    Opts2 = case CacheToken of
+        true ->
+            case maps:get(token, Opts, undefined) of
+                undefined ->
+                    Opts;
+                OriginalToken ->
+                    CachedToken = get_link_token(LinkTokens, OriginalToken),
+                    maps:put(token, CachedToken, Opts)
+            end;
+        _ ->
+            Opts
+    end,
 
-        Batch3 = datastore_links_iter:terminate(ForestIt),
-        {Result2, Batch4} = case CacheToken of
-            true ->
-                case maps:get(token, Opts, undefined) of
-                    undefined ->
-                        {Result, Batch3};
-                    OldToken ->
-                        {Result0, Token} = Result,
-                        {NewToken, NewBatch} =
-                            datastore_doc_batch:set_link_token(Batch3, Token,
-                                OldToken),
-                        {{Result0, NewToken}, NewBatch}
-                end;
-            _ ->
-                {Result, Batch3}
-        end,
+    {Result, ForestIt} = datastore_links_iter:fold(Ctx2, Key, TreeIds,
+        Fun, Acc, Opts2, Batch2),
 
-        {Result2, Batch4}
-    end);
-batch_request({fetch_links_trees, [Ctx, Key]}, Batch) ->
+    Batch3 = datastore_links_iter:terminate(ForestIt),
+    case CacheToken of
+        true ->
+            case maps:get(token, Opts, undefined) of
+                undefined ->
+                    {{Ref, Result}, Batch3, LinkTokens};
+                OldToken ->
+                    {Result0, Token} = Result,
+                    {NewToken, LinkTokens2} =
+                        set_link_token(LinkTokens, Token, OldToken),
+                    {{Ref, {Result0, NewToken}}, Batch3, LinkTokens2}
+            end;
+        _ ->
+            {{Ref, Result}, Batch3, LinkTokens}
+    end;
+batch_request({fetch_links_trees, [Ctx, Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request({Function, Args}, Batch) ->
+batch_request({Function, Args}, Batch, _LinkTokens) ->
     apply(datastore_doc_batch, Function, Args ++ [Batch]).
 
 %%--------------------------------------------------------------------
@@ -677,3 +680,37 @@ check_inactivate(#state{
     end, LT),
 
     State2#state{link_tokens = LT2}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets link token from cache in batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_link_token(cached_token_map(), datastore_links_iter:token()) ->
+    datastore_links_iter:token().
+get_link_token(Tokens,
+    #link_token{restart_token = {cached_token, Token}} = FullToken) ->
+    {Token2, _} = maps:get(Token, Tokens, {undefined, ok}),
+    FullToken#link_token{restart_token = Token2};
+get_link_token(_Batch, Token) ->
+    Token.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Puts link token in batch's cache.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_link_token(cached_token_map(), datastore_links_iter:token(),
+    datastore_links_iter:token()) -> {datastore_links_iter:token(), cached_token_map()}.
+set_link_token(Tokens, #link_token{restart_token = Token} = FullToken,
+    #link_token{restart_token = {cached_token, Token2}}) ->
+    {FullToken#link_token{restart_token = {cached_token, Token2}},
+        maps:put(Token2, {Token, os:timestamp()}, Tokens)};
+set_link_token(Tokens, Token, #link_token{} = OldToken) ->
+    Token2 = erlang:make_ref(),
+    set_link_token(Tokens, Token,
+        OldToken#link_token{restart_token = {cached_token, Token2}});
+set_link_token(Tokens, Token, _OldToken) ->
+    set_link_token(Tokens, Token, #link_token{}).
