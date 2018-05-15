@@ -36,6 +36,15 @@ distclean:
 	$(REBAR) clean --all
 
 ##
+## Submodules
+##
+
+submodules:
+	git submodule sync --recursive ${submodule}
+	git submodule update --init --recursive ${submodule}
+
+
+##
 ## Release targets
 ##
 
