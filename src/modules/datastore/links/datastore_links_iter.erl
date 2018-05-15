@@ -326,10 +326,9 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
     end, [], HeapList),
     Keys2 = lists:sort(Keys),
 
-    OffsetAbs = abs(Offset),
-    % TODO tu zwracamy co doczytujemy (przekazane w contiune lub wszystkie minus empty)
     Continue = case ForceContinue of
         [] ->
+            OffsetAbs = abs(Offset),
             case length(Keys) > OffsetAbs of
                 true ->
                     {lists:nth(OffsetAbs, Keys2) >= Name, TreeIds -- EmptyTrees};
@@ -347,11 +346,11 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
                     {ok, #forest_it{heap = TmpHeap} = ForestIt2, TmpEmptyTrees}) ->
                     case lists:member(TreeId, FoldIds) of
                         false ->
-                            ForestIt4 = ForestIt2#forest_it{
+                            ForestIt3 = ForestIt2#forest_it{
                                 heap = gb_trees:insert(ItKey, TreeIt, TmpHeap)
                             },
 
-                            {ok, ForestIt4, TmpEmptyTrees};
+                            {ok, ForestIt3, TmpEmptyTrees};
                         _ ->
                             case init_tree_fold(TreeId, ForestIt2, #{node_prev_to_key => Name}) of
                                 {{ok, #tree_it{links = [#link{name = FirstName} | _] = Links2}}, ForestIt3} ->
