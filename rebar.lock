@@ -98,7 +98,7 @@
   1},
  {<<"meck">>,
   {git,"https://github.com/eproxus/meck.git",
-       {ref,"ad8374ce5bdb0bb05d9f5a75d989157361902c3c"}},
+       {ref,"36b208e2d4d7d09ef7ef7f7aa7979da79fa97ef3"}},
   1},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},2},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},2},
