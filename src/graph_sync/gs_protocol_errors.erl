@@ -311,6 +311,14 @@ error_to_json(1, ?ERROR_BAD_VALUE_LOGIN) ->
     #{
         <<"id">> => <<"badValueLogin">>
     };
+error_to_json(1, ?ERROR_BAD_VALUE_USER_NAME) ->
+    #{
+        <<"id">> => <<"badValueUserName">>
+    };
+error_to_json(1, ?ERROR_BAD_VALUE_NAME) ->
+    #{
+        <<"id">> => <<"badValueName">>
+    };
 error_to_json(1, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
     #{
         <<"id">> => <<"subdomainDelegationDisabled">>
@@ -513,6 +521,12 @@ json_to_error(1, #{<<"id">> := <<"badValueIntentifier">>,
 
 json_to_error(1, #{<<"id">> := <<"badValueLogin">>}) ->
     ?ERROR_BAD_VALUE_LOGIN;
+
+json_to_error(1, #{<<"id">> := <<"badValueUserName">>}) ->
+    ?ERROR_BAD_VALUE_USER_NAME;
+
+json_to_error(1, #{<<"id">> := <<"badValueName">>}) ->
+    ?ERROR_BAD_VALUE_NAME;
 
 json_to_error(1, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
     ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;
