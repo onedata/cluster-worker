@@ -11,13 +11,14 @@
 -module(nagios_listener).
 -author("Michal Zmuda").
 
+-behaviour(listener_behaviour).
+
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 % Cowboy listener references
 -define(NAGIOS_LISTENER, nagios).
 
--behaviour(listener_behaviour).
 
 %% listener_behaviour callbacks
 -export([port/0, start/0, stop/0, healthcheck/0]).
@@ -50,7 +51,7 @@ start() ->
     {ok, MaxKeepAlive} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         http_max_keepalive),
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_socket_timeout_seconds),
+        http_request_timeout),
 
     Dispatch = cowboy_router:compile([
         {'_', [

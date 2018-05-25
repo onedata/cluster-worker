@@ -86,10 +86,12 @@ handshake(Client, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = H
             }),
             ?GS_LOGIC_PLUGIN:client_connected(Client, ConnRef),
             Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
+            Attributes = Translator:handshake_attributes(Client),
             {ok, gs_protocol:generate_success_response(Req, #gs_resp_handshake{
                 version = Version,
                 session_id = SessionId,
-                identity = Identity
+                identity = Identity,
+                attributes = Attributes
             })}
     end.
 
@@ -394,9 +396,12 @@ translate_create(Translator, ProtoVer, GRI, Data) ->
 -spec translate_get(translator(), gs_protocol:protocol_version(),
     gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
 translate_get(Translator, ProtoVer, GRI, Data) ->
-    Resp = Translator:translate_get(ProtoVer, GRI, Data),
+    {NewGRI, Resp} = case Translator:translate_get(ProtoVer, GRI, Data) of
+        {ModifiedGRI, Response} -> {ModifiedGRI, Response};
+        Response -> {GRI, Response}
+    end,
     % GRI must be sent back with every request
-    Resp#{<<"gri">> => gs_protocol:gri_to_string(GRI)}.
+    Resp#{<<"gri">> => gs_protocol:gri_to_string(NewGRI)}.
 
 
 -spec subscribe(gs_protocol:session_id(), gs_protocol:gri(), gs_protocol:client(),

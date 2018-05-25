@@ -29,7 +29,7 @@
   2},
  {<<"ctool">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/ctool.git",
-       {ref,"a344cbbcad754145df11a0f0f86ad8adf902fcc4"}},
+       {ref,"891abfdb43720fd4c76e1d2aeeb72b7774f71b1d"}},
   0},
  {<<"edown">>,
   {git,"git://github.com/uwiger/edown.git",

@@ -37,17 +37,12 @@
         {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
     ], [supervisor_first, {posthook, init_supervisors}]}
 ]).
--define(CLUSTER_WORKER_LISTENERS, [
-    nagios_listener,
-    redirector_listener
-]).
 
 -define(HELPER_ETS, node_manager_helper_ets).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0,
-    modules/0, listeners/0, cluster_worker_modules/0,
-    cluster_worker_listeners/0, start_worker/2]).
+    modules/0, listeners/0, cluster_worker_modules/0, start_worker/2]).
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
@@ -102,15 +97,6 @@ init_report() ->
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
     | {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of listeners provided by cluster-worker.
-%% Use in plugins when specifying listeners.
-%% @end
-%%--------------------------------------------------------------------
--spec cluster_worker_listeners() -> Listeners :: [atom()].
-cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 
 %%--------------------------------------------------------------------
 

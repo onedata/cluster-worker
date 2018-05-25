@@ -72,7 +72,9 @@ renamed_models() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec listeners() -> Listeners :: [atom()].
-listeners() -> node_manager:cluster_worker_listeners().
+listeners() -> [
+    nagios_listener
+].
 
 %%--------------------------------------------------------------------
 %% @doc

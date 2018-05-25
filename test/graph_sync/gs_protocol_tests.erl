@@ -584,7 +584,7 @@ encode_decode_error_test() ->
         ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(<<"spaceId">>),
         ?ERROR_BAD_VALUE_BAD_TOKEN_TYPE(<<"supportToken">>),
         ?ERROR_BAD_VALUE_IDENTIFIER(<<"id">>),
-        ?ERROR_BAD_VALUE_LOGIN,
+        ?ERROR_BAD_VALUE_ALIAS,
         ?ERROR_BAD_VALUE_USER_NAME,
         ?ERROR_BAD_VALUE_NAME,
         ?ERROR_RELATION_DOES_NOT_EXIST(od_user, <<"user1">>, od_space, <<"space1">>),

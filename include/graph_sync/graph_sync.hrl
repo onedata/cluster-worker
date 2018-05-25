@@ -42,7 +42,7 @@
     version = ?BASIC_PROTOCOL :: gs_protocol:protocol_version(),
     session_id :: undefined | gs_protocol:session_id(),
     identity = nobody :: nobody | gs_protocol:identity(),
-    attributes :: undefined | gs_protocol:handshake_attributes()
+    attributes = undefined :: gs_protocol:handshake_attributes()
 }).
 
 -record(gs_req_rpc, {

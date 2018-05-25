@@ -357,9 +357,9 @@ kill_owner(Owner) ->
 %%--------------------------------------------------------------------
 -spec sleep_random_interval(Num :: integer()) -> ok.
 sleep_random_interval(Num) ->
-    {ok, Interval1} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
-    {ok, Interval2} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
-    timer:sleep(Num * crypto:rand_uniform(Interval1, Interval2 + 1)).
+    {ok, Min} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_min_sleep_time_ms),
+    {ok, Max} = application:get_env(?CLUSTER_WORKER_APP_NAME, task_fail_max_sleep_time_ms),
+    timer:sleep(Num * (Min + rand:uniform(Max - Min + 1))).
 
 %%--------------------------------------------------------------------
 %% @private

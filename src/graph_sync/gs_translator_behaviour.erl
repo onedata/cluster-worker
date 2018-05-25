@@ -17,6 +17,16 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Returns handshake response attributes for given client that has been
+%% authorized.
+%% @end
+%%--------------------------------------------------------------------
+-callback handshake_attributes(gs_protocol:client()) ->
+    gs_protocol:handshake_attributes().
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Translates CREATE result to the format understood by client. Will be called
 %% only for requests that return {ok, {data, Data}}.
 %% For other results, translate_get is called.
@@ -28,9 +38,12 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Translates GET result to the format understood by client. Should not include
-%% "gri" in the resulting json map, as it is included automatically.
+%% Translates GET result to the format understood by client. The requested GRI
+%% will be automatically included in the answer. Alternatively, this callback
+%% can return a new GRI to override the requested one.
 %% @end
 %%--------------------------------------------------------------------
 -callback translate_get(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) -> gs_protocol:data() | gs_protocol:error().
+    Data :: term()) ->
+    gs_protocol:data() | {gs_protocol:gri(), gs_protocol:data()} |
+    gs_protocol:error().
