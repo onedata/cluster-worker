@@ -58,6 +58,7 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, subscribable_resources, fun subscribable_resources/1),
 
     ok = test_utils:mock_new(Nodes, ?GS_EXAMPLE_TRANSLATOR, [non_strict]),
+    ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, handshake_attributes, fun handshake_attributes/1),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_get, fun translate_get/3),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_create, fun translate_create/3),
 
@@ -208,6 +209,9 @@ subscribable_resources(od_user) -> [
 subscribable_resources(_) -> [
 ].
 
+
+handshake_attributes(_) ->
+    #{}.
 
 
 translate_get(1, _GRI, Data) ->

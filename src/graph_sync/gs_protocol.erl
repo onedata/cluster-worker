@@ -72,7 +72,7 @@
 -type identity() :: nobody | {user, UId :: binary()} | {provider, PId :: binary()}.
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
--type handshake_attributes() :: maps:map().
+-type handshake_attributes() :: undefined | maps:map().
 
 % Denotes type of message so the payload can be properly interpreted
 -type message_type() :: request | response | push.

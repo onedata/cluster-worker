@@ -164,18 +164,17 @@
             %% HTTP
             %% ===================================================================
 
+            %% NOTE: nagios server is started only when cluster_worker is run
+            %% in standalone mode, not as a part of bigger application.
+
             %% Port on which nagios is available
-            {http_nagios_port, 6666},
-            %% Port on which standard HTTP will be opened to redirect requests to HTTPS
-            {http_redirect_port, 80},
+            {http_nagios_port, 80},
             %% Number of accepting processes in http listeners
             {http_number_of_acceptors, 100},
-            %% Number of accepting processes on port 80 (redirecting to https)
-            {http_number_of_http_acceptors, 50},
             %% Maximum number of HTTP requests without closing the connection (HTTP/1.1 only)
             {http_max_keepalive, 30},
-            %% Socket timeout in sek
-            {http_socket_timeout_seconds, 300},
+            %% Request timeout in milliseconds
+            {http_request_timeout, 30000},
 
             %% ===================================================================
             %% NAGIOS

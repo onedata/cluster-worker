@@ -49,13 +49,13 @@
 -type fold_fun() :: datastore:fold_fun(link()).
 -type fold_acc() :: any().
 -type fold_opt() :: {prev_link_name, link_name()} |
-                    {offset, integer()} |
-                    {size, non_neg_integer()} |
-                    {token, token()} |
-                    % Datastore internal options
-                    {node_id, links_node:id()} |
-                    {prev_tree_id, tree_id()} | % Warning - link must exist with this opt!
-                    {node_prev_to_key, link_name()}. % To walk back with neg offset
+    {offset, integer()} |
+    {size, non_neg_integer()} |
+    {token, token()} |
+    % Datastore internal options
+    {node_id, links_node:id()} |
+    {prev_tree_id, tree_id()} | % Warning - link must exist with this opt!
+    {node_prev_to_key, link_name()}. % To walk back with neg offset
 -type fold_opts() :: maps:map([fold_opt()]).
 -type token() :: #link_token{}.
 
@@ -319,7 +319,7 @@ init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
 -spec add_prev_fold_nodes({ok | {error, term()}, forest_it()}, fold_opts(), list(), list()) ->
     {ok | {error, term()}, forest_it()}.
 add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt} = Ans,
-    #{offset := Offset, prev_link_name := Name} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
+    #{offset := Offset, prev_link_name := PrevLinkName} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
     HeapList = gb_trees:to_list(Heap),
     Keys = lists:foldl(fun({_, #tree_it{links = Links}}, Acc) ->
         Acc ++ lists:map(fun(#link{name = Name}) -> Name end, Links)
@@ -331,7 +331,7 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
             OffsetAbs = abs(Offset),
             case length(Keys) > OffsetAbs of
                 true ->
-                    {lists:nth(OffsetAbs, Keys2) >= Name, TreeIds -- EmptyTrees};
+                    {lists:nth(OffsetAbs, Keys2) >= PrevLinkName, TreeIds -- EmptyTrees};
                 _ ->
                     {true, TreeIds -- EmptyTrees}
             end;
@@ -376,7 +376,7 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
 
             add_prev_fold_nodes(Ans2, Opts, EmptyTrees, []);
         _ ->
-            SmallerKeys = lists:takewhile(fun(Key) -> Key < Name end, Keys2),
+            SmallerKeys = lists:takewhile(fun(Key) -> Key < PrevLinkName end, Keys2),
             FirstIncluded = lists:nth(length(SmallerKeys) + Offset + 1, Keys2),
 
             FoldAns = lists:foldl(fun({{_, ItTree}, #tree_it{links = [First | _] = Links} = TreeIt},
