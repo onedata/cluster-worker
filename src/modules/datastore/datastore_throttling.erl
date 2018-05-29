@@ -442,5 +442,6 @@ get_config_value(Name, Config, Defaults) ->
 log_monitoring_stats(Format, Args) ->
     LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_log_file,
         "/tmp/throttling_monitoring.log"),
-
-    node_manager:log_monitoring_stats(LogFile, Format, Args).
+    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        throttling_log_file_max_size, 524288000), % 500 MB
+    logger:log_with_rotation(LogFile, Format, Args, MaxSize).

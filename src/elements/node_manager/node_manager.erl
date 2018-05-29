@@ -198,25 +198,9 @@ single_error_log(LogKey, Log, Args, FreezeTime) ->
 -spec log_monitoring_stats(LogFile :: string(),
     Format :: io:format(), Args :: [term()]) -> ok.
 log_monitoring_stats(LogFile, Format, Args) ->
-    Now = os:timestamp(),
-    {Date, Time} = lager_util:format_time(lager_util:maybe_utc(
-        lager_util:localtime_ms(Now))),
     MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         monitoring_log_file_max_size, 524288000), % 500 MB
-
-    case filelib:file_size(LogFile) > MaxSize of
-        true ->
-            LogFile2 = LogFile ++ ".1",
-            file:delete(LogFile2),
-            file:rename(LogFile, LogFile2),
-            ok;
-        _ ->
-            ok
-    end,
-
-    file:write_file(LogFile,
-        io_lib:format("~n~s, ~s: " ++ Format, [Date, Time | Args]), [append]),
-    ok.
+    logger:log_with_rotation(LogFile, Format, Args, MaxSize).
 
 
 %%--------------------------------------------------------------------
