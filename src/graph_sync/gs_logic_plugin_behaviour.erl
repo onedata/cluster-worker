@@ -144,9 +144,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the list of subscribable resources for given entity type, identified
-%% by {Aspect, Scope} pairs.
+%% Returns if given GRI is subscribable, i.e. clients can subscribe for changes
+%% concerning that GRI.
 %% @end
 %%--------------------------------------------------------------------
--callback subscribable_resources(gs_protocol:entity_type()) ->
-    [{gs_protocol:aspect(), gs_protocol:scope()}].
+-callback is_subscribable(gs_protocol:gri()) -> boolean().

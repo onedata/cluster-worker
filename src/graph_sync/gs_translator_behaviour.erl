@@ -30,10 +30,13 @@
 %% Translates CREATE result to the format understood by client. Will be called
 %% only for requests that return {ok, {data, Data}}.
 %% For other results, translate_get is called.
+%% Can return a function taking one argument - the Client, that returns result
+%% depending on the client.
 %% @end
 %%--------------------------------------------------------------------
 -callback translate_create(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) -> gs_protocol:data() | gs_protocol:error().
+    Data :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
+    Result :: gs_protocol:data() | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -41,9 +44,11 @@
 %% Translates GET result to the format understood by client. The requested GRI
 %% will be automatically included in the answer. Alternatively, this callback
 %% can return a new GRI to override the requested one.
+%% Can return a function taking one argument - the Client, that returns result
+%% depending on the client.
 %% @end
 %%--------------------------------------------------------------------
 -callback translate_get(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) ->
-    gs_protocol:data() | {gs_protocol:gri(), gs_protocol:data()} |
+    Data :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
+    Result :: gs_protocol:data() | {gs_protocol:gri(), gs_protocol:data()} |
     gs_protocol:error().

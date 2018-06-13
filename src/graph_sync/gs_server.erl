@@ -131,31 +131,25 @@ terminate_connection(ConnRef) ->
 %%--------------------------------------------------------------------
 -spec updated(gs_protocol:entity_type(), gs_protocol:entity_id(), gs_protocol:entity()) -> ok.
 updated(EntityType, EntityId, Entity) ->
-    lists:foreach(
-        fun(GRI) ->
-            updated(GRI, Entity)
-        end, generate_subscribable_resources(EntityType, EntityId)).
-
-
--spec updated(gs_protocol:gri(), gs_protocol:entity()) -> ok.
-updated(GRI, Entity) ->
-    {ok, Subs} = gs_persistence:get_subscribers(GRI),
-    case Subs of
-        [] ->
+    {ok, AllSubscribers} = gs_persistence:get_subscribers(EntityType, EntityId),
+    maps:map(fun
+        ({_Aspect, _Scope}, []) ->
             ok;
-        _ ->
+        ({Aspect, Scope}, Subscribers) ->
+            GRI = #gri{type = EntityType, id = EntityId, aspect = Aspect, scope = Scope},
             {ok, Data} = ?GS_LOGIC_PLUGIN:handle_graph_request(
                 ?GS_LOGIC_PLUGIN:root_client(), undefined, GRI, get, #{}, Entity
             ),
             lists:foreach(
                 fun(Subscriber) ->
                     updated(GRI, Entity, Subscriber, Data)
-                end, Subs)
-    end.
+                end, Subscribers)
+    end, AllSubscribers),
+    ok.
 
 
 -spec updated(gs_protocol:gri(), gs_protocol:entity(), gs_persistence:subscriber(), term()) -> ok.
-updated(GRI, Entity, {SessionId, {Client, AuthHint}} = _Subscriber, Data) ->
+updated(GRI, Entity, {SessionId, {Client, AuthHint}}, Data) ->
     {ok, #gs_session{
         protocol_version = ProtoVersion,
         conn_ref = ConnRef,
@@ -164,7 +158,7 @@ updated(GRI, Entity, {SessionId, {Client, AuthHint}} = _Subscriber, Data) ->
     case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, GRI, get, Entity) of
         true ->
             DataJSONMap = translate_get(
-                Translator, ProtoVersion, GRI, Data
+                Translator, Client, ProtoVersion, GRI, Data
             ),
             gs_ws_handler:push(ConnRef, #gs_push{
                 subtype = graph, message = #gs_push_graph{
@@ -188,19 +182,12 @@ updated(GRI, Entity, {SessionId, {Client, AuthHint}} = _Subscriber, Data) ->
 %%--------------------------------------------------------------------
 -spec deleted(gs_protocol:entity_type(), gs_protocol:entity_id()) -> ok.
 deleted(EntityType, EntityId) ->
-    lists:foreach(
-        fun(GRI) ->
-            deleted(GRI)
-        end, generate_subscribable_resources(EntityType, EntityId)).
-
-
--spec deleted(gs_protocol:gri()) -> ok.
-deleted(GRI) ->
-    {ok, Subs} = gs_persistence:get_subscribers(GRI),
-    case Subs of
-        [] ->
+    {ok, AllSubscribers} = gs_persistence:get_subscribers(EntityType, EntityId),
+    maps:map(fun
+        ({_Aspect, _Scope}, []) ->
             ok;
-        _ ->
+        ({Aspect, Scope}, Subscribers) ->
+            GRI = #gri{type = EntityType, id = EntityId, aspect = Aspect, scope = Scope},
             lists:foreach(
                 fun({SessionId, _}) ->
                     {ok, #gs_session{
@@ -210,9 +197,10 @@ deleted(GRI) ->
                         subtype = graph, message = #gs_push_graph{
                             gri = GRI, change_type = deleted
                         }})
-                end, Subs),
+                end, Subscribers),
             gs_persistence:remove_all_subscribers(GRI)
-    end.
+    end, AllSubscribers),
+    ok.
 
 
 %%--------------------------------------------------------------------
@@ -310,11 +298,9 @@ handle_request(Session, #gs_req_graph{} = Req) ->
     } = Req,
     case Subscribe of
         true ->
-            case is_subscribable(GRI) of
-                true ->
-                    ok;
-                false ->
-                    throw(?ERROR_NOT_SUBSCRIBABLE)
+            case is_subscribable(Operation, GRI) of
+                true -> ok;
+                false -> throw(?ERROR_NOT_SUBSCRIBABLE)
             end;
         false ->
             ok
@@ -333,11 +319,11 @@ handle_request(Session, #gs_req_graph{} = Req) ->
             {not_subscribable, AuthHint, null};
         {create, {ok, {data, ResData}}} ->
             {not_subscribable, AuthHint, #{<<"data">> => translate_create(
-                Translator, ProtoVer, GRI, ResData
+                Translator, Client, ProtoVer, GRI, ResData
             )}};
         {create, {ok, {fetched, UpdatedGRI, ResData}}} ->
             {UpdatedGRI, AuthHint, translate_get(
-                Translator, ProtoVer, UpdatedGRI, ResData
+                Translator, Client, ProtoVer, UpdatedGRI, ResData
             )};
         {create, {ok, {not_fetched, UpdatedGRI}}} ->
             % This must succeed, otherwise crash is better to trace the problem
@@ -345,7 +331,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
                 Client, undefined, UpdatedGRI, get, #{}, undefined
             ),
             {UpdatedGRI, AuthHint, translate_get(
-                Translator, ProtoVer, UpdatedGRI, FetchedData
+                Translator, Client, ProtoVer, UpdatedGRI, FetchedData
             )};
         {create, {ok, {not_fetched, UpdatedGRI, NAuthHint}}} ->
             % This must succeed, otherwise crash is better to trace the problem
@@ -353,12 +339,12 @@ handle_request(Session, #gs_req_graph{} = Req) ->
                 Client, NAuthHint, UpdatedGRI, get, #{}, undefined
             ),
             {UpdatedGRI, NAuthHint, translate_get(
-                Translator, ProtoVer, UpdatedGRI, FetchedData
+                Translator, Client, ProtoVer, UpdatedGRI, FetchedData
             )};
 
         {get, {ok, ResData}} ->
             {GRI, AuthHint, translate_get(
-                Translator, ProtoVer, GRI, ResData
+                Translator, Client, ProtoVer, GRI, ResData
             )};
 
         {update, ok} ->
@@ -386,17 +372,24 @@ handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
 %%% Internal functions
 %%%===================================================================
 
--spec translate_create(translator(), gs_protocol:protocol_version(),
+-spec translate_create(translator(), gs_protocol:client(), gs_protocol:protocol_version(),
     gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_create(Translator, ProtoVer, GRI, Data) ->
+translate_create(Translator, Client, ProtoVer, GRI, Data) ->
     % Used only when data is returned rather than GRI and resource
-    Translator:translate_create(ProtoVer, GRI, Data).
+    case Translator:translate_create(ProtoVer, GRI, Data) of
+        Fun when is_function(Fun, 1) -> Fun(Client);
+        Result -> Result
+    end.
 
 
--spec translate_get(translator(), gs_protocol:protocol_version(),
+-spec translate_get(translator(), gs_protocol:client(), gs_protocol:protocol_version(),
     gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_get(Translator, ProtoVer, GRI, Data) ->
-    {NewGRI, Resp} = case Translator:translate_get(ProtoVer, GRI, Data) of
+translate_get(Translator, Client, ProtoVer, GRI, Data) ->
+    CallbackResult = case Translator:translate_get(ProtoVer, GRI, Data) of
+        Fun when is_function(Fun, 1) -> Fun(Client);
+        Result -> Result
+    end,
+    {NewGRI, Resp} = case CallbackResult of
         {ModifiedGRI, Response} -> {ModifiedGRI, Response};
         Response -> {GRI, Response}
     end,
@@ -419,24 +412,20 @@ unsubscribe(SessionId, GRI) ->
     ok.
 
 
--spec generate_subscribable_resources(gs_protocol:entity_type(),
-    gs_protocol:entity_id()) -> [gs_protocol:gri()].
-generate_subscribable_resources(EntityType, EntityId) ->
-    lists:map(
-        fun({A, S}) ->
-            #gri{type = EntityType, id = EntityId, aspect = A, scope = S}
-        end, ?GS_LOGIC_PLUGIN:subscribable_resources(EntityType)).
-
-
--spec is_subscribable(gs_protocol:gri()) -> boolean().
-is_subscribable(#gri{type = EntityType, aspect = Aspect, scope = Scope}) ->
-    lists:member(
-        {Aspect, Scope},
-        ?GS_LOGIC_PLUGIN:subscribable_resources(EntityType)
-    ).
+-spec is_subscribable(gs_protocol:operation(), gs_protocol:gri()) -> boolean().
+is_subscribable(create, GRI = #gri{id = undefined}) ->
+    % Newly created resources can be subscribed for depending on logic_plugin
+    ?GS_LOGIC_PLUGIN:is_subscribable(GRI);
+is_subscribable(_, #gri{id = undefined}) ->
+    % But resources that do not correspond to any entity cannot
+    false;
+is_subscribable(_, GRI) ->
+    % Resources corresponding to an entity can be subscribed for depending on logic_plugin
+    ?GS_LOGIC_PLUGIN:is_subscribable(GRI).
 
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Tries to authorize client by HTTP cookie.
 %% {true, Client} - client was authorized
@@ -456,6 +445,7 @@ authorize_by_session_cookie(Req) ->
 
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Tries to authorize client by provider certificate.
 %% {true, Client} - client was authorized
@@ -475,6 +465,7 @@ authorize_by_macaroon(Req) ->
 
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns cookie value for given cookie name.
 %% Undefined if no such cookie was sent.
@@ -487,6 +478,7 @@ get_cookie(Name, Req) ->
 
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns macaroon from "macaroon" or "X-Auth-token" header, if present.
 %% @end

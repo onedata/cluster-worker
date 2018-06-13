@@ -61,8 +61,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Req :: cowboy_req:req(), Opts :: any()) ->
-    {ok, cowboy_req:req(), no_state} |
-    {cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
+    {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
     case gs_server:authorize(Req) of
         {ok, Client} ->
@@ -72,7 +71,7 @@ init(Req, [Translator]) ->
             {cowboy_websocket, Req, State};
         ?ERROR_UNAUTHORIZED ->
             NewReq = cowboy_req:reply(401, Req),
-            {ok, NewReq, no_state}
+            {ok, NewReq, #pre_handshake_state{}}
     end.
 
 
