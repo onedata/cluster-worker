@@ -65,7 +65,7 @@ all() -> ?ALL([
 
 handshake_test(Config) ->
     % Try to connect with no cookie - should be treated as anonymous
-    ?assertMatch(
+    {ok, Client1, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = nobody}},
         gs_client:start_link(get_gs_ws_url(Config),
             undefined,
@@ -76,7 +76,7 @@ handshake_test(Config) ->
     ),
 
     % Try to connect with user 1 session cookie
-    ?assertMatch(
+    {ok, Client2, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = {user, ?USER_1}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {cookie, {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
@@ -87,7 +87,7 @@ handshake_test(Config) ->
     ),
 
     % Try to connect with user 2 session cookie
-    ?assertMatch(
+    {ok, Client3, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = {user, ?USER_2}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {cookie, {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
@@ -108,13 +108,7 @@ handshake_test(Config) ->
         )
     ),
 
-    % Try to connect with client certificates
-    Opts = [
-        {keyfile, ?TEST_FILE(Config, "client_key.pem")},
-        {certfile, ?TEST_FILE(Config, "client_cert.pem")},
-        {cacerts, get_cacerts(Config)}
-    ],
-    ?assertMatch(
+    {ok, Client4, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = {provider, ?PROVIDER_1}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {macaroon, ?PROVIDER_1_MACAROON},
@@ -146,6 +140,9 @@ handshake_test(Config) ->
             ?SSL_OPTS(Config)
         )
     ),
+
+    disconnect_client([Client1, Client2, Client3, Client4]),
+
     ok.
 
 
@@ -184,6 +181,9 @@ rpc_req_test(Config) ->
         ?ERROR_RPC_UNDEFINED,
         gs_client:rpc_request(Client1, <<"nonExistentFun">>, #{<<"a">> => <<"b">>})
     ),
+
+    disconnect_client([Client1, Client2]),
+
     ok.
 
 
@@ -310,6 +310,8 @@ graph_req_test(Config) ->
         }, create, #{<<"name">> => ?GROUP_1_NAME}, false, ?AS_USER(?SELF))
     ),
 
+    disconnect_client([Client1, Client2]),
+
     ok.
 
 
@@ -348,10 +350,28 @@ subscribe_test(Config) ->
         }, get, #{}, true)
     ),
 
+    User1NameSubstring = binary:part(maps:get(<<"name">>, User1Data), 0, 4),
+
+    ?assertMatch(
+        {ok, #gs_resp_graph{result = #{<<"nameSubstring">> := User1NameSubstring}}},
+        gs_client:graph_request(Client1, #gri{
+            type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
+        }, get, #{}, true)
+    ),
+
     ?assertMatch(
         {ok, #gs_resp_graph{result = User2Data}},
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_2, aspect = instance
+        }, get, #{}, true)
+    ),
+
+    User2NameSubstring = binary:part(maps:get(<<"name">>, User2Data), 0, 6),
+
+    ?assertMatch(
+        {ok, #gs_resp_graph{result = #{<<"nameSubstring">> := User2NameSubstring}}},
+        gs_client:graph_request(Client2, #gri{
+            type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
         }, get, #{}, true)
     ),
 
@@ -383,6 +403,9 @@ subscribe_test(Config) ->
         <<"name">> => <<"newName2">>
     },
 
+    NewUser1NameSubstring = binary:part(maps:get(<<"name">>, NewUser1Data), 0, 4),
+    NewUser2NameSubstring = binary:part(maps:get(<<"name">>, NewUser2Data), 0, 6),
+
     ?assertEqual(
         true,
         verify_message_present(GathererPid, client1, fun(Msg) ->
@@ -390,6 +413,21 @@ subscribe_test(Config) ->
                 #gs_push_graph{gri = #gri{
                     type = od_user, id = ?USER_1, aspect = instance
                 }, change_type = updated, data = NewUser1Data} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client1, fun(Msg) ->
+            case Msg of
+                #gs_push_graph{gri = #gri{
+                    type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
+                }, change_type = updated, data = #{<<"nameSubstring">> := NewUser1NameSubstring}} ->
                     true;
                 _ ->
                     false
@@ -427,6 +465,24 @@ subscribe_test(Config) ->
         end),
         50
     ),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client2, fun(Msg) ->
+            case Msg of
+                #gs_push_graph{gri = #gri{
+                    type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
+                }, change_type = updated, data = #{<<"nameSubstring">> := NewUser2NameSubstring}} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
+    disconnect_client([Client1, Client2]),
+
     ok.
 
 
@@ -508,6 +564,9 @@ unsubscribe_test(Config) ->
                 false
         end
     end, 20)),
+
+    disconnect_client([Client1]),
+
     ok.
 
 
@@ -595,8 +654,7 @@ nosub_test(Config) ->
                     type = od_user, id = ?USER_2, aspect = instance
                 }, reason = forbidden} ->
                     true;
-                O ->
-                    ct:print("O ~p", [O]),
+                _ ->
                     false
             end
         end),
@@ -613,6 +671,9 @@ nosub_test(Config) ->
                 false
         end
     end, 20)),
+
+    disconnect_client([Client1, Client2]),
+
     ok.
 
 
@@ -666,41 +727,41 @@ subscribers_persistence_test(Config) ->
     Sub2 = {Session2, {Auth2, AuthHint2}},
     Sub3 = {Session3, {Auth3, AuthHint3}},
 
+    UserId = <<"dummyId">>,
+    GRI = #gri{type = od_user, id = UserId, aspect = instance, scope = private},
 
-    GRI = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = private},
-
-    {ok, Subscribers1} = rpc:call(Node, gs_persistence, get_subscribers, [GRI]),
-    ?assertMatch([], Subscribers1),
+    {ok, Subscribers1} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
+    ?assertEqual(#{}, Subscribers1),
 
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session1, Auth1, AuthHint1])),
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session2, Auth2, AuthHint2])),
-    {ok, Subscribers2} = rpc:call(Node, gs_persistence, get_subscribers, [GRI]),
-    Expected2 = lists:sort([Sub1, Sub2]),
-    ?assertMatch(Expected2, lists:sort(Subscribers2)),
+    {ok, Subscribers2} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
+    Expected2 = ordsets:from_list([Sub1, Sub2]),
+    ?assertMatch(#{{instance, private} := Expected2}, Subscribers2),
 
     % Subscribing should be idempotent
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session2, Auth2, AuthHint2])),
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session2, Auth2, AuthHint2])),
-    {ok, Subscribers3} = rpc:call(Node, gs_persistence, get_subscribers, [GRI]),
-    Expected3 = lists:sort([Sub1, Sub2]),
-    ?assertMatch(Expected3, lists:sort(Subscribers3)),
+    {ok, Subscribers3} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
+    Expected3 = ordsets:from_list([Sub1, Sub2]),
+    ?assertMatch(#{{instance, private} := Expected3}, Subscribers3),
 
     % Add third subscriber
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session3, Auth3, AuthHint3])),
-    {ok, Subscribers4} = rpc:call(Node, gs_persistence, get_subscribers, [GRI]),
-    Expected4 = lists:sort([Sub1, Sub2, Sub3]),
-    ?assertMatch(Expected4, lists:sort(Subscribers4)),
+    {ok, Subscribers4} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
+    Expected4 = ordsets:from_list([Sub1, Sub2, Sub3]),
+    ?assertMatch(#{{instance, private} := Expected4}, Subscribers4),
 
     % Remove second subscriber
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_subscriber, [GRI, Session2])),
-    {ok, Subscribers5} = rpc:call(Node, gs_persistence, get_subscribers, [GRI]),
-    Expected5 = lists:sort([Sub1, Sub3]),
-    ?assertMatch(Expected5, lists:sort(Subscribers5)),
+    {ok, Subscribers5} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
+    Expected5 = ordsets:from_list([Sub1, Sub3]),
+    ?assertMatch(#{{instance, private} := Expected5}, Subscribers5),
 
     % Remove all subscribers
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscribers, [GRI])),
-    {ok, Subscribers6} = rpc:call(Node, gs_persistence, get_subscribers, [GRI]),
-    ?assertMatch([], Subscribers6),
+    {ok, Subscribers6} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
+    ?assertEqual(#{}, Subscribers6),
     ok.
 
 
@@ -717,9 +778,6 @@ subscriptions_persistence_test(Config) ->
     GRI1 = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = private},
     GRI2 = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = protected},
     GRI3 = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = shared},
-    Sub1 = gs_persistence:gri_to_hash(GRI1),
-    Sub2 = gs_persistence:gri_to_hash(GRI2),
-    Sub3 = gs_persistence:gri_to_hash(GRI3),
 
     {ok, Subscriptions1} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
     ?assertMatch([], Subscriptions1),
@@ -727,26 +785,26 @@ subscriptions_persistence_test(Config) ->
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI1])),
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI3])),
     {ok, Subscriptions2} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected2 = lists:sort([Sub1, Sub3]),
+    Expected2 = lists:sort([GRI1, GRI3]),
     ?assertMatch(Expected2, lists:sort(Subscriptions2)),
 
     % Subscribing should be idempotent
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI1])),
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI1])),
     {ok, Subscriptions3} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected3 = lists:sort([Sub1, Sub3]),
+    Expected3 = lists:sort([GRI1, GRI3]),
     ?assertMatch(Expected3, lists:sort(Subscriptions3)),
 
     % Add second GRI
     ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI2])),
     {ok, Subscriptions4} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected4 = lists:sort([Sub1, Sub2, Sub3]),
+    Expected4 = lists:sort([GRI1, GRI2, GRI3]),
     ?assertMatch(Expected4, lists:sort(Subscriptions4)),
 
     % Remove first GRI
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_subscription, [SessionId, GRI1])),
     {ok, Subscriptions5} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected5 = lists:sort([Sub2, Sub3]),
+    Expected5 = lists:sort([GRI2, GRI3]),
     ?assertMatch(Expected5, lists:sort(Subscriptions5)),
 
     % Remove all GRIs
@@ -802,8 +860,8 @@ gs_server_session_clearing_test_api_level(Config) ->
     ?assertMatch(ok, rpc:call(Node, gs_server, cleanup_client_session, [SessionId])),
 
     ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscriptions, [SessionId])),
-    ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscribers, [GRI1])),
-    ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscribers, [GRI2])),
+    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_1])),
+    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_2])),
     ok.
 
 
@@ -837,15 +895,14 @@ gs_server_session_clearing_test_connection_level(Config) ->
         }, get, #{}, true, ?THROUGH_SPACE(?SPACE_1))
     ),
 
-    process_flag(trap_exit, true),
-    exit(Client1, kill),
-    % Grant a little time for cleanup
-    timer:sleep(1000),
-    process_flag(trap_exit, false),
+    disconnect_client(Client1),
 
     ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscriptions, [SessionId])),
-    ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscribers, [GRI1])),
-    ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscribers, [GRI2])),
+    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_1])),
+    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_2])),
+
+    disconnect_client([Client1]),
+
     ok.
 
 %%%===================================================================
@@ -896,6 +953,17 @@ get_gs_ws_url(Config) ->
     NodeIP = test_utils:get_docker_ip(Node),
     str_utils:format_bin("wss://~s:~B/", [NodeIP, ?GS_PORT]).
 
+
+disconnect_client([]) ->
+    % Allow some time for cleanup
+    timer:sleep(5000),
+    process_flag(trap_exit, false);
+disconnect_client([Client | Rest]) ->
+    process_flag(trap_exit, true),
+    exit(Client, kill),
+    disconnect_client(Rest);
+disconnect_client(Client) ->
+    disconnect_client([Client]).
 
 
 get_cacerts(Config) ->

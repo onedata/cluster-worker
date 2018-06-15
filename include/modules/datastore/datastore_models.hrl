@@ -41,17 +41,6 @@
     queue = [] :: [lock:queue_element()]
 }).
 
--record(synced_cert, {
-    cert_file_content :: undefined | binary(),
-    key_file_content :: undefined | binary()
-}).
-
--record(cached_identity, {
-    id :: undefined | identity:id(),
-    encoded_public_key :: undefined | identity:encoded_public_key(),
-    last_update_seconds :: undefined | integer()
-}).
-
 -record(node_management, {
     value :: term()
 }).
@@ -63,12 +52,12 @@
     protocol_version = 0 :: gs_protocol:protocol_version(),
     conn_ref :: undefined | gs_server:conn_ref(),
     translator :: gs_server:translator(),
-    subscriptions = [] :: ordsets:ordset(gs_persistence:subscription())
+    subscriptions = [] :: gs_persistence:subscriptions()
 }).
 
 % Holds a list of subscribers for certain resource.
 -record(gs_subscription, {
-    subscribers = [] :: ordsets:ordset(gs_persistence:subscriber())
+    subscribers = #{} :: gs_persistence:subscribers()
 }).
 
 -endif.

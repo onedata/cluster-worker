@@ -33,7 +33,7 @@
     guest_client/0,
     handle_rpc/4,
     handle_graph_request/6,
-    subscribable_resources/1
+    is_subscribable/1
 ]).
 -export([
     translate_get/3,
@@ -55,7 +55,7 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, guest_client, fun guest_client/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_rpc, fun handle_rpc/4),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_graph_request, fun handle_graph_request/6),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, subscribable_resources, fun subscribable_resources/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_subscribable, fun is_subscribable/1),
 
     ok = test_utils:mock_new(Nodes, ?GS_EXAMPLE_TRANSLATOR, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, handshake_attributes, fun handshake_attributes/1),
@@ -199,25 +199,52 @@ handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_space, id = un
 handle_graph_request(?USER_AUTH(?USER_1), _, #gri{type = od_space, id = ?SPACE_1, aspect = instance}, get, _Data, _Entity) ->
     {ok, #{<<"name">> => ?SPACE_1_NAME}};
 
+handle_graph_request(Client, _AuthHint, #gri{type = od_user, id = UserId, aspect = {name_substring, LenBin}}, get, _Data, Entity) ->
+    Len = binary_to_integer(LenBin),
+    UserName = case Entity of
+        undefined ->
+            maps:get(<<"name">>, ?USER_DATA_WITHOUT_GRI(UserId));
+        Fetched ->
+            % Used in gs_server:updated
+            maps:get(<<"name">>, Fetched)
+    end,
+    NameSubstring = binary:part(UserName, 0, Len),
+    case Client of
+        ?ROOT_AUTH -> {ok, #{<<"nameSubstring">> => NameSubstring}};
+        ?USER_AUTH(UserId) -> {ok, #{<<"nameSubstring">> => NameSubstring}};
+        _ -> ?ERROR_FORBIDDEN
+    end;
+
 handle_graph_request(_, _, _, _, _, _) ->
     ?ERROR_NOT_FOUND.
 
 
-subscribable_resources(od_user) -> [
-    {instance, private}
-];
-subscribable_resources(_) -> [
-].
+is_subscribable(#gri{type = od_user, aspect = instance, scope = private}) ->
+    true;
+is_subscribable(#gri{type = od_user, aspect = {name_substring, _}, scope = private}) ->
+    true;
+is_subscribable(_) ->
+    false.
 
 
 handshake_attributes(_) ->
     #{}.
 
 
+% Test both ways of implementing the translator - returning exact value or a fun
+% to evaluate.
 translate_get(1, _GRI, Data) ->
-    Data.
+    case rand:uniform(2) of
+        1 -> Data;
+        2 -> fun(_Client) -> Data end
+    end.
 
 
+% Test both ways of implementing the translator - returning exact value or a fun
+% to evaluate.
 translate_create(1, _GRI, Data) ->
-    Data.
+    case rand:uniform(2) of
+        1 -> Data;
+        2 -> fun(_Client) -> Data end
+    end.
 
