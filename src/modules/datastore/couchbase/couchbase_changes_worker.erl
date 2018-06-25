@@ -215,7 +215,8 @@ fetch_changes(#state{
         {ok, {Changes0}} ->
             Changes0;
         Error ->
-            ?error("Cannot fetch changes, error: ~p", [Error]),
+            ?error("Cannot fetch changes, error: ~p, scope: ~p, start: ~p,
+            stop: ~p", [Error, Scope, SeqSafe2, Seq2]),
             []
     end,
 
