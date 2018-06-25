@@ -144,6 +144,29 @@ handle_info(update, #state{
         {error, _Reason} -> Seq
     end,
     {noreply, fetch_changes(State#state{seq = Seq3})};
+handle_info(update, #state{
+    seq_safe = SeqSafe,
+    seq = Seq,
+    bucket = Bucket,
+    scope = Scope
+} = State) when SeqSafe > Seq->
+    Ctx = #{bucket => Bucket},
+    SeqKey = couchbase_changes:get_seq_key(Scope),
+    Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey) of
+        {ok, _, Seq2} -> Seq2;
+        {error, _Reason} -> Seq
+    end,
+
+    SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
+    SeqSafe3 = case couchbase_driver:get_counter(Ctx, SeqSafeKey) of
+        {ok, _, SeqSafe2} -> SeqSafe2;
+        {error, _Reason2} -> SeqSafe
+    end,
+
+    ?warning("Too high seq_safe for scope ~p: seq_safe = ~p, seq = ~p,
+        new_seq_safe = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, SeqSafe3, Seq3]),
+
+    {noreply, fetch_changes(State#state{seq = Seq3, seq_safe = SeqSafe3})};
 handle_info(update, #state{} = State) ->
     {noreply, fetch_changes(State)};
 handle_info(Info, #state{} = State) ->
@@ -211,27 +234,27 @@ fetch_changes(#state{
         {inclusive_end, true}
     ]),
 
-    Changes = case QueryAns of
-        {ok, {Changes0}} ->
-            Changes0;
+    case QueryAns of
+        {ok, {Changes}} ->
+            State2 = #state{
+                seq_safe = SeqSafe3
+            } = process_changes(SeqSafe2, Seq2 + 1, Changes, State, []),
+
+            ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
+            gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
+
+            case SeqSafe3 of
+                Seq2 -> erlang:send_after(0, self(), update);
+                _ -> erlang:send_after(Interval, self(), update)
+            end,
+            State2;
         Error ->
             ?error("Cannot fetch changes, error: ~p, scope: ~p, start: ~p,
             stop: ~p", [Error, Scope, SeqSafe2, Seq2]),
-            []
-    end,
 
-    State2 = #state{
-        seq_safe = SeqSafe3
-    } = process_changes(SeqSafe2, Seq2 + 1, Changes, State, []),
-
-    ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
-    gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
-
-    case SeqSafe3 of
-        Seq2 -> erlang:send_after(0, self(), update);
-        _ -> erlang:send_after(Interval, self(), update)
-    end,
-    State2.
+            erlang:send_after(Interval, self(), update),
+            State
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
