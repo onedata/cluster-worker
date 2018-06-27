@@ -104,8 +104,7 @@ post_async(Bucket, Mode, Request) ->
     future().
 post_async(Bucket, Mode, Request, ResponseTo) ->
     Ref = make_ref(),
-    Id = get_worker_id(Bucket, Mode),
-    Worker = couchbase_pool_sup:get_worker(Bucket, Mode, Id),
+    {Id, Worker} = get_worker(Bucket, Mode),
     update_request_queue_size(Bucket, Mode, Id, 1),
     Worker ! {post, {Ref, ResponseTo, Request}},
     {Ref, Worker}.
@@ -286,14 +285,19 @@ get_workers(Bucket, Mode) ->
 %% Returns worker ID to be used by next operation.
 %% @end
 %%--------------------------------------------------------------------
--spec get_worker_id(couchbase_config:bucket(), mode()) ->
-    couchbase_pool_worker:id().
-get_worker_id(Bucket, write = Mode) ->
+-spec get_worker(couchbase_config:bucket(), mode()) ->
+    {couchbase_pool_worker:id(), pid()}.
+get_worker(Bucket, write = Mode) ->
+    Pid = spawn(fun() -> timer:sleep(1000000) end),
+    T1 = os:timestamp(),
+    erlang:process_info(Pid, memory),
+    timer:now_diff(os:timestamp(), T1),
     Alg = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_pool_worker_algorithm, big_batch),
+        couchbase_pool_worker_algorithm, {big_limited_batch, 10, 104857600}),
     case Alg of
         round_robin ->
-            get_next_worker_id(Bucket, Mode, 0);
+            Id = get_next_worker_id(Bucket, Mode, 0),
+            {Id, couchbase_pool_sup:get_worker(Bucket, Mode, Id)};
         _ ->
             Key = {next_worker_id, Bucket, Mode},
             Id = case ets:lookup(couchbase_pool_stats, Key) of
@@ -310,12 +314,34 @@ get_worker_id(Bucket, write = Mode) ->
             MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 couchbase_pool_batch_size, 1000),
             case Size < MaxSize of
-                true -> Id;
-                _ -> get_next_worker_id(Bucket, Mode, 1)
+                true ->
+                    case Alg of
+                        {big_limited_batch, CheckSize, MemoryLimit} ->
+                            Worker = couchbase_pool_sup:get_worker(Bucket, Mode, Id),
+                            case Size < CheckSize of
+                                true ->
+                                    {Id, Worker};
+                                _ ->
+                                    {memory, Mem} = erlang:process_info(Worker, memory),
+                                    case Mem < MemoryLimit of
+                                        true ->
+                                            {Id, Worker};
+                                        _ ->
+                                            Id2 = get_next_worker_id(Bucket, Mode, 1),
+                                            {Id2, couchbase_pool_sup:get_worker(Bucket, Mode, Id2)}
+                                    end
+                            end;
+                        _ ->
+                            {Id, couchbase_pool_sup:get_worker(Bucket, Mode, Id)}
+                    end;
+                _ ->
+                    Id2 = get_next_worker_id(Bucket, Mode, 1),
+                    {Id2, couchbase_pool_sup:get_worker(Bucket, Mode, Id2)}
             end
     end;
-get_worker_id(Bucket, Mode) ->
-    get_next_worker_id(Bucket, Mode, 0).
+get_worker(Bucket, Mode) ->
+    Id = get_next_worker_id(Bucket, Mode, 0),
+    {Id, couchbase_pool_sup:get_worker(Bucket, Mode, Id)}.
 
 %%--------------------------------------------------------------------
 %% @private
