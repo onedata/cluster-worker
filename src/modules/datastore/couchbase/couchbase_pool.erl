@@ -288,10 +288,6 @@ get_workers(Bucket, Mode) ->
 -spec get_worker(couchbase_config:bucket(), mode()) ->
     {couchbase_pool_worker:id(), pid()}.
 get_worker(Bucket, write = Mode) ->
-    Pid = spawn(fun() -> timer:sleep(1000000) end),
-    T1 = os:timestamp(),
-    erlang:process_info(Pid, memory),
-    timer:now_diff(os:timestamp(), T1),
     Alg = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_pool_worker_algorithm, {big_limited_batch, 10, 104857600}),
     case Alg of
