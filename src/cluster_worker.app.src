@@ -231,9 +231,11 @@
 
             % Scope of cberl instance: pool, mode, node
             {cberl_instance_scope, mode},
-            % Algorithm of couchbase pool worker: big_batch (maximizes batch
-            % size) or round_robin
-            {couchbase_pool_worker_algorithm, big_batch},
+            % Algorithm of couchbase pool worker: big_batch (maximizes batch size),
+            % {big_limited_batch, CheckSize, MemoryLimit} (maximizes batch size
+            % but when batch is bigger than CheckSize verifies if worker uses
+            % less memory than MemoryLimit) or round_robin
+            {couchbase_pool_worker_algorithm, {big_limited_batch, 10, 104857600}},
             % Should tp flush documents faster if possible
             {tp_fast_flush, on},
             % Should couchbase pool worker wait on documents durability during

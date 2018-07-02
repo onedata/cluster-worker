@@ -23,7 +23,7 @@
 -export([create/2, save/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
--export([fold/3, fold_keys/3]).
+-export([fold/3, fold/5, fold_keys/3]).
 -export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
@@ -233,16 +233,37 @@ delete_all(Ctx) ->
 %%--------------------------------------------------------------------
 -spec fold(ctx(), fold_fun(doc()), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold(Ctx = #{model := Model, fold_enabled := true}, Fun, Acc) ->
+fold(Ctx, Fun, Acc) ->
+    fold(Ctx, Fun, fun(Key, Acc2) ->
+        {ok, [Key | Acc2]}
+    end, true, Acc).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Calls Fun(Doc, Acc) for each model document in a datastore. Filters keys before.
+%% @end
+%%--------------------------------------------------------------------
+-spec fold(ctx(), fold_fun(doc()), fold_fun(key()), boolean(), fold_acc()) ->
+    {ok, fold_acc()} | {error, term()}.
+fold(Ctx = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
     ModelKey = atom_to_binary(Model, utf8),
-    fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
-        case get(Ctx, Key) of
-            {ok, Doc} -> Fun(Doc, Acc2);
-            {error, not_found} -> {ok, Acc2};
-            {error, Reason} -> {error, Reason}
-        end
-    end, Acc, #{});
-fold(_Ctx, _Fun, _Acc) ->
+    LinksAns = fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
+        KeyFilter(Key, Acc2)
+    end, [], #{}),
+
+    case LinksAns of
+        {ok, List} ->
+            List2 = case ReverseKeys of
+                true ->
+                    lists:reverse(List);
+                _ ->
+                    List
+            end,
+            fold_internal(List2, Acc, Ctx, Fun);
+        _ ->
+            LinksAns
+    end;
+fold(_Ctx, _Fun, _KeyFilter, _ReverseKeys, _Acc) ->
     {error, not_supported}.
 
 %%--------------------------------------------------------------------
@@ -498,3 +519,28 @@ hd_if_list(List) when is_list(List) ->
     hd(List);
 hd_if_list(Term) ->
     Term.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Calls Fun(Doc, Acc) for each key.
+%% @end
+%%--------------------------------------------------------------------
+-spec fold_internal([key()], fold_acc(), ctx(), fold_fun(doc())) ->
+    {ok, fold_acc()} | {error, term()}.
+fold_internal([], Acc, _Ctx, _Fun) ->
+    {ok, Acc};
+fold_internal([Key | Tail], Acc, Ctx, Fun) ->
+    case get(Ctx, Key) of
+        {ok, Doc} ->
+            case Fun(Doc, Acc) of
+                {ok, Acc2} ->
+                    fold_internal(Tail, Acc2, Ctx, Fun);
+                {stop, Acc2} ->
+                    {ok, Acc2};
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, not_found} -> fold_internal(Tail, Acc, Ctx, Fun);
+        {error, Reason} -> {error, Reason}
+    end.
