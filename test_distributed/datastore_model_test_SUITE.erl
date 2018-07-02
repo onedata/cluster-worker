@@ -34,6 +34,7 @@
     delete_should_ignore_missing_value/1,
     delete_should_mark_value_deleted/1,
     fold_should_return_all_values/1,
+    fold_should_return_all_values2/1,
     fold_keys_should_return_all_keys/1,
     add_links_should_succeed/1,
     get_links_should_succeed/1,
@@ -65,6 +66,7 @@ all() ->
         delete_should_ignore_missing_value,
         delete_should_mark_value_deleted,
         fold_should_return_all_values,
+        fold_should_return_all_values2,
         fold_keys_should_return_all_keys,
         add_links_should_succeed,
         get_links_should_succeed,
@@ -227,6 +229,24 @@ fold_should_return_all_values(Config) ->
         ])),
         Keys = [Doc#document.key || Doc <- Docs],
         ?assert(lists:member(ExpectedKey, Keys))
+    end, ?TEST_MODELS).
+
+fold_should_return_all_values2(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        ExpectedKeys = lists:foldl(fun(Num, Acc) ->
+            {ok, #document{key = ExpectedKey}} = ?assertMatch({ok, #document{}},
+                rpc:call(Worker, Model, save, [?DOC(?KEY(Num), Model)])
+            ),
+            [ExpectedKey | Acc]
+        end, [], lists:seq(1, 10)),
+        {ok, Docs} = ?assertMatch({ok, [_ | _]}, rpc:call(Worker, Model, fold, [
+            fun(Doc, Acc) -> {ok, [Doc | Acc]} end, []
+        ])),
+        Keys = [Doc#document.key || Doc <- Docs],
+        lists:foreach(fun(ExpectedKey) ->
+            ?assert(lists:member(ExpectedKey, Keys))
+        end, ExpectedKeys)
     end, ?TEST_MODELS).
 
 fold_keys_should_return_all_keys(Config) ->
