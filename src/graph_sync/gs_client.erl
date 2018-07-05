@@ -14,9 +14,10 @@
 
 -behaviour(websocket_client_handler_behaviour).
 
--include_lib("ctool/include/api_errors.hrl").
+-include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 % Client state record
