@@ -43,8 +43,8 @@
             %% ===================================================================
 
             % This option sets default time interval between sending ping frames
-            % by websocket server (gs_ws_handler).
-            {websocket_keepalive, 30000},
+            % by Graph Sync websocket server and client to each other.
+            {graph_sync_websocket_keepalive, 30000},
 
             %% How long (in ms) should worker wait between heartbeats (when connected to cm)
             {heartbeat_interval, 500},

@@ -15,8 +15,9 @@
 
 -behaviour(cowboy_websocket).
 
--include_lib("ctool/include/api_errors.hrl").
+-include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
@@ -32,9 +33,9 @@
 
 -type state() :: #pre_handshake_state{} | #state{}.
 
--define(KEEPALIVE_INTERVAL,
-    application:get_env(cluster_worker, websocket_keepalive, timer:seconds(30))
-).
+-define(KEEPALIVE_INTERVAL, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(30)
+)).
 
 %% Cowboy WebSocket handler callbacks
 -export([
@@ -144,6 +145,9 @@ websocket_handle({text, Data}, State) ->
     end;
 
 websocket_handle(pong, State) ->
+    {ok, State};
+
+websocket_handle(ping, State) ->
     {ok, State};
 
 websocket_handle(Msg, State) ->
