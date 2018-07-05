@@ -45,33 +45,18 @@
 init(#{method := <<"GET">>} = Req, State) ->
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
     {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
-    CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
-        {ok, {LastCheck, LastValue}} ->
-            case (erlang:monotonic_time(milli_seconds) - LastCheck) < CachingTime of
-                true ->
-                    ?debug("Serving nagios response from cache"),
-                    {true, LastValue};
-                false ->
-                    false
-            end;
-        _ ->
-            false
-    end,
-    ClusterStatus = case CachedResponse of
-        {true, Value} ->
-            Value;
-        false ->
-            Status = get_cluster_status(Timeout),
+    
+    GetStatus = fun() ->
+        Status = get_cluster_status(Timeout),
+        case Status of
             % Save cluster state in cache, but only if there was no error
-            case Status of
-                {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
-                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache,
-                        {erlang:monotonic_time(milli_seconds), Status});
-                _ ->
-                    skip
-            end,
-            Status
+            {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
+                {true, Status, CachingTime};
+            _ -> 
+                {false, Status}
+        end 
     end,
+    {ok, ClusterStatus} = simple_cache:get(nagios_cache, GetStatus),
     NewReq = case ClusterStatus of
         error ->
             cowboy_req:reply(500, Req);
