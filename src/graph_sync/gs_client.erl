@@ -147,6 +147,9 @@ websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) -
 websocket_handle({ping, <<"">>}, _, State) ->
     {ok, State};
 
+websocket_handle({pong, <<"">>}, _, State) ->
+    {ok, State};
+
 websocket_handle(Msg, _, State) ->
     ?warning("Unexpected frame in GS client: ~p", [Msg]),
     {ok, State}.
@@ -191,6 +194,9 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             Pid ! {response, Error},
             {ok, State}
     end;
+
+websocket_info(perform_ping, _, State) ->
+    {reply, ping, State};
 
 websocket_info(terminate, _, State) ->
     {close, <<"">>, State};

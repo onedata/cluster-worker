@@ -23,7 +23,11 @@
 % Current protocol version
 -define(SUPPORTED_PROTO_VERSIONS, [1]).
 
+-define(CONNECTION_INFO(__Client), {arbitrary_connection_info, __Client}).
+
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
+
+-define(SESSION_COOKIE_NAME, <<"sess-id">>).
 
 -define(USER_AUTH(__UserId), {user_auth, __UserId}).
 -define(PROVIDER_AUTH(__ProviderId), {provider_auth, __ProviderId}).
