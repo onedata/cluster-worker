@@ -14,9 +14,10 @@
 
 -behaviour(websocket_client_handler_behaviour).
 
--include_lib("ctool/include/api_errors.hrl").
+-include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 % Client state record
@@ -145,6 +146,9 @@ websocket_handle({text, Data}, _, #state{protocol_version = ProtoVer} = State) -
     end;
 
 websocket_handle({ping, <<"">>}, _, State) ->
+    {ok, State};
+
+websocket_handle({pong, <<"">>}, _, State) ->
     {ok, State};
 
 websocket_handle(Msg, _, State) ->
