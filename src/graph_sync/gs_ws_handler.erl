@@ -20,8 +20,10 @@
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
-    % This is an opaque term to the gs handler
-    client :: term(),
+    % Client as understood by gs_logic_plugin (opaque term to the gs handler)
+    client :: gs_protocol:client(),
+    % Arbitrary connection info from gs_logic_plugin (opaque term to the gs handler)
+    connection_info ::gs_server:connection_info(),
     translator :: module()
 }).
 
@@ -64,11 +66,13 @@
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
     case gs_server:authorize(Req) of
-        {ok, Client} ->
+        {ok, Client, ConnectionInfo, NewReq} ->
             State = #pre_handshake_state{
-                client = Client, translator = Translator
+                client = Client,
+                connection_info = ConnectionInfo,
+                translator = Translator
             },
-            {cowboy_websocket, Req, State};
+            {cowboy_websocket, NewReq, State};
         ?ERROR_UNAUTHORIZED ->
             NewReq = cowboy_req:reply(401, Req),
             {ok, NewReq, #pre_handshake_state{}}
@@ -100,11 +104,15 @@ websocket_init(State) ->
     State :: state(),
     OutFrame :: cowboy_websocket:frame().
 websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
-    #pre_handshake_state{client = Client, translator = Translator} = State,
+    #pre_handshake_state{
+        client = Client,
+        connection_info = ConnectionInfo,
+        translator = Translator
+    } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(Client, self(), Translator, Request) of
+            case gs_server:handshake(Client, ConnectionInfo, self(), Translator, Request) of
                 {ok, Resp} ->
                     #gs_resp{
                         response = #gs_resp_handshake{
@@ -141,6 +149,9 @@ websocket_handle({text, Data}, State) ->
             {ok, ErrorJSONMap} = gs_protocol:encode(ProtocolVersion, ErrorMsg),
             {reply, {text, json_utils:encode(ErrorJSONMap)}, State}
     end;
+
+websocket_handle(ping, State) ->
+    {ok, State};
 
 websocket_handle(pong, State) ->
     {ok, State};

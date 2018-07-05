@@ -23,11 +23,11 @@
     unmock_callbacks/1
 ]).
 -export([
-    authorize_by_session_cookie/1,
-    authorize_by_macaroons/2,
+    authorize/1,
     client_to_identity/1,
-    client_connected/2,
-    client_disconnected/2,
+    client_connected/3,
+    client_disconnected/3,
+    verify_auth_override/1,
     is_authorized/5,
     root_client/0,
     guest_client/0,
@@ -45,11 +45,11 @@ mock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_session_cookie, fun authorize_by_session_cookie/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize_by_macaroons, fun authorize_by_macaroons/2),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize, fun authorize/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_to_identity, fun client_to_identity/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/3),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/3),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_auth_override, fun verify_auth_override/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_authorized, fun is_authorized/5),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, root_client, fun root_client/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, guest_client, fun guest_client/0),
@@ -71,24 +71,33 @@ unmock_callbacks(Config) ->
     test_utils:mock_unload(Nodes, ?GS_EXAMPLE_TRANSLATOR).
 
 
-authorize_by_session_cookie(SessionCookie) ->
-    case SessionCookie of
-        ?USER_1_COOKIE ->
-            {true, ?USER_AUTH(?USER_1)};
-        ?USER_2_COOKIE ->
-            {true, ?USER_AUTH(?USER_2)};
-        _ ->
-            ?ERROR_UNAUTHORIZED
+authorize(Req) ->
+    case parse_macaroons_from_headers(Req) of
+        {undefined, _} ->
+            case proplists:get_value(?SESSION_COOKIE_NAME, cowboy_req:parse_cookies(Req)) of
+                undefined ->
+                    {ok, ?NOBODY_AUTH, ?CONNECTION_INFO(?NOBODY_AUTH), Req};
+                ?USER_1_COOKIE ->
+                    {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1)), Req};
+                ?USER_2_COOKIE ->
+                    {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2)), Req};
+                _ ->
+                    ?ERROR_UNAUTHORIZED
+            end;
+        {Macaroon, DischMacaroons} ->
+            case verify_auth_override({macaroon, Macaroon, DischMacaroons}) of
+                {ok, Client} ->
+                    {ok, Client, ?CONNECTION_INFO(Client), Req};
+                Error ->
+                    Error
+            end
     end.
 
 
-authorize_by_macaroons(Macaroon, DischargeMacaroons) ->
-    case {Macaroon, DischargeMacaroons} of
-        {?PROVIDER_1_MACAROON, []} ->
-            {true, ?PROVIDER_AUTH(?PROVIDER_1)};
-        _ ->
-            ?ERROR_UNAUTHORIZED
-    end.
+verify_auth_override({macaroon, ?PROVIDER_1_MACAROON, []}) ->
+    {ok, ?PROVIDER_AUTH(?PROVIDER_1)};
+verify_auth_override(_) ->
+    ?ERROR_UNAUTHORIZED.
 
 
 client_to_identity(?NOBODY_AUTH) -> nobody;
@@ -102,10 +111,10 @@ root_client() -> ?ROOT_AUTH.
 guest_client() -> ?NOBODY_AUTH.
 
 
-client_connected(_, _) -> ok.
+client_connected(Client, ?CONNECTION_INFO(Client), _) -> ok.
 
 
-client_disconnected(_, _) -> ok.
+client_disconnected(Client, ?CONNECTION_INFO(Client), _) -> ok.
 
 
 is_authorized(?USER_AUTH(UserId), _AuthHint, #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
@@ -248,3 +257,29 @@ translate_create(1, _GRI, Data) ->
         2 -> fun(_Client) -> Data end
     end.
 
+
+-spec parse_macaroons_from_headers(Req :: cowboy_req:req()) ->
+    {Macaroon :: binary() | undefined, DischargeMacaroons :: [binary()]} |
+    no_return().
+parse_macaroons_from_headers(Req) ->
+    MacaroonHeader = cowboy_req:header(<<"macaroon">>, Req),
+    XAuthTokenHeader = cowboy_req:header(<<"x-auth-token">>, Req),
+    % X-Auth-Token is an alias for macaroon header, check if any of them
+    % is given.
+    SerializedMacaroon = case MacaroonHeader of
+        <<_/binary>> ->
+            MacaroonHeader;
+        _ ->
+            XAuthTokenHeader % binary() or undefined
+    end,
+
+    DischargeMacaroons = case cowboy_req:header(<<"discharge-macaroons">>, Req) of
+        undefined ->
+            [];
+        <<"">> ->
+            [];
+        SerializedDischarges ->
+            binary:split(SerializedDischarges, <<" ">>, [global])
+    end,
+
+    {SerializedMacaroon, DischargeMacaroons}.
