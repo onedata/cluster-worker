@@ -14,9 +14,10 @@
 
 -behaviour(websocket_client_handler_behaviour).
 
--include_lib("ctool/include/api_errors.hrl").
+-include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 % Client state record
@@ -31,6 +32,10 @@
 }).
 
 -type state() :: #state{}.
+
+-define(KEEPALIVE_INTERVAL, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(30)
+)).
 
 -type push_callback() :: fun((gs_protocol:push()) -> any()).
 % Reference to GS client instance
@@ -114,7 +119,7 @@ kill(ClientRef) ->
 -spec init([term()], websocket_req:req()) ->
     {ok, state()} | {ok, state(), Keepalive :: integer()}.
 init([], _) ->
-    {ok, #state{}}.
+    {ok, #state{}, ?KEEPALIVE_INTERVAL}.
 
 
 %%%===================================================================
@@ -194,9 +199,6 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             Pid ! {response, Error},
             {ok, State}
     end;
-
-websocket_info(perform_ping, _, State) ->
-    {reply, ping, State};
 
 websocket_info(terminate, _, State) ->
     {close, <<"">>, State};
