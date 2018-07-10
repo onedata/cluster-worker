@@ -157,9 +157,6 @@ websocket_handle(ping, State) ->
 websocket_handle(pong, State) ->
     {ok, State};
 
-websocket_handle(ping, State) ->
-    {ok, State};
-
 websocket_handle(Msg, State) ->
     ?warning("Unexpected frame in GS websocket handler: ~p", [Msg]),
     {ok, State}.
