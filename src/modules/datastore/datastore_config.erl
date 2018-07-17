@@ -13,7 +13,7 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([get_models/0, get_throttled_models/0]).
+-export([init/0, get_models/0, get_throttled_models/0]).
 
 -type model() :: datastore_model:model().
 
@@ -35,6 +35,16 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Ensures that datastore_config_plugin is loaded, if existent.
+%% @end
+%%--------------------------------------------------------------------
+-spec init() -> ok.
+init() ->
+    code:ensure_loaded(?PLUGIN),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -65,20 +75,9 @@ get_throttled_models() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec apply_plugin(atom(), list(), term()) -> term().
-apply_plugin(Function, Args, Default) ->
-    try
-        Exports = ?PLUGIN:module_info(functions),
-        Arity = length(Args),
-        case lists:keyfind(Function, 1, Exports) of
-            {Function, Arity} -> erlang:apply(?PLUGIN, Function, Args);
-            _ -> Default
-        end
-    catch
-        _:_ ->
-            case code:ensure_loaded(?PLUGIN) of
-                {module, ?PLUGIN} ->
-                    apply_plugin(Function, Args, Default);
-                {error, nofile} ->
-                    Default
-            end
+apply_plugin(Callback, Args, Default) ->
+    Arity = length(Args),
+    case erlang:function_exported(?PLUGIN, Callback, Arity) of
+        true -> erlang:apply(?PLUGIN, Callback, Args);
+        false -> Default
     end.
