@@ -15,9 +15,7 @@
 
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/test/test_utils.hrl").
--include_lib("ctool/include/test/assertions.hrl").
--include_lib("ctool/include/test/performance.hrl").
+-include("performance_test_utils.hrl").
 
 -define(TEST_MODELS, [
     ets_only_model,
@@ -80,18 +78,6 @@
     scope = Scope,
     mutators = Mutators
 }).
-
--define(PERF_PARAM(Name, Value, Unit, Description), [
-    {name, Name},
-    {value, Value},
-    {description, Description},
-    {unit, Unit}
-]).
--define(PERF_CFG(Name, Params), {config, [
-    {name, Name},
-    {description, atom_to_list(Name)},
-    {parameters, Params}
-]}).
 
 -define(OPS_NUM(Value), ?PERF_PARAM(ops_num, Value, "",
     "Number of operations.")).

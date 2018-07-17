@@ -13,11 +13,12 @@
 -module(graph_sync_test_SUITE).
 -author("Lukasz Opiola").
 
--include_lib("ctool/include/api_errors.hrl").
 -include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("graph_sync_mocks.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include("performance_test_utils.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
@@ -44,11 +45,7 @@
     gs_server_session_clearing_test_connection_level/1
 ]).
 
-%%%===================================================================
-%%% API functions
-%%%===================================================================
-
-all() -> ?ALL([
+-define(TEST_CASES, [
     handshake_test,
     rpc_req_test,
     graph_req_test,
@@ -61,6 +58,13 @@ all() -> ?ALL([
     gs_server_session_clearing_test_api_level,
     gs_server_session_clearing_test_connection_level
 ]).
+
+%%%===================================================================
+%%% API functions
+%%%===================================================================
+
+all() ->
+    ?ALL(?TEST_CASES).
 
 
 handshake_test(Config) ->
@@ -108,6 +112,7 @@ handshake_test(Config) ->
         )
     ),
 
+    % Try to connect with provider macaroon
     {ok, Client4, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = {provider, ?PROVIDER_1}}},
         gs_client:start_link(get_gs_ws_url(Config),
