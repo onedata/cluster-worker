@@ -62,13 +62,17 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_get, fun translate_get/3),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_create, fun translate_create/3),
 
+    ok = test_utils:mock_new(Nodes, datastore_config_plugin, [non_strict]),
+    ok = test_utils:mock_expect(Nodes, datastore_config_plugin, get_throttled_models, fun get_throttled_models/0),
+
     ok.
 
 
 unmock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
     test_utils:mock_unload(Nodes, ?GS_LOGIC_PLUGIN),
-    test_utils:mock_unload(Nodes, ?GS_EXAMPLE_TRANSLATOR).
+    test_utils:mock_unload(Nodes, ?GS_EXAMPLE_TRANSLATOR),
+    test_utils:mock_unload(Nodes, datastore_config_plugin).
 
 
 authorize_by_session_cookie(SessionCookie) ->
@@ -156,9 +160,12 @@ handle_graph_request(Client, _, #gri{type = od_user, id = UserId, aspect = insta
         ?USER_AUTH(UserId) ->
             case Data of
                 #{<<"name">> := NewName} when is_binary(NewName) ->
-                    gs_server:updated(
-                        od_user, UserId, #{<<"name">> => NewName}
-                    ),
+                    % Updates are typically asynchronous
+                    spawn(fun() ->
+                        gs_server:updated(
+                            od_user, UserId, #{<<"name">> => NewName}
+                        )
+                    end),
                     ok;
                 #{<<"name">> := _} ->
                     ?ERROR_BAD_VALUE_BINARY(<<"name">>);
@@ -221,3 +228,5 @@ translate_get(1, _GRI, Data) ->
 translate_create(1, _GRI, Data) ->
     Data.
 
+get_throttled_models() ->
+    [].
