@@ -217,6 +217,7 @@ websocket_info(Msg, State) ->
 terminate(_Reason, _Req, #pre_handshake_state{}) ->
     ok;
 terminate(_Reason, _Req, #state{session_id = SessionId}) ->
+    ?debug("Graph Sync connection terminating, sessionId: ~s", [SessionId]),
     gs_server:cleanup_client_session(SessionId),
     ok.
 

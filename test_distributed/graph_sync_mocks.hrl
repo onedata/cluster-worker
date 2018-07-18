@@ -18,7 +18,7 @@
 
 -define(GS_PORT, 8443).
 -define(GS_LISTENER_ID, "gs_listener_id").
--define(GS_HTTPS_ACCEPTORS, 50).
+-define(GS_HTTPS_ACCEPTORS, 100).
 
 % Current protocol version
 -define(SUPPORTED_PROTO_VERSIONS, [1]).
