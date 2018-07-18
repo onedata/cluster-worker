@@ -97,7 +97,6 @@ all() ->
 %%% Performance tests
 %%%===================================================================
 
-
 concurrent_clients_spawning_performance(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, 5},
@@ -110,32 +109,31 @@ concurrent_clients_spawning_performance(Config) ->
         ?PERF_CFG(large, [?CLIENT_NUM(1500)])
     ]).
 concurrent_clients_spawning_performance_base(Config) ->
-    try
-        ClientNum = ?CLIENT_NUM,
+    ClientNum = ?CLIENT_NUM,
 
-        %% ----------------------
-        %% Start time measurement
-        %% ----------------------
-        StartTime = os:timestamp(),
+    %% ----------------------
+    %% Start time measurement
+    %% ----------------------
+    StartTime = os:timestamp(),
 
-        {ok, SupervisorPid, _} = spawn_supervisor(fun spawn_many_clients/2, [
-            Config, ClientNum
-        ]),
+    {ok, SupervisorPid, _} = spawn_supervisor(fun spawn_many_clients/2, [
+        Config, ClientNum
+    ]),
 
-        Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
-        %% ----------------------
-        %% End time measurement
-        %% ----------------------
+    Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
+    AvgPerClient = Time / ClientNum,
+    %% ----------------------
+    %% End time measurement
+    %% ----------------------
 
-        terminate_supervisor(Config, SupervisorPid),
+    terminate_supervisor(Config, SupervisorPid),
 
-        [
-            #parameter{name = client_spawning_time, value = Time, unit = "ms",
-                description = "Time taken by clients spawning and handshaking"}
-        ]
-    catch T:M ->
-        ct:print("A: ~p", [{T, M, erlang:get_stacktrace()}])
-    end.
+    [
+        #parameter{name = clients_spawning_time, value = Time, unit = "ms",
+            description = "Time taken by clients spawning and handshaking."},
+        #parameter{name = avg_time_per_client, value = AvgPerClient, unit = "ms",
+            description = "Average time taken by one client to spawn and handshake."}
+    ].
 
 
 concurrent_active_clients_spawning_performance(Config) ->
@@ -150,48 +148,47 @@ concurrent_active_clients_spawning_performance(Config) ->
         ?PERF_CFG(long, [?CLIENT_NUM(1500), ?REQUEST_INTERVAL_SECONDS(2)])
     ]).
 concurrent_active_clients_spawning_performance_base(Config) ->
-    try
-        ClientNum = ?CLIENT_NUM,
-        RequestInterval = ?REQUEST_INTERVAL_SECONDS,
+    ClientNum = ?CLIENT_NUM,
+    RequestInterval = ?REQUEST_INTERVAL_SECONDS,
 
-        MakeRequestRegularly = fun(Client) ->
-            Pid = spawn_link(fun Loop() ->
-                receive
-                    perform_request ->
-                        ?assertMatch(
-                            {ok, #gs_resp_graph{}},
-                            gs_client:graph_request(Client, ?USER_1_GRI, get)
-                        ),
-                        erlang:send_after(round(timer:seconds(RequestInterval)), self(), perform_request),
-                        Loop()
-                end
-            end),
-            erlang:send_after(rand:uniform(round(timer:seconds(RequestInterval))), Pid, perform_request)
-        end,
+    MakeRequestRegularly = fun(Client) ->
+        Pid = spawn_link(fun Loop() ->
+            receive
+                perform_request ->
+                    ?assertMatch(
+                        {ok, #gs_resp_graph{}},
+                        gs_client:graph_request(Client, ?USER_1_GRI, get)
+                    ),
+                    erlang:send_after(round(timer:seconds(RequestInterval)), self(), perform_request),
+                    Loop()
+            end
+        end),
+        erlang:send_after(rand:uniform(round(timer:seconds(RequestInterval))), Pid, perform_request)
+    end,
 
-        %% ----------------------
-        %% Start time measurement
-        %% ----------------------
-        StartTime = os:timestamp(),
+    %% ----------------------
+    %% Start time measurement
+    %% ----------------------
+    StartTime = os:timestamp(),
 
-        {ok, SupervisorPid, _} = spawn_supervisor(fun spawn_many_clients/5, [
-            Config, ClientNum, true, ?NO_OP_FUN, MakeRequestRegularly
-        ]),
+    {ok, SupervisorPid, _} = spawn_supervisor(fun spawn_many_clients/5, [
+        Config, ClientNum, true, ?NO_OP_FUN, MakeRequestRegularly
+    ]),
 
-        Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
-        %% ----------------------
-        %% End time measurement
-        %% ----------------------
+    Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
+    AvgPerClient = Time / ClientNum,
+    %% ----------------------
+    %% End time measurement
+    %% ----------------------
 
-        terminate_supervisor(Config, SupervisorPid),
+    terminate_supervisor(Config, SupervisorPid),
 
-        [
-            #parameter{name = update_propagation_time, value = Time, unit = "ms",
-                description = "Time taken by clients spawning and making regular requests"}
-        ]
-    catch T:M ->
-        ct:print("A: ~p", [{T, M, erlang:get_stacktrace()}])
-    end.
+    [
+        #parameter{name = clients_spawning_time, value = Time, unit = "ms",
+            description = "Time taken by clients spawning and making regular requests."},
+        #parameter{name = avg_time_per_client, value = AvgPerClient, unit = "ms",
+            description = "Average time taken by one client to spawn and make regular requests."}
+    ].
 
 
 update_propagation_performance(Config) ->
@@ -275,6 +272,7 @@ update_propagation_performance_base(Config) ->
     receive finished -> ok end,
 
     Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
+    AvgPerUpdatePerClient = Time / ChangeNum / ClientNum,
     %% ----------------------
     %% End time measurement
     %% ----------------------
@@ -282,8 +280,10 @@ update_propagation_performance_base(Config) ->
     terminate_supervisor(Config, SupervisorPid),
 
     [
-        #parameter{name = update_propagation_time, value = Time, unit = "ms",
-            description = "Time of update propagation alone"}
+        #parameter{name = updates_propagation_time, value = Time, unit = "ms",
+            description = "Time of updates propagation alone."},
+        #parameter{name = avg_time_per_client_per_update, value = AvgPerUpdatePerClient, unit = "ms",
+            description = "Average time taken to send one update to one client."}
     ].
 
 
@@ -326,6 +326,7 @@ subscriptions_performance_base(Config) ->
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
 
     Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
+    AvgPerSubscription = Time / (EndSubscriptions - StartSubscriptions),
     %% ----------------------
     %% End time measurement
     %% ----------------------
@@ -336,7 +337,9 @@ subscriptions_performance_base(Config) ->
 
     [
         #parameter{name = subscribe_unsubscribe_time, value = Time, unit = "ms",
-            description = "Time taken to add and remove subscriptions of a client."}
+            description = "Time taken to add and remove subscriptions of a client."},
+        #parameter{name = avg_time_per_subscription, value = AvgPerSubscription, unit = "ms",
+            description = "Average time taken to add and remove one subscription."}
     ].
 
 
@@ -378,6 +381,7 @@ subscribers_performance_base(Config) ->
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
 
     Time = timer:now_diff(os:timestamp(), StartTime) / 1000,
+    AvgPerSubscriber = Time / (EndSubscribers - StartSubscribers),
     %% ----------------------
     %% End time measurement
     %% ----------------------
@@ -388,7 +392,9 @@ subscribers_performance_base(Config) ->
 
     [
         #parameter{name = subscribe_unsubscribe_time, value = Time, unit = "ms",
-            description = "Time taken to add and remove subscriptions for given resource."}
+            description = "Time taken to add and remove subscriptions for given resource."},
+        #parameter{name = avg_time_per_subscriber, value = AvgPerSubscriber, unit = "ms",
+            description = "Average time taken to add and remove one subscriber."}
     ].
 
 
@@ -495,8 +501,6 @@ spawn_many_clients(Config, Number, RetryFlag, CallbackFunction, OnSuccessFun) ->
     SuccessfulConnections = GatherConnections([]),
     {SuccessfulProxyPids, SuccessfulClientPids} = lists:unzip(SuccessfulConnections),
     FailedConnections = ProxyPids -- SuccessfulProxyPids,
-
-    ct:print("SuccessfulClientPids: ~p", [length(SuccessfulClientPids)]),
 
     case {length(SuccessfulClientPids), RetryFlag} of
         {Number, _} ->
