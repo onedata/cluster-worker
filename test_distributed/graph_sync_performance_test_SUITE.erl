@@ -518,7 +518,7 @@ spawn_many_clients(Config, Number, RetryFlag, CallbackFunction, OnSuccessFun) ->
 spawn_client(Config, CallbackFunction, OnSuccessFun) ->
     {ok, Client, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
         get_gs_ws_url(Config),
-        {cookie, {?GRAPH_SYNC_SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
+        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
         ?SUPPORTED_PROTO_VERSIONS,
         CallbackFunction,
         ?SSL_OPTS(Config)
