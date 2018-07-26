@@ -402,7 +402,12 @@ handle_cast({cluster_init_finished, Nodes}, State) ->
     {noreply, NewState};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
-    ok = datastore_throttling:configure_throttling(),
+    try
+        ok = datastore_throttling:configure_throttling()
+    catch
+        Error:Reason ->
+            ?warning_stacktrace("configure_throttling failed due to ~p:~p", [Error, Reason])
+    end,
     {noreply, State};
 
 handle_cast(configure_throttling, State) ->
