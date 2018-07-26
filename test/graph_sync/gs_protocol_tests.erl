@@ -587,6 +587,7 @@ encode_decode_error_test() ->
         ?ERROR_BAD_VALUE_ALIAS,
         ?ERROR_BAD_VALUE_USER_NAME,
         ?ERROR_BAD_VALUE_NAME,
+        ?ERROR_PROTECTED_GROUP,
         ?ERROR_RELATION_DOES_NOT_EXIST(od_user, <<"user1">>, od_space, <<"space1">>),
         ?ERROR_RELATION_ALREADY_EXISTS(od_user, <<"user1">>, od_space, <<"space1">>),
         ?ERROR_CANNOT_DELETE_ENTITY(od_user, <<"user1">>),
