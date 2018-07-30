@@ -457,7 +457,7 @@ links_performance(Config) ->
         {repeats, ?REPEATS},
         {success_rate, ?SUCCESS_RATE},
         {parameters, [
-            [{name, links_num}, {value, 10000}, {description, "Number of links listed during the test."}]
+            [{name, links_num}, {value, 100000}, {description, "Number of links listed during the test."}]
         ]},
         {description, "Lists large number of links"},
         {config, [{name, small},
@@ -499,17 +499,19 @@ links_performance_base(Config) ->
     put(key_num, KeyNum + 1),
     Key = ?KEY(KeyNum),
 
-    ExpectedLinks = lists:map(fun(N) ->
-        {?LINK_NAME(N), ?LINK_TARGET(N)}
-    end, lists:seq(1, LinksNum)),
-    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-        Key, ?LINK_TREE_ID, ExpectedLinks
-    ])),
-
     % Init tp
     ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
         [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
     )),
+
+    ExpectedLinks = lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum)),
+    T0Add = os:timestamp(),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key, ?LINK_TREE_ID, ExpectedLinks
+    ])),
+    T1Add = os:timestamp(),
 
     T0 = os:timestamp(),
     {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
@@ -550,13 +552,14 @@ links_performance_base(Config) ->
 %%        Key, ?LINK_TREE_ID, ExpectedLinkNames
 %%    ])),
 
+    AddTimeDiff = timer:now_diff(T1Add, T0Add),
     TimeDiff1 = timer:now_diff(T1, T0),
     TimeDiff2 = timer:now_diff(T3, T2),
     TimeDiff3 = timer:now_diff(T5, T4),
     TimeDiff4 = timer:now_diff(T7, T6),
     TimeDiff5 = timer:now_diff(T9, T8),
     ct:print("Results: ~p",
-        [{TimeDiff1, TimeDiff2, TimeDiff3, TimeDiff4, TimeDiff5}]).
+        [{TimeDiff1, TimeDiff2, TimeDiff3, TimeDiff4, TimeDiff5, AddTimeDiff}]).
 
 %%%===================================================================
 %%% Init/teardown functions
