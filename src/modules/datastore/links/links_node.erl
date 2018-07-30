@@ -46,7 +46,7 @@ encode(#bp_tree_node{leaf = Leaf, children = Children}) ->
             }};
         (Key, Value, Map) ->
             Map#{Key => Value}
-    end, #{}, bp_tree_array:to_map(Children)),
+    end, #{}, bp_tree_children:to_map(Children)),
     jiffy:encode(#{
         <<"leaf">> => Leaf,
         <<"children">> => Children2
@@ -71,7 +71,7 @@ decode(Term) ->
     end, #{}, Children),
     #bp_tree_node{
         leaf = Leaf,
-        children = bp_tree_array:from_map(Children2)
+        children = bp_tree_children:from_map(Children2)
     }.
 
 %%%===================================================================
