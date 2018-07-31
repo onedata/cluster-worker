@@ -486,7 +486,16 @@ links_performance(Config) ->
         ]}
     ]).
 links_performance_base(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Orders = [128, 1024, 5120, 10240],
+    lists:foreach(fun(Order) ->
+        links_performance_base(Config, Order, false),
+        links_performance_base(Config, Order, true)
+    end, Orders).
+
+links_performance_base(Config, Order, Reverse) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, datastore_links_tree_order, Order),
+
     Model = ets_only_model,
     LinksNum = ?config(links_num, Config),
 
@@ -507,9 +516,13 @@ links_performance_base(Config) ->
     ExpectedLinks = lists:map(fun(N) ->
         {?LINK_NAME(N), ?LINK_TARGET(N)}
     end, lists:seq(1, LinksNum)),
+    ToAdd = case Reverse of
+        true -> lists:reverse(ExpectedLinks);
+        _ -> ExpectedLinks
+    end,
     T0Add = os:timestamp(),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-        Key, ?LINK_TREE_ID, ExpectedLinks
+        Key, ?LINK_TREE_ID, ToAdd
     ])),
     T1Add = os:timestamp(),
 
@@ -544,13 +557,24 @@ links_performance_base(Config) ->
     T9 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links5)),
 
+    ExpectedLinkNames = lists:map(fun(N) ->
+        ?LINK_NAME(N)
+    end, lists:seq(1, LinksNum)),
+    ToDel = case Reverse of
+        true -> lists:reverse(ExpectedLinkNames);
+        _ -> ExpectedLinkNames
+    end,
+    T10 = os:timestamp(),
     % TODO - delete performance
-%%    ExpectedLinkNames = lists:map(fun(N) ->
-%%        ?LINK_NAME(N)
-%%    end, lists:seq(1, LinksNum)),
-%%    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-%%        Key, ?LINK_TREE_ID, ExpectedLinkNames
-%%    ])),
+    case Order =< 128 of
+        true ->
+            ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+                Key, ?LINK_TREE_ID, ToDel
+            ]));
+        _ ->
+            ok
+    end,
+    T11 = os:timestamp(),
 
     AddTimeDiff = timer:now_diff(T1Add, T0Add),
     TimeDiff1 = timer:now_diff(T1, T0),
@@ -558,8 +582,10 @@ links_performance_base(Config) ->
     TimeDiff3 = timer:now_diff(T5, T4),
     TimeDiff4 = timer:now_diff(T7, T6),
     TimeDiff5 = timer:now_diff(T9, T8),
-    ct:print("Results: ~p",
-        [{TimeDiff1, TimeDiff2, TimeDiff3, TimeDiff4, TimeDiff5, AddTimeDiff}]).
+    TimeDiff6 = timer:now_diff(T11, T10),
+    ct:print("Results for order ~p (reversed ~p): ~p",
+        [Order, Reverse, {AddTimeDiff, TimeDiff1, TimeDiff2, TimeDiff3,
+            TimeDiff4, TimeDiff5, TimeDiff6}]).
 
 %%%===================================================================
 %%% Init/teardown functions
