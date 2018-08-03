@@ -493,6 +493,7 @@ links_performance_base(Config) ->
     end, Orders).
 
 links_performance_base(Config, Order, Reverse) ->
+    % TODO VFS-4743 - test fetch
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, datastore_links_tree_order, Order),
 
