@@ -57,8 +57,22 @@ end).
 
 -define(PROVIDER_1_MACAROON, <<"provider1macaroon">>).
 
+% Used for auto scope tests
+-define(HANDLE_SERVICE, <<"handleService">>).
 
+-define(HANDLE_SERVICE_DATA(__Public, __Shared, __Protected, __Private), #{
+    <<"public">> => __Public,
+    <<"shared">> => __Shared,
+    <<"protected">> => __Protected,
+    <<"private">> => __Private
+}).
 
+-define(LIMIT_HANDLE_SERVICE_DATA(__Scope, __Data), case __Scope of
+    private -> __Data;
+    protected -> maps:remove(<<"private">>, __Data);
+    shared -> maps:remove(<<"protected">>, maps:remove(<<"private">>, __Data));
+    public -> maps:remove(<<"shared">>, maps:remove(<<"protected">>, maps:remove(<<"private">>, __Data)))
+end).
 
 
 -endif.

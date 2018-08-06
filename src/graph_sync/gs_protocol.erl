@@ -90,7 +90,8 @@
 % Aspect of given entity, one of resource identifiers
 -type aspect() :: atom() | {atom(), term()}.
 % Scope of given aspect, allows to differentiate access to subsets of aspect data
--type scope() :: private | protected | shared | public.
+% 'auto' scope means the maximum scope (if any) the client is authorized to access.
+-type scope() :: private | protected | shared | public | auto.
 % Graph Resource Identifier - a record identifying a certain resource in the graph.
 -type gri() :: #gri{}.
 % Requested operation
@@ -120,11 +121,16 @@
 
 -type error() :: {error, term()}.
 
--type graph_request_result() :: ok |
+-type graph_request_result() :: ok | % Create, update, delete result
+% Create result
 {ok, {data, Data :: term()}} |
 {ok, {not_fetched, gri()}} |
 {ok, {not_fetched, gri(), auth_hint()}} |
 {ok, {fetched, gri(), Data :: term()}} |
+% Get result
+{ok, Data :: term()} |
+% Used when auto scope is requested
+{ok, ResultGRI :: gri(), Data :: term()} |
 error().
 
 -type json_map() :: maps:map().
@@ -856,14 +862,16 @@ string_to_aspect(String) ->
 scope_to_string(private) -> <<"private">>;
 scope_to_string(protected) -> <<"protected">>;
 scope_to_string(shared) -> <<"shared">>;
-scope_to_string(public) -> <<"public">>.
+scope_to_string(public) -> <<"public">>;
+scope_to_string(auto) -> <<"auto">>.
 
 
 -spec string_to_scope(binary()) -> scope().
 string_to_scope(<<"private">>) -> private;
 string_to_scope(<<"protected">>) -> protected;
 string_to_scope(<<"shared">>) -> shared;
-string_to_scope(<<"public">>) -> public.
+string_to_scope(<<"public">>) -> public;
+string_to_scope(<<"auto">>) -> auto.
 
 
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().

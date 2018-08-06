@@ -29,6 +29,11 @@
 
 -export_type([conn_ref/0, translator/0, connection_info/0]).
 
+%% Simple cache used to remember calculated payloads per GRI and limit the
+%% number of requests to GS_LOGIC_PLUGIN when there is a lot of subscribers
+%% for the same records.
+-type payload_cache() :: maps:map(gs_protocol:gri(), gs_protocol:data()).
+
 
 %% API
 -export([authorize/1, handshake/5]).
@@ -125,44 +130,44 @@ terminate_connection(ConnRef) ->
 -spec updated(gs_protocol:entity_type(), gs_protocol:entity_id(), gs_protocol:entity()) -> ok.
 updated(EntityType, EntityId, Entity) ->
     {ok, AllSubscribers} = gs_persistence:get_subscribers(EntityType, EntityId),
-    maps:map(fun
-        ({_Aspect, _Scope}, []) ->
-            ok;
-        ({Aspect, Scope}, Subscribers) ->
+    maps:fold(fun
+        ({_Aspect, _Scope}, [], PayloadCache) ->
+            PayloadCache;
+        ({Aspect, Scope}, Subscribers, PayloadCache) ->
             GRI = #gri{type = EntityType, id = EntityId, aspect = Aspect, scope = Scope},
-            {ok, Data} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                ?GS_LOGIC_PLUGIN:root_client(), undefined, GRI, get, #{}, Entity
-            ),
-            lists:foreach(
-                fun(Subscriber) ->
-                    updated(GRI, Entity, Subscriber, Data)
-                end, Subscribers)
-    end, AllSubscribers),
+            lists:foldl(fun(Subscriber, PayloadCacheAcc) ->
+                push_updated(GRI, Entity, Subscriber, PayloadCacheAcc)
+            end, PayloadCache, Subscribers)
+    end, #{}, AllSubscribers),
     ok.
 
 
--spec updated(gs_protocol:gri(), gs_protocol:entity(), gs_persistence:subscriber(), term()) -> ok.
-updated(GRI, Entity, {SessionId, {Client, AuthHint}}, Data) ->
+-spec push_updated(gs_protocol:gri(), gs_protocol:entity(),
+    gs_persistence:subscriber(), payload_cache()) -> payload_cache().
+push_updated(ReqGRI, Entity, {SessionId, {Client, AuthHint}}, PayloadCache) ->
     {ok, #gs_session{
-        protocol_version = ProtoVersion,
+        protocol_version = ProtoVer,
         conn_ref = ConnRef,
         translator = Translator
     }} = gs_persistence:get_session(SessionId),
-    case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, GRI, get, Entity) of
-        true ->
-            DataJSONMap = translate_get(
-                Translator, Client, ProtoVersion, GRI, Data
+    case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, ReqGRI, get, Entity) of
+        {true, ResGRI} ->
+            {Data, NewPayloadCache} = updated_payload(
+                ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache
             ),
             gs_ws_handler:push(ConnRef, #gs_push{
                 subtype = graph, message = #gs_push_graph{
-                    gri = GRI, change_type = updated, data = DataJSONMap
-                }});
+                    gri = ReqGRI, change_type = updated, data = Data
+                }}),
+            NewPayloadCache;
         false ->
-            unsubscribe(SessionId, GRI),
+            unsubscribe(SessionId, ReqGRI),
             gs_ws_handler:push(ConnRef, #gs_push{
                 subtype = nosub, message = #gs_push_nosub{
-                    gri = GRI, reason = forbidden
-                }})
+                    gri = ReqGRI, reason = forbidden
+                }
+            }),
+            PayloadCache
     end.
 
 
@@ -273,7 +278,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
         translator = Translator
     } = Session,
     #gs_req_graph{
-        gri = GRI,
+        gri = RequestedGRI,
         operation = Operation,
         data = Data,
         auth_hint = AuthHint,
@@ -281,7 +286,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
     } = Req,
     case Subscribe of
         true ->
-            case is_subscribable(Operation, GRI) of
+            case is_subscribable(Operation, RequestedGRI) of
                 true -> ok;
                 false -> throw(?ERROR_NOT_SUBSCRIBABLE)
             end;
@@ -289,7 +294,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
             ok
     end,
     Result = ?GS_LOGIC_PLUGIN:handle_graph_request(
-        Client, AuthHint, GRI, Operation, Data, undefined
+        Client, AuthHint, RequestedGRI, Operation, Data, undefined
     ),
     case Result of
         {error, _} = Error ->
@@ -302,36 +307,40 @@ handle_request(Session, #gs_req_graph{} = Req) ->
             {not_subscribable, AuthHint, null};
         {create, {ok, {data, ResData}}} ->
             {not_subscribable, AuthHint, #{<<"data">> => translate_create(
-                Translator, Client, ProtoVer, GRI, ResData
+                Translator, Client, ProtoVer, RequestedGRI, ResData
             )}};
-        {create, {ok, {fetched, UpdatedGRI, ResData}}} ->
-            {UpdatedGRI, AuthHint, translate_get(
-                Translator, Client, ProtoVer, UpdatedGRI, ResData
+        {create, {ok, {fetched, ResultGRI, ResData}}} ->
+            {ResultGRI, AuthHint, translate_get(
+                RequestedGRI, ResultGRI, Translator, ProtoVer, Client, ResData
             )};
-        {create, {ok, {not_fetched, UpdatedGRI}}} ->
+        {create, {ok, {not_fetched, ResultGRI}}} ->
             % This must succeed, otherwise crash is better to trace the problem
             {ok, FetchedData} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                Client, undefined, UpdatedGRI, get, #{}, undefined
+                Client, undefined, ResultGRI, get, #{}, undefined
             ),
-            {UpdatedGRI, AuthHint, translate_get(
-                Translator, Client, ProtoVer, UpdatedGRI, FetchedData
+            {ResultGRI, AuthHint, translate_get(
+                RequestedGRI, ResultGRI, Translator, ProtoVer, Client, FetchedData
             )};
-        {create, {ok, {not_fetched, UpdatedGRI, NAuthHint}}} ->
+        {create, {ok, {not_fetched, ResultGRI, NAuthHint}}} ->
             % This must succeed, otherwise crash is better to trace the problem
             {ok, FetchedData} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                Client, NAuthHint, UpdatedGRI, get, #{}, undefined
+                Client, NAuthHint, ResultGRI, get, #{}, undefined
             ),
-            {UpdatedGRI, NAuthHint, translate_get(
-                Translator, Client, ProtoVer, UpdatedGRI, FetchedData
+            {ResultGRI, NAuthHint, translate_get(
+                RequestedGRI, ResultGRI, Translator, ProtoVer, Client, FetchedData
             )};
 
         {get, {ok, ResData}} ->
-            {GRI, AuthHint, translate_get(
-                Translator, Client, ProtoVer, GRI, ResData
+            {RequestedGRI, AuthHint, translate_get(
+                RequestedGRI, Translator, ProtoVer, Client, ResData
+            )};
+        {get, {ok, ResultGRI, ResData}} ->
+            {ResultGRI, AuthHint, translate_get(
+                RequestedGRI, ResultGRI, Translator, ProtoVer, Client, ResData
             )};
 
         {update, ok} ->
-            {GRI, AuthHint, null};
+            {RequestedGRI, AuthHint, null};
 
         {delete, ok} ->
             {not_subscribable, AuthHint, null}
@@ -355,6 +364,7 @@ handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
 %%% Internal functions
 %%%===================================================================
 
+%% @private
 -spec translate_create(translator(), gs_protocol:client(), gs_protocol:protocol_version(),
     gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
 translate_create(Translator, Client, ProtoVer, GRI, Data) ->
@@ -365,21 +375,62 @@ translate_create(Translator, Client, ProtoVer, GRI, Data) ->
     end.
 
 
--spec translate_get(translator(), gs_protocol:client(), gs_protocol:protocol_version(),
-    gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_get(Translator, Client, ProtoVer, GRI, Data) ->
-    CallbackResult = case Translator:translate_get(ProtoVer, GRI, Data) of
+%% @private
+-spec translate_get(gs_protocol:gri(), translator(), gs_protocol:protocol_version(),
+    gs_protocol:client(), term()) -> gs_protocol:data() | gs_protocol:error().
+translate_get(GRI, Translator, ProtoVer, Client, Data) ->
+    translate_get(GRI, GRI, Translator, ProtoVer, Client, Data).
+
+%% @private
+-spec translate_get(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+    translator(), gs_protocol:client(), gs_protocol:protocol_version(), term()) ->
+    gs_protocol:data() | gs_protocol:error().
+translate_get(RequestedGRI, ResultGRI, Translator, ProtoVer, Client, Data) ->
+    Resp = case Translator:translate_get(ProtoVer, ResultGRI, Data) of
         Fun when is_function(Fun, 1) -> Fun(Client);
         Result -> Result
     end,
-    {NewGRI, Resp} = case CallbackResult of
-        {ModifiedGRI, Response} -> {ModifiedGRI, Response};
-        Response -> {GRI, Response}
-    end,
-    % GRI must be sent back with every request
-    Resp#{<<"gri">> => gs_protocol:gri_to_string(NewGRI)}.
+    %% GRI must be sent back with every GET response
+    append_gri(RequestedGRI, ResultGRI, Resp).
 
 
+-spec updated_payload(ReqGRI :: gs_protocol:gri(), ResGRI :: gs_protocol:gri(),
+    translator(), gs_protocol:protocol_version(), gs_protocol:client(),
+    gs_protocol:entity(), payload_cache()) -> payload_cache().
+updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache) ->
+    case maps:find(ResGRI, PayloadCache) of
+        {ok, Fun} when is_function(Fun, 1) ->
+            {append_gri(ReqGRI, ResGRI, Fun(Client)), PayloadCache};
+        {ok, Data} ->
+            {append_gri(ReqGRI, ResGRI, Data), PayloadCache};
+        _ ->
+            {ok, Data} = ?GS_LOGIC_PLUGIN:handle_graph_request(
+                ?GS_LOGIC_PLUGIN:root_client(), undefined, ResGRI, get, #{}, Entity
+            ),
+            TranslateResult = Translator:translate_get(ProtoVer, ResGRI, Data),
+            Result = case TranslateResult of
+                Fun when is_function(Fun, 1) -> Fun(Client);
+                DataJSONMap -> DataJSONMap
+            end,
+            {append_gri(ReqGRI, ResGRI, Result), PayloadCache#{ResGRI => TranslateResult}}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Check if auto scope was requested - in this case override it in result.
+%% @end
+%%--------------------------------------------------------------------
+-spec append_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+    gs_protocol:data()) -> gs_protocol:data().
+append_gri(#gri{scope = auto}, ResultGRI, Data) ->
+    Data#{<<"gri">> => gs_protocol:gri_to_string(ResultGRI#gri{scope = auto})};
+append_gri(_RequestedGRI, ResultGRI, Data) ->
+    Data#{<<"gri">> => gs_protocol:gri_to_string(ResultGRI)}.
+
+
+%% @private
 -spec subscribe(gs_protocol:session_id(), gs_protocol:gri(), gs_protocol:client(),
     gs_protocol:auth_hint()) -> ok.
 subscribe(SessionId, GRI, Client, AuthHint) ->
@@ -388,6 +439,7 @@ subscribe(SessionId, GRI, Client, AuthHint) ->
     ok.
 
 
+%% @private
 -spec unsubscribe(gs_protocol:session_id(), gs_protocol:gri()) -> ok.
 unsubscribe(SessionId, GRI) ->
     gs_persistence:remove_subscriber(GRI, SessionId),
@@ -395,6 +447,7 @@ unsubscribe(SessionId, GRI) ->
     ok.
 
 
+%% @private
 -spec is_subscribable(gs_protocol:operation(), gs_protocol:gri()) -> boolean().
 is_subscribable(create, GRI = #gri{id = undefined}) ->
     % Newly created resources can be subscribed for depending on logic_plugin

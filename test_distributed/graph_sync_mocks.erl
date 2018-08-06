@@ -12,15 +12,17 @@
 -module(graph_sync_mocks).
 -author("Lukasz Opiola").
 
--include_lib("ctool/include/api_errors.hrl").
--include("modules/datastore/datastore_models.hrl").
--include("graph_sync/graph_sync.hrl").
 -include("graph_sync_mocks.hrl").
+-include("graph_sync/graph_sync.hrl").
+-include("global_definitions.hrl").
+-include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 
 -export([
     mock_callbacks/1,
-    unmock_callbacks/1
+    unmock_callbacks/1,
+    mock_max_scope_towards_handle_service/3
 ]).
 -export([
     authorize/1,
@@ -121,15 +123,41 @@ client_connected(Client, ?CONNECTION_INFO(Client), _) -> ok.
 client_disconnected(Client, ?CONNECTION_INFO(Client), _) -> ok.
 
 
-is_authorized(?USER_AUTH(UserId), _AuthHint, #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
-    true;
-is_authorized(?USER_AUTH(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), #gri{type = od_user, id = _UserId}, get, UserData) ->
+mock_max_scope_towards_handle_service(Config, UserId, MaxScope) ->
+    Nodes = ?config(cluster_worker_nodes, Config),
+    CurrentMock = rpc:call(hd(Nodes), application, get_env, [?CLUSTER_WORKER_APP_NAME, mock_hservice_scope, #{}]),
+    test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, mock_hservice_scope, CurrentMock#{UserId => MaxScope}).
+
+
+is_authorized(?ROOT_AUTH, _, GRI, _, _) ->
+    {true, GRI};
+is_authorized(?USER_AUTH(UserId), _AuthHint, GRI = #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
+    {true, GRI};
+is_authorized(?USER_AUTH(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), GRI = #gri{type = od_user, id = _UserId}, get, UserData) ->
     case UserData of
         % Used to test nosub push message
         #{<<"name">> := ?USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE} ->
             false;
         _ ->
-            true
+            {true, GRI}
+    end;
+is_authorized(?USER_AUTH(UserId), _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, _, _) ->
+    MaxScope = maps:get(
+        UserId,
+        application:get_env(?CLUSTER_WORKER_APP_NAME, mock_hservice_scope, #{}),
+        none
+    ),
+    case {UserId, GRI} of
+        {UserId, #gri{scope = auto}} ->
+            case MaxScope of
+                none -> false;
+                Scope -> {true, GRI#gri{scope = Scope}}
+            end;
+        {UserId, #gri{scope = RequestedScope}} ->
+            case scope_to_int(RequestedScope) =< scope_to_int(MaxScope) of
+                true -> {true, GRI};
+                false -> false
+            end
     end;
 is_authorized(_, _, _, _, _) ->
     false.
@@ -231,6 +259,30 @@ handle_graph_request(Client, _AuthHint, #gri{type = od_user, id = UserId, aspect
         _ -> ?ERROR_FORBIDDEN
     end;
 
+handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, create, _, _) ->
+    case is_authorized(Client, undefined, GRI, create, #{}) of
+        false ->
+            ?ERROR_FORBIDDEN;
+        {true, #gri{scope = ResScope}} ->
+            Data = ?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>),
+            {ok, {fetched, GRI#gri{scope = ResScope}, ?LIMIT_HANDLE_SERVICE_DATA(ResScope, Data)}}
+    end;
+
+handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, get, _, Entity) ->
+    Data = case Entity of
+        undefined ->
+            ?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>);
+        Fetched ->
+            % Used in gs_server:updated
+            Fetched
+    end,
+    case is_authorized(Client, undefined, GRI, get, #{}) of
+        false ->
+            ?ERROR_FORBIDDEN;
+        {true, #gri{scope = Scope}} ->
+            {ok, ?LIMIT_HANDLE_SERVICE_DATA(Scope, Data)}
+    end;
+
 handle_graph_request(_, _, _, _, _, _) ->
     ?ERROR_NOT_FOUND.
 
@@ -238,6 +290,8 @@ handle_graph_request(_, _, _, _, _, _) ->
 is_subscribable(#gri{type = od_user, aspect = instance, scope = private}) ->
     true;
 is_subscribable(#gri{type = od_user, aspect = {name_substring, _}, scope = private}) ->
+    true;
+is_subscribable(#gri{type = od_handle_service, aspect = instance}) ->
     true;
 is_subscribable(_) ->
     false.
@@ -293,3 +347,10 @@ parse_macaroons_from_headers(Req) ->
     end,
 
     {SerializedMacaroon, DischargeMacaroons}.
+
+
+scope_to_int(public) -> 1;
+scope_to_int(shared) -> 2;
+scope_to_int(protected) -> 3;
+scope_to_int(private) -> 4;
+scope_to_int(_) -> 0.
