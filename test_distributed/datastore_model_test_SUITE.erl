@@ -566,7 +566,7 @@ links_performance_base(Config, Order, Reverse) ->
         _ -> ExpectedLinkNames
     end,
     T10 = os:timestamp(),
-    % TODO - delete performance
+    % TODO VFS-4743 - delete performance
     case Order =< 128 of
         true ->
             ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
