@@ -32,7 +32,7 @@
 %% Simple cache used to remember calculated payloads per GRI and limit the
 %% number of requests to GS_LOGIC_PLUGIN when there is a lot of subscribers
 %% for the same records.
--type payload_cache() :: maps:map(gs_protocol:gri(), gs_protocol:data()).
+-type payload_cache() :: #{gs_protocol:gri() => gs_protocol:data()}.
 
 
 %% API
@@ -391,18 +391,29 @@ translate_get(RequestedGRI, ResultGRI, Translator, ProtoVer, Client, Data) ->
         Result -> Result
     end,
     %% GRI must be sent back with every GET response
-    append_gri(RequestedGRI, ResultGRI, Resp).
+    insert_gri(RequestedGRI, ResultGRI, Resp).
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is used to generate payload for the "updated" push message.
+%% It uses a simple PayloadCache, which remembers past results between function
+%% calls - it is useful to minimize the number of calls to GS_LOGIC_PLUGIN when
+%% generating the same payload for many subscribers.
+%% @end
+%%--------------------------------------------------------------------
 -spec updated_payload(ReqGRI :: gs_protocol:gri(), ResGRI :: gs_protocol:gri(),
     translator(), gs_protocol:protocol_version(), gs_protocol:client(),
-    gs_protocol:entity(), payload_cache()) -> payload_cache().
+    gs_protocol:entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
 updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache) ->
     case maps:find(ResGRI, PayloadCache) of
         {ok, Fun} when is_function(Fun, 1) ->
-            {append_gri(ReqGRI, ResGRI, Fun(Client)), PayloadCache};
+            % Function-type translator, must be evaluated per client
+            {insert_gri(ReqGRI, ResGRI, Fun(Client)), PayloadCache};
         {ok, Data} ->
-            {append_gri(ReqGRI, ResGRI, Data), PayloadCache};
+            % Literal translator, the results can be reused for all clients
+            {insert_gri(ReqGRI, ResGRI, Data), PayloadCache};
         _ ->
             {ok, Data} = ?GS_LOGIC_PLUGIN:handle_graph_request(
                 ?GS_LOGIC_PLUGIN:root_client(), undefined, ResGRI, get, #{}, Entity
@@ -412,21 +423,23 @@ updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCac
                 Fun when is_function(Fun, 1) -> Fun(Client);
                 DataJSONMap -> DataJSONMap
             end,
-            {append_gri(ReqGRI, ResGRI, Result), PayloadCache#{ResGRI => TranslateResult}}
+            % Cache the translator result for faster consecutive calls
+            {insert_gri(ReqGRI, ResGRI, Result), PayloadCache#{ResGRI => TranslateResult}}
     end.
 
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Check if auto scope was requested - in this case override it in result.
+%% Inserts the "gri" field in the result. Checks if auto scope was
+%% requested - in this case overrides the scope in result to auto.
 %% @end
 %%--------------------------------------------------------------------
--spec append_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+-spec insert_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
     gs_protocol:data()) -> gs_protocol:data().
-append_gri(#gri{scope = auto}, ResultGRI, Data) ->
+insert_gri(#gri{scope = auto}, ResultGRI, Data) ->
     Data#{<<"gri">> => gs_protocol:gri_to_string(ResultGRI#gri{scope = auto})};
-append_gri(_RequestedGRI, ResultGRI, Data) ->
+insert_gri(_RequestedGRI, ResultGRI, Data) ->
     Data#{<<"gri">> => gs_protocol:gri_to_string(ResultGRI)}.
 
 
