@@ -24,7 +24,8 @@
 -export([simple_call_test/1, direct_cast_test/1, redirect_cast_test/1, mixed_cast_test/1]).
 -export([mixed_cast_test_core/1]).
 -export([singleton_module_test/1, simple_call_test_base/1,
-    direct_cast_test_base/1, redirect_cast_test_base/1, mixed_cast_test_base/1]).
+    direct_cast_test_base/1, redirect_cast_test_base/1, mixed_cast_test_base/1,
+    tree_test/1]).
 
 -define(TEST_CASES, [
     singleton_module_test, simple_call_test, direct_cast_test, redirect_cast_test, mixed_cast_test
@@ -43,8 +44,6 @@ all() ->
 
 %%%===================================================================
 %%% Test functions
-%%%===================================================================
-
 %%%===================================================================
 
 singleton_module_test(Config) ->
@@ -315,3 +314,178 @@ count_answers(Num, Exp) ->
     end,
     ?assertEqual(pong, Ans),
     count_answers(NumToBeReceived, Exp).
+
+%%%===================================================================
+%%% Manual performance tests functions
+%%%===================================================================
+
+-define(SIZE, 1024).
+-define(NIL, null).
+
+tree_test(_Config) ->
+    test_get(10),
+    test_get(100),
+    test_get(1000),
+    test_get(10000),
+    test_get(50000),
+
+    put_test(10),
+    put_test(100),
+    put_test(1000),
+    put_test(5000),
+
+    del_test(10),
+    del_test(100),
+    del_test(1000),
+    del_test(5000),
+
+    test_tree(10),
+    test_tree(100),
+    test_tree(1000),
+    test_tree(10000),
+    test_tree(50000),
+    ok.
+
+test_get(Size) ->
+    Seq = lists:seq(1, Size),
+    Tuple = list_to_tuple(lists:duplicate(Size, ?NIL)),
+    List = lists:zip(Seq, lists:duplicate(Size, ?NIL)),
+    Map = maps:from_list(List),
+    GBSet = gb_sets:from_ordset(List),
+    GBTree = gb_trees:from_orddict(List),
+
+    T1 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        erlang:element(I, Tuple)
+    end, Seq),
+    Diff1 = timer:now_diff(os:timestamp(), T1),
+
+    T2 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        proplists:get_value(I, List)
+    end, Seq),
+    Diff2 = timer:now_diff(os:timestamp(), T2),
+
+    T3 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        maps:get(I, Map)
+    end, Seq),
+    Diff3 = timer:now_diff(os:timestamp(), T3),
+
+    T4 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        It = gb_sets:iterator_from({I, ?NIL}, GBSet),
+        gb_sets:next(It)
+    end, Seq),
+    Diff4 = timer:now_diff(os:timestamp(), T4),
+
+    T5 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        It = gb_trees:iterator_from(I, GBTree),
+        gb_trees:next(It)
+    end, Seq),
+    Diff5 = timer:now_diff(os:timestamp(), T5),
+
+    ct:print("Get test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
+        [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
+
+put_test(Size) ->
+    Seq = lists:seq(1, Size),
+    Tuple = list_to_tuple(lists:duplicate(Size, ?NIL)),
+
+    T1 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        lists:foreach(fun(I) ->
+            X = erlang:element(I, Tuple),
+            erlang:setelement(I, Tuple, X)
+        end, lists:seq(I, Size))
+    end, Seq),
+    Diff1 = timer:now_diff(os:timestamp(), T1),
+
+    T2 = os:timestamp(),
+    lists:foldl(fun(I, List) ->
+        [{I, ?NIL} | proplists:delete(I, List)]
+    end, [], Seq),
+    Diff2 = timer:now_diff(os:timestamp(), T2),
+
+    T3 = os:timestamp(),
+    lists:foldl(fun(I, Map) ->
+        maps:put(I, ?NIL, Map)
+    end, #{}, Seq),
+    Diff3 = timer:now_diff(os:timestamp(), T3),
+
+    T4 = os:timestamp(),
+    lists:foldl(fun(I, GBSet) ->
+        gb_sets:add({I, ?NIL}, GBSet)
+    end, gb_sets:new(), Seq),
+    Diff4 = timer:now_diff(os:timestamp(), T4),
+
+    T5 = os:timestamp(),
+    lists:foldl(fun(I, GBTree) ->
+        gb_trees:insert(I, ?NIL, GBTree)
+    end, gb_trees:empty(), Seq),
+    Diff5 = timer:now_diff(os:timestamp(), T5),
+
+    ct:print("Put test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
+        [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
+
+del_test(Size) ->
+    Seq = lists:seq(1, Size),
+    List = lists:zip(Seq, lists:duplicate(Size, ?NIL)),
+    Map = maps:from_list(List),
+    GBSet = gb_sets:from_ordset(List),
+    GBTree = gb_trees:from_orddict(List),
+
+    T2 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        proplists:delete(I, List)
+    end, Seq),
+    Diff2 = timer:now_diff(os:timestamp(), T2),
+
+    T3 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        maps:remove(I, Map)
+    end, Seq),
+    Diff3 = timer:now_diff(os:timestamp(), T3),
+
+    T4 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        It = gb_sets:iterator_from({I, ?NIL}, GBSet),
+        E = gb_sets:next(It),
+        gb_sets:delete_any(E, GBSet)
+    end, Seq),
+    Diff4 = timer:now_diff(os:timestamp(), T4),
+
+    T5 = os:timestamp(),
+    lists:foreach(fun(I) ->
+        gb_trees:delete_any(I, GBTree)
+    end, Seq),
+    Diff5 = timer:now_diff(os:timestamp(), T5),
+
+    ct:print("Del test for size ~p: list ~p, map ~p, gb_set ~p, gb_tree ~p",
+        [Size, Diff2, Diff3, Diff4, Diff5]).
+
+test_tree(Size) ->
+    Seq = lists:seq(1, Size),
+    Seq2 = lists:seq(1, Size, 2),
+    Seq3 = lists:seq(1, Size, 2),
+    T1 = os:timestamp(),
+    Tree1 = lists:foldl(fun(I, GBTree) ->
+        gb_trees:insert(I, ?NIL, GBTree)
+    end, gb_trees:empty(), Seq),
+    Diff1 = timer:now_diff(os:timestamp(), T1),
+
+    T2 = os:timestamp(),
+    Tree2 = lists:foldl(fun(I, GBTree) ->
+        gb_trees:delete_any(I, GBTree)
+    end, Tree1, Seq2),
+    Diff2 = timer:now_diff(os:timestamp(), T2),
+
+    T3 = os:timestamp(),
+    lists:foldl(fun(I, GBTree) ->
+        gb_trees:insert(I, ?NIL, GBTree)
+    end, Tree2, Seq3),
+    Diff3 = timer:now_diff(os:timestamp(), T3),
+
+    ct:print("Tree test for size ~p: add 1: ~p, del half: ~p, add 2: ~p",
+        [Size, Diff1, Diff2, Diff3]).

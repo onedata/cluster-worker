@@ -114,6 +114,8 @@
             {aggregate_tp, true},
             % Size of tp key space (0 - unlimited)
             {tp_space_size, 0},
+            % Should tp force garbage collection
+            {tp_gc, off},
 
             % Thresholds to start node analysis
             {node_mem_analysis_treshold, 2000000000}, % 2 GB
