@@ -496,6 +496,8 @@ links_performance_base(Config, Order, Reverse) ->
     % TODO VFS-4743 - test fetch
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, datastore_links_tree_order, Order),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME,
+        fold_cache_timeout, timer:seconds(30)),
 
     Model = ets_only_model,
     LinksNum = ?config(links_num, Config),
