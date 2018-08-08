@@ -121,17 +121,14 @@
 
 -type error() :: {error, term()}.
 
--type graph_request_result() :: ok | % Create, update, delete result
-% Create result
-{ok, {data, Data :: term()}} |
-{ok, {not_fetched, gri()}} |
-{ok, {not_fetched, gri(), auth_hint()}} |
-{ok, {fetched, gri(), Data :: term()}} |
-% Get result
-{ok, Data :: term()} |
-% Used when auto scope is requested
-{ok, ResultGRI :: gri(), Data :: term()} |
-error().
+-type graph_create_result() :: ok | {ok, {data, term()} | {fetched, gri(), term()} |
+{not_fetched, gri()} | {not_fetched, gri(), auth_hint()}} | error().
+-type graph_get_result() :: {ok, term()} | {ok, gri(), term()} | error().
+-type graph_delete_result() :: ok | error().
+-type graph_update_result() :: ok | error().
+
+-type graph_request_result() :: graph_create_result() | graph_get_result() |
+graph_update_result() | graph_delete_result().
 
 -type json_map() :: maps:map().
 
@@ -159,6 +156,11 @@ error().
     rpc_function/0,
     rpc_args/0,
     rpc_result/0,
+    error/0,
+    graph_create_result/0,
+    graph_get_result/0,
+    graph_delete_result/0,
+    graph_update_result/0,
     graph_request_result/0,
     json_map/0
 ]).
