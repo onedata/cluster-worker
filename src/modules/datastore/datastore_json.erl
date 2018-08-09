@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([encode/1, decode/1]).
+-export([encode/1, decode/1, encode_term/2, decode_term/2]).
 
 -type value() :: datastore_doc:value().
 -type doc() :: datastore_doc:doc(value()).
@@ -110,12 +110,7 @@ decode({Term} = EJson) when is_list(Term) ->
 decode(EJson) ->
     EJson.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Encodes an erlang term to erlang json format with given structure.
 %% @end
@@ -136,6 +131,10 @@ encode_term(Term, integer) when is_integer(Term) ->
 encode_term(Term, json) when is_binary(Term) ->
     jiffy:decode(Term);
 encode_term(Term, string) when is_binary(Term) ->
+    Term;
+encode_term(Term, string_or_integer) when is_binary(Term) ->
+    Term;
+encode_term(Term, string_or_integer) when is_integer(Term) ->
     Term;
 encode_term(Term, term) ->
     base64:encode(term_to_binary(Term));
@@ -186,7 +185,6 @@ encode_term(Term, Type) ->
     error({invalid_term_structure, Term, Type}).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Decodes an erlang term from erlang json format with given structure.
 %% @end
@@ -207,6 +205,10 @@ decode_term(Term, integer) when is_integer(Term) ->
 decode_term(Term, json) ->
     jiffy:encode(Term);
 decode_term(Term, string) when is_binary(Term) ->
+    Term;
+decode_term(Term, string_or_integer) when is_binary(Term) ->
+    Term;
+decode_term(Term, string_or_integer) when is_integer(Term) ->
     Term;
 decode_term(Term, term) when is_binary(Term) ->
     binary_to_term(base64:decode(Term));
@@ -252,6 +254,10 @@ decode_term({Term}, Type) when is_list(Term), is_map(Type) ->
     end, #{}, Term);
 decode_term(Term, Type) ->
     error({invalid_json_structure, Term, Type}).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private

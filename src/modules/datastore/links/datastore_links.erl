@@ -61,8 +61,8 @@
 -type forest_id() :: links_forest:id().
 -type batch() :: undefined | datastore_doc_batch:batch().
 -type link() :: #link{}.
--type link_name() :: binary().
--type link_target() :: binary().
+-type link_name() :: binary() | integer().
+-type link_target() :: binary() | integer().
 -type link_rev() :: undefined | binary().
 -type mask() :: datastore_links_mask:mask().
 -type forest_it() :: datastore_links_iter:forest_it().
