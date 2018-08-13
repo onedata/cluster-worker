@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([encode/1, decode/1, encode_term/2, decode_term/2]).
+-export([encode/1, decode/1]).
 
 -type value() :: datastore_doc:value().
 -type doc() :: datastore_doc:doc(value()).
@@ -110,7 +110,12 @@ decode({Term} = EJson) when is_list(Term) ->
 decode(EJson) ->
     EJson.
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Encodes an erlang term to erlang json format with given structure.
 %% @end
@@ -185,6 +190,7 @@ encode_term(Term, Type) ->
     error({invalid_term_structure, Term, Type}).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Decodes an erlang term from erlang json format with given structure.
 %% @end
@@ -254,10 +260,6 @@ decode_term({Term}, Type) when is_list(Term), is_map(Type) ->
     end, #{}, Term);
 decode_term(Term, Type) ->
     error({invalid_json_structure, Term, Type}).
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private
