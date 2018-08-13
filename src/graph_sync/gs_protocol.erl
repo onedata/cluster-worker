@@ -95,8 +95,11 @@
 -type gri() :: #gri{}.
 % Requested operation
 -type operation() :: create | get | update | delete.
-% Data included in the request or response
--type data() :: undefined | json_map() | binary().
+% Data included in the request or response and its format:
+%   resource - data carries a resource with included gri
+%   value - data carries a value that is not related to any resource
+-type data_format() :: undefined | resource | value.
+-type data() :: undefined | json_map() | binary() | integer().
 % Authorization hint that indicates the context needed to access shared
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
@@ -120,12 +123,14 @@
 
 -type error() :: {error, term()}.
 
--type graph_request_result() :: ok |
-{ok, {data, Data :: term()}} |
-{ok, {not_fetched, gri()}} |
-{ok, {not_fetched, gri(), auth_hint()}} |
-{ok, {fetched, gri(), Data :: term()}} |
-error().
+-type graph_create_result() :: ok | {ok, value, term()} |
+{ok, resource, {gri(), term()} | {gri(), auth_hint(), term()}} | error().
+-type graph_get_result() :: {ok, term()} | error().
+-type graph_delete_result() :: ok | error().
+-type graph_update_result() :: ok | error().
+
+-type graph_request_result() :: graph_create_result() | graph_get_result() |
+graph_update_result() | graph_delete_result().
 
 -type json_map() :: maps:map().
 
@@ -145,6 +150,7 @@ error().
     scope/0,
     gri/0,
     operation/0,
+    data_format/0,
     data/0,
     auth_hint/0,
     entity/0,
@@ -153,6 +159,11 @@ error().
     rpc_function/0,
     rpc_args/0,
     rpc_result/0,
+    error/0,
+    graph_create_result/0,
+    graph_get_result/0,
+    graph_delete_result/0,
+    graph_update_result/0,
     graph_request_result/0,
     json_map/0
 ]).
@@ -180,7 +191,7 @@ error().
 %% @end
 %%--------------------------------------------------------------------
 -spec supported_versions() -> [protocol_version()].
-supported_versions() -> [1].
+supported_versions() -> [1, 2].
 
 
 %%--------------------------------------------------------------------
@@ -405,7 +416,7 @@ encode_request_handshake(_, #gs_req_handshake{} = Req) ->
 
 
 -spec encode_request_rpc(protocol_version(), rpc_req()) -> json_map().
-encode_request_rpc(1, #gs_req_rpc{} = Req) ->
+encode_request_rpc(_, #gs_req_rpc{} = Req) ->
     #gs_req_rpc{
         function = Function, args = Args
     } = Req,
@@ -416,7 +427,7 @@ encode_request_rpc(1, #gs_req_rpc{} = Req) ->
 
 
 -spec encode_request_graph(protocol_version(), graph_req()) -> json_map().
-encode_request_graph(1, #gs_req_graph{} = Req) ->
+encode_request_graph(_, #gs_req_graph{} = Req) ->
     #gs_req_graph{
         gri = GRI, operation = Operation, data = Data,
         subscribe = Subscribe, auth_hint = AuthHint
@@ -431,7 +442,7 @@ encode_request_graph(1, #gs_req_graph{} = Req) ->
 
 
 -spec encode_request_unsub(protocol_version(), unsub_req()) -> json_map().
-encode_request_unsub(1, #gs_req_unsub{} = Req) ->
+encode_request_unsub(_, #gs_req_unsub{} = Req) ->
     #gs_req_unsub{
         gri = GRI
     } = Req,
@@ -488,7 +499,7 @@ encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
 
 
 -spec encode_response_rpc(protocol_version(), rpc_resp()) -> json_map().
-encode_response_rpc(1, #gs_resp_rpc{} = Resp) ->
+encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
     #gs_resp_rpc{
         result = Result
     } = Resp,
@@ -496,15 +507,23 @@ encode_response_rpc(1, #gs_resp_rpc{} = Resp) ->
 
 
 -spec encode_response_graph(protocol_version(), graph_resp()) -> json_map().
-encode_response_graph(1, #gs_resp_graph{} = Resp) ->
-    #gs_resp_graph{
-        result = Result
-    } = Resp,
-    undefined_to_null(Result).
+encode_response_graph(_, #gs_resp_graph{data_format = undefined}) ->
+    undefined;
+encode_response_graph(1, #gs_resp_graph{data_format = Format, data = Result}) ->
+    case Format of
+        value -> #{<<"data">> => undefined_to_null(Result)};
+        resource -> Result
+    end;
+encode_response_graph(2, #gs_resp_graph{data_format = Format, data = Result}) ->
+    FormatStr = data_format_to_str(Format),
+    #{
+        <<"format">> => FormatStr,
+        FormatStr => undefined_to_null(Result)
+    }.
 
 
 -spec encode_response_unsub(protocol_version(), unsub_resp()) -> json_map().
-encode_response_unsub(1, #gs_resp_unsub{}) ->
+encode_response_unsub(_, #gs_resp_unsub{}) ->
     % Currently the response does not carry any information
     #{}.
 
@@ -530,7 +549,7 @@ encode_push(ProtocolVersion, #gs_push{} = GSReq) ->
 
 
 -spec encode_push_graph(protocol_version(), graph_push()) -> json_map().
-encode_push_graph(1, #gs_push_graph{} = Message) ->
+encode_push_graph(_, #gs_push_graph{} = Message) ->
     #gs_push_graph{
         gri = GRI, change_type = UpdateType, data = Data
     } = Message,
@@ -542,7 +561,7 @@ encode_push_graph(1, #gs_push_graph{} = Message) ->
 
 
 -spec encode_push_nosub(protocol_version(), nosub_push()) -> json_map().
-encode_push_nosub(1, #gs_push_nosub{} = Message) ->
+encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     #gs_push_nosub{
         gri = GRI, reason = Reason
     } = Message,
@@ -556,13 +575,13 @@ encode_push_nosub(1, #gs_push_nosub{} = Message) ->
 encode_push_error(?BASIC_PROTOCOL, Message) ->
     % Error push message may be sent before negotiating handshake, so it must
     % support the basic protocol (currently the same as 1. protocol version).
-    encode_push_error(1, Message);
-encode_push_error(1, #gs_push_error{} = Message) ->
+    encode_push_error(2, Message);
+encode_push_error(ProtocolVersion, #gs_push_error{} = Message) ->
     #gs_push_error{
         error = Error
     } = Message,
     #{
-        <<"error">> => gs_protocol_errors:error_to_json(1, Error)
+        <<"error">> => gs_protocol_errors:error_to_json(ProtocolVersion, Error)
     }.
 
 
@@ -602,7 +621,7 @@ decode_request_handshake(_, PayloadJSON) ->
 
 
 -spec decode_request_rpc(protocol_version(), json_map()) -> rpc_req().
-decode_request_rpc(1, PayloadJSON) ->
+decode_request_rpc(_, PayloadJSON) ->
     #gs_req_rpc{
         function = maps:get(<<"function">>, PayloadJSON),
         args = maps:get(<<"args">>, PayloadJSON)
@@ -610,7 +629,7 @@ decode_request_rpc(1, PayloadJSON) ->
 
 
 -spec decode_request_graph(protocol_version(), json_map()) -> graph_req().
-decode_request_graph(1, PayloadJSON) ->
+decode_request_graph(_, PayloadJSON) ->
     #gs_req_graph{
         gri = string_to_gri(maps:get(<<"gri">>, PayloadJSON)),
         operation = string_to_operation(maps:get(<<"operation">>, PayloadJSON)),
@@ -621,7 +640,7 @@ decode_request_graph(1, PayloadJSON) ->
 
 
 -spec decode_request_unsub(protocol_version(), json_map()) -> unsub_req().
-decode_request_unsub(1, PayloadJSON) ->
+decode_request_unsub(_, PayloadJSON) ->
     #gs_req_unsub{
         gri = string_to_gri(maps:get(<<"gri">>, PayloadJSON))
     }.
@@ -634,7 +653,7 @@ decode_response(ProtocolVersion, ReqJSON) ->
     Error = gs_protocol_errors:json_to_error(
         ProtocolVersion, maps:get(<<"error">>, PayloadJSON, null)
     ),
-    DataJSON = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
+    DataJSON = maps:get(<<"data">>, PayloadJSON, #{}),
     Subtype = string_to_subtype(maps:get(<<"subtype">>, ReqJSON)),
     Response = case Success of
         false ->
@@ -676,7 +695,7 @@ decode_response_handshake(_, DataJSON) ->
 
 
 -spec decode_response_rpc(protocol_version(), json_map()) -> rpc_resp().
-decode_response_rpc(1, DataJSON) ->
+decode_response_rpc(_, DataJSON) ->
     #gs_resp_rpc{
         result = null_to_undefined(DataJSON)
     }.
@@ -684,13 +703,36 @@ decode_response_rpc(1, DataJSON) ->
 
 -spec decode_response_graph(protocol_version(), json_map()) -> graph_resp().
 decode_response_graph(1, DataJSON) ->
+    case DataJSON of
+        null ->
+            #gs_resp_graph{};
+        Map when map_size(Map) == 0 ->
+            #gs_resp_graph{};
+        #{<<"data">> := Data} ->
+            #gs_resp_graph{
+                data_format = value,
+                data = Data
+            };
+        #{<<"gri">> := _} ->
+            #gs_resp_graph{
+                data_format = resource,
+                data = DataJSON
+            }
+    end;
+decode_response_graph(2, null) ->
+    #gs_resp_graph{};
+decode_response_graph(2, Map) when map_size(Map) == 0 ->
+    #gs_resp_graph{};
+decode_response_graph(2, DataJSON) ->
+    FormatStr = maps:get(<<"format">>, DataJSON),
     #gs_resp_graph{
-        result = null_to_undefined(DataJSON)
+        data_format = str_to_data_format(FormatStr),
+        data = maps:get(FormatStr, DataJSON)
     }.
 
 
 -spec decode_response_unsub(protocol_version(), json_map()) -> unsub_resp().
-decode_response_unsub(1, _DataJSON) ->
+decode_response_unsub(_, _DataJSON) ->
     % Currently the response does not carry any information
     #gs_resp_unsub{}.
 
@@ -714,7 +756,7 @@ decode_push(ProtocolVersion, ReqJSON) ->
 
 
 -spec decode_push_graph(protocol_version(), json_map()) -> graph_push().
-decode_push_graph(1, PayloadJSON) ->
+decode_push_graph(_, PayloadJSON) ->
     GRI = string_to_gri(maps:get(<<"gri">>, PayloadJSON)),
     UpdateType = string_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
     Data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
@@ -726,7 +768,7 @@ decode_push_graph(1, PayloadJSON) ->
 
 
 -spec decode_push_nosub(protocol_version(), json_map()) -> nosub_push().
-decode_push_nosub(1, PayloadJSON) ->
+decode_push_nosub(_, PayloadJSON) ->
     GRI = maps:get(<<"gri">>, PayloadJSON),
     Reason = maps:get(<<"reason">>, PayloadJSON),
     #gs_push_nosub{
@@ -739,11 +781,11 @@ decode_push_nosub(1, PayloadJSON) ->
 decode_push_error(?BASIC_PROTOCOL, PayloadJSON) ->
     % Error push message may be sent before negotiating handshake, so it must
     % support the basic protocol (currently the same as 1. protocol version).
-    decode_push_error(1, PayloadJSON);
-decode_push_error(1, PayloadJSON) ->
+    decode_push_error(2, PayloadJSON);
+decode_push_error(ProtocolVersion, PayloadJSON) ->
     Error = maps:get(<<"error">>, PayloadJSON),
     #gs_push_error{
-        error = gs_protocol_errors:json_to_error(1, Error)
+        error = gs_protocol_errors:json_to_error(ProtocolVersion, Error)
     }.
 
 
@@ -928,3 +970,13 @@ update_type_to_string(deleted) -> <<"deleted">>.
 -spec string_to_update_type(binary()) -> change_type().
 string_to_update_type(<<"updated">>) -> updated;
 string_to_update_type(<<"deleted">>) -> deleted.
+
+
+-spec data_format_to_str(atom()) -> binary().
+data_format_to_str(resource) -> <<"resource">>;
+data_format_to_str(value) -> <<"value">>.
+
+
+-spec str_to_data_format(binary()) -> atom().
+str_to_data_format(<<"resource">>) -> resource;
+str_to_data_format(<<"value">>) -> value.

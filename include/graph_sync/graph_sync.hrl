@@ -63,7 +63,8 @@
 }).
 
 -record(gs_resp_graph, {
-    result :: undefined | gs_protocol:data()
+    data_format :: gs_protocol:data_format(),
+    data :: gs_protocol:data()
 }).
 
 -record(gs_req_unsub, {

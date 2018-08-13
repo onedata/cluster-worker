@@ -27,23 +27,23 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Translates CREATE result to the format understood by client. Will be called
-%% only for requests that return {ok, {data, Data}}.
-%% For other results, translate_get is called.
+%% Translates result with data_format = 'value' (currently only applicable to
+%% CREATE operation) to the format understood by client.
 %% @end
 %%--------------------------------------------------------------------
--callback translate_create(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) -> gs_protocol:data() | gs_protocol:error().
+-callback translate_value(gs_protocol:protocol_version(), gs_protocol:gri(),
+    Value :: term()) -> gs_protocol:data() | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Translates GET result to the format understood by client. The requested GRI
-%% will be automatically included in the answer. Alternatively, this callback
-%% can return a new GRI to override the requested one.
+%% Translates result with data_format = 'resource' (can be returned from
+%% CREATE or GET operations) to the format understood by client. The requested
+%% GRI will be automatically included in the answer. Alternatively, this
+%% callback can return a new GRI to override the requested one.
 %% @end
 %%--------------------------------------------------------------------
--callback translate_get(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) ->
+-callback translate_resource(gs_protocol:protocol_version(), gs_protocol:gri(),
+    ResourceData :: term()) ->
     gs_protocol:data() | {gs_protocol:gri(), gs_protocol:data()} |
     gs_protocol:error().

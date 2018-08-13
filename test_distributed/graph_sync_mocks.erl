@@ -36,8 +36,8 @@
     subscribable_resources/1
 ]).
 -export([
-    translate_get/3,
-    translate_create/3
+    translate_resource/3,
+    translate_value/3
 ]).
 
 
@@ -59,8 +59,8 @@ mock_callbacks(Config) ->
 
     ok = test_utils:mock_new(Nodes, ?GS_EXAMPLE_TRANSLATOR, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, handshake_attributes, fun handshake_attributes/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_get, fun translate_get/3),
-    ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_create, fun translate_create/3),
+    ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_resource, fun translate_resource/3),
+    ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, translate_value, fun translate_value/3),
 
     ok = test_utils:mock_new(Nodes, datastore_config_plugin, [non_strict]),
     ok = test_utils:mock_expect(Nodes, datastore_config_plugin, get_throttled_models, fun get_throttled_models/0),
@@ -126,13 +126,13 @@ is_authorized(_, _, _, _, _) ->
     false.
 
 
-handle_rpc(1, ?USER_AUTH(?USER_1), <<"user1Fun">>, Args) ->
+handle_rpc(_, ?USER_AUTH(?USER_1), <<"user1Fun">>, Args) ->
     {ok, Args};
-handle_rpc(1, _, <<"user1Fun">>, _Args) ->
+handle_rpc(_, _, <<"user1Fun">>, _Args) ->
     ?ERROR_FORBIDDEN;
-handle_rpc(1, ?USER_AUTH(?USER_2), <<"user2Fun">>, Args) ->
+handle_rpc(_, ?USER_AUTH(?USER_2), <<"user2Fun">>, Args) ->
     {ok, Args};
-handle_rpc(1, _, <<"user2Fun">>, _Args) ->
+handle_rpc(_, _, <<"user2Fun">>, _Args) ->
     ?ERROR_FORBIDDEN;
 handle_rpc(_, _, _, _) ->
     ?ERROR_RPC_UNDEFINED.
@@ -190,7 +190,7 @@ handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_group, id = un
     #{<<"name">> := ?GROUP_1_NAME} = Data,
     case AuthHint of
         ?AS_USER(UserId) ->
-            {ok, {fetched, #gri{type = od_group, id = ?GROUP_1, aspect = instance}, #{<<"name">> => ?GROUP_1_NAME}}};
+            {ok, resource, {#gri{type = od_group, id = ?GROUP_1, aspect = instance}, #{<<"name">> => ?GROUP_1_NAME}}};
         _ ->
             ?ERROR_FORBIDDEN
     end;
@@ -199,7 +199,7 @@ handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_space, id = un
     #{<<"name">> := ?SPACE_1_NAME} = Data,
     case AuthHint of
         ?AS_USER(UserId) ->
-            {ok, {not_fetched, #gri{type = od_space, id = ?SPACE_1, aspect = instance}, #{<<"name">> => ?SPACE_1_NAME}}};
+            {ok, resource, {#gri{type = od_space, id = ?SPACE_1, aspect = instance}, #{<<"name">> => ?SPACE_1_NAME}}};
         _ ->
             ?ERROR_FORBIDDEN
     end;
@@ -221,11 +221,11 @@ handshake_attributes(_) ->
     #{}.
 
 
-translate_get(1, _GRI, Data) ->
+translate_resource(_, _GRI, Data) ->
     Data.
 
 
-translate_create(1, _GRI, Data) ->
+translate_value(_, _GRI, Data) ->
     Data.
 
 get_throttled_models() ->
