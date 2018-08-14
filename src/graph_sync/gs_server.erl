@@ -13,10 +13,10 @@
 -module(gs_server).
 -author("Lukasz Opiola").
 
--include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 
 
 % Identifier of connection process, one per session.
@@ -163,7 +163,7 @@ updated(GRI, Entity, {SessionId, {Client, AuthHint}} = _Subscriber, Data) ->
     }} = gs_persistence:get_session(SessionId),
     case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, GRI, get, Entity) of
         true ->
-            DataJSONMap = translate_get(
+            DataJSONMap = translate_resource(
                 Translator, ProtoVersion, GRI, Data
             ),
             gs_ws_handler:push(ConnRef, #gs_push{
@@ -323,49 +323,39 @@ handle_request(Session, #gs_req_graph{} = Req) ->
         Client, AuthHint, GRI, Operation, Data, undefined
     ),
     case Result of
-        {error, _} = Error ->
-            throw(Error);
-        _ ->
-            ok
+        {error, _} = Error -> throw(Error);
+        _ -> ok
     end,
-    {NewGRI, NewAuthHint, ResultJSONMap} = case {Operation, Result} of
+    {NewGRI, NewAuthHint, Response} = case {Operation, Result} of
         {create, ok} ->
-            {not_subscribable, AuthHint, null};
-        {create, {ok, {data, ResData}}} ->
-            {not_subscribable, AuthHint, #{<<"data">> => translate_create(
-                Translator, ProtoVer, GRI, ResData
-            )}};
-        {create, {ok, {fetched, UpdatedGRI, ResData}}} ->
-            {UpdatedGRI, AuthHint, translate_get(
-                Translator, ProtoVer, UpdatedGRI, ResData
-            )};
-        {create, {ok, {not_fetched, UpdatedGRI}}} ->
-            % This must succeed, otherwise crash is better to trace the problem
-            {ok, FetchedData} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                Client, undefined, UpdatedGRI, get, #{}, undefined
-            ),
-            {UpdatedGRI, AuthHint, translate_get(
-                Translator, ProtoVer, UpdatedGRI, FetchedData
-            )};
-        {create, {ok, {not_fetched, UpdatedGRI, NAuthHint}}} ->
-            % This must succeed, otherwise crash is better to trace the problem
-            {ok, FetchedData} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                Client, NAuthHint, UpdatedGRI, get, #{}, undefined
-            ),
-            {UpdatedGRI, NAuthHint, translate_get(
-                Translator, ProtoVer, UpdatedGRI, FetchedData
-            )};
+            {not_subscribable, AuthHint, #gs_resp_graph{}};
+        {create, {ok, value, Value}} ->
+            {not_subscribable, AuthHint, #gs_resp_graph{
+                data_format = value,
+                data = translate_value(Translator, ProtoVer, GRI, Value)
+            }};
+        {create, {ok, resource, {UpdatedGRI, ResData}}} ->
+            {UpdatedGRI, AuthHint, #gs_resp_graph{
+                data_format = resource,
+                data = translate_resource(Translator, ProtoVer, UpdatedGRI, ResData)
+            }};
+        {create, {ok, resource, {UpdatedGRI, NAuthHint, ResData}}} ->
+            {UpdatedGRI, NAuthHint, #gs_resp_graph{
+                data_format = resource,
+                data = translate_resource(Translator, ProtoVer, UpdatedGRI, ResData)
+            }};
 
         {get, {ok, ResData}} ->
-            {GRI, AuthHint, translate_get(
-                Translator, ProtoVer, GRI, ResData
-            )};
+            {GRI, AuthHint, #gs_resp_graph{
+                data_format = resource,
+                data = translate_resource(Translator, ProtoVer, GRI, ResData)
+            }};
 
         {update, ok} ->
-            {GRI, AuthHint, null};
+            {GRI, AuthHint, #gs_resp_graph{}};
 
         {delete, ok} ->
-            {not_subscribable, AuthHint, null}
+            {not_subscribable, AuthHint, #gs_resp_graph{}}
     end,
     case {Subscribe, NewAuthHint, NewGRI} of
         {true, _, not_subscribable} ->
@@ -375,7 +365,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
         {false, _, _} ->
             ok
     end,
-    {ok, #gs_resp_graph{result = ResultJSONMap}};
+    {ok, Response};
 
 handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
     unsubscribe(SessionId, GRI),
@@ -386,17 +376,17 @@ handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
 %%% Internal functions
 %%%===================================================================
 
--spec translate_create(translator(), gs_protocol:protocol_version(),
+-spec translate_value(translator(), gs_protocol:protocol_version(),
     gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_create(Translator, ProtoVer, GRI, Data) ->
+translate_value(Translator, ProtoVer, GRI, Data) ->
     % Used only when data is returned rather than GRI and resource
-    Translator:translate_create(ProtoVer, GRI, Data).
+    Translator:translate_value(ProtoVer, GRI, Data).
 
 
--spec translate_get(translator(), gs_protocol:protocol_version(),
+-spec translate_resource(translator(), gs_protocol:protocol_version(),
     gs_protocol:gri(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_get(Translator, ProtoVer, GRI, Data) ->
-    {NewGRI, Resp} = case Translator:translate_get(ProtoVer, GRI, Data) of
+translate_resource(Translator, ProtoVer, GRI, Data) ->
+    {NewGRI, Resp} = case Translator:translate_resource(ProtoVer, GRI, Data) of
         {ModifiedGRI, Response} -> {ModifiedGRI, Response};
         Response -> {GRI, Response}
     end,

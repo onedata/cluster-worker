@@ -244,7 +244,7 @@ update_propagation_performance_base(Config) ->
 
     OnSuccessFun = fun(Client) ->
         ?assertMatch(
-            {ok, #gs_resp_graph{result = User1Data}},
+            {ok, #gs_resp_graph{data = User1Data}},
             gs_client:graph_request(Client, #gri{
                 type = od_user, id = ?USER_1, aspect = instance
             }, get, #{}, true)

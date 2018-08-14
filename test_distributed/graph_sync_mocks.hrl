@@ -21,7 +21,7 @@
 -define(GS_HTTPS_ACCEPTORS, 100).
 
 % Current protocol version
--define(SUPPORTED_PROTO_VERSIONS, [1]).
+-define(SUPPORTED_PROTO_VERSIONS, [1, 2]).
 
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
 
