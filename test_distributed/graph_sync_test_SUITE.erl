@@ -38,6 +38,7 @@
     subscribe_test/1,
     unsubscribe_test/1,
     nosub_test/1,
+    auto_scope_test/1,
     session_persistence_test/1,
     subscribers_persistence_test/1,
     subscriptions_persistence_test/1,
@@ -52,6 +53,7 @@
     subscribe_test,
     unsubscribe_test,
     nosub_test,
+    auto_scope_test,
     session_persistence_test,
     subscribers_persistence_test,
     subscriptions_persistence_test,
@@ -678,6 +680,140 @@ nosub_test(Config) ->
     end, 20)),
 
     disconnect_client([Client1, Client2]),
+
+    ok.
+
+
+auto_scope_test(Config) ->
+    [Node | _] = ?config(cluster_worker_nodes, Config),
+
+    GathererPid = spawn(fun() ->
+        gatherer_loop(#{})
+    end),
+
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, none),
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, public),
+
+    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
+        get_gs_ws_url(Config),
+        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
+        ?SUPPORTED_PROTO_VERSIONS,
+        fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
+        ?SSL_OPTS(Config)
+    ),
+    {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
+        get_gs_ws_url(Config),
+        {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
+        ?SUPPORTED_PROTO_VERSIONS,
+        fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
+        ?SSL_OPTS(Config)
+    ),
+
+    HsGRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance},
+    HsGRIAuto = HsGRI#gri{scope = auto},
+    HsGRIAutoStr = gs_protocol:gri_to_string(HsGRIAuto),
+
+    ?assertEqual(
+        ?ERROR_FORBIDDEN,
+        gs_client:graph_request(Client1, HsGRI#gri{scope = auto}, get, #{}, true)
+    ),
+
+    ?assertEqual(
+        ?ERROR_FORBIDDEN,
+        gs_client:graph_request(Client2, HsGRI#gri{scope = shared}, get, #{}, true)
+    ),
+
+    ?assertEqual(
+        {ok, #gs_resp_graph{result = #{
+            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>}
+        }},
+        gs_client:graph_request(Client2, HsGRI#gri{scope = auto}, get, #{}, true)
+    ),
+
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, shared),
+
+    ?assertEqual(
+        {ok, #gs_resp_graph{result = #{
+            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>, <<"shared">> => <<"sha1">>}
+        }},
+        gs_client:graph_request(Client1, HsGRI#gri{scope = auto}, get, #{}, true)
+    ),
+
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, private),
+
+    HServiceData2 = ?HANDLE_SERVICE_DATA(<<"pub2">>, <<"sha2">>, <<"pro2">>, <<"pri2">>),
+    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData2]),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client1, fun(Msg) ->
+            Expected = ?LIMIT_HANDLE_SERVICE_DATA(shared, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
+            case Msg of
+                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client2, fun(Msg) ->
+            Expected = ?LIMIT_HANDLE_SERVICE_DATA(private, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
+            case Msg of
+                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, protected),
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, none),
+
+    HServiceData3 = ?HANDLE_SERVICE_DATA(<<"pub3">>, <<"sha3">>, <<"pro3">>, <<"pri3">>),
+    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData3]),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client1, fun(Msg) ->
+            Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData3)#{<<"gri">> => HsGRIAutoStr},
+            case Msg of
+                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client2, fun(Msg) ->
+            case Msg of
+                #gs_push_nosub{gri = HsGRIAuto, reason = forbidden} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
+    % Check if create with auto scope works as expected
+    graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, protected),
+    ?assertEqual(
+        {ok, #gs_resp_graph{result = #{
+            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>,
+            <<"shared">> => <<"sha1">>, <<"protected">> => <<"pro1">>}
+        }},
+        gs_client:graph_request(Client2, HsGRI#gri{scope = auto}, create, #{}, true)
+    ),
 
     ok.
 

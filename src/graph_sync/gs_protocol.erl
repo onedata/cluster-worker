@@ -90,7 +90,8 @@
 % Aspect of given entity, one of resource identifiers
 -type aspect() :: atom() | {atom(), term()}.
 % Scope of given aspect, allows to differentiate access to subsets of aspect data
--type scope() :: private | protected | shared | public.
+% 'auto' scope means the maximum scope (if any) the client is authorized to access.
+-type scope() :: private | protected | shared | public | auto.
 % Graph Resource Identifier - a record identifying a certain resource in the graph.
 -type gri() :: #gri{}.
 % Requested operation
@@ -120,12 +121,14 @@
 
 -type error() :: {error, term()}.
 
--type graph_request_result() :: ok |
-{ok, {data, Data :: term()}} |
-{ok, {not_fetched, gri()}} |
-{ok, {not_fetched, gri(), auth_hint()}} |
-{ok, {fetched, gri(), Data :: term()}} |
-error().
+-type graph_create_result() :: ok | {ok, {data, term()} | {fetched, gri(), term()} |
+{not_fetched, gri()} | {not_fetched, gri(), auth_hint()}} | error().
+-type graph_get_result() :: {ok, term()} | {ok, gri(), term()} | error().
+-type graph_delete_result() :: ok | error().
+-type graph_update_result() :: ok | error().
+
+-type graph_request_result() :: graph_create_result() | graph_get_result() |
+graph_update_result() | graph_delete_result().
 
 -type json_map() :: maps:map().
 
@@ -153,6 +156,11 @@ error().
     rpc_function/0,
     rpc_args/0,
     rpc_result/0,
+    error/0,
+    graph_create_result/0,
+    graph_get_result/0,
+    graph_delete_result/0,
+    graph_update_result/0,
     graph_request_result/0,
     json_map/0
 ]).
@@ -856,14 +864,16 @@ string_to_aspect(String) ->
 scope_to_string(private) -> <<"private">>;
 scope_to_string(protected) -> <<"protected">>;
 scope_to_string(shared) -> <<"shared">>;
-scope_to_string(public) -> <<"public">>.
+scope_to_string(public) -> <<"public">>;
+scope_to_string(auto) -> <<"auto">>.
 
 
 -spec string_to_scope(binary()) -> scope().
 string_to_scope(<<"private">>) -> private;
 string_to_scope(<<"protected">>) -> protected;
 string_to_scope(<<"shared">>) -> shared;
-string_to_scope(<<"public">>) -> public.
+string_to_scope(<<"public">>) -> public;
+string_to_scope(<<"auto">>) -> auto.
 
 
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().

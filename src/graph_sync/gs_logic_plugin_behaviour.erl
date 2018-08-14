@@ -74,10 +74,13 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Determines if given client is authorized to perform certain operation.
+%% GRI is returned to indicate how auto scope was resolved. If a specific
+%% scope was requested, it must return the same gri.
 %% @end
 %%--------------------------------------------------------------------
 -callback is_authorized(gs_protocol:client(), gs_protocol:auth_hint(),
-    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data()) -> boolean().
+    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data()) ->
+    {true, gs_protocol:gri()} | false.
 
 
 %%--------------------------------------------------------------------
