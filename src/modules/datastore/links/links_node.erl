@@ -39,13 +39,24 @@
 -spec encode(links_node()) -> binary().
 encode(#bp_tree_node{leaf = Leaf, children = Children}) ->
     Children2 = maps:fold(fun
-        (Key, {LinkTarget, LinkRev}, Map) ->
+        (Key, {LinkTarget, LinkRev}, Map) when is_binary(Key) ->
             Map#{Key => #{
                 <<"target">> => LinkTarget,
                 <<"_rev">> => LinkRev
             }};
-        (Key, Value, Map) ->
-            Map#{Key => Value}
+        (Key, Value, Map) when is_binary(Key) ->
+            Map#{Key => Value};
+        (Key, {LinkTarget, LinkRev}, Map) when is_integer(Key) ->
+            Map#{integer_to_binary(Key) => #{
+                <<"target">> => LinkTarget,
+                <<"_rev">> => LinkRev,
+                <<"type">> => <<"int">>
+            }};
+        (Key, Value, Map) when is_integer(Key) ->
+            Map#{integer_to_binary(Key) => #{
+                <<"target">> => Value,
+                <<"type">> => <<"int">>
+            }}
     end, #{}, bp_tree_children:to_map(Children)),
     jiffy:encode(#{
         <<"leaf">> => Leaf,
@@ -64,8 +75,13 @@ decode(Term) ->
         <<"children">> := Children
     } = jiffy:decode(Term, [return_maps]),
     Children2 = maps:fold(fun
+        (Key, #{<<"target">> := LinkTarget, <<"_rev">> := LinkRev,
+            <<"type">> := <<"int">>}, Map) ->
+            Map#{binary_to_integer(Key) => {LinkTarget, LinkRev}};
         (Key, #{<<"target">> := LinkTarget, <<"_rev">> := LinkRev}, Map) ->
             Map#{Key => {LinkTarget, LinkRev}};
+        (Key, #{<<"target">> := Value, <<"type">> := <<"int">>}, Map) ->
+            Map#{binary_to_integer(Key) => Value};
         (Key, Value, Map) ->
             Map#{Key => Value}
     end, #{}, Children),
