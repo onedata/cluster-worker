@@ -15,9 +15,9 @@
 
 -ifdef(TEST).
 
--include_lib("ctool/include/api_errors.hrl").
--include("graph_sync/graph_sync.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include("graph_sync/graph_sync.hrl").
+-include_lib("ctool/include/api_errors.hrl").
 
 gri_conversion_test() ->
     ?assertEqual(
@@ -462,21 +462,59 @@ encode_decode_message_test() ->
             response = undefined
         },
         #gs_resp{
-            id = <<"mess26">>,
+            id = <<"mess26.1">>,
             subtype = graph,
             success = true,
             error = undefined,
             response = #gs_resp_graph{
-                result = undefined
+                data = undefined
             }
         },
         #gs_resp{
-            id = <<"mess27">>,
+            id = <<"mess26.2">>,
+            subtype = graph,
+            success = true,
+            error = undefined,
+            response = #gs_resp_graph{}
+        },
+        #gs_resp{
+            id = <<"mess27.1">>,
             subtype = graph,
             success = true,
             error = undefined,
             response = #gs_resp_graph{
-                result = #{<<"data27">> => 27}
+                data_format = value,
+                data = #{<<"data27">> => 27}
+            }
+        },
+        #gs_resp{
+            id = <<"mess27.2">>,
+            subtype = graph,
+            success = true,
+            error = undefined,
+            response = #gs_resp_graph{
+                data_format = value,
+                data = 12345
+            }
+        },
+        #gs_resp{
+            id = <<"mess27.3">>,
+            subtype = graph,
+            success = true,
+            error = undefined,
+            response = #gs_resp_graph{
+                data_format = value,
+                data = <<"12345">>
+            }
+        },
+        #gs_resp{
+            id = <<"mess27.4">>,
+            subtype = graph,
+            success = true,
+            error = undefined,
+            response = #gs_resp_graph{
+                data_format = resource,
+                data = #{<<"data27">> => 27, <<"gri">> => <<"user.id.instance:protected">>}
             }
         },
         #gs_resp{
@@ -525,17 +563,19 @@ encode_decode_message_test() ->
         }
     ],
 
-    lists:foreach(
-        fun(Request) ->
-            {ok, Encoded} = gs_protocol:encode(1, Request),
+    lists:foreach(fun(ProtoVersion) ->
+        lists:foreach(fun(Request) ->
+            {ok, Encoded} = gs_protocol:encode(ProtoVersion, Request),
             true = is_map(Encoded),
             EncodedJSON = json_utils:encode(Encoded),
             DecodedJSON = json_utils:decode(EncodedJSON),
-            {ok, Decoded} = gs_protocol:decode(1, DecodedJSON),
+            {ok, Decoded} = gs_protocol:decode(ProtoVersion, DecodedJSON),
             ?assertEqual(Decoded, Request)
-        end, RequestsToCheck),
+        end, RequestsToCheck)
+    end, gs_protocol:supported_versions()),
 
-    ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(1, <<"sdfsdviuyasd9fas">>)).
+    ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(1, <<"sdfsdviuyasd9fas">>)),
+    ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(2, <<"sdfsdviuyasd9fas">>)).
 
 
 encode_decode_error_test() ->

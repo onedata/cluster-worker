@@ -137,6 +137,10 @@ encode_term(Term, json) when is_binary(Term) ->
     jiffy:decode(Term);
 encode_term(Term, string) when is_binary(Term) ->
     Term;
+encode_term(Term, string_or_integer) when is_binary(Term) ->
+    Term;
+encode_term(Term, string_or_integer) when is_integer(Term) ->
+    Term;
 encode_term(Term, term) ->
     base64:encode(term_to_binary(Term));
 encode_term(Term, {custom, {Mod, Encoder, _Decoder}}) ->
@@ -207,6 +211,10 @@ decode_term(Term, integer) when is_integer(Term) ->
 decode_term(Term, json) ->
     jiffy:encode(Term);
 decode_term(Term, string) when is_binary(Term) ->
+    Term;
+decode_term(Term, string_or_integer) when is_binary(Term) ->
+    Term;
+decode_term(Term, string_or_integer) when is_integer(Term) ->
     Term;
 decode_term(Term, term) when is_binary(Term) ->
     binary_to_term(base64:decode(Term));
