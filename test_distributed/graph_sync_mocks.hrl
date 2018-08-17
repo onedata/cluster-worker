@@ -21,7 +21,7 @@
 -define(GS_HTTPS_ACCEPTORS, 100).
 
 % Current protocol version
--define(SUPPORTED_PROTO_VERSIONS, [1]).
+-define(SUPPORTED_PROTO_VERSIONS, [1, 2]).
 
 -define(CONNECTION_INFO(__Client), {arbitrary_connection_info, __Client}).
 

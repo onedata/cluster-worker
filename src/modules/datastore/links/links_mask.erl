@@ -53,6 +53,6 @@ get_record_struct(1) ->
         {model, atom},
         {key, string},
         {tree_id, string},
-        {links, [{string, string}]},
+        {links, [{string_or_integer, string}]},
         {next, string}
     ]}.

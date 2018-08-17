@@ -88,7 +88,7 @@ all() ->
 
 -define(ATTEMPTS, 30).
 
--define(REPEATS, 3).
+-define(REPEATS, 1).
 -define(SUCCESS_RATE, 100).
 
 %%%===================================================================

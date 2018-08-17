@@ -27,28 +27,26 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Translates CREATE result to the format understood by client. Will be called
-%% only for requests that return {ok, {data, Data}}.
-%% For other results, translate_get is called.
+%% Translates result with data_format = 'value' (currently only applicable to
+%% CREATE operation) to the format understood by client.
 %% Can return a function taking one argument - the Client, that returns result
 %% depending on the client.
 %% @end
 %%--------------------------------------------------------------------
--callback translate_create(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
+-callback translate_value(gs_protocol:protocol_version(), gs_protocol:gri(),
+    Value :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
     Result :: gs_protocol:data() | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Translates GET result to the format understood by client. The requested GRI
-%% will be automatically included in the answer. Alternatively, this callback
-%% can return a new GRI to override the requested one.
+%% Translates result with data_format = 'resource' (can be returned from
+%% CREATE or GET operations) to the format understood by client. The requested
+%% GRI will be automatically included in the answer.
 %% Can return a function taking one argument - the Client, that returns result
 %% depending on the client.
 %% @end
 %%--------------------------------------------------------------------
--callback translate_get(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Data :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
-    Result :: gs_protocol:data() | {gs_protocol:gri(), gs_protocol:data()} |
-    gs_protocol:error().
+-callback translate_resource(gs_protocol:protocol_version(), gs_protocol:gri(),
+    ResourceData :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
+    Result :: gs_protocol:data() | gs_protocol:error().

@@ -70,12 +70,15 @@ all() ->
 
 
 handshake_test(Config) ->
+    [handshake_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+handshake_test_base(Config, ProtoVersion) ->
     % Try to connect with no cookie - should be treated as anonymous
     {ok, Client1, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = nobody}},
         gs_client:start_link(get_gs_ws_url(Config),
             undefined,
-            ?SUPPORTED_PROTO_VERSIONS,
+            [ProtoVersion],
             fun(_) -> ok end,
             ?SSL_OPTS(Config)
         )
@@ -86,7 +89,7 @@ handshake_test(Config) ->
         {ok, _, #gs_resp_handshake{identity = {user, ?USER_1}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-            ?SUPPORTED_PROTO_VERSIONS,
+            [ProtoVersion],
             fun(_) -> ok end,
             ?SSL_OPTS(Config)
         )
@@ -97,7 +100,7 @@ handshake_test(Config) ->
         {ok, _, #gs_resp_handshake{identity = {user, ?USER_2}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-            ?SUPPORTED_PROTO_VERSIONS,
+            [ProtoVersion],
             fun(_) -> ok end,
             ?SSL_OPTS(Config)
         )
@@ -108,7 +111,7 @@ handshake_test(Config) ->
         ?ERROR_UNAUTHORIZED,
         gs_client:start_link(get_gs_ws_url(Config),
             {cookie, {?SESSION_COOKIE_NAME, <<"bkkwksdf">>}},
-            ?SUPPORTED_PROTO_VERSIONS,
+            [ProtoVersion],
             fun(_) -> ok end,
             ?SSL_OPTS(Config)
         )
@@ -119,7 +122,7 @@ handshake_test(Config) ->
         {ok, _, #gs_resp_handshake{identity = {provider, ?PROVIDER_1}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {macaroon, ?PROVIDER_1_MACAROON},
-            ?SUPPORTED_PROTO_VERSIONS,
+            [ProtoVersion],
             fun(_) -> ok end,
             ?SSL_OPTS(Config)
         )
@@ -130,7 +133,7 @@ handshake_test(Config) ->
         ?ERROR_UNAUTHORIZED,
         gs_client:start_link(get_gs_ws_url(Config),
             {macaroon, <<"badMacaroon">>},
-            ?SUPPORTED_PROTO_VERSIONS,
+            [ProtoVersion],
             fun(_) -> ok end,
             ?SSL_OPTS(Config)
         )
@@ -154,17 +157,20 @@ handshake_test(Config) ->
 
 
 rpc_req_test(Config) ->
+    [rpc_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+rpc_req_test_base(Config, ProtoVersion) ->
     {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)
     ),
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)
     ),
@@ -195,6 +201,9 @@ rpc_req_test(Config) ->
 
 
 graph_req_test(Config) ->
+    [graph_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+graph_req_test_base(Config, ProtoVersion) ->
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
         <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
     },
@@ -202,20 +211,20 @@ graph_req_test(Config) ->
     {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)
     ),
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User1Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, get)
@@ -230,7 +239,7 @@ graph_req_test(Config) ->
 
     % User 2 should be able to get user 1 data through space ?SPACE_1
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User1Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, get, #{}, false, ?THROUGH_SPACE(?SPACE_1))
@@ -238,7 +247,7 @@ graph_req_test(Config) ->
 
     % User should be able to get it's own data using "self" as id
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User1Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?SELF, aspect = instance
         }, get)
@@ -294,7 +303,7 @@ graph_req_test(Config) ->
         #gri{type = od_space, id = ?SPACE_1, aspect = instance}
     ),
     ?assertMatch(
-        {ok, #gs_resp_graph{result = #{
+        {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> := NewSpaceGRI,
             <<"name">> := ?SPACE_1_NAME
         }}},
@@ -308,7 +317,7 @@ graph_req_test(Config) ->
         #gri{type = od_group, id = ?GROUP_1, aspect = instance}
     ),
     ?assertMatch(
-        {ok, #gs_resp_graph{result = #{
+        {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> := NewGroupGRI,
             <<"name">> := ?GROUP_1_NAME
         }}},
@@ -317,12 +326,24 @@ graph_req_test(Config) ->
         }, create, #{<<"name">> => ?GROUP_1_NAME}, false, ?AS_USER(?SELF))
     ),
 
+    % Test creating a value rather than resource
+    Value = 1293462394,
+    ?assertMatch(
+        {ok, #gs_resp_graph{data_format = value, data = Value}},
+        gs_client:graph_request(Client1, #gri{
+            type = od_group, id = ?GROUP_1, aspect = int_value
+        }, create, #{<<"value">> => integer_to_binary(Value)})
+    ),
+
     disconnect_client([Client1, Client2]),
 
     ok.
 
 
 subscribe_test(Config) ->
+    [subscribe_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+subscribe_test_base(Config, ProtoVersion) ->
     GathererPid = spawn(fun() ->
         gatherer_loop(#{})
     end),
@@ -337,7 +358,7 @@ subscribe_test(Config) ->
     {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
         ?SSL_OPTS(Config)
     ),
@@ -345,13 +366,13 @@ subscribe_test(Config) ->
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
         ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User1Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, get, #{}, true)
@@ -360,14 +381,14 @@ subscribe_test(Config) ->
     User1NameSubstring = binary:part(maps:get(<<"name">>, User1Data), 0, 4),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = #{<<"nameSubstring">> := User1NameSubstring}}},
+        {ok, #gs_resp_graph{data_format = resource, data = #{<<"nameSubstring">> := User1NameSubstring}}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
         }, get, #{}, true)
     ),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User2Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User2Data}},
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_2, aspect = instance
         }, get, #{}, true)
@@ -376,7 +397,7 @@ subscribe_test(Config) ->
     User2NameSubstring = binary:part(maps:get(<<"name">>, User2Data), 0, 6),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = #{<<"nameSubstring">> := User2NameSubstring}}},
+        {ok, #gs_resp_graph{data_format = resource, data = #{<<"nameSubstring">> := User2NameSubstring}}},
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
         }, get, #{}, true)
@@ -494,6 +515,9 @@ subscribe_test(Config) ->
 
 
 unsubscribe_test(Config) ->
+    [unsubscribe_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+unsubscribe_test_base(Config, ProtoVersion) ->
     GathererPid = spawn(fun() ->
         gatherer_loop(#{})
     end),
@@ -505,13 +529,13 @@ unsubscribe_test(Config) ->
     {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
         ?SSL_OPTS(Config)
     ),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User1Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, get, #{}, true)
@@ -578,6 +602,9 @@ unsubscribe_test(Config) ->
 
 
 nosub_test(Config) ->
+    [nosub_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+nosub_test_base(Config, ProtoVersion) ->
     GathererPid = spawn(fun() ->
         gatherer_loop(#{})
     end),
@@ -589,7 +616,7 @@ nosub_test(Config) ->
     {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
         ?SSL_OPTS(Config)
     ),
@@ -597,7 +624,7 @@ nosub_test(Config) ->
     {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
         ?SSL_OPTS(Config)
     ),
@@ -610,7 +637,7 @@ nosub_test(Config) ->
     ),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{result = User2Data}},
+        {ok, #gs_resp_graph{data_format = resource, data = User2Data}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_2, aspect = instance
         }, get, #{}, true, ?THROUGH_SPACE(?SPACE_1))
@@ -724,7 +751,7 @@ auto_scope_test(Config) ->
     ),
 
     ?assertEqual(
-        {ok, #gs_resp_graph{result = #{
+        {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>}
         }},
         gs_client:graph_request(Client2, HsGRI#gri{scope = auto}, get, #{}, true)
@@ -733,7 +760,7 @@ auto_scope_test(Config) ->
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, shared),
 
     ?assertEqual(
-        {ok, #gs_resp_graph{result = #{
+        {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>, <<"shared">> => <<"sha1">>}
         }},
         gs_client:graph_request(Client1, HsGRI#gri{scope = auto}, get, #{}, true)
@@ -808,7 +835,7 @@ auto_scope_test(Config) ->
     % Check if create with auto scope works as expected
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, protected),
     ?assertEqual(
-        {ok, #gs_resp_graph{result = #{
+        {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>,
             <<"shared">> => <<"sha1">>, <<"protected">> => <<"pro1">>}
         }},
@@ -1008,11 +1035,14 @@ gs_server_session_clearing_test_api_level(Config) ->
 
 
 gs_server_session_clearing_test_connection_level(Config) ->
+    [gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
     {ok, Client1, #gs_resp_handshake{session_id = SessionId}} = gs_client:start_link(
         get_gs_ws_url(Config),
         {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
+        [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)
     ),
