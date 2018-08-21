@@ -136,7 +136,6 @@ updated(EntityType, EntityId, Entity) ->
             updated(GRI, Entity)
         end, generate_subscribable_resources(EntityType, EntityId)).
 
-
 -spec updated(gs_protocol:gri(), gs_protocol:entity()) -> ok.
 updated(GRI, Entity) ->
     {ok, Subs} = gs_persistence:get_subscribers(GRI),
@@ -153,29 +152,34 @@ updated(GRI, Entity) ->
                 end, Subs)
     end.
 
-
 -spec updated(gs_protocol:gri(), gs_protocol:entity(), gs_persistence:subscriber(), term()) -> ok.
 updated(GRI, Entity, {SessionId, {Client, AuthHint}} = _Subscriber, Data) ->
-    {ok, #gs_session{
-        protocol_version = ProtoVersion,
-        conn_ref = ConnRef,
-        translator = Translator
-    }} = gs_persistence:get_session(SessionId),
-    case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, GRI, get, Entity) of
-        true ->
-            DataJSONMap = translate_resource(
-                Translator, ProtoVersion, GRI, Data
-            ),
-            gs_ws_handler:push(ConnRef, #gs_push{
-                subtype = graph, message = #gs_push_graph{
-                    gri = GRI, change_type = updated, data = DataJSONMap
-                }});
-        false ->
-            unsubscribe(SessionId, GRI),
-            gs_ws_handler:push(ConnRef, #gs_push{
-                subtype = nosub, message = #gs_push_nosub{
-                    gri = GRI, reason = forbidden
-                }})
+    case gs_persistence:get_session(SessionId) of
+        {error, not_found} ->
+            % Possible when session cleanup is in progress
+            ok;
+        {ok, GsSession} ->
+            #gs_session{
+                protocol_version = ProtoVersion,
+                conn_ref = ConnRef,
+                translator = Translator
+            } = GsSession,
+            case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, GRI, get, Entity) of
+                true ->
+                    DataJSONMap = translate_resource(
+                        Translator, ProtoVersion, GRI, Data
+                    ),
+                    gs_ws_handler:push(ConnRef, #gs_push{
+                        subtype = graph, message = #gs_push_graph{
+                            gri = GRI, change_type = updated, data = DataJSONMap
+                        }});
+                false ->
+                    unsubscribe(SessionId, GRI),
+                    gs_ws_handler:push(ConnRef, #gs_push{
+                        subtype = nosub, message = #gs_push_nosub{
+                            gri = GRI, reason = forbidden
+                        }})
+            end
     end.
 
 
@@ -197,22 +201,19 @@ deleted(EntityType, EntityId) ->
 -spec deleted(gs_protocol:gri()) -> ok.
 deleted(GRI) ->
     {ok, Subs} = gs_persistence:get_subscribers(GRI),
-    case Subs of
-        [] ->
-            ok;
-        _ ->
-            lists:foreach(
-                fun({SessionId, _}) ->
-                    {ok, #gs_session{
-                        conn_ref = ConnRef
-                    }} = gs_persistence:get_session(SessionId),
-                    gs_ws_handler:push(ConnRef, #gs_push{
-                        subtype = graph, message = #gs_push_graph{
-                            gri = GRI, change_type = deleted
-                        }})
-                end, Subs),
-            gs_persistence:remove_all_subscribers(GRI)
-    end.
+    lists:foreach(fun({SessionId, _}) ->
+        case gs_persistence:get_session(SessionId) of
+            {error, not_found} ->
+                % Possible when session cleanup is in progress
+                ok;
+            {ok, #gs_session{conn_ref = ConnRef}} ->
+                gs_ws_handler:push(ConnRef, #gs_push{
+                    subtype = graph, message = #gs_push_graph{
+                        gri = GRI, change_type = deleted
+                    }})
+        end
+    end, Subs),
+    gs_persistence:remove_all_subscribers(GRI).
 
 
 %%--------------------------------------------------------------------

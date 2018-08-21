@@ -55,12 +55,16 @@ create_session(GsSession = #gs_session{}) ->
 %% field for more concise code.
 %% @end
 %%--------------------------------------------------------------------
--spec get_session(gs_protocol:session_id()) -> {ok, #gs_session{}}.
+-spec get_session(gs_protocol:session_id()) -> {ok, #gs_session{}} | {error, term()}.
 get_session(SessionId) ->
-    {ok, #document{value = GsSession}} = gs_session:get(SessionId),
-    {ok, GsSession#gs_session{
-        id = SessionId
-    }}.
+    case gs_session:get(SessionId) of
+        {ok, #document{value = GsSession}} ->
+            {ok, GsSession#gs_session{
+                id = SessionId
+            }};
+        {error, _} = Error ->
+            Error
+    end.
 
 
 %%--------------------------------------------------------------------
