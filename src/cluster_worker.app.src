@@ -48,8 +48,8 @@
             %% {external_ip, "10.0.0.1"},
             {external_ip, undefined},
 
-            {monitoring_log_file, "{{platform_log_dir}}/node_manager_monitoring.log"},
-            {throttling_log_file, "{{platform_log_dir}}/throttling_monitoring.log"},
+            {monitoring_log_file, "./log/node_manager_monitoring.log"},
+            {throttling_log_file, "./log/throttling_monitoring.log"},
 
             % This option sets default time interval between sending ping frames
             % by Graph Sync websocket server and client to each other.

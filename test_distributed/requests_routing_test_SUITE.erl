@@ -386,7 +386,7 @@ test_get(Size) ->
     end, Seq),
     Diff5 = timer:now_diff(os:timestamp(), T5),
 
-    ct:print("Get test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
+    ct:pal("Get test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
         [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
 
 put_test(Size) ->
@@ -426,7 +426,7 @@ put_test(Size) ->
     end, gb_trees:empty(), Seq),
     Diff5 = timer:now_diff(os:timestamp(), T5),
 
-    ct:print("Put test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
+    ct:pal("Put test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
         [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
 
 del_test(Size) ->
@@ -462,7 +462,7 @@ del_test(Size) ->
     end, Seq),
     Diff5 = timer:now_diff(os:timestamp(), T5),
 
-    ct:print("Del test for size ~p: list ~p, map ~p, gb_set ~p, gb_tree ~p",
+    ct:pal("Del test for size ~p: list ~p, map ~p, gb_set ~p, gb_tree ~p",
         [Size, Diff2, Diff3, Diff4, Diff5]).
 
 test_tree(Size) ->
@@ -487,5 +487,5 @@ test_tree(Size) ->
     end, Tree2, Seq3),
     Diff3 = timer:now_diff(os:timestamp(), T3),
 
-    ct:print("Tree test for size ~p: add 1: ~p, del half: ~p, add 2: ~p",
+    ct:pal("Tree test for size ~p: add 1: ~p, del half: ~p, add 2: ~p",
         [Size, Diff1, Diff2, Diff3]).

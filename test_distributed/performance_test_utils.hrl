@@ -38,7 +38,7 @@
 -define(derive_measurement(From, Name, TransformFun),
     put(Name, TransformFun(get(From)))
 ).
--define(print_measurement(Name, Unit, Desc), #parameter{
+-define(format_measurement(Name, Unit, Desc), #parameter{
     name = Name, unit = atom_to_list(Unit), description = Desc, value = case Unit of
         s -> get(Name) / 1000000;
         ms -> get(Name) / 1000;

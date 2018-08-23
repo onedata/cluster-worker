@@ -75,9 +75,11 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback) ->
 %% Spawns a number of Graph Sync clients, with given Authorizations and Identities.
 %% Returns SupervisorPid - a pid that is linked to all the connections, and
 %% can be simply killed to cause a complete cleanup.
-%% RetryFlag indicates if failed connections should be retried or omitted.
 %% CallbackFunction will be called when a push message comes.
 %% OnSuccessFun will be called upon successful connection.
+%% RetryFlag indicates if failed connections should be retried or omitted. The function
+%% will retry infinitely, until desired number of clients has been spawned. The code
+%% using it sets timetraps, so even upon failure, the infinite loop will be stopped.
 %% @end
 %%--------------------------------------------------------------------
 -spec spawn_clients(URL :: string() | binary(), SslOpts :: list(),
@@ -87,12 +89,12 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback) ->
     {ok, SupervisorPid :: pid(), Clients :: [pid()]}.
 spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSuccessFun) ->
     Master = self(),
-    SupervisorPid = spawn(fun() ->
+    {SupervisorPid, _} = spawn_monitor(fun() ->
         process_flag(trap_exit, true),
         Result = try
             {ok, do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSuccessFun)}
         catch Type:Reason ->
-            ct:print("Cannot start supervisor due to ~p:~p~nStacktrace: ~p", [
+            ct:pal("Cannot start supervisor due to ~p:~p~nStacktrace: ~p", [
                 Type, Reason, erlang:get_stacktrace()
             ]),
             error
@@ -106,7 +108,6 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSucce
                 ok
         end
     end),
-    erlang:monitor(process, SupervisorPid),
     receive
         {ok, Clients} ->
             {ok, SupervisorPid, Clients};
@@ -159,7 +160,7 @@ terminate_clients(SupervisorPid, GracePeriod) ->
     Clients :: [pid()].
 do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSuccessFun) ->
     NumberOfClients = length(AuthsAndIdentities),
-    Master = self(),
+    Supervisor = self(),
     ProxyPids = lists:map(fun({Auth, Identity}) ->
         Pid = spawn_link(fun() ->
             try
@@ -167,7 +168,7 @@ do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSu
                 RandomBackoff = rand:uniform(300),
                 timer:sleep(RandomBackoff),
                 ClientPid = spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun),
-                Master ! {client_pid, self(), ClientPid},
+                Supervisor ! {client_pid, self(), ClientPid},
                 % Wait infinitely
                 receive finish -> ok end
             catch _:_ ->

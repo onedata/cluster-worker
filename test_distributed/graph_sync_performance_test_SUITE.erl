@@ -117,9 +117,9 @@ concurrent_clients_spawning_performance_base(Config) ->
     terminate_clients(Config, SupervisorPid),
 
     [
-        ?print_measurement(clients_spawning_time, ms,
+        ?format_measurement(clients_spawning_time, ms,
             "Time taken by clients spawning and handshaking."),
-        ?print_measurement(avg_time_per_client, ms,
+        ?format_measurement(avg_time_per_client, ms,
             "Average time taken by one client to spawn and handshake.")
     ].
 
@@ -169,9 +169,9 @@ concurrent_active_clients_spawning_performance_base(Config) ->
     terminate_clients(Config, SupervisorPid),
 
     [
-        ?print_measurement(clients_spawning_time, ms,
+        ?format_measurement(clients_spawning_time, ms,
             "Time taken by clients spawning and making regular requests."),
-        ?print_measurement(avg_time_per_client, ms,
+        ?format_measurement(avg_time_per_client, ms,
             "Average time taken by one client to spawn and make regular requests.")
     ].
 
@@ -260,9 +260,9 @@ update_propagation_performance_base(Config) ->
     terminate_clients(Config, SupervisorPid),
 
     [
-        ?print_measurement(updates_propagation_time, ms,
+        ?format_measurement(updates_propagation_time, ms,
             "Time of updates propagation alone."),
-        ?print_measurement(avg_time_per_client_per_update, us,
+        ?format_measurement(avg_time_per_client_per_update, us,
             "Average time taken to send one update to one client.")
     ].
 
@@ -294,11 +294,11 @@ subscriptions_performance_base(Config) ->
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
-    lists:map(fun(Seq) ->
+    utils:pforeach(fun(Seq) ->
         simulate_subscribe(Config, GRI(Seq), SessionId, Client, AuthHint)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
 
-    lists:map(fun(Seq) ->
+    utils:pforeach(fun(Seq) ->
         simulate_unsubscribe(Config, GRI(Seq), SessionId)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
     ?end_measurement(subscribe_unsubscribe_time),
@@ -312,9 +312,9 @@ subscriptions_performance_base(Config) ->
     end, lists:seq(1, StartSubscriptions)),
 
     [
-        ?print_measurement(subscribe_unsubscribe_time, ms,
+        ?format_measurement(subscribe_unsubscribe_time, ms,
             "Time taken to add and remove subscriptions of a client."),
-        ?print_measurement(avg_time_per_subscription, us,
+        ?format_measurement(avg_time_per_subscription, us,
             "Average time taken to add and remove one subscription.")
     ].
 
@@ -345,11 +345,11 @@ subscribers_performance_base(Config) ->
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
-    lists:map(fun(Seq) ->
+    utils:pforeach(fun(Seq) ->
         simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Client, AuthHint)
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
 
-    lists:map(fun(Seq) ->
+    utils:pforeach(fun(Seq) ->
         simulate_unsubscribe(Config, ?USER_1_GRI, SessionId(Seq))
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
     ?end_measurement(subscribe_unsubscribe_time),
@@ -363,9 +363,9 @@ subscribers_performance_base(Config) ->
     end, lists:seq(1, StartSubscribers)),
 
     [
-        ?print_measurement(subscribe_unsubscribe_time, ms,
+        ?format_measurement(subscribe_unsubscribe_time, ms,
             "Time taken to add and remove subscriptions for given resource."),
-        ?print_measurement(avg_time_per_subscriber, us,
+        ?format_measurement(avg_time_per_subscriber, us,
             "Average time taken to add and remove one subscriber.")
     ].
 
