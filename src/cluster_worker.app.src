@@ -42,6 +42,15 @@
             %% GENERAL
             %% ===================================================================
 
+            %% External IP of this node - used by DNS and for inter-provider communication
+            %% can be set to a tuple or string, for example:
+            %% {external_ip, {10,0,0,1}}, or:
+            %% {external_ip, "10.0.0.1"},
+            {external_ip, undefined},
+
+            {monitoring_log_file, "./log/node_manager_monitoring.log"},
+            {throttling_log_file, "./log/throttling_monitoring.log"},
+
             % This option sets default time interval between sending ping frames
             % by Graph Sync websocket server and client to each other.
             {graph_sync_websocket_keepalive, 30000},
@@ -58,8 +67,8 @@
             {node_mem_ratio_to_clear_cache, 90},
 
             %% Number of tp processes to reduce tp process idle time
-            {throttling_reduce_idle_time_memory_proc_number, 200},
-            {throttling_min_idle_time_memory_proc_number, 1000},
+            {throttling_reduce_idle_time_memory_proc_number, 2000},
+            {throttling_min_idle_time_memory_proc_number, 10000},
             %% Interval of throttling configuration when throttling is used
             {throttling_active_check_interval_seconds, 1},
             %% Interval of throttling configuration
@@ -83,25 +92,31 @@
             % - tp_size - number of documents waiting to be flushed in tp processes,
             % - memory - memory usage in percent.
             {throttling_config, [
+                {import, [
+                    {base_time_ms, 40960},
+                    {strength, 50},
+                    {db_queue_max_expected, 4000},
+                    {tp_size_sum_expected, 30000}
+                ]},
                 {default, [
                     {base_time_ms, 40960},
                     {strength, 20},
                     {tp_param_strength, 1},
                     {db_max_param_strength, 1},
-                    {flush_queue_param_strength, 0},
+                    {flush_queue_param_strength, 1},
                     {db_sum_param_strength, 0},
                     {tp_size_sum_param_strength, 1},
                     {mem_param_strength, 0},
                     {tp_proc_expected, 20000},
                     {tp_proc_limit, 40000},
-                    {db_queue_max_expected, 4000},
-                    {db_queue_max_limit, 40000},
-                    {db_flush_queue_expected, 100000},
+                    {db_queue_max_expected, 8000},
+                    {db_queue_max_limit, 20000},
+                    {db_flush_queue_expected, 200000},
                     {db_flush_queue_limit, 500000},
                     {db_queue_sum_expected, 40000},
                     {db_queue_sum_limit, 100000},
-                    {tp_size_sum_expected, 60000},
-                    {tp_size_sum_limit, 200000},
+                    {tp_size_sum_expected, 500000},
+                    {tp_size_sum_limit, 1000000},
                     {memory_expected, 90},
                     {memory_limit, 95}
                 ]}
@@ -109,12 +124,12 @@
 
             % Number of tp subtrees
             % (tree of tp_servers is divided into several subtrees)
-            {tp_subtrees_number, 50},
+            {tp_subtrees_number, 20},
             % Enable handling of link and doc calls in single tp proc
             {aggregate_tp, true},
             % Size of tp key space (0 - unlimited)
-            {tp_space_size, 0},
-            % Should tp force garbage collection
+            {tp_space_size, 2000},
+            % Should tp force garbage collection (options: on, off)
             {tp_gc, off},
 
             % Thresholds to start node analysis
@@ -225,11 +240,15 @@
                     {changes, 3}
                 ]}
             ]},
+            {couchbase_pool_min_batch_size, 250},
             {couchbase_pool_batch_size, 1000},
+            {couchbase_pool_max_batch_size, 2000},
             {couchbase_changes_batch_size, 200},
             {couchbase_changes_update_interval, 1000},
             {couchbase_changes_stream_batch_size, 200},
             {couchbase_changes_stream_update_interval, 1000},
+            % Should couchbase pool force garbage collection (options: on, off)
+            {couchbase_pool_gc, off},
 
             % Scope of cberl instance: pool, mode, node
             {cberl_instance_scope, mode},
@@ -250,10 +269,17 @@
             % Max keys in tp memory
             {max_key_tp_mem, 100},
 
+            %% Should cache fold link token be cached by cache writer
+            %% Warning: other possibility is use cache_list_dir_token flag - do not use both
+            {cache_fold_token, true},
+            %% Time of fold link token caching by cache writer
+            {fold_cache_timeout, 30000},
+
             %% ===================================================================
             %% EXOMETER
             %% ===================================================================
 
+            {counter_name_prefixes, [comp, cluster_worker]},
 
             % Interval between exometer reports
             {exometer_logging_interval, 15000},
@@ -264,12 +290,15 @@
             % to apply - use exometer_utils:init_exometer_counters()
             {excluded_exometer_counters, []},
 
-            {counter_name_prefixes, [comp, cluster_worker]},
-
             % Should lager reporter be on
-            {exometer_lager_reporter, true},
+            {exometer_lager_reporter, false},
             % Logging level of lager reporter
             {exometer_logging_level, debug},
+            {exometer_data_points_number, 100},
+
+            %% ===================================================================
+            %% Graphite config
+            %% ===================================================================
 
             % Should graphite reporter be active and namespaces used
             {integrate_with_graphite, false},

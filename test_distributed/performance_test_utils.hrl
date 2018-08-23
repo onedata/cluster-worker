@@ -29,4 +29,21 @@
     {parameters, Params}
 ]}).
 
+-define(begin_measurement(Name),
+    put(Name, os:timestamp())
+).
+-define(end_measurement(Name),
+    put(Name, timer:now_diff(os:timestamp(), get(Name)))
+).
+-define(derive_measurement(From, Name, TransformFun),
+    put(Name, TransformFun(get(From)))
+).
+-define(format_measurement(Name, Unit, Desc), #parameter{
+    name = Name, unit = atom_to_list(Unit), description = Desc, value = case Unit of
+        s -> get(Name) / 1000000;
+        ms -> get(Name) / 1000;
+        us -> get(Name)
+    end
+}).
+
 -endif.
