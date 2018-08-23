@@ -17,13 +17,12 @@
 %% API
 -export([get_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1]).
 -export([resolve_conflict/4]).
--export([set_defaults/1]).
+-export([set_defaults/1, set_defaults/2]).
 
 -type model() :: datastore_model:model().
 -type version() :: datastore_model:version().
 -type doc() :: datastore:doc().
 -type ctx() :: datastore:ctx().
--type ctx_default() :: {[atom()], term()}.
 
 %%%===================================================================
 %%% API
@@ -101,6 +100,17 @@ set_defaults(Ctx) ->
     Ctx3 = set_disc_driver(Ctx2),
     set_remote_driver(Ctx3).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets defaults for a datastore model context.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_defaults(datastore_model:key(), ctx()) -> ctx().
+set_defaults(UniqueKey, Ctx) ->
+    Ctx2 = set_memory_driver(UniqueKey, Ctx),
+    Ctx3 = set_disc_driver(Ctx2),
+    set_remote_driver(Ctx3).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -132,11 +142,27 @@ set_memory_driver(Ctx = #{memory_driver := undefined}) ->
     Ctx;
 set_memory_driver(Ctx = #{model := Model}) ->
     Name = atom_to_list(Model),
-    set_defaults(Ctx, [
-        {[memory_driver], ets_driver},
-        {[memory_driver_ctx, table], list_to_atom(Name ++ "_table")},
-        {[memory_driver_opts], []}
-    ]).
+    Ctx#{memory_driver => ets_driver,
+        % TODO - tutaj mozna od razu ustawic multiplier
+        memory_driver_ctx => #{table => list_to_atom(Name ++ "_table")},
+        memory_driver_opts => []}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sets default memory driver.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_memory_driver(datastore_model:key(), ctx()) -> ctx().
+set_memory_driver(_UniqueKey, Ctx = #{memory_driver := undefined}) ->
+    Ctx;
+set_memory_driver(UniqueKey, Ctx = #{model := Model}) ->
+    Name = atom_to_list(Model),
+    Ctx#{memory_driver => ets_driver,
+        % TODO - tutaj mozna od razu ustawic multiplier
+        memory_driver_ctx => #{table => list_to_atom(
+            datastore_multiplier:extend_name(UniqueKey, Name ++ "_table"))},
+        memory_driver_opts => []}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -148,11 +174,9 @@ set_memory_driver(Ctx = #{model := Model}) ->
 set_disc_driver(Ctx = #{disc_driver := undefined}) ->
     Ctx;
 set_disc_driver(Ctx) ->
-    set_defaults(Ctx, [
-        {[disc_driver], couchbase_driver},
-        {[disc_driver_ctx, bucket], <<"onedata">>},
-        {[disc_driver_ctx, no_seq], not maps:get(sync_enabled, Ctx, false)}
-    ]).
+    Ctx#{disc_driver => couchbase_driver,
+        disc_driver_ctx => #{bucket => <<"onedata">>,
+            no_seq => not maps:get(sync_enabled, Ctx, false)}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -164,29 +188,4 @@ set_disc_driver(Ctx) ->
 set_remote_driver(Ctx = #{remote_driver := undefined}) ->
     Ctx;
 set_remote_driver(Ctx) ->
-    set_default([remote_driver], undefined, Ctx).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sets default context parameters.
-%% @end
-%%--------------------------------------------------------------------
--spec set_defaults(ctx(), [ctx_default()]) -> ctx().
-set_defaults(Ctx, Defaults) ->
-    lists:foldl(fun({Keys, Default}, Ctx2) ->
-        set_default(Keys, Default, Ctx2)
-    end, Ctx, Defaults).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sets default context parameter.
-%% @end
-%%--------------------------------------------------------------------
--spec set_default([atom()], term(), ctx()) -> ctx().
-set_default([Key], Default, Ctx) ->
-    maps:put(Key, maps:get(Key, Ctx, Default), Ctx);
-set_default([Key | Keys], Default, Ctx) ->
-    Ctx2 = set_default(Keys, Default, maps:get(Key, Ctx, #{})),
-    maps:put(Key, Ctx2, Ctx).
+    Ctx#{remote_driver => undefined}.
