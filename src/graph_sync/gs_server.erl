@@ -145,29 +145,30 @@ updated(EntityType, EntityId, Entity) ->
 -spec push_updated(gs_protocol:gri(), gs_protocol:entity(),
     gs_persistence:subscriber(), payload_cache()) -> payload_cache().
 push_updated(ReqGRI, Entity, {SessionId, {Client, AuthHint}}, PayloadCache) ->
-    {ok, #gs_session{
-        protocol_version = ProtoVer,
-        conn_ref = ConnRef,
-        translator = Translator
-    }} = gs_persistence:get_session(SessionId),
-    case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, ReqGRI, get, Entity) of
-        {true, ResGRI} ->
-            {Data, NewPayloadCache} = updated_payload(
-                ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache
-            ),
-            gs_ws_handler:push(ConnRef, #gs_push{
-                subtype = graph, message = #gs_push_graph{
-                    gri = ReqGRI, change_type = updated, data = Data
-                }}),
-            NewPayloadCache;
-        false ->
-            unsubscribe(SessionId, ReqGRI),
-            gs_ws_handler:push(ConnRef, #gs_push{
-                subtype = nosub, message = #gs_push_nosub{
-                    gri = ReqGRI, reason = forbidden
-                }
-            }),
-            PayloadCache
+    case gs_persistence:get_session(SessionId) of
+        {error, not_found} ->
+            % Possible when session cleanup is in progress
+            ok;
+        {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
+            case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, ReqGRI, get, Entity) of
+                {true, ResGRI} ->
+                    {Data, NewPayloadCache} = updated_payload(
+                        ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache
+                    ),
+                    gs_ws_handler:push(ConnRef, #gs_push{
+                        subtype = graph, message = #gs_push_graph{
+                            gri = ReqGRI, change_type = updated, data = Data
+                        }}),
+                    NewPayloadCache;
+                false ->
+                    unsubscribe(SessionId, ReqGRI),
+                    gs_ws_handler:push(ConnRef, #gs_push{
+                        subtype = nosub, message = #gs_push_nosub{
+                            gri = ReqGRI, reason = forbidden
+                        }
+                    }),
+                    PayloadCache
+            end
     end.
 
 
@@ -188,13 +189,16 @@ deleted(EntityType, EntityId) ->
             GRI = #gri{type = EntityType, id = EntityId, aspect = Aspect, scope = Scope},
             lists:foreach(
                 fun({SessionId, _}) ->
-                    {ok, #gs_session{
-                        conn_ref = ConnRef
-                    }} = gs_persistence:get_session(SessionId),
-                    gs_ws_handler:push(ConnRef, #gs_push{
-                        subtype = graph, message = #gs_push_graph{
-                            gri = GRI, change_type = deleted
-                        }})
+                    case gs_persistence:get_session(SessionId) of
+                        {error, not_found} ->
+                            % Possible when session cleanup is in progress
+                            ok;
+                        {ok, #gs_session{conn_ref = ConnRef}} ->
+                            gs_ws_handler:push(ConnRef, #gs_push{
+                                subtype = graph, message = #gs_push_graph{
+                                    gri = GRI, change_type = deleted
+                                }})
+                    end
                 end, Subscribers),
             gs_persistence:remove_all_subscribers(GRI)
     end, AllSubscribers),

@@ -151,7 +151,6 @@ handle_call(_Request, _From, State) ->
     Timeout :: non_neg_integer() | infinity.
 
 handle_cast({update_lb_advice, LBAdvice}, State) ->
-    ?debug("Dispatcher update of load_balancing advice: ~p", [LBAdvice]),
     % Update LB advice
     ets:insert(?WORKER_MAP_ETS, {?LB_ADVICE_KEY, LBAdvice}),
     {noreply, State#state{last_update = erlang:monotonic_time(milli_seconds)}};
