@@ -188,7 +188,7 @@ set_disc_driver(Ctx) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec set_remote_driver(ctx()) -> ctx().
-set_remote_driver(Ctx = #{remote_driver := undefined}) ->
+set_remote_driver(Ctx = #{remote_driver := _RD}) ->
     Ctx;
 set_remote_driver(Ctx) ->
     Ctx#{remote_driver => undefined}.
