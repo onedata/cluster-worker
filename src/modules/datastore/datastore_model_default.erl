@@ -156,13 +156,16 @@ set_memory_driver(Ctx = #{model := Model}) ->
 -spec set_memory_driver(datastore_model:key(), ctx()) -> ctx().
 set_memory_driver(_UniqueKey, Ctx = #{memory_driver := undefined}) ->
     Ctx;
-set_memory_driver(UniqueKey, Ctx = #{model := Model}) ->
+set_memory_driver(UniqueKey, Ctx = #{model := Model, memory_driver := MemDriver}) ->
     Name = atom_to_list(Model),
-    Ctx#{memory_driver => ets_driver,
+    Ctx#{memory_driver => MemDriver,
         % TODO - tutaj mozna od razu ustawic multiplier
         memory_driver_ctx => #{table => list_to_atom(
             datastore_multiplier:extend_name(UniqueKey, Name ++ "_table"))},
-        memory_driver_opts => []}.
+        memory_driver_opts => []};
+set_memory_driver(UniqueKey, Ctx) ->
+    set_memory_driver(UniqueKey, Ctx#{memory_driver => ets_driver}).
+
 
 %%--------------------------------------------------------------------
 %% @private
