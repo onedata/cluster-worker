@@ -167,7 +167,7 @@ get_cluster_status(Timeout) ->
     ]}
     ]}.
 get_cluster_status(Timeout, NodeManagerCheck) ->
-    case check_cm(Timeout) of
+    case check_cm() of
         error ->
             error;
         Nodes ->
@@ -269,8 +269,8 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 %% Contacts cluster manager for healthcheck and gathers information about cluster state.
 %% @end
 %%--------------------------------------------------------------------
--spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
-check_cm(Timeout) ->
+-spec check_cm() -> Nodes :: [node()] | error.
+check_cm() ->
     try node_manager:get_cluster_nodes() of
         {ok, Nodes} -> Nodes;
         {error, cluster_not_ready} -> error

@@ -70,7 +70,7 @@
   ?exometer_name(Module, none, Name)).
 
 -define(exometer_name(Module, Submodule, Name),
-  ?exometer_name(0, Module, none, Name)).
+  ?exometer_name(0, Module, Submodule, Name)).
 
 -define(exometer_name(Thread, Module, Submodule, Name),
   [thread, Thread, mod, Module, submod, Submodule, Name]).

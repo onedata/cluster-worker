@@ -622,7 +622,7 @@ links_performance_base(Config, Order, Reverse) ->
     TimeDiff4 = timer:now_diff(T7, T6),
     TimeDiff5 = timer:now_diff(T9, T8),
     TimeDiff6 = timer:now_diff(T11, T10),
-    ct:print("Results for order ~p (reversed ~p): ~p",
+    ct:pal("Results for order ~p (reversed ~p): ~p",
         [Order, Reverse, {AddTimeDiff, TimeDiff1, TimeDiff2, TimeDiff3,
             TimeDiff4, TimeDiff5, TimeDiff6}]).
 
