@@ -26,7 +26,7 @@
 
 -define(EXOMETER_MODULES,
   [couchbase_batch, couchbase_pool, node_manager,  datastore_worker, 
-       datastore_router, datastore_model, datastore_cache]).
+       datastore_router, datastore_cache]).
 
 -define(GRAPHITE_REPORTER_OPTS, [
   graphite_api_key,

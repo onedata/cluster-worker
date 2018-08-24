@@ -47,8 +47,12 @@
     get_links_trees_should_return_all_trees/1,
     fold_links_token_should_succeed_after_token_timeout/1,
     links_performance/1,
-    links_performance_base/1
+    links_performance_base/1,
+    create_get_performance/1
 ]).
+
+% for rpc
+-export([test_create_get/0]).
 
 all() ->
     ?ALL([
@@ -80,7 +84,8 @@ all() ->
         fold_links_token_should_succeed_after_token_timeout,
         links_performance
     ], [
-        links_performance
+        links_performance,
+        create_get_performance
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
@@ -94,6 +99,37 @@ all() ->
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
+
+create_get_performance(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    {ok, Times} = ?assertMatch({ok, _},
+        rpc:call(Worker, ?MODULE, test_create_get, [])),
+    ct:print("Times: ~p", [Times]),
+    ok.
+
+test_create_get() ->
+    Key = ?KEY,
+    % Use gs_subscription as example of existing model
+    % (model emulation affects results).
+    Doc = #document{key = Key, value = #gs_subscription{}},
+    Time0 = os:timestamp(),
+    ?assertEqual({error, not_found}, gs_subscription:get(Key)),
+    Time1 = os:timestamp(),
+    ?assertEqual({error, not_found}, gs_subscription:get(Key)),
+    Time2 = os:timestamp(),
+    ?assertMatch({ok, _}, gs_subscription:create(Doc)),
+    Time3 = os:timestamp(),
+    ?assertMatch({ok, _}, gs_subscription:get(Key)),
+    Time4 = os:timestamp(),
+    ?assertMatch({ok, _}, gs_subscription:get(Key)),
+    Time5 = os:timestamp(),
+
+    Diff1 = timer:now_diff(Time1, Time0),
+    Diff2 = timer:now_diff(Time2, Time1),
+    Diff3 = timer:now_diff(Time3, Time2),
+    Diff4 = timer:now_diff(Time4, Time3),
+    Diff5 = timer:now_diff(Time5, Time4),
+    {ok, {Diff1, Diff2, Diff3, Diff4, Diff5}}.
 
 create_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
