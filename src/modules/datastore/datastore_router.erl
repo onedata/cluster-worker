@@ -103,7 +103,7 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 select_node(#{routing := local}, _Key) ->
     node();
 select_node(_Ctx, Key) ->
-    consistent_hasing:get_node(Key).
+    consistent_hashing:get_node(Key).
 
 %%--------------------------------------------------------------------
 %% @private

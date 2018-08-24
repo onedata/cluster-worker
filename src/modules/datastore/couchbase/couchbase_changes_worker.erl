@@ -76,7 +76,9 @@ init([Bucket, Scope]) ->
     {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
     SeqKey = couchbase_changes:get_seq_key(Scope),
     {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
-    erlang:send_after(0, self(), update),
+    Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_update_interval, 1000),
+    erlang:send_after(Interval, self(), update),
     {ok, #state{
         bucket = Bucket,
         scope = Scope,
@@ -84,8 +86,7 @@ init([Bucket, Scope]) ->
         seq_safe = SeqSafe,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 100),
-        interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_update_interval, 1000),
+        interval = Interval,
         gc = GCPid
     }}.
 
@@ -163,8 +164,8 @@ handle_info(update, #state{
         {error, _Reason2} -> SeqSafe
     end,
 
-    ?warning("Too high seq_safe for scope ~p: seq_safe = ~p, seq = ~p,
-        new_seq_safe = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, SeqSafe3, Seq3]),
+    ?warning("Too high seq_safe for scope ~p: seq_safe = ~p, seq = ~p, "
+        "new_seq_safe = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, SeqSafe3, Seq3]),
 
     {noreply, fetch_changes(State#state{seq = Seq3, seq_safe = SeqSafe3})};
 handle_info(update, #state{} = State) ->
@@ -249,8 +250,9 @@ fetch_changes(#state{
             end,
             State2;
         Error ->
-            ?error("Cannot fetch changes, error: ~p, scope: ~p, start: ~p,
-            stop: ~p", [Error, Scope, SeqSafe2, Seq2]),
+            ?warning("Cannot fetch changes, error: ~p, scope: ~p, start: ~p, stop: ~p", [
+                Error, Scope, SeqSafe2, Seq2
+            ]),
 
             erlang:send_after(Interval, self(), update),
             State

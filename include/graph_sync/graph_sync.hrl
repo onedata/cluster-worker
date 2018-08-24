@@ -20,10 +20,6 @@
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
 
-% Cookie name for cookie based session.
--define(GRAPH_SYNC_SESSION_COOKIE_NAME, <<"session_id">>).
-
-
 % Graph Resource Identifier - a record identifying a certain resource in the
 % graph.
 -record(gri, {
