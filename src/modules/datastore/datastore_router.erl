@@ -27,12 +27,8 @@
     [save, update, create, create_or_update, get, delete, exists, add_links, 
         set_links, create_link, delete_links, fetch_link, foreach_link, 
         mark_links_deleted, get_links, fold_links, get_links_trees
-    ]). 
-
--define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
-        list_to_atom(atom_to_list(Param) ++ "_time"))).
+    ]).
 -define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(?MODULE, Param)).
--define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
 
 %%%===================================================================
 %%% API
@@ -45,15 +41,10 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
-        exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
-    Histograms = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), uniform, [{size, Size}]}
-    end, ?EXOMETER_COUNTERS),
     Counters = lists:map(fun(Name) ->
         {?EXOMETER_DATASTORE_NAME(Name), counter}
     end, ?EXOMETER_COUNTERS),
-    ?init_counters(Counters ++ Histograms).
+    ?init_counters(Counters).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -62,13 +53,10 @@ init_counters() ->
 %%--------------------------------------------------------------------
 -spec init_report() -> ok.
 init_report() ->
-    Histograms = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
-    end, ?EXOMETER_COUNTERS),
     Counters = lists:map(fun(Name) ->
         {?EXOMETER_DATASTORE_NAME(Name), [value]}
     end, ?EXOMETER_COUNTERS),
-    ?init_reports(Histograms ++ Counters).
+    ?init_reports(Counters).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,13 +79,13 @@ route(Ctx, Key, Function, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec process(module(), atom(), list()) -> term().
+process(datastore_doc, Function, Args) ->
+    ?update_datastore_counter(?EXOMETER_DATASTORE_NAME(Function)),
+    apply(datastore_doc, Function, Args);
 process(Module, Function, Args = [#{model := Model} | _]) ->
+    ?update_datastore_counter(?EXOMETER_DATASTORE_NAME(Function)),
     case datastore_throttling:throttle_model(Model) of
-        ok -> 
-            ?update_counter(?EXOMETER_DATASTORE_NAME(Function)),
-            {Time, Ans} = timer:tc(erlang, apply, [Module, Function, Args]),
-            ?update_counter(?EXOMETER_NAME(Function), Time),
-            Ans;
+        ok -> apply(Module, Function, Args);
         {error, Reason} -> {error, Reason}
     end.
 

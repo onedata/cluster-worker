@@ -27,10 +27,12 @@
 %% Extends the name with namespace extension calculated using key.
 %% @end
 %%--------------------------------------------------------------------
--spec extend_name(datastore:key() | pid(), atom() | ctx()) ->
+-spec extend_name(datastore:key() | pid(), atom() | list() | ctx()) ->
   atom() | ctx().
 extend_name(Key, Name) when is_atom(Name) ->
   list_to_atom(atom_to_list(Name) ++ get_num(Key));
+extend_name(Key, Name) when is_list(Name) ->
+  Name ++ get_num(Key);
 extend_name(Key, #{table := Table} = Ctx) ->
   NewName = list_to_atom(atom_to_list(Table) ++ get_num(Key)),
   override_context(table, NewName, Ctx);

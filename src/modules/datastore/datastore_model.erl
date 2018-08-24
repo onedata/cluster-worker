@@ -14,7 +14,6 @@
 
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/datastore_models.hrl").
--include("exometer_utils.hrl").
 -include("global_definitions.hrl").
 
 
@@ -27,7 +26,6 @@
 -export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
--export([init_counters/0, init_report/0]).
 %% for rpc
 -export([datastore_apply_all_subtrees/4]).
 
@@ -52,46 +50,6 @@
 -type one_or_many(Type) :: Type | [Type].
 
 -export_type([model/0, record/0, record_struct/0, record_version/0]).
-
--define(EXOMETER_HISTOGRAM_COUNTERS,
-    [save, update, create, create_or_update, get, delete, exists, add_links, 
-        set_links, create_link, delete_links, fetch_link, foreach_link, 
-        mark_links_deleted, get_links, fold_links, get_links_trees, delete_all
-    ]).
-
--define(EXOMETER_NAME(Param), ?exometer_name(?MODULE,
-  list_to_atom(atom_to_list(Param) ++ "_time"))).
--define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
-
-%%%===================================================================
-%%% API
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Initializes all counters.
-%% @end
-%%--------------------------------------------------------------------
--spec init_counters() -> ok.
-init_counters() ->
-    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
-        exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
-    Counters = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), uniform, [{size, Size}]}
-    end, ?EXOMETER_HISTOGRAM_COUNTERS),
-    ?init_counters(Counters).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Subscribe for reports for all parameters.
-%% @end
-%%--------------------------------------------------------------------
--spec init_report() -> ok.
-init_report() ->
-    Reports = lists:map(fun(Name) ->
-        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
-    end, ?EXOMETER_HISTOGRAM_COUNTERS),
-    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -385,15 +343,10 @@ datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply(ctx(), key(), fun(), atom(), list()) -> term().
-datastore_apply(Ctx0, Key, Fun, FunName, Args) ->
-    Before = os:timestamp(),
-    Ctx = datastore_model_default:set_defaults(Ctx0),
-    UniqueKey = get_unique_key(Ctx, Key),
-    Ctx2 = datastore_multiplier:extend_name(UniqueKey, Ctx),
-    Ans = erlang:apply(Fun, [Ctx2, UniqueKey | Args]),
-    After = os:timestamp(),
-    ?update_counter(?EXOMETER_NAME(FunName), timer:now_diff(After, Before)),
-    Ans.
+datastore_apply(Ctx0, Key, Fun, _FunName, Args) ->
+    UniqueKey = get_unique_key(Ctx0, Key),
+    Ctx = datastore_model_default:set_defaults(UniqueKey, Ctx0),
+    erlang:apply(Fun, [Ctx, UniqueKey | Args]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -404,13 +357,12 @@ datastore_apply(Ctx0, Key, Fun, FunName, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec datastore_apply_all(ctx(), key(), fun(), atom(), list()) -> term().
-datastore_apply_all(Ctx0, Key, Fun, FunName, Args) ->
-    Before = os:timestamp(),
+datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
     Ctx = datastore_model_default:set_defaults(Ctx0),
     UniqueKey = get_unique_key(Ctx, Key),
     Routing = maps:get(routing, Ctx, global),
 
-    Ans = case Routing of
+    case Routing of
         global ->
             lists:foldl(fun
                 (Node, ok) ->
@@ -424,11 +376,7 @@ datastore_apply_all(Ctx0, Key, Fun, FunName, Args) ->
             end, ok, consistent_hashing:get_all_nodes());
         _ ->
             datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args)
-    end,
-
-    After = os:timestamp(),
-    ?update_counter(?EXOMETER_NAME(FunName), timer:now_diff(After, Before)),
-    Ans.
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
