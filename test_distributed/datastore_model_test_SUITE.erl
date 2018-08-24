@@ -109,20 +109,19 @@ create_get_performance(Config) ->
 
 test_create_get() ->
     Key = ?KEY,
-    % Use synced_cert as example of existing model
+    % Use gs_subscription as example of existing model
     % (model emulation affects results).
-    Doc = #document{key = Key, value = #synced_cert{
-        cert_file_content = <<"123">>, key_file_content = <<"xyz">>}},
+    Doc = #document{key = Key, value = #gs_subscription{}},
     Time0 = os:timestamp(),
-    ?assertEqual({error, not_found}, synced_cert:get(Key)),
+    ?assertEqual({error, not_found}, gs_subscription:get(Key)),
     Time1 = os:timestamp(),
-    ?assertEqual({error, not_found}, synced_cert:get(Key)),
+    ?assertEqual({error, not_found}, gs_subscription:get(Key)),
     Time2 = os:timestamp(),
-    ?assertMatch({ok, _}, synced_cert:create(Doc)),
+    ?assertMatch({ok, _}, gs_subscription:create(Doc)),
     Time3 = os:timestamp(),
-    ?assertMatch({ok, _}, synced_cert:get(Key)),
+    ?assertMatch({ok, _}, gs_subscription:get(Key)),
     Time4 = os:timestamp(),
-    ?assertMatch({ok, _}, synced_cert:get(Key)),
+    ?assertMatch({ok, _}, gs_subscription:get(Key)),
     Time5 = os:timestamp(),
 
     Diff1 = timer:now_diff(Time1, Time0),

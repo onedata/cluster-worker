@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/1, delete/1, update/3, list/0]).
+-export([get/1, delete/1, update/3, create/1, list/0]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
@@ -65,6 +65,15 @@ delete(Key) ->
 -spec update(key(), diff(), record()) -> {ok, doc()} | {error, term()}.
 update(Key, Diff, Default) ->
     datastore_model:update(?CTX, Key, Diff, Default).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates Graph Sync subscription record.
+%% @end
+%%--------------------------------------------------------------------
+-spec create(doc()) -> {ok, doc()} | {error, term()}.
+create(Doc) ->
+    datastore_model:create(?CTX, Doc).
 
 %%--------------------------------------------------------------------
 %% @doc

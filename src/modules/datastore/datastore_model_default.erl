@@ -25,8 +25,9 @@
 -type ctx() :: datastore:ctx().
 
 -define(DEFAULT_BUCKET, <<"onedata">>).
--define(EXTEND_TABLE_NAME(UniqueKey, Name), list_to_atom(
-    datastore_multiplier:extend_name(UniqueKey, Name ++ "_table")))
+-define(EXTEND_TABLE_NAME(Model), list_to_atom(atom_to_list(Model) ++ "_table")).
+-define(EXTEND_TABLE_NAME(UniqueKey, Model), list_to_atom(
+    datastore_multiplier:extend_name(UniqueKey, atom_to_list(Model) ++ "_table"))).
 
 %%%===================================================================
 %%% API
@@ -145,9 +146,8 @@ model_apply(Model, {Function, Args}, DefaultFun) ->
 set_memory_driver(Ctx = #{memory_driver := undefined}) ->
     Ctx;
 set_memory_driver(Ctx = #{model := Model}) ->
-    Name = atom_to_list(Model),
     Ctx#{memory_driver => ets_driver,
-        memory_driver_ctx => #{table => list_to_atom(Name ++ "_table")},
+        memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(Model)},
         memory_driver_opts => []}.
 
 %%--------------------------------------------------------------------
@@ -160,9 +160,8 @@ set_memory_driver(Ctx = #{model := Model}) ->
 set_memory_driver(_UniqueKey, Ctx = #{memory_driver := undefined}) ->
     Ctx;
 set_memory_driver(UniqueKey, Ctx = #{model := Model, memory_driver := MemDriver}) ->
-    Name = atom_to_list(Model),
     Ctx#{memory_driver => MemDriver,
-        memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(UniqueKey, Name)},
+        memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(UniqueKey, Model)},
         memory_driver_opts => []};
 set_memory_driver(UniqueKey, Ctx) ->
     set_memory_driver(UniqueKey, Ctx#{memory_driver => ets_driver}).
