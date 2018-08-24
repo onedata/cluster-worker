@@ -24,6 +24,10 @@
 -type doc() :: datastore:doc().
 -type ctx() :: datastore:ctx().
 
+-define(DEFAULT_BUCKET, <<"onedata">>).
+-define(EXTEND_TABLE_NAME(UniqueKey, Name), list_to_atom(
+    datastore_multiplier:extend_name(UniqueKey, Name ++ "_table")))
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -143,7 +147,6 @@ set_memory_driver(Ctx = #{memory_driver := undefined}) ->
 set_memory_driver(Ctx = #{model := Model}) ->
     Name = atom_to_list(Model),
     Ctx#{memory_driver => ets_driver,
-        % TODO - tutaj mozna od razu ustawic multiplier
         memory_driver_ctx => #{table => list_to_atom(Name ++ "_table")},
         memory_driver_opts => []}.
 
@@ -159,9 +162,7 @@ set_memory_driver(_UniqueKey, Ctx = #{memory_driver := undefined}) ->
 set_memory_driver(UniqueKey, Ctx = #{model := Model, memory_driver := MemDriver}) ->
     Name = atom_to_list(Model),
     Ctx#{memory_driver => MemDriver,
-        % TODO - tutaj mozna od razu ustawic multiplier
-        memory_driver_ctx => #{table => list_to_atom(
-            datastore_multiplier:extend_name(UniqueKey, Name ++ "_table"))},
+        memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(UniqueKey, Name)},
         memory_driver_opts => []};
 set_memory_driver(UniqueKey, Ctx) ->
     set_memory_driver(UniqueKey, Ctx#{memory_driver => ets_driver}).
@@ -177,9 +178,13 @@ set_memory_driver(UniqueKey, Ctx) ->
 set_disc_driver(Ctx = #{disc_driver := undefined}) ->
     Ctx;
 set_disc_driver(Ctx) ->
-    Ctx#{disc_driver => couchbase_driver,
-        disc_driver_ctx => #{bucket => <<"onedata">>,
-            no_seq => not maps:get(sync_enabled, Ctx, false)}}.
+    Ctx#{
+        disc_driver => couchbase_driver,
+        disc_driver_ctx => #{
+            bucket => ?DEFAULT_BUCKET,
+            no_seq => not maps:get(sync_enabled, Ctx, false)
+        }
+    }.
 
 %%--------------------------------------------------------------------
 %% @private

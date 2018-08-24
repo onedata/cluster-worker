@@ -109,6 +109,8 @@ create_get_performance(Config) ->
 
 test_create_get() ->
     Key = ?KEY,
+    % Use synced_cert as example of existing model
+    % (model emulation affects results).
     Doc = #document{key = Key, value = #synced_cert{
         cert_file_content = <<"123">>, key_file_content = <<"xyz">>}},
     Time0 = os:timestamp(),

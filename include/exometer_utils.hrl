@@ -17,6 +17,8 @@
 %%%===================================================================
 
 %-define(skip_exometer, 1).
+% Skip (replace with ok) exometer counters that are updated during datastore calls
+% Counters used by datastore backend (async saves to couch) are not skipped
 -define(skip_datastore_foreground, 1).
 
 -ifdef(skip_exometer).
