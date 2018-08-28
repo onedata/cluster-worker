@@ -163,10 +163,13 @@ handle_info(update, #state{
         {error, _Reason2} -> SeqSafe
     end,
 
-    ?warning("Too high seq_safe for scope ~p: seq_safe = ~p, seq = ~p,
-        new_seq_safe = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, SeqSafe3, Seq3]),
+    Seq4 = max(Seq3, SeqSafe3),
 
-    {noreply, fetch_changes(State#state{seq = Seq3, seq_safe = SeqSafe3})};
+    ?warning("Wrong seq and seq_safe for scope ~p: seq_safe = ~p, seq = ~p,
+        new_seq_safe = ~p, seq_from_db = ~p, new_seq = ~p",
+        [Scope, SeqSafe, Seq, SeqSafe3, Seq3, Seq4]),
+
+    {noreply, fetch_changes(State#state{seq = Seq4, seq_safe = SeqSafe3})};
 handle_info(update, #state{} = State) ->
     {noreply, fetch_changes(State)};
 handle_info(Info, #state{} = State) ->
