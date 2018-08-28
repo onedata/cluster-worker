@@ -70,17 +70,31 @@ start_link(Bucket, Scope) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Bucket, Scope]) ->
-    {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
     SeqKey = couchbase_changes:get_seq_key(Scope),
     {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     erlang:send_after(0, self(), update),
+
+    Seq3 = case SeqSafe > Seq of
+        true ->
+            Seq2 = max(Seq, SeqSafe),
+            {ok, _, _} = couchbase_driver:update_counter(Ctx, SeqKey, Seq2, Seq2 - Seq),
+
+            ?warning("Wrong seq and seq_safe for scope ~p: seq_safe = ~p, "
+            "seq = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, Seq2]),
+            Seq2;
+        _ ->
+            Seq
+    end,
+
+    {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
+
     {ok, #state{
         bucket = Bucket,
         scope = Scope,
-        seq = Seq,
+        seq = Seq3,
         seq_safe = SeqSafe,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 100),
@@ -144,32 +158,6 @@ handle_info(update, #state{
         {error, _Reason} -> Seq
     end,
     {noreply, fetch_changes(State#state{seq = Seq3})};
-handle_info(update, #state{
-    seq_safe = SeqSafe,
-    seq = Seq,
-    bucket = Bucket,
-    scope = Scope
-} = State) when SeqSafe > Seq->
-    Ctx = #{bucket => Bucket},
-    SeqKey = couchbase_changes:get_seq_key(Scope),
-    Seq3 = case couchbase_driver:get_counter(Ctx, SeqKey) of
-        {ok, _, Seq2} -> Seq2;
-        {error, _Reason} -> Seq
-    end,
-
-    SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
-    SeqSafe3 = case couchbase_driver:get_counter(Ctx, SeqSafeKey) of
-        {ok, _, SeqSafe2} -> SeqSafe2;
-        {error, _Reason2} -> SeqSafe
-    end,
-
-    Seq4 = max(Seq3, SeqSafe3),
-
-    ?warning("Wrong seq and seq_safe for scope ~p: seq_safe = ~p, seq = ~p,
-        new_seq_safe = ~p, seq_from_db = ~p, new_seq = ~p",
-        [Scope, SeqSafe, Seq, SeqSafe3, Seq3, Seq4]),
-
-    {noreply, fetch_changes(State#state{seq = Seq4, seq_safe = SeqSafe3})};
 handle_info(update, #state{} = State) ->
     {noreply, fetch_changes(State)};
 handle_info(Info, #state{} = State) ->
