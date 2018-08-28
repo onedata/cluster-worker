@@ -81,7 +81,7 @@ init([Bucket, Scope]) ->
     Seq3 = case SeqSafe > Seq of
         true ->
             Seq2 = max(Seq, SeqSafe),
-            {ok, _, _} = couchbase_driver:update_counter(Ctx, SeqKey, Seq2, Seq2 - Seq),
+            {ok, _, _} = couchbase_driver:update_counter(Ctx, SeqKey, Seq2 - Seq, Seq2),
 
             ?warning("Wrong seq and seq_safe for scope ~p: seq_safe = ~p, "
             "seq = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, Seq2]),
