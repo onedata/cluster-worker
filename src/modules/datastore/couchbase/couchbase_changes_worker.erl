@@ -70,6 +70,7 @@ start_link(Bucket, Scope) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Bucket, Scope]) ->
+    {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
     {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, SeqSafeKey),
@@ -88,8 +89,6 @@ init([Bucket, Scope]) ->
         _ ->
             Seq
     end,
-
-    {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
 
     {ok, #state{
         bucket = Bucket,
