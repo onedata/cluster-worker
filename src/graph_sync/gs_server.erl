@@ -313,12 +313,12 @@ handle_request(Session, #gs_req_graph{} = Req) ->
                 data = translate_value(Translator, ProtoVer, RequestedGRI, Client, Value)
             }};
         {create, {ok, resource, {ResultGRI, ResData}}} ->
-            {ResultGRI, AuthHint, #gs_resp_graph{
+            {coalesce_gri(RequestedGRI, ResultGRI), AuthHint, #gs_resp_graph{
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, ResData)
             }};
         {create, {ok, resource, {ResultGRI, NAuthHint, ResData}}} ->
-            {ResultGRI, NAuthHint, #gs_resp_graph{
+            {coalesce_gri(RequestedGRI, ResultGRI), NAuthHint, #gs_resp_graph{
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, ResData)
             }};
@@ -329,7 +329,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, Client, ResData)
             }};
         {get, {ok, ResultGRI, ResData}} ->
-            {ResultGRI, AuthHint, #gs_resp_graph{
+            {RequestedGRI, AuthHint, #gs_resp_graph{
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, ResData)
             }};
@@ -402,7 +402,7 @@ translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, Data) 
     translator(), gs_protocol:protocol_version(), gs_protocol:client(),
     gs_protocol:entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
 updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache) ->
-    case maps:find(ResGRI, PayloadCache) of
+    case maps:find({Translator, ResGRI}, PayloadCache) of
         {ok, Fun} when is_function(Fun, 1) ->
             % Function-type translator, must be evaluated per client
             {insert_gri(ReqGRI, ResGRI, Fun(Client)), PayloadCache};
@@ -419,23 +419,30 @@ updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCac
                 DataJSONMap -> DataJSONMap
             end,
             % Cache the translator result for faster consecutive calls
-            {insert_gri(ReqGRI, ResGRI, Result), PayloadCache#{ResGRI => TranslateResult}}
+            {insert_gri(ReqGRI, ResGRI, Result), PayloadCache#{{Translator, ResGRI} => TranslateResult}}
     end.
+
+
+%% @private
+-spec insert_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+    gs_protocol:data()) -> gs_protocol:data().
+insert_gri(RequestedGRI, ResultGRI, Data) ->
+    Data#{<<"gri">> => gs_protocol:gri_to_string(coalesce_gri(RequestedGRI, ResultGRI))}.
 
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Inserts the "gri" field in the result. Checks if auto scope was
-%% requested - in this case overrides the scope in result to auto.
+%% Checks if auto scope was requested - in this case overrides the scope in
+%% result GRI to auto.
 %% @end
 %%--------------------------------------------------------------------
--spec insert_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
-    gs_protocol:data()) -> gs_protocol:data().
-insert_gri(#gri{scope = auto}, ResultGRI, Data) ->
-    Data#{<<"gri">> => gs_protocol:gri_to_string(ResultGRI#gri{scope = auto})};
-insert_gri(_RequestedGRI, ResultGRI, Data) ->
-    Data#{<<"gri">> => gs_protocol:gri_to_string(ResultGRI)}.
+-spec coalesce_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri()) ->
+    gs_protocol:gri().
+coalesce_gri(#gri{scope = auto}, ResultGRI) ->
+    ResultGRI#gri{scope = auto};
+coalesce_gri(_RequestedGRI, ResultGRI) ->
+    ResultGRI.
 
 
 %% @private
