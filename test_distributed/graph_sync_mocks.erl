@@ -147,13 +147,13 @@ is_authorized(?USER_AUTH(UserId), _, GRI = #gri{type = od_handle_service, id = ?
         application:get_env(?CLUSTER_WORKER_APP_NAME, mock_hservice_scope, #{}),
         none
     ),
-    case {UserId, GRI} of
-        {UserId, #gri{scope = auto}} ->
+    case GRI of
+        #gri{scope = auto} ->
             case MaxScope of
                 none -> false;
                 Scope -> {true, GRI#gri{scope = Scope}}
             end;
-        {UserId, #gri{scope = RequestedScope}} ->
+        #gri{scope = RequestedScope} ->
             case scope_to_int(RequestedScope) =< scope_to_int(MaxScope) of
                 true -> {true, GRI};
                 false -> false
@@ -283,8 +283,10 @@ handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDL
     case is_authorized(Client, undefined, GRI, get, #{}) of
         false ->
             ?ERROR_FORBIDDEN;
-        {true, #gri{scope = Scope}} ->
-            {ok, ?LIMIT_HANDLE_SERVICE_DATA(Scope, Data)}
+        {true, GRI} ->
+            {ok, ?LIMIT_HANDLE_SERVICE_DATA(GRI#gri.scope, Data)};
+        {true, ResultGRI = #gri{scope = Scope}} ->
+            {ok, ResultGRI, ?LIMIT_HANDLE_SERVICE_DATA(Scope, Data)}
     end;
 
 handle_graph_request(_, _, _, _, _, _) ->

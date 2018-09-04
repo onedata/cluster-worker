@@ -842,6 +842,23 @@ auto_scope_test(Config) ->
         gs_client:graph_request(Client2, HsGRI#gri{scope = auto}, create, #{}, true)
     ),
 
+    HServiceData4 = ?HANDLE_SERVICE_DATA(<<"pub4">>, <<"sha4">>, <<"pro4">>, <<"pri4">>),
+    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData4]),
+
+    ?assertEqual(
+        true,
+        verify_message_present(GathererPid, client2, fun(Msg) ->
+            Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData4)#{<<"gri">> => HsGRIAutoStr},
+            case Msg of
+                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                    true;
+                _ ->
+                    false
+            end
+        end),
+        50
+    ),
+
     ok.
 
 
