@@ -43,7 +43,7 @@
 -spec add(link_name(), link_target(), tree()) ->
     {{ok, link()} | {error, term()}, tree()}.
 add(LinkName, LinkTarget, Tree) ->
-    LinkRev = datastore_utils:gen_hex(?REV_LENGTH),
+    LinkRev = str_utils:rand_hex(?REV_LENGTH),
     case bp_tree:insert(LinkName, {LinkTarget, LinkRev}, Tree) of
         {ok, Tree2} ->
             {{ok, #link{

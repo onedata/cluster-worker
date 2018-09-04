@@ -52,7 +52,7 @@
 -define(RND_KEY, datastore_utils:gen_key()).
 -define(REV, ?REV(1)).
 -define(REV(N), <<(integer_to_binary(N))/binary, "-",
-    (datastore_utils:gen_hex(16))/binary>>).
+    (str_utils:rand_hex(16))/binary>>).
 -define(MUTATOR, ?MUTATOR(1)).
 -define(MUTATOR(N), ?TERM("mutator", N)).
 -define(SCOPE, ?SCOPE(?CASE)).

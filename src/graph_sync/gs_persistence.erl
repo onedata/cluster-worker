@@ -18,19 +18,22 @@
 -include_lib("ctool/include/logging.hrl").
 
 
--type subscription() :: #gri{} | binary().
+% List of subscriptions of given client
+-type subscriptions() :: ordsets:ordset(gs_protocol:gri()).
+% Identifier of a subscriber client
 -type subscriber() :: {gs_protocol:session_id(), {gs_protocol:client(), gs_protocol:auth_hint()}}.
+% A map of subscribers per {Aspect, Scope} for an entity
+-type subscribers() :: maps:map({gs_protocol:aspect(), gs_protocol:scope()}, ordsets:ordset(subscriber())).
 
--export_type([subscription/0, subscriber/0]).
+-export_type([subscriptions/0, subscriber/0, subscribers/0]).
 
 
 %% API
 -export([create_session/1, get_session/1, delete_session/1]).
 -export([add_subscriber/4, add_subscription/2]).
--export([get_subscribers/1, get_subscriptions/1]).
+-export([get_subscribers/2, get_subscriptions/1]).
 -export([remove_subscriber/2, remove_subscription/2]).
 -export([remove_all_subscribers/1, remove_all_subscriptions/1]).
--export([gri_to_hash/1]).
 
 %%%===================================================================
 %%% API
@@ -84,13 +87,15 @@ delete_session(SessionId) ->
 %% client + auth_hint that were used to access the resource.
 %% @end
 %%--------------------------------------------------------------------
--spec add_subscriber(subscription(), gs_protocol:session_id(),
+-spec add_subscriber(gs_protocol:gri(), gs_protocol:session_id(),
     gs_protocol:client(), gs_protocol:auth_hint()) -> ok.
-add_subscriber(#gri{} = GRI, SessionId, Client, AuthHint) ->
-    add_subscriber(gri_to_hash(GRI), SessionId, Client, AuthHint);
-add_subscriber(HashedGRI, SessionId, Client, AuthHint) ->
-    modify_subscribers(HashedGRI, fun(Subscribers) ->
-        ordsets:add_element({SessionId, {Client, AuthHint}}, Subscribers)
+add_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId, Client, AuthHint) ->
+    modify_subscribers(Type, Id, fun(AllSubscribers) ->
+        SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
+        NewSubscribers = ordsets:add_element({SessionId, {Client, AuthHint}}, SubscribersForAspect),
+        AllSubscribers#{
+            {Aspect, Scope} => NewSubscribers
+        }
     end).
 
 
@@ -100,12 +105,10 @@ add_subscriber(HashedGRI, SessionId, Client, AuthHint) ->
 %% of resource about which he would like to receive updates.
 %% @end
 %%--------------------------------------------------------------------
--spec add_subscription(gs_protocol:session_id(), subscription()) -> ok.
-add_subscription(SessionId, #gri{} = GRI) ->
-    add_subscription(SessionId, gri_to_hash(GRI));
-add_subscription(SessionId, HashedGRI) ->
+-spec add_subscription(gs_protocol:session_id(), gs_protocol:gri()) -> ok.
+add_subscription(SessionId, GRI) ->
     modify_subscriptions(SessionId, fun(Subscriptions) ->
-        ordsets:add_element(HashedGRI, Subscriptions)
+        ordsets:add_element(GRI, Subscriptions)
     end).
 
 
@@ -114,13 +117,12 @@ add_subscription(SessionId, HashedGRI) ->
 %% Retrieves the list of subscribers for given resource.
 %% @end
 %%--------------------------------------------------------------------
--spec get_subscribers(subscription()) -> {ok, [subscriber()]}.
-get_subscribers(#gri{} = GRI) ->
-    get_subscribers(gri_to_hash(GRI));
-get_subscribers(HashedGRI) ->
-    case gs_subscription:get(HashedGRI) of
+-spec get_subscribers(gs_protocol:entity_type(), gs_protocol:entity_id()) ->
+    {ok, subscribers()}.
+get_subscribers(Type, Id) ->
+    case gs_subscription:get(Type, Id) of
         {error, not_found} ->
-            {ok, []};
+            {ok, #{}};
         {ok, #document{value = #gs_subscription{subscribers = Subscribers}}} ->
             {ok, Subscribers}
     end.
@@ -131,11 +133,11 @@ get_subscribers(HashedGRI) ->
 %% Retrieves the list of subscriptions for given client.
 %% @end
 %%--------------------------------------------------------------------
--spec get_subscriptions(gs_protocol:session_id()) -> {ok, [subscription()]}.
+-spec get_subscriptions(gs_protocol:session_id()) -> {ok, subscriptions()}.
 get_subscriptions(SessionId) ->
     case gs_session:get(SessionId) of
         {error, not_found} ->
-            {ok, []};
+            {ok, ordsets:new()};
         {ok, #document{value = #gs_session{subscriptions = Subscriptions}}} ->
             {ok, Subscriptions}
     end.
@@ -147,14 +149,22 @@ get_subscriptions(SessionId) ->
 %% subscribers of given resource.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_subscriber(subscription(), gs_protocol:session_id()) -> ok.
-remove_subscriber(#gri{} = GRI, SessionId) ->
-    remove_subscriber(gri_to_hash(GRI), SessionId);
-remove_subscriber(HashedGRI, SessionId) ->
-    modify_subscribers(HashedGRI, fun(Subscribers) ->
-        % Proplists can be safely used here to delete all tuples {SessionId, _}
-        % without breaking ordsets list order.
-        proplists:delete(SessionId, Subscribers)
+-spec remove_subscriber(gs_protocol:gri(), gs_protocol:session_id()) -> ok.
+remove_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId) ->
+    modify_subscribers(Type, Id, fun(AllSubscribers) ->
+        SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
+        NewSubscribers = ordsets:filter(fun({SessId, _}) ->
+            case SessId of
+                SessionId -> false;
+                _ -> true
+            end
+        end, SubscribersForAspect),
+        case ordsets:size(NewSubscribers) of
+            0 ->
+                maps:remove({Aspect, Scope}, AllSubscribers);
+            _ ->
+                AllSubscribers#{{Aspect, Scope} => NewSubscribers}
+        end
     end).
 
 
@@ -163,12 +173,10 @@ remove_subscriber(HashedGRI, SessionId) ->
 %% Removes a subscription from the list of resources given client is subscribed for.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_subscription(gs_protocol:session_id(), subscription()) -> ok.
-remove_subscription(SessionId, #gri{} = GRI) ->
-    remove_subscription(SessionId, gri_to_hash(GRI));
-remove_subscription(SessionId, HashedGRI) ->
+-spec remove_subscription(gs_protocol:session_id(), gs_protocol:gri()) -> ok.
+remove_subscription(SessionId, GRI) ->
     modify_subscriptions(SessionId, fun(Subscriptions) ->
-        ordsets:del_element(HashedGRI, Subscriptions)
+        ordsets:del_element(GRI, Subscriptions)
     end).
 
 
@@ -177,16 +185,17 @@ remove_subscription(SessionId, HashedGRI) ->
 %% Removes all subscribers of given resource.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_all_subscribers(subscription()) -> ok.
-remove_all_subscribers(#gri{} = GRI) ->
-    remove_all_subscribers(gri_to_hash(GRI));
-remove_all_subscribers(HashedGRI) ->
-    {ok, Subscribers} = get_subscribers(HashedGRI),
+-spec remove_all_subscribers(gs_protocol:gri()) -> ok.
+remove_all_subscribers(GRI = #gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
+    {ok, AllSubscribers} = get_subscribers(Type, Id),
+    SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
     lists:foreach(
         fun({SessionId, {_Client, _AuthHint}}) ->
-            remove_subscription(SessionId, HashedGRI)
-        end, Subscribers),
-    gs_subscription:delete(HashedGRI).
+            remove_subscription(SessionId, GRI)
+        end, SubscribersForAspect),
+    modify_subscribers(Type, Id, fun(Subscribers) ->
+        maps:remove({Aspect, Scope}, Subscribers)
+    end).
 
 
 %%--------------------------------------------------------------------
@@ -198,41 +207,32 @@ remove_all_subscribers(HashedGRI) ->
 remove_all_subscriptions(SessionId) ->
     {ok, Subscriptions} = get_subscriptions(SessionId),
     lists:foreach(
-        fun(HashedGRI) ->
-            remove_subscriber(HashedGRI, SessionId)
+        fun(GRI) ->
+            remove_subscriber(GRI, SessionId)
         end, Subscriptions),
     modify_subscriptions(SessionId, fun(_Subscriptions) ->
         ordsets:new()
     end).
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Generates an md5 checksum for given GRI to be used as resource id in database.
-%% @end
-%%--------------------------------------------------------------------
--spec gri_to_hash(gs_protocol:gri()) -> binary().
-gri_to_hash(GRI) ->
-    datastore_utils:gen_key(<<"">>, term_to_binary(GRI)).
-
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec modify_subscribers(HashedGRI :: binary(), gs_subscription:diff()) -> ok.
-modify_subscribers(HashedGRI, UpdateFun) ->
-    Default = #gs_subscription{subscribers = UpdateFun([])},
+-spec modify_subscribers(gs_protocol:entity_type(), gs_protocol:entity_id(),
+    gs_subscription:diff()) -> ok.
+modify_subscribers(Type, Id, UpdateFun) ->
+    Default = #gs_subscription{subscribers = UpdateFun(#{})},
     Diff = fun(GSSub = #gs_subscription{subscribers = Subscribers}) ->
         {ok, GSSub#gs_subscription{subscribers = UpdateFun(Subscribers)}}
     end,
-    {ok, _} = gs_subscription:update(HashedGRI, Diff, Default),
+    {ok, _} = gs_subscription:update(Type, Id, Diff, Default),
     ok.
 
 
 -spec modify_subscriptions(gs_protocol:session_id(), gs_session:diff()) -> ok.
 modify_subscriptions(SessionId, UpdateFun) ->
-    Default = #gs_session{subscriptions = UpdateFun([])},
+    Default = #gs_session{subscriptions = UpdateFun(ordsets:new())},
     Diff = fun(Session = #gs_session{subscriptions = Subscriptions}) ->
         {ok, Session#gs_session{subscriptions = UpdateFun(Subscriptions)}}
     end,
