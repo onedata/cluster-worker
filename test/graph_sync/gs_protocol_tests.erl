@@ -560,6 +560,14 @@ encode_decode_message_test() ->
                 gri = #gri{type = od_user, id = <<"id32">>, aspect = whatever},
                 reason = forbidden
             }
+        },
+        #gs_push{
+            subtype = nosub,
+            message = #gs_push_nosub{
+                gri = #gri{type = od_user, id = <<"id33">>, aspect = whatever},
+                auth_hint = ?THROUGH_USER(<<"otherid33">>),
+                reason = forbidden
+            }
         }
     ],
 

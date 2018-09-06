@@ -79,6 +79,7 @@
 
 -record(gs_push_nosub, {
     gri :: gs_protocol:gri(),
+    auth_hint :: gs_protocol:auth_hint(),
     reason = forbidden :: gs_protocol:nosub_reason()
 }).
 

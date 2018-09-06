@@ -164,7 +164,7 @@ push_updated(ReqGRI, Entity, {SessionId, {Client, AuthHint}}, PayloadCache) ->
                     unsubscribe(SessionId, ReqGRI),
                     gs_ws_handler:push(ConnRef, #gs_push{
                         subtype = nosub, message = #gs_push_nosub{
-                            gri = ReqGRI, reason = forbidden
+                            gri = ReqGRI, auth_hint = AuthHint, reason = forbidden
                         }
                     }),
                     PayloadCache

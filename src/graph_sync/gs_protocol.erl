@@ -564,10 +564,11 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
 -spec encode_push_nosub(protocol_version(), nosub_push()) -> json_map().
 encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     #gs_push_nosub{
-        gri = GRI, reason = Reason
+        gri = GRI, auth_hint = AuthHint, reason = Reason
     } = Message,
     #{
         <<"gri">> => gri_to_string(GRI),
+        <<"authHint">> => auth_hint_to_json(AuthHint),
         <<"reason">> => nosub_reason_to_json(Reason)
     }.
 
@@ -772,8 +773,10 @@ decode_push_graph(_, PayloadJSON) ->
 decode_push_nosub(_, PayloadJSON) ->
     GRI = maps:get(<<"gri">>, PayloadJSON),
     Reason = maps:get(<<"reason">>, PayloadJSON),
+    AuthHint = maps:get(<<"authHint">>, PayloadJSON, null),
     #gs_push_nosub{
         gri = string_to_gri(GRI),
+        auth_hint = json_to_auth_hint(AuthHint),
         reason = json_to_nosub_reason(Reason)
     }.
 
