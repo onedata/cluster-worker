@@ -464,6 +464,11 @@ unsubscribe(SessionId, GRI) ->
 
 %% @private
 -spec is_subscribable(gs_protocol:operation(), gs_protocol:gri()) -> boolean().
+is_subscribable(Operation, GRI = #gri{scope = auto}) ->
+    is_subscribable(Operation, GRI#gri{scope = private}) orelse
+        is_subscribable(Operation, GRI#gri{scope = protected}) orelse
+        is_subscribable(Operation, GRI#gri{scope = shared}) orelse
+        is_subscribable(Operation, GRI#gri{scope = public});
 is_subscribable(create, GRI = #gri{id = undefined}) ->
     % Newly created resources can be subscribed for depending on logic_plugin
     ?GS_LOGIC_PLUGIN:is_subscribable(GRI);
