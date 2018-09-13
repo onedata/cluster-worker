@@ -427,6 +427,7 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
 batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+    % TODO - sort links !!!
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
