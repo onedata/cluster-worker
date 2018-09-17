@@ -428,14 +428,14 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
     end, {[], Batch}, LinkNames);
 batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     % TODO - sort links !!!
-    lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
-        {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
-            links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
-                datastore_links:delete(LinkName, LinkRev, Tree)
-            end)
-        end),
-        {[Response | Responses], Batch4}
-    end, {[], Batch}, Links);
+    links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
+        lists:foldl(fun({LinkName, LinkRev}, {Responses, Tree2}) ->
+            {Response, Tree4} = batch_link_apply(Tree2, fun(Tree3) ->
+                    datastore_links:delete(LinkName, LinkRev, Tree3)
+            end),
+            {[Response | Responses], Tree4}
+        end, {[], Tree}, Links)
+    end);
 batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
@@ -504,6 +504,24 @@ batch_apply(Batch, Fun) ->
     Batch2 = datastore_doc_batch:init_request(Ref, Batch),
     {Response, Batch3} = Fun(Batch2),
     {{Ref, Response}, Batch3}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies request on a batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec batch_link_apply(batch(), fun((batch()) -> {term(), batch()})) ->
+    {{reference(), term()}, batch()}.
+batch_link_apply(Tree, Fun) ->
+    Ref = make_ref(),
+    Tree2 = bp_tree:update_store_state(fun(State) ->
+        links_tree:update_batch(fun(Batch) ->
+            datastore_doc_batch:init_request(Ref, Batch)
+        end, State)
+    end, Tree),
+    {Response, Tree3} = Fun(Tree2),
+    {{Ref, Response}, Tree3}.
 
 %%--------------------------------------------------------------------
 %% @private
