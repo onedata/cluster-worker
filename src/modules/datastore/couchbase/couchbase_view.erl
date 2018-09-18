@@ -221,7 +221,7 @@ test_views(Connection, DesignName, Views, Repeats, SleepTime) ->
     timer:sleep(SleepTime),
     Views2 = lists:foldl(fun({Name, Spatial} = View, Acc) ->
         case query(Connection, DesignName, Name, [
-            {stale, false}, {key, <<"key">>}, {spatial, Spatial}]) of
+            {stale, update_after}, {key, <<"key">>}, {spatial, Spatial}]) of
             {error, {_, <<"view_undefined">>}} -> [View | Acc];
             _ -> Acc
         end
