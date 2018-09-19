@@ -404,14 +404,14 @@ batch_request({delete, [Ctx, Key, Pred]}, Batch, _LinkTokens) ->
         datastore_doc:delete(set_mutator_pid(Ctx), Key, Pred, Batch2)
     end);
 batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
-    lists:foldl(fun({LinkName, LinkTarget}, {Responses, Batch2}) ->
-        {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
-            links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
-                datastore_links:add(LinkName, LinkTarget, Tree)
-            end)
-        end),
-        {[Response | Responses], Batch4}
-    end, {[], Batch}, Links);
+    links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
+        lists:foldl(fun({LinkName, LinkTarget}, {Responses, Tree2}) ->
+            {Response, Tree4} = batch_link_apply(Tree2, fun(Tree3) ->
+                datastore_links:add(LinkName, LinkTarget, Tree3)
+            end),
+            {[Response | Responses], Tree4}
+        end, {[], Tree}, Links)
+    end);
 batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->

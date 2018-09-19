@@ -8,7 +8,7 @@
   2},
  {<<"bp_tree">>,
   {git,"https://github.com/onedata/bp_tree.git",
-       {ref,"09cc4be5af311105ef5678e175bf9b1f598ee523"}},
+       {ref,"7301ce3ebafcc75d03eaf2f959242782d6f8ab37"}},
   0},
  {<<"cberl">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/cberl.git",

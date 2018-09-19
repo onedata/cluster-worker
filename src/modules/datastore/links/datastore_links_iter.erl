@@ -278,12 +278,14 @@ get_from_tree(LinkName, TreeId, #forest_it{
     Cache = maps:get(TreeId, MasksCache),
     {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch),
     case datastore_links_crud:get(LinkName, Tree) of
-        {{ok, Link}, _} ->
+        {{ok, Link}, Tree2} ->
+            datastore_links:terminate_tree(Tree2),
             case is_deleted(Link, Cache) of
                 true -> {error, not_found};
                 false -> {ok, Link}
             end;
         {{error, Reason}, _} ->
+            datastore_links:terminate_tree(Tree),
             {error, Reason}
     end.
 
