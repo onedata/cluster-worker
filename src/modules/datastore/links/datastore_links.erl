@@ -48,7 +48,7 @@
 
 %% API
 -export([get_forest_id/1, get_mask_root_id/1, get_tree_id/1]).
--export([init_tree/3, init_tree/4, terminate_tree/1]).
+-export([init_tree/3, init_tree/4, init_tree/5, terminate_tree/1]).
 -export([add/3, get/2, delete/2, delete/3, mark_deleted/3]).
 -export([fold/4]).
 -export([get_links_trees/3]).
@@ -114,18 +114,28 @@ init_tree(Ctx, Key, TreeId) ->
     init_tree(Ctx, Key, TreeId, undefined).
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Initializes links tree.
+%% @equiv init_tree(Ctx, Key, TreeId, Batch, false)
 %% @end
 %%--------------------------------------------------------------------
 -spec init_tree(ctx(), key(), tree_id(), batch()) ->
     {ok, tree()} | {error, term()}.
 init_tree(Ctx, Key, TreeId, Batch) ->
+    init_tree(Ctx, Key, TreeId, Batch, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes links tree.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_tree(ctx(), key(), tree_id(), batch(), boolean()) ->
+    {ok, tree()} | {error, term()}.
+init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
     bp_tree:init([
         {order, application:get_env(?CLUSTER_WORKER_APP_NAME,
             datastore_links_tree_order, 50)},
         {store_module, links_tree},
-        {store_args, [Ctx, Key, TreeId, Batch]}
+        {store_args, [Ctx, Key, TreeId, Batch]},
+        {read_only, ReadOnly}
     ]).
 
 %%--------------------------------------------------------------------

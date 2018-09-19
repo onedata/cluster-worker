@@ -511,8 +511,8 @@ batch_apply(Batch, Fun) ->
 %% Applies request on a batch.
 %% @end
 %%--------------------------------------------------------------------
--spec batch_link_apply(batch(), fun((batch()) -> {term(), batch()})) ->
-    {{reference(), term()}, batch()}.
+-spec batch_link_apply(tree(), fun((tree()) -> {term(), tree()})) ->
+    {{reference(), term()}, tree()}.
 batch_link_apply(Tree, Fun) ->
     Ref = make_ref(),
     Tree2 = bp_tree:update_store_state(fun(State) ->
