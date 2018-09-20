@@ -597,23 +597,17 @@ links_performance_base(Config, Order, Reverse) ->
     T9 = os:timestamp(),
     ?assertEqual(LinksNum, length(Links5)),
 
-    ExpectedLinkNames = lists:map(fun(N) ->
+    ExpectedLinkNames = lists:sort(lists:map(fun(N) ->
         ?LINK_NAME(N)
-    end, lists:seq(1, LinksNum)),
+    end, lists:seq(1, LinksNum))),
     ToDel = case Reverse of
         true -> lists:reverse(ExpectedLinkNames);
         _ -> ExpectedLinkNames
     end,
     T10 = os:timestamp(),
-    % TODO VFS-4743 - delete performance
-    case Order =< 128 of
-        true ->
-            ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-                Key, ?LINK_TREE_ID, ToDel
-            ]));
-        _ ->
-            ok
-    end,
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key, ?LINK_TREE_ID, ToDel
+    ])),
     T11 = os:timestamp(),
 
     AddTimeDiff = timer:now_diff(T1Add, T0Add),
