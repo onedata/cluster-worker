@@ -85,14 +85,19 @@ delete_session(SessionId) ->
 %% Adds a subscriber for given GRI, i.e. a client that would like to receive
 %% updates of given resource. The subscriber is identified by session id and
 %% client + auth_hint that were used to access the resource.
+%% If the client with the same session id performs a second subscription,
+%% the old one is deleted.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_subscriber(gs_protocol:gri(), gs_protocol:session_id(),
     gs_protocol:client(), gs_protocol:auth_hint()) -> ok.
 add_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId, Client, AuthHint) ->
     modify_subscribers(Type, Id, fun(AllSubscribers) ->
-        SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
-        NewSubscribers = ordsets:add_element({SessionId, {Client, AuthHint}}, SubscribersForAspect),
+        Subscribers = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
+        NewSubscribers = ordsets:add_element(
+            {SessionId, {Client, AuthHint}},
+            proplists:delete(SessionId, Subscribers)
+        ),
         AllSubscribers#{
             {Aspect, Scope} => NewSubscribers
         }
@@ -145,8 +150,7 @@ get_subscriptions(SessionId) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes a subscriber (client) from the list of
-%% subscribers of given resource.
+%% Removes a subscriber (client) from the list of subscribers of given resource.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_subscriber(gs_protocol:gri(), gs_protocol:session_id()) -> ok.
