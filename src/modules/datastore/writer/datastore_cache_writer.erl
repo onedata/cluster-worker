@@ -428,14 +428,26 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
     end, {[], Batch}, LinkNames);
 batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     % TODO - sort links !!!
-    links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
-        lists:foldl(fun({LinkName, LinkRev}, {Responses, Tree2}) ->
-            {Response, Tree4} = batch_link_apply(Tree2, fun(Tree3) ->
-                    datastore_links:delete(LinkName, LinkRev, Tree3)
-            end),
-            {[Response | Responses], Tree4}
-        end, {[], Tree}, Links)
-    end);
+    FinalAns = links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
+        {FinalResponse, FinalTree, _, _} = lists:foldl(fun
+            ({LinkName, LinkRev}, {Responses, Tree2, [_ | TmpLinks], []}) ->
+                put(next_ops, TmpLinks),
+                {Response, Tree4} = batch_link_apply(Tree2, fun(Tree3) ->
+                        datastore_links:delete(LinkName, LinkRev, Tree3)
+                end),
+%%                ?info("jjjjj ~p", [length(get(next_ops_finished))]),
+                {[Response | Responses], Tree4, TmpLinks, get(next_ops_finished)};
+            (_, {Responses, Tree2, [_ | TmpLinks], [_ | Processed]}) ->
+                {Response, Tree4} = batch_link_apply(Tree2, fun(Tree3) ->
+                    {ok, Tree3}
+                end),
+                {[Response | Responses], Tree4, TmpLinks, Processed}
+        end, {[], Tree, Links, []}, Links),
+        {FinalResponse, FinalTree}
+    end),
+    erase(next_ops),
+    erase(next_ops_finished),
+    FinalAns;
 batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->

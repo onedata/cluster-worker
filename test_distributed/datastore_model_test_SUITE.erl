@@ -493,7 +493,7 @@ links_performance(Config) ->
         {repeats, ?REPEATS},
         {success_rate, ?SUCCESS_RATE},
         {parameters, [
-            [{name, links_num}, {value, 10000}, {description, "Number of links listed during the test."}]
+            [{name, links_num}, {value, 100000}, {description, "Number of links listed during the test."}]
         ]},
         {description, "Lists large number of links"},
         {config, [{name, small},
@@ -523,7 +523,8 @@ links_performance(Config) ->
     ]).
 links_performance_base(Config) ->
     ct:timetrap({hours, 2}),
-    Orders = [128, 1024, 5120, 10240],
+%%    Orders = [128, 1024, 5120, 10240],
+    Orders = [10240],
     lists:foreach(fun(Order) ->
         links_performance_base(Config, Order, false),
         links_performance_base(Config, Order, true)
@@ -553,9 +554,9 @@ links_performance_base(Config, Order, Reverse) ->
         [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
     )),
 
-    ExpectedLinks = lists:map(fun(N) ->
+    ExpectedLinks = lists:sort(lists:map(fun(N) ->
         {?LINK_NAME(N), ?LINK_TARGET(N)}
-    end, lists:seq(1, LinksNum)),
+    end, lists:seq(1, LinksNum))),
     ToAdd = case Reverse of
         true -> lists:reverse(ExpectedLinks);
         _ -> ExpectedLinks
@@ -609,6 +610,13 @@ links_performance_base(Config, Order, Reverse) ->
         Key, ?LINK_TREE_ID, ToDel
     ])),
     T11 = os:timestamp(),
+
+    ?assertMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key, ?LINK_TREE_ID, {?LINK_NAME(0), ?LINK_TARGET(0)}
+    ])),
+    ?assertMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
+        Key, ?LINK_TREE_ID, ?LINK_NAME(0)
+    ])),
 
     AddTimeDiff = timer:now_diff(T1Add, T0Add),
     TimeDiff1 = timer:now_diff(T1, T0),
