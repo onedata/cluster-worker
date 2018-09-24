@@ -611,6 +611,23 @@ links_performance_base(Config, Order, Reverse) ->
     ])),
     T11 = os:timestamp(),
 
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key, ?LINK_TREE_ID, ToAdd
+    ])),
+
+    ExpectedLinkNames2 = lists:sort(lists:map(fun(N) ->
+        ?LINK_NAME(N)
+    end, lists:seq(1, LinksNum, 3))),
+    ToDel2 = case Reverse of
+        true -> lists:reverse(ExpectedLinkNames2);
+        _ -> ExpectedLinkNames2
+    end,
+    T12 = os:timestamp(),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key, ?LINK_TREE_ID, ToDel2
+    ])),
+    T13 = os:timestamp(),
+
     ?assertMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         Key, ?LINK_TREE_ID, {?LINK_NAME(0), ?LINK_TARGET(0)}
     ])),
@@ -625,9 +642,10 @@ links_performance_base(Config, Order, Reverse) ->
     TimeDiff4 = timer:now_diff(T7, T6),
     TimeDiff5 = timer:now_diff(T9, T8),
     TimeDiff6 = timer:now_diff(T11, T10),
+    TimeDiff7 = timer:now_diff(T13, T12),
     ct:pal("Results for order ~p (reversed ~p): ~p",
         [Order, Reverse, {AddTimeDiff, TimeDiff1, TimeDiff2, TimeDiff3,
-            TimeDiff4, TimeDiff5, TimeDiff6}]).
+            TimeDiff4, TimeDiff5, TimeDiff6, TimeDiff7}]).
 
 %%%===================================================================
 %%% Init/teardown functions

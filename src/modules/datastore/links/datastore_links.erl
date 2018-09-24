@@ -49,7 +49,7 @@
 %% API
 -export([get_forest_id/1, get_mask_root_id/1, get_tree_id/1]).
 -export([init_tree/3, init_tree/4, init_tree/5, terminate_tree/1]).
--export([add/3, get/2, delete/2, delete/3, mark_deleted/3]).
+-export([add/2, get/2, delete/2, mark_deleted/3]).
 -export([fold/4]).
 -export([get_links_trees/3]).
 
@@ -152,10 +152,10 @@ terminate_tree(Tree) ->
 %% Creates named link between a document and a target.
 %% @end
 %%--------------------------------------------------------------------
--spec add(link_name(), link_target(), tree()) ->
-    {{ok, link()} | {error, term()}, tree()}.
-add(LinkName, LinkTarget, Tree) ->
-    datastore_links_crud:add(LinkName, LinkTarget, Tree).
+%%-spec add(link_name(), link_target(), tree()) ->
+%%    {{ok, link()} | {error, term()}, tree()}.
+add(Items, Tree) ->
+    datastore_links_crud:add(Items, Tree).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -169,22 +169,13 @@ get(LinkName, ForestIt) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes document link by name ignoring revision.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(link_name(), tree()) -> {ok | {error, term()}, tree()}.
-delete(LinkName, Tree) ->
-    datastore_links_crud:delete(LinkName, Tree).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Removes document link by name and revision.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(link_name(), link_rev(), tree()) ->
-    {ok | {error, term()}, tree()}.
-delete(LinkName, LinkRev, Tree) ->
-    datastore_links_crud:delete(LinkName, LinkRev, Tree).
+%%-spec delete(link_name(), link_rev(), tree()) ->
+%%    {ok | {error, term()}, tree()}.
+delete(Items, Tree) ->
+    datastore_links_crud:delete(Items, Tree).
 
 %%--------------------------------------------------------------------
 %% @doc
