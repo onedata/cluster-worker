@@ -353,7 +353,7 @@ null_to_undefined(Other) ->
 -spec string_to_gri(binary()) -> gri().
 string_to_gri(String) ->
     [TypeStr, IdBinary, AspectScope] = binary:split(String, <<".">>, [global]),
-    Type = string_to_entity_type(TypeStr),
+    Type = ?GS_LOGIC_PLUGIN:decode_entity_type(TypeStr),
     Id = string_to_id(IdBinary),
     {Aspect, Scope} = case binary:split(AspectScope, <<":">>, [global]) of
         [A, S] -> {string_to_aspect(A), string_to_scope(S)};
@@ -370,7 +370,7 @@ string_to_gri(String) ->
 -spec gri_to_string(gri()) -> binary().
 gri_to_string(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
     <<
-        (entity_type_to_string(Type))/binary, ".",
+        (?GS_LOGIC_PLUGIN:encode_entity_type(Type))/binary, ".",
         (id_to_string(Id))/binary, ".",
         (aspect_to_string(Aspect))/binary, ":",
         (scope_to_string(Scope))/binary
@@ -846,28 +846,6 @@ string_to_operation(<<"create">>) -> create;
 string_to_operation(<<"get">>) -> get;
 string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
-
-
--spec entity_type_to_string(entity_type()) -> binary().
-entity_type_to_string(od_user) -> <<"user">>;
-entity_type_to_string(od_group) -> <<"group">>;
-entity_type_to_string(od_space) -> <<"space">>;
-entity_type_to_string(od_share) -> <<"share">>;
-entity_type_to_string(od_provider) -> <<"provider">>;
-entity_type_to_string(od_handle_service) -> <<"handleService">>;
-entity_type_to_string(od_handle) -> <<"handle">>;
-entity_type_to_string(_) -> throw(?ERROR_BAD_TYPE).
-
-
--spec string_to_entity_type(binary()) -> entity_type().
-string_to_entity_type(<<"user">>) -> od_user;
-string_to_entity_type(<<"group">>) -> od_group;
-string_to_entity_type(<<"space">>) -> od_space;
-string_to_entity_type(<<"share">>) -> od_share;
-string_to_entity_type(<<"provider">>) -> od_provider;
-string_to_entity_type(<<"handleService">>) -> od_handle_service;
-string_to_entity_type(<<"handle">>) -> od_handle;
-string_to_entity_type(_) -> throw(?ERROR_BAD_TYPE).
 
 
 -spec id_to_string(undefined | binary()) -> binary().

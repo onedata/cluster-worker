@@ -46,6 +46,24 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Encodes entity type to string, used in serialized GRI form.
+%% Should throw ?ERROR_BAD_TYPE upon failure.
+%% @end
+%%--------------------------------------------------------------------
+-callback encode_entity_type(gs_protocol:entity_type()) -> binary().
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Decodes entity type from string, used in serialized GRI form.
+%% Should throw ?ERROR_BAD_TYPE upon failure.
+%% @end
+%%--------------------------------------------------------------------
+-callback decode_entity_type(binary()) -> gs_protocol:entity_type().
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Callback called when a new client connects to the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
