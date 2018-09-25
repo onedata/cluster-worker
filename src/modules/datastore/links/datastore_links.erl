@@ -64,6 +64,7 @@
 -type link_name() :: binary() | integer().
 -type link_target() :: binary() | integer().
 -type link_rev() :: undefined | binary().
+-type remove_pred() :: bp_tree:remove_pred().
 -type mask() :: datastore_links_mask:mask().
 -type forest_it() :: datastore_links_iter:forest_it().
 -type fold_fun() :: datastore_links_iter:fold_fun().
@@ -152,8 +153,8 @@ terminate_tree(Tree) ->
 %% Creates named link between a document and a target.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec add(link_name(), link_target(), tree()) ->
-%%    {{ok, link()} | {error, term()}, tree()}.
+-spec add([{link_name(), {link_target(), link_rev()}}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
 add(Items, Tree) ->
     datastore_links_crud:add(Items, Tree).
 
@@ -172,8 +173,8 @@ get(LinkName, ForestIt) ->
 %% Removes document link by name and revision.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec delete(link_name(), link_rev(), tree()) ->
-%%    {ok | {error, term()}, tree()}.
+-spec delete([{link_name(), remove_pred()}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
 delete(Items, Tree) ->
     datastore_links_crud:delete(Items, Tree).
 

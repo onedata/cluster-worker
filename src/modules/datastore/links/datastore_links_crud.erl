@@ -27,6 +27,7 @@
 -type link_name() :: datastore_links:link_name().
 -type link_target() :: datastore_links:link_target().
 -type link_rev() :: datastore_links:link_rev().
+-type remove_pred() :: bp_tree:remove_pred().
 
 %%%===================================================================
 %%% API
@@ -37,8 +38,8 @@
 %% Creates named link between a document and a target.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec add(link_name(), link_target(), tree()) ->
-%%    {{ok, link()} | {error, term()}, tree()}.
+-spec add([{link_name(), {link_target(), link_rev()}}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
 add(Items, Tree) ->
     case bp_tree:insert(Items, Tree) of
         {ok, AddedKeys, Tree2} ->
@@ -71,8 +72,8 @@ get(LinkName, Tree) ->
 %% Deletes named link between a document and a target in provided revision.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec delete(link_name(), link_rev(), tree()) ->
-%%    {ok | {error, term()}, tree()}.
+-spec delete([{link_name(), remove_pred()}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
 delete([{FirstLink, _} | _] = Items, Tree) ->
     case bp_tree:remove(Items, Tree) of
         {ok, RemovedKeys, Tree2} ->

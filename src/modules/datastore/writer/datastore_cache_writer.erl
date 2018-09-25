@@ -407,11 +407,18 @@ batch_request({delete, [Ctx, Key, Pred]}, Batch, _LinkTokens) ->
         datastore_doc:delete(set_mutator_pid(Ctx), Key, Pred, Batch2)
     end);
 batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
-    Items = lists:map(fun({LinkName, LinkTarget}) ->
-        % TODO - dosc ciezkie
-        LinkRev = datastore_utils:gen_hex(?REV_LENGTH),
-        {LinkName, {LinkTarget, LinkRev}}
-    end, Links),
+    Items = case maps:get(sync_enabled, Ctx, false) of
+        true ->
+            lists:map(fun({LinkName, LinkTarget}) ->
+                % TODO - VFS-4904 takes half of time
+                LinkRev = datastore_utils:gen_hex(?REV_LENGTH),
+                {LinkName, {LinkTarget, LinkRev}}
+            end, Links);
+        _ ->
+            lists:map(fun({LinkName, LinkTarget}) ->
+                {LinkName, {LinkTarget, undefined}}
+            end, Links)
+    end,
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
         add_links(Items, Tree, TreeId, [], [])
     end);
@@ -430,7 +437,6 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
 batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
-    % TODO - sort links !!!
     Items = lists:map(fun({LinkName, LinkRev}) ->
         Pred = fun
             ({_, Rev}) when LinkRev =/= undefined -> Rev =:= LinkRev;
@@ -496,7 +502,16 @@ batch_request({fetch_links_trees, [Ctx, Key]}, Batch, _LinkTokens) ->
 batch_request({Function, Args}, Batch, _LinkTokens) ->
     apply(datastore_doc_batch, Function, Args ++ [Batch]).
 
-
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deletes links from tree.
+%% Warning: links have to be sorted.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_links([{datastore_links:link_name(), datastore_links:remove_pred()}],
+    tree(), [{reference(), term()}], [datastore_links:link_name()]) ->
+    {[{reference(), term()}], tree()}.
 delete_links([], Tree, Responses, _RemovedKeys) ->
     {Responses, Tree};
 delete_links([_ | LinksTail] = Links, Tree, Responses, []) ->
@@ -515,6 +530,16 @@ delete_links([_ | LinksTail], Tree, Responses, [_ | RemovedKeys]) ->
     end),
     delete_links(LinksTail, Tree3, [Response | Responses], RemovedKeys).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Adds links to tree.
+%% Warning: links have to be sorted.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_links([{datastore_links:link_name(), {datastore_links:link_target(),
+    datastore_links:link_rev()}}], tree(), tree_id(), [{reference(), term()}],
+    [datastore_links:link_name()]) -> {[{reference(), term()}], tree()}.
 add_links([], Tree, _TreeId, Responses, _AddedKeys) ->
     {Responses, Tree};
 add_links([{LinkName, {LinkTarget, LinkRev}} | LinksTail] = Links, Tree, TreeId,
