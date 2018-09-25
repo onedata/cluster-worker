@@ -88,9 +88,14 @@ decode(Term) ->
         <<"children">> := Children
     } = InputMap = jiffy:decode(Term, [return_maps]),
     Children2 = maps:fold(fun
+        (Key, #{<<"target">> := LinkTarget, <<"_rev">> := <<"undefined">>,
+            <<"type">> := <<"int">>}, Map) ->
+            Map#{binary_to_integer(Key) => {LinkTarget, undefined}};
         (Key, #{<<"target">> := LinkTarget, <<"_rev">> := LinkRev,
             <<"type">> := <<"int">>}, Map) ->
             Map#{binary_to_integer(Key) => {LinkTarget, LinkRev}};
+        (Key, #{<<"target">> := LinkTarget, <<"_rev">> := <<"undefined">>}, Map) ->
+            Map#{Key => {LinkTarget, undefined}};
         (Key, #{<<"target">> := LinkTarget, <<"_rev">> := LinkRev}, Map) ->
             Map#{Key => {LinkTarget, LinkRev}};
         (Key, #{<<"target">> := Value, <<"type">> := <<"int">>}, Map) ->

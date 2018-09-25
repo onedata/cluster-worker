@@ -312,7 +312,7 @@ add_links_should_succeed(Config) ->
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
             ?assertEqual(LinkName, Link#link.name),
             ?assertEqual(LinkTarget, Link#link.target),
-            ?assertEqual(<<>>, Link#link.rev)
+            ?assertEqual(undefined, Link#link.rev)
         end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
@@ -335,7 +335,7 @@ get_links_should_succeed(Config) ->
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
             ?assertEqual(LinkName, Link#link.name),
             ?assertEqual(LinkTarget, Link#link.target),
-            ?assertEqual(<<>>, Link#link.rev)
+            ?assertEqual(undefined, Link#link.rev)
         end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
