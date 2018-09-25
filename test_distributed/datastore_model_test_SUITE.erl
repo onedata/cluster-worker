@@ -301,28 +301,28 @@ add_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         Results = rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
         ]),
-        lists:foreach(fun({Result, N}) ->
+        lists:foreach(fun({Result, {LinkName, LinkTarget}}) ->
             {ok, Link} = ?assertMatch({ok, #link{}}, Result),
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
-            ?assertEqual(?LINK_NAME(N), Link#link.name),
-            ?assertEqual(?LINK_TARGET(N), Link#link.target),
-            ?assertMatch(<<_/binary>>, Link#link.rev)
-        end, lists:zip(Results, lists:seq(1, LinksNum)))
+            ?assertEqual(LinkName, Link#link.name),
+            ?assertEqual(LinkTarget, Link#link.target),
+            ?assertEqual(<<>>, Link#link.rev)
+        end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
 get_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         {LinksNames, _} = lists:unzip(Links),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
@@ -330,13 +330,13 @@ get_links_should_succeed(Config) ->
         Results = rpc:call(Worker, Model, get_links, [
             ?KEY, ?LINK_TREE_ID, LinksNames
         ]),
-        lists:foreach(fun({Result, N}) ->
+        lists:foreach(fun({Result, {LinkName, LinkTarget}}) ->
             {ok, [Link]} = ?assertMatch({ok, [#link{}]}, Result),
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
-            ?assertEqual(?LINK_NAME(N), Link#link.name),
-            ?assertEqual(?LINK_TARGET(N), Link#link.target),
-            ?assertMatch(<<_/binary>>, Link#link.rev)
-        end, lists:zip(Results, lists:seq(1, LinksNum)))
+            ?assertEqual(LinkName, Link#link.name),
+            ?assertEqual(LinkTarget, Link#link.target),
+            ?assertEqual(<<>>, Link#link.rev)
+        end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
 get_links_should_return_missing_error(Config) ->
@@ -351,9 +351,9 @@ delete_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         {LinksNames, _} = lists:unzip(Links),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
@@ -381,9 +381,9 @@ mark_links_deleted_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         {LinksNames, _} = lists:unzip(Links),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
@@ -409,9 +409,9 @@ fold_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        ExpectedLinks = lists:map(fun(N) ->
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, ExpectedLinks
         ])),
@@ -430,9 +430,9 @@ fold_links_token_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        ExpectedLinks = lists:map(fun(N) ->
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, ExpectedLinks
         ])),
@@ -453,9 +453,9 @@ fold_links_token_should_succeed_after_token_timeout(Config) ->
 
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        ExpectedLinks = lists:map(fun(N) ->
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, ExpectedLinks
         ])),

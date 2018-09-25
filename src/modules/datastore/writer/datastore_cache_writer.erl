@@ -416,7 +416,7 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
             end, Links);
         _ ->
             lists:map(fun({LinkName, LinkTarget}) ->
-                {LinkName, {LinkTarget, undefined}}
+                {LinkName, {LinkTarget, <<>>}}
             end, Links)
     end,
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
