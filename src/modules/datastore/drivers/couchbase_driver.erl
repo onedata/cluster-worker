@@ -18,7 +18,8 @@
 -export([save/1, save/3, get/2, delete/2]).
 -export([get_counter/2, get_counter/3, update_counter/4]).
 -export([save_design_doc/3, get_design_doc/2, delete_design_doc/2]).
--export([save_view_doc/3, save_spatial_view_doc/3, query_view/4]).
+-export([save_view_doc/3, save_view_doc/4,
+    save_spatial_view_doc/3, save_spatial_view_doc/4, query_view/4]).
 
 -type ctx() :: #{bucket := couchbase_config:bucket(),
                  pool_mode => couchbase_pool:mode(),
@@ -31,6 +32,9 @@
 -type item() :: {ctx(), key(), value()}.
 -type design() :: binary().
 -type view() :: binary().
+-type view_creation_opt() :: {update_min_changes, integer()} |
+                             {replica_update_min_changes, integer()}.
+-type view_creation_opts() :: [view_creation_opt()].
 -type view_opt() :: {descending, boolean()} |
                     {endkey, binary()} |
                     {endkey_docid, binary()} |
@@ -53,6 +57,9 @@
                     {end_range, binary()}.
 
 -export_type([ctx/0, key/0, value/0, item/0, design/0, view/0, view_opt/0]).
+
+-define(UPDATE_MIN_CHANGES, 5000).
+-define(REPLICA_UPDATE_MIN_CHANGES, 5000).
 
 %%%===================================================================
 %%% API
@@ -227,18 +234,42 @@ delete_design_doc(#{bucket := Bucket} = Ctx, DesignName) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates a design document with a single view. Name of design document is
-%% equal to the view name.
+%% @equiv save_view_doc(Ctx, ViewName, Function, []).
 %% @end
 %%--------------------------------------------------------------------
 -spec save_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
 save_view_doc(Ctx, ViewName, Function) ->
-    EJson = {[{<<"views">>, {[{
-        ViewName, {[{
-            <<"map">>, Function
-        }]}
-    }]}}]},
+    save_view_doc(Ctx, ViewName, Function, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a design document with a single view. Name of design document is
+%% equal to the view name.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_view_doc(ctx(), view(), binary(), view_creation_opts()) -> ok | {error, term()}.
+save_view_doc(Ctx, ViewName, Function, Opts) ->
+    EJson = {[
+        {<<"views">>, {[
+            {ViewName, {[
+                {<<"map">>, Function}
+            ]}}
+        ]}},
+        {<<"options">>, {[
+            {<<"updateMinChanges">>, proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
+            {<<"replicaUpdateMinChanges">>, proplists:get_value(replica_update_min_changes, Opts, ?REPLICA_UPDATE_MIN_CHANGES)}
+        ]}}
+    ]},
     save_design_doc(Ctx, ViewName, EJson).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv save_spatial_view_doc(Ctx, ViewName, Function, []).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_spatial_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
+save_spatial_view_doc(Ctx, ViewName, Function) ->
+    save_spatial_view_doc(Ctx, ViewName, Function, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -246,11 +277,17 @@ save_view_doc(Ctx, ViewName, Function) ->
 %% is equal to the view name.
 %% @end
 %%--------------------------------------------------------------------
--spec save_spatial_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
-save_spatial_view_doc(Ctx, ViewName, Function) ->
-    EJson = {[{<<"spatial">>, {[{
-        ViewName, Function
-    }]}}]},
+-spec save_spatial_view_doc(ctx(), view(), binary(), view_creation_opts()) -> ok | {error, term()}.
+save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
+    EJson = {[
+        {<<"spatial">>, {[
+            {ViewName, Function}
+        ]}},
+        {<<"options">>, {[
+            {<<"updateMinChanges">>, proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
+            {<<"replicaUpdateMinChanges">>, proplists:get_value(replica_update_min_changes, Opts, ?REPLICA_UPDATE_MIN_CHANGES)}
+        ]}}
+    ]},
     save_design_doc(Ctx, ViewName, EJson).
 
 %%--------------------------------------------------------------------
