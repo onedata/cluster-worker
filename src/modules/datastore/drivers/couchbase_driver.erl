@@ -18,7 +18,7 @@
 -export([save/1, save/3, get/2, delete/2]).
 -export([get_counter/2, get_counter/3, update_counter/4]).
 -export([save_design_doc/3, get_design_doc/2, delete_design_doc/2]).
--export([save_view_doc/3, save_view_doc/4,
+-export([save_view_doc/3, save_view_doc/4, save_view_doc/5,
     save_spatial_view_doc/3, save_spatial_view_doc/4, query_view/4]).
 
 -type ctx() :: #{bucket := couchbase_config:bucket(),
@@ -243,17 +243,25 @@ save_view_doc(Ctx, ViewName, Function) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates a design document with a single view. Name of design document is
-%% equal to the view name.
+%% @equiv save_view_doc(Ctx, ViewName, Function, undefined, Opts).
 %% @end
 %%--------------------------------------------------------------------
 -spec save_view_doc(ctx(), view(), binary(), view_creation_opts()) -> ok | {error, term()}.
 save_view_doc(Ctx, ViewName, Function, Opts) ->
+    save_view_doc(Ctx, ViewName, Function, undefined, Opts).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a design document with a single view. Name of design document is
+%% equal to the view name.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_view_doc(ctx(), view(), binary(), binary() | undefined,
+    view_creation_opts()) -> ok | {error, term()}.
+save_view_doc(Ctx, ViewName, MapFunction, ReduceFunction, Opts) ->
     EJson = {[
         {<<"views">>, {[
-            {ViewName, {[
-                {<<"map">>, Function}
-            ]}}
+            view_definition(ViewName, MapFunction, ReduceFunction)
         ]}},
         {<<"options">>, {[
             {<<"updateMinChanges">>, proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
@@ -300,3 +308,24 @@ save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
 query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
     Mode = maps:get(pool_mode, Ctx, read),
     couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%-------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns view definition in EJSON format.
+%% @end
+%%-------------------------------------------------------------------
+-spec view_definition(view(), binary(), binary() | undefined) -> datastore_json:ejson().
+view_definition(ViewName, MapFunction, undefined) ->
+    {ViewName, {[
+        {<<"map">>, MapFunction}
+    ]}};
+view_definition(ViewName, MapFunction, ReduceFunction) ->
+    {ViewName, {[
+        {<<"map">>, MapFunction},
+        {<<"reduce">>, ReduceFunction}
+    ]}}.
