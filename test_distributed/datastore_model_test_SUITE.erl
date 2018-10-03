@@ -493,7 +493,7 @@ links_performance(Config) ->
         {repeats, ?REPEATS},
         {success_rate, ?SUCCESS_RATE},
         {parameters, [
-            [{name, links_num}, {value, 100000},
+            [{name, links_num}, {value, 50000},
                 {description, "Number of links listed during the test."}],
             [{name, orders}, {value, [10240]},
                 {description, "Tree orders used during test."}]
@@ -519,14 +519,15 @@ links_performance(Config) ->
                 [{name, orders}, {value, [128, 1024, 5120, 10240]}]
             ]},
             {description, "High number of links"}
-        ]},
-        {config, [{name, large},
-            {parameters, [
-                [{name, links_num}, {value, 100000}],
-                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
-            ]},
-            {description, "Very high number of links"}
         ]}
+        % TODO - VFS-4937
+%%        {config, [{name, large},
+%%            {parameters, [
+%%                [{name, links_num}, {value, 100000}],
+%%                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
+%%            ]},
+%%            {description, "Very high number of links"}
+%%        ]}
     ]).
 links_performance_base(Config) ->
     ct:timetrap({hours, 2}),

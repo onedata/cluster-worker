@@ -133,7 +133,7 @@ init_tree(Ctx, Key, TreeId, Batch) ->
 init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
     bp_tree:init([
         {order, application:get_env(?CLUSTER_WORKER_APP_NAME,
-            datastore_links_tree_order, 50)},
+            datastore_links_tree_order, 1024)},
         {store_module, links_tree},
         {store_args, [Ctx, Key, TreeId, Batch]},
         {read_only, ReadOnly}

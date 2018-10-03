@@ -217,7 +217,7 @@
             %% ===================================================================
 
             %% Maps to an 'order' parameter of a bp_tree library
-            {datastore_links_tree_order, 128},
+            {datastore_links_tree_order, 1024},
 
             {tp_processes_limit, 250000},
 
