@@ -123,7 +123,7 @@ set_defaults(UniqueKey, Ctx) ->
 %%-------------------------------------------------------------------
 -spec get_default_disk_ctx() -> datastore:disc_driver_ctx().
 get_default_disk_ctx() ->
-    #{bucket => <<"onedata">>}.
+    #{bucket => ?DEFAULT_BUCKET}.
 
 %%%===================================================================
 %%% Internal functions
