@@ -15,7 +15,8 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1, get_default_disk_ctx/0]).
+-export([get_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1,
+    get_default_disk_ctx/0]).
 -export([resolve_conflict/4]).
 -export([set_defaults/1, set_defaults/2]).
 
