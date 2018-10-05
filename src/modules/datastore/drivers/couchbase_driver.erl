@@ -18,7 +18,8 @@
 -export([save/1, save/3, get/2, delete/2]).
 -export([get_counter/2, get_counter/3, update_counter/4]).
 -export([save_design_doc/3, get_design_doc/2, delete_design_doc/2]).
--export([save_view_doc/3, save_spatial_view_doc/3, query_view/4]).
+-export([save_view_doc/3, save_view_doc/4, save_view_doc/5,
+    save_spatial_view_doc/3, save_spatial_view_doc/4, query_view/4]).
 
 -type ctx() :: #{bucket := couchbase_config:bucket(),
                  pool_mode => couchbase_pool:mode(),
@@ -31,6 +32,9 @@
 -type item() :: {ctx(), key(), value()}.
 -type design() :: binary().
 -type view() :: binary().
+-type view_creation_opt() :: {update_min_changes, integer()} |
+                             {replica_update_min_changes, integer()}.
+-type view_creation_opts() :: [view_creation_opt()].
 -type view_opt() :: {descending, boolean()} |
                     {endkey, binary()} |
                     {endkey_docid, binary()} |
@@ -53,6 +57,11 @@
                     {end_range, binary()}.
 
 -export_type([ctx/0, key/0, value/0, item/0, design/0, view/0, view_opt/0]).
+
+% below parameters are described in
+% https://docs.couchbase.com/server/4.1/developer-guide/views-operation.html#automated-index-updates
+-define(UPDATE_MIN_CHANGES, 5000).
+-define(REPLICA_UPDATE_MIN_CHANGES, 5000).
 
 %%%===================================================================
 %%% API
@@ -227,18 +236,53 @@ delete_design_doc(#{bucket := Bucket} = Ctx, DesignName) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates a design document with a single view. Name of design document is
-%% equal to the view name.
+%% @equiv save_view_doc(Ctx, ViewName, Function, []).
 %% @end
 %%--------------------------------------------------------------------
 -spec save_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
 save_view_doc(Ctx, ViewName, Function) ->
-    EJson = {[{<<"views">>, {[{
-        ViewName, {[{
-            <<"map">>, Function
-        }]}
-    }]}}]},
+    save_view_doc(Ctx, ViewName, Function, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv save_view_doc(Ctx, ViewName, Function, undefined, Opts).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_view_doc(ctx(), view(), binary(), view_creation_opts()) -> ok | {error, term()}.
+save_view_doc(Ctx, ViewName, Function, Opts) ->
+    save_view_doc(Ctx, ViewName, Function, undefined, Opts).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a design document with a single view. Name of design document is
+%% equal to the view name.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_view_doc(ctx(), view(), binary(), binary() | undefined,
+    view_creation_opts()) -> ok | {error, term()}.
+save_view_doc(Ctx, ViewName, MapFunction, ReduceFunction, Opts) ->
+    EJson = {[
+        {<<"views">>, {[
+            view_definition(ViewName, MapFunction, ReduceFunction)
+        ]}},
+        {<<"options">>, {[
+            {<<"updateMinChanges">>,
+                proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
+            {<<"replicaUpdateMinChanges">>,
+                proplists:get_value(replica_update_min_changes, Opts,
+                    ?REPLICA_UPDATE_MIN_CHANGES)}
+        ]}}
+    ]},
     save_design_doc(Ctx, ViewName, EJson).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv save_spatial_view_doc(Ctx, ViewName, Function, []).
+%% @end
+%%--------------------------------------------------------------------
+-spec save_spatial_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
+save_spatial_view_doc(Ctx, ViewName, Function) ->
+    save_spatial_view_doc(Ctx, ViewName, Function, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -246,11 +290,20 @@ save_view_doc(Ctx, ViewName, Function) ->
 %% is equal to the view name.
 %% @end
 %%--------------------------------------------------------------------
--spec save_spatial_view_doc(ctx(), view(), binary()) -> ok | {error, term()}.
-save_spatial_view_doc(Ctx, ViewName, Function) ->
-    EJson = {[{<<"spatial">>, {[{
-        ViewName, Function
-    }]}}]},
+-spec save_spatial_view_doc(ctx(), view(), binary(), view_creation_opts()) -> ok | {error, term()}.
+save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
+    EJson = {[
+        {<<"spatial">>, {[
+            {ViewName, Function}
+        ]}},
+        {<<"options">>, {[
+            {<<"updateMinChanges">>,
+                proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
+            {<<"replicaUpdateMinChanges">>,
+                proplists:get_value(replica_update_min_changes, Opts,
+                    ?REPLICA_UPDATE_MIN_CHANGES)}
+        ]}}
+    ]},
     save_design_doc(Ctx, ViewName, EJson).
 
 %%--------------------------------------------------------------------
@@ -263,3 +316,24 @@ save_spatial_view_doc(Ctx, ViewName, Function) ->
 query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
     Mode = maps:get(pool_mode, Ctx, read),
     couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%-------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns view definition in EJSON format.
+%% @end
+%%-------------------------------------------------------------------
+-spec view_definition(view(), binary(), binary() | undefined) -> datastore_json:ejson().
+view_definition(ViewName, MapFunction, undefined) ->
+    {ViewName, {[
+        {<<"map">>, MapFunction}
+    ]}};
+view_definition(ViewName, MapFunction, ReduceFunction) ->
+    {ViewName, {[
+        {<<"map">>, MapFunction},
+        {<<"reduce">>, ReduceFunction}
+    ]}}.
