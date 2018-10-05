@@ -58,6 +58,8 @@
 
 -export_type([ctx/0, key/0, value/0, item/0, design/0, view/0, view_opt/0]).
 
+% below parameters are described in
+% https://docs.couchbase.com/server/4.1/developer-guide/views-operation.html#automated-index-updates
 -define(UPDATE_MIN_CHANGES, 5000).
 -define(REPLICA_UPDATE_MIN_CHANGES, 5000).
 
@@ -264,8 +266,11 @@ save_view_doc(Ctx, ViewName, MapFunction, ReduceFunction, Opts) ->
             view_definition(ViewName, MapFunction, ReduceFunction)
         ]}},
         {<<"options">>, {[
-            {<<"updateMinChanges">>, proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
-            {<<"replicaUpdateMinChanges">>, proplists:get_value(replica_update_min_changes, Opts, ?REPLICA_UPDATE_MIN_CHANGES)}
+            {<<"updateMinChanges">>,
+                proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
+            {<<"replicaUpdateMinChanges">>,
+                proplists:get_value(replica_update_min_changes, Opts,
+                    ?REPLICA_UPDATE_MIN_CHANGES)}
         ]}}
     ]},
     save_design_doc(Ctx, ViewName, EJson).
@@ -292,8 +297,11 @@ save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
             {ViewName, Function}
         ]}},
         {<<"options">>, {[
-            {<<"updateMinChanges">>, proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
-            {<<"replicaUpdateMinChanges">>, proplists:get_value(replica_update_min_changes, Opts, ?REPLICA_UPDATE_MIN_CHANGES)}
+            {<<"updateMinChanges">>,
+                proplists:get_value(update_min_changes, Opts, ?UPDATE_MIN_CHANGES)},
+            {<<"replicaUpdateMinChanges">>,
+                proplists:get_value(replica_update_min_changes, Opts,
+                    ?REPLICA_UPDATE_MIN_CHANGES)}
         ]}}
     ]},
     save_design_doc(Ctx, ViewName, EJson).
