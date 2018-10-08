@@ -19,7 +19,7 @@
 -include_lib("ctool/include/test/performance.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1]).
+-export([all/0, init_per_suite/1, end_per_suite/1]).
 
 %% tests
 -export([
@@ -53,7 +53,8 @@
     query_view_should_parse_empty_opts/1,
     query_view_should_parse_all_opts/1,
     get_buckets_should_return_all_buckets/1,
-    cberl_test/1
+    cberl_test/1,
+    expired_doc_should_not_exist/1
 ]).
 
 %% test_bases
@@ -94,7 +95,8 @@ all() ->
         query_view_should_parse_empty_opts,
         query_view_should_parse_all_opts,
         get_buckets_should_return_all_buckets,
-        cberl_test
+        cberl_test,
+        expired_doc_should_not_exist
     ], [
         save_get_delete_should_return_success,
         cberl_test
@@ -627,12 +629,29 @@ get_buckets_should_return_all_buckets(Config) ->
         []
     )).
 
+expired_doc_should_not_exist(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(T) ->
+        {ok, Cas, Doc} = rpc:call(Worker, couchbase_driver, save, [?CTX#{expiry => T}, ?KEY, ?DOC]),
+        ?assertEqual({ok, Cas, Doc}, rpc:call(Worker, couchbase_driver, get,
+            [?CTX, ?KEY]
+        )),
+        timer:sleep(3000),
+        ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, get,
+            [?CTX, ?KEY]
+        ))
+    end, [os:system_time(second)+1, 1]).
+
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(Config).
+
+end_per_suite(_Config) ->
+    ok.
 
 %%%===================================================================
 %%% Cberl test helper functions

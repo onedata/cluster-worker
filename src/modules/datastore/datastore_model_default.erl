@@ -187,9 +187,13 @@ set_memory_driver(UniqueKey, Ctx) ->
 set_disc_driver(Ctx = #{disc_driver := undefined}) ->
     Ctx;
 set_disc_driver(Ctx) ->
+    Disc_driver_ctx = case maps:get(expiry, Ctx, 0) of
+        0 -> #{};
+        Expiry -> #{expiry => Expiry}
+    end,
     Ctx#{
         disc_driver => couchbase_driver,
-        disc_driver_ctx => #{
+        disc_driver_ctx => Disc_driver_ctx#{
             bucket => ?DEFAULT_BUCKET,
             no_seq => not maps:get(sync_enabled, Ctx, false)
         }

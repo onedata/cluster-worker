@@ -307,7 +307,7 @@ prepare_change_store(Requests) ->
     maps:fold(fun
         (_Key, {#{no_seq := true}, _}, {ChangeStoreRequests, ChangeKeys}) ->
             {ChangeStoreRequests, ChangeKeys};
-        (Key, {_, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
+        (Key, {Ctx, {ok, _, Doc = #document{}}}, {ChangeStoreRequests, ChangeKeys}) ->
             #document{scope = Scope, seq = Seq} = Doc,
             ChangeKey = couchbase_changes:get_change_key(Scope, Seq),
             EJson = #{
@@ -315,8 +315,9 @@ prepare_change_store(Requests) ->
                 <<"key">> => Key,
                 <<"pid">> => base64:encode(term_to_binary(self()))
             },
+            Expiry = maps:get(expiry, Ctx, 0),
             {
-                [{set, ChangeKey, EJson, json, 0, 0} | ChangeStoreRequests],
+                [{set, ChangeKey, EJson, json, 0, Expiry} | ChangeStoreRequests],
                 maps:put(ChangeKey, Key, ChangeKeys)
             };
         (_Key, {_, _}, {ChangeStoreRequests, ChangeKeys}) ->
@@ -362,8 +363,9 @@ prepare_store(Requests) ->
             try
                 EJson = datastore_json:encode(Value),
                 Cas = maps:get(cas, Ctx, 0),
+                Expiry = maps:get(expiry, Ctx, 0),    
                 {
-                    [{set, Key, EJson, json, Cas, 0} | StoreRequests],
+                    [{set, Key, EJson, json, Cas, Expiry} | StoreRequests],
                     maps:put(Key, {Ctx, {ok, Cas, Value}}, Requests2),
                     Responses
                 }
