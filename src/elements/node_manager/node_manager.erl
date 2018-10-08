@@ -225,35 +225,56 @@ start_worker(Module, Args, Options) ->
         {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
 
-            case lists:member(supervisor_first, Options) of
-                true ->
-                    {ok, _} = supervisor:start_child(
-                        ?MAIN_WORKER_SUPERVISOR_NAME,
-                        {Module, {worker_host, start_link,
-                            [Module, Args, LoadMemorySize]}, transient, 5000,
-                            worker, [worker_host]}
-                    ),
-                    {ok, _} = supervisor:start_child(
-                        ?MAIN_WORKER_SUPERVISOR_NAME,
-                        {WorkerSupervisorName, {worker_host_sup, start_link,
-                            [WorkerSupervisorName, Args]}, transient, infinity,
-                            supervisor, [worker_host_sup]}
-                    );
-                _ ->
-                    {ok, _} = supervisor:start_child(
-                        ?MAIN_WORKER_SUPERVISOR_NAME,
-                        {WorkerSupervisorName, {worker_host_sup, start_link,
-                            [WorkerSupervisorName, Args]}, transient, infinity,
-                            supervisor, [worker_host_sup]}
-                    ),
-                    {ok, _} = supervisor:start_child(
-                        ?MAIN_WORKER_SUPERVISOR_NAME,
-                        {Module, {worker_host, start_link,
-                            [Module, Args, LoadMemorySize]}, transient, 5000,
-                            worker, [worker_host]}
-                    )
-            end,
-        ?info("Worker: ~s started", [Module])
+        case lists:member(supervisor_first, Options) of
+            true ->
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {Module, {worker_host, start_link,
+                        [Module, Args, LoadMemorySize]}, transient, 5000,
+                        worker, [worker_host]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module ~p already started", [Module]),
+                        ok
+                end,
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {WorkerSupervisorName, {worker_host_sup, start_link,
+                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        supervisor, [worker_host_sup]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module supervisor ~p already started", [Module]),
+                        ok
+                end;
+            _ ->
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {WorkerSupervisorName, {worker_host_sup, start_link,
+                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        supervisor, [worker_host_sup]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module supervisor ~p already started", [Module]),
+                        ok
+                end,
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {Module, {worker_host, start_link,
+                        [Module, Args, LoadMemorySize]}, transient, 5000,
+                        worker, [worker_host]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module ~p already started", [Module]),
+                        ok
+                end
+        end,
+        ?info("Worker: ~s started", [Module]),
+        ok
     catch
         _:Error ->
             ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
@@ -580,7 +601,14 @@ terminate(Reason, State) ->
     ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
 
     lists:foreach(fun(Module) ->
-        erlang:apply(Module, stop, []) end, node_manager:listeners()),
+        try
+            erlang:apply(Module, stop, [])
+        catch
+            E1:E2 ->
+                ?warning_stacktrace("Stop failed on module ~p: ~p:~p",
+                    [Module, E1, E2])
+        end
+    end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
     plugins:apply(node_manager_plugin, terminate, [Reason, State]).
