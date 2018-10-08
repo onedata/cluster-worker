@@ -74,9 +74,6 @@ init([Ctx, Key, TreeId, Batch]) ->
         batch = Batch
     }}.
 
-update_batch(Fun, State = #state{batch = Batch}) ->
-    State#state{batch = Fun(Batch)}.
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Implementation of {@link bp_tree_store:set_root_id/2} callback.
@@ -230,6 +227,15 @@ delete_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
 -spec terminate(state()) -> batch().
 terminate(#state{batch = Batch}) ->
     Batch.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Function used to update batch field inside state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_batch(fun((batch()) -> batch()), state()) -> state().
+update_batch(Fun, State = #state{batch = Batch}) ->
+    State#state{batch = Fun(Batch)}.
 
 %%%===================================================================
 %%% Internal functions
