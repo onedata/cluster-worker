@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_links.hrl").
 
 %% API
--export([add/3, get/2, delete/2, delete/3]).
+-export([add/2, get/2, delete/2]).
 -export([apply/5]).
 
 -type ctx() :: datastore:ctx().
@@ -27,9 +27,7 @@
 -type link_name() :: datastore_links:link_name().
 -type link_target() :: datastore_links:link_target().
 -type link_rev() :: datastore_links:link_rev().
-
--define(REV_LENGTH,
-    application:get_env(cluster_worker, datastore_links_rev_length, 16)).
+-type remove_pred() :: bp_tree:remove_pred().
 
 %%%===================================================================
 %%% API
@@ -40,18 +38,12 @@
 %% Creates named link between a document and a target.
 %% @end
 %%--------------------------------------------------------------------
--spec add(link_name(), link_target(), tree()) ->
-    {{ok, link()} | {error, term()}, tree()}.
-add(LinkName, LinkTarget, Tree) ->
-    LinkRev = datastore_utils:gen_hex(?REV_LENGTH),
-    case bp_tree:insert(LinkName, {LinkTarget, LinkRev}, Tree) of
-        {ok, Tree2} ->
-            {{ok, #link{
-                tree_id = datastore_links:get_tree_id(Tree),
-                name = LinkName,
-                target = LinkTarget,
-                rev = LinkRev
-            }}, Tree2};
+-spec add([{link_name(), {link_target(), link_rev()}}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
+add(Items, Tree) ->
+    case bp_tree:insert(Items, Tree) of
+        {ok, AddedKeys, Tree2} ->
+            {{ok, AddedKeys}, Tree2};
         {{error, Reason}, Tree2} ->
             {{error, Reason}, Tree2}
     end.
@@ -77,32 +69,19 @@ get(LinkName, Tree) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes named link between a document and a target ignoring revision.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(link_name(), tree()) -> {ok | {error, term()}, tree()}.
-delete(LinkName, Tree) ->
-    delete(LinkName, undefined, Tree).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Deletes named link between a document and a target in provided revision.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(link_name(), link_rev(), tree()) ->
-    {ok | {error, term()}, tree()}.
-delete(LinkName, LinkRev, Tree) ->
-    Pred = fun
-        ({_, Rev}) when LinkRev =/= undefined -> Rev =:= LinkRev;
-        (_) -> true
-    end,
-    case bp_tree:remove(LinkName, Pred, Tree) of
-        {ok, Tree2} ->
-            {ok, Tree2};
+-spec delete([{link_name(), remove_pred()}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
+delete([{FirstLink, _} | _] = Items, Tree) ->
+    case bp_tree:remove(Items, Tree) of
+        {ok, RemovedKeys, Tree2} ->
+            {{ok, RemovedKeys}, Tree2};
         {{error, Reason}, Tree2} when
             Reason == not_found;
             Reason == predicate_not_satisfied ->
-            {ok, Tree2};
+            {{ok, [FirstLink]}, Tree2};
         {{error, Reason}, Tree2} ->
             {{error, Reason}, Tree2}
     end.

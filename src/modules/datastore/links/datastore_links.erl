@@ -48,8 +48,8 @@
 
 %% API
 -export([get_forest_id/1, get_mask_root_id/1, get_tree_id/1]).
--export([init_tree/3, init_tree/4, terminate_tree/1]).
--export([add/3, get/2, delete/2, delete/3, mark_deleted/3]).
+-export([init_tree/3, init_tree/4, init_tree/5, terminate_tree/1]).
+-export([add/2, get/2, delete/2, mark_deleted/3]).
 -export([fold/4]).
 -export([get_links_trees/3]).
 
@@ -64,6 +64,7 @@
 -type link_name() :: binary() | integer().
 -type link_target() :: binary() | integer().
 -type link_rev() :: undefined | binary().
+-type remove_pred() :: bp_tree:remove_pred().
 -type mask() :: datastore_links_mask:mask().
 -type forest_it() :: datastore_links_iter:forest_it().
 -type fold_fun() :: datastore_links_iter:fold_fun().
@@ -114,18 +115,28 @@ init_tree(Ctx, Key, TreeId) ->
     init_tree(Ctx, Key, TreeId, undefined).
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Initializes links tree.
+%% @equiv init_tree(Ctx, Key, TreeId, Batch, false)
 %% @end
 %%--------------------------------------------------------------------
 -spec init_tree(ctx(), key(), tree_id(), batch()) ->
     {ok, tree()} | {error, term()}.
 init_tree(Ctx, Key, TreeId, Batch) ->
+    init_tree(Ctx, Key, TreeId, Batch, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes links tree.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_tree(ctx(), key(), tree_id(), batch(), boolean()) ->
+    {ok, tree()} | {error, term()}.
+init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
     bp_tree:init([
         {order, application:get_env(?CLUSTER_WORKER_APP_NAME,
-            datastore_links_tree_order, 50)},
+            datastore_links_tree_order, 1024)},
         {store_module, links_tree},
-        {store_args, [Ctx, Key, TreeId, Batch]}
+        {store_args, [Ctx, Key, TreeId, Batch]},
+        {read_only, ReadOnly}
     ]).
 
 %%--------------------------------------------------------------------
@@ -142,10 +153,10 @@ terminate_tree(Tree) ->
 %% Creates named link between a document and a target.
 %% @end
 %%--------------------------------------------------------------------
--spec add(link_name(), link_target(), tree()) ->
-    {{ok, link()} | {error, term()}, tree()}.
-add(LinkName, LinkTarget, Tree) ->
-    datastore_links_crud:add(LinkName, LinkTarget, Tree).
+-spec add([{link_name(), {link_target(), link_rev()}}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
+add(Items, Tree) ->
+    datastore_links_crud:add(Items, Tree).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -159,22 +170,13 @@ get(LinkName, ForestIt) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Removes document link by name ignoring revision.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(link_name(), tree()) -> {ok | {error, term()}, tree()}.
-delete(LinkName, Tree) ->
-    datastore_links_crud:delete(LinkName, Tree).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Removes document link by name and revision.
 %% @end
 %%--------------------------------------------------------------------
--spec delete(link_name(), link_rev(), tree()) ->
-    {ok | {error, term()}, tree()}.
-delete(LinkName, LinkRev, Tree) ->
-    datastore_links_crud:delete(LinkName, LinkRev, Tree).
+-spec delete([{link_name(), remove_pred()}], tree()) ->
+    {{ok, [link_name()]} | {error, term()}, tree()}.
+delete(Items, Tree) ->
+    datastore_links_crud:delete(Items, Tree).
 
 %%--------------------------------------------------------------------
 %% @doc

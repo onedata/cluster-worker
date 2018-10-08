@@ -22,7 +22,7 @@
 
 %% bp_tree_store callbacks
 -export([init/1, set_root_id/2, unset_root_id/1, get_root_id/1, create_node/2,
-    get_node/2, update_node/3, delete_node/2, terminate/1]).
+    get_node/2, update_node/3, delete_node/2, terminate/1, update_batch/2]).
 
 -record(state, {
     ctx :: ctx(),
@@ -227,6 +227,15 @@ delete_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
 -spec terminate(state()) -> batch().
 terminate(#state{batch = Batch}) ->
     Batch.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Function used to update batch field inside state record.
+%% @end
+%%--------------------------------------------------------------------
+-spec update_batch(fun((batch()) -> batch()), state()) -> state().
+update_batch(Fun, State = #state{batch = Batch}) ->
+    State#state{batch = Fun(Batch)}.
 
 %%%===================================================================
 %%% Internal functions

@@ -301,28 +301,28 @@ add_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         Results = rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
         ]),
-        lists:foreach(fun({Result, N}) ->
+        lists:foreach(fun({Result, {LinkName, LinkTarget}}) ->
             {ok, Link} = ?assertMatch({ok, #link{}}, Result),
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
-            ?assertEqual(?LINK_NAME(N), Link#link.name),
-            ?assertEqual(?LINK_TARGET(N), Link#link.target),
-            ?assertMatch(<<_/binary>>, Link#link.rev)
-        end, lists:zip(Results, lists:seq(1, LinksNum)))
+            ?assertEqual(LinkName, Link#link.name),
+            ?assertEqual(LinkTarget, Link#link.target),
+            ?assertEqual(undefined, Link#link.rev)
+        end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
 get_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         {LinksNames, _} = lists:unzip(Links),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
@@ -330,13 +330,13 @@ get_links_should_succeed(Config) ->
         Results = rpc:call(Worker, Model, get_links, [
             ?KEY, ?LINK_TREE_ID, LinksNames
         ]),
-        lists:foreach(fun({Result, N}) ->
+        lists:foreach(fun({Result, {LinkName, LinkTarget}}) ->
             {ok, [Link]} = ?assertMatch({ok, [#link{}]}, Result),
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
-            ?assertEqual(?LINK_NAME(N), Link#link.name),
-            ?assertEqual(?LINK_TARGET(N), Link#link.target),
-            ?assertMatch(<<_/binary>>, Link#link.rev)
-        end, lists:zip(Results, lists:seq(1, LinksNum)))
+            ?assertEqual(LinkName, Link#link.name),
+            ?assertEqual(LinkTarget, Link#link.target),
+            ?assertEqual(undefined, Link#link.rev)
+        end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
 get_links_should_return_missing_error(Config) ->
@@ -351,9 +351,9 @@ delete_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         {LinksNames, _} = lists:unzip(Links),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
@@ -381,9 +381,9 @@ mark_links_deleted_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        Links = lists:map(fun(N) ->
+        Links = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         {LinksNames, _} = lists:unzip(Links),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, Links
@@ -409,9 +409,9 @@ fold_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        ExpectedLinks = lists:map(fun(N) ->
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, ExpectedLinks
         ])),
@@ -430,9 +430,9 @@ fold_links_token_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        ExpectedLinks = lists:map(fun(N) ->
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, ExpectedLinks
         ])),
@@ -453,9 +453,9 @@ fold_links_token_should_succeed_after_token_timeout(Config) ->
 
     lists:foreach(fun(Model) ->
         LinksNum = 1000,
-        ExpectedLinks = lists:map(fun(N) ->
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
             {?LINK_NAME(N), ?LINK_TARGET(N)}
-        end, lists:seq(1, LinksNum)),
+        end, lists:seq(1, LinksNum))),
         ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
             ?KEY, ?LINK_TREE_ID, ExpectedLinks
         ])),
@@ -493,44 +493,53 @@ links_performance(Config) ->
         {repeats, ?REPEATS},
         {success_rate, ?SUCCESS_RATE},
         {parameters, [
-            [{name, links_num}, {value, 10000}, {description, "Number of links listed during the test."}]
+            [{name, links_num}, {value, 50000},
+                {description, "Number of links listed during the test."}],
+            [{name, orders}, {value, [10240]},
+                {description, "Tree orders used during test."}]
         ]},
         {description, "Lists large number of links"},
         {config, [{name, small},
             {parameters, [
-                [{name, links_num}, {value, 5000}]
+                [{name, links_num}, {value, 5000}],
+                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
             ]},
             {description, "Small number of links"}
         ]},
         {config, [{name, medium},
             {parameters, [
-                [{name, links_num}, {value, 20000}]
+                [{name, links_num}, {value, 20000}],
+                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
             ]},
             {description, "Medium number of links"}
         ]},
         {config, [{name, big},
             {parameters, [
-                [{name, links_num}, {value, 50000}]
+                [{name, links_num}, {value, 50000}],
+                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
             ]},
             {description, "High number of links"}
-        ]},
-        {config, [{name, large},
-            {parameters, [
-                [{name, links_num}, {value, 100000}]
-            ]},
-            {description, "Very high number of links"}
         ]}
+        % TODO - VFS-4937
+%%        {config, [{name, large},
+%%            {parameters, [
+%%                [{name, links_num}, {value, 100000}],
+%%                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
+%%            ]},
+%%            {description, "Very high number of links"}
+%%        ]}
     ]).
 links_performance_base(Config) ->
     ct:timetrap({hours, 2}),
-    Orders = [128, 1024, 5120, 10240],
+    Orders = ?config(orders, Config),
     lists:foreach(fun(Order) ->
-        links_performance_base(Config, Order, false),
-        links_performance_base(Config, Order, true)
+        links_performance_base(Config, Order)
     end, Orders).
 
-links_performance_base(Config, Order, Reverse) ->
+links_performance_base(Config, Order) ->
     % TODO VFS-4743 - test fetch
+
+    % Init test variables
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, datastore_links_tree_order, Order),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME,
@@ -545,87 +554,155 @@ links_performance_base(Config, Order, Reverse) ->
         N ->
             N
     end,
-    put(key_num, KeyNum + 1),
+    put(key_num, KeyNum + 2),
     Key = ?KEY(KeyNum),
+    Key2 = ?KEY(KeyNum + 1),
 
     % Init tp
-    ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key, ?LINK_TREE_ID, [{?LINK_NAME, ?LINK_TARGET}]
+    ])),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key2, ?LINK_TREE_ID, [{?LINK_NAME, ?LINK_TARGET}]
+    ])),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key, ?LINK_TREE_ID, [?LINK_NAME]
+    ])),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key2, ?LINK_TREE_ID, [?LINK_NAME]
+    ])),
+    ?assertMatch({ok, []}, rpc:call(Worker, Model, fold_links,
         [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
     )),
+    ?assertMatch({ok, []}, rpc:call(Worker, Model, fold_links,
+        [Key2, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{size => 1}]
+    )),
 
-    ExpectedLinks = lists:map(fun(N) ->
+    % Test add
+    ExpectedLinks = lists:sort(lists:map(fun(N) ->
         {?LINK_NAME(N), ?LINK_TARGET(N)}
-    end, lists:seq(1, LinksNum)),
-    ToAdd = case Reverse of
-        true -> lists:reverse(ExpectedLinks);
-        _ -> ExpectedLinks
-    end,
+    end, lists:seq(1, LinksNum))),
+    ExpectedLinksHalf = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum, 2))),
+    ExpectedLinksHalf2 = ExpectedLinks -- ExpectedLinksHalf,
+
     T0Add = os:timestamp(),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-        Key, ?LINK_TREE_ID, ToAdd
+        Key, ?LINK_TREE_ID, ExpectedLinks
     ])),
     T1Add = os:timestamp(),
 
-    T0 = os:timestamp(),
+    T2Add = os:timestamp(),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key2, ?LINK_TREE_ID, ExpectedLinksHalf
+    ])),
+    T3Add = os:timestamp(),
+
+    T4Add = os:timestamp(),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key2, ?LINK_TREE_ID, ExpectedLinksHalf2
+    ])),
+    T5Add = os:timestamp(),
+
+    % Test list
+    T0List = os:timestamp(),
     {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
         [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
     )),
-    T1 = os:timestamp(),
+    T1List = os:timestamp(),
     ?assertEqual(LinksNum, length(Links)),
 
-    T2 = os:timestamp(),
-    Links2 = fold_links_offset(Key, Worker, Model,
+    T2List = os:timestamp(),
+    Links2 = fold_links_offset(Key2, Worker, Model,
         #{size => 100, offset => 0}, LinksNum),
-    T3 = os:timestamp(),
+    T3List = os:timestamp(),
     ?assertEqual(LinksNum, length(Links2)),
 
-    T4 = os:timestamp(),
-    Links3 = fold_links_offset(Key, Worker, Model,
+    T4List = os:timestamp(),
+    Links3 = fold_links_offset(Key2, Worker, Model,
         #{size => 2000, offset => 0}, LinksNum),
-    T5 = os:timestamp(),
+    T5List = os:timestamp(),
     ?assertEqual(LinksNum, length(Links3)),
 
-    T6 = os:timestamp(),
+    T6List = os:timestamp(),
     Links4 = fold_links_token(Key, Worker, Model,
         #{size => 100, offset => 0, token => #link_token{}}),
-    T7 = os:timestamp(),
+    T7List = os:timestamp(),
     ?assertEqual(LinksNum, length(Links4)),
 
-    T8 = os:timestamp(),
+    T8List = os:timestamp(),
     Links5 = fold_links_token(Key, Worker, Model,
         #{size => 2000, offset => 0, token => #link_token{}}),
-    T9 = os:timestamp(),
+    T9List = os:timestamp(),
     ?assertEqual(LinksNum, length(Links5)),
 
-    ExpectedLinkNames = lists:map(fun(N) ->
+    % Test del
+    ExpectedLinkNames = lists:sort(lists:map(fun(N) ->
         ?LINK_NAME(N)
-    end, lists:seq(1, LinksNum)),
-    ToDel = case Reverse of
-        true -> lists:reverse(ExpectedLinkNames);
-        _ -> ExpectedLinkNames
-    end,
-    T10 = os:timestamp(),
-    % TODO VFS-4743 - delete performance
-    case Order =< 128 of
-        true ->
-            ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-                Key, ?LINK_TREE_ID, ToDel
-            ]));
-        _ ->
-            ok
-    end,
-    T11 = os:timestamp(),
+    end, lists:seq(1, LinksNum))),
+    ExpectedLinkNamesReversed = lists:reverse(ExpectedLinkNames),
 
-    AddTimeDiff = timer:now_diff(T1Add, T0Add),
-    TimeDiff1 = timer:now_diff(T1, T0),
-    TimeDiff2 = timer:now_diff(T3, T2),
-    TimeDiff3 = timer:now_diff(T5, T4),
-    TimeDiff4 = timer:now_diff(T7, T6),
-    TimeDiff5 = timer:now_diff(T9, T8),
-    TimeDiff6 = timer:now_diff(T11, T10),
-    ct:pal("Results for order ~p (reversed ~p): ~p",
-        [Order, Reverse, {AddTimeDiff, TimeDiff1, TimeDiff2, TimeDiff3,
-            TimeDiff4, TimeDiff5, TimeDiff6}]).
+    T0Del = os:timestamp(),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key, ?LINK_TREE_ID, ExpectedLinkNames
+    ])),
+    T1Del = os:timestamp(),
+    Links6 = fold_links_token(Key, Worker, Model,
+        #{size => 2000, offset => 0, token => #link_token{}}),
+    ?assertEqual(0, length(Links6)),
+
+    T2Del = os:timestamp(),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key2, ?LINK_TREE_ID, ExpectedLinkNamesReversed
+    ])),
+    T3Del = os:timestamp(),
+    Links7 = fold_links_token(Key2, Worker, Model,
+        #{size => 2000, offset => 0, token => #link_token{}}),
+    ?assertEqual(0, length(Links7)),
+
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        Key, ?LINK_TREE_ID, ExpectedLinks
+    ])),
+
+    ExpectedLinkNames2 = lists:sort(lists:map(fun(N) ->
+        ?LINK_NAME(N)
+    end, lists:seq(1, LinksNum, 3))),
+    ExpectedLinkNames3 = ExpectedLinkNames -- ExpectedLinkNames2,
+    T4Del = os:timestamp(),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key, ?LINK_TREE_ID, ExpectedLinkNames2
+    ])),
+    T5Del = os:timestamp(),
+
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        Key, ?LINK_TREE_ID, ExpectedLinkNames3
+    ])),
+    Links8 = fold_links_token(Key2, Worker, Model,
+        #{size => 2000, offset => 0, token => #link_token{}}),
+    ?assertEqual(0, length(Links8)),
+
+    % Print results
+    AddTime1Diff = timer:now_diff(T1Add, T0Add),
+    AddTime2Diff = timer:now_diff(T3Add, T2Add),
+    AddTime3Diff = timer:now_diff(T5Add, T4Add),
+    ListTimeDiff1 = timer:now_diff(T1List, T0List),
+    ListTimeDiff2 = timer:now_diff(T3List, T2List),
+    ListTimeDiff3 = timer:now_diff(T5List, T4List),
+    ListTimeDiff4 = timer:now_diff(T7List, T6List),
+    ListTimeDiff5 = timer:now_diff(T9List, T8List),
+    DelTime1Diff = timer:now_diff(T1Del, T0Del),
+    DelTime2Diff = timer:now_diff(T3Del, T2Del),
+    DelTime3Diff = timer:now_diff(T5Del, T4Del),
+    ct:pal("Results for order ~p, links num ~p:~n"
+        "add all ~p, add half ~p, add second half ~p~n"
+        "list all ~p, list offset (batch 100) ~p, list offset (batch 2000) ~p~n"
+        "list token (batch 100) ~p, list token (batch 2000) ~p~n"
+        "dell all ~p, dell all reversed ~p, dell 1/3 ~p~n",
+        [Order, LinksNum, AddTime1Diff, AddTime2Diff, AddTime3Diff,
+            ListTimeDiff1, ListTimeDiff2, ListTimeDiff3,
+            ListTimeDiff4, ListTimeDiff5,
+            DelTime1Diff, DelTime2Diff, DelTime3Diff]).
 
 %%%===================================================================
 %%% Init/teardown functions
