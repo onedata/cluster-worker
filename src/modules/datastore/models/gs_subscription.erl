@@ -16,18 +16,17 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/1, delete/1, update/3, create/1, list/0]).
+-export([get/2, update/4, create/3, list/0]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
 
 -type ctx() :: datastore:ctx().
--type key() :: datastore:key().
 -type record() :: #gs_subscription{}.
 -type doc() :: datastore_doc:doc(record()).
 -type diff() :: datastore_doc:diff(record()).
 
--export_type([diff/0]).
+-export_type([doc/0, diff/0]).
 
 -define(CTX, #{
     model => ?MODULE,
@@ -44,36 +43,30 @@
 %% Returns Graph Sync subscription record.
 %% @end
 %%--------------------------------------------------------------------
--spec get(key()) -> {ok, doc()} | {error, term()}.
-get(Key) ->
-    datastore_model:get(?CTX, Key).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Deletes Graph Sync subscription record.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(key()) -> ok | {error, term()}.
-delete(Key) ->
-    datastore_model:delete(?CTX, Key).
+-spec get(gs_protocol:entity_type(), gs_protocol:entity_id()) ->
+    {ok, doc()} | {error, term()}.
+get(Type, Id) ->
+    datastore_model:get(?CTX, id(Type, Id)).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Updates existing Graph Sync subscription record or creates default one.
 %% @end
 %%--------------------------------------------------------------------
--spec update(key(), diff(), record()) -> {ok, doc()} | {error, term()}.
-update(Key, Diff, Default) ->
-    datastore_model:update(?CTX, Key, Diff, Default).
+-spec update(gs_protocol:entity_type(), gs_protocol:entity_id(), diff(), record()) ->
+    {ok, doc()} | {error, term()}.
+update(Type, Id, Diff, Default) ->
+    datastore_model:update(?CTX, id(Type, Id), Diff, Default).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates Graph Sync subscription record.
 %% @end
 %%--------------------------------------------------------------------
--spec create(doc()) -> {ok, doc()} | {error, term()}.
-create(Doc) ->
-    datastore_model:create(?CTX, Doc).
+-spec create(gs_protocol:entity_type(), gs_protocol:entity_id(), doc()) ->
+    {ok, doc()} | {error, term()}.
+create(Type, Id, Doc) ->
+    datastore_model:create(?CTX, Doc#document{key = id(Type, Id)}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -96,3 +89,8 @@ list() ->
 -spec get_ctx() -> ctx().
 get_ctx() ->
     ?CTX.
+
+
+-spec id(gs_protocol:entity_type(), gs_protocol:entity_id()) -> binary().
+id(Type, Id) ->
+    <<(atom_to_binary(Type, utf8))/binary, Id/binary>>.

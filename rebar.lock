@@ -1,3 +1,4 @@
+{"1.1.0",
 [{<<"base64url">>,
   {git,"https://github.com/dvv/base64url.git",
        {ref,"f2c64ed8b9bebc536fad37ad97243452b674b837"}},
@@ -17,7 +18,7 @@
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},2},
  {<<"cluster_manager">>,
   {raw,"ssh://git@git.plgrid.pl:7999/vfs/cluster-manager.git",
-       {mod_ref,git,{ref,"939176e5a73dc00f25f51b219acb67ed1066042e"},[]}},
+       {mod_ref,git,{ref,"efd492fae0432ffabb09635042a8a44194deca44"},[]}},
   0},
  {<<"cowboy">>,
   {git,"git://github.com/ninenines/cowboy.git",
@@ -29,7 +30,7 @@
   2},
  {<<"ctool">>,
   {git,"ssh://git@git.plgrid.pl:7999/vfs/ctool.git",
-       {ref,"5d185053921faaf22b48c1137ab4be22530c8b42"}},
+       {ref,"d9a0e61fb4a7ef2f153ca63e191c6b50d5d8d544"}},
   0},
  {<<"edown">>,
   {git,"git://github.com/uwiger/edown.git",
@@ -120,4 +121,14 @@
  {<<"worker_pool">>,
   {git,"https://github.com/inaka/worker_pool",
        {ref,"ae5aa2e5819f7cce3aa3fbc50d39743de3515cdc"}},
-  0}].
+  0}]}.
+[
+{pkg_hash,[
+ {<<"certifi">>, <<"861A57F3808F7EB0C2D1802AFEAAE0FA5DE813B0DF0979153CBAFCD853ABABAF">>},
+ {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>},
+ {<<"idna">>, <<"AC62EE99DA068F43C50DC69ACF700E03A62A348360126260E87F2B54ECED86B2">>},
+ {<<"lager">>, <<"9D29C5FF7F926D25ECD9899990867C9152DCF34EEE65BAC8EC0DFC0D16A26E0C">>},
+ {<<"metrics">>, <<"25F094DEA2CDA98213CECC3AEFF09E940299D950904393B2A29D191C346A8486">>},
+ {<<"mimerl">>, <<"993F9B0E084083405ED8252B99460C4F0563E41729AB42D9074FD5E52439BE88">>},
+ {<<"ssl_verify_fun">>, <<"28A4D65B7F59893BC2C7DE786DEC1E1555BD742D336043FE644AE956C3497FBE">>}]}
+].

@@ -323,6 +323,10 @@ error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
     #{
         <<"id">> => <<"subdomainDelegationDisabled">>
     };
+error_to_json(_, ?ERROR_PROTECTED_GROUP) ->
+    #{
+        <<"id">> => <<"protectedGroup">>
+    };
 error_to_json(_, ?ERROR_RELATION_DOES_NOT_EXIST(ChType, ChId, ParType, ParId)) ->
     #{
         <<"id">> => <<"relationDoesNotExist">>,
@@ -350,6 +354,10 @@ error_to_json(_, ?ERROR_CANNOT_DELETE_ENTITY(EntityType, EntityId)) ->
             <<"entityType">> => EntityType,
             <<"entityId">> => EntityId
         }
+    };
+error_to_json(_, ?ERROR_CANNOT_JOIN_GROUP_TO_ITSELF) ->
+    #{
+        <<"id">> => <<"cannotJoinGroupToItself">>
     }.
 
 
@@ -531,6 +539,9 @@ json_to_error(_, #{<<"id">> := <<"badValueName">>}) ->
 json_to_error(_, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
     ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;
 
+json_to_error(_, #{<<"id">> := <<"protectedGroup">>}) ->
+    ?ERROR_PROTECTED_GROUP;
+
 json_to_error(_, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{
         <<"childType">> := ChType, <<"childId">> := ChId,
@@ -549,5 +560,7 @@ json_to_error(_, #{<<"id">> := <<"relationAlreadyExists">>,
 
 json_to_error(_, #{<<"id">> := <<"cannotDeleteEntity">>,
     <<"details">> := #{<<"entityType">> := EntityType, <<"entityId">> := EntityId}}) ->
-    ?ERROR_CANNOT_DELETE_ENTITY(binary_to_existing_atom(EntityType, utf8), EntityId).
+    ?ERROR_CANNOT_DELETE_ENTITY(binary_to_existing_atom(EntityType, utf8), EntityId);
 
+json_to_error(_, #{<<"id">> := <<"cannotJoinGroupToItself">>}) ->
+    ?ERROR_CANNOT_JOIN_GROUP_TO_ITSELF.
