@@ -15,7 +15,8 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1]).
+-export([get_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1,
+    get_default_disk_ctx/0]).
 -export([resolve_conflict/4]).
 -export([set_defaults/1, set_defaults/2]).
 
@@ -115,6 +116,15 @@ set_defaults(UniqueKey, Ctx) ->
     Ctx2 = set_memory_driver(UniqueKey, Ctx),
     Ctx3 = set_disc_driver(Ctx2),
     set_remote_driver(Ctx3).
+
+%%-------------------------------------------------------------------
+%% @doc
+%% Returns default disk ctx.
+%% @end
+%%-------------------------------------------------------------------
+-spec get_default_disk_ctx() -> datastore:disc_driver_ctx().
+get_default_disk_ctx() ->
+    #{bucket => ?DEFAULT_BUCKET}.
 
 %%%===================================================================
 %%% Internal functions

@@ -93,33 +93,28 @@ all() ->
 
 add_link_should_save_link_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+    LinkName = ?LINK_NAME,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
-            ?LINK_NAME, ?LINK_TARGET
+            [{LinkName, {?LINK_TARGET, undefined}}]
         ]]
-    )),
-    ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
-    ?assertEqual(?LINK_NAME, Link#link.name),
-    ?assertEqual(?LINK_TARGET, Link#link.target),
-    ?assertMatch(<<_/binary>>, Link#link.tree_id).
+    )).
 
 add_link_should_save_link_on_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+    LinkName = ?LINK_NAME,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
-            ?LINK_NAME, ?LINK_TARGET
+            [{LinkName, {?LINK_TARGET, undefined}}]
         ]]
-    )),
-    ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
-    ?assertEqual(?LINK_NAME, Link#link.name),
-    ?assertEqual(?LINK_TARGET, Link#link.target),
-    ?assertMatch(<<_/binary>>, Link#link.tree_id).
+    )).
 
 get_link_should_return_target_from_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+    LinkName = ?LINK_NAME,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
-            ?LINK_NAME, ?LINK_TARGET
+            [{LinkName, {?LINK_TARGET, undefined}}]
         ]]
     )),
     {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
@@ -134,9 +129,10 @@ get_link_should_return_target_from_memory(Config) ->
 
 get_link_should_return_target_from_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+    LinkName = ?LINK_NAME,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
-            ?LINK_NAME, ?LINK_TARGET
+            [{LinkName, {?LINK_TARGET, undefined}}]
         ]]
     )),
     {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
@@ -151,27 +147,29 @@ get_link_should_return_target_from_disc(Config) ->
 
 delete_link_should_delete_link_in_memory(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+    LinkName = ?LINK_NAME,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
-            ?LINK_NAME, ?LINK_TARGET
+            [{LinkName, {?LINK_TARGET, undefined}}]
         ]]
     )),
-    ?assertMatch({ok, _}, rpc:call(Worker,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, delete, [
-            ?LINK_NAME
+            [{LinkName, fun(_) -> true end}]
         ]]
     )).
 
 delete_link_should_delete_link_on_disc(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+    LinkName = ?LINK_NAME,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
-            ?LINK_NAME, ?LINK_TARGET
+            [{LinkName, {?LINK_TARGET, undefined}}]
         ]]
     )),
-    ?assertMatch({ok, _}, rpc:call(Worker,
+    ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
         datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, delete, [
-            ?LINK_NAME
+            [{LinkName, fun(_) -> true end}]
         ]]
     )).
 
@@ -473,9 +471,15 @@ cache_size(_Case) -> 10000.
 
 add_links(Worker, Ctx, Key, TreeId, LinksNum) ->
     lists:map(fun(N) ->
-        {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+        LinkName = ?LINK_NAME(N),
+        ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
             datastore_links_crud, apply, [Ctx, Key, TreeId, add, [
-                ?LINK_NAME(N), ?LINK_TARGET(N)
+                [{LinkName, {?LINK_TARGET(N), undefined}}]
+            ]]
+        )),
+        {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+            datastore_links_crud, apply, [Ctx, Key, TreeId, get, [
+                LinkName
             ]]
         )),
         Link
@@ -486,9 +490,15 @@ add_links_with_ids(Worker, Ctx, Key, TreeId, LinksNum) ->
         Name = <<"link-", (?CASE)/binary, "-",
             (integer_to_binary(10-TreeId))/binary, "-",
             (integer_to_binary(N))/binary>>,
-        {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+
+        ?assertMatch({{ok, [Name]}, _}, rpc:call(Worker,
             datastore_links_crud, apply, [Ctx, Key, ?LINK_TREE_ID(TreeId), add, [
-                Name, ?LINK_TARGET(N)
+                [{Name, {?LINK_TARGET(N), undefined}}]
+            ]]
+        )),
+        {{ok, Link}, _} = ?assertMatch({{ok, #link{}}, _}, rpc:call(Worker,
+            datastore_links_crud, apply, [Ctx, Key, ?LINK_TREE_ID(TreeId), get, [
+                Name
             ]]
         )),
         Link

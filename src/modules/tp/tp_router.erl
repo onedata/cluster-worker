@@ -104,11 +104,16 @@ cleanup() ->
 -spec init_supervisors() -> ok.
 init_supervisors() ->
     lists:foreach(fun(Name) ->
-        {ok, _} = supervisor:start_child(
+        case supervisor:start_child(
             ?TP_ROUTER_SUP,
             {Name, {tp_subtree_supervisor, start_link, [Name]},
                 transient, infinity, supervisor, [tp_subtree_supervisor]}
-        )
+        ) of
+            {ok, _} -> ok;
+            {error, {already_started, _}} ->
+                ?debug("Tp supervisor ~p already started", [Name]),
+                ok
+        end
     end, datastore_multiplier:get_names(?TP_ROUTER_SUP)).
 
 %%--------------------------------------------------------------------

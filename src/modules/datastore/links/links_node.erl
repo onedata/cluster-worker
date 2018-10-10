@@ -37,7 +37,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec encode(links_node()) -> binary().
-encode(#bp_tree_node{leaf = Leaf, children = Children}) ->
+encode(#bp_tree_node{leaf = Leaf, children = Children, order = Order, rebalance_info = RI}) ->
     Children2 = maps:fold(fun
         (Key, {LinkTarget, LinkRev}, Map) when is_binary(Key) ->
             Map#{Key => #{
@@ -58,10 +58,23 @@ encode(#bp_tree_node{leaf = Leaf, children = Children}) ->
                 <<"type">> => <<"int">>
             }}
     end, #{}, bp_tree_children:to_map(Children)),
-    jiffy:encode(#{
+
+    FinalMap = #{
         <<"leaf">> => Leaf,
         <<"children">> => Children2
-    }).
+    },
+
+    FinalMap2 = case Order of
+        undefined -> FinalMap;
+        _ -> maps:put(<<"order">>, Order, FinalMap)
+    end,
+
+    FinalMap3 = case RI of
+        undefined -> FinalMap2;
+        _ -> maps:put(<<"rebalance_info">>, RI, FinalMap2)
+    end,
+
+    jiffy:encode(FinalMap3).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -73,11 +86,16 @@ decode(Term) ->
     #{
         <<"leaf">> := Leaf,
         <<"children">> := Children
-    } = jiffy:decode(Term, [return_maps]),
+    } = InputMap = jiffy:decode(Term, [return_maps]),
     Children2 = maps:fold(fun
+        (Key, #{<<"target">> := LinkTarget, <<"_rev">> := <<"undefined">>,
+            <<"type">> := <<"int">>}, Map) ->
+            Map#{binary_to_integer(Key) => {LinkTarget, undefined}};
         (Key, #{<<"target">> := LinkTarget, <<"_rev">> := LinkRev,
             <<"type">> := <<"int">>}, Map) ->
             Map#{binary_to_integer(Key) => {LinkTarget, LinkRev}};
+        (Key, #{<<"target">> := LinkTarget, <<"_rev">> := <<"undefined">>}, Map) ->
+            Map#{Key => {LinkTarget, undefined}};
         (Key, #{<<"target">> := LinkTarget, <<"_rev">> := LinkRev}, Map) ->
             Map#{Key => {LinkTarget, LinkRev}};
         (Key, #{<<"target">> := Value, <<"type">> := <<"int">>}, Map) ->
@@ -85,9 +103,12 @@ decode(Term) ->
         (Key, Value, Map) ->
             Map#{Key => Value}
     end, #{}, Children),
+
     #bp_tree_node{
         leaf = Leaf,
-        children = bp_tree_children:from_map(Children2)
+        children = bp_tree_children:from_map(Children2),
+        order = maps:get(<<"order">>, InputMap, undefined),
+        rebalance_info = maps:get(<<"rebalance_info">>, InputMap, undefined)
     }.
 
 %%%===================================================================

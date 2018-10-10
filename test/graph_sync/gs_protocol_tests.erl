@@ -41,13 +41,13 @@ gs_protocol_test_() ->
 %%%===================================================================
 
 setup() ->
-    meck:new(gs_logic_plugin, [non_strict]),
-    meck:expect(gs_logic_plugin, encode_entity_type, fun(Atom) -> atom_to_binary(Atom, utf8) end),
-    meck:expect(gs_logic_plugin, decode_entity_type, fun(Bin) -> binary_to_atom(Bin, utf8) end).
+    meck:new(gs_protocol_plugin, [non_strict]),
+    meck:expect(gs_protocol_plugin, encode_entity_type, fun(Atom) -> atom_to_binary(Atom, utf8) end),
+    meck:expect(gs_protocol_plugin, decode_entity_type, fun(Bin) -> binary_to_atom(Bin, utf8) end).
 
 teardown(_) ->
-    ?assert(meck:validate(gs_logic_plugin)),
-    ok = meck:unload(gs_logic_plugin).
+    ?assert(meck:validate(gs_protocol_plugin)),
+    ok = meck:unload(gs_protocol_plugin).
 
 
 %%%===================================================================

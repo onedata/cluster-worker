@@ -56,8 +56,6 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_auth_override, fun verify_auth_override/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_authorized, fun is_authorized/5),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, root_client, fun root_client/0),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, encode_entity_type, fun encode_entity_type/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, decode_entity_type, fun decode_entity_type/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, guest_client, fun guest_client/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_rpc, fun handle_rpc/4),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_graph_request, fun handle_graph_request/6),
@@ -71,10 +69,14 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_new(Nodes, datastore_config_plugin, [non_strict]),
     ok = test_utils:mock_expect(Nodes, datastore_config_plugin, get_throttled_models, fun get_throttled_models/0),
 
+    ok = test_utils:mock_new(Nodes, ?GS_PROTOCOL_PLUGIN, [non_strict]),
+    ok = test_utils:mock_expect(Nodes, ?GS_PROTOCOL_PLUGIN, encode_entity_type, fun encode_entity_type/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_PROTOCOL_PLUGIN, decode_entity_type, fun decode_entity_type/1),
+
     % GS_LOGIC_PLUGIN is called in gs_client on the testmaster node
-    ok = test_utils:mock_new([node()], ?GS_LOGIC_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect([node()], ?GS_LOGIC_PLUGIN, encode_entity_type, fun encode_entity_type/1),
-    ok = test_utils:mock_expect([node()], ?GS_LOGIC_PLUGIN, decode_entity_type, fun decode_entity_type/1),
+    ok = test_utils:mock_new([node()], ?GS_PROTOCOL_PLUGIN, [non_strict]),
+    ok = test_utils:mock_expect([node()], ?GS_PROTOCOL_PLUGIN, encode_entity_type, fun encode_entity_type/1),
+    ok = test_utils:mock_expect([node()], ?GS_PROTOCOL_PLUGIN, decode_entity_type, fun decode_entity_type/1),
 
     ok.
 
@@ -82,6 +84,7 @@ mock_callbacks(Config) ->
 unmock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
     test_utils:mock_unload(Nodes, ?GS_LOGIC_PLUGIN),
+    test_utils:mock_unload(Nodes, ?GS_PROTOCOL_PLUGIN),
     test_utils:mock_unload(Nodes, ?GS_EXAMPLE_TRANSLATOR),
     test_utils:mock_unload(Nodes, datastore_config_plugin),
 
@@ -123,12 +126,6 @@ client_to_identity(?PROVIDER_AUTH(PId)) -> {provider, PId}.
 
 
 root_client() -> ?ROOT_AUTH.
-
-
-encode_entity_type(Atom) -> atom_to_binary(Atom, utf8).
-
-
-decode_entity_type(Bin) -> binary_to_atom(Bin, utf8).
 
 
 guest_client() -> ?NOBODY_AUTH.
@@ -343,6 +340,12 @@ translate_value(_, _GRI, Data) ->
 
 get_throttled_models() ->
     [].
+
+
+encode_entity_type(Atom) -> atom_to_binary(Atom, utf8).
+
+
+decode_entity_type(Bin) -> binary_to_atom(Bin, utf8).
 
 
 -spec parse_macaroons_from_headers(Req :: cowboy_req:req()) ->

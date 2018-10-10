@@ -49,6 +49,9 @@
 -type cached_token_map() ::
     #{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
 
+-define(REV_LENGTH,
+    application:get_env(cluster_worker, datastore_links_rev_length, 16)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -404,14 +407,21 @@ batch_request({delete, [Ctx, Key, Pred]}, Batch, _LinkTokens) ->
         datastore_doc:delete(set_mutator_pid(Ctx), Key, Pred, Batch2)
     end);
 batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
-    lists:foldl(fun({LinkName, LinkTarget}, {Responses, Batch2}) ->
-        {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
-            links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
-                datastore_links:add(LinkName, LinkTarget, Tree)
-            end)
-        end),
-        {[Response | Responses], Batch4}
-    end, {[], Batch}, Links);
+    Items = case maps:get(sync_enabled, Ctx, false) of
+        true ->
+            lists:map(fun({LinkName, LinkTarget}) ->
+                % TODO - VFS-4904 takes half of time
+                LinkRev = str_utils:rand_hex(?REV_LENGTH),
+                {LinkName, {LinkTarget, LinkRev}}
+            end, Links);
+        _ ->
+            lists:map(fun({LinkName, LinkTarget}) ->
+                {LinkName, {LinkTarget, undefined}}
+            end, Links)
+    end,
+    links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
+        add_links(Items, Tree, TreeId, [], [])
+    end);
 batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
@@ -427,14 +437,16 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
 batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
-    lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
-        {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
-            links_tree_apply(Ctx, Key, TreeId, Batch3, fun(Tree) ->
-                datastore_links:delete(LinkName, LinkRev, Tree)
-            end)
-        end),
-        {[Response | Responses], Batch4}
-    end, {[], Batch}, Links);
+    Items = lists:map(fun({LinkName, LinkRev}) ->
+        Pred = fun
+            ({_, Rev}) when LinkRev =/= undefined -> Rev =:= LinkRev;
+            (_) -> true
+        end,
+        {LinkName, Pred}
+    end, Links),
+    links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
+        delete_links(Items, Tree, [], [])
+    end);
 batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
@@ -493,6 +505,76 @@ batch_request({Function, Args}, Batch, _LinkTokens) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Deletes links from tree.
+%% Warning: links have to be sorted.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_links([{datastore_links:link_name(), datastore_links:remove_pred()}],
+    tree(), [{reference(), term()}], [datastore_links:link_name()]) ->
+    {[{reference(), term()}], tree()}.
+delete_links([], Tree, Responses, _RemovedKeys) ->
+    {Responses, Tree};
+delete_links([_ | LinksTail] = Links, Tree, Responses, []) ->
+    {Response, Tree3} = batch_link_apply(Tree, fun(Tree2) ->
+        datastore_links:delete(Links, Tree2)
+    end),
+    case Response of
+        {Ref, {ok, [_ | RemovedKeys]}} ->
+            delete_links(LinksTail, Tree3, [{Ref, ok} | Responses], RemovedKeys);
+        _ ->
+            delete_links(LinksTail, Tree3, [Response | Responses], [])
+    end;
+delete_links([_ | LinksTail], Tree, Responses, [_ | RemovedKeys]) ->
+    {Response, Tree3} = batch_link_apply(Tree, fun(Tree2) ->
+        {ok, Tree2}
+    end),
+    delete_links(LinksTail, Tree3, [Response | Responses], RemovedKeys).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Adds links to tree.
+%% Warning: links have to be sorted.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_links([{datastore_links:link_name(), {datastore_links:link_target(),
+    datastore_links:link_rev()}}], tree(), tree_id(), [{reference(), term()}],
+    [datastore_links:link_name()]) -> {[{reference(), term()}], tree()}.
+add_links([], Tree, _TreeId, Responses, _AddedKeys) ->
+    {Responses, Tree};
+add_links([{LinkName, {LinkTarget, LinkRev}} | LinksTail] = Links, Tree, TreeId,
+    Responses, []) ->
+    {Response, Tree3} = batch_link_apply(Tree, fun(Tree2) ->
+        datastore_links:add(Links, Tree2)
+    end),
+    case Response of
+        {Ref, {ok, [_ | AddedKeys]}} ->
+            FinalResponse = {ok, #link{
+                tree_id = TreeId,
+                name = LinkName,
+                target = LinkTarget,
+                rev = LinkRev
+            }},
+            add_links(LinksTail, Tree3, TreeId,
+                [{Ref, FinalResponse} | Responses], AddedKeys);
+        _ ->
+            add_links(LinksTail, Tree3, TreeId, [Response | Responses], [])
+    end;
+add_links([{LinkName, {LinkTarget, LinkRev}} | LinksTail], Tree, TreeId,
+    Responses, [_ | AddedKeys]) ->
+    {Response, Tree3} = batch_link_apply(Tree, fun(Tree2) ->
+        {{ok, #link{
+            tree_id = TreeId,
+            name = LinkName,
+            target = LinkTarget,
+            rev = LinkRev
+        }}, Tree2}
+    end),
+    add_links(LinksTail, Tree3, TreeId, [Response | Responses], AddedKeys).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Applies request on a batch.
 %% @end
 %%--------------------------------------------------------------------
@@ -503,6 +585,24 @@ batch_apply(Batch, Fun) ->
     Batch2 = datastore_doc_batch:init_request(Ref, Batch),
     {Response, Batch3} = Fun(Batch2),
     {{Ref, Response}, Batch3}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Applies request on a batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec batch_link_apply(tree(), fun((tree()) -> {term(), tree()})) ->
+    {{reference(), term()}, tree()}.
+batch_link_apply(Tree, Fun) ->
+    Ref = make_ref(),
+    Tree2 = bp_tree:update_store_state(fun(State) ->
+        links_tree:update_batch(fun(Batch) ->
+            datastore_doc_batch:init_request(Ref, Batch)
+        end, State)
+    end, Tree),
+    {Response, Tree3} = Fun(Tree2),
+    {{Ref, Response}, Tree3}.
 
 %%--------------------------------------------------------------------
 %% @private
