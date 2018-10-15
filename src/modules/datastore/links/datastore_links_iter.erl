@@ -342,7 +342,7 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
     end,
 
     case Continue of
-        {true, FoldIds} ->
+        {true, FoldIds} when FoldIds =/= [] ->
             Ans2 = lists:foldl(fun
                 ({{Name, TreeId} = ItKey, #tree_it{links = Links} = TreeIt},
                     {ok, #forest_it{heap = TmpHeap} = ForestIt2, TmpEmptyTrees}) ->
@@ -379,7 +379,7 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
             add_prev_fold_nodes(Ans2, Opts, EmptyTrees, []);
         _ ->
             SmallerKeys = lists:takewhile(fun(Key) -> Key < PrevLinkName end, Keys2),
-            FirstIncluded = lists:nth(length(SmallerKeys) + Offset + 1, Keys2),
+            FirstIncluded = lists:nth(max(length(SmallerKeys) + Offset + 1, 1), Keys2),
 
             FoldAns = lists:foldl(fun({{_, ItTree}, #tree_it{links = [First | _] = Links} = TreeIt},
                 {#forest_it{heap = TmpHeap} = ForestIt2, ContinueList}) ->
