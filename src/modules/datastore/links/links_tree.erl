@@ -131,7 +131,7 @@ get_root_id(State = #state{
     ctx = Ctx, forest_id = ForestId, tree_id = TreeId, batch = Batch
 }) ->
     Ctx2 = set_remote_driver_ctx(Ctx, State),
-    case datastore_doc:fetch(Ctx2, ForestId, Batch) of
+    case datastore_doc:fetch(Ctx2, ForestId, Batch, true) of
         {{ok, #document{value = #links_forest{trees = Trees}}}, Batch2} ->
             {get_root_id(TreeId, Trees), State#state{batch = Batch2}};
         {{error, Reason}, Batch2} ->
@@ -172,7 +172,7 @@ create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
     {{ok, links_node()} | {error, term()}, state()}.
 get_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
     Ctx2 = set_remote_driver_ctx(Ctx, State),
-    case datastore_doc:fetch(Ctx2, NodeId, Batch) of
+    case datastore_doc:fetch(Ctx2, NodeId, Batch, true) of
         {{ok, #document{value = #links_node{node = Node}}}, Batch2} ->
             {{ok, Node}, State#state{batch = Batch2}};
         {{error, Reason}, Batch2} ->
