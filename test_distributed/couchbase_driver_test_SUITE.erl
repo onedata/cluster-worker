@@ -632,7 +632,8 @@ get_buckets_should_return_all_buckets(Config) ->
 expired_doc_should_not_exist(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(T) ->
-        {ok, Cas, Doc} = rpc:call(Worker, couchbase_driver, save, [?CTX#{expiry => T}, ?KEY, ?DOC]),
+        {ok, Cas, Doc} = rpc:call(Worker, couchbase_driver, save, 
+            [?CTX#{expiry => T}, ?KEY, ?DOC]),
         ?assertEqual({ok, Cas, Doc}, rpc:call(Worker, couchbase_driver, get,
             [?CTX, ?KEY]
         )),
