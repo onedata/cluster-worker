@@ -22,7 +22,7 @@
 
 %% API
 -export([create/4, save/4, update/4, update/5]).
--export([get/2, fetch/3, fetch_deleted/3, exists/2]).
+-export([get/2, fetch/3, fetch/4, fetch_deleted/3, exists/2]).
 -export([delete/3, delete/4]).
 -export([get_links/4, get_links_trees/2]).
 
@@ -80,7 +80,7 @@ create(Ctx, Key, Doc, Batch) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 save(Ctx = #{generated_key := true}, Key, Doc, Batch) ->
     Doc2 = fill(Ctx, Doc),
-    datastore_doc_batch:save(Ctx, Key, Doc2, Batch);
+    datastore_doc_batch:create(Ctx, Key, Doc2, Batch);
 save(Ctx, Key, Doc, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc}, Batch2} ->
@@ -188,20 +188,30 @@ exists(Ctx, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns datastore document.
+%% @equiv fetch(Ctx, Key, Batch, false)
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch(ctx(), key(), undefined | batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
-fetch(#{include_deleted := true} = Ctx, Key, Batch) ->
-    case fetch_deleted(Ctx, Key, Batch) of
+fetch(Ctx, Key, Batch) ->
+    fetch(Ctx, Key, Batch, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns datastore document.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch(ctx(), key(), undefined | batch(), boolean()) ->
+    {{ok, doc(value())} | {error, term()}, batch()}.
+fetch(#{include_deleted := true} = Ctx, Key, Batch, LinkFetch) ->
+    case fetch_deleted(Ctx, Key, Batch, LinkFetch) of
         {{ok, #document{value = undefined, deleted = true}}, Batch2} ->
             {{error, not_found}, Batch2};
         {Result, Batch2} ->
             {Result, Batch2}
     end;
-fetch(Ctx, Key, Batch) ->
-    case fetch_deleted(Ctx, Key, Batch) of
+fetch(Ctx, Key, Batch, LinkFetch) ->
+    case fetch_deleted(Ctx, Key, Batch, LinkFetch) of
         {{ok, #document{deleted = true}}, Batch2} ->
             {{error, not_found}, Batch2};
         {Result, Batch2} ->
@@ -210,15 +220,13 @@ fetch(Ctx, Key, Batch) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns datastore document even if it is marked as deleted.
+%% @equiv fetch_deleted(Ctx, Key, Batch, false).
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_deleted(ctx(), key(), undefined | batch()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
-fetch_deleted(Ctx, Key, Batch = undefined) ->
-    {datastore_cache:get(Ctx, Key), Batch};
 fetch_deleted(Ctx, Key, Batch) ->
-    datastore_doc_batch:fetch(Ctx, Key, Batch).
+    fetch_deleted(Ctx, Key, Batch, false).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -311,6 +319,24 @@ get_links_trees(Ctx, Key) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns datastore document even if it is marked as deleted.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_deleted(ctx(), key(), undefined | batch(), boolean()) ->
+    {{ok, doc(value())} | {error, term()}, batch()}.
+fetch_deleted(Ctx, Key, Batch = undefined, false) ->
+    {datastore_cache:get(Ctx, Key), Batch};
+fetch_deleted(Ctx, Key, Batch = undefined, true) ->
+    case datastore_cache:get(Ctx, Key) of
+        {error, not_found} -> {datastore_cache:get_remote(Ctx, Key), Batch};
+        Other -> {Other, Batch}
+    end;
+fetch_deleted(Ctx, Key, Batch, _) ->
+    datastore_doc_batch:fetch(Ctx, Key, Batch).
 
 %%--------------------------------------------------------------------
 %% @private
