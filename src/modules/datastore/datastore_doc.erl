@@ -80,7 +80,7 @@ create(Ctx, Key, Doc, Batch) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 save(Ctx = #{generated_key := true}, Key, Doc, Batch) ->
     Doc2 = fill(Ctx, Doc),
-    datastore_doc_batch:save(Ctx, Key, Doc2, Batch);
+    datastore_doc_batch:create(Ctx, Key, Doc2, Batch);
 save(Ctx, Key, Doc, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc}, Batch2} ->
