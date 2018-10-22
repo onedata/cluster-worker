@@ -19,6 +19,8 @@
 -export([init_models/1, init_models/2]).
 -export([get_memory_driver/1, get_disc_driver/1]).
 
+-export([get_ctx/1]).
+
 -define(TIMEOUT, timer:seconds(60)).
 
 %%%===================================================================

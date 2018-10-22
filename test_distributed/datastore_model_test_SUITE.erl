@@ -48,7 +48,8 @@
     fold_links_token_should_succeed_after_token_timeout/1,
     links_performance/1,
     links_performance_base/1,
-    create_get_performance/1
+    create_get_performance/1,
+    expired_doc_should_not_exist/1
 ]).
 
 % for rpc
@@ -82,7 +83,8 @@ all() ->
         fold_links_token_should_succeed,
         get_links_trees_should_return_all_trees,
         fold_links_token_should_succeed_after_token_timeout,
-        links_performance
+        links_performance,
+        expired_doc_should_not_exist
     ], [
         links_performance,
         create_get_performance
@@ -742,6 +744,21 @@ del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
         apply(Model, delete_links, [Key, Tree, Name])
     end, ExpectedLinkNames).
 
+
+expired_doc_should_not_exist(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(T) ->
+        Model = ets_cached_model,
+        Ctx = (datastore_test_utils:get_ctx(Model))#{expiry => T},
+        {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
+            rpc:call(Worker, datastore_model, create, [Ctx, ?DOC(?KEY(T), Model)])
+        ),
+        assert_on_disc(Worker, Model, Key),
+        timer:sleep(8000),
+        assert_not_on_disc(Worker, Model, Key)
+    end, [os:system_time(second)+5, 5]).
+    
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -803,6 +820,18 @@ assert_on_disc(Worker, Model, Key, Deleted) ->
             ok;
         Driver ->
             ?assertMatch({ok, _, #document{deleted = Deleted}},
+                rpc:call(Worker, Driver, get, [
+                    ?DISC_CTX, ?UNIQUE_KEY(Model, Key)
+                ]), ?ATTEMPTS
+            )
+    end.
+
+assert_not_on_disc(Worker, Model, Key) ->
+    case ?DISC_DRV(Model) of
+        undefined ->
+            ok;
+        Driver ->
+            ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
                     ?DISC_CTX, ?UNIQUE_KEY(Model, Key)
                 ]), ?ATTEMPTS
