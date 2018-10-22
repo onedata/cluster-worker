@@ -14,7 +14,7 @@
 
 %% API
 -export([gen_key/0, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
--export([hex/1, gen_hex/1]).
+-export([gen_hex/1]).
 
 -type hex() :: binary().
 -type key() :: datastore:key().
@@ -50,7 +50,7 @@ gen_key(Seed, Key) when is_binary(Seed) ->
     Ctx = crypto:hash_init(md5),
     Ctx2 = crypto:hash_update(Ctx, Seed),
     Ctx3 = crypto:hash_update(Ctx2, Key),
-    hex(crypto:hash_final(Ctx3)).
+    hex_nif:hex(crypto:hash_final(Ctx3)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -92,23 +92,9 @@ is_greater_rev(Rev1, Rev2) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Converts binary digest to a binary hex string.
-%% @end
-%%--------------------------------------------------------------------
--spec hex(binary()) -> hex().
-% TODO - VFS-4904 - very slow
-hex(Digest) ->
-    Hex = {$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $a, $b, $c, $d, $e, $f},
-    <<
-        <<(element(B bsr 4 + 1, Hex)), (element(B band 16#0F + 1, Hex))>> ||
-        <<B:8>> <= Digest
-    >>.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Generates random binary hex string of given size.
 %% @end
 %%--------------------------------------------------------------------
 -spec gen_hex(non_neg_integer()) -> hex().
 gen_hex(Size) ->
-    hex(crypto:strong_rand_bytes(Size)).
+    hex_nif:hex(crypto:strong_rand_bytes(Size)).
