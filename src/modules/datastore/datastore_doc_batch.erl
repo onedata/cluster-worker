@@ -32,10 +32,12 @@
 %% API
 -export([init/0, apply/1, terminate/1]).
 -export([init_request/2, terminate_request/2]).
--export([save/4, fetch/3]).
+-export([save/4, create/4, fetch/3]).
 
 -record(batch, {
     cache = #{} :: #{key() => entry()},
+    cache_mod_keys = [] :: [key()],
+    cache_added_keys = [] :: [key()],
     requests = #{} :: #{request_ref() => [key()]},
     request_ref = undefined :: undefined | request_ref()
 }).
@@ -75,13 +77,17 @@ init() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec apply(batch()) -> batch().
-apply(Batch = #batch{cache = Cache}) ->
-    Requests = maps:fold(fun
-        (Key, #entry{ctx = Ctx, doc = Doc, status = pending}, Acc) ->
-            [{Ctx, Key, Doc} | Acc];
-        (_Key, _Entry, Acc) ->
-            Acc
-    end, [], Cache),
+apply(Batch = #batch{cache = Cache, cache_mod_keys = CMK,
+    cache_added_keys = CAK}) ->
+    KeysOrder = (CMK -- CAK) ++ CAK,
+    Requests = lists:foldl(fun(Key, Acc) ->
+        case maps:get(Key, Cache, undefined) of
+            #entry{ctx = Ctx, doc = Doc, status = pending} ->
+                [{Ctx, Key, Doc} | Acc];
+            _ ->
+                Acc
+        end
+    end, [], KeysOrder),
     {_, Keys, _} = lists:unzip3(Requests),
     Responses = datastore_cache:save(Requests),
     Statuses = lists:map(fun
@@ -89,12 +95,13 @@ apply(Batch = #batch{cache = Cache}) ->
         ({ok, disc, _}) -> saved;
         ({error, Reason}) -> {error, Reason}
     end, Responses),
+    Batch2 = Batch#batch{cache_mod_keys = [], cache_added_keys = []},
     lists:foldl(fun({Key, Status}, Batch2 = #batch{cache = Cache2}) ->
         Entry = maps:get(Key, Cache2),
         Batch2#batch{
             cache = maps:put(Key, Entry#entry{status = Status}, Cache2)
         }
-    end, Batch, lists:zip(Keys, Statuses)).
+    end, Batch2, lists:zip(Keys, Statuses)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -154,14 +161,25 @@ terminate_request(Ref, #batch{cache = Cache, requests = Requests}) ->
 %%--------------------------------------------------------------------
 -spec save(ctx(), key(), doc(), batch()) -> {{ok, doc()}, batch()}.
 save(Ctx, Key, Doc, Batch = #batch{
-    cache = Cache, requests = Requests, request_ref = Ref
+    cache = Cache, cache_mod_keys = CMK, requests = Requests, request_ref = Ref
 }) ->
     Keys = maps:get(Ref, Requests, []),
     Entry = #entry{ctx = Ctx, doc = Doc, status = pending},
+    CMK2 = [Key | CMK -- [Key]],
     {{ok, Doc}, Batch#batch{
         requests = maps:put(Ref, [Key | Keys], Requests),
-        cache = maps:put(Key, Entry, Cache)
+        cache = maps:put(Key, Entry, Cache),
+        cache_mod_keys = CMK2
     }}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv to save(Ctx, Key, Doc, Batch) but also adds Key to added keys list.
+%% @end
+%%--------------------------------------------------------------------
+-spec create(ctx(), key(), doc(), batch()) -> {{ok, doc()}, batch()}.
+create(Ctx, Key, Doc, Batch = #batch{cache_added_keys = CAK}) ->
+    save(Ctx, Key, Doc, Batch#batch{cache_added_keys = [Key | CAK -- [Key]]}).
 
 %%--------------------------------------------------------------------
 %% @doc

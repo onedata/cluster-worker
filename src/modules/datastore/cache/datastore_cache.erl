@@ -23,7 +23,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/2, fetch/2, save/1, save/3]).
+-export([get/2, fetch/2, get_remote/2, save/1, save/3]).
 -export([flush/1, flush/2]).
 -export([flush_async/2, wait/1]).
 -export([inactivate/1, inactivate/2]).
@@ -129,6 +129,19 @@ fetch(Ctx, Keys) when is_list(Keys) ->
         ({error, Reason}) ->
             {error, Reason}
     end, Results2).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Retrieves values from remote store.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_remote(ctx(), key()) -> {ok, doc()} | {error, term()}.
+get_remote(Ctx, Key) ->
+    Future = get_remote_async(Ctx, Key),
+    case wait(Future) of
+        ({ok, _, Doc}) -> {ok, Doc};
+        ({error, Reason}) -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

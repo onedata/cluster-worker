@@ -191,7 +191,8 @@ set_disc_driver(Ctx) ->
         disc_driver => couchbase_driver,
         disc_driver_ctx => #{
             bucket => ?DEFAULT_BUCKET,
-            no_seq => not maps:get(sync_enabled, Ctx, false)
+            no_seq => not maps:get(sync_enabled, Ctx, false),
+            expiry => maps:get(expiry, Ctx, 0)
         }
     }.
 

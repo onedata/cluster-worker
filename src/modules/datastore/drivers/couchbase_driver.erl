@@ -26,7 +26,8 @@
                  cas => cberl:cas(),
                  no_seq => boolean(),
                  no_durability => boolean(),
-                 answer_to => pid()}.
+                 answer_to => pid(),
+                 expiry => cberl:expiry()}.
 -type key() :: datastore:key().
 -type value() :: datastore:doc() | cberl:value().
 -type item() :: {ctx(), key(), value()}.
