@@ -27,44 +27,12 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Tries to authorize requesting client by session cookie. Will be called only
-%% if a session cookie was sent in the request.
+%% Authorizes the requesting client. If error is returned, the Graph Sync
+%% connection will be denied.
 %% @end
 %%--------------------------------------------------------------------
--callback authorize_by_session_cookie(SessionCookie :: binary()) ->
-    false | {true, gs_protocol:client()} | gs_protocol:error().
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Tries to authorize requesting client by X-Auth-Token. Will be called
-%% only if a token was sent in the request.
-%% @end
-%%--------------------------------------------------------------------
--callback authorize_by_token(Token :: binary()) ->
-    false | {true, gs_protocol:client()} | gs_protocol:error().
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Tries to authorize requesting client by macaroons. Will be called
-%% only if macaroons were sent in the request.
-%% @end
-%%--------------------------------------------------------------------
--callback authorize_by_macaroons(Macaroon :: binary(),
-    DischargeMacaroons :: [binary()]) ->
-    false | {true, gs_protocol:client()} | gs_protocol:error().
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Tries to authorize requesting client by basic auth credentials. Will be
-%% called only if credentials were sent in the request, in the format
-%% b64(user:password).
-%% @end
-%%--------------------------------------------------------------------
--callback authorize_by_basic_auth(UserPasswdB64 :: binary()) ->
-    false | {true, gs_protocol:client()} | gs_protocol:error().
+-callback authorize(cowboy_req:req()) ->
+    {ok, gs_protocol:client()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -111,6 +79,15 @@
 %%--------------------------------------------------------------------
 -callback client_disconnected(gs_protocol:client(), gs_server:connection_ref()) ->
     ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Callback called when auth override is sent in request to verify it.
+%% @end
+%%--------------------------------------------------------------------
+-callback verify_auth_override(gs_protocol:auth_override()) ->
+    {ok, gs_protocol:client()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
