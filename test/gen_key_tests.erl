@@ -60,7 +60,7 @@ gen_key_test_base() ->
 %%%===================================================================
 
 gen_hex(Size) ->
-    hex_nif:hex(crypto:strong_rand_bytes(Size)).
+    hex_utils:hex(crypto:strong_rand_bytes(Size)).
 
 gen_key(Seed, Key) when is_binary(Seed) ->
     Time1 = erlang:monotonic_time(nanosecond),
@@ -76,7 +76,7 @@ gen_key(Seed, Key) when is_binary(Seed) ->
     Digest = crypto:hash_final(Ctx3),
 
     Time5 = erlang:monotonic_time(nanosecond),
-    hex_nif:hex(Digest),
+    hex_utils:hex(Digest),
     Time6 = erlang:monotonic_time(nanosecond),
 
     [Time2-Time1, Time3-Time2, Time4-Time3, Time5-Time4, Time6-Time5].
