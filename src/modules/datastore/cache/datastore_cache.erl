@@ -21,6 +21,7 @@
 
 -include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get/2, fetch/2, get_remote/2, save/1, save/3]).
@@ -429,6 +430,7 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _, _) ->
         true ->
             ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
         false ->
+            ?info("aaaaaa ~p", [{Key, Doc}]),
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end;
 save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
@@ -445,13 +447,16 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
             Ans = ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc)),
             case Inactivate of
               true ->
+                  ?info("aaaaaa5 ~p", [{Key, Doc}]),
                 datastore_cache_manager:mark_inactive(Pool, Key);
               _ ->
                 ok
             end,
             Ans;
         {false, true} ->
+            ?info("aaaaaa2 ~p", [{Key, Doc}]),
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
         {false, false} ->
+            ?info("aaaaaa3 ~p", [{Key, Doc}]),
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end.

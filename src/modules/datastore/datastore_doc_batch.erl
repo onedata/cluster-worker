@@ -28,6 +28,7 @@
 -author("Krzysztof Trzepla").
 
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([init/0, apply/1, terminate/1]).
@@ -93,7 +94,9 @@ apply(Batch = #batch{cache = Cache, cache_mod_keys = CMK,
     Statuses = lists:map(fun
         ({ok, memory, _}) -> cached;
         ({ok, disc, _}) -> saved;
-        ({error, Reason}) -> {error, Reason}
+        ({error, Reason}) ->
+            ?info("bbbbbb ~p", [Reason]),
+            {error, Reason}
     end, Responses),
     Batch2 = Batch#batch{cache_mod_keys = [], cache_added_keys = []},
     lists:foldl(fun({Key, Status}, Batch2 = #batch{cache = Cache2}) ->
