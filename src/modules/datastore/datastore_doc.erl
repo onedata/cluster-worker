@@ -85,17 +85,17 @@ save(Ctx, Key, Doc, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc}, Batch2} ->
             case resolve_conflict(Ctx, Doc, PrevDoc) of
-                {true, Doc2} ->
+                {save, Doc2} ->
                     datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
-                false ->
-                    {{ok, Doc}, Batch2}
+                ignore ->
+                    {{error, ignored}, Batch2}
             end;
         {{error, not_found}, Batch2} ->
             case resolve_conflict(Ctx, Doc, #document{}) of
-                {true, Doc2} ->
+                {save, Doc2} ->
                     datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
-                false ->
-                    {{ok, Doc}, Batch2}
+                ignore ->
+                    {{error, ignored}, Batch2}
             end;
         {{error, Reason}, Batch2} ->
             {{error, Reason}, Batch2}
@@ -345,27 +345,27 @@ fetch_deleted(Ctx, Key, Batch, _) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec resolve_conflict(ctx(), doc(value()), doc(value())) ->
-    {true, doc(value())} | false.
+    {save, doc(value())} | ignore.
 resolve_conflict(#{sync_change := true}, RemoteDoc, #document{revs = []}) ->
-    {true, RemoteDoc};
+    {save, RemoteDoc};
 resolve_conflict(#{sync_change := true}, #document{revs = []}, _LocalDoc) ->
-    false;
+    ignore;
 resolve_conflict(Ctx = #{sync_change := true}, RemoteDoc, LocalDoc) ->
     Model = element(1, RemoteDoc#document.value),
     case datastore_model_default:resolve_conflict(
         Model, Ctx, RemoteDoc, LocalDoc
     ) of
         {true, Doc} ->
-            {true, fill(Ctx, Doc, LocalDoc)};
+            {save, fill(Ctx, Doc, LocalDoc)};
         {false, Doc} ->
-            {true, Doc};
+            {save, Doc};
         ignore ->
-            false;
+            ignore;
         default ->
             default_resolve_conflict(RemoteDoc, LocalDoc)
     end;
 resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
-    {true, fill(Ctx, RemoteDoc, LocalDoc)}.
+    {save, fill(Ctx, RemoteDoc, LocalDoc)}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -374,13 +374,15 @@ resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec default_resolve_conflict(doc(value()), doc(value())) ->
-    {true, doc(value())} | false.
+    {save, doc(value())} | ignore.
 default_resolve_conflict(RemoteDoc, LocalDoc) ->
     #document{revs = [RemoteRev | _]} = RemoteDoc,
     #document{revs = [LocalRev | _]} = LocalDoc,
     case datastore_utils:is_greater_rev(RemoteRev, LocalRev) of
-        true -> {true, RemoteDoc};
-        false -> false
+        true ->
+            {save, RemoteDoc};
+        false ->
+            ignore
     end.
 
 %%--------------------------------------------------------------------
