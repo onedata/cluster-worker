@@ -46,7 +46,7 @@ gen_key(Seed, Key) when is_binary(Seed) ->
     Ctx = crypto:hash_init(md5),
     Ctx2 = crypto:hash_update(Ctx, Seed),
     Ctx3 = crypto:hash_update(Ctx2, Key),
-    str_utils:to_hex(crypto:hash_final(Ctx3)).
+    hex_utils:hex(crypto:hash_final(Ctx3)).
 
 %%--------------------------------------------------------------------
 %% @doc
