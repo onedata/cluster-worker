@@ -331,7 +331,7 @@ get_links_trees(Ctx, Key) ->
 fetch_deleted(Ctx, Key, Batch = undefined, false) ->
     {datastore_cache:get(Ctx, Key), Batch};
 fetch_deleted(Ctx, Key, Batch = undefined, true) ->
-    case datastore_cache:get(Ctx, Key) of
+    case datastore_cache:get(Ctx, Key, true) of
         {error, not_found} -> {datastore_cache:get_remote(Ctx, Key), Batch};
         Other -> {Other, Batch}
     end;

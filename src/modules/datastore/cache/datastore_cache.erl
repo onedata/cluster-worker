@@ -21,10 +21,9 @@
 
 -include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
--export([get/2, fetch/2, get_remote/2, save/1, save/3]).
+-export([get/2, get/3, fetch/2, get_remote/2, save/1, save/3]).
 -export([flush/1, flush/2]).
 -export([flush_async/2, wait/1]).
 -export([inactivate/1, inactivate/2]).
@@ -94,14 +93,24 @@ init_report() ->
 %%--------------------------------------------------------------------
 -spec get(ctx(), key()) -> {ok, doc()} | {error, term()};
     (ctx(), [datastore:key()]) -> [{ok, doc()} | {error, term()}].
-get(Ctx, <<_/binary>> = Key) ->
-    hd(get(Ctx, [Key]));
-get(Ctx, Keys) when is_list(Keys) ->
+get(Ctx, Keys) ->
+    get(Ctx, Keys, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Retrieves values.
+%% @end
+%%--------------------------------------------------------------------
+-spec get(ctx(), key(), boolean()) -> {ok, doc()} | {error, term()};
+    (ctx(), [datastore:key()]) -> [{ok, doc()} | {error, term()}].
+get(Ctx, <<_/binary>> = Key, DiscFallback) ->
+    hd(get(Ctx, [Key], DiscFallback));
+get(Ctx, Keys, DiscFallback) when is_list(Keys) ->
     ?update_datastore_counter(?EXOMETER_NAME(cache_get), length(Keys)),
     lists:map(fun
-        ({ok, memory, Doc}) -> {ok, Doc};
+        ({ok, _, Doc}) -> {ok, Doc};
         ({error, Reason}) -> {error, Reason}
-    end, wait([get_async(Ctx, Key, false) || Key <- Keys])).
+    end, wait([get_async(Ctx, Key, DiscFallback) || Key <- Keys])).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -430,7 +439,6 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _, _) ->
         true ->
             ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
         false ->
-            ?info("aaaaaa ~p", [{Key, Doc}]),
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end;
 save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
@@ -447,16 +455,13 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
             Ans = ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc)),
             case Inactivate of
               true ->
-                  ?info("aaaaaa5 ~p", [{Key, Doc}]),
                 datastore_cache_manager:mark_inactive(Pool, Key);
               _ ->
                 ok
             end,
             Ans;
         {false, true} ->
-            ?info("aaaaaa2 ~p", [{Key, Doc}]),
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
         {false, false} ->
-            ?info("aaaaaa3 ~p", [{Key, Doc}]),
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end.
