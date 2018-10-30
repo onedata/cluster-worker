@@ -102,7 +102,7 @@ get(Ctx, Keys) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get(ctx(), key(), boolean()) -> {ok, doc()} | {error, term()};
-    (ctx(), [datastore:key()]) -> [{ok, doc()} | {error, term()}].
+    (ctx(), [datastore:key()], boolean()) -> [{ok, doc()} | {error, term()}].
 get(Ctx, <<_/binary>> = Key, DiscFallback) ->
     hd(get(Ctx, [Key], DiscFallback));
 get(Ctx, Keys, DiscFallback) when is_list(Keys) ->
