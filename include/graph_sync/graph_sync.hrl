@@ -13,16 +13,13 @@
 -ifndef(GRAPH_SYNC_HRL).
 -define(GRAPH_SYNC_HRL, 1).
 
-% Module that must be implemented in projects that use Graph Sync, contains
-% callbacks according to gs_logic_plugin_behaviour.
+% Modules that must be implemented in projects that use Graph Sync, contain
+% callbacks called by gs_server and gs_protocol
 -define(GS_LOGIC_PLUGIN, gs_logic_plugin).
+-define(GS_PROTOCOL_PLUGIN, gs_protocol_plugin).
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
-
-% Cookie name for cookie based session.
--define(GRAPH_SYNC_SESSION_COOKIE_NAME, <<"session_id">>).
-
 
 % Graph Resource Identifier - a record identifying a certain resource in the
 % graph.
@@ -83,6 +80,7 @@
 
 -record(gs_push_nosub, {
     gri :: gs_protocol:gri(),
+    auth_hint :: gs_protocol:auth_hint(),
     reason = forbidden :: gs_protocol:nosub_reason()
 }).
 

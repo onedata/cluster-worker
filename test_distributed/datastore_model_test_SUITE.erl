@@ -110,20 +110,20 @@ create_get_performance(Config) ->
     ok.
 
 test_create_get() ->
-    Key = ?KEY,
+    ID = ?KEY,
     % Use gs_subscription as example of existing model
     % (model emulation affects results).
-    Doc = #document{key = Key, value = #gs_subscription{}},
+    Doc = #document{value = #gs_subscription{}},
     Time0 = os:timestamp(),
-    ?assertEqual({error, not_found}, gs_subscription:get(Key)),
+    ?assertEqual({error, not_found}, gs_subscription:get(test, ID)),
     Time1 = os:timestamp(),
-    ?assertEqual({error, not_found}, gs_subscription:get(Key)),
+    ?assertEqual({error, not_found}, gs_subscription:get(test, ID)),
     Time2 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:create(Doc)),
+    ?assertMatch({ok, _}, gs_subscription:create(test, ID, Doc)),
     Time3 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:get(Key)),
+    ?assertMatch({ok, _}, gs_subscription:get(test, ID)),
     Time4 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:get(Key)),
+    ?assertMatch({ok, _}, gs_subscription:get(test, ID)),
     Time5 = os:timestamp(),
 
     Diff1 = timer:now_diff(Time1, Time0),

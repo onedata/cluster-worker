@@ -19,10 +19,45 @@
 -include("graph_sync/graph_sync.hrl").
 -include_lib("ctool/include/api_errors.hrl").
 
-gri_conversion_test() ->
+%%%===================================================================
+%%% Tests generator
+%%%===================================================================
+
+gs_protocol_test_() ->
+    {foreach,
+        fun setup/0,
+        fun teardown/1,
+        [
+            fun gri_conversion/0,
+            fun greatest_common_version/0,
+            fun encode_decode_message/0,
+            fun encode_decode_error/0
+        ]
+    }.
+
+
+%%%===================================================================
+%%% Setup/teardown functions
+%%%===================================================================
+
+setup() ->
+    meck:new(gs_protocol_plugin, [non_strict]),
+    meck:expect(gs_protocol_plugin, encode_entity_type, fun(Atom) -> atom_to_binary(Atom, utf8) end),
+    meck:expect(gs_protocol_plugin, decode_entity_type, fun(Bin) -> binary_to_atom(Bin, utf8) end).
+
+teardown(_) ->
+    ?assert(meck:validate(gs_protocol_plugin)),
+    ok = meck:unload(gs_protocol_plugin).
+
+
+%%%===================================================================
+%%% Tests
+%%%===================================================================
+
+gri_conversion() ->
     ?assertEqual(
         #gri{
-            type = od_user, id = <<"12345">>,
+            type = user, id = <<"12345">>,
             aspect = instance, scope = protected
         },
         gs_protocol:string_to_gri(<<"user.12345.instance:protected">>)
@@ -30,14 +65,14 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"user.12345.instance:protected">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_user, id = <<"12345">>,
+            type = user, id = <<"12345">>,
             aspect = instance, scope = protected
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_group, id = <<"ghdkeos2wsrt4">>,
+            type = group, id = <<"ghdkeos2wsrt4">>,
             aspect = user_invite_token, scope = private
         },
         gs_protocol:string_to_gri(<<"group.ghdkeos2wsrt4.user_invite_token">>)
@@ -45,14 +80,14 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"group.ghdkeos2wsrt4.user_invite_token:private">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_group, id = <<"ghdkeos2wsrt4">>,
+            type = group, id = <<"ghdkeos2wsrt4">>,
             aspect = user_invite_token, scope = private
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_space, id = <<"spaceId">>,
+            type = space, id = <<"spaceId">>,
             aspect = {user, <<"12345">>}, scope = private
         },
         gs_protocol:string_to_gri(<<"space.spaceId.user,12345">>)
@@ -60,14 +95,14 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"space.spaceId.user,12345:private">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_space, id = <<"spaceId">>,
+            type = space, id = <<"spaceId">>,
             aspect = {user, <<"12345">>}, scope = private
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_space, id = <<"spaceId">>,
+            type = space, id = <<"spaceId">>,
             aspect = {user, <<"12345">>}, scope = public
         },
         gs_protocol:string_to_gri(<<"space.spaceId.user,12345:public">>)
@@ -75,14 +110,14 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"space.spaceId.user,12345:public">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_space, id = <<"spaceId">>,
+            type = space, id = <<"spaceId">>,
             aspect = {user, <<"12345">>}, scope = public
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_share, id = <<"sh732js">>,
+            type = share, id = <<"sh732js">>,
             aspect = space, scope = protected
         },
         gs_protocol:string_to_gri(<<"share.sh732js.space:protected">>)
@@ -90,14 +125,14 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"share.sh732js.space:protected">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_share, id = <<"sh732js">>,
+            type = share, id = <<"sh732js">>,
             aspect = space, scope = protected
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_provider, id = <<"pr2ndv7y3bs">>,
+            type = provider, id = <<"pr2ndv7y3bs">>,
             aspect = {space, <<"sp9fhh83">>}, scope = private
         },
         gs_protocol:string_to_gri(<<"provider.pr2ndv7y3bs.space,sp9fhh83:private">>)
@@ -105,14 +140,14 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"provider.pr2ndv7y3bs.space,sp9fhh83:private">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_provider, id = <<"pr2ndv7y3bs">>,
+            type = provider, id = <<"pr2ndv7y3bs">>,
             aspect = {space, <<"sp9fhh83">>}, scope = private
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_handle, id = <<"hndl76dhsha">>,
+            type = handle, id = <<"hndl76dhsha">>,
             aspect = handle, scope = public
         },
         gs_protocol:string_to_gri(<<"handle.hndl76dhsha.handle:public">>)
@@ -120,22 +155,22 @@ gri_conversion_test() ->
     ?assertEqual(
         <<"handle.hndl76dhsha.handle:public">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_handle, id = <<"hndl76dhsha">>,
+            type = handle, id = <<"hndl76dhsha">>,
             aspect = handle, scope = public
         })
     ),
 
     ?assertEqual(
         #gri{
-            type = od_handle_service, id = <<"hs726shshao">>,
+            type = handle_service, id = <<"hs726shshao">>,
             aspect = instance, scope = private
         },
-        gs_protocol:string_to_gri(<<"handleService.hs726shshao.instance">>)
+        gs_protocol:string_to_gri(<<"handle_service.hs726shshao.instance">>)
     ),
     ?assertEqual(
-        <<"handleService.hs726shshao.instance:private">>,
+        <<"handle_service.hs726shshao.instance:private">>,
         gs_protocol:gri_to_string(#gri{
-            type = od_handle_service, id = <<"hs726shshao">>,
+            type = handle_service, id = <<"hs726shshao">>,
             aspect = instance, scope = private
         })
     ),
@@ -143,7 +178,7 @@ gri_conversion_test() ->
     ok.
 
 
-greatest_common_version_test() ->
+greatest_common_version() ->
     ?assertEqual(
         {true, 7},
         gs_protocol:greatest_common_version([1, 2, 5, 6, 7], [7])
@@ -192,7 +227,7 @@ greatest_common_version_test() ->
     ok.
 
 
-encode_decode_message_test() ->
+encode_decode_message() ->
     % Check if requests are encoded and decoded correctly
     RequestsToCheck = [
         #gs_req{
@@ -263,7 +298,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = undefined, aspect = whatever},
+                gri = #gri{type = user, id = undefined, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = false,
@@ -275,7 +310,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id9">>, aspect = whatever, scope = shared},
+                gri = #gri{type = user, id = <<"id9">>, aspect = whatever, scope = shared},
                 operation = create,
                 data = #{<<"data9">> => 9},
                 subscribe = true,
@@ -287,7 +322,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_space, id = <<"id10">>, aspect = whatever},
+                gri = #gri{type = space, id = <<"id10">>, aspect = whatever},
                 operation = update,
                 data = #{<<"data10">> => 10},
                 subscribe = false,
@@ -299,7 +334,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_space, id = <<"id11">>, aspect = whatever},
+                gri = #gri{type = space, id = <<"id11">>, aspect = whatever},
                 operation = delete,
                 data = undefined,
                 subscribe = false,
@@ -311,7 +346,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id12">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id12">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -323,7 +358,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id13">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id13">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -335,7 +370,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id14">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id14">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -347,7 +382,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id15">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id15">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -359,7 +394,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id17">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id17">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -371,7 +406,7 @@ encode_decode_message_test() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = od_user, id = <<"id18">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id18">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -383,7 +418,7 @@ encode_decode_message_test() ->
             subtype = unsub,
             auth_override = undefined,
             request = #gs_req_unsub{
-                gri = #gri{type = od_user, id = <<"id19">>, aspect = whatever}
+                gri = #gri{type = user, id = <<"id19">>, aspect = whatever}
             }
         },
         #gs_resp{
@@ -541,7 +576,7 @@ encode_decode_message_test() ->
         #gs_push{
             subtype = graph,
             message = #gs_push_graph{
-                gri = #gri{type = od_user, id = <<"id30">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id30">>, aspect = whatever},
                 change_type = updated,
                 data = #{<<"data30">> => 30}
             }
@@ -549,7 +584,7 @@ encode_decode_message_test() ->
         #gs_push{
             subtype = graph,
             message = #gs_push_graph{
-                gri = #gri{type = od_user, id = <<"id31">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id31">>, aspect = whatever},
                 change_type = deleted,
                 data = undefined
             }
@@ -557,7 +592,15 @@ encode_decode_message_test() ->
         #gs_push{
             subtype = nosub,
             message = #gs_push_nosub{
-                gri = #gri{type = od_user, id = <<"id32">>, aspect = whatever},
+                gri = #gri{type = user, id = <<"id32">>, aspect = whatever},
+                reason = forbidden
+            }
+        },
+        #gs_push{
+            subtype = nosub,
+            message = #gs_push_nosub{
+                gri = #gri{type = user, id = <<"id33">>, aspect = whatever},
+                auth_hint = ?THROUGH_USER(<<"otherid33">>),
                 reason = forbidden
             }
         }
@@ -578,9 +621,9 @@ encode_decode_message_test() ->
     ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(2, <<"sdfsdviuyasd9fas">>)).
 
 
-encode_decode_error_test() ->
-    % Tuple means that after encoding a decoding the left hand side error, right
-    % one should be obtained.
+encode_decode_error() ->
+    % Tuple means that after encoding and decoding the left hand side error,
+    % right one should be obtained.
     ErrorsToCheck = [
         ?ERROR_BAD_MESSAGE(<<"edaml-wsesjapfs">>),
         ?ERROR_BAD_VERSION([123, 345, 234, 1, 34]),
@@ -627,9 +670,11 @@ encode_decode_error_test() ->
         ?ERROR_BAD_VALUE_ALIAS,
         ?ERROR_BAD_VALUE_USER_NAME,
         ?ERROR_BAD_VALUE_NAME,
-        ?ERROR_RELATION_DOES_NOT_EXIST(od_user, <<"user1">>, od_space, <<"space1">>),
-        ?ERROR_RELATION_ALREADY_EXISTS(od_user, <<"user1">>, od_space, <<"space1">>),
-        ?ERROR_CANNOT_DELETE_ENTITY(od_user, <<"user1">>)
+        ?ERROR_PROTECTED_GROUP,
+        ?ERROR_RELATION_DOES_NOT_EXIST(user, <<"user1">>, space, <<"space1">>),
+        ?ERROR_RELATION_ALREADY_EXISTS(user, <<"user1">>, space, <<"space1">>),
+        ?ERROR_CANNOT_DELETE_ENTITY(user, <<"user1">>),
+        ?ERROR_CANNOT_JOIN_GROUP_TO_ITSELF
     ],
 
     lists:foreach(

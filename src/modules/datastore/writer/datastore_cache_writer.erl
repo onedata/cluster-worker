@@ -411,7 +411,7 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
         true ->
             lists:map(fun({LinkName, LinkTarget}) ->
                 % TODO - VFS-4904 takes half of time
-                LinkRev = datastore_utils:gen_hex(?REV_LENGTH),
+                LinkRev = str_utils:rand_hex(?REV_LENGTH),
                 {LinkName, {LinkTarget, LinkRev}}
             end, Links);
         _ ->
