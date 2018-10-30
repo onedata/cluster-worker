@@ -329,7 +329,7 @@ get_links_trees(Ctx, Key) ->
 -spec fetch_deleted(ctx(), key(), undefined | batch(), boolean()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
 fetch_deleted(Ctx, Key, Batch = undefined, false) ->
-    {datastore_cache:get(Ctx, Key), Batch};
+    {datastore_cache:get(Ctx, Key, true), Batch};
 fetch_deleted(Ctx, Key, Batch = undefined, true) ->
     case datastore_cache:get(Ctx, Key, true) of
         {error, not_found} -> {datastore_cache:get_remote(Ctx, Key), Batch};
