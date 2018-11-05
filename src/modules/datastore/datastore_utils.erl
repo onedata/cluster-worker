@@ -15,6 +15,7 @@
 %% API
 -export([gen_key/0, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
 -export([gen_hex/1]).
+-export([set_expiry/2]).
 
 -type hex() :: binary().
 -type key() :: datastore:key().
@@ -98,3 +99,9 @@ is_greater_rev(Rev1, Rev2) ->
 -spec gen_hex(non_neg_integer()) -> hex().
 gen_hex(Size) ->
     hex_nif:hex(crypto:strong_rand_bytes(Size)).
+
+set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
+    Ctx#{expiry => Expiry};
+set_expiry(Ctx, Expiry) ->
+    os:timestamp(),
+    Ctx#{expiry => erlang:system_time(second) + Expiry}.

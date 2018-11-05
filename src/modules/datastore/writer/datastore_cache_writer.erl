@@ -30,6 +30,7 @@
     cached_keys_to_flush = #{} :: cached_keys(),
     keys_in_flush = #{} :: #{key() => reference()},
     keys_to_inactivate = #{} :: cached_keys(),
+    keys_to_expire = #{},
     keys_times = #{} :: #{key() => erlang:timestamp()},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
@@ -124,6 +125,7 @@ handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
 handle_call(terminate, _From, #state{
     requests_ref = undefined,
     cached_keys_to_flush = #{},
+    keys_to_expire = #{},
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
     gen_server:call(Pid, terminate, infinity),
@@ -150,24 +152,26 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     requests_ref = CurrentRef,
     master_pid = Pid,
     keys_in_flush = KIF,
+    keys_to_expire = ToExpire,
     flush_times = FT
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
-    {KIF2, FT2} = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+    Timestamp = os:timestamp(),
+    {KIF2, FT2, Flushed} = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
-            Filtered = maps:filter(fun(_K, V) ->
+            Filtered = maps:filter(fun(_K, {V, _}) ->
                 V =/= Ref
             end, KIF),
 
-            Timestamp = os:timestamp(),
+            Flushed0 = maps:without(maps:keys(Filtered), KIF),
             NewFT = maps:fold(fun(K, _V, Acc) ->
                 maps:put(K, Timestamp, Acc)
-            end, FT, maps:without(maps:keys(Filtered), KIF)),
+            end, FT, Flushed0),
 
-            {Filtered, NewFT};
+            {Filtered, NewFT, Flushed0};
         _ ->
-            {#{}, #{}}
+            {#{}, #{}, KIF}
     end,
 
     NewRef = case Ref of
@@ -175,12 +179,21 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         _ -> CurrentRef
     end,
 
+    ToExpire2 = maps:fold(fun
+        (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc)
+            when Expiry > 0 ->
+            maps:put(K, {Timestamp, Expiry}, Acc);
+        (_, _, Acc) ->
+            Acc
+    end, ToExpire, Flushed),
+
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
     {noreply, schedule_flush(check_inactivate(State#state{
         cached_keys_to_flush = NewKeys,
         flush_ref = undefined,
         requests_ref = NewRef,
         keys_in_flush = KIF2,
+        keys_to_expire = ToExpire2,
         flush_times = FT2
     }), 0)};
 handle_cast(Request, #state{} = State) ->
@@ -229,8 +242,8 @@ handle_info(flush, State = #state{
                 _ ->
                     Waiting = maps:without(maps:keys(ToFlush), CachedKeys),
 
-                    KiF2 = maps:fold(fun(K, _V, Acc) ->
-                        maps:put(K, Ref, Acc)
+                    KiF2 = maps:fold(fun(K, Ctx, Acc) ->
+                        maps:put(K, {Ref, Ctx}, Acc)
                     end, KiF, ToFlush),
 
                     % TODO VFS-4221 - remove datastore_disc_writer
@@ -264,8 +277,8 @@ handle_info(flush, State = #state{
         _ ->
             tp_router:delete_process_size(Pid),
             gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
-            KiF2 = maps:fold(fun(K, _V, Acc) ->
-                maps:put(K, Ref, Acc)
+            KiF2 = maps:fold(fun(K, Ctx, Acc) ->
+                maps:put(K, {Ref, Ctx}, Acc)
             end, KiF, CachedKeys),
 
             {#{}, KiF2, #{}, false}
@@ -737,15 +750,24 @@ check_inactivate(#state{
     keys_to_inactivate = ToInactivate,
     cached_keys_to_flush = CachedKeys,
     keys_in_flush = KiF,
+    keys_to_expire = ToExpire,
     keys_times = KeysTimes,
     flush_times = FT,
     link_tokens = LT
 } = State) ->
+    % TODO - zaschedulowac check jesli zostaly dokumenty to expire
+    Now = os:timestamp(),
+    ToExpire2 = maps:fold(fun(K, {Timestamp, Expiry}, Acc) ->
+        case timer:now_diff(Now, Timestamp) > Expiry of
+            true -> Acc;
+            _ -> maps:put(K, {Timestamp, Expiry}, Acc)
+        end
+    end, #{}, ToExpire),
+
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
-    Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF),
+    Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF) ++ maps:keys(ToExpire2),
     ToInactivate2 = maps:without(Exclude, ToInactivate),
     ExcludeMap = maps:with(Exclude, ToInactivate),
-    Now = os:timestamp(),
 
     State2 = case maps:size(ToInactivate) > Max of
         true ->
@@ -779,7 +801,7 @@ check_inactivate(#state{
         timer:now_diff(Now, Time) =< MaxLinkTimeUS
     end, LT),
 
-    State2#state{link_tokens = LT2}.
+    State2#state{link_tokens = LT2, keys_to_expire = ToExpire2}.
 
 %%--------------------------------------------------------------------
 %% @private

@@ -376,8 +376,10 @@ cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD 
         ({_Key, {ok, memory, Doc}}) ->
             ?FUTURE(memory, {ok, Doc});
         ({Key, {ok, disc, Doc}}) ->
+            % TODO - czy proces bedzie wiedzial ze te klucze tez ma zinwalidowac?
             save_async(Ctx, Key, Doc, false, true);
         ({Key, {ok, remote, Doc}}) ->
+            % TODO - czy sie nie spierniczy przy flush?
             save_async(Ctx, Key, Doc, true, true);
         ({Key, {error, not_found}}) ->
             Doc = #document{key = Key, value = undefined, deleted = true},
