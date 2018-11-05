@@ -355,9 +355,9 @@ error_to_json(_, ?ERROR_CANNOT_DELETE_ENTITY(EntityType, EntityId)) ->
             <<"entityId">> => EntityId
         }
     };
-error_to_json(_, ?ERROR_CANNOT_JOIN_GROUP_TO_ITSELF) ->
+error_to_json(_, ?ERROR_CANNOT_ADD_RELATION_TO_SELF) ->
     #{
-        <<"id">> => <<"cannotJoinGroupToItself">>
+        <<"id">> => <<"cannotAddRelationToSelf">>
     }.
 
 
@@ -562,5 +562,11 @@ json_to_error(_, #{<<"id">> := <<"cannotDeleteEntity">>,
     <<"details">> := #{<<"entityType">> := EntityType, <<"entityId">> := EntityId}}) ->
     ?ERROR_CANNOT_DELETE_ENTITY(binary_to_existing_atom(EntityType, utf8), EntityId);
 
-json_to_error(_, #{<<"id">> := <<"cannotJoinGroupToItself">>}) ->
-    ?ERROR_CANNOT_JOIN_GROUP_TO_ITSELF.
+json_to_error(_, #{<<"id">> := <<"cannotAddRelationToSelf">>}) ->
+    ?ERROR_CANNOT_ADD_RELATION_TO_SELF;
+
+% Unknown errors
+json_to_error(_, #{<<"details">> := #{<<"description">> := Description}}) ->
+    ?ERROR_UNCLASSIFIED_ERROR(Description);
+json_to_error(_, _) ->
+    ?ERROR_UNCLASSIFIED_ERROR(<<"No error description">>).
