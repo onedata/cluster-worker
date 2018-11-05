@@ -51,7 +51,7 @@ gen_key(Seed, Key) when is_binary(Seed) ->
     Ctx = crypto:hash_init(md5),
     Ctx2 = crypto:hash_update(Ctx, Seed),
     Ctx3 = crypto:hash_update(Ctx2, Key),
-    hex_nif:hex(crypto:hash_final(Ctx3)).
+    hex_utils:hex(crypto:hash_final(Ctx3)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -98,7 +98,7 @@ is_greater_rev(Rev1, Rev2) ->
 %%--------------------------------------------------------------------
 -spec gen_hex(non_neg_integer()) -> hex().
 gen_hex(Size) ->
-    hex_nif:hex(crypto:strong_rand_bytes(Size)).
+    hex_utils:hex(crypto:strong_rand_bytes(Size)).
 
 set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
     Ctx#{expiry => Expiry};
