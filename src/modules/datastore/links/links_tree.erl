@@ -174,13 +174,18 @@ create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
 %%--------------------------------------------------------------------
 -spec get_node(node_id(), state()) ->
     {{ok, links_node()} | {error, term()}, state()}.
-get_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
+get_node(NodeId, State = #state{ctx = Ctx, batch = Batch, tree_id = TreeID}) ->
+    LocalTreeID = maps:get(local_links_tree_id, Ctx, undefined),
     Ctx2 = set_remote_driver_ctx(Ctx, State),
-    Ctx3 = case Batch of
-        undefined ->
+    Ctx3 = case {Batch, LocalTreeID} of
+        {undefined, _} ->
             Ctx2#{include_deleted => true};
+        {_, undefined} ->
+            Ctx2;
+        {_, TreeID} ->
+            Ctx2;
         _ ->
-            Ctx2
+            Ctx2#{include_deleted => true}
     end,
     case datastore_doc:fetch(Ctx3, NodeId, Batch, true) of
         {{ok, #document{value = #links_node{node = Node}}}, Batch2} ->
