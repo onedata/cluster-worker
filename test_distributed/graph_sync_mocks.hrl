@@ -25,6 +25,8 @@
 
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
 
+-define(SESSION_COOKIE_NAME, <<"sess-id">>).
+
 -define(USER_AUTH(__UserId), {user_auth, __UserId}).
 -define(PROVIDER_AUTH(__ProviderId), {provider_auth, __ProviderId}).
 -define(NOBODY_AUTH, nobody).
