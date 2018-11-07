@@ -840,7 +840,7 @@ link_del_should_delay_inactivate(Config) ->
     DeletedNodes = get_link_nodes(delete_link_node),
     ?assertEqual(1, length(DeletedNodes)),
     [DeletedNode] = DeletedNodes,
-    timer:sleep(timer:seconds(10)),
+    timer:sleep(timer:seconds(15)),
     Inactivated = get_link_nodes(inactivate),
 
     Timestamp = lists:foldl(fun({Map, T}, Acc) ->
@@ -849,6 +849,12 @@ link_del_should_delay_inactivate(Config) ->
             _ -> Acc
         end
     end, undefined, Inactivated),
+
+    case Timestamp of
+        undefined -> ct:print("Inactivated ~p", [Inactivated]);
+        _ -> ok
+    end,
+
     ?assertNotEqual(undefined, Timestamp),
     ?assert(timer:now_diff(Timestamp, Now) > 5000000).
 
