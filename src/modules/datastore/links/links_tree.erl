@@ -43,8 +43,12 @@
 
 -export_type([id/0]).
 
+% Default time in seconds for document (saved in memory only) to expire after
+% delete
 -define(MEMORY_EXPIRY, 5).
--define(DISK_EXPIRY, 31104000).
+% Default time in seconds for document (saved to disk) to expire after delete
+% (one year)
+-define(DISK_EXPIRY, 31536000).
 
 %%%===================================================================
 %%% API

@@ -20,6 +20,7 @@
 -type hex() :: binary().
 -type key() :: datastore:key().
 -type rev() :: datastore_doc:rev().
+-type ctx() :: datastore:ctx().
 
 -export_type([hex/0]).
 
@@ -100,6 +101,12 @@ is_greater_rev(Rev1, Rev2) ->
 gen_hex(Size) ->
     hex_utils:hex(crypto:strong_rand_bytes(Size)).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets expiry field in context.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_expiry(ctx(), non_neg_integer()) -> ctx().
 set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
     Ctx#{expiry => Expiry};
 set_expiry(Ctx, Expiry) ->

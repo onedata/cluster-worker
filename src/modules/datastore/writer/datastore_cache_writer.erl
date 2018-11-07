@@ -30,11 +30,11 @@
     cached_keys_to_flush = #{} :: cached_keys(),
     keys_in_flush = #{} :: #{key() => reference()},
     keys_to_inactivate = #{} :: cached_keys(),
-    keys_to_expire = #{},
+    keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
     keys_times = #{} :: #{key() => erlang:timestamp()},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
-    flush_ref = undefined :: undefined | reference(),
+    to_execute = undefined :: undefined | flush | inactivate,
     link_tokens = #{} :: cached_token_map()
 }).
 
@@ -182,20 +182,20 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     ToExpire2 = maps:fold(fun
         (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc)
             when Expiry > 0 ->
-            maps:put(K, {Timestamp, Expiry}, Acc);
+            maps:put(K, {Timestamp, Expiry * 1000000}, Acc);
         (_, _, Acc) ->
             Acc
     end, ToExpire, Flushed),
 
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
-    {noreply, schedule_flush(check_inactivate(State#state{
+    {noreply, check_inactivate(schedule_flush(State#state{
         cached_keys_to_flush = NewKeys,
-        flush_ref = undefined,
+        to_execute = undefined,
         requests_ref = NewRef,
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
         flush_times = FT2
-    }), 0)};
+    }, 0))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -304,6 +304,8 @@ handle_info(flush, State = #state{
     end,
 
     {noreply, State3};
+handle_info(inactivate, #state{} = State) ->
+    {noreply, check_inactivate(State)};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -717,14 +719,14 @@ schedule_flush(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_flush(state(), non_neg_integer()) -> state().
-schedule_flush(State = #state{flush_ref = undefined}, Delay) ->
+schedule_flush(State = #state{to_execute = undefined}, Delay) ->
     erlang:send_after(Delay, self(), flush),
-    State#state{flush_ref = make_ref()};
+    State#state{to_execute = flush};
 schedule_flush(State = #state{}, Delay) ->
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             erlang:send_after(Delay, self(), flush),
-            State#state{flush_ref = make_ref()};
+            State#state{to_execute = flush};
         _ ->
             State
     end.
@@ -753,16 +755,22 @@ check_inactivate(#state{
     keys_to_expire = ToExpire,
     keys_times = KeysTimes,
     flush_times = FT,
-    link_tokens = LT
+    link_tokens = LT,
+    to_execute = ToExecute
 } = State) ->
     % TODO - zaschedulowac check jesli zostaly dokumenty to expire
     Now = os:timestamp(),
-    ToExpire2 = maps:fold(fun(K, {Timestamp, Expiry}, Acc) ->
-        case timer:now_diff(Now, Timestamp) > Expiry of
-            true -> Acc;
-            _ -> maps:put(K, {Timestamp, Expiry}, Acc)
-        end
-    end, #{}, ToExpire),
+    {ToExpire2, ExpireMaxTime} =
+        maps:fold(fun(K, {Timestamp, Expiry}, {Acc, MaxTime}) ->
+            Diff = timer:now_diff(Now, Timestamp),
+            case Diff >= Expiry of
+                true ->
+                    {Acc, MaxTime};
+                _ ->
+                    {maps:put(K, {Timestamp, Expiry}, Acc),
+                        max(MaxTime, Expiry - Diff)}
+            end
+        end, {#{}, 0}, ToExpire),
 
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
     Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF) ++ maps:keys(ToExpire2),
@@ -801,7 +809,16 @@ check_inactivate(#state{
         timer:now_diff(Now, Time) =< MaxLinkTimeUS
     end, LT),
 
-    State2#state{link_tokens = LT2, keys_to_expire = ToExpire2}.
+    case {maps:size(ToExpire2), ToExecute} of
+        {0, _} ->
+            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2};
+        {_, undefined} ->
+            erlang:send_after(ExpireMaxTime div 1000, self(), inactivate),
+            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2,
+                to_execute = inactivate};
+        _ ->
+            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
