@@ -238,10 +238,12 @@ delete_node(NodeId, State = #state{ctx = #{disc_driver := undefined} = Ctx,
         {{error, Reason}, Batch2} ->
             {{error, Reason}, State#state{batch = Batch2}}
     end;
-delete_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
+delete_node(NodeId, State = #state{ctx = #{disc_driver_ctx := DiscCtx} = Ctx,
+    batch = Batch}) ->
     Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
         link_disk_expiry, ?DISK_EXPIRY),
-    Ctx2 = datastore_utils:set_expiry(Ctx, Expiry),
+
+    Ctx2 = Ctx#{disc_driver_ctx => datastore_utils:set_expiry(DiscCtx, Expiry)},
     case datastore_doc:delete(Ctx2, NodeId, Batch) of
         {ok, Batch2} ->
             {ok, State#state{batch = Batch2}};

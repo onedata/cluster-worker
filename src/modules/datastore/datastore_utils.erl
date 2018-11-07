@@ -106,7 +106,8 @@ gen_hex(Size) ->
 %% Sets expiry field in context.
 %% @end
 %%--------------------------------------------------------------------
--spec set_expiry(ctx(), non_neg_integer()) -> ctx().
+-spec set_expiry(ctx() | couchbase_driver:ctx(), non_neg_integer()) ->
+    ctx() | couchbase_driver:ctx().
 set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
     Ctx#{expiry => Expiry};
 set_expiry(Ctx, Expiry) ->

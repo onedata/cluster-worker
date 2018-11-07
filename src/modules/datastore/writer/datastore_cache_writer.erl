@@ -34,7 +34,7 @@
     keys_times = #{} :: #{key() => erlang:timestamp()},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
-    to_execute = undefined :: undefined | flush | inactivate,
+    to_execute = [] :: [flush | inactivate],
     link_tokens = #{} :: cached_token_map()
 }).
 
@@ -153,7 +153,8 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     master_pid = Pid,
     keys_in_flush = KIF,
     keys_to_expire = ToExpire,
-    flush_times = FT
+    flush_times = FT,
+    to_execute = ToExecute
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
@@ -190,7 +191,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
     {noreply, check_inactivate(schedule_flush(State#state{
         cached_keys_to_flush = NewKeys,
-        to_execute = undefined,
+        to_execute = ToExecute -- [flush],
         requests_ref = NewRef,
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
@@ -719,16 +720,19 @@ schedule_flush(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_flush(state(), non_neg_integer()) -> state().
-schedule_flush(State = #state{to_execute = undefined}, Delay) ->
-    erlang:send_after(Delay, self(), flush),
-    State#state{to_execute = flush};
-schedule_flush(State = #state{}, Delay) ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
-        on ->
+schedule_flush(State = #state{to_execute = ToExecute}, Delay) ->
+    case lists:member(flush, ToExecute) of
+        true ->
+            case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
+                on ->
+                    erlang:send_after(Delay, self(), flush),
+                    State;
+                _ ->
+                    State
+            end;
+        false ->
             erlang:send_after(Delay, self(), flush),
-            State#state{to_execute = flush};
-        _ ->
-            State
+            State#state{to_execute = [flush | ToExecute]}
     end.
 
 %%--------------------------------------------------------------------
@@ -756,10 +760,11 @@ check_inactivate(#state{
     keys_times = KeysTimes,
     flush_times = FT,
     link_tokens = LT,
-    to_execute = ToExecute
+    to_execute = ToExecute0
 } = State) ->
-    % TODO - zaschedulowac check jesli zostaly dokumenty to expire
+    ToExecute = ToExecute0 -- [inactivate],
     Now = os:timestamp(),
+
     {ToExpire2, ExpireMaxTime} =
         maps:fold(fun(K, {Timestamp, Expiry}, {Acc, MaxTime}) ->
             Diff = timer:now_diff(Now, Timestamp),
@@ -777,12 +782,12 @@ check_inactivate(#state{
     ToInactivate2 = maps:without(Exclude, ToInactivate),
     ExcludeMap = maps:with(Exclude, ToInactivate),
 
-    State2 = case maps:size(ToInactivate) > Max of
+    {State2, ExpireMaxTime3} = case maps:size(ToInactivate) > Max of
         true ->
             datastore_cache:inactivate(ToInactivate2),
-            State#state{keys_to_inactivate = ExcludeMap,
+            {State#state{keys_to_inactivate = ExcludeMap,
                 keys_times = maps:with(Exclude, KeysTimes),
-                flush_times = maps:with(Exclude, FT)};
+                flush_times = maps:with(Exclude, FT)}, ExpireMaxTime};
         _ ->
             MaxTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
                 tp_active_mem_sek, 5),
@@ -792,14 +797,18 @@ check_inactivate(#state{
                 KeyTime = maps:get(K, KeysTimes, {0,0,0}),
                 timer:now_diff(Now, KeyTime) > MaxTimeUS
             end, ToInactivate2),
+            ExpireMaxTime2 = case maps:size(ToInactivate3) of
+                0 -> ExpireMaxTime;
+                _ -> max(ExpireMaxTime, MaxTimeUS)
+            end,
 
             ExcludeMap2 = maps:without(maps:keys(ToInactivate3), ToInactivate2),
             datastore_cache:inactivate(ToInactivate3),
             NewToInactivate = maps:merge(ExcludeMap, ExcludeMap2),
             NewToInactivateKeys = maps:keys(NewToInactivate),
-            State#state{keys_to_inactivate = NewToInactivate,
+            {State#state{keys_to_inactivate = NewToInactivate,
                 keys_times = maps:with(NewToInactivateKeys, KeysTimes),
-                flush_times = maps:with(NewToInactivateKeys, FT)}
+                flush_times = maps:with(NewToInactivateKeys, FT)}, ExpireMaxTime2}
     end,
 
     MaxLinkTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -809,15 +818,14 @@ check_inactivate(#state{
         timer:now_diff(Now, Time) =< MaxLinkTimeUS
     end, LT),
 
-    case {maps:size(ToExpire2), ToExecute} of
-        {0, _} ->
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2};
-        {_, undefined} ->
-            erlang:send_after(ExpireMaxTime div 1000, self(), inactivate),
+    case maps:size(ToExpire2) + maps:size(State2#state.keys_to_inactivate) of
+        0 ->
             State2#state{link_tokens = LT2, keys_to_expire = ToExpire2,
-                to_execute = inactivate};
+                to_execute = ToExecute};
         _ ->
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2}
+            erlang:send_after(ExpireMaxTime3 div 1000, self(), inactivate),
+            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2,
+                to_execute = [inactivate | ToExecute]}
     end.
 
 %%--------------------------------------------------------------------
