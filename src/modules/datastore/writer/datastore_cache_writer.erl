@@ -183,6 +183,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     ToExpire2 = maps:fold(fun
         (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc)
             when Expiry > 0 ->
+            % Save expiry in us (to compare with timer:now_diff fun result)
             maps:put(K, {Timestamp, Expiry * 1000000}, Acc);
         (_, _, Acc) ->
             Acc
@@ -775,7 +776,7 @@ check_inactivate(#state{
                     {maps:put(K, {Timestamp, Expiry}, Acc),
                         max(MaxTime, Expiry - Diff)}
             end
-        end, {#{}, 0}, ToExpire),
+        end, {#{}, 1000000}, ToExpire),
 
     Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
     Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF) ++ maps:keys(ToExpire2),
@@ -797,12 +798,13 @@ check_inactivate(#state{
                 KeyTime = maps:get(K, KeysTimes, {0,0,0}),
                 timer:now_diff(Now, KeyTime) > MaxTimeUS
             end, ToInactivate2),
-            ExpireMaxTime2 = case maps:size(ToInactivate3) of
+
+            ExcludeMap2 = maps:without(maps:keys(ToInactivate3), ToInactivate2),
+            ExpireMaxTime2 = case maps:size(ExcludeMap2) of
                 0 -> ExpireMaxTime;
                 _ -> max(ExpireMaxTime, MaxTimeUS)
             end,
 
-            ExcludeMap2 = maps:without(maps:keys(ToInactivate3), ToInactivate2),
             datastore_cache:inactivate(ToInactivate3),
             NewToInactivate = maps:merge(ExcludeMap, ExcludeMap2),
             NewToInactivateKeys = maps:keys(NewToInactivate),
