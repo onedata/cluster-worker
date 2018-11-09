@@ -16,7 +16,8 @@
 -include("global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2,
+    end_per_testcase/2]).
 
 %% tests
 -export([
@@ -49,7 +50,10 @@
     links_performance/1,
     links_performance_base/1,
     create_get_performance/1,
-    expired_doc_should_not_exist/1
+    expired_doc_should_not_exist/1,
+    deleted_doc_should_expire/1,
+    link_doc_should_expire/1,
+    link_del_should_delay_inactivate/1
 ]).
 
 % for rpc
@@ -84,7 +88,10 @@ all() ->
         get_links_trees_should_return_all_trees,
         fold_links_token_should_succeed_after_token_timeout,
         links_performance,
-        expired_doc_should_not_exist
+        expired_doc_should_not_exist,
+        deleted_doc_should_expire,
+        link_doc_should_expire,
+        link_del_should_delay_inactivate
     ], [
         links_performance,
         create_get_performance
@@ -757,7 +764,99 @@ expired_doc_should_not_exist(Config) ->
         timer:sleep(8000),
         assert_not_on_disc(Worker, Model, Key)
     end, [os:system_time(second)+5, 5]).
-    
+
+deleted_doc_should_expire(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_cached_model,
+    Key = ?KEY,
+    Ctx = datastore_test_utils:get_ctx(Model),
+    {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
+        rpc:call(Worker, datastore_model, create, [Ctx, ?DOC(Key, Model)])
+    ),
+    assert_on_disc(Worker, Model, Key),
+
+    ?assertMatch(ok,
+        rpc:call(Worker, datastore_model, delete, [Ctx, Key])
+    ),
+    assert_on_disc(Worker, Model, Key, false),
+    timer:sleep(8000),
+    assert_not_on_disc(Worker, Model, Key).
+
+link_doc_should_expire(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_cached_model,
+    LinksNum = 1,
+    Links = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum))),
+    {LinksNames, _} = lists:unzip(Links),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+    ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+
+    CreatedNodes = get_link_nodes(create_link_node),
+    lists:foreach(fun(Node) -> assert_key_on_disc(Worker, Model, Node) end,
+        CreatedNodes),
+
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+    ?assertAllMatch({error, not_found}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+
+    DeletedNodes = get_link_nodes(delete_link_node),
+    ?assertEqual(1, length(DeletedNodes)),
+    [DeletedNode] = DeletedNodes,
+    assert_key_on_disc(Worker, Model, DeletedNode, false),
+    timer:sleep(8000),
+    assert_key_not_on_disc(Worker, Model, DeletedNode).
+
+link_del_should_delay_inactivate(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_only_model,
+    LinksNum = 1,
+    Links = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum))),
+    {LinksNames, _} = lists:unzip(Links),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+    ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+    Now = os:timestamp(),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+    ?assertAllMatch({error, not_found}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+
+    DeletedNodes = get_link_nodes(delete_link_node),
+    ?assertEqual(1, length(DeletedNodes)),
+    [DeletedNode] = DeletedNodes,
+    timer:sleep(timer:seconds(15)),
+    Inactivated = get_link_nodes(inactivate),
+
+    Timestamp = lists:foldl(fun({Map, T}, Acc) ->
+        case maps:is_key(DeletedNode, Map) of
+            true -> T;
+            _ -> Acc
+        end
+    end, undefined, Inactivated),
+
+    case Timestamp of
+        undefined -> ct:print("Inactivated ~p", [Inactivated]);
+        _ -> ok
+    end,
+
+    ?assertNotEqual(undefined, Timestamp),
+    ?assert(timer:now_diff(Timestamp, Now) > 5000000).
 
 %%%===================================================================
 %%% Init/teardown functions
@@ -766,6 +865,49 @@ expired_doc_should_not_exist(Config) ->
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(Config).
 
+init_per_testcase(deleted_doc_should_expire = Case, Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    {ok, Expiry} = test_utils:get_env(Worker, cluster_worker, document_expiry),
+    test_utils:set_env(Workers, cluster_worker, document_expiry, 5),
+    [{expiry, Expiry} | init_per_testcase(?DEFAULT_CASE(Case), Config)];
+init_per_testcase(link_doc_should_expire = Case, Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    {ok, Expiry} = test_utils:get_env(Worker, cluster_worker, document_expiry),
+    test_utils:set_env(Workers, cluster_worker, link_disk_expiry, 5),
+
+    Master = self(),
+    ok = test_utils:mock_new(Workers, links_tree),
+    ok = test_utils:mock_expect(Workers, links_tree, delete_node,
+        fun(NodeID, State) ->
+            Master ! {delete_link_node, NodeID},
+            meck:passthrough([NodeID, State])
+        end),
+    ok = test_utils:mock_expect(Workers, links_tree, create_node,
+        fun(Node, State) ->
+            {{ok, NodeID}, _} = Ans = meck:passthrough([Node, State]),
+            Master ! {create_link_node, NodeID},
+            Ans
+        end),
+
+    [{expiry, Expiry} | init_per_testcase(?DEFAULT_CASE(Case), Config)];
+init_per_testcase(link_del_should_delay_inactivate = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    Master = self(),
+    ok = test_utils:mock_new(Workers, links_tree),
+    ok = test_utils:mock_expect(Workers, links_tree, delete_node,
+        fun(NodeID, State) ->
+            Master ! {delete_link_node, NodeID},
+            meck:passthrough([NodeID, State])
+        end),
+
+    ok = test_utils:mock_new(Workers, datastore_cache),
+    ok = test_utils:mock_expect(Workers, datastore_cache, inactivate,
+        fun(ToInactivate) ->
+            Master ! {inactivate, {ToInactivate, os:timestamp()}},
+            meck:passthrough([ToInactivate])
+        end),
+
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -773,12 +915,36 @@ init_per_testcase(_, Config) ->
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
     Config.
 
+end_per_testcase(deleted_doc_should_expire, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    Expiry = ?config(expiry, Config),
+    test_utils:set_env(Workers, cluster_worker, document_expiry, Expiry);
+end_per_testcase(link_doc_should_expire, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    Expiry = ?config(expiry, Config),
+    test_utils:set_env(Workers, cluster_worker, link_disk_expiry, Expiry),
+
+    test_utils:mock_unload(Workers, links_tree);
+end_per_testcase(link_del_should_delay_inactivate, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Workers, [links_tree, datastore_cache]);
+end_per_testcase(_Case, _Config) ->
+    ok.
+
 end_per_suite(_Config) ->
     ok.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_link_nodes(Message) ->
+    receive
+        {Message, NodeID} ->
+            [NodeID | get_link_nodes(Message)]
+    after
+        0 -> []
+    end.
 
 assert_in_memory(Worker, Model, Key) ->
     assert_in_memory(Worker, Model, Key, false).
@@ -815,25 +981,34 @@ assert_on_disc(Worker, Model, Key) ->
     assert_on_disc(Worker, Model, Key, false).
 
 assert_on_disc(Worker, Model, Key, Deleted) ->
+    assert_key_on_disc(Worker, Model, ?UNIQUE_KEY(Model, Key), Deleted).
+
+assert_key_on_disc(Worker, Model, Key) ->
+    assert_key_on_disc(Worker, Model, Key, false).
+
+assert_key_on_disc(Worker, Model, Key, Deleted) ->
     case ?DISC_DRV(Model) of
         undefined ->
             ok;
         Driver ->
             ?assertMatch({ok, _, #document{deleted = Deleted}},
                 rpc:call(Worker, Driver, get, [
-                    ?DISC_CTX, ?UNIQUE_KEY(Model, Key)
+                    ?DISC_CTX, Key
                 ]), ?ATTEMPTS
             )
     end.
 
 assert_not_on_disc(Worker, Model, Key) ->
+    assert_key_not_on_disc(Worker, Model, ?UNIQUE_KEY(Model, Key)).
+
+assert_key_not_on_disc(Worker, Model, Key) ->
     case ?DISC_DRV(Model) of
         undefined ->
             ok;
         Driver ->
             ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
-                    ?DISC_CTX, ?UNIQUE_KEY(Model, Key)
+                    ?DISC_CTX, Key
                 ]), ?ATTEMPTS
             )
     end.

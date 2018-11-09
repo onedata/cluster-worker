@@ -42,12 +42,13 @@
                  remote_driver_ctx => remote_driver_ctx(),
                  include_deleted => boolean(),
                  expiry => cberl:expiry()  
-                        % Specify the expiration time. This is either
-                        % an absolute Unix timestamp or a relative 
-                        % offset from now, in seconds. 
+                        % Specify the expiration time. For disc/cached models
+                        % This is either an absolute Unix timestamp or
+                        % a relative offset from now, in seconds.
                         % If the value of this number is greater than 
                         % the value of thirty days in seconds, 
-                        % then it is a Unix timestamp
+                        % then it is a Unix timestamp. For memory models
+                        % it is always a relative offset from now.
 }.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().

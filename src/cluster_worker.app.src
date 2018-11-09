@@ -275,6 +275,15 @@
             %% Time of fold link token caching by cache writer
             {fold_cache_timeout, 30000},
 
+            % Time in seconds for document to expire after delete (one year)
+            {document_expiry, 31536000},
+            % Time in seconds for link document (saved to disk) to expire after
+            % delete (one year)
+            {link_disk_expiry, 31536000},
+            % Time in seconds for link document (saved in memory only) to expire
+            % after delete
+            {link_memory_expiry, 5},
+
             %% ===================================================================
             %% EXOMETER
             %% ===================================================================
