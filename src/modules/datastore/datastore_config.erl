@@ -24,7 +24,6 @@
     links_node,
     lock,
     node_management,
-    synced_cert,
     task_pool,
     gs_session,
     gs_subscription

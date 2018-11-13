@@ -33,6 +33,10 @@
 
 -type state() :: #state{}.
 
+-define(KEEPALIVE_INTERVAL, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(30)
+)).
+
 -type push_callback() :: fun((gs_protocol:push()) -> any()).
 % Reference to GS client instance
 -type client_ref() :: pid().
@@ -115,7 +119,7 @@ kill(ClientRef) ->
 -spec init([term()], websocket_req:req()) ->
     {ok, state()} | {ok, state(), Keepalive :: integer()}.
 init([], _) ->
-    {ok, #state{}}.
+    {ok, #state{}, ?KEEPALIVE_INTERVAL}.
 
 
 %%%===================================================================

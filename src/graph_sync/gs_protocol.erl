@@ -90,7 +90,8 @@
 % Aspect of given entity, one of resource identifiers
 -type aspect() :: atom() | {atom(), term()}.
 % Scope of given aspect, allows to differentiate access to subsets of aspect data
--type scope() :: private | protected | shared | public.
+% 'auto' scope means the maximum scope (if any) the client is authorized to access.
+-type scope() :: private | protected | shared | public | auto.
 % Graph Resource Identifier - a record identifying a certain resource in the graph.
 -type gri() :: #gri{}.
 % Requested operation
@@ -125,7 +126,7 @@
 
 -type graph_create_result() :: ok | {ok, value, term()} |
 {ok, resource, {gri(), term()} | {gri(), auth_hint(), term()}} | error().
--type graph_get_result() :: {ok, term()} | error().
+-type graph_get_result() :: {ok, term()} | {ok, gri(), term()} | error().
 -type graph_delete_result() :: ok | error().
 -type graph_update_result() :: ok | error().
 
@@ -352,7 +353,7 @@ null_to_undefined(Other) ->
 -spec string_to_gri(binary()) -> gri().
 string_to_gri(String) ->
     [TypeStr, IdBinary, AspectScope] = binary:split(String, <<".">>, [global]),
-    Type = string_to_entity_type(TypeStr),
+    Type = ?GS_PROTOCOL_PLUGIN:decode_entity_type(TypeStr),
     Id = string_to_id(IdBinary),
     {Aspect, Scope} = case binary:split(AspectScope, <<":">>, [global]) of
         [A, S] -> {string_to_aspect(A), string_to_scope(S)};
@@ -369,7 +370,7 @@ string_to_gri(String) ->
 -spec gri_to_string(gri()) -> binary().
 gri_to_string(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
     <<
-        (entity_type_to_string(Type))/binary, ".",
+        (?GS_PROTOCOL_PLUGIN:encode_entity_type(Type))/binary, ".",
         (id_to_string(Id))/binary, ".",
         (aspect_to_string(Aspect))/binary, ":",
         (scope_to_string(Scope))/binary
@@ -563,10 +564,11 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
 -spec encode_push_nosub(protocol_version(), nosub_push()) -> json_map().
 encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     #gs_push_nosub{
-        gri = GRI, reason = Reason
+        gri = GRI, auth_hint = AuthHint, reason = Reason
     } = Message,
     #{
         <<"gri">> => gri_to_string(GRI),
+        <<"authHint">> => auth_hint_to_json(AuthHint),
         <<"reason">> => nosub_reason_to_json(Reason)
     }.
 
@@ -771,8 +773,10 @@ decode_push_graph(_, PayloadJSON) ->
 decode_push_nosub(_, PayloadJSON) ->
     GRI = maps:get(<<"gri">>, PayloadJSON),
     Reason = maps:get(<<"reason">>, PayloadJSON),
+    AuthHint = maps:get(<<"authHint">>, PayloadJSON, null),
     #gs_push_nosub{
         gri = string_to_gri(GRI),
+        auth_hint = json_to_auth_hint(AuthHint),
         reason = json_to_nosub_reason(Reason)
     }.
 
@@ -844,28 +848,6 @@ string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
 
 
--spec entity_type_to_string(entity_type()) -> binary().
-entity_type_to_string(od_user) -> <<"user">>;
-entity_type_to_string(od_group) -> <<"group">>;
-entity_type_to_string(od_space) -> <<"space">>;
-entity_type_to_string(od_share) -> <<"share">>;
-entity_type_to_string(od_provider) -> <<"provider">>;
-entity_type_to_string(od_handle_service) -> <<"handleService">>;
-entity_type_to_string(od_handle) -> <<"handle">>;
-entity_type_to_string(_) -> throw(?ERROR_BAD_TYPE).
-
-
--spec string_to_entity_type(binary()) -> entity_type().
-string_to_entity_type(<<"user">>) -> od_user;
-string_to_entity_type(<<"group">>) -> od_group;
-string_to_entity_type(<<"space">>) -> od_space;
-string_to_entity_type(<<"share">>) -> od_share;
-string_to_entity_type(<<"provider">>) -> od_provider;
-string_to_entity_type(<<"handleService">>) -> od_handle_service;
-string_to_entity_type(<<"handle">>) -> od_handle;
-string_to_entity_type(_) -> throw(?ERROR_BAD_TYPE).
-
-
 -spec id_to_string(undefined | binary()) -> binary().
 id_to_string(undefined) -> <<"null">>;
 id_to_string(?SELF) -> <<"self">>;
@@ -898,14 +880,16 @@ string_to_aspect(String) ->
 scope_to_string(private) -> <<"private">>;
 scope_to_string(protected) -> <<"protected">>;
 scope_to_string(shared) -> <<"shared">>;
-scope_to_string(public) -> <<"public">>.
+scope_to_string(public) -> <<"public">>;
+scope_to_string(auto) -> <<"auto">>.
 
 
 -spec string_to_scope(binary()) -> scope().
 string_to_scope(<<"private">>) -> private;
 string_to_scope(<<"protected">>) -> protected;
 string_to_scope(<<"shared">>) -> shared;
-string_to_scope(<<"public">>) -> public.
+string_to_scope(<<"public">>) -> public;
+string_to_scope(<<"auto">>) -> auto.
 
 
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
