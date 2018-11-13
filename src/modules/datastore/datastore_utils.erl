@@ -14,9 +14,11 @@
 
 %% API
 -export([gen_key/0, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
+-export([set_expiry/2]).
 
 -type key() :: datastore:key().
 -type rev() :: datastore_doc:rev().
+-type ctx() :: datastore:ctx().
 
 -define(KEY_LENGTH,
     application:get_env(cluster_worker, datastore_doc_key_length, 16)).
@@ -85,3 +87,16 @@ is_greater_rev(Rev1, Rev2) ->
         % TODO VFS-4145 - change to false when remote driver flushes documents
         {false, false, false, false} -> true
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets expiry field in context.
+%% @end
+%%--------------------------------------------------------------------
+-spec set_expiry(ctx() | couchbase_driver:ctx(), non_neg_integer()) ->
+    ctx() | couchbase_driver:ctx().
+set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
+    Ctx#{expiry => Expiry};
+set_expiry(Ctx, Expiry) ->
+    os:timestamp(),
+    Ctx#{expiry => erlang:system_time(second) + Expiry}.

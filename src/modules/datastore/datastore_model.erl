@@ -51,6 +51,9 @@
 
 -export_type([model/0, record/0, record_struct/0, record_version/0]).
 
+% Default time in seconds for document to expire after delete (one year)
+-define(EXPIRY, 31536000).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Initializes memory driver of a datastore model.
@@ -168,7 +171,14 @@ delete(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), pred()) -> ok | {error, term()}.
-delete(Ctx, Key, Pred) ->
+delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
+    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
+    delete_all_links(Ctx, Key, Result),
+    delete_fold_link(Ctx, Key, Result);
+delete(Ctx0, Key, Pred) ->
+    Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        document_expiry, ?EXPIRY),
+    Ctx = datastore_utils:set_expiry(Ctx0, Expiry),
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).

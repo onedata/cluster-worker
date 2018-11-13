@@ -16,6 +16,7 @@
 -behaviour(bp_tree_store).
 
 -include("modules/datastore/datastore_models.hrl").
+-include("global_definitions.hrl").
 
 %% API
 -export([get_tree_id/1]).
@@ -41,6 +42,13 @@
 -type state() :: #state{}.
 
 -export_type([id/0]).
+
+% Default time in seconds for document (saved in memory only) to expire after
+% delete
+-define(MEMORY_EXPIRY, 5).
+% Default time in seconds for document (saved to disk) to expire after delete
+% (one year)
+-define(DISK_EXPIRY, 31536000).
 
 %%%===================================================================
 %%% API
@@ -170,14 +178,18 @@ create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
 %%--------------------------------------------------------------------
 -spec get_node(node_id(), state()) ->
     {{ok, links_node()} | {error, term()}, state()}.
-get_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
+get_node(NodeId, State = #state{ctx = Ctx, batch = Batch, tree_id = TreeID}) ->
+    LocalTreeID = maps:get(local_links_tree_id, Ctx, undefined),
     Ctx2 = set_remote_driver_ctx(Ctx, State),
-    % TODO 4970 - Documents expire
-    Ctx3 = case Batch of
-        undefined ->
+    Ctx3 = case {Batch, LocalTreeID} of
+        {undefined, _} ->
             Ctx2#{include_deleted => true};
+        {_, undefined} ->
+            Ctx2;
+        {_, TreeID} ->
+            Ctx2;
         _ ->
-            Ctx2
+            Ctx2#{include_deleted => true}
     end,
     case datastore_doc:fetch(Ctx3, NodeId, Batch, true) of
         {{ok, #document{value = #links_node{node = Node}}}, Batch2} ->
@@ -215,11 +227,24 @@ update_node(NodeId, Node, State = #state{
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_node(node_id(), state()) -> {ok | {error, term()}, state()}.
-delete_node(_NodeId, State = #state{ctx = #{sync_enabled := true}, batch = _Batch}) ->
-    % TODO VFS-3908 - set document to expire
-    {ok, State};
-delete_node(NodeId, State = #state{ctx = Ctx, batch = Batch}) ->
-    case datastore_doc:delete(Ctx, NodeId, Batch) of
+delete_node(NodeId, State = #state{ctx = #{disc_driver := undefined} = Ctx,
+    batch = Batch}) ->
+    Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        link_memory_expiry, ?MEMORY_EXPIRY),
+    Ctx2 = datastore_utils:set_expiry(Ctx, Expiry),
+    case datastore_doc:delete(Ctx2, NodeId, Batch) of
+        {ok, Batch2} ->
+            {ok, State#state{batch = Batch2}};
+        {{error, Reason}, Batch2} ->
+            {{error, Reason}, State#state{batch = Batch2}}
+    end;
+delete_node(NodeId, State = #state{ctx = #{disc_driver_ctx := DiscCtx} = Ctx,
+    batch = Batch}) ->
+    Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        link_disk_expiry, ?DISK_EXPIRY),
+
+    Ctx2 = Ctx#{disc_driver_ctx => datastore_utils:set_expiry(DiscCtx, Expiry)},
+    case datastore_doc:delete(Ctx2, NodeId, Batch) of
         {ok, Batch2} ->
             {ok, State#state{batch = Batch2}};
         {{error, Reason}, Batch2} ->
