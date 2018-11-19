@@ -219,8 +219,8 @@ fetch_changes(#state{
     Design = couchbase_changes:design(),
     View = couchbase_changes:view(),
     QueryAns = couchbase_driver:query_view(Ctx, Design, View, [
-        {startkey, jiffy:encode([Scope, SeqSafe2])},
-        {endkey, jiffy:encode([Scope, Seq2])},
+        {startkey, [Scope, SeqSafe2]},
+        {endkey, [Scope, Seq2]},
         {inclusive_end, true}
     ]),
 
