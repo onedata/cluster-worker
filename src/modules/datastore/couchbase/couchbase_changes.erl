@@ -15,7 +15,7 @@
 
 %% API
 -export([enable/1, start/2, stop/2]).
--export([stream/3, stream/4, cancel_stream/1]).
+-export([stream/3, stream/4, stream/5, cancel_stream/1]).
 -export([design/0, view/0]).
 -export([get_seq_key/1, get_seq_safe_key/1, get_change_key/2]).
 
@@ -85,13 +85,23 @@ stop(Bucket, Scope) ->
     couchbase_changes_sup:stop_worker(Bucket, Scope).
 
 %%--------------------------------------------------------------------
-%% @equiv stream(Bucket, Scope, Callback, [])
+%% @equiv stream(Bucket, Scope, Callback, [], [])
 %% @end
 %%--------------------------------------------------------------------
 -spec stream(couchbase_config:bucket(), datastore:scope(), callback()) ->
     {ok, pid()} | {error, Reason :: term()}.
 stream(Bucket, Scope, Callback) ->
-    stream(Bucket, Scope, Callback, []).
+    stream(Bucket, Scope, Callback, [], []).
+
+
+%%--------------------------------------------------------------------
+%% @equiv stream(Bucket, Scope, Callback, Opts, [])
+%% @end
+%%--------------------------------------------------------------------
+-spec stream(couchbase_config:bucket(), datastore:scope(), callback(), 
+    [option()]) -> {ok, pid()} | {error, Reason :: term()}.
+stream(Bucket, Scope, Callback, Opts) ->
+    stream(Bucket, Scope, Callback, Opts, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -103,9 +113,10 @@ stream(Bucket, Scope, Callback) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec stream(couchbase_config:bucket(), datastore:scope(), callback(),
-    [option()]) -> {ok, pid()} | {error, Reason :: term()}.
-stream(Bucket, Scope, Callback, Opts) ->
-    couchbase_changes_stream_sup:start_worker(Bucket, Scope, Callback, Opts).
+    [option()], [pid()]) -> {ok, pid()} | {error, Reason :: term()}.
+stream(Bucket, Scope, Callback, Opts, LinkedProcesses) ->
+    couchbase_changes_stream_sup:start_worker(Bucket, Scope, Callback, 
+        Opts, LinkedProcesses).
 
 %%--------------------------------------------------------------------
 %% @doc
