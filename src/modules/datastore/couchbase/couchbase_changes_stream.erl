@@ -212,8 +212,8 @@ get_changes(Since, Until, #state{} = State) ->
         false ->
             QueryAns = couchbase_driver:query_view(Ctx,
                 couchbase_changes:design(), couchbase_changes:view(), [
-                    {startkey, jiffy:encode([Scope, Since])},
-                    {endkey, jiffy:encode([Scope, Until2])},
+                    {startkey, [Scope, Since]},
+                    {endkey, [Scope, Until2]},
                     {inclusive_end, false}
                 ]
             ),
