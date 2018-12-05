@@ -16,7 +16,8 @@
 -include("global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, 
+    init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -33,6 +34,7 @@
     stream_should_return_changes_from_finite_range/1,
     stream_should_return_changes_from_infinite_range/1,
     cancel_stream_should_stop_worker/1,
+    stream_should_stop_when_linked_process_is_terminated/1,
     stream_should_ignore_changes/1,
     stream_should_ignore_changes2/1,
     stream_should_ignore_changes3/1,
@@ -59,6 +61,7 @@ all() ->
         stream_should_return_changes_from_finite_range,
         stream_should_return_changes_from_infinite_range,
         cancel_stream_should_stop_worker,
+        stream_should_stop_when_linked_process_is_terminated,
         stream_should_ignore_changes,
         stream_should_ignore_changes2,
         stream_should_ignore_changes3,
@@ -308,6 +311,17 @@ cancel_stream_should_stop_worker(Config) ->
         stream, [?BUCKET, ?SCOPE, Callback]
     )),
     ?assertEqual(ok, rpc:call(Worker, couchbase_changes, cancel_stream, [Pid])),
+    ?assertReceivedMatch({error, 1, shutdown}, ?TIMEOUT).
+
+stream_should_stop_when_linked_process_is_terminated(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    Callback = fun(Any) -> Self ! Any end,
+    LinkedProcess = spawn(fun Loop() -> Loop() end),
+    {ok, _} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes,
+        stream, [?BUCKET, ?SCOPE, Callback, [], [LinkedProcess]]
+    )),
+    exit(LinkedProcess, shutdown),
     ?assertReceivedMatch({error, 1, shutdown}, ?TIMEOUT).
 
 stream_should_ignore_changes(Config) ->
@@ -610,6 +624,9 @@ init_per_suite(Config) ->
         )),
         Config2
     end).
+
+end_per_suite(_Config) ->
+    ok.
 
 init_per_testcase(Case, Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
