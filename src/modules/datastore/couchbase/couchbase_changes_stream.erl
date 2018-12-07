@@ -22,7 +22,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/4]).
+-export([start_link/5]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -36,7 +36,8 @@
     until :: couchbase_changes:until(),
     except_mutator :: datastore:mutator(),
     batch_size :: non_neg_integer(),
-    interval :: non_neg_integer()
+    interval :: non_neg_integer(),
+    linked_processes :: [pid()]
 }).
 
 -type state() :: #state{}.
@@ -51,10 +52,10 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(couchbase_config:bucket(), datastore:scope(),
-    couchbase_changes:callback(), proplists:proplist()) ->
+    couchbase_changes:callback(), proplists:proplist(), [pid()]) ->
     {ok, pid()} | {error, Reason :: term()}.
-start_link(Bucket, Scope, Callback, Opts) ->
-    gen_server:start_link(?MODULE, [Bucket, Scope, Callback, Opts], []).
+start_link(Bucket, Scope, Callback, Opts, LinkedProcesses) ->
+    gen_server:start_link(?MODULE, [Bucket, Scope, Callback, Opts, LinkedProcesses], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -69,9 +70,10 @@ start_link(Bucket, Scope, Callback, Opts) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Bucket, Scope, Callback, Opts]) ->
+init([Bucket, Scope, Callback, Opts, LinkedProcesses]) ->
     process_flag(trap_exit, true),
     erlang:send_after(0, self(), update),
+    lists:foreach(fun(Pid) -> link(Pid) end, LinkedProcesses),
     {ok, #state{
         bucket = Bucket,
         scope = Scope,
@@ -82,7 +84,8 @@ init([Bucket, Scope, Callback, Opts]) ->
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_batch_size, 200),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_update_interval, 1000)
+            couchbase_changes_stream_update_interval, 1000),
+        linked_processes = LinkedProcesses
     }}.
 
 %%--------------------------------------------------------------------
@@ -134,6 +137,17 @@ handle_info(update, #state{since = Since, until = Until} = State) ->
     case State2#state.since >= Until of
         true -> {stop, normal, State2};
         false -> {noreply, State2}
+    end;
+handle_info({'EXIT', From, Reason} = Info, 
+    #state{linked_processes = LinkedProcesses} = State) ->
+    case lists:member(From, LinkedProcesses) of
+        true ->
+            ?info("Stopping stream ~p because linked process ~p "
+            "terrminated with ~p", [self(), From, Reason]),
+            {stop, Reason, State};
+        _ ->
+            ?log_bad_request(Info),
+            {noreply, State}
     end;
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
@@ -198,8 +212,8 @@ get_changes(Since, Until, #state{} = State) ->
         false ->
             QueryAns = couchbase_driver:query_view(Ctx,
                 couchbase_changes:design(), couchbase_changes:view(), [
-                    {startkey, jiffy:encode([Scope, Since])},
-                    {endkey, jiffy:encode([Scope, Until2])},
+                    {startkey, [Scope, Since]},
+                    {endkey, [Scope, Until2]},
                     {inclusive_end, false}
                 ]
             ),

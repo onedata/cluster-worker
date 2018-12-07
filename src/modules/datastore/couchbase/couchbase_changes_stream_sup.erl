@@ -17,7 +17,7 @@
 
 %% API
 -export([start_link/0]).
--export([start_worker/4, stop_worker/1]).
+-export([start_worker/5, stop_worker/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -41,10 +41,10 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec start_worker(couchbase_config:bucket(), datastore:scope(),
-    couchbase_changes:callback(), proplists:proplist()) ->
+    couchbase_changes:callback(), proplists:proplist(), [pid()]) ->
     {ok, pid()} | {error, Reason :: term()}.
-start_worker(Bucket, Scope, Callback, Opts) ->
-    supervisor:start_child(?MODULE, [Bucket, Scope, Callback, Opts]).
+start_worker(Bucket, Scope, Callback, Opts, LinkedProcesses) ->
+    supervisor:start_child(?MODULE, [Bucket, Scope, Callback, Opts, LinkedProcesses]).
 
 %%--------------------------------------------------------------------
 %% @doc

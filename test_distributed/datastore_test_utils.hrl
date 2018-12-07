@@ -61,6 +61,7 @@
 
 -define(DESIGN, <<"design-", (?CASE)/binary>>).
 -define(VIEW, <<"view-", (?CASE)/binary>>).
+-define(VIEW_SPATIAL, <<"spatial-", (?CASE)/binary>>).
 
 -define(LINK_TREE_ID, ?LINK_TREE_ID(1)).
 -define(LINK_TREE_ID(N), ?TERM("tree", N)).

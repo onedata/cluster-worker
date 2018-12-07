@@ -50,8 +50,13 @@
     query_view_should_return_empty_result/1,
     query_view_should_return_result/1,
     query_view_should_return_missing_error/1,
+    query_view_should_return_result_with_string_key/1,
+    query_view_should_return_result_with_integer_key/1,
     query_view_should_parse_empty_opts/1,
     query_view_should_parse_all_opts/1,
+    query_view_should_parse_all_opts_spatial/1,
+    query_view_should_parse_all_opts_reduce/1,
+    query_view_should_parse_all_opts_reduce1/1,
     get_buckets_should_return_all_buckets/1,
     cberl_test/1,
     expired_doc_should_not_exist/1
@@ -92,8 +97,13 @@ all() ->
         query_view_should_return_empty_result,
         query_view_should_return_result,
         query_view_should_return_missing_error,
+        query_view_should_return_result_with_integer_key,
+        query_view_should_return_result_with_string_key,
         query_view_should_parse_empty_opts,
         query_view_should_parse_all_opts,
+        query_view_should_parse_all_opts_spatial,
+        query_view_should_parse_all_opts_reduce,
+        query_view_should_parse_all_opts_reduce1,
         get_buckets_should_return_all_buckets,
         cberl_test,
         expired_doc_should_not_exist
@@ -110,14 +120,27 @@ all() ->
 -define(DOC, ?DOC(1)).
 -define(DOC(N), ?BASE_DOC(?KEY(N), ?VALUE)).
 -define(DURABLE_DOC(N), ?BASE_DOC(?DURABLE_KEY(N), ?VALUE)).
--define(VIEW_FUNCTION, <<"function (doc, meta) {\r\n"
-                         "  emit(meta.id, null);\r\n"
-                         "}\r\n">>).
--define(DESIGN_EJSON, {[{<<"views">>,
+-define(VIEW_FUNCTION, ?VIEW_FUNCTION(<<"meta.id">>)).
+-define(VIEW_FUNCTION(Key), <<"function (doc, meta) {\r\n"
+                              "  emit(", Key/binary, ", null);\r\n"
+                              "}\r\n">>).
+-define(DESIGN_EJSON(ViewFuntion), {[{<<"views">>,
     {[{?VIEW,
-        {[{<<"map">>, ?VIEW_FUNCTION}]}
+        {[{<<"map">>, ViewFuntion}]}
     }]}
 }]}).
+-define(DESIGN_EJSON, ?DESIGN_EJSON(?VIEW_FUNCTION)).
+-define(DESIGN_EJSON_REDUCE, {[{<<"views">>,
+    {[{?VIEW,
+        {[{<<"map">>, ?VIEW_FUNCTION},
+        {<<"reduce">>, <<"_count">>}]}
+    }]}
+}]}).
+-define(DESIGN_EJSON_SPATIAL, {[
+    {<<"spatial">>, {[
+        {?VIEW_SPATIAL, ?VIEW_FUNCTION}
+    ]}}
+]}).
 
 -define(DURABLE(Value), ?PERF_PARAM(durable, Value, "",
     "Perform save operation with durability check.")).
@@ -571,6 +594,34 @@ query_view_should_return_result(Config) ->
     ?assertEqual(?KEY, proplists:get_value(<<"key">>, Result)),
     ?assertEqual(null, proplists:get_value(<<"value">>, Result)).
 
+query_view_should_return_result_with_integer_key(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON(?VIEW_FUNCTION(<<"1">>))]
+    ),
+    rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
+    {ok, {[_|_]}} = ?assertMatch({ok, {[_|_]}},
+        rpc:call(Worker, couchbase_driver, query_view,
+            [?CTX, ?DESIGN, ?VIEW, [
+                {stale, false}, {key, 1}
+            ]]
+        )
+    ).
+
+query_view_should_return_result_with_string_key(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON(?VIEW_FUNCTION(<<"'1'">>))]
+    ),
+    rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
+    {ok, {[_|_]}} = ?assertMatch({ok, {[_|_]}},
+        rpc:call(Worker, couchbase_driver, query_view,
+            [?CTX, ?DESIGN, ?VIEW, [
+                {stale, false}, {key, <<"1">>}
+            ]]
+        )
+    ).
+
 query_view_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertMatch({error, {<<"not_found">>, _}},
@@ -581,13 +632,19 @@ query_view_should_return_missing_error(Config) ->
 
 query_view_should_parse_empty_opts(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({error, {_, _}}, rpc:call(Worker, couchbase_driver, query_view,
+    rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON]
+    ),
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_driver, query_view,
         [?CTX, ?DESIGN, ?VIEW, []]
     )).
 
 query_view_should_parse_all_opts(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertMatch({error, {_, _}},
+    ok = rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON]
+    ),
+    ?assertMatch({ok, _},
         rpc:call(Worker, couchbase_driver, query_view,
             [?CTX, ?DESIGN, ?VIEW, [
                 {descending, true},
@@ -596,29 +653,66 @@ query_view_should_parse_all_opts(Config) ->
                 {endkey_docid, <<"id">>},
                 {full_set, true},
                 {full_set, false},
-                {group, true},
-                {group, false},
-                {group_level, 1},
                 {inclusive_end, true},
                 {inclusive_end, false},
                 {key, <<"key">>},
-                {keys, [<<"key">>]},
                 {limit, 1},
                 {on_error, continue},
                 {on_error, stop},
-                {reduce, true},
-                {reduce, false},
-                {spatial, true},
-                {spatial, false},
                 {skip, 0},
                 {stale, ok},
                 {stale, false},
                 {stale, update_after},
                 {startkey, <<"key">>},
                 {startkey_docid, <<"id">>},
-                {bbox, <<"bbox">>},
-                {start_range, <<"range">>},
-                {end_range, <<"range">>}
+                {bbox, <<"0,0,1,1">>},
+                {start_range, [0,0]},
+                {end_range, [1,1]},
+                {spatial, false},
+                {reduce, false}
+            ]]
+        )
+    ).
+
+query_view_should_parse_all_opts_spatial(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ok = rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON_SPATIAL]
+    ),
+    ?assertMatch({ok, _},
+        rpc:call(Worker, couchbase_driver, query_view,
+            [?CTX, ?DESIGN, ?VIEW_SPATIAL, [
+                {keys, [<<"key">>]},
+                {spatial, true}
+            ]]
+        )
+    ).
+
+query_view_should_parse_all_opts_reduce(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ok = rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON_REDUCE]
+    ),
+    ?assertMatch({ok, _},
+        rpc:call(Worker, couchbase_driver, query_view,
+            [?CTX, ?DESIGN, ?VIEW, [
+                {group, true},
+                {group, false},
+                {reduce, true}
+            ]]
+        )
+    ).
+
+query_view_should_parse_all_opts_reduce1(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ok = rpc:call(Worker, couchbase_driver, save_design_doc,
+        [?CTX, ?DESIGN, ?DESIGN_EJSON_REDUCE]
+    ),
+    ?assertMatch({ok, _},
+        rpc:call(Worker, couchbase_driver, query_view,
+            [?CTX, ?DESIGN, ?VIEW, [
+                {group_level, 1},
+                {reduce, true}
             ]]
         )
     ).
@@ -642,7 +736,6 @@ expired_doc_should_not_exist(Config) ->
             [?CTX, ?KEY]
         ))
     end, [os:system_time(second)+1, 1]).
-
 
 %%%===================================================================
 %%% Init/teardown functions

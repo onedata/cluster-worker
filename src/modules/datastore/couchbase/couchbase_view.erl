@@ -158,14 +158,14 @@ get_query_params([Opt | Opts]) ->
 -spec get_query_param(couchbase_dirver:view_opt()) -> binary().
 get_query_param({descending, true}) -> <<"descending=true">>;
 get_query_param({descending, false}) -> <<"descending=false">>;
-get_query_param({endkey, Key}) -> <<"endkey=", Key/binary>>;
+get_query_param({endkey, Key}) -> <<"endkey=", (json_utils:encode(Key))/binary>>;
 get_query_param({endkey_docid, Id}) -> <<"endkey_docid=", Id/binary>>;
 get_query_param({full_set, true}) -> <<"full_set=true">>;
 get_query_param({full_set, false}) -> <<"full_set=false">>;
 get_query_param({inclusive_end, true}) -> <<"inclusive_end=true">>;
 get_query_param({inclusive_end, false}) -> <<"inclusive_end=false">>;
-get_query_param({key, Key}) -> <<"key=", (jiffy:encode(Key))/binary>>;
-get_query_param({keys, Keys}) -> <<"keys=", (jiffy:encode(Keys))/binary>>;
+get_query_param({key, Key}) -> <<"key=", (json_utils:encode(Key))/binary>>;
+get_query_param({keys, Keys}) -> <<"keys=", (json_utils:encode(Keys))/binary>>;
 get_query_param({limit, L}) -> <<"limit=", (integer_to_binary(L))/binary>>;
 get_query_param({on_error, continue}) -> <<"on_error=continue">>;
 get_query_param({on_error, stop}) -> <<"on_error=stop">>;
@@ -175,13 +175,13 @@ get_query_param({skip, Skip}) -> <<"skip=", (integer_to_binary(Skip))/binary>>;
 get_query_param({stale, ok}) -> <<"stale=ok">>;
 get_query_param({stale, false}) -> <<"stale=false">>;
 get_query_param({stale, update_after}) -> <<"stale=update_after">>;
-get_query_param({startkey, Key}) -> <<"startkey=", Key/binary>>;
+get_query_param({startkey, Key}) -> <<"startkey=", (json_utils:encode(Key))/binary>>;
 get_query_param({startkey_docid, Id}) -> <<"startkey_docid=", Id/binary>>;
 get_query_param({bbox, BBox}) -> <<"bbox=", BBox/binary>>;
 get_query_param({start_range, Range}) ->
-    <<"start_range=", (jiffy:encode(Range))/binary>>;
+    <<"start_range=", (json_utils:encode(Range))/binary>>;
 get_query_param({end_range, Range}) ->
-    <<"end_range=", (jiffy:encode(Range))/binary>>;
+    <<"end_range=", (json_utils:encode(Range))/binary>>;
 get_query_param({group, true}) -> <<"group=true">>;
 get_query_param({group, false}) -> <<"group=false">>;
 get_query_param({group_level, Level}) ->
