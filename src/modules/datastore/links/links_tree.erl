@@ -122,8 +122,24 @@ unset_root_id(State = #state{
         {ok, Forest#links_forest{trees = set_root_id(TreeId, <<>>, Trees)}}
     end,
     case datastore_doc:update(Ctx, ForestId, Diff, Batch) of
-        {{ok, _}, Batch2} ->
-            {ok, State#state{batch = Batch2}};
+        {{ok, #document{value = #links_forest{trees = Trees}}}, Batch2} ->
+            case maps:get(disc_driver, Ctx, undefined) of
+                undefined ->
+                    case lists:filter(fun({Key, _}) -> Key =/= <<>> end,
+                        maps:values(Trees)) of
+                        [] ->
+                            case datastore_doc:delete(Ctx, ForestId, Batch2) of
+                                {ok, Batch3} ->
+                                    {ok, State#state{batch = Batch3}};
+                                {{error, Reason}, Batch3} ->
+                                    {{error, Reason}, State#state{batch = Batch3}}
+                            end;
+                        _ ->
+                            {ok, State#state{batch = Batch2}}
+                    end;
+                _ ->
+                    {ok, State#state{batch = Batch2}}
+            end;
         {{error, Reason}, Batch2} ->
             {{error, Reason}, State#state{batch = Batch2}}
     end.
