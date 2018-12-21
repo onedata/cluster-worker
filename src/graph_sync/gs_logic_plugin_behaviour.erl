@@ -13,17 +13,6 @@
 -module(gs_logic_plugin_behaviour).
 -author("Lukasz Opiola").
 
-%%--------------------------------------------------------------------
-%% @doc
-%% NOTE: All authorization callbacks can return one of:
-%%  # {true, gs_protocol:client()} - client was authorized
-%%  # {error, term()} - client could not be authorized, request should fail
-%%  # false - client could not be authorized, continue without authorization
-%%      (in this case other auth methods will be tried or the client will be
-%%      perceived as GUEST).
-%% @end
-%%--------------------------------------------------------------------
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -32,7 +21,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback authorize(cowboy_req:req()) ->
-    {ok, gs_protocol:client()} | gs_protocol:error().
+    {ok, gs_protocol:client(), gs_server:connection_info(), cowboy_req:req()} |
+    gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -56,19 +46,10 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the GUEST client as understood by gs_logic_plugin, i.e. a client that
-%% was not identified as anyone and can only access public resources.
-%% @end
-%%--------------------------------------------------------------------
--callback guest_client() -> gs_protocol:client().
-
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Callback called when a new client connects to the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_connected(gs_protocol:client(), gs_server:connection_ref()) ->
+-callback client_connected(gs_protocol:client(), gs_server:connection_info(), gs_server:connection_ref()) ->
     ok.
 
 
@@ -77,7 +58,7 @@
 %% Callback called when a client disconnects from the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_disconnected(gs_protocol:client(), gs_server:connection_ref()) ->
+-callback client_disconnected(gs_protocol:client(), gs_server:connection_info(), gs_server:connection_ref()) ->
     ok.
 
 
@@ -93,10 +74,13 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Determines if given client is authorized to perform certain operation.
+%% GRI is returned to indicate how auto scope was resolved. If a specific
+%% scope was requested, it must return the same gri.
 %% @end
 %%--------------------------------------------------------------------
 -callback is_authorized(gs_protocol:client(), gs_protocol:auth_hint(),
-    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data()) -> boolean().
+    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data()) ->
+    {true, gs_protocol:gri()} | false.
 
 
 %%--------------------------------------------------------------------
@@ -121,9 +105,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the list of subscribable resources for given entity type, identified
-%% by {Aspect, Scope} pairs.
+%% Returns if given GRI is subscribable, i.e. clients can subscribe for changes
+%% concerning that GRI.
 %% @end
 %%--------------------------------------------------------------------
--callback subscribable_resources(gs_protocol:entity_type()) ->
-    [{gs_protocol:aspect(), gs_protocol:scope()}].
+-callback is_subscribable(gs_protocol:gri()) -> boolean().
