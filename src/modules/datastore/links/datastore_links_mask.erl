@@ -123,7 +123,7 @@ terminate(#mask{
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns documents documents batch.
+%% Terminates mask and returns documents batch.
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate_read_only_mask(mask()) -> {ok, batch()}.
