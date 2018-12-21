@@ -250,15 +250,11 @@ init_tree_mask_cache(TreeId, Mask, ForestIt = #forest_it{
 }) ->
     case datastore_links_mask:load(Mask) of
         {{ok, Cache}, Mask2} ->
-            case datastore_links_mask:terminate_read_only_mask(Mask2) of
-                {ok, Batch} ->
-                    {ok, ForestIt#forest_it{
-                        masks_cache = maps:put(TreeId, Cache, MasksCache),
-                        batch = Batch
-                    }};
-                {{error, Reason}, Batch} ->
-                    {{error, Reason}, ForestIt#forest_it{batch = Batch}}
-            end;
+            {ok, Batch} = datastore_links_mask:terminate_read_only_mask(Mask2),
+            {ok, ForestIt#forest_it{
+                masks_cache = maps:put(TreeId, Cache, MasksCache),
+                batch = Batch
+            }};
         {{error, Reason}, Mask2} ->
             {_, Batch} = datastore_links_mask:terminate_read_only_mask(Mask2),
             {{error, Reason}, ForestIt#forest_it{batch = Batch}}
