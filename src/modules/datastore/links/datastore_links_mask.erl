@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([init/4, load/1, terminate/1]).
+-export([init/4, load/1, terminate/1, terminate_read_only_mask/1]).
 -export([mark_deleted/3, is_deleted/3]).
 
 -record(mask, {
@@ -120,6 +120,15 @@ terminate(#mask{
         {{ok, _}, Batch2} -> {ok, Batch2};
         {{error, Reason}, Batch2} -> {{error, Reason}, Batch2}
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Terminates mask and returns documents batch.
+%% @end
+%%--------------------------------------------------------------------
+-spec terminate_read_only_mask(mask()) -> {ok, batch()}.
+terminate_read_only_mask(#mask{batch = Batch}) ->
+    {ok, Batch}.
 
 %%--------------------------------------------------------------------
 %% @doc
