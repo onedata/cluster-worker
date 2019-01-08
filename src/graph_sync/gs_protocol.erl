@@ -905,6 +905,8 @@ auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) ->
     <<"throughHandleService:", HSId/binary>>;
 auth_hint_to_json(?THROUGH_HANDLE(HandleId)) ->
     <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) ->
+    <<"throughCluster:", ClusterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
 auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>.
 
@@ -922,6 +924,8 @@ json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) ->
     ?THROUGH_HANDLE_SERVICE(HSId);
 json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) ->
     ?THROUGH_HANDLE(HandleId);
+json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) ->
+    ?THROUGH_CLUSTER(ClusterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId).
 
