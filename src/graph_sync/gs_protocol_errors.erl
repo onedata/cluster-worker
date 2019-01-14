@@ -174,11 +174,12 @@ error_to_json(_, ?ERROR_BAD_VALUE_LIST_OF_BINARIES(Key)) ->
             <<"key">> => Key
         }
     };
-error_to_json(_, ?ERROR_BAD_VALUE_ATOM(Key)) ->
+error_to_json(_, ?ERROR_BAD_VALUE_ATOM(Key, Value)) ->
     #{
-        <<"id">> => <<"badValueString">>,
+        <<"id">> => <<"badValueStringIllegal">>,
         <<"details">> => #{
-            <<"key">> => Key
+            <<"key">> => Key,
+            <<"value">> => Value
         }
     };
 error_to_json(_, ?ERROR_BAD_VALUE_LIST_OF_ATOMS(Key)) ->
@@ -470,6 +471,10 @@ json_to_error(_, #{<<"id">> := <<"badValueString">>,
 json_to_error(_, #{<<"id">> := <<"badValueListOfStrings">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_LIST_OF_BINARIES(Key);
+
+json_to_error(_, #{<<"id">> := <<"badValueStringIllegal">>,
+    <<"details">> := #{<<"key">> := Key, <<"value">> := Value}}) ->
+    ?ERROR_BAD_VALUE_ATOM(Key, Value);
 
 json_to_error(_, #{<<"id">> := <<"badValueBoolean">>,
     <<"details">> := #{<<"key">> := Key}}) ->

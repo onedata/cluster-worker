@@ -650,7 +650,7 @@ encode_decode_error() ->
         ?ERROR_BAD_VALUE_BOOLEAN(<<"subdomainDelegation">>),
         ?ERROR_BAD_VALUE_BINARY(<<"spaceId">>),
         ?ERROR_BAD_VALUE_LIST_OF_BINARIES(<<"urls">>),
-        {?ERROR_BAD_VALUE_ATOM(<<"spaceId">>), ?ERROR_BAD_VALUE_BINARY(<<"spaceId">>)},
+        ?ERROR_BAD_VALUE_ATOM(<<"privileges">>, <<"bad_privilege">>),
         {?ERROR_BAD_VALUE_LIST_OF_ATOMS(<<"privileges">>), ?ERROR_BAD_VALUE_LIST_OF_BINARIES(<<"privileges">>)},
         ?ERROR_BAD_VALUE_DOMAIN(<<"domain">>),
         ?ERROR_BAD_VALUE_SUBDOMAIN,
