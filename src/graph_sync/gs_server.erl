@@ -225,11 +225,11 @@ handle_request(Session, #gs_req{auth_override = undefined, request = Req}) ->
 
 % This request has the authorization field specified, override the default
 % authorization.
-handle_request(Session, #gs_req{auth_override = AuthOverride} = Req) ->
-    case ?GS_LOGIC_PLUGIN:verify_auth_override(AuthOverride) of
-        {ok, Client} ->
+handle_request(Session = #gs_session{client = Client}, #gs_req{auth_override = AuthOverride} = Req) ->
+    case ?GS_LOGIC_PLUGIN:verify_auth_override(Client, AuthOverride) of
+        {ok, OverridenClient} ->
             handle_request(
-                Session#gs_session{client = Client},
+                Session#gs_session{client = OverridenClient},
                 Req#gs_req{auth_override = undefined}
             );
         {error, _} = Error ->
