@@ -105,7 +105,7 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | asUser | asGroup,
+    throughHandleService | throughHandle | throughHarvester | asUser | asGroup | asSpace,
     EntityId :: binary()
 }.
 % A prefetched entity that can be passed to gs_logic_plugin to speed up request
@@ -905,8 +905,11 @@ auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) ->
     <<"throughHandleService:", HSId/binary>>;
 auth_hint_to_json(?THROUGH_HANDLE(HandleId)) ->
     <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) ->
+    <<"throughHarvester:", HarvesterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
-auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>.
+auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
+auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>.
 
 
 -spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
@@ -922,8 +925,11 @@ json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) ->
     ?THROUGH_HANDLE_SERVICE(HSId);
 json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) ->
     ?THROUGH_HANDLE(HandleId);
+json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) ->
+    ?THROUGH_HARVESTER(HarvesterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
-json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId).
+json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
+json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
 
 
 -spec identity_to_json(identity()) -> binary() | json_map().

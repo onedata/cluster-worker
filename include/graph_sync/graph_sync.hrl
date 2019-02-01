@@ -116,11 +116,13 @@
 -define(THROUGH_USER(__UserId), {throughUser, __UserId}).
 -define(THROUGH_GROUP(__GroupId), {throughGroup, __GroupId}).
 -define(THROUGH_SPACE(__SpaceId), {throughSpace, __SpaceId}).
+-define(THROUGH_HARVESTER(__HarvesterId), {throughHarvester, __HarvesterId}).
 -define(THROUGH_PROVIDER(__ProviderId), {throughProvider, __ProviderId}).
 -define(THROUGH_HANDLE_SERVICE(__HServiceId), {throughHandleService, __HServiceId}).
 -define(THROUGH_HANDLE(__HandleId), {throughHandle, __HandleId}).
 % Auth hint denoting context in which an aspect is created
 -define(AS_USER(__UserId), {asUser, __UserId}).
 -define(AS_GROUP(__GroupId), {asGroup, __GroupId}).
+-define(AS_SPACE(__SpaceId), {asSpace, __SpaceId}).
 
 -endif.
