@@ -105,7 +105,7 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | asUser | asGroup,
+    throughHandleService | throughHandle | throughCluster | asUser | asGroup,
     EntityId :: binary()
 }.
 % A prefetched entity that can be passed to gs_logic_plugin to speed up request
