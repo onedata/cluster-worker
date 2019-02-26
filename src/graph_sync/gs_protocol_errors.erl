@@ -358,6 +358,11 @@ error_to_json(_, ?ERROR_CANNOT_DELETE_ENTITY(EntityType, EntityId)) ->
 error_to_json(_, ?ERROR_CANNOT_ADD_RELATION_TO_SELF) ->
     #{
         <<"id">> => <<"cannotAddRelationToSelf">>
+    };
+
+error_to_json(_, ?ERROR_TEMPORARY_FAILURE) ->
+    #{
+        <<"id">> => <<"temporaryFailure">>
     }.
 
 
@@ -564,6 +569,9 @@ json_to_error(_, #{<<"id">> := <<"cannotDeleteEntity">>,
 
 json_to_error(_, #{<<"id">> := <<"cannotAddRelationToSelf">>}) ->
     ?ERROR_CANNOT_ADD_RELATION_TO_SELF;
+
+json_to_error(_, #{<<"id">> := <<"temporaryFailure">>}) ->
+    ?ERROR_TEMPORARY_FAILURE;
 
 % Unknown errors
 json_to_error(_, #{<<"details">> := #{<<"description">> := Description}}) ->
