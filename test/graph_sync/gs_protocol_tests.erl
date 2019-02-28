@@ -643,6 +643,7 @@ encode_decode_error() ->
         ?ERROR_BAD_BASIC_CREDENTIALS,
         ?ERROR_MALFORMED_DATA,
         ?ERROR_MISSING_REQUIRED_VALUE(<<"spaceId">>),
+        ?ERROR_BAD_IDP_ACCESS_TOKEN(<<"keycloak">>),
         ?ERROR_MISSING_AT_LEAST_ONE_VALUE([<<"name">>, <<"type">>]),
         ?ERROR_BAD_DATA(<<"spaceId">>),
         ?ERROR_BAD_VALUE_EMPTY(<<"spaceId">>),
