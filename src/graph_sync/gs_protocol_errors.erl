@@ -130,6 +130,13 @@ error_to_json(_, ?ERROR_MISSING_REQUIRED_VALUE(Key)) ->
             <<"key">> => Key
         }
     };
+error_to_json(_, ?ERROR_BAD_IDP_ACCESS_TOKEN(IdP)) ->
+    #{
+        <<"id">> => <<"badIdpAccessToken">>,
+        <<"details">> => #{
+            <<"idp">> => IdP
+        }
+    };
 error_to_json(_, ?ERROR_MISSING_AT_LEAST_ONE_VALUE(Keys)) ->
     #{
         <<"id">> => <<"missingAtLeastOneValue">>,
@@ -439,6 +446,10 @@ json_to_error(_, #{<<"id">> := <<"badBasicCredentials">>}) ->
 json_to_error(_, #{<<"id">> := <<"missingRequiredValue">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_MISSING_REQUIRED_VALUE(Key);
+
+json_to_error(_, #{<<"id">> := <<"badIdpAccessToken">>,
+    <<"details">> := #{<<"idp">> := IdP}}) ->
+    ?ERROR_BAD_IDP_ACCESS_TOKEN(IdP);
 
 json_to_error(_, #{<<"id">> := <<"missingAtLeastOneValue">>,
     <<"details">> := #{<<"keys">> := Keys}}) ->
