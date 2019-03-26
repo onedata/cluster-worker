@@ -148,7 +148,7 @@ push_updated(ReqGRI, Entity, {SessionId, {Client, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
         {error, not_found} ->
             % Possible when session cleanup is in progress
-            ok;
+            PayloadCache;
         {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
             case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, ReqGRI, get, Entity) of
                 {true, ResGRI} ->
