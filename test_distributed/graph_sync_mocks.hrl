@@ -40,6 +40,9 @@
 -define(USER_1_COOKIE, <<"user1Cookie">>).
 -define(USER_2_COOKIE, <<"user2Cookie">>).
 
+-define(USER_1_TOKEN, <<"user1Token">>).
+-define(USER_2_TOKEN, <<"user2Token">>).
+
 -define(USER_DATA_WITHOUT_GRI(__UserId), case __UserId of
     ?USER_1 -> #{<<"name">> => <<"mockUser1Name">>};
     ?USER_2 -> #{<<"name">> => <<"mockUser2Name">>}
