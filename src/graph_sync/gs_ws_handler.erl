@@ -24,7 +24,7 @@
     % Client as understood by gs_logic_plugin (opaque term to the gs handler)
     client :: gs_protocol:client(),
     % Arbitrary connection info from gs_logic_plugin (opaque term to the gs handler)
-    connection_info ::gs_server:connection_info(),
+    connection_info :: gs_server:connection_info(),
     translator :: module()
 }).
 
@@ -66,7 +66,7 @@
 -spec init(Req :: cowboy_req:req(), Opts :: any()) ->
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
-    case gs_server:authorize(Req) of
+    try gs_server:authorize(Req) of
         {ok, Client, ConnectionInfo, NewReq} ->
             State = #pre_handshake_state{
                 client = Client,
@@ -77,6 +77,11 @@ init(Req, [Translator]) ->
         ?ERROR_UNAUTHORIZED ->
             NewReq = cowboy_req:reply(401, Req),
             {ok, NewReq, #pre_handshake_state{}}
+    catch Type:Reason ->
+        ?error_stacktrace("Unexpected error in graph sync websocket init - ~p:~p", [
+            Type, Reason
+        ]),
+        exit(init_failed)
     end.
 
 
@@ -192,8 +197,8 @@ websocket_info({push, Msg}, #state{protocol_version = ProtoVer} = State) ->
             ?error_stacktrace(
                 "Discarding GS message to client as "
                 "it cannot be encoded - ~p:~p~nMessage: ~p", [
-                Type, Message, Msg
-            ]),
+                    Type, Message, Msg
+                ]),
             {ok, State}
     end;
 
