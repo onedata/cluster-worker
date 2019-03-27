@@ -80,7 +80,9 @@
 -type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
 
 % Used to override the client authorization established on connection level, per
-% request.
+% request. Can be used for example by providers to authorize a certain request
+% with a user's token, while still using the Graph Sync channel that was opened
+% with provider's auth.
 -type auth_override() :: undefined | {token, binary()} | {basic, binary()} |
 {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
 

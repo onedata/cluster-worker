@@ -65,6 +65,7 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Callback called when auth override is sent in request to verify it.
+%% {@link gs_protocol:auth_override()}.
 %% @end
 %%--------------------------------------------------------------------
 -callback verify_auth_override(gs_protocol:client(), gs_protocol:auth_override()) ->
