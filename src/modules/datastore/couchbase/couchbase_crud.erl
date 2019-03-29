@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([init_save_requests/2, terminate_save_requests/1]).
@@ -370,7 +371,10 @@ prepare_store(Requests) ->
                     Responses
                 }
             catch
-                _:Reason ->
+                Type:Reason ->
+                    ?warning_stacktrace("Cannot encode document due to ~p:~p~nDoc: ~p", [
+                        Type, Reason, Value
+                    ]),
                     Reason2 = {Reason, erlang:get_stacktrace()},
                     {
                         StoreRequests,
