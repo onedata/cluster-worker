@@ -106,6 +106,28 @@ handshake_test_base(Config, ProtoVersion) ->
         )
     ),
 
+    % Try to connect with user 1 token
+    {ok, Client4, _} = ?assertMatch(
+        {ok, _, #gs_resp_handshake{identity = {user, ?USER_1}}},
+        gs_client:start_link(get_gs_ws_url(Config),
+            {urlToken, ?USER_1_TOKEN},
+            [ProtoVersion],
+            fun(_) -> ok end,
+            ?SSL_OPTS(Config)
+        )
+    ),
+
+    % Try to connect with user 2 token
+    {ok, Client5, _} = ?assertMatch(
+        {ok, _, #gs_resp_handshake{identity = {user, ?USER_2}}},
+        gs_client:start_link(get_gs_ws_url(Config),
+            {urlToken, ?USER_2_TOKEN},
+            [ProtoVersion],
+            fun(_) -> ok end,
+            ?SSL_OPTS(Config)
+        )
+    ),
+
     % Try to connect with bad cookie
     ?assertMatch(
         ?ERROR_UNAUTHORIZED,
@@ -117,8 +139,19 @@ handshake_test_base(Config, ProtoVersion) ->
         )
     ),
 
+    % Try to connect with bad token
+    ?assertMatch(
+        ?ERROR_UNAUTHORIZED,
+        gs_client:start_link(get_gs_ws_url(Config),
+            {urlToken, <<"asdasfdfbvc">>},
+            [ProtoVersion],
+            fun(_) -> ok end,
+            ?SSL_OPTS(Config)
+        )
+    ),
+
     % Try to connect with provider macaroon
-    {ok, Client4, _} = ?assertMatch(
+    {ok, Client6, _} = ?assertMatch(
         {ok, _, #gs_resp_handshake{identity = {provider, ?PROVIDER_1}}},
         gs_client:start_link(get_gs_ws_url(Config),
             {macaroon, ?PROVIDER_1_MACAROON},
@@ -151,7 +184,7 @@ handshake_test_base(Config, ProtoVersion) ->
         )
     ),
 
-    disconnect_client([Client1, Client2, Client3, Client4]),
+    disconnect_client([Client1, Client2, Client3, Client4, Client5, Client6]),
 
     ok.
 

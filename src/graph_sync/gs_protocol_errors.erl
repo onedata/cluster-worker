@@ -130,6 +130,13 @@ error_to_json(_, ?ERROR_MISSING_REQUIRED_VALUE(Key)) ->
             <<"key">> => Key
         }
     };
+error_to_json(_, ?ERROR_BAD_IDP_ACCESS_TOKEN(IdP)) ->
+    #{
+        <<"id">> => <<"badIdpAccessToken">>,
+        <<"details">> => #{
+            <<"idp">> => IdP
+        }
+    };
 error_to_json(_, ?ERROR_MISSING_AT_LEAST_ONE_VALUE(Keys)) ->
     #{
         <<"id">> => <<"missingAtLeastOneValue">>,
@@ -319,6 +326,10 @@ error_to_json(_, ?ERROR_BAD_VALUE_NAME) ->
     #{
         <<"id">> => <<"badValueName">>
     };
+error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED) ->
+    #{
+        <<"id">> => <<"subdomainDelegationNotSupported">>
+    };
 error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
     #{
         <<"id">> => <<"subdomainDelegationDisabled">>
@@ -445,6 +456,10 @@ json_to_error(_, #{<<"id">> := <<"missingRequiredValue">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_MISSING_REQUIRED_VALUE(Key);
 
+json_to_error(_, #{<<"id">> := <<"badIdpAccessToken">>,
+    <<"details">> := #{<<"idp">> := IdP}}) ->
+    ?ERROR_BAD_IDP_ACCESS_TOKEN(IdP);
+
 json_to_error(_, #{<<"id">> := <<"missingAtLeastOneValue">>,
     <<"details">> := #{<<"keys">> := Keys}}) ->
     ?ERROR_MISSING_AT_LEAST_ONE_VALUE(Keys);
@@ -540,6 +555,9 @@ json_to_error(_, #{<<"id">> := <<"badValueUserName">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"badValueName">>}) ->
     ?ERROR_BAD_VALUE_NAME;
+
+json_to_error(_, #{<<"id">> := <<"subdomainDelegationNotSupported">>}) ->
+    ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED;
 
 json_to_error(_, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
     ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;

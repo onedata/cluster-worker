@@ -113,16 +113,17 @@
 
 % Possible auth hints
 % Auth hint denoting rights to view certain aspects
--define(THROUGH_USER(__UserId), {throughUser, __UserId}).
--define(THROUGH_GROUP(__GroupId), {throughGroup, __GroupId}).
--define(THROUGH_SPACE(__SpaceId), {throughSpace, __SpaceId}).
--define(THROUGH_HARVESTER(__HarvesterId), {throughHarvester, __HarvesterId}).
--define(THROUGH_PROVIDER(__ProviderId), {throughProvider, __ProviderId}).
--define(THROUGH_HANDLE_SERVICE(__HServiceId), {throughHandleService, __HServiceId}).
--define(THROUGH_HANDLE(__HandleId), {throughHandle, __HandleId}).
+-define(THROUGH_USER(UserId), {throughUser, UserId}).
+-define(THROUGH_GROUP(GroupId), {throughGroup, GroupId}).
+-define(THROUGH_SPACE(SpaceId), {throughSpace, SpaceId}).
+-define(THROUGH_PROVIDER(ProviderId), {throughProvider, ProviderId}).
+-define(THROUGH_HANDLE_SERVICE(HServiceId), {throughHandleService, HServiceId}).
+-define(THROUGH_HANDLE(HandleId), {throughHandle, HandleId}).
+-define(THROUGH_HARVESTER(HarvesterId), {throughHarvester, HarvesterId}).
+-define(THROUGH_CLUSTER(ClusterId), {throughCluster, ClusterId}).
 % Auth hint denoting context in which an aspect is created
--define(AS_USER(__UserId), {asUser, __UserId}).
--define(AS_GROUP(__GroupId), {asGroup, __GroupId}).
--define(AS_SPACE(__SpaceId), {asSpace, __SpaceId}).
+-define(AS_USER(UserId), {asUser, UserId}).
+-define(AS_GROUP(GroupId), {asGroup, GroupId}).
+-define(AS_SPACE(SpaceId), {asSpace, SpaceId}).
 
 -endif.

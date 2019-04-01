@@ -314,24 +314,27 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Sends responce to client
+%% Sends response to client
 %% @end
 %%--------------------------------------------------------------------
 -spec send_response(Plugin :: atom(), BeforeProcessingRequest :: term(), Request :: #worker_request{}, Response :: term()) -> atom().
-send_response(Plugin, BeforeProcessingRequest, #worker_request{id = MsgId, reply_to = ReplyTo}, Response) ->
+send_response(Plugin, BeforeProcessingRequest, #worker_request{id = ReqId, reply_to = ReplyTo}, Response) ->
     case ReplyTo of
-        undefined -> ok;
+        undefined ->
+            ok;
         {gen_serv, Serv} ->
-            case MsgId of
+            case ReqId of
                 undefined -> gen_server2:cast(Serv, Response);
                 Id ->
                     gen_server2:cast(Serv, #worker_answer{id = Id, response = Response})
             end;
         {proc, Pid} ->
-            case MsgId of
+            case ReqId of
                 undefined -> Pid ! Response;
                 Id -> Pid ! #worker_answer{id = Id, response = Response}
-            end
+            end;
+        _ when is_function(ReplyTo) ->
+            ReplyTo(Response)
     end,
 
     AfterProcessingRequest = os:timestamp(),

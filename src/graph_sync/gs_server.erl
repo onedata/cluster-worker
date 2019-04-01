@@ -148,7 +148,7 @@ push_updated(ReqGRI, Entity, {SessionId, {Client, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
         {error, not_found} ->
             % Possible when session cleanup is in progress
-            ok;
+            PayloadCache;
         {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
             case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, ReqGRI, get, Entity) of
                 {true, ResGRI} ->
@@ -225,11 +225,11 @@ handle_request(Session, #gs_req{auth_override = undefined, request = Req}) ->
 
 % This request has the authorization field specified, override the default
 % authorization.
-handle_request(Session, #gs_req{auth_override = AuthOverride} = Req) ->
-    case ?GS_LOGIC_PLUGIN:verify_auth_override(AuthOverride) of
-        {ok, Client} ->
+handle_request(Session = #gs_session{client = Client}, #gs_req{auth_override = AuthOverride} = Req) ->
+    case ?GS_LOGIC_PLUGIN:verify_auth_override(Client, AuthOverride) of
+        {ok, OverridenClient} ->
             handle_request(
-                Session#gs_session{client = Client},
+                Session#gs_session{client = OverridenClient},
                 Req#gs_req{auth_override = undefined}
             );
         {error, _} = Error ->

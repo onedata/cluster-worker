@@ -92,18 +92,12 @@ unmock_callbacks(Config) ->
 
 
 authorize(Req) ->
+    try_authorize_by_macaroons(Req).
+
+try_authorize_by_macaroons(Req) ->
     case parse_macaroons_from_headers(Req) of
         {undefined, _} ->
-            case proplists:get_value(?SESSION_COOKIE_NAME, cowboy_req:parse_cookies(Req)) of
-                undefined ->
-                    {ok, ?NOBODY_AUTH, ?CONNECTION_INFO(?NOBODY_AUTH), Req};
-                ?USER_1_COOKIE ->
-                    {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1)), Req};
-                ?USER_2_COOKIE ->
-                    {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2)), Req};
-                _ ->
-                    ?ERROR_UNAUTHORIZED
-            end;
+            try_authorize_by_url_token(Req);
         {Macaroon, DischMacaroons} ->
             case verify_auth_override({macaroon, Macaroon, DischMacaroons}) of
                 {ok, Client} ->
@@ -111,6 +105,32 @@ authorize(Req) ->
                 Error ->
                     Error
             end
+    end.
+
+try_authorize_by_url_token(Req) ->
+    QueryParams = cowboy_req:parse_qs(Req),
+    case proplists:get_value(<<"token">>, QueryParams, undefined) of
+        undefined ->
+            try_authorize_by_cookie(Req);
+        ?USER_1_TOKEN ->
+            {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1)), Req};
+        ?USER_2_TOKEN ->
+            {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2)), Req};
+        _ ->
+            ?ERROR_UNAUTHORIZED
+    end.
+
+
+try_authorize_by_cookie(Req) ->
+    case proplists:get_value(?SESSION_COOKIE_NAME, cowboy_req:parse_cookies(Req)) of
+        undefined ->
+            {ok, ?NOBODY_AUTH, ?CONNECTION_INFO(?NOBODY_AUTH), Req};
+        ?USER_1_COOKIE ->
+            {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1)), Req};
+        ?USER_2_COOKIE ->
+            {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2)), Req};
+        _ ->
+            ?ERROR_UNAUTHORIZED
     end.
 
 
