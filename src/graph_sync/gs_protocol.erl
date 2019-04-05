@@ -80,7 +80,9 @@
 -type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
 
 % Used to override the client authorization established on connection level, per
-% request.
+% request. Can be used for example by providers to authorize a certain request
+% with a user's token, while still using the Graph Sync channel that was opened
+% with provider's auth.
 -type auth_override() :: undefined | {token, binary()} | {basic, binary()} |
 {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
 
@@ -105,7 +107,7 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | asUser | asGroup,
+    throughHandleService | throughHandle | throughCluster | asUser | asGroup,
     EntityId :: binary()
 }.
 % A prefetched entity that can be passed to gs_logic_plugin to speed up request
@@ -905,6 +907,8 @@ auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) ->
     <<"throughHandleService:", HSId/binary>>;
 auth_hint_to_json(?THROUGH_HANDLE(HandleId)) ->
     <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) ->
+    <<"throughCluster:", ClusterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
 auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>.
 
@@ -922,6 +926,8 @@ json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) ->
     ?THROUGH_HANDLE_SERVICE(HSId);
 json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) ->
     ?THROUGH_HANDLE(HandleId);
+json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) ->
+    ?THROUGH_CLUSTER(ClusterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId).
 
