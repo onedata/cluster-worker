@@ -334,6 +334,10 @@ error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
     #{
         <<"id">> => <<"subdomainDelegationDisabled">>
     };
+error_to_json(_, ?ERROR_BASIC_AUTH_NOT_SUPPORTED) ->
+    #{
+        <<"id">> => <<"basicAuthNotSupported">>
+    };
 error_to_json(_, ?ERROR_BASIC_AUTH_DISABLED) ->
     #{
         <<"id">> => <<"basicAuthDisabled">>
@@ -565,6 +569,9 @@ json_to_error(_, #{<<"id">> := <<"subdomainDelegationNotSupported">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
     ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;
+
+json_to_error(_, #{<<"id">> := <<"basicAuthNotSupported">>}) ->
+    ?ERROR_BASIC_AUTH_NOT_SUPPORTED;
 
 json_to_error(_, #{<<"id">> := <<"basicAuthDisabled">>}) ->
     ?ERROR_BASIC_AUTH_DISABLED;
