@@ -322,6 +322,10 @@ error_to_json(_, ?ERROR_BAD_VALUE_USER_NAME) ->
     #{
         <<"id">> => <<"badValueUserName">>
     };
+error_to_json(_, ?ERROR_BAD_VALUE_PASSWORD) ->
+    #{
+        <<"id">> => <<"badValuePassword">>
+    };
 error_to_json(_, ?ERROR_BAD_VALUE_NAME) ->
     #{
         <<"id">> => <<"badValueName">>
@@ -560,6 +564,9 @@ json_to_error(_, #{<<"id">> := <<"badValueAlias">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"badValueUserName">>}) ->
     ?ERROR_BAD_VALUE_USER_NAME;
+
+json_to_error(_, #{<<"id">> := <<"badValuePassword">>}) ->
+    ?ERROR_BAD_VALUE_PASSWORD;
 
 json_to_error(_, #{<<"id">> := <<"badValueName">>}) ->
     ?ERROR_BAD_VALUE_NAME;
