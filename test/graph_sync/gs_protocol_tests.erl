@@ -673,6 +673,7 @@ encode_decode_error() ->
         ?ERROR_BAD_VALUE_NAME,
         ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED,
         ?ERROR_SUBDOMAIN_DELEGATION_DISABLED,
+        ?ERROR_BASIC_AUTH_DISABLED,
         ?ERROR_PROTECTED_GROUP,
         ?ERROR_RELATION_DOES_NOT_EXIST(user, <<"user1">>, space, <<"space1">>),
         ?ERROR_RELATION_ALREADY_EXISTS(user, <<"user1">>, space, <<"space1">>),
