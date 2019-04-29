@@ -19,7 +19,7 @@
 -export([design/0, view/0]).
 -export([get_seq_key/1, get_seq_safe_key/1, get_change_key/2]).
 
--type callback() :: fun(({ok, [datastore:document()] | end_of_stream}
+-type callback() :: fun(({ok, [datastore:document()] | end_of_stream | stream_stopped}
                     | {error, since(), Reason :: term()}) -> any()).
 -type seq() :: non_neg_integer() | null.
 -type since() :: seq().
