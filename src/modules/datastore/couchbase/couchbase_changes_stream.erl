@@ -127,8 +127,7 @@ handle_call(Request, _From, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_cast(?STOP, #state{callback = Callback} = State) ->
-    Callback({ok, stream_stopped}),
+handle_cast(?STOP, #state{} = State) ->
     {stop, normal, State};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
