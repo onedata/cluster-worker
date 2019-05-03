@@ -71,4 +71,10 @@
     subscribers = [] :: ordsets:ordset(gs_persistence:subscriber())
 }).
 
+-record(traverse_task, {
+    task_module :: atom(),
+    status :: atom(),
+    description = #{} :: maps:map()
+}).
+
 -endif.
