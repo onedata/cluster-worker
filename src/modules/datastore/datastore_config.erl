@@ -27,7 +27,8 @@
     synced_cert,
     task_pool,
     gs_session,
-    gs_subscription
+    gs_subscription,
+    traverse_task
 ]).
 
 -define(PLUGIN, datastore_config_plugin).

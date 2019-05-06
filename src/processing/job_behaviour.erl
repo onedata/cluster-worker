@@ -18,8 +18,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback do_master_job(traverse:job()) ->
-    {ok, [MasterJob :: traverse:job()], [SlaveJob :: traverse:job()]} |
-    {ok, [MasterJob :: traverse:job()], [SlaveJob :: traverse:job()], traverse:description()} |
+    {ok, [SlaveJob :: traverse:job()], [MasterJob :: traverse:job()]} |
+    {ok, [SlaveJob :: traverse:job()], [MasterJob :: traverse:job()], traverse:description()} |
     {error, term()}.
 
 %%--------------------------------------------------------------------

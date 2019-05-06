@@ -163,7 +163,7 @@ run_on_slave_pool(Pool, TaskModule, TaskID, Jobs) ->
 run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, Jobs) ->
     lists:foreach(fun(Job) ->
         ok = TaskModule:save_job(Job, start),
-        worker_pool:cast(MasterPool, {?MODULE, execute_master_job,
+        ok = worker_pool:cast(MasterPool, {?MODULE, execute_master_job,
             [MasterPool, SlavePool, TaskModule, TaskID, Job]})
     end, Jobs).
 

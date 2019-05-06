@@ -47,6 +47,7 @@
 -spec init(Args :: term()) ->
     {ok, worker_host:plugin_state()} | {error, Reason :: term()}.
 init(_Args) ->
+    tmp_cache:init_group_manager(),
     datastore_config:init(),
     datastore_cache_manager:init(),
     ets:new(?CHANGES_COUNTERS, [named_table, public, set]),
