@@ -98,13 +98,14 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args) ->
 -spec calculate_and_cache(cache(), key(), callback(), callback_args(), timestamp()) ->
     {ok, value(), additional_info()} | {error, term()}.
 calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
+    % TODO - rozwazyc sekcje krytyczna zeby nie bylo potem sprawdzania invalidacji
     case CalculateCallback(Args) of
         {ok, Value, _CalculationInfo} = Ans ->
             ets:insert(Cache, {Key, Value, Timestamp, 0}),
 
             case check_invalidation(Cache, Timestamp) of
                 invalidated -> ok; % value in cache will be invalid without counter update
-                _ -> catch ets:update_counter(Cache, Key, {4, Timestamp})
+                _ -> catch ets:update_counter(Cache, Key, {4, Timestamp, Timestamp, Timestamp})
             end,
 
             Ans;
