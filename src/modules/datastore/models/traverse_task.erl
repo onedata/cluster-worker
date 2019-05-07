@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/1, create/3, update_description/2,
+-export([get/1, create/4, update_description/2,
     update_status/2, delete/1]).
 
 %% datastore_model callbacks
@@ -54,11 +54,12 @@ get(Key) ->
 %% Creates task document.
 %% @end
 %%--------------------------------------------------------------------
--spec create(key(), traverse:pool(), traverse:task_module()) -> ok | no_return().
-create(ID, Pool, TaskModule) ->
+-spec create(key(), traverse:pool(), traverse:task_module(),
+    traverse:description()) -> ok | no_return().
+create(ID, Pool, TaskModule, InitialDescription) ->
     Doc = #document{
         key = ID,
-        value = #traverse_task{task_module = TaskModule}
+        value = #traverse_task{task_module = TaskModule, description = InitialDescription}
     },
     {ok, _} = datastore_model:create(?CTX, Doc),
     % TODO - taski sa grupowane, co ze zmianami statusu i load balancingiem?

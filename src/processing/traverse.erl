@@ -102,19 +102,26 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Job) ->
         SlaveAnswers = run_on_slave_pool(SlavePool, TaskModule, TaskID, SlaveJobsList),
         ok = run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, MasterJobsList),
 
-        lists:foldl(fun
-            (ok, {OkSum, ErrorSum}) -> {OkSum + 1, ErrorSum};
+        {SlavesOk, SlavesErrors} = lists:foldl(fun
+            ({ok, ok}, {OkSum, ErrorSum}) -> {OkSum + 1, ErrorSum};
             (_, {OkSum, ErrorSum}) -> {OkSum, ErrorSum + 1}
         end, {0, 0}, SlaveAnswers),
 
         ok = TaskModule:save_job(Job, finish),
         Description2 = #{
-            slave_jobs_done => length(SlaveJobsList),
+            slave_jobs_done => SlavesOk,
+            master_jobs_failed => SlavesErrors,
             master_jobs_done => 1
         },
         {ok, NewDescription} = traverse_task:update_description(TaskID, Description2),
 
-        maybe_execute_finish_callback(TaskModule, TaskID, NewDescription)
+        try
+            maybe_execute_finish_callback(TaskModule, TaskID, NewDescription)
+        catch
+            E3:E4 ->
+                ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
+                    [Job, TaskID, TaskModule, E3, E4])
+        end
     catch
         E1:E2 ->
             ?error_stacktrace("Master job ~p of task ~p (module ~p) error ~p:~p",
@@ -169,10 +176,10 @@ run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, Jobs) ->
 
 -spec maybe_execute_finish_callback(task_module(), id(), description()) -> ok | no_return().
 maybe_execute_finish_callback(TaskModule, TaskID, #{
-    master_jobs_delegated := Delegated,
-    master_jobs_done := Done,
-    master_jobs_failed := Failed
-}) ->
+    master_jobs_delegated := Delegated
+} = Description) ->
+    Done = maps:get(master_jobs_done, Description, 0),
+    Failed = maps:get(master_jobs_failed, Description, 0),
     case Delegated == Done + Failed of
         true ->
             % Co jesli nigdy sie nie zgra (polecial blad na save'owaniu info o starcie slave'a, a slave sie nie uruchil)
@@ -183,7 +190,9 @@ maybe_execute_finish_callback(TaskModule, TaskID, #{
 
 -spec add_task(pool(), task_module(), id()) -> ok | no_return().
 add_task(Pool, TaskModule, TaskID) ->
-    traverse_task:create(TaskID, Pool, TaskModule).
+    traverse_task:create(TaskID, Pool, TaskModule, #{
+        master_jobs_delegated => 1
+    }).
 
 check_task_list_and_run() ->
     % Tutaj load balancing per user/space cokolwiek

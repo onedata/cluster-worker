@@ -98,7 +98,19 @@ traverse_test(Config) ->
         1551,1552,1553,1556,1557, 1558],
     Ans = get_slave_ans(),
 
+    SJobsNum = length(Expected),
+    MJobsNum = SJobsNum div 3,
+    Description = #{
+        slave_jobs_delegated => SJobsNum,
+        master_jobs_delegated => MJobsNum,
+        slave_jobs_done => SJobsNum,
+        master_jobs_done => MJobsNum,
+        master_jobs_failed => 0
+    },
+
     ?assertEqual(Expected, lists:sort(Ans)),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+        rpc:call(Worker, traverse_task, get, [<<"1">>])),
     ok.
 
 %%%===================================================================
@@ -167,7 +179,8 @@ do_master_job({Master, Num}) ->
     {ok, SlaveJobs, MasterJobs}.
 
 do_slave_job({Master, Num}) ->
-    Master ! {slave, Num}.
+    Master ! {slave, Num},
+    ok.
 
 task_finished(_) ->
     ok.
