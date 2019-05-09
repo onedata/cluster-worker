@@ -119,9 +119,11 @@
 -define(THROUGH_PROVIDER(ProviderId), {throughProvider, ProviderId}).
 -define(THROUGH_HANDLE_SERVICE(HServiceId), {throughHandleService, HServiceId}).
 -define(THROUGH_HANDLE(HandleId), {throughHandle, HandleId}).
+-define(THROUGH_HARVESTER(HarvesterId), {throughHarvester, HarvesterId}).
 -define(THROUGH_CLUSTER(ClusterId), {throughCluster, ClusterId}).
 % Auth hint denoting context in which an aspect is created
 -define(AS_USER(UserId), {asUser, UserId}).
 -define(AS_GROUP(GroupId), {asGroup, GroupId}).
+-define(AS_SPACE(SpaceId), {asSpace, SpaceId}).
 
 -endif.
