@@ -13,8 +13,9 @@
 -author("Michal Wrzeszcz").
 
 %% Basic cache API
--export([get_or_calculate/4, get/2, calculate_and_cache/4,
-    calculate_and_cache/5, invalidate/1, get_timestamp/0]).
+-export([get_or_calculate/4, get_or_calculate/5, get/2,
+    calculate_and_cache/4, calculate_and_cache/5, calculate_and_cache/6,
+    invalidate/1, get_timestamp/0]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2,
     terminate_cache/2, check_cache_size/1]).
@@ -40,6 +41,7 @@
 -define(GROUP_MEMBERS_KEY(Group), {group_members, Group}).
 -define(CREATE_CRITICAL_SECTION(Group), {tmp_cache_group_create, Group}).
 -define(INVALIDATE_CRITICAL_SECTION(Cache), {tmp_cache_invalidation, Cache}).
+-define(INSERT_CRITICAL_SECTION(Cache, Key), {tmp_cache_insert, Cache, Key}).
 
 %%%===================================================================
 %%% Basic cache API
@@ -54,11 +56,23 @@
 -spec get_or_calculate(cache(), key(), callback(), callback_args()) ->
     {ok, value(), additional_info()} | {error, term()}.
 get_or_calculate(Cache, Key, CalculateCallback, Args) ->
+    get_or_calculate(Cache, Key, CalculateCallback, Args, false).
+
+get_or_calculate(Cache, Key, CalculateCallback, Args, false) ->
     case get(Cache, Key) of
         {ok, Value} ->
             {ok, Value, cached};
         {error, not_found} ->
             calculate_and_cache(Cache, Key, CalculateCallback, Args)
+    end;
+get_or_calculate(Cache, Key, CalculateCallback, Args, true) ->
+    case get(Cache, Key) of
+        {ok, Value} ->
+            {ok, Value, cached};
+        {error, not_found} ->
+            critical_section:run(?INSERT_CRITICAL_SECTION(Cache, Key), fun() ->
+                get_or_calculate(Cache, Key, CalculateCallback, Args, false)
+            end)
     end.
 
 %%--------------------------------------------------------------------
@@ -98,7 +112,9 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args) ->
 -spec calculate_and_cache(cache(), key(), callback(), callback_args(), timestamp()) ->
     {ok, value(), additional_info()} | {error, term()}.
 calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
-    % TODO - rozwazyc sekcje krytyczna zeby nie bylo potem sprawdzania invalidacji
+    calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, false).
+
+calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, false) ->
     case CalculateCallback(Args) of
         {ok, Value, _CalculationInfo} = Ans ->
             ets:insert(Cache, {Key, Value, Timestamp, 0}),
@@ -111,7 +127,11 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
             Ans;
         Other ->
             Other
-    end.
+    end;
+calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, true) ->
+    critical_section:run(?INSERT_CRITICAL_SECTION(Cache, Key), fun() ->
+        calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, false)
+    end).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -120,7 +140,7 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
 %%--------------------------------------------------------------------
 -spec invalidate(cache()) -> ok.
 invalidate(Cache) ->
-    critical_section:run({tmp_cache_invalidation, Cache}, fun() ->
+    critical_section:run(?INVALIDATE_CRITICAL_SECTION(Cache), fun() ->
         ets:insert(?CACHE_MANAGER, {?INVALIDATION_TIMESTAMP_KEY(Cache), get_timestamp()}),
         ets:delete_all_objects(Cache),
         ok

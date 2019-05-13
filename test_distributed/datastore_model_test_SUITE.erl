@@ -53,7 +53,9 @@
     expired_doc_should_not_exist/1,
     deleted_doc_should_expire/1,
     link_doc_should_expire/1,
-    link_del_should_delay_inactivate/1
+    link_del_should_delay_inactivate/1,
+    fold_links_id_should_succeed/1,
+    fold_links_token_and_id_should_succeed/1
 ]).
 
 % for rpc
@@ -91,7 +93,9 @@ all() ->
         expired_doc_should_not_exist,
         deleted_doc_should_expire,
         link_doc_should_expire,
-        link_del_should_delay_inactivate
+        link_del_should_delay_inactivate,
+        fold_links_id_should_succeed,
+        fold_links_token_and_id_should_succeed
     ], [
         links_performance,
         create_get_performance
@@ -474,6 +478,68 @@ fold_links_token_should_succeed_after_token_timeout(Config) ->
             #{token => #link_token{}, size => 500, offset => 0}),
         lists:foreach(fun({{Name, Target}, Link = #link{}}) ->
             ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
+            ?assertEqual(Name, Link#link.name),
+            ?assertEqual(Target, Link#link.target)
+        end, lists:zip(ExpectedLinks2, Links))
+    end, ?TEST_MODELS).
+
+fold_links_id_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        LinksNum = 1000,
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
+            {?LINK_NAME(N), ?LINK_TARGET(N)}
+        end, lists:seq(1, LinksNum))),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID, ExpectedLinks
+        ])),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID(2), ExpectedLinks
+        ])),
+
+        AddTree = fun(TreeID) ->
+            lists:map(fun({Name, Target}) ->
+                {Name, Target, TreeID}
+            end, ExpectedLinks)
+        end,
+        ExpectedLinks2 = lists:sort(AddTree(?LINK_TREE_ID) ++ AddTree(?LINK_TREE_ID(2))),
+
+        Links = fold_links_id_and_tree(?KEY, Worker, Model,
+            #{prev_link_name => <<>>, size => 101}),
+        lists:foreach(fun({{Name, Target, TreeID}, Link = #link{}}) ->
+            ?assertEqual(TreeID, Link#link.tree_id),
+            ?assertEqual(Name, Link#link.name),
+            ?assertEqual(Target, Link#link.target)
+        end, lists:zip(ExpectedLinks2, Links))
+    end, ?TEST_MODELS).
+
+fold_links_token_and_id_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
+        fold_cache_timeout, timer:seconds(0)),
+    lists:foreach(fun(Model) ->
+        LinksNum = 1000,
+        ExpectedLinks = lists:sort(lists:map(fun(N) ->
+            {?LINK_NAME(N), ?LINK_TARGET(N)}
+        end, lists:seq(1, LinksNum))),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID, ExpectedLinks
+        ])),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID(2), ExpectedLinks
+        ])),
+
+        AddTree = fun(TreeID) ->
+            lists:map(fun({Name, Target}) ->
+                {Name, Target, TreeID}
+            end, ExpectedLinks)
+        end,
+        ExpectedLinks2 = lists:sort(AddTree(?LINK_TREE_ID) ++ AddTree(?LINK_TREE_ID(2))),
+
+        Links = fold_links_token_id_and_tree(?KEY, Worker, Model,
+            #{token => #link_token{}, size => 501}),
+        lists:foreach(fun({{Name, Target, TreeID}, Link = #link{}}) ->
+            ?assertEqual(TreeID, Link#link.tree_id),
             ?assertEqual(Name, Link#link.name),
             ?assertEqual(Target, Link#link.target)
         end, lists:zip(ExpectedLinks2, Links))
@@ -1066,10 +1132,39 @@ fold_links_id(Key, Worker, Model, #{prev_link_name := StartLink} = Opts) ->
     end, Links),
     case Filtered of
         [Last | _] ->
-            Opts2 = Opts#{prev_link_name => Last#link.name},
+            Opts2 = Opts#{prev_link_name => Last#link.name, prev_tree_id => Last#link.tree_id},
             lists:reverse(Filtered) ++ fold_links_id(Key, Worker, Model, Opts2);
         _ ->
             []
+    end.
+
+fold_links_id_and_tree(Key, Worker, Model, Opts) ->
+    {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], Opts]
+    )),
+
+    case Links of
+        [Last | _] ->
+            Opts2 = Opts#{prev_link_name => Last#link.name, prev_tree_id => Last#link.tree_id},
+            lists:reverse(Links) ++ fold_links_id_and_tree(Key, Worker, Model, Opts2);
+        _ ->
+            []
+    end.
+
+fold_links_token_id_and_tree(Key, Worker, Model, Opts) ->
+    {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, Model, fold_links,
+        [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], Opts]
+    )),
+    Reversed = lists:reverse(Links),
+    case Token#link_token.is_last of
+        true ->
+            Reversed;
+        _ ->
+            [Last | _] = Links,
+            Opts2 = Opts#{token => Token, prev_link_name => Last#link.name,
+                prev_tree_id => Last#link.tree_id},
+            timer:sleep(timer:seconds(10)),
+            Reversed ++ fold_links_token_id_and_tree(Key, Worker, Model, Opts2)
     end.
 
 fold_links_id_and_neg_offset(Key, Worker, Model, Opts, TmpAns) ->

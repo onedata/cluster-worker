@@ -43,7 +43,8 @@
     multi_sorted_tree_fold_should_return_all_using_id_with_neg_offset/1,
     multi_sorted_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset/1,
     multi_sorted_tree_fold_should_return_all_using_not_existsing_middle_id_with_neg_offset/1,
-    multi_tree_fold_should_return_targets_with_token/1
+    multi_tree_fold_should_return_targets_with_token/1,
+    multi_tree_fold_should_return_targets_with_token_id_and_tree/1
 ]).
 
 all() ->
@@ -72,7 +73,8 @@ all() ->
         multi_sorted_tree_fold_should_return_all_using_id_with_neg_offset,
         multi_sorted_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset,
         multi_sorted_tree_fold_should_return_all_using_not_existsing_middle_id_with_neg_offset,
-        multi_tree_fold_should_return_targets_with_token
+        multi_tree_fold_should_return_targets_with_token,
+        multi_tree_fold_should_return_targets_with_token_id_and_tree
     ]).
 
 -define(MODEL, ets_cached_model).
@@ -261,6 +263,19 @@ multi_tree_fold_should_return_targets_with_token(Config) ->
 
     Links = fold_links_token(Worker, ?CTX(?KEY), ?KEY,
             #{token => #link_token{}, offset => 0, size => Incr}),
+    ?assertEqual(get_expected_links(AllLinks), Links).
+
+multi_tree_fold_should_return_targets_with_token_id_and_tree(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 5,
+    LinksNum = 500,
+    Incr = 100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    Links = fold_links_token_id_and_tree(Worker, ?CTX(?KEY), ?KEY,
+        #{token => #link_token{}, size => Incr}),
     ?assertEqual(get_expected_links(AllLinks), Links).
 
 multi_tree_fold_should_return_targets_from_link(Config) ->
@@ -611,6 +626,23 @@ fold_links_token(Worker, Ctx, Key, Opts) ->
         _ ->
             Opts2 = Opts#{token => Token},
             Reversed ++ fold_links_token(Worker, Ctx, Key, Opts2)
+    end.
+
+fold_links_token_id_and_tree(Worker, Ctx, Key, Opts) ->
+    {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, datastore_links_iter,
+        fold, [Ctx, Key, all, fun(Link, Acc) ->
+            {ok, [Link | Acc]}
+                              end, [], Opts]
+    )),
+    Reversed = lists:reverse(Links),
+    case Token#link_token.is_last of
+        true ->
+            Reversed;
+        _ ->
+            [Last | _] = Links,
+            Opts2 = Opts#{token => Token#link_token{restart_token = undefined},
+                prev_link_name => Last#link.name, prev_tree_id => Last#link.tree_id},
+            Reversed ++ fold_links_token_id_and_tree(Worker, Ctx, Key, Opts2)
     end.
 
 get_expected_links(Links) ->
