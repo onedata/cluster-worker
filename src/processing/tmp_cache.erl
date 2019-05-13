@@ -12,9 +12,11 @@
 -module(tmp_cache).
 -author("Michal Wrzeszcz").
 
+-dialyzer({nowarn_function, [init_cache/2, terminate_cache/2]}). % silence warning about race on ets
+
 %% Basic cache API
 -export([get_or_calculate/4, get_or_calculate/5, get/2,
-    calculate_and_cache/4, calculate_and_cache/5, calculate_and_cache/6,
+    calculate_and_cache/4, calculate_and_cache/5,
     invalidate/1, get_timestamp/0]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2,
@@ -34,6 +36,7 @@
 -type terminate_options() :: #{group => group()}.
 -type check_options() :: #{size := non_neg_integer(), name := cache() | group(),
     check_frequency := non_neg_integer(), group => boolean()}.
+-type in_critical_section() :: boolean().
 
 -define(TIMER_MESSAGE(Options), {tmp_cache_timer, Options}).
 -define(CACHE_MANAGER, tmp_cache_manager).
@@ -49,8 +52,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Gets value from cache. If it is not found - uses callback to calculate it.
-%% Calculated value is cached.
+%% @equiv get_or_calculate(Cache, Key, CalculateCallback, Args, false).
 %% @end
 %%--------------------------------------------------------------------
 -spec get_or_calculate(cache(), key(), callback(), callback_args()) ->
@@ -58,6 +60,14 @@
 get_or_calculate(Cache, Key, CalculateCallback, Args) ->
     get_or_calculate(Cache, Key, CalculateCallback, Args, false).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets value from cache. If it is not found - uses callback to calculate it.
+%% Calculated value is cached.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_or_calculate(cache(), key(), callback(), callback_args(),
+    in_critical_section()) -> {ok, value(), additional_info()} | {error, term()}.
 get_or_calculate(Cache, Key, CalculateCallback, Args, false) ->
     case get(Cache, Key) of
         {ok, Value} ->
@@ -112,26 +122,21 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args) ->
 -spec calculate_and_cache(cache(), key(), callback(), callback_args(), timestamp()) ->
     {ok, value(), additional_info()} | {error, term()}.
 calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
-    calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, false).
-
-calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, false) ->
     case CalculateCallback(Args) of
         {ok, Value, _CalculationInfo} = Ans ->
-            ets:insert(Cache, {Key, Value, Timestamp, 0}),
-
-            case check_invalidation(Cache, Timestamp) of
-                invalidated -> ok; % value in cache will be invalid without counter update
-                _ -> catch ets:update_counter(Cache, Key, {4, Timestamp, Timestamp, Timestamp})
+            case ets:insert_new(Cache, {Key, Value, Timestamp, 0}) of
+                true ->
+                    case check_invalidation(Cache, Timestamp) of
+                        invalidated -> ok; % value in cache will be invalid without counter update
+                        _ -> catch ets:update_counter(Cache, Key, {4, Timestamp, Timestamp, Timestamp})
+                    end;
+                _ ->
+                    ok
             end,
-
             Ans;
         Other ->
             Other
-    end;
-calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, true) ->
-    critical_section:run(?INSERT_CRITICAL_SECTION(Cache, Key), fun() ->
-        calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp, false)
-    end).
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
