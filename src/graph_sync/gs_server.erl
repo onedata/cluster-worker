@@ -36,7 +36,7 @@
 
 
 %% API
--export([authorize/1, handshake/5]).
+-export([handshake/4]).
 -export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
@@ -48,25 +48,13 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Authorizes a client based on cowboy request, used during handshake.
-%% @end
-%%--------------------------------------------------------------------
--spec authorize(cowboy_req:req()) ->
-    {ok, gs_protocol:client(), connection_info(), cowboy_req:req()} |
-    gs_protocol:error().
-authorize(Req) ->
-    ?GS_LOGIC_PLUGIN:authorize(Req).
-
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Validates a handshake request and if it's correct, creates a new session.
 %% Returns success or error handshake response depending on the outcome.
 %% @end
 %%--------------------------------------------------------------------
--spec handshake(gs_protocol:client(), connection_info(), conn_ref(), translator(), gs_protocol:req_wrapper()) ->
+-spec handshake(gs_protocol:auth(), conn_ref(), translator(), gs_protocol:req_wrapper()) ->
     {ok, gs_protocol:resp_wrapper()} | {error, gs_protocol:resp_wrapper()}.
-handshake(Client, ConnectionInfo, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req) ->
+handshake(HttpAuth, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req) ->
     #gs_req_handshake{supported_versions = ClientVersions} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(ClientVersions, ServerVersions) of
@@ -75,22 +63,34 @@ handshake(Client, ConnectionInfo, ConnRef, Translator, #gs_req{request = #gs_req
                 Req, ?ERROR_BAD_VERSION(ServerVersions))
             };
         {true, Version} ->
-            {ok, SessionId} = gs_persistence:create_session(#gs_session{
-                client = Client,
-                connection_info = ConnectionInfo,
-                conn_ref = ConnRef,
-                protocol_version = Version,
-                translator = Translator
-            }),
-            ?GS_LOGIC_PLUGIN:client_connected(Client, ConnectionInfo, ConnRef),
-            Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
-            Attributes = Translator:handshake_attributes(Client),
-            {ok, gs_protocol:generate_success_response(Req, #gs_resp_handshake{
-                version = Version,
-                session_id = SessionId,
-                identity = Identity,
-                attributes = Attributes
-            })}
+            %% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
+            Auth = case HttpAuth of
+                undefined -> HReq#gs_req_handshake.auth;
+                _ -> HttpAuth
+            end,
+            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(Auth) of
+                ?ERROR_UNAUTHORIZED ->
+                    {error, gs_protocol:generate_error_response(
+                        Req, ?ERROR_UNAUTHORIZED)
+                    };
+                {ok, Client, ConnectionInfo} ->
+                    {ok, SessionId} = gs_persistence:create_session(#gs_session{
+                        client = Client,
+                        connection_info = ConnectionInfo,
+                        conn_ref = ConnRef,
+                        protocol_version = Version,
+                        translator = Translator
+                    }),
+                    ?GS_LOGIC_PLUGIN:client_connected(Client, ConnectionInfo, ConnRef),
+                    Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
+                    Attributes = Translator:handshake_attributes(Client),
+                    {ok, gs_protocol:generate_success_response(Req, #gs_resp_handshake{
+                        version = Version,
+                        session_id = SessionId,
+                        identity = Identity,
+                        attributes = Attributes
+                    })}
+            end
     end.
 
 

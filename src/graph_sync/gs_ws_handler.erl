@@ -21,10 +21,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
-    % Client as understood by gs_logic_plugin (opaque term to the gs handler)
-    client :: gs_protocol:client(),
-    % Arbitrary connection info from gs_logic_plugin (opaque term to the gs handler)
-    connection_info :: gs_server:connection_info(),
+    % @TODO DEPRECATED VFS-5436 - used when auth macaroons are sent in headers
+    http_auth :: gs_protocol:auth(),
     translator :: module()
 }).
 
@@ -66,23 +64,10 @@
 -spec init(Req :: cowboy_req:req(), Opts :: any()) ->
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
-    try gs_server:authorize(Req) of
-        {ok, Client, ConnectionInfo, NewReq} ->
-            State = #pre_handshake_state{
-                client = Client,
-                connection_info = ConnectionInfo,
-                translator = Translator
-            },
-            {cowboy_websocket, NewReq, State};
-        ?ERROR_UNAUTHORIZED ->
-            NewReq = cowboy_req:reply(401, Req),
-            {ok, NewReq, #pre_handshake_state{}}
-    catch Type:Reason ->
-        ?error_stacktrace("Unexpected error in graph sync websocket init - ~p:~p", [
-            Type, Reason
-        ]),
-        exit(init_failed)
-    end.
+    {cowboy_websocket, Req, #pre_handshake_state{
+        http_auth = parse_auth_from_headers(Req),
+        translator = Translator
+    }}.
 
 
 %%--------------------------------------------------------------------
@@ -111,14 +96,13 @@ websocket_init(State) ->
     OutFrame :: cowboy_websocket:frame().
 websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     #pre_handshake_state{
-        client = Client,
-        connection_info = ConnectionInfo,
+        http_auth = HttpAuth,
         translator = Translator
     } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(Client, ConnectionInfo, self(), Translator, Request) of
+            case gs_server:handshake(HttpAuth, self(), Translator, Request) of
                 {ok, Resp} ->
                     #gs_resp{
                         response = #gs_resp_handshake{
@@ -256,6 +240,7 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Spawns a new process to process a request (or a group of processes in case of
 %% multiple requests). After processing, the response is pushed to the client.
@@ -293,6 +278,7 @@ process_request_async(SessionId, Request) ->
     ok.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Decodes a binary JSON message into gs request record(s).
 %% @end
@@ -313,4 +299,19 @@ decode_body(ProtocolVersion, Data) ->
     catch
         _:_ ->
             ?ERROR_BAD_MESSAGE(Data)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Looks for the "Macaroon" header and return the macaroon GS auth, or undefined
+%% if the header is not found.
+%% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
+%% @end
+%%--------------------------------------------------------------------
+-spec parse_auth_from_headers(cowboy_req:req()) -> gs_protocol:auth().
+parse_auth_from_headers(Req) ->
+    case cowboy_req:header(<<"macaroon">>, Req) of
+        undefined -> undefined;
+        Macaroon -> {macaroon, Macaroon, []}
     end.

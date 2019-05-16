@@ -27,8 +27,6 @@
 
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
 
--define(SESSION_COOKIE_NAME, <<"sess-id">>).
-
 -define(USER_AUTH(__UserId), {user_auth, __UserId}).
 -define(PROVIDER_AUTH(__ProviderId), {provider_auth, __ProviderId}).
 -define(NOBODY_AUTH, nobody).
@@ -37,11 +35,8 @@
 -define(USER_1, <<"user1Id">>).
 -define(USER_2, <<"user2Id">>).
 
--define(USER_1_COOKIE, <<"user1Cookie">>).
--define(USER_2_COOKIE, <<"user2Cookie">>).
-
--define(USER_1_TOKEN, <<"user1Token">>).
--define(USER_2_TOKEN, <<"user2Token">>).
+-define(USER_1_MACAROON, <<"user1Macaroon">>).
+-define(USER_2_MACAROON, <<"user2Macaroon">>).
 
 -define(USER_DATA_WITHOUT_GRI(__UserId), case __UserId of
     ?USER_1 -> #{<<"name">> => <<"mockUser1Name">>};
@@ -72,9 +67,9 @@ end).
 
 -define(LIMIT_HANDLE_SERVICE_DATA(__Scope, __Data), case __Scope of
     private -> __Data;
-    protected -> maps:remove(<<"private">>, __Data);
-    shared -> maps:remove(<<"protected">>, maps:remove(<<"private">>, __Data));
-    public -> maps:remove(<<"shared">>, maps:remove(<<"protected">>, maps:remove(<<"private">>, __Data)))
+    protected -> maps:without([<<"private">>], __Data);
+    shared -> maps:without([<<"private">>, <<"protected">>], __Data);
+    public -> maps:without([<<"private">>, <<"protected">>, <<"shared">>], __Data)
 end).
 
 

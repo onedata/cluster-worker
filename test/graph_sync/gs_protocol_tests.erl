@@ -263,25 +263,28 @@ encode_decode_message() ->
             auth_override = undefined,
             request = #gs_req_handshake{
                 supported_versions = [],
+                auth = undefined,
                 session_id = <<"23423424qdsfdsgew456235tegdfg">>
             }
         },
         #gs_req{
             id = <<"mess5">>,
-            subtype = rpc,
-            auth_override = {token, <<"123123">>},
-            request = #gs_req_rpc{
-                function = <<"f5">>,
-                args = #{<<"args5">> => 5}
+            subtype = handshake,
+            auth_override = undefined,
+            request = #gs_req_handshake{
+                supported_versions = [123123, 34534, 123, 5],
+                auth = {macaroon, <<"macaroon">>, []},
+                session_id = <<"zxvcert245234234234234">>
             }
         },
         #gs_req{
             id = <<"mess6">>,
-            subtype = rpc,
-            auth_override = {basic, <<"123sdfadsfq345r123">>},
-            request = #gs_req_rpc{
-                function = <<"f6">>,
-                args = #{<<"args6">> => 6}
+            subtype = handshake,
+            auth_override = undefined,
+            request = #gs_req_handshake{
+                supported_versions = [1],
+                auth = {macaroon, <<"macaroon">>, [<<"d1">>, <<"d2">>]},
+                session_id = <<"ccxvsdfsdfsdfsdf">>
             }
         },
         #gs_req{
