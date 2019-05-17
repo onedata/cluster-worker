@@ -38,6 +38,7 @@
     subscribe_test/1,
     unsubscribe_test/1,
     nosub_test/1,
+    auth_override_test/1,
     auto_scope_test/1,
     session_persistence_test/1,
     subscribers_persistence_test/1,
@@ -53,6 +54,7 @@
     subscribe_test,
     unsubscribe_test,
     nosub_test,
+    auth_override_test,
     auto_scope_test,
     session_persistence_test,
     subscribers_persistence_test,
@@ -60,6 +62,8 @@
     gs_server_session_clearing_test_api_level,
     gs_server_session_clearing_test_connection_level
 ]).
+
+-define(wait_until_true(Term), ?assertEqual(true, Term, 50)).
 
 %%%===================================================================
 %%% API functions
@@ -74,117 +78,29 @@ handshake_test(Config) ->
 
 handshake_test_base(Config, ProtoVersion) ->
     % Try to connect with no cookie - should be treated as anonymous
-    {ok, Client1, _} = ?assertMatch(
-        {ok, _, #gs_resp_handshake{identity = nobody}},
-        gs_client:start_link(get_gs_ws_url(Config),
-            undefined,
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
+    Client1 = spawn_client(Config, ProtoVersion, undefined, nobody),
 
-    % Try to connect with user 1 session cookie
-    {ok, Client2, _} = ?assertMatch(
-        {ok, _, #gs_resp_handshake{identity = {user, ?USER_1}}},
-        gs_client:start_link(get_gs_ws_url(Config),
-            {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
+    % Try to connect with user 1 macaroon, auth via HTTP or handshake
+    Client2 = spawn_client(Config, ProtoVersion, {http, {macaroon, ?USER_1_MACAROON}}, {user, ?USER_1}),
+    Client3 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}),
 
-    % Try to connect with user 2 session cookie
-    {ok, Client3, _} = ?assertMatch(
-        {ok, _, #gs_resp_handshake{identity = {user, ?USER_2}}},
-        gs_client:start_link(get_gs_ws_url(Config),
-            {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
+    % Try to connect with user 2 macaroon, auth via HTTP or handshake
+    Client4 = spawn_client(Config, ProtoVersion, {http, {macaroon, ?USER_2_MACAROON}}, {user, ?USER_2}),
+    Client5 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, {user, ?USER_2}),
 
-    % Try to connect with user 1 token
-    {ok, Client4, _} = ?assertMatch(
-        {ok, _, #gs_resp_handshake{identity = {user, ?USER_1}}},
-        gs_client:start_link(get_gs_ws_url(Config),
-            {urlToken, ?USER_1_TOKEN},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
+    % Try to connect with bad macaroon, auth via HTTP or handshake
+    spawn_client(Config, ProtoVersion, {http, {macaroon, <<"bkkwksdf">>}}, ?ERROR_UNAUTHORIZED),
+    spawn_client(Config, ProtoVersion, {macaroon, <<"bkkwksdf">>, []}, ?ERROR_UNAUTHORIZED),
 
-    % Try to connect with user 2 token
-    {ok, Client5, _} = ?assertMatch(
-        {ok, _, #gs_resp_handshake{identity = {user, ?USER_2}}},
-        gs_client:start_link(get_gs_ws_url(Config),
-            {urlToken, ?USER_2_TOKEN},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
-
-    % Try to connect with bad cookie
-    ?assertMatch(
-        ?ERROR_UNAUTHORIZED,
-        gs_client:start_link(get_gs_ws_url(Config),
-            {cookie, {?SESSION_COOKIE_NAME, <<"bkkwksdf">>}},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
-
-    % Try to connect with bad token
-    ?assertMatch(
-        ?ERROR_UNAUTHORIZED,
-        gs_client:start_link(get_gs_ws_url(Config),
-            {urlToken, <<"asdasfdfbvc">>},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
-
-    % Try to connect with provider macaroon
-    {ok, Client6, _} = ?assertMatch(
-        {ok, _, #gs_resp_handshake{identity = {provider, ?PROVIDER_1}}},
-        gs_client:start_link(get_gs_ws_url(Config),
-            {macaroon, ?PROVIDER_1_MACAROON},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
-
-    % Try to connect with bad macaroon
-    ?assertMatch(
-        ?ERROR_UNAUTHORIZED,
-        gs_client:start_link(get_gs_ws_url(Config),
-            {macaroon, <<"badMacaroon">>},
-            [ProtoVersion],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
+    % Try to connect with provider macaroon, auth via HTTP or handshake
+    Client6 = spawn_client(Config, ProtoVersion, {http, {macaroon, ?PROVIDER_1_MACAROON}}, {provider, ?PROVIDER_1}),
+    Client7 = spawn_client(Config, ProtoVersion, {macaroon, ?PROVIDER_1_MACAROON, []}, {provider, ?PROVIDER_1}),
 
     % Try to connect with bad protocol version
     SuppVersions = gs_protocol:supported_versions(),
-    ?assertMatch(
-        ?ERROR_BAD_VERSION(SuppVersions),
-        gs_client:start_link(get_gs_ws_url(Config),
-            {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-            [lists:max(SuppVersions) + 1],
-            fun(_) -> ok end,
-            ?SSL_OPTS(Config)
-        )
-    ),
+    spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERROR_BAD_VERSION(SuppVersions)),
 
-    disconnect_client([Client1, Client2, Client3, Client4, Client5, Client6]),
+    disconnect_client([Client1, Client2, Client3, Client4, Client5, Client6, Client7]),
 
     ok.
 
@@ -193,20 +109,9 @@ rpc_req_test(Config) ->
     [rpc_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
 rpc_req_test_base(Config, ProtoVersion) ->
-    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        [ProtoVersion],
-        fun(_) -> ok end,
-        ?SSL_OPTS(Config)
-    ),
-    {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        [ProtoVersion],
-        fun(_) -> ok end,
-        ?SSL_OPTS(Config)
-    ),
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}),
+    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, {user, ?USER_2}),
+
     ?assertMatch(
         {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
         gs_client:rpc_request(Client1, <<"user1Fun">>, #{<<"a">> => <<"b">>})
@@ -241,20 +146,8 @@ graph_req_test_base(Config, ProtoVersion) ->
         <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
     },
 
-    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        [ProtoVersion],
-        fun(_) -> ok end,
-        ?SSL_OPTS(Config)
-    ),
-    {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        [ProtoVersion],
-        fun(_) -> ok end,
-        ?SSL_OPTS(Config)
-    ),
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}),
+    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, {user, ?USER_2}),
 
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
@@ -373,6 +266,7 @@ graph_req_test_base(Config, ProtoVersion) ->
     ok.
 
 
+
 subscribe_test(Config) ->
     [subscribe_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
@@ -388,21 +282,13 @@ subscribe_test_base(Config, ProtoVersion) ->
         <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance})
     },
 
-    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        [ProtoVersion],
-        fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        ?SSL_OPTS(Config)
-    ),
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}, fun(Push) ->
+        GathererPid ! {gather_message, client1, Push}
+    end),
 
-    {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        [ProtoVersion],
-        fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
-        ?SSL_OPTS(Config)
-    ),
+    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, {user, ?USER_2}, fun(Push) ->
+        GathererPid ! {gather_message, client2, Push}
+    end),
 
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
@@ -467,80 +353,60 @@ subscribe_test_base(Config, ProtoVersion) ->
     NewUser1NameSubstring = binary:part(maps:get(<<"name">>, NewUser1Data), 0, 4),
     NewUser2NameSubstring = binary:part(maps:get(<<"name">>, NewUser2Data), 0, 6),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_1, aspect = instance
-                }, change_type = updated, data = NewUser1Data} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_1, aspect = instance
+            }, change_type = updated, data = NewUser1Data} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
-                }, change_type = updated, data = #{<<"nameSubstring">> := NewUser1NameSubstring}} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
+            }, change_type = updated, data = #{<<"nameSubstring">> := NewUser1NameSubstring}} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_1, aspect = instance
-                }, change_type = deleted, data = undefined} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_1, aspect = instance
+            }, change_type = deleted, data = undefined} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client2, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_2, aspect = instance
-                }, change_type = updated, data = NewUser2Data} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_2, aspect = instance
+            }, change_type = updated, data = NewUser2Data} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client2, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
-                }, change_type = updated, data = #{<<"nameSubstring">> := NewUser2NameSubstring}} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
+            }, change_type = updated, data = #{<<"nameSubstring">> := NewUser2NameSubstring}} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     disconnect_client([Client1, Client2]),
 
@@ -559,13 +425,9 @@ unsubscribe_test_base(Config, ProtoVersion) ->
         <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
     },
 
-    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        [ProtoVersion],
-        fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        ?SSL_OPTS(Config)
-    ),
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}, fun(Push) ->
+        GathererPid ! {gather_message, client1, Push}
+    end),
 
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
@@ -585,20 +447,16 @@ unsubscribe_test_base(Config, ProtoVersion) ->
         <<"name">> => <<"newName1">>
     },
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_1, aspect = instance
-                }, change_type = updated, data = NewUser1Data} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_1, aspect = instance
+            }, change_type = updated, data = NewUser1Data} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     ?assertMatch(
         {ok, #gs_resp_unsub{}},
@@ -646,21 +504,13 @@ nosub_test_base(Config, ProtoVersion) ->
         <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance})
     },
 
-    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        [ProtoVersion],
-        fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        ?SSL_OPTS(Config)
-    ),
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}, fun(Push) ->
+        GathererPid ! {gather_message, client1, Push}
+    end),
 
-    {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        [ProtoVersion],
-        fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
-        ?SSL_OPTS(Config)
-    ),
+    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, {user, ?USER_2}, fun(Push) ->
+        GathererPid ! {gather_message, client2, Push}
+    end),
 
     ?assertMatch(
         ?ERROR_FORBIDDEN,
@@ -687,20 +537,16 @@ nosub_test_base(Config, ProtoVersion) ->
         <<"name">> => <<"newName1">>
     },
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            case Msg of
-                #gs_push_graph{gri = #gri{
-                    type = od_user, id = ?USER_2, aspect = instance
-                }, change_type = updated, data = NewUser2Data} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{gri = #gri{
+                type = od_user, id = ?USER_2, aspect = instance
+            }, change_type = updated, data = NewUser2Data} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     ?assertMatch(
         {ok, #gs_resp_graph{}},
@@ -713,20 +559,16 @@ nosub_test_base(Config, ProtoVersion) ->
         <<"name">> => ?USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE
     },
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            case Msg of
-                #gs_push_nosub{gri = #gri{
-                    type = od_user, id = ?USER_2, aspect = instance
-                }, reason = forbidden} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_nosub{gri = #gri{
+                type = od_user, id = ?USER_2, aspect = instance
+            }, reason = forbidden} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     ?assert(verify_message_absent(GathererPid, client1, fun(Msg) ->
         case Msg of
@@ -744,6 +586,71 @@ nosub_test_base(Config, ProtoVersion) ->
     ok.
 
 
+auth_override_test(Config) ->
+    [auth_override_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+auth_override_test_base(Config, ProtoVersion) ->
+    GathererPid = spawn(fun() ->
+        gatherer_loop(#{})
+    end),
+
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}, fun(Push) ->
+        GathererPid ! {gather_message, client1, Push}
+    end),
+
+    % User 1 should be able to get user's 2 data by possessing his macaroon and
+    % using it as auth override during the request.
+    User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance})
+    },
+
+    ?assertMatch(
+        {ok, #gs_resp_graph{data_format = resource, data = User2Data}},
+        gs_client:sync_request(Client1, #gs_req{
+            subtype = graph,
+            auth_override = {macaroon, ?USER_2_MACAROON, []},
+            request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?SELF, aspect = instance},
+                operation = get,
+                subscribe = true
+            }
+        })
+    ),
+
+    NewUser2Name = <<"newName2">>,
+    NewUser2Data = User2Data#{
+        <<"name">> => NewUser2Name
+    },
+
+    % Subscribing should work too - user1 should be receiving future changes of
+    % user's 2 record.
+    ?assertMatch(
+        {ok, #gs_resp_graph{}},
+        gs_client:sync_request(Client1, #gs_req{
+            subtype = graph,
+            auth_override = {macaroon, ?USER_2_MACAROON, []},
+            request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?SELF, aspect = instance},
+                operation = update,
+                data = #{<<"name">> => NewUser2Name}
+            }
+        })
+    ),
+
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        case Msg of
+            #gs_push_graph{
+                gri = #gri{type = od_user, id = ?USER_2, aspect = instance},
+                change_type = updated,
+                data = NewUser2Data
+            } ->
+                true;
+            _ ->
+                false
+        end
+    end)).
+
+
 auto_scope_test(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
 
@@ -754,20 +661,13 @@ auto_scope_test(Config) ->
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, none),
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, public),
 
-    {ok, Client1, #gs_resp_handshake{identity = {user, ?USER_1}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
-        fun(Push) -> GathererPid ! {gather_message, client1, Push} end,
-        ?SSL_OPTS(Config)
-    ),
-    {ok, Client2, #gs_resp_handshake{identity = {user, ?USER_2}}} = gs_client:start_link(
-        get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_2_COOKIE}},
-        ?SUPPORTED_PROTO_VERSIONS,
-        fun(Push) -> GathererPid ! {gather_message, client2, Push} end,
-        ?SSL_OPTS(Config)
-    ),
+    Client1 = spawn_client(Config, ?SUPPORTED_PROTO_VERSIONS, {macaroon, ?USER_1_MACAROON, []}, {user, ?USER_1}, fun(Push) ->
+        GathererPid ! {gather_message, client1, Push}
+    end),
+
+    Client2 = spawn_client(Config, ?SUPPORTED_PROTO_VERSIONS, {macaroon, ?USER_2_MACAROON, []}, {user, ?USER_2}, fun(Push) ->
+        GathererPid ! {gather_message, client2, Push}
+    end),
 
     HsGRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance},
     HsGRIAuto = HsGRI#gri{scope = auto},
@@ -804,33 +704,25 @@ auto_scope_test(Config) ->
     HServiceData2 = ?HANDLE_SERVICE_DATA(<<"pub2">>, <<"sha2">>, <<"pro2">>, <<"pri2">>),
     rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData2]),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            Expected = ?LIMIT_HANDLE_SERVICE_DATA(shared, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
-            case Msg of
-                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(shared, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
+        case Msg of
+            #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client2, fun(Msg) ->
-            Expected = ?LIMIT_HANDLE_SERVICE_DATA(private, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
-            case Msg of
-                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(private, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
+        case Msg of
+            #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, protected),
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, none),
@@ -838,32 +730,24 @@ auto_scope_test(Config) ->
     HServiceData3 = ?HANDLE_SERVICE_DATA(<<"pub3">>, <<"sha3">>, <<"pro3">>, <<"pri3">>),
     rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData3]),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client1, fun(Msg) ->
-            Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData3)#{<<"gri">> => HsGRIAutoStr},
-            case Msg of
-                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData3)#{<<"gri">> => HsGRIAutoStr},
+        case Msg of
+            #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client2, fun(Msg) ->
-            case Msg of
-                #gs_push_nosub{gri = HsGRIAuto, reason = forbidden} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
+        case Msg of
+            #gs_push_nosub{gri = HsGRIAuto, reason = forbidden} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     % Check if create with auto scope works as expected
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, protected),
@@ -878,19 +762,15 @@ auto_scope_test(Config) ->
     HServiceData4 = ?HANDLE_SERVICE_DATA(<<"pub4">>, <<"sha4">>, <<"pro4">>, <<"pri4">>),
     rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData4]),
 
-    ?assertEqual(
-        true,
-        verify_message_present(GathererPid, client2, fun(Msg) ->
-            Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData4)#{<<"gri">> => HsGRIAutoStr},
-            case Msg of
-                #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
-                    true;
-                _ ->
-                    false
-            end
-        end),
-        50
-    ),
+    ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData4)#{<<"gri">> => HsGRIAutoStr},
+        case Msg of
+            #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
+                true;
+            _ ->
+                false
+        end
+    end)),
 
     ok.
 
@@ -1034,11 +914,11 @@ subscriptions_persistence_test(Config) ->
 
 gs_server_session_clearing_test_api_level(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
-    Auth = ?USER_AUTH(?USER_1),
-    ConnectionInfo = ?CONNECTION_INFO(Auth),
+    Auth = {macaroon, ?USER_1_MACAROON, []},
     ConnRef = self(),
     Translator = ?GS_EXAMPLE_TRANSLATOR,
     HandshakeReq = #gs_req{request = #gs_req_handshake{
+        auth = Auth,
         supported_versions = gs_protocol:supported_versions()
     }},
     {ok, #gs_resp{response = #gs_resp_handshake{
@@ -1047,7 +927,7 @@ gs_server_session_clearing_test_api_level(Config) ->
         identity = {user, ?USER_1}
     }}} = ?assertMatch(
         {ok, _},
-        rpc:call(Node, gs_server, handshake, [Auth, ConnectionInfo, ConnRef, Translator, HandshakeReq])
+        rpc:call(Node, gs_server, handshake, [Auth, ConnRef, Translator, HandshakeReq])
     ),
 
     GRI1 = #gri{type = od_user, id = ?USER_1, aspect = instance},
@@ -1089,9 +969,10 @@ gs_server_session_clearing_test_connection_level(Config) ->
 
 gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
+
     {ok, Client1, #gs_resp_handshake{session_id = SessionId}} = gs_client:start_link(
         get_gs_ws_url(Config),
-        {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
+        {macaroon, ?USER_1_MACAROON, []},
         [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)
@@ -1122,8 +1003,6 @@ gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
     ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscriptions, [SessionId])),
     ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_1])),
     ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_2])),
-
-    disconnect_client([Client1]),
 
     ok.
 
@@ -1168,6 +1047,30 @@ verify_message_absent(GathererPid, ClientRef, MessageMatcherFun, Retries) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+% ExpResult :: {error, term()} | gs_protocol:identity().
+spawn_client(Config, ProtoVersion, Auth, ExpResult) ->
+    spawn_client(Config, ProtoVersion, Auth, ExpResult, fun(_) -> ok end).
+
+spawn_client(Config, ProtoVersion, Auth, ExpResult, PushCallback) when is_integer(ProtoVersion) ->
+    spawn_client(Config, [ProtoVersion], Auth, ExpResult, PushCallback);
+spawn_client(Config, ProtoVersions, Auth, ExpResult, PushCallback) ->
+    Result = gs_client:start_link(
+        get_gs_ws_url(Config),
+        Auth,
+        ProtoVersions,
+        PushCallback,
+        ?SSL_OPTS(Config)
+    ),
+    case ExpResult of
+        {error, _} ->
+            ?assertMatch(ExpResult, Result),
+            connection_error;
+        ExpIdentity ->
+            ?assertMatch({ok, _, #gs_resp_handshake{identity = ExpIdentity}}, Result),
+            {ok, Client, _} = Result,
+            Client
+    end.
 
 
 get_gs_ws_url(Config) ->

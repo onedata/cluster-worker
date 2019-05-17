@@ -16,13 +16,12 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Authorizes the requesting client. If error is returned, the Graph Sync
-%% connection will be denied.
+%% Authorizes the requesting client based on handshake auth.
+%% If error is returned, the handshake is denied.
 %% @end
 %%--------------------------------------------------------------------
--callback authorize(cowboy_req:req()) ->
-    {ok, gs_protocol:client(), gs_server:connection_info(), cowboy_req:req()} |
-    gs_protocol:error().
+-callback verify_handshake_auth(gs_protocol:auth()) ->
+    {ok, gs_protocol:client(), gs_server:connection_info()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------

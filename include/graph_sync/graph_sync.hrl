@@ -32,6 +32,7 @@
 
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
+    auth = undefined :: undefined | gs_protocol:auth(),
     session_id :: undefined | gs_protocol:session_id()
 }).
 
