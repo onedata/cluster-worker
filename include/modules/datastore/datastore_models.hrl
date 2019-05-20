@@ -72,9 +72,21 @@
 }).
 
 -record(traverse_task, {
-    task_module :: atom(),
-    status :: atom(),
+    task_module :: traverse:task_module(),
+    status = waiting :: traverse:status(),
+    enqueued = true :: boolean(),
+    canceled = false :: boolean(),
+    executor :: traverse:executor(),
+    group :: traverse:group(),
     description = #{} :: maps:map()
+}).
+
+-record(traverse_tasks_load_balance, {
+    task_module :: traverse:task_module(),
+    ongoing_tasks = 0 :: non_neg_integer(),
+    ongoing_tasks_limit = 0 :: non_neg_integer(),
+    groups = [] :: [traverse:group()],
+    groups_to_cancel = [] :: [traverse:group()]
 }).
 
 -endif.

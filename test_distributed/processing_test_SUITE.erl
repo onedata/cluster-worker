@@ -86,7 +86,7 @@ clearing_test(Config) ->
 
 traverse_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ?MODULE, <<"1">>, <<"1">>, {self(), 1}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"1">>, {self(), 1}])),
 
     Expected = [2,3,4,
         11,12,13,16,17,18,
@@ -119,7 +119,7 @@ traverse_test(Config) ->
 
 init_per_testcase(traverse_test, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 10])),
     Config;
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -186,4 +186,4 @@ task_finished(_) ->
     ok.
 
 save_job(_, _) ->
-    ok.
+    {ok, <<"id">>}.

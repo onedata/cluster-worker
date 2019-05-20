@@ -41,4 +41,4 @@
 %% Saves information about master job.
 %% @end
 %%--------------------------------------------------------------------
--callback save_job(traverse:job(), traverse:job_status()) -> ok  | {error, term()}.
+-callback save_job(traverse:job(), traverse:job_status()) -> {ok, traverse:job_id()}  | {error, term()}.
