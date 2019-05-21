@@ -25,11 +25,11 @@
     mock_max_scope_towards_handle_service/3
 ]).
 -export([
-    authorize/1,
+    verify_handshake_auth/1,
     client_to_identity/1,
     client_connected/3,
     client_disconnected/3,
-    verify_auth_override/1,
+    verify_auth_override/2,
     is_authorized/5,
     root_client/0,
     encode_entity_type/1,
@@ -49,11 +49,11 @@ mock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, authorize, fun authorize/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_to_identity, fun client_to_identity/1),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/3),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/3),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_auth_override, fun verify_auth_override/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_auth_override, fun verify_auth_override/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_authorized, fun is_authorized/5),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, root_client, fun root_client/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, guest_client, fun guest_client/0),
@@ -91,52 +91,25 @@ unmock_callbacks(Config) ->
     test_utils:mock_unload([node()], ?GS_LOGIC_PLUGIN).
 
 
-authorize(Req) ->
-    try_authorize_by_macaroons(Req).
-
-try_authorize_by_macaroons(Req) ->
-    case parse_macaroons_from_headers(Req) of
-        {undefined, _} ->
-            try_authorize_by_url_token(Req);
-        {Macaroon, DischMacaroons} ->
-            case verify_auth_override({macaroon, Macaroon, DischMacaroons}) of
-                {ok, Client} ->
-                    {ok, Client, ?CONNECTION_INFO(Client), Req};
-                Error ->
-                    Error
-            end
-    end.
-
-try_authorize_by_url_token(Req) ->
-    QueryParams = cowboy_req:parse_qs(Req),
-    case proplists:get_value(<<"token">>, QueryParams, undefined) of
-        undefined ->
-            try_authorize_by_cookie(Req);
-        ?USER_1_TOKEN ->
-            {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1)), Req};
-        ?USER_2_TOKEN ->
-            {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2)), Req};
-        _ ->
-            ?ERROR_UNAUTHORIZED
-    end.
+verify_handshake_auth({macaroon, ?USER_1_MACAROON, []}) ->
+    {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1))};
+verify_handshake_auth({macaroon, ?USER_2_MACAROON, []}) ->
+    {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2))};
+verify_handshake_auth({macaroon, ?PROVIDER_1_MACAROON, []}) ->
+    {ok, ?PROVIDER_AUTH(?PROVIDER_1), ?CONNECTION_INFO(?PROVIDER_AUTH(?PROVIDER_1))};
+verify_handshake_auth(undefined) ->
+    {ok, ?NOBODY_AUTH, ?CONNECTION_INFO(?NOBODY_AUTH)};
+verify_handshake_auth(_) ->
+    ?ERROR_UNAUTHORIZED.
 
 
-try_authorize_by_cookie(Req) ->
-    case proplists:get_value(?SESSION_COOKIE_NAME, cowboy_req:parse_cookies(Req)) of
-        undefined ->
-            {ok, ?NOBODY_AUTH, ?CONNECTION_INFO(?NOBODY_AUTH), Req};
-        ?USER_1_COOKIE ->
-            {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1)), Req};
-        ?USER_2_COOKIE ->
-            {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2)), Req};
-        _ ->
-            ?ERROR_UNAUTHORIZED
-    end.
-
-
-verify_auth_override({macaroon, ?PROVIDER_1_MACAROON, []}) ->
+verify_auth_override(_Client, {macaroon, ?USER_1_MACAROON, []}) ->
+    {ok, ?USER_AUTH(?USER_1)};
+verify_auth_override(_Client, {macaroon, ?USER_2_MACAROON, []}) ->
+    {ok, ?USER_AUTH(?USER_2)};
+verify_auth_override(_Client, {macaroon, ?PROVIDER_1_MACAROON, []}) ->
     {ok, ?PROVIDER_AUTH(?PROVIDER_1)};
-verify_auth_override(_) ->
+verify_auth_override(_Client, _) ->
     ?ERROR_UNAUTHORIZED.
 
 
@@ -366,33 +339,6 @@ encode_entity_type(Atom) -> atom_to_binary(Atom, utf8).
 
 
 decode_entity_type(Bin) -> binary_to_atom(Bin, utf8).
-
-
--spec parse_macaroons_from_headers(Req :: cowboy_req:req()) ->
-    {Macaroon :: binary() | undefined, DischargeMacaroons :: [binary()]} |
-    no_return().
-parse_macaroons_from_headers(Req) ->
-    MacaroonHeader = cowboy_req:header(<<"macaroon">>, Req),
-    XAuthTokenHeader = cowboy_req:header(<<"x-auth-token">>, Req),
-    % X-Auth-Token is an alias for macaroon header, check if any of them
-    % is given.
-    SerializedMacaroon = case MacaroonHeader of
-        <<_/binary>> ->
-            MacaroonHeader;
-        _ ->
-            XAuthTokenHeader % binary() or undefined
-    end,
-
-    DischargeMacaroons = case cowboy_req:header(<<"discharge-macaroons">>, Req) of
-        undefined ->
-            [];
-        <<"">> ->
-            [];
-        SerializedDischarges ->
-            binary:split(SerializedDischarges, <<" ">>, [global])
-    end,
-
-    {SerializedMacaroon, DischargeMacaroons}.
 
 
 scope_to_int(public) -> 1;

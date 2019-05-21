@@ -79,12 +79,14 @@
 % Denotes subtype of message so the payload can be properly interpreted
 -type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
 
+% Clients authorization, used during handshake or auth override.
+-type auth() :: undefined | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+
 % Used to override the client authorization established on connection level, per
 % request. Can be used for example by providers to authorize a certain request
 % with a user's token, while still using the Graph Sync channel that was opened
 % with provider's auth.
--type auth_override() :: undefined | {token, binary()} | {basic, binary()} |
-{macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+-type auth_override() :: auth().
 
 % Possible entity types
 -type entity_type() :: atom().
@@ -107,7 +109,7 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | throughHarvester | throughCluster| 
+    throughHandleService | throughHandle | throughHarvester | throughCluster|
     asUser | asGroup | asSpace,
     EntityId :: binary()
 }.
@@ -402,7 +404,7 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
         <<"id">> => Id,
         <<"type">> => <<"request">>,
         <<"subtype">> => subtype_to_string(Subtype),
-        <<"authOverride">> => auth_override_to_json(AuthOverride),
+        <<"authOverride">> => auth_to_json(AuthOverride),
         <<"payload">> => Payload
     }.
 
@@ -411,10 +413,11 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
 encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     % Handshake messages do not change regardless of the protocol version
     #gs_req_handshake{
-        supported_versions = SupportedVersions, session_id = SessionId
+        supported_versions = SupportedVersions, auth = Auth, session_id = SessionId
     } = Req,
     #{
         <<"supportedVersions">> => SupportedVersions,
+        <<"auth">> => auth_to_json(Auth),
         <<"sessionId">> => undefined_to_null(SessionId)
     }.
 
@@ -609,7 +612,7 @@ decode_request(ProtocolVersion, ReqJSON) ->
     #gs_req{
         id = maps:get(<<"id">>, ReqJSON),
         subtype = Subtype,
-        auth_override = json_to_aut_override(AuthOverride),
+        auth_override = json_to_auth(AuthOverride),
         request = Request
     }.
 
@@ -618,9 +621,11 @@ decode_request(ProtocolVersion, ReqJSON) ->
 decode_request_handshake(_, PayloadJSON) ->
     % Handshake messages do not change regardless of the protocol version
     SessionId = maps:get(<<"sessionId">>, PayloadJSON, null),
+    Auth = maps:get(<<"auth">>, PayloadJSON, null),
     SupportedVersions = maps:get(<<"supportedVersions">>, PayloadJSON),
     #gs_req_handshake{
         supported_versions = SupportedVersions,
+        auth = json_to_auth(Auth),
         session_id = null_to_undefined(SessionId)
     }.
 
@@ -814,24 +819,17 @@ string_to_subtype(<<"nosub">>) -> nosub;
 string_to_subtype(<<"error">>) -> error.
 
 
--spec json_to_aut_override(null | json_map()) -> undefined | auth_override().
-json_to_aut_override(null) -> undefined;
-json_to_aut_override(#{<<"token">> := Token}) -> {token, Token};
-json_to_aut_override(#{<<"basic">> := UserPasswdB64}) ->
-    {basic, UserPasswdB64};
-json_to_aut_override(#{
-    <<"macaroon">> := Macaroon,
-    <<"discharge-macaroons">> := DischargeMacaroons}
-) ->
-    {macaroon, Macaroon, DischargeMacaroons}.
+-spec json_to_auth(null | json_map()) -> auth().
+json_to_auth(null) ->
+    undefined;
+json_to_auth(#{<<"macaroon">> := Macaroon} = Json) ->
+    {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
 
 
--spec auth_override_to_json(undefined | auth_override()) -> null | json_map().
-auth_override_to_json(undefined) -> null;
-auth_override_to_json({token, Token}) -> #{<<"token">> => Token};
-auth_override_to_json({basic, UserPasswdB64}) ->
-    #{<<"basic">> => UserPasswdB64};
-auth_override_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
+-spec auth_to_json(auth()) -> null | json_map().
+auth_to_json(undefined) ->
+    null;
+auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
     <<"macaroon">> => Macaroon,
     <<"discharge-macaroons">> => DischargeMacaroons
 }.

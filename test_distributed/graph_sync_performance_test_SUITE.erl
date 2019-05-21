@@ -379,7 +379,7 @@ spawn_clients(Config, ClientNum) ->
 
 spawn_clients(Config, ClientNum, RetryFlag, CallbackFunction, OnSuccessFun) ->
     URL = get_gs_ws_url(Config),
-    Auth = {cookie, {?SESSION_COOKIE_NAME, ?USER_1_COOKIE}},
+    Auth = {macaroon, ?USER_1_MACAROON, []},
     Identity = {user, ?USER_1},
     AuthsAndIdentities = lists:duplicate(ClientNum, {Auth, Identity}),
     graph_sync_test_utils:spawn_clients(

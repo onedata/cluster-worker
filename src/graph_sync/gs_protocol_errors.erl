@@ -314,13 +314,17 @@ error_to_json(_, ?ERROR_BAD_VALUE_IDENTIFIER(Key)) ->
             <<"key">> => Key
         }
     };
-error_to_json(_, ?ERROR_BAD_VALUE_ALIAS) ->
+error_to_json(_, ?ERROR_BAD_VALUE_FULL_NAME) ->
     #{
-        <<"id">> => <<"badValueAlias">>
+        <<"id">> => <<"badValueFullName">>
     };
-error_to_json(_, ?ERROR_BAD_VALUE_USER_NAME) ->
+error_to_json(_, ?ERROR_BAD_VALUE_USERNAME) ->
     #{
-        <<"id">> => <<"badValueUserName">>
+        <<"id">> => <<"badValueUsername">>
+    };
+error_to_json(_, ?ERROR_BAD_VALUE_PASSWORD) ->
+    #{
+        <<"id">> => <<"badValuePassword">>
     };
 error_to_json(_, ?ERROR_BAD_VALUE_NAME) ->
     #{
@@ -333,6 +337,14 @@ error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED) ->
 error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
     #{
         <<"id">> => <<"subdomainDelegationDisabled">>
+    };
+error_to_json(_, ?ERROR_BASIC_AUTH_NOT_SUPPORTED) ->
+    #{
+        <<"id">> => <<"basicAuthNotSupported">>
+    };
+error_to_json(_, ?ERROR_BASIC_AUTH_DISABLED) ->
+    #{
+        <<"id">> => <<"basicAuthDisabled">>
     };
 error_to_json(_, ?ERROR_PROTECTED_GROUP) ->
     #{
@@ -547,11 +559,14 @@ json_to_error(_, #{<<"id">> := <<"badValueIntentifier">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_IDENTIFIER(Key);
 
-json_to_error(_, #{<<"id">> := <<"badValueAlias">>}) ->
-    ?ERROR_BAD_VALUE_ALIAS;
+json_to_error(_, #{<<"id">> := <<"badValueFullName">>}) ->
+    ?ERROR_BAD_VALUE_FULL_NAME;
 
-json_to_error(_, #{<<"id">> := <<"badValueUserName">>}) ->
-    ?ERROR_BAD_VALUE_USER_NAME;
+json_to_error(_, #{<<"id">> := <<"badValueUsername">>}) ->
+    ?ERROR_BAD_VALUE_USERNAME;
+
+json_to_error(_, #{<<"id">> := <<"badValuePassword">>}) ->
+    ?ERROR_BAD_VALUE_PASSWORD;
 
 json_to_error(_, #{<<"id">> := <<"badValueName">>}) ->
     ?ERROR_BAD_VALUE_NAME;
@@ -561,6 +576,12 @@ json_to_error(_, #{<<"id">> := <<"subdomainDelegationNotSupported">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
     ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;
+
+json_to_error(_, #{<<"id">> := <<"basicAuthNotSupported">>}) ->
+    ?ERROR_BASIC_AUTH_NOT_SUPPORTED;
+
+json_to_error(_, #{<<"id">> := <<"basicAuthDisabled">>}) ->
+    ?ERROR_BASIC_AUTH_DISABLED;
 
 json_to_error(_, #{<<"id">> := <<"protectedGroup">>}) ->
     ?ERROR_PROTECTED_GROUP;

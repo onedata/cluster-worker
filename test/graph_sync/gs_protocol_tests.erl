@@ -263,25 +263,28 @@ encode_decode_message() ->
             auth_override = undefined,
             request = #gs_req_handshake{
                 supported_versions = [],
+                auth = undefined,
                 session_id = <<"23423424qdsfdsgew456235tegdfg">>
             }
         },
         #gs_req{
             id = <<"mess5">>,
-            subtype = rpc,
-            auth_override = {token, <<"123123">>},
-            request = #gs_req_rpc{
-                function = <<"f5">>,
-                args = #{<<"args5">> => 5}
+            subtype = handshake,
+            auth_override = undefined,
+            request = #gs_req_handshake{
+                supported_versions = [123123, 34534, 123, 5],
+                auth = {macaroon, <<"macaroon">>, []},
+                session_id = <<"zxvcert245234234234234">>
             }
         },
         #gs_req{
             id = <<"mess6">>,
-            subtype = rpc,
-            auth_override = {basic, <<"123sdfadsfq345r123">>},
-            request = #gs_req_rpc{
-                function = <<"f6">>,
-                args = #{<<"args6">> => 6}
+            subtype = handshake,
+            auth_override = undefined,
+            request = #gs_req_handshake{
+                supported_versions = [1],
+                auth = {macaroon, <<"macaroon">>, [<<"d1">>, <<"d2">>]},
+                session_id = <<"ccxvsdfsdfsdfsdf">>
             }
         },
         #gs_req{
@@ -668,11 +671,14 @@ encode_decode_error() ->
         ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(<<"spaceId">>),
         ?ERROR_BAD_VALUE_BAD_TOKEN_TYPE(<<"supportToken">>),
         ?ERROR_BAD_VALUE_IDENTIFIER(<<"id">>),
-        ?ERROR_BAD_VALUE_ALIAS,
-        ?ERROR_BAD_VALUE_USER_NAME,
+        ?ERROR_BAD_VALUE_FULL_NAME,
+        ?ERROR_BAD_VALUE_USERNAME,
+        ?ERROR_BAD_VALUE_PASSWORD,
         ?ERROR_BAD_VALUE_NAME,
         ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED,
         ?ERROR_SUBDOMAIN_DELEGATION_DISABLED,
+        ?ERROR_BASIC_AUTH_NOT_SUPPORTED,
+        ?ERROR_BASIC_AUTH_DISABLED,
         ?ERROR_PROTECTED_GROUP,
         ?ERROR_RELATION_DOES_NOT_EXIST(user, <<"user1">>, space, <<"space1">>),
         ?ERROR_RELATION_ALREADY_EXISTS(user, <<"user1">>, space, <<"space1">>),
