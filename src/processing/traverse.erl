@@ -54,8 +54,7 @@
 %% Initializes pool.
 %% @end
 %%--------------------------------------------------------------------
--spec init_pool(task_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ->
-    ok | no_return().
+-spec init_pool(task_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
 init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
     {ok, _} = worker_pool:start_sup_pool(?MASTER_POOL_NAME(TaskModule),
         [{workers, MasterJobsNum}, {queue_type, lifo}]),
@@ -99,7 +98,7 @@ run(TaskModule, TaskID, TaskGroup, Job, Creator) ->
 %%--------------------------------------------------------------------
 -spec run(task_module(), id(), group(), job(), executor(), executor()) -> ok.
 run(TaskModule, TaskID, TaskGroup, Job, Creator, Executor) ->
-    case traverse_tasks_load_balance:add_task(TaskModule) of
+    case traverse_tasks_load_balance:add_task(TaskModule, TaskGroup) of
         ok ->
             ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, undefined, #{
                 master_jobs_delegated => 1
@@ -266,7 +265,9 @@ run_task(TaskModule, TaskID, Executor, GroupID, MainJobID, Creator) ->
     % TODO - wywolac callback on_task_start
     % TODO - osluzyc sytuacje jak juz task zostal uruchomiony na innym node
     {ok, Job} = TaskModule:get_job(MainJobID),
-    ok = traverse_task:on_task_start(TaskID, TaskModule, GroupID, Creator),
+    ok = traverse_task:on_task_start(TaskID, TaskModule, GroupID, Creator, #{
+        master_jobs_delegated => 1
+    }),
     ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
         TaskModule, TaskID, Executor, GroupID, [Job]).
 

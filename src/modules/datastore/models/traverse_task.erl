@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([create/7, start/5, on_task_start/4, update_description/2, update_status/2,
+-export([create/7, start/6, on_task_start/5, update_description/2, update_status/2,
     finish/5, cancel/1, on_task_cancel/1, get/1, get_next_task/2]).
 
 %% datastore_model callbacks
@@ -28,6 +28,7 @@
 
 -export_type([key/0]).
 
+% TODO - sortowac drzewa po czasie
 -define(SCHEDULED_KEY(TaskModule), ?LINK_KEY(TaskModule, "SCHEDULED_")).
 -define(ONGOING_KEY(TaskModule), ?LINK_KEY(TaskModule, "ONGOING_")).
 -define(ENDED_KEY(TaskModule), ?LINK_KEY(TaskModule, "ENDED_")).
@@ -69,6 +70,7 @@ create(ID, TaskModule, Executor, Creator, GroupID, ScheduledJob, InitialDescript
         [{ok, _}] = datastore_model:add_links(?CTX(Creator),
             Key, Creator, [{ID, LinkValue}])
     end),
+    % TODO - chyba bez sensu bo rejestrujemy grupy ktore czekaja (wiec nie zawsze trzeba to robic - sprawdz ScheduledJob)
     ok = traverse_tasks_load_balance:register_group(TaskModule, GroupID),
     ok.
 
@@ -78,8 +80,8 @@ create(ID, TaskModule, Executor, Creator, GroupID, ScheduledJob, InitialDescript
 %% @end
 %%--------------------------------------------------------------------
 -spec start(key(), traverse:task_module(), traverse:group(),
-    traverse:executor(), traverse:executor()) -> ok.
-start(ID, TaskModule, GroupID, Executor, Creator) ->
+    traverse:executor(), traverse:executor(), traverse:description()) -> ok.
+start(ID, TaskModule, GroupID, Executor, Creator, NweDescription) ->
     Diff = fun(Task) ->
         {ok, Task#traverse_task{status = ongoing, enqueued = false}}
     end,
@@ -92,7 +94,7 @@ start(ID, TaskModule, GroupID, Executor, Creator) ->
 
     case Creator =:= Executor of
         true ->
-            on_task_start(ID, TaskModule, GroupID, Creator);
+            on_task_start(ID, TaskModule, GroupID, Creator, NweDescription);
         _ ->
             ok
     end,
@@ -104,8 +106,9 @@ start(ID, TaskModule, GroupID, Executor, Creator) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec on_task_start(key(), traverse:task_module(), traverse:group(),
-    traverse:executor()) -> ok.
-on_task_start(ID, TaskModule, GroupID, Creator) ->
+    traverse:executor(), traverse:description()) -> ok.
+on_task_start(ID, TaskModule, GroupID, Creator, NweDescription) ->
+    {ok, _} = update_description(ID, NweDescription),
     run_on_trees(?SCHEDULED_KEY(TaskModule), GroupID, fun(Key) ->
         [ok] = datastore_model:delete_links(?CTX(Creator),
             Key, Creator, [ID])

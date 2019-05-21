@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %%% Task and task module management API
--export([list_task_modules/0, init_task_module/2, add_task/1, finish_task/1]).
+-export([list_task_modules/0, init_task_module/2, add_task/1, add_task/2, finish_task/1]).
 %%% Group management API
 -export([register_group/2, get_next_group/1, cancel_group_init/2, cancel_group/2]).
 
@@ -62,17 +62,30 @@ init_task_module(TaskModule, Limit) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves information about new task.
+%% @equiv add_task(TaskModule, undefined).
 %% @end
 %%--------------------------------------------------------------------
 -spec add_task(traverse:task_module()) -> ok | {error, term()}.
 add_task(TaskModule) ->
-    Diff = fun(#traverse_tasks_load_balance{ongoing_tasks = OT, ongoing_tasks_limit = TL} = Record) ->
-        case OT < TL of
-            false ->
+    add_task(TaskModule, undefined).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves information about new task.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_task(traverse:task_module(), traverse:group() | undefined) -> ok | {error, term()}.
+add_task(TaskModule, Group) ->
+    Diff = fun(#traverse_tasks_load_balance{ongoing_tasks = OT,
+        ongoing_tasks_limit = TL, groups = Groups} = Record) ->
+        case {OT < TL, Group} of
+            {false, _} ->
                 {error, limit_exceeded};
+            {_, undefined} ->
+                {ok, Record#traverse_tasks_load_balance{ongoing_tasks = OT + 1}};
             _ ->
-                {ok, Record#traverse_tasks_load_balance{ongoing_tasks = OT + 1}}
+                {ok, Record#traverse_tasks_load_balance{
+                    ongoing_tasks = OT + 1, groups = [Group | (Groups -- [Group])]}}
         end
     end,
     extract_ok(datastore_model:update(?CTX, ?KEY(TaskModule), Diff)).
@@ -179,8 +192,8 @@ get_next_group(TaskModule) ->
     Diff = fun
                (#traverse_tasks_load_balance{groups = []}) ->
                    {error, no_groups};
-               (#traverse_tasks_load_balance{groups = [_]} = Record) ->
-                   {ok, Record};
+               (#traverse_tasks_load_balance{groups = [Group]}) ->
+                   {error, {single_group, Group}};
                (#traverse_tasks_load_balance{groups = Groups} = Record) ->
                    Next = lists:last(Groups),
                    Groups2 = [Next | lists:droplast(Groups)],
@@ -189,6 +202,8 @@ get_next_group(TaskModule) ->
     case datastore_model:update(?CTX, ?KEY(TaskModule), Diff) of
         {ok, #document{value = #traverse_tasks_load_balance{groups = [Next | _]}}} ->
             {ok, Next};
+        {error, {single_group, Group}} ->
+            {ok, Group};
         Other ->
             Other
     end.
