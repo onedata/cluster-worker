@@ -86,7 +86,8 @@
     ongoing_tasks = 0 :: non_neg_integer(),
     ongoing_tasks_limit = 0 :: non_neg_integer(),
     groups = [] :: [traverse:group()],
-    groups_to_cancel = [] :: [traverse:group()]
+    groups_to_cancel = [] :: [traverse:group()],
+    nodes = [] :: [node()]
 }).
 
 -endif.

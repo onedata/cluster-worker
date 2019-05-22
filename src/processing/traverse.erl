@@ -16,9 +16,12 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init_pool/4, run/3, run/4, run/5, run/6, maybe_run_scheduled_task/2]).
+-export([init_pool/4, stop_pool/1,
+    run/3, run/4, run/5, run/6, maybe_run_scheduled_task/2]).
 %% Functions executed on pools
 -export([execute_master_job/7, execute_slave_job/3]).
+%% For rpc:
+-export([run_on_master_pool/7, check_task_list_and_run/2]).
 
 -type id() :: traverse_task:key().
 -type group() :: binary().
@@ -51,7 +54,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes pool.
+%% @equiv init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, [node()]).
 %% @end
 %%--------------------------------------------------------------------
 -spec init_pool(task_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
@@ -61,8 +64,22 @@ init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
     {ok, _} = worker_pool:start_sup_pool(?SLAVE_POOL_NAME(TaskModule),
         [{workers, SlaveJobsNum}, {queue_type, lifo}]),
 
-    ok = traverse_tasks_load_balance:init_task_module(TaskModule, ParallelOrdersLimit),
-    ok.
+    ok = traverse_tasks_load_balance:init_task_module(TaskModule, ParallelOrdersLimit).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Stops pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec stop_pool(task_module()) -> ok.
+stop_pool(TaskModule) ->
+    ok = worker_pool:stop_sup_pool(?MASTER_POOL_NAME(TaskModule)),
+    ok = worker_pool:stop_sup_pool(?SLAVE_POOL_NAME(TaskModule)),
+
+    case traverse_tasks_load_balance:clear_task_module(TaskModule) of
+        ok -> ok;
+        {error, not_found} -> ok
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -99,12 +116,13 @@ run(TaskModule, TaskID, TaskGroup, Job, Creator) ->
 -spec run(task_module(), id(), group(), job(), executor(), executor()) -> ok.
 run(TaskModule, TaskID, TaskGroup, Job, Creator, Executor) ->
     case traverse_tasks_load_balance:add_task(TaskModule, TaskGroup) of
-        ok ->
+        {ok, Node} ->
             ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, undefined, #{
                 master_jobs_delegated => 1
             }),
-            ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
-                TaskModule, TaskID, Executor, TaskGroup, [Job]);
+            ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
+                ?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
+                TaskModule, TaskID, Executor, TaskGroup, [Job]]);
         _ ->
             {ok, InitialJob} = TaskModule:save_job(Job, waiting),
             ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, InitialJob, #{})
@@ -118,8 +136,8 @@ run(TaskModule, TaskID, TaskGroup, Job, Creator, Executor) ->
 -spec maybe_run_scheduled_task(task_module(), executor()) -> ok.
 maybe_run_scheduled_task(TaskModule, Executor) ->
     case traverse_tasks_load_balance:add_task(TaskModule) of
-        ok ->
-            check_task_list_and_run(TaskModule, Executor);
+        {ok, Node} ->
+            rpc:call(Node, ?MODULE, check_task_list_and_run, [TaskModule, Executor]);
         _ ->
             ok
     end.
@@ -264,7 +282,7 @@ run_task(TaskModule, TaskID, Executor, GroupID, MainJobID, Creator) ->
     % TODO - zrobic tu case i obsluzyc error not found (nie zsyncowal sie dokument)
     % TODO - wywolac callback on_task_start
     % TODO - osluzyc sytuacje jak juz task zostal uruchomiony na innym node
-    {ok, Job} = TaskModule:get_job(MainJobID),
+    {ok, Job, _Node} = TaskModule:get_job(MainJobID),
     ok = traverse_task:on_task_start(TaskID, TaskModule, GroupID, Creator, #{
         master_jobs_delegated => 1
     }),

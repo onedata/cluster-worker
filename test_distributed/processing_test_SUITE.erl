@@ -93,7 +93,7 @@ clearing_test(Config) ->
 
 traverse_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"1">>, {self(), 1, 1}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"traverse_test1">>, {self(), 1, 1}])),
 
     Expected = [2,3,4,
         11,12,13,16,17,18,
@@ -118,14 +118,17 @@ traverse_test(Config) ->
     ?assertEqual(Expected, lists:sort(Ans)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"1">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_test1">>])),
     ok.
 
 traverse_multitask_concurrent_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"1">>, {self(), 1, 1}])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"2">>, {self(), 1, 2}])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"3">>, {self(), 1, 3}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_multitask_concurrent_test1">>, {self(), 1, 1}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_multitask_concurrent_test2">>, {self(), 1, 2}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_multitask_concurrent_test3">>, {self(), 1, 3}])),
 
     Expected0 = [2,3,4,
         11,12,13,16,17,18,
@@ -150,20 +153,22 @@ traverse_multitask_concurrent_test(Config) ->
 
     ?assertEqual(lists:sort(Expected), lists:sort(Ans)),
 
-
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"1">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_multitask_concurrent_test1">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"2">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_multitask_concurrent_test2">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"3">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_multitask_concurrent_test3">>])),
     ok.
 
 traverse_multitask_sequential_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"1">>, {self(), 1, 1}])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"2">>, {self(), 1, 2}])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?MODULE, <<"3">>, {self(), 1, 3}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_multitask_sequential_test1">>, {self(), 1, 1}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_multitask_sequential_test2">>, {self(), 1, 2}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_multitask_sequential_test3">>, {self(), 1, 3}])),
 
     Expected = [2,3,4,
         11,12,13,16,17,18,
@@ -194,22 +199,22 @@ traverse_multitask_sequential_test(Config) ->
     ?assertEqual(Expected, lists:sort(Ans3)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"1">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_multitask_sequential_test1">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"2">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_multitask_sequential_test2">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"3">>])),
+        rpc:call(Worker, traverse_task, get, [<<"traverse_multitask_sequential_test3">>])),
     ok.
 
 traverse_loadbalancingt_test(Config) ->
-    Tasks = [{<<"1">>, <<"1">>, 1}, {<<"2">>, <<"2">>, 2}, {<<"3">>, <<"2">>, 3},
-        {<<"4">>, <<"2">>, 4}, {<<"5">>, <<"3">>, 5}, {<<"6">>, <<"3">>, 6}],
+    Tasks = [{<<"tlt1">>, <<"tlt1">>, 1}, {<<"tlt2">>, <<"tlt2">>, 2}, {<<"tlt3">>, <<"tlt2">>, 3},
+        {<<"tlt4">>, <<"tlt2">>, 4}, {<<"tlt5">>, <<"tlt3">>, 5}, {<<"tlt6">>, <<"tlt3">>, 6}],
     Check = [{1,1}, {2,2}, {3,5}, {4,3}, {5,6}, {6,4}],
     traverse_loadbalancingt_base(Config, Tasks, Check).
 
 traverse_loadbalancingt_mixed_ids_test(Config) ->
-    Tasks = [{<<"9">>, <<"1">>, 1}, {<<"2">>, <<"2">>, 2}, {<<"3">>, <<"2">>, 3},
-        {<<"8">>, <<"2">>, 4}, {<<"5">>, <<"3">>, 5}, {<<"6">>, <<"3">>, 6}],
+    Tasks = [{<<"tlmid9">>, <<"tlmid1">>, 1}, {<<"tlmid2">>, <<"tlmid2">>, 2}, {<<"tlmid3">>, <<"tlmid2">>, 3},
+        {<<"tlmid8">>, <<"tlmid2">>, 4}, {<<"tlmid5">>, <<"tlmid3">>, 5}, {<<"tlmid6">>, <<"tlmid3">>, 6}],
     Check = [{1,1}, {2,2}, {3,5}, {4,3}, {5,6}, {6,4}],
     traverse_loadbalancingt_base(Config, Tasks, Check).
 
@@ -288,8 +293,9 @@ end_per_testcase(Case, Config) when
     after
         1000 -> timeout
     end;
-end_per_testcase(_, _Config) ->
-    ok.
+end_per_testcase(_, Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(ok, rpc:call(Worker, traverse, stop_pool, [?MODULE])).
 
 %%%===================================================================
 %%% Internal functions
@@ -345,6 +351,7 @@ do_slave_job({Master, Num, ID}) ->
     ok.
 
 task_finished(_) ->
+    timer:sleep(100),
     ok.
 
 save_job(Job, waiting) ->
@@ -357,4 +364,4 @@ save_job(_, _) ->
 
 get_job(ID) ->
     {ok, Jobs} = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job),
-    {ok, proplists:get_value(ID, Jobs, undefined)}.
+    {ok, proplists:get_value(ID, Jobs, undefined), undefined}.

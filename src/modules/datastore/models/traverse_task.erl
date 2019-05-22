@@ -29,6 +29,7 @@
 -export_type([key/0]).
 
 % TODO - sortowac drzewa po czasie
+% TODO - generowac ID sklejajac ID z nazwa modulu
 -define(SCHEDULED_KEY(TaskModule), ?LINK_KEY(TaskModule, "SCHEDULED_")).
 -define(ONGOING_KEY(TaskModule), ?LINK_KEY(TaskModule, "ONGOING_")).
 -define(ENDED_KEY(TaskModule), ?LINK_KEY(TaskModule, "ENDED_")).

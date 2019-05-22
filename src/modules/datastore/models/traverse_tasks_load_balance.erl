@@ -15,7 +15,8 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %%% Task and task module management API
--export([list_task_modules/0, init_task_module/2, add_task/1, add_task/2, finish_task/1]).
+-export([list_task_modules/0, init_task_module/2, clear_task_module/1,
+    add_task/1, add_task/2, finish_task/1]).
 %%% Group management API
 -export([register_group/2, get_next_group/1, cancel_group_init/2, cancel_group/2]).
 
@@ -56,9 +57,22 @@ list_task_modules() ->
 %%--------------------------------------------------------------------
 -spec init_task_module(traverse:task_module(), non_neg_integer()) -> ok | {error, term()}.
 init_task_module(TaskModule, Limit) ->
-    Doc = #document{key = ?KEY(TaskModule),
-        value = #traverse_tasks_load_balance{task_module = TaskModule, ongoing_tasks_limit = Limit}},
-    extract_ok(datastore_model:create(?CTX, Doc)).
+    New = #traverse_tasks_load_balance{task_module = TaskModule,
+        ongoing_tasks_limit = Limit, nodes = [node()]},
+    Diff = fun(#traverse_tasks_load_balance{nodes = Nodes} = Record) ->
+        {ok, Record#traverse_tasks_load_balance{nodes = [node() | Nodes],
+            ongoing_tasks_limit = Limit}}
+    end,
+    extract_ok(datastore_model:update(?CTX, ?KEY(TaskModule), Diff, New)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Clears document for task module.
+%% @end
+%%--------------------------------------------------------------------
+-spec clear_task_module(traverse:task_module()) -> ok | {error, term()}.
+clear_task_module(TaskModule) ->
+    datastore_model:delete(?CTX, ?KEY(TaskModule)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -74,21 +88,28 @@ add_task(TaskModule) ->
 %% Saves information about new task.
 %% @end
 %%--------------------------------------------------------------------
--spec add_task(traverse:task_module(), traverse:group() | undefined) -> ok | {error, term()}.
+-spec add_task(traverse:task_module(), traverse:group() | undefined) ->
+    {ok, node()} | {error, term()}.
 add_task(TaskModule, Group) ->
     Diff = fun(#traverse_tasks_load_balance{ongoing_tasks = OT,
-        ongoing_tasks_limit = TL, groups = Groups} = Record) ->
+        ongoing_tasks_limit = TL, groups = Groups, nodes = Nodes} = Record) ->
         case {OT < TL, Group} of
             {false, _} ->
                 {error, limit_exceeded};
             {_, undefined} ->
-                {ok, Record#traverse_tasks_load_balance{ongoing_tasks = OT + 1}};
+                {ok, Record#traverse_tasks_load_balance{ongoing_tasks = OT + 1,
+                    nodes = update_nodes(Nodes)}};
             _ ->
-                {ok, Record#traverse_tasks_load_balance{
-                    ongoing_tasks = OT + 1, groups = [Group | (Groups -- [Group])]}}
+                {ok, Record#traverse_tasks_load_balance{ongoing_tasks = OT + 1,
+                    groups = [Group | (Groups -- [Group])], nodes = update_nodes(Nodes)}}
         end
     end,
-    extract_ok(datastore_model:update(?CTX, ?KEY(TaskModule), Diff)).
+    case datastore_model:update(?CTX, ?KEY(TaskModule), Diff) of
+        {ok, #document{value = #traverse_tasks_load_balance{nodes = [Next | _]}}} ->
+            {ok, Next};
+        Other ->
+            Other
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -234,7 +255,8 @@ get_record_struct(1) ->
         {ongoing_tasks, integer},
         {ongoing_tasks_limit, integer},
         {groups, [string]},
-        {groups_to_cancel, [string]}
+        {groups_to_cancel, [string]},
+        {nodes, [atom]}
     ]}.
 
 %%%===================================================================
@@ -244,3 +266,13 @@ get_record_struct(1) ->
 -spec extract_ok(term()) -> term().
 extract_ok({ok, _}) -> ok;
 extract_ok(Result) -> Result.
+
+-spec update_nodes([node()]) -> [node()].
+update_nodes(Nodes) ->
+    case Nodes of
+        [_] ->
+            Nodes;
+        _ ->
+            Next = lists:last(Nodes),
+            [Next | lists:droplast(Nodes)]
+    end.
