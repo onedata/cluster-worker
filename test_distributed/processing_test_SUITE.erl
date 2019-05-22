@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains tmp cache tests.
+%%% This file contains tmp cache and traverse tests.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(processing_test_SUITE).

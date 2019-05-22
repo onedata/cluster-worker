@@ -81,25 +81,31 @@ create(ID, TaskModule, Executor, Creator, GroupID, ScheduledJob, InitialDescript
 %% @end
 %%--------------------------------------------------------------------
 -spec start(key(), traverse:task_module(), traverse:group(),
-    traverse:executor(), traverse:executor(), traverse:description()) -> ok.
+    traverse:executor(), traverse:executor(), traverse:description()) -> ok | {error, already_started}.
 start(ID, TaskModule, GroupID, Executor, Creator, NweDescription) ->
-    Diff = fun(Task) ->
-        {ok, Task#traverse_task{status = ongoing, enqueued = false}}
+    Diff = fun
+        (#traverse_task{status = waiting} = Task) ->
+            {ok, Task#traverse_task{status = ongoing, enqueued = false}};
+        (_) ->
+            {error, already_started}
     end,
-    {ok, _} = datastore_model:update(?CTX, ID, Diff),
+    case datastore_model:update(?CTX, ID, Diff) of
+        {ok, _} ->
+            run_on_trees(?ONGOING_KEY(TaskModule), GroupID, fun(Key) ->
+                [{ok, _}] = datastore_model:add_links(?CTX(Executor),
+                    Key, Executor, [{ID, ID}])
+                                                            end),
 
-    run_on_trees(?ONGOING_KEY(TaskModule), GroupID, fun(Key) ->
-        [{ok, _}] = datastore_model:add_links(?CTX(Executor),
-            Key, Executor, [{ID, ID}])
-    end),
-
-    case Creator =:= Executor of
-        true ->
-            on_task_start(ID, TaskModule, GroupID, Creator, NweDescription);
-        _ ->
-            ok
-    end,
-    ok.
+            case Creator =:= Executor of
+                true ->
+                    on_task_start(ID, TaskModule, GroupID, Creator, NweDescription);
+                _ ->
+                    ok
+            end,
+            ok;
+        Other ->
+            Other
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

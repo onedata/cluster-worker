@@ -282,12 +282,16 @@ run_task(TaskModule, TaskID, Executor, GroupID, MainJobID, Creator) ->
     % TODO - zrobic tu case i obsluzyc error not found (nie zsyncowal sie dokument)
     % TODO - wywolac callback on_task_start
     % TODO - osluzyc sytuacje jak juz task zostal uruchomiony na innym node
-    {ok, Job, _Node} = TaskModule:get_job(MainJobID),
-    ok = traverse_task:on_task_start(TaskID, TaskModule, GroupID, Creator, #{
+    {ok, Job, _Node} = TaskModule:get_job(MainJobID), % A moze info o nodzie przechowywac w linkach?
+    case traverse_task:start(TaskID, TaskModule, GroupID, Executor, Creator, #{
         master_jobs_delegated => 1
-    }),
-    ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
-        TaskModule, TaskID, Executor, GroupID, [Job]).
+    }) of
+        ok ->
+            ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
+                TaskModule, TaskID, Executor, GroupID, [Job]);
+        {error, already_started} ->
+            check_task_list_and_run(TaskModule, Executor)
+    end.
 
 -spec cancel_group(task_module(), group()) -> ok
     | {abort, {traverse:id(), traverse:job_id(), traverse:executor()}} | {error, term()}.
