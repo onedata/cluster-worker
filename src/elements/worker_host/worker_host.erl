@@ -143,11 +143,6 @@ handle_call(_Request, _From, State) ->
     | {stop, Reason :: term(), NewState},
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
-%% Spawning migrated to worker proxy
-%% There is still need for responding to {timer, term()} requests
-handle_cast(#worker_request{} = Req, State = #host_state{plugin = Plugin}) ->
-    spawn(fun() -> proc_request(Plugin, Req) end),
-    {noreply, State};
 
 handle_cast({progress_report, Report}, State) ->
     NewLoadInfo = save_progress(Report, State#host_state.load_info),
@@ -300,7 +295,18 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
             Plugin:handle(Msg)
         catch
             Type:Error ->
-                ?error_stacktrace("Worker plug-in ~p error: ~p:~p, on request: ~p", [Plugin, Type, Error, Request]),
+                LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
+                {MsgFormat, FormatArgs} = case LogRequest of
+                    true ->
+                        MF = "Worker plug-in ~p error: ~p:~p, on request: ~p",
+                        FA = [Plugin, Type, Error, Request],
+                        {MF, FA};
+                    _ ->
+                        MF = "Worker plug-in ~p error: ~p:~p",
+                        FA = [Plugin, Type, Error],
+                        {MF, FA}
+                end,
+                ?error_stacktrace(MsgFormat, FormatArgs),
                 worker_plugin_error
         end,
     send_response(Plugin, BeforeProcessingRequest, Request, Response).
@@ -308,24 +314,27 @@ proc_request(Plugin, Request = #worker_request{req = Msg}) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Sends responce to client
+%% Sends response to client
 %% @end
 %%--------------------------------------------------------------------
 -spec send_response(Plugin :: atom(), BeforeProcessingRequest :: term(), Request :: #worker_request{}, Response :: term()) -> atom().
-send_response(Plugin, BeforeProcessingRequest, #worker_request{id = MsgId, reply_to = ReplyTo}, Response) ->
+send_response(Plugin, BeforeProcessingRequest, #worker_request{id = ReqId, reply_to = ReplyTo}, Response) ->
     case ReplyTo of
-        undefined -> ok;
+        undefined ->
+            ok;
         {gen_serv, Serv} ->
-            case MsgId of
+            case ReqId of
                 undefined -> gen_server2:cast(Serv, Response);
                 Id ->
                     gen_server2:cast(Serv, #worker_answer{id = Id, response = Response})
             end;
         {proc, Pid} ->
-            case MsgId of
+            case ReqId of
                 undefined -> Pid ! Response;
                 Id -> Pid ! #worker_answer{id = Id, response = Response}
-            end
+            end;
+        _ when is_function(ReplyTo) ->
+            ReplyTo(Response)
     end,
 
     AfterProcessingRequest = os:timestamp(),

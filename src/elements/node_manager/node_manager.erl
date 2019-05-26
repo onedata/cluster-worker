@@ -21,37 +21,72 @@
 -behaviour(gen_server).
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include("elements/node_manager/node_manager.hrl").
 -include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
-%% Note: Workers start with order specified below. For this reason
-%% all workers that need datastore_worker shall be after datastore_worker on
-%% the list below.
 -define(CLUSTER_WORKER_MODULES, [
-    {datastore_worker, []},
-    {dns_worker, []}
-]).
--define(CLUSTER_WORKER_LISTENERS, [
-    dns_listener,
-    nagios_listener,
-    redirector_listener
+    {datastore_worker, [
+        {supervisor_flags, datastore_worker:supervisor_flags()},
+        {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
+    ]},
+    {tp_router, [
+        {supervisor_flags, tp_router:main_supervisor_flags()},
+        {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
+    ], [supervisor_first, {posthook, init_supervisors}]}
 ]).
 
+-define(HELPER_ETS, node_manager_helper_ets).
+
 %% API
--export([start_link/0, stop/0, get_ip_address/0, refresh_ip_address/0,
-    modules/0, listeners/0, cluster_worker_modules/0, cluster_worker_listeners/0]).
+-export([start_link/0, stop/0, get_ip_address/0,
+    modules/0, listeners/0, cluster_worker_modules/0, start_worker/2]).
+-export([single_error_log/2, single_error_log/3, single_error_log/4,
+    log_monitoring_stats/3]).
+-export([init_report/0, init_counters/0]).
+-export([get_cluster_nodes/0, get_cluster_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% for tests
--export([init_workers/0]).
+-export([init_workers/0, init_workers/1]).
+
+-define(EXOMETER_COUNTERS,
+            [processes_num, memory_erlang, memory_node, cpu_node]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
+-define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc
+%% Initializes all counters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
+        exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), uniform, [{size, Size}]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Subscribe for reports for all parameters.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [min, max, median, mean, n]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Reports).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -59,17 +94,9 @@
 %% Use in plugins when specifying modules_with_args.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_worker_modules() -> Models :: [{atom(), [any()]}].
+-spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
+    | {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of listeners provided by cluster-worker.
-%% Use in plugins when specifying listeners.
-%% @end
-%%--------------------------------------------------------------------
--spec cluster_worker_listeners() -> Listeners :: [atom()].
-cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 
 %%--------------------------------------------------------------------
 
@@ -79,10 +106,13 @@ cluster_worker_listeners() -> ?CLUSTER_WORKER_LISTENERS.
 %%--------------------------------------------------------------------
 -spec modules() -> Models :: [atom()].
 modules() ->
+    DefaultWorkers = cluster_worker_modules(),
+    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
     lists:map(fun
         ({Module, _}) -> Module;
-        ({singleton, Module, _}) -> Module
-    end, plugins:apply(node_manager_plugin, modules_with_args, [])).
+        ({singleton, Module, _}) -> Module;
+        ({Module, _, _}) -> Module
+    end, DefaultWorkers ++ CustomWorkers).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -119,20 +149,137 @@ stop() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns node's IP address.
+%% @equiv single_error_log(LogKey, Log, [])
 %% @end
 %%--------------------------------------------------------------------
-get_ip_address() ->
-    gen_server2:call(?NODE_MANAGER_NAME, get_ip_address).
+-spec single_error_log(LogKey :: atom(), Log :: string()) -> ok.
+single_error_log(LogKey, Log) ->
+    single_error_log(LogKey, Log, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @equiv single_error_log(LogKey, Log, Args, 500)
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()]) -> ok.
+single_error_log(LogKey, Log, Args) ->
+    single_error_log(LogKey, Log, Args, 500).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Logs error. If any other process tries to log with same key,
+%% the message is not logged.
+%% @end
+%%--------------------------------------------------------------------
+-spec single_error_log(LogKey :: atom(), Log :: string(),
+    Args :: [term()], FreezeTime :: non_neg_integer()) -> ok.
+single_error_log(LogKey, Log, Args, FreezeTime) ->
+    case ets:lookup(?HELPER_ETS, LogKey) of
+        [] ->
+            case ets:insert_new(?HELPER_ETS, {LogKey, ok}) of
+                true ->
+                    ?error(Log, Args),
+                    timer:sleep(FreezeTime),
+                    ets:delete(?HELPER_ETS, LogKey),
+                    ok;
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Log monitoring result.
+%% @end
+%%--------------------------------------------------------------------
+-spec log_monitoring_stats(LogFile :: string(),
+    Format :: io:format(), Args :: [term()]) -> ok.
+log_monitoring_stats(LogFile, Format, Args) ->
+    MaxSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        monitoring_log_file_max_size, 524288000), % 500 MB
+    logger:log_with_rotation(LogFile, Format, Args, MaxSize).
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Tries to contact GR and refresh node's IP Address.
+%% Starts worker node with dedicated supervisor as brother. Both entities
+%% are started under MAIN_WORKER_SUPERVISOR supervision.
 %% @end
 %%--------------------------------------------------------------------
-refresh_ip_address() ->
-    gen_server2:cast(?NODE_MANAGER_NAME, refresh_ip_address).
+-spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
+start_worker(Module, Args) ->
+    start_worker(Module, Args, []).
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts worker node with dedicated supervisor as brother. Both entities
+%% are started under MAIN_WORKER_SUPERVISOR supervision.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_worker(Module :: atom(), Args :: term(), Options :: list()) ->
+    ok | {error, term()}.
+start_worker(Module, Args, Options) ->
+    try
+        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
+        WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
+
+        case lists:member(supervisor_first, Options) of
+            true ->
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {Module, {worker_host, start_link,
+                        [Module, Args, LoadMemorySize]}, transient, 5000,
+                        worker, [worker_host]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module ~p already started", [Module]),
+                        ok
+                end,
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {WorkerSupervisorName, {worker_host_sup, start_link,
+                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        supervisor, [worker_host_sup]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module supervisor ~p already started", [Module]),
+                        ok
+                end;
+            _ ->
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {WorkerSupervisorName, {worker_host_sup, start_link,
+                        [WorkerSupervisorName, Args]}, transient, infinity,
+                        supervisor, [worker_host_sup]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module supervisor ~p already started", [Module]),
+                        ok
+                end,
+                case supervisor:start_child(
+                    ?MAIN_WORKER_SUPERVISOR_NAME,
+                    {Module, {worker_host, start_link,
+                        [Module, Args, LoadMemorySize]}, transient, 5000,
+                        worker, [worker_host]}
+                ) of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} ->
+                        ?warning("Module ~p already started", [Module]),
+                        ok
+                end
+        end,
+        ?info("Worker: ~s started", [Module]),
+        ok
+    catch
+        _:Error ->
+            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
+            {error, Error}
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -155,9 +302,14 @@ refresh_ip_address() ->
 init([]) ->
     process_flag(trap_exit, true),
     try
+        ?init_exometer_reporters(false),
+        exometer_utils:init_exometer_counters(),
+        catch ets:new(?HELPER_ETS, [named_table, public, set]),
+
+        ?info("Running 'before_init' procedures."),
         ok = plugins:apply(node_manager_plugin, before_init, [[]]),
 
-        ?info("Plugin initailised"),
+        ?info("Plugin initialised"),
 
         ?info("Checking if all ports are free..."),
         lists:foreach(
@@ -173,23 +325,20 @@ init([]) ->
                 end
             end, node_manager:listeners()),
 
-        ?info("Ports OK, starting listeners..."),
+        ?info("Ports OK"),
 
-        lists:foreach(fun(Module) ->
-            ok = erlang:apply(Module, start, []) end, node_manager:listeners()),
-        ?info("All listeners started"),
-
-        next_mem_check(),
         next_task_check(),
-        erlang:send_after(caches_controller:plan_next_throttling_check(), self(), {timer, configure_throttling}),
+        erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
+        {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
+        {ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+        erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
+        erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
 
         gen_server2:cast(self(), connect_to_cm),
+        MonitoringState = monitoring:start(),
 
-        NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
-        MonitoringState = monitoring:start(NodeIP),
-
-        {ok, #state{node_ip = NodeIP,
+        {ok, #state{
             cm_con_status = not_connected,
             monitoring_state = MonitoringState}}
     catch
@@ -218,56 +367,35 @@ init([]) ->
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
 
-handle_call(healthcheck, _From, State = #state{cm_con_status = ConnStatus}) ->
-    Reply = case ConnStatus of
-        registered -> ok;
-        _ -> out_of_sync
-    end,
-    {reply, Reply, State};
-
-handle_call(get_ip_address, _From, State = #state{node_ip = IPAddress}) ->
-    {reply, IPAddress, State};
-
-% only for tests
-handle_call(check_mem_synch, _From, State) ->
-    Ans = case monitoring:get_memory_stats() of
-        [{<<"mem">>, MemUsage}] ->
-            case caches_controller:should_clear_cache(MemUsage, erlang:memory()) of
-                true ->
-                    free_memory(MemUsage);
-                _ ->
-                    ok
-            end;
-        _ ->
-            cannot_check_mem_usage
-    end,
-    {reply, Ans, State};
-
-% only for tests
-handle_call(clear_mem_synch, _From, State) ->
-    caches_controller:delete_old_keys(locally_cached, 0),
-    caches_controller:delete_old_keys(globally_cached, 0),
+handle_call(healthcheck, _From,
+    #state{cm_con_status = registered, initialized = true} = State) ->
     {reply, ok, State};
+handle_call(healthcheck, _From, State) ->
+    {reply, out_of_sync, State};
 
-% only for tests
-handle_call(force_clear_node, _From, State) ->
-    A1 = caches_controller:delete_all_keys(locally_cached),
-    A2 = caches_controller:delete_all_keys(globally_cached),
-    task_manager:kill_all(),
-    {reply, {A1, A2}, State};
+handle_call(internal_healthcheck, _From, #state{cm_con_status = registered} = State) ->
+    {reply, ok, State};
+handle_call(internal_healthcheck, _From, State) ->
+    {reply, out_of_sync, State};
 
-handle_call(disable_cache_control, _From, State) ->
-    {reply, ok, State#state{cache_control = false}};
+handle_call(disable_task_control, _From, State) ->
+    {reply, ok, State#state{task_control = false}};
 
-handle_call(enable_cache_control, _From, State) ->
-    {reply, ok, State#state{cache_control = true}};
+handle_call(enable_task_control, _From, State) ->
+    {reply, ok, State#state{task_control = true}};
+
+handle_call(disable_throttling, _From, State) ->
+    {reply, ok, State#state{throttling = false}};
+
+handle_call(enable_throttling, _From, State) ->
+    {reply, ok, State#state{throttling = true}};
 
 %% Generic function apply in node_manager's process
 handle_call({apply, M, F, A}, _From, State) ->
     {reply, apply(M, F, A), State};
 
 handle_call(_Request, _From, State) ->
-    plugins:apply(node_manager_plugin, handle_call_extension, [_Request, _From, State]).
+    plugins:apply(node_manager_plugin, handle_call, [_Request, _From, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -290,45 +418,71 @@ handle_cast(cm_conn_ack, State) ->
     NewState = cm_conn_ack(State),
     {noreply, NewState};
 
-handle_cast(check_mem, #state{monitoring_state = MonState, cache_control = CacheControl,
-    last_cache_cleaning = Last, cache_cleaning_pid = LastCleaningPid} = State) when CacheControl =:= true ->
-    MemUsage = monitoring:mem_usage(MonState),
-    {_, ErlangMemUsage, _} = monitoring:erlang_vm_stats(MonState),
-    % Check if memory cleaning of oldest docs should be started
-    % even when memory utilization is low (e.g. once a day)
-    NewState = case caches_controller:should_clear_cache(MemUsage, ErlangMemUsage) of
-        true ->
-            start_memory_cleaning(LastCleaningPid, MemUsage, State);
-        _ ->
-            Now = os:timestamp(),
-            {ok, CleaningPeriod} = application:get_env(?CLUSTER_WORKER_APP_NAME, clear_cache_max_period_ms),
-            case timer:now_diff(Now, Last) >= 1000000 * CleaningPeriod of
-                true ->
-                    start_memory_cleaning(LastCleaningPid, undefined, State);
-                _ ->
-                    State
-            end
-    end,
-
-    next_mem_check(),
+handle_cast({cluster_init_finished, Nodes}, State) ->
+    NewState = cluster_init_finished(State, Nodes),
     {noreply, NewState};
 
+handle_cast(configure_throttling, #state{throttling = true} = State) ->
+    try
+        ok = datastore_throttling:configure_throttling()
+    catch
+        Error:Reason ->
+            ?warning_stacktrace("configure_throttling failed due to ~p:~p", [Error, Reason])
+    end,
+    {noreply, State};
+
 handle_cast(configure_throttling, State) ->
-    ok = caches_controller:configure_throttling(),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds),
+    erlang:send_after(timer:seconds(Interval), self(), {timer, configure_throttling}),
     {noreply, State};
 
-handle_cast(check_mem, State) ->
-    next_mem_check(),
+handle_cast(check_memory, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
+    erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
+    spawn(fun() ->
+        plugins:apply(node_manager_plugin, clear_memory, [false])
+    end),
     {noreply, State};
 
-handle_cast(check_tasks, State) ->
-    spawn(task_manager, check_and_rerun_all, []),
+handle_cast(check_exometer, State) ->
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+    erlang:send_after(Interval, self(), {timer, check_exometer}),
+    spawn(fun() ->
+        ?init_exometer_reporters
+    end),
+    {noreply, State};
+
+handle_cast(check_tasks, #state{task_control = TC} = State) ->
+    case TC of
+        true ->
+            spawn(task_manager, check_and_rerun_all, []);
+        _ ->
+            ok
+    end,
     next_task_check(),
     {noreply, State};
 
-handle_cast(do_heartbeat, State) ->
-    NewState = do_heartbeat(State),
-    {noreply, NewState};
+handle_cast(force_check_tasks, State) ->
+    spawn(task_manager, check_and_rerun_all, []),
+    {noreply, State};
+
+handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
+    Self = self(),
+    spawn(fun() ->
+        {NewMonState, NewLSA} = do_heartbeat(State),
+        gen_server2:cast(?NODE_MANAGER_NAME, {heartbeat_state_update, {NewMonState, NewLSA}}),
+        {ok, Interval} = case Status of
+            registered ->
+                application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_registered_interval);
+            _ ->
+                application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval)
+        end,
+        erlang:send_after(Interval, Self, {timer, do_heartbeat})
+    end),
+    {noreply, State};
+
+handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
+    {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
 handle_cast(check_cluster_status, State) ->
     % Check if cluster is initialized - this must be done in different process
@@ -337,11 +491,13 @@ handle_cast(check_cluster_status, State) ->
     spawn(fun() ->
         {ok, Timeout} = application:get_env(
             ?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
-        Status = case nagios_handler:get_cluster_status(Timeout) of
+        Status = case nagios_handler:get_cluster_status(Timeout, internal_healthcheck) of
             {ok, {_AppName, ok, _NodeStatuses}} ->
                 ok;
-            _ ->
-                error
+            {ok, {_AppName, GenericError, NodeStatuses}}  ->
+                {error, {GenericError, NodeStatuses}};
+            Error ->
+                {error, Error}
         end,
         % Cast cluster status back to node manager
         gen_server2:cast(?NODE_MANAGER_NAME, {cluster_status, Status})
@@ -353,20 +509,30 @@ handle_cast({cluster_status, _}, #state{initialized = true} = State) ->
     % Already initialized, do nothing
     {noreply, State};
 
-handle_cast({cluster_status, CStatus}, #state{initialized = false} = State) ->
+handle_cast({cluster_status, CStatus}, #state{initialized = {false, TriesNum}} = State) ->
     % Not yet initialized, run after_init if cluster health is ok.
     case CStatus of
         ok ->
             % Cluster initialized, run after_init callback
             % of node_manager_plugin.
-            ?info("Cluster initialized. Running 'after_init' procedures."),
+            ?info("All nodes initialized. Running 'after_init' procedures."),
             ok = plugins:apply(node_manager_plugin, after_init, [[]]),
             {noreply, State#state{initialized = true}};
-        error ->
-            % Cluster not yet initialized, try in a second.
-            ?debug("Cluster not initialized. Next check in a second."),
-            erlang:send_after(timer:seconds(1), self(), {timer, check_cluster_status}),
-            {noreply, State}
+        {error, Error} ->
+            MaxChecksNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                cluster_status_max_checks_number, 30),
+            case TriesNum < MaxChecksNum of
+                true ->
+                    % Cluster not yet initialized, try in a second.
+                    ?debug("Cluster not initialized. Next check in a second."),
+                    erlang:send_after(timer:seconds(1), self(), {timer, check_cluster_status}),
+                    {noreply, State#state{initialized = {false, TriesNum + 1}}};
+                _ ->
+                    ?error("Stopping application. Reason: "
+                    "cannot initialize cluster, status: ~p", [Error]),
+                    init:stop(),
+                    {stop, normal, State}
+            end
     end;
 
 handle_cast({update_lb_advices, Advices}, State) ->
@@ -376,16 +542,11 @@ handle_cast({update_lb_advices, Advices}, State) ->
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
-handle_cast(refresh_ip_address, #state{monitoring_state = MonState} = State) ->
-    NodeIP = plugins:apply(node_manager_plugin, check_node_ip_address, []),
-    NewMonState = monitoring:refresh_ip_address(NodeIP, MonState),
-    {noreply, State#state{node_ip = NodeIP, monitoring_state = NewMonState}};
-
 handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(_Request, State) ->
-    plugins:apply(node_manager_plugin, handle_cast_extension, [_Request, State]).
+    plugins:apply(node_manager_plugin, handle_cast, [_Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -400,7 +561,6 @@ handle_cast(_Request, State) ->
     | {stop, Reason :: term(), NewState},
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity.
-
 handle_info({timer, Msg}, State) ->
     gen_server2:cast(?NODE_MANAGER_NAME, Msg),
     {noreply, State};
@@ -409,7 +569,8 @@ handle_info({nodedown, Node}, State) ->
     {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
     case lists:member(Node, CMNodes) of
         false ->
-            ?warning("Node manager received unexpected nodedown msg: ~p", [{nodedown, Node}]);
+            ?warning("Node manager received unexpected nodedown msg: ~p",
+                [{nodedown, Node}]);
         true ->
             ok
         % TODO maybe node_manager should be restarted along with all workers to
@@ -419,8 +580,8 @@ handle_info({nodedown, Node}, State) ->
     end,
     {noreply, State};
 
-handle_info(_Request, State) ->
-    plugins:apply(node_manager_plugin, handle_info_extension, [_Request, State]).
+handle_info(Request, State) ->
+    plugins:apply(node_manager_plugin, handle_info, [Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -436,14 +597,21 @@ handle_info(_Request, State) ->
     | shutdown
     | {shutdown, term()}
     | term().
-terminate(_Reason, _State) ->
-    ?info("Shutting down ~p due to ~p", [?MODULE, _Reason]),
+terminate(Reason, State) ->
+    ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
 
     lists:foreach(fun(Module) ->
-        erlang:apply(Module, stop, []) end, node_manager:listeners()),
+        try
+            erlang:apply(Module, stop, [])
+        catch
+            E1:E2 ->
+                ?warning_stacktrace("Stop failed on module ~p: ~p:~p",
+                    [Module, E1, E2])
+        end
+    end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
-    plugins:apply(node_manager_plugin, on_terminate, [_Reason, _State]).
+    plugins:apply(node_manager_plugin, terminate, [Reason, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -455,8 +623,8 @@ terminate(_Reason, _State) ->
     Result :: {ok, NewState :: term()} | {error, Reason :: term()},
     OldVsn :: Vsn | {down, Vsn},
     Vsn :: term().
-code_change(_OldVsn, State, _Extra) ->
-    plugins:apply(node_manager_plugin, on_code_change, [_OldVsn, State, _Extra]).
+code_change(OldVsn, State, Extra) ->
+    plugins:apply(node_manager_plugin, code_change, [OldVsn, State, Extra]).
 
 %%%===================================================================
 %%% Internal functions
@@ -510,12 +678,12 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 -spec cm_conn_ack(State :: term()) -> #state{}.
 cm_conn_ack(State = #state{cm_con_status = connected}) ->
     ?info("Successfully connected to cluster manager"),
-    init_node(),
-    ?info("Node initialized"),
+    ?info("Starting default workers..."),
+    init_workers(cluster_worker_modules()),
+    ?info("Default workers started successfully"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
     erlang:send_after(Interval, self(), {timer, do_heartbeat}),
-    self() ! {timer, check_cluster_status},
     State#state{cm_con_status = registered};
 cm_conn_ack(State) ->
     % Already registered or not connected, do nothing
@@ -526,40 +694,60 @@ cm_conn_ack(State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Receives information that cluster has been successfully initialized.
+%% @end
+%%--------------------------------------------------------------------
+-spec cluster_init_finished(State :: term(), ClusterNodes :: [node()]) -> #state{}.
+cluster_init_finished(State, Nodes) ->
+    ?info("Cluster initialized. Running 'on_cluster_initialized' procedures"),
+    plugins:apply(node_manager_plugin, on_cluster_initialized, [Nodes]),
+    ?info("Starting custom workers..."),
+    Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+    ?info("Starting listeners..."),
+    lists:foreach(fun(Module) ->
+        ok = erlang:apply(Module, start, []),
+        ?info("   * ~p started", [Module])
+    end, node_manager:listeners()),
+    ?info("All listeners started"),
+    self() ! {timer, check_cluster_status},
+    State.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Performs calls to cluster manager with heartbeat. The heartbeat message consists of
 %% current monitoring data. The data is updated directly before sending.
 %% The cluster manager will perform an 'update_lb_advices' cast perodically, using
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: #state{}) -> #state{}.
+-spec do_heartbeat(State :: #state{}) ->
+    {monitoring:node_monitoring_state(), {erlang:timestamp(), pid()}}.
 do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
-    scheduler_info = SchedulerInfo} = State) ->
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
-    erlang:send_after(Interval, self(), {timer, do_heartbeat}),
+    scheduler_info = SchedulerInfo} = _State) ->
     NewMonState = monitoring:update(MonState),
     NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
     ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
-    State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA};
+    {NewMonState, NewLSA};
 
 % Stop heartbeat if node_manager is not registered in cluster manager
-do_heartbeat(State) ->
-    State.
+do_heartbeat(#state{monitoring_state = MonState, last_state_analysis = LSA} = _State) ->
+    {MonState, LSA}.
 
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Receives lb advices update from cluster manager and follows it to DNS worker and dispatcher.
+%% Receives lb advices update from cluster manager and follows it to dispatcher.
 %% @end
 %%--------------------------------------------------------------------
--spec update_lb_advices(State :: #state{}, LBAdvices) -> #state{} when
-    LBAdvices :: {load_balancing:dns_lb_advice(), load_balancing:dispatcher_lb_advice()}.
-update_lb_advices(State, {DNSAdvice, DispatcherAdvice}) ->
+-spec update_lb_advices(State :: #state{}, DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> #state{}.
+update_lb_advices(State, DispatcherAdvice) ->
     gen_server2:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
-    worker_proxy:call({dns_worker, node()}, {update_lb_advice, DNSAdvice}),
     State.
 
 
@@ -594,158 +782,51 @@ init_net_connection([Node | Nodes]) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Init node as worker of oneprovider cluster
-%% @end
-%%--------------------------------------------------------------------
--spec init_node() -> ok.
-init_node() ->
-    init_workers().
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts all workers on node, and notifies
-%% cluster manager about successfull init
+%% Starts all workers on node.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_workers() -> ok.
 init_workers() ->
+    DefaultWorkers = cluster_worker_modules(),
+    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    init_workers(DefaultWorkers ++ CustomWorkers).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts specified workers on node.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_workers(list()) -> ok.
+init_workers(Workers) ->
     lists:foreach(fun
         ({Module, Args}) ->
-            ok = start_worker(Module, Args),
-            case Module of
-                datastore_worker ->
-                    {ok, NodeToSync} = gen_server2:call({global, ?CLUSTER_MANAGER}, get_node_to_sync),
-                    ok = datastore:ensure_state_loaded(NodeToSync),
-                    ?info("Datastore synchronized");
-                _ -> ok
-            end;
+            ok = start_worker(Module, Args);
         ({singleton, Module, Args}) ->
-            case gen_server2:call({global, ?CLUSTER_MANAGER}, {register_singleton_module, Module, node()}) of
+            case gen_server2:call({global, ?CLUSTER_MANAGER},
+                {register_singleton_module, Module, node()}) of
                 ok ->
-                    ok = start_worker(Module, Args),
-                    ?info("Singleton module ~p started", [Module]);
+                    ?info("Starting singleton module ~p", [Module]),
+                    ok = start_worker(Module, Args);
                 already_started ->
                     ok
-            end
-    end, plugins:apply(node_manager_plugin, modules_with_args, [])),
-    ?info("All workers started"),
-    ok.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Starts worker node with dedicated supervisor as brother. Both entities
-%% are started under MAIN_WORKER_SUPERVISOR supervision.
-%% @end
-%%--------------------------------------------------------------------
--spec start_worker(Module :: atom(), Args :: term()) -> ok | {error, term()}.
-start_worker(Module, Args) ->
-    try
-        {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
-        WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
-        {ok, _} = supervisor:start_child(
-            ?MAIN_WORKER_SUPERVISOR_NAME,
-            {Module, {worker_host, start_link, [Module, Args, LoadMemorySize]}, transient, 5000, worker, [worker_host]}
-        ),
-        {ok, _} = supervisor:start_child(
-            ?MAIN_WORKER_SUPERVISOR_NAME,
-            {WorkerSupervisorName, {worker_host_sup, start_link, [WorkerSupervisorName, Args]}, transient, infinity, supervisor, [worker_host_sup]}
-        ),
-        ?info("Worker: ~s started", [Module])
-    catch
-        _:Error ->
-            ?error_stacktrace("Error: ~p during start of worker: ~s", [Error, Module]),
-            {error, Error}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Starts memory cleaning.
-%% @end
-%%--------------------------------------------------------------------
--spec start_memory_cleaning(LastCleaningPid :: pid(), MemUsage :: float() | undefined, State :: #state{}) -> #state{}.
-start_memory_cleaning(LastCleaningPid, MemUsage, State) ->
-    case LastCleaningPid of
-        undefined ->
-            Pid = spawn(fun() -> free_memory(MemUsage) end),
-            State#state{last_cache_cleaning = os:timestamp(), cache_cleaning_pid = Pid};
-        _ ->
-            case is_process_alive(LastCleaningPid) of
-                true ->
-                    Pid = spawn(fun() -> free_memory(MemUsage) end),
-                    State#state{last_cache_cleaning = os:timestamp(), cache_cleaning_pid = Pid};
-                _ ->
-                    State
-            end
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Clears memory caches.
-%% @end
-%%--------------------------------------------------------------------
--spec free_memory(NodeMem :: float() | undefined) -> ok | mem_usage_too_high | cannot_check_mem_usage | {error, term()}.
-free_memory(undefined) ->
-    try
-        % Following code will be used when clearing memory algorithm will change
-        % TODO VFS-2428 - do not use foreach during clearing
-        ok
-%%        ok = plugins:apply(node_manager_plugin, clear_memory, [false]),
-%%        ClearingOrder = [{false, globally_cached}, {false, locally_cached}],
-%%        lists:foreach(fun
-%%            ({Aggressive, StoreType}) ->
-%%                caches_controller:clear_cache(Aggressive, StoreType)
-%%        end, ClearingOrder)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
-            {error, E2}
-    end;
-free_memory(NodeMem) ->
-    try
-        ok = plugins:apply(node_manager_plugin, clear_memory, [true]),
-        AvgMem = gen_server2:call({global, ?CLUSTER_MANAGER}, get_avg_mem_usage),
-        ClearingOrder = case NodeMem >= AvgMem of
-            true ->
-                [{false, locally_cached}, {false, globally_cached}, {true, locally_cached}, {true, globally_cached}];
-            _ ->
-                [{false, globally_cached}, {false, locally_cached}, {true, globally_cached}, {true, locally_cached}]
-        end,
-        ?info("Clearing memory in order: ~p~nMemory info: ~p", [ClearingOrder, erlang:memory()]),
-        lists:foldl(fun
-            ({_Aggressive, _StoreType}, ok) ->
+            end;
+        ({Module, Args, Options}) ->
+            case proplists:get_value(prehook, Options) of
+              undefined ->
                 ok;
-            ({Aggressive, StoreType}, _) ->
-                Ans = caches_controller:clear_cache(Aggressive, StoreType),
-                case Ans of
-                    mem_usage_too_high ->
-                        ?warning("Not able to free enough memory clearing cache ~p with param ~p", [StoreType, Aggressive]);
-                    _ ->
-                        ok
-                end,
-                Ans
-        end, start, ClearingOrder)
-    catch
-        E1:E2 ->
-            ?error_stacktrace("Error during caches cleaning ~p:~p", [E1, E2]),
-            {error, E2}
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Plans next memory checking.
-%% @end
-%%--------------------------------------------------------------------
--spec next_mem_check() -> TimerRef :: reference().
-next_mem_check() ->
-    {ok, IntervalMin} = application:get_env(?CLUSTER_WORKER_APP_NAME, check_mem_interval_minutes),
-    Interval = timer:minutes(IntervalMin),
-    % random to reduce probability that two nodes clear memory simultanosly
-    erlang:send_after(crypto:rand_uniform(round(0.8 * Interval), round(1.2 * Interval)), self(), {timer, check_mem}).
-
+              Prehook ->
+                ok = apply(Module, Prehook, [])
+            end,
+            ok = start_worker(Module, Args, Options),
+            case proplists:get_value(posthook, Options) of
+              undefined ->
+                ok;
+              Posthook ->
+                ok = apply(Module, Posthook, [])
+            end
+    end, Workers),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -781,72 +862,112 @@ check_port(Port) ->
 %% Analyse monitoring state and log result.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(), SchedulerInfo :: undefined | list(),
-    LastAnalysisTime :: erlang:timestamp()) -> erlang:timestamp().
-analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
+-spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
+    SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
+        LastAnalysisPid :: pid() | undefined}) -> {erlang:timestamp(), pid()}.
+analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
     ?debug("Monitoring state: ~p", [MonState]),
 
-    {_, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
+    {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
-    {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_min),
+    {ok, MinInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, min_analysis_interval_sek),
     {ok, MaxInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, max_analysis_interval_min),
     {ok, MemThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_analysis_treshold),
     {ok, ProcThreshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, procs_num_analysis_treshold),
+    {ok, MemToStartCleaning} = application:get_env(?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache),
 
     {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME, schedulers_monitoring),
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
 
+    MemUsage = monitoring:mem_usage(MonState),
+
+    exometer:update(?EXOMETER_NAME(processes_num), PNum),
+    exometer:update(?EXOMETER_NAME(memory_erlang), MemInt),
+    exometer:update(?EXOMETER_NAME(memory_node), MemUsage),
+    exometer:update(?EXOMETER_NAME(cpu_node), CPU * 100),
+
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
-    case (TimeDiff >= timer:minutes(MaxInterval)) orelse
-        ((TimeDiff >= timer:minutes(MinInterval)) andalso ((MemInt >= MemThreshold) orelse (PNum >= ProcThreshold))) of
+    MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
+    MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),
+    MinTresholdExceeded = (MemInt >= MemThreshold) orelse
+        (PNum >= ProcThreshold) orelse (MemUsage >= MemToStartCleaning),
+    LastPidAlive = LastAnalysisPid =/= undefined andalso
+        erlang:is_process_alive(LastAnalysisPid),
+    case (MaxTimeExceeded orelse (MinTimeExceeded andalso MinTresholdExceeded))
+        andalso not LastPidAlive of
         true ->
-            spawn(fun() ->
-                ?debug("Erlang ets mem usage: ~p", [
-                    lists:reverse(lists:sort(lists:map(fun(N) -> {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
+            Pid = spawn(fun() ->
+                log_monitoring_stats("Monitoring state: ~p", [MonState]),
+                log_monitoring_stats("Erlang ets mem usage: ~p", [
+                    lists:reverse(lists:sort(lists:map(fun(N) ->
+                        {ets:info(N, memory), ets:info(N, size), N} end, ets:all())))
                 ]),
 
-                Procs = erlang:processes(),
-                SortedProcs = lists:reverse(lists:sort(lists:map(fun(P) -> {erlang:process_info(P, memory), P} end, Procs))),
-                MergedStacksMap = lists:foldl(fun(P, Map) ->
-                    case {erlang:process_info(P, current_stacktrace), erlang:process_info(P, memory)} of
-                        {{current_stacktrace, K}, {memory, M}} ->
-                            {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
-                            maps:put(K, {M+M2, Num +1, K}, Map);
-                        _ ->
-                            Map
-                    end
-                end, #{}, Procs),
-                MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap))), 5),
+                % Gather processes info
+                {ProcNum, {Top5M, Top5B, CS_Map, CS_Bin_Map}} =
+                    get_procs_stats(),
 
-                MergedStacksMap2 = maps:map(fun(K, {M, N, K}) -> {N, M, K} end, MergedStacksMap),
+                % Merge processes with similar stacktrace and find groups
+                % that use a lot of memory
+                MergedStacks = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Map))), 5),
+
+                MergedStacksMap2 = maps:map(fun(K, {M, N, K}) ->
+                    {N, M, K} end, CS_Map),
                 MergedStacks2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksMap2))), 5),
 
-                GetName = fun(P) ->
-                    All = erlang:registered(),
-                    lists:foldl(fun(Name, Acc) ->
-                        case whereis(Name) of
-                            P ->
-                                Name;
-                            _ ->
-                                Acc
-                        end
-                    end, non, All)
-                end,
+                % Merge processes with similar stacktrace and find groups
+                % that use a lot of memory to store binaries
+                MergedStacksBin = lists:sublist(lists:reverse(lists:sort(maps:values(CS_Bin_Map))), 5),
+
+                MergedStacksBinMap2 = maps:map(fun(K, {M, N, K}) ->
+                    {N, M, K} end, CS_Bin_Map),
+                MergedStacksBin2 = lists:sublist(lists:reverse(lists:sort(maps:values(MergedStacksBinMap2))), 5),
+
+                All = erlang:registered(),
 
                 TopProcesses = lists:map(
-                    fun({M, P}) ->
-                        {M, erlang:process_info(P, current_stacktrace), erlang:process_info(P, message_queue_len),
-                            erlang:process_info(P, stack_size), erlang:process_info(P, heap_size),
-                            erlang:process_info(P, total_heap_size), P, GetName(P)}
-                    end, lists:sublist(SortedProcs, 5)),
-                ?debug("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n "
-                    "aggregated memory consumption: ~p~n simmilar procs: ~p", [length(Procs),
-                    TopProcesses, MergedStacks, MergedStacks2
+                    fun({M, {P, CS}}) ->
+                        {M, CS, P, get_process_name(P, All),
+                            erlang:process_info(P, current_function),
+                            erlang:process_info(P, initial_call),
+                            erlang:process_info(P, message_queue_len)}
+                    end, lists:reverse(Top5M)),
+
+                AddBL = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                    include_binary_list_in_monitoring_reoport, false),
+                TopProcessesBin = case AddBL of
+                    true ->
+                        lists:map(
+                            fun({M, {P, CS, BL}}) ->
+                                {M, CS, P, get_process_name(P, All), BL,
+                                    erlang:process_info(P, current_function),
+                                    erlang:process_info(P, initial_call),
+                                    erlang:process_info(P, message_queue_len)}
+                            end, lists:reverse(Top5B));
+                    _ ->
+                        lists:map(
+                            fun({M, {P, CS, _BL}}) ->
+                                {M, CS, P, get_process_name(P, All),
+                                    erlang:process_info(P, current_function),
+                                    erlang:process_info(P, initial_call),
+                                    erlang:process_info(P, message_queue_len)}
+                            end, lists:reverse(Top5B))
+                end,
+
+                log_monitoring_stats("Erlang Procs stats:~n procs num: ~p~n single proc memory cosumption: ~p~n"
+                "single proc memory cosumption (binary): ~p~n"
+                "aggregated memory consumption: ~p~n"
+                "simmilar procs: ~p~n"
+                "aggregated memory consumption (binary): ~p~n"
+                "simmilar procs (binary): ~p", [
+                    ProcNum, TopProcesses, TopProcessesBin, MergedStacks,
+                    MergedStacks2, MergedStacksBin, MergedStacksBin2
                 ]),
 
-                ?debug("Schedulers basic info: all: ~p, online: ~p",
+                % Log schedulers info
+                log_monitoring_stats("Schedulers basic info: all: ~p, online: ~p",
                     [erlang:system_info(schedulers), erlang:system_info(schedulers_online)]),
                 NewSchedulerInfo0 = erlang:statistics(scheduler_wall_time),
                 case is_list(NewSchedulerInfo0) of
@@ -854,15 +975,15 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                         NewSchedulerInfo = lists:sort(NewSchedulerInfo0),
                         gen_server2:cast(?NODE_MANAGER_NAME, {update_scheduler_info, NewSchedulerInfo}),
 
-                        ?debug("Schedulers advanced info: ~p", [NewSchedulerInfo]),
+                        log_monitoring_stats("Schedulers advanced info: ~p", [NewSchedulerInfo]),
                         case is_list(SchedulerInfo) of
                             true ->
                                 Percent = lists:map(fun({{I, A0, T0}, {I, A1, T1}}) ->
-                                    {I, (A1 - A0)/(T1 - T0)} end, lists:zip(SchedulerInfo,NewSchedulerInfo)),
-                                {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai,Ti}) ->
-                                    {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo,NewSchedulerInfo)),
-                                Aggregated = A/T,
-                                ?debug("Schedulers utilization percent: ~p, aggregated: ~p", [Percent,Aggregated]);
+                                    {I, (A1 - A0) / (T1 - T0)} end, lists:zip(SchedulerInfo, NewSchedulerInfo)),
+                                {A, T} = lists:foldl(fun({{_, A0, T0}, {_, A1, T1}}, {Ai, Ti}) ->
+                                    {Ai + (A1 - A0), Ti + (T1 - T0)} end, {0, 0}, lists:zip(SchedulerInfo, NewSchedulerInfo)),
+                                Aggregated = A / T,
+                                log_monitoring_stats("Schedulers utilization percent: ~p, aggregated: ~p", [Percent, Aggregated]);
                             _ ->
                                 ok
                         end;
@@ -870,7 +991,195 @@ analyse_monitoring_state(MonState, SchedulerInfo, LastAnalysisTime) ->
                         ok
                 end
             end),
-            Now;
+            {Now, Pid};
         _ ->
-            LastAnalysisTime
+            {LastAnalysisTime, LastAnalysisPid}
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets statistics for processes (processes number and processes that use
+%% a lot of memory).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_procs_stats() -> {ProcNum :: non_neg_integer(),
+    {Top5Mem :: [{Memory :: non_neg_integer(), Value :: term()}],
+        Top5Bin :: [{MemoryBin :: non_neg_integer(), Value :: term()}],
+        CS_Map :: #{}, CS_Bin_Map :: #{}}}.
+get_procs_stats() ->
+    Procs = erlang:processes(),
+    PNum = length(Procs),
+
+    {PNum, get_procs_stats(Procs, {[], [], #{}, #{}}, 0)}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Gets statistics for processes that use a lot of memory.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_procs_stats([pid()],
+    {TmpTop5Mem :: [{TmpMemory :: non_neg_integer(), TmpValue :: term()}],
+        TmpTop5Bin :: [{TmpMemoryBin :: non_neg_integer(), TmpValue :: term()}],
+        TmpCS_Map :: #{}, TmpCS_Bin_Map :: #{}}, Count :: non_neg_integer()) ->
+    {Top5Mem :: [{Memory :: non_neg_integer(), Value :: term()}],
+        Top5Bin :: [{MemoryBin :: non_neg_integer(), Value :: term()}],
+        CS_Map :: #{}, CS_Bin_Map :: #{}}.
+get_procs_stats([], Ans, _Count) ->
+    Ans;
+get_procs_stats([P | Procs], {Top5Mem, Top5Bin, CS_Map, CS_Bin_Map}, Count) ->
+    CS = erlang:process_info(P, current_stacktrace),
+
+    ProcMem = case erlang:process_info(P, memory) of
+        {memory, M} ->
+            M;
+        _ ->
+            0
+    end,
+
+    {Bin, BinList} = case erlang:process_info(P, binary) of
+        {binary, BL} ->
+            {get_binary_size(BL), BL};
+        _ ->
+            {0, []}
+    end,
+
+    Top5Mem2 = top_five(ProcMem, {P, CS}, Top5Mem),
+    Top5Bin2 = top_five(Bin, {P, CS, BinList}, Top5Bin),
+    CS_Map2 = merge_stacks(CS, ProcMem, CS_Map),
+    CS_Bin_Map2 = merge_stacks(CS, Bin, CS_Bin_Map),
+
+    GC_Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        proc_stats_analysis_gc_interval, 25000),
+    case Count rem GC_Interval of
+        0 ->
+            erlang:garbage_collect();
+        _ ->
+            ok
+    end,
+
+    get_procs_stats(Procs, {Top5Mem2, Top5Bin2, CS_Map2, CS_Bin_Map2},
+        Count + 1).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sums utilization of memory of processes with similar stacktrace.
+%% @end
+%%--------------------------------------------------------------------
+-spec top_five(Memory :: non_neg_integer(), Value :: term(),
+    Acc :: [{non_neg_integer(), term()}]) ->
+    NewAcc :: [{non_neg_integer(), term()}].
+top_five(M, Value, []) ->
+    [{M, Value}];
+top_five(M, Value, [{Min, _} | Top4] = Top5) ->
+    case length(Top5) < 5 of
+        true -> lists:sort([{M, Value} | Top5]);
+        _ ->
+            case M > Min of
+                true ->
+                    lists:sort([{M, Value} | Top4]);
+                _ ->
+                    Top5
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sums utilization of memory of processes with similar stacktrace.
+%% @end
+%%--------------------------------------------------------------------
+-spec merge_stacks(Stacktrace :: term(), Memory :: non_neg_integer(),
+    Acc :: #{}) -> NewAcc :: #{}.
+merge_stacks(CS, M, Map) ->
+    case CS of
+        {current_stacktrace, K} ->
+            {M2, Num, _} = maps:get(K, Map, {0, 0, K}),
+            maps:put(K, {M + M2, Num + 1, K}, Map);
+        _ ->
+            Map
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tries to find process name.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_process_name(pid(), [atom()]) -> atom().
+get_process_name(P, All) ->
+    lists:foldl(fun(Name, Acc) ->
+        case whereis(Name) of
+            P ->
+                Name;
+            _ ->
+                Acc
+        end
+    end, non, All).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns sum of sizes of binaries listed by process_info.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_binary_size(list()) -> non_neg_integer().
+get_binary_size(BinList) ->
+    lists:foldl(fun({_, S, _}, Acc) ->
+        S + Acc
+    end, 0, BinList).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Log monitoring result.
+%% @end
+%%--------------------------------------------------------------------
+-spec log_monitoring_stats(Format :: io:format(), Args :: [term()]) -> ok.
+log_monitoring_stats(Format, Args) ->
+    LogFile = application:get_env(?CLUSTER_WORKER_APP_NAME, monitoring_log_file,
+        "/tmp/node_manager_monitoring.log"),
+
+    log_monitoring_stats(LogFile, Format, Args).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns node's IP address.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_ip_address() -> inet:ip4_address().
+get_ip_address() ->
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, external_ip, undefined) of
+        {_, _, _, _} = IP -> IP;
+        IPAsList when is_list(IPAsList) ->
+            {ok, IP} = inet:parse_ipv4strict_address(IPAsList),
+            IP;
+        undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
+        _ -> {127, 0, 0, 1}
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Fetches cluster nodes from cluster manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_nodes() -> {ok, [node()]} | {error, cluster_not_ready}.
+get_cluster_nodes() ->
+    gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Get up to date information about IPs in the cluster.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_ips() -> [inet:ip4_address()] | no_return().
+get_cluster_ips() ->
+    {ok, Nodes} = get_cluster_nodes(),
+
+    lists:map(fun(Node) ->
+        {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
+    end, Nodes).

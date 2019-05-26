@@ -4,11 +4,7 @@
 .dialyzer.plt
 .idea
 .rebar
-
-src/gui_static/common
-src/gui_static/flatui
-src/gui_static/fonts
-src/gui_static/n2o
+.rebar3
 
 *.iml
 *.sublime*
@@ -16,23 +12,15 @@ src/gui_static/n2o
 *.pyc
 *.o
 
-rel/*.rpm
-
 test/eunit_results
 test_distributed/cover_tmp.spec
 test_coverage
 
-doc
+./doc
 logs
-priv/sync_gateway
-vendor
-
-c_lib
-c_src/helpers_nif/*.o
-c_src/rt_container/*.o
-c_src/oneproxy/build/*
 
 docs/_build/
 _build
 compile_commands.json
 cluster_manager
+ebin

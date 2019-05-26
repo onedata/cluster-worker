@@ -1,68 +1,42 @@
 %%%-------------------------------------------------------------------
-%%% @author Rafal Slota
-%%% @copyright (C) 2016 ACK CYFRONET AGH
+%%% @author Krzysztof Trzepla
+%%% @copyright (C) 2017 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%-------------------------------------------------------------------
-%%% @doc JSON encoding for datastore models
+%%% @doc This module is responsible for encoding/decoding datastore document
+%%% to/from EJSON format.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_json).
--author("Rafal Slota").
+-author("Krzysztof Trzepla").
 
--include("modules/datastore/datastore_common.hrl").
--include("modules/datastore/datastore_common_internal.hrl").
--include("modules/datastore/datastore_models_def.hrl").
-
-
-%%%===================================================================
-%%% Definitions
-%%%===================================================================
-
-%% Encoded record name field
--define(RECORD_TYPE_MARKER, "<record_type>").
-
-%% Encoded record version field
--define(RECORD_VERSION_MARKER, "<record_version>").
-
-
-%%%===================================================================
-%%% Types
-%%%===================================================================
-
--type field_name() :: atom().
--type record_key() :: binary | atom | integer | term | string.
--type record_value() :: json %% Raw JSON binary
-    %% or simple types
-    | record_key() | boolean | [record_struct()] | {record_struct()} | #{record_key() => record_struct()}
-    %% or custom value - executes Mod:Encoder(GivenTerm) while encoding and Mod:Decoder(SavedJSON) while decoding.
-    %% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
-    | {custom_value, {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}
-    %% or custom value - executes Mod:Encoder(TypeName, GivenTerm) while encoding and Mod:Decoder(TypeName, SavedJSON) while decoding.
-    %% Encoder shall return JSON binary, Decoder shall decode JSON binary to original term.
-    %% You can specify only module name, Decoder defaults to 'encode_value', Decoder defaults to 'decode_value'
-    | {custom_type, TypeName :: atom(), Mod :: atom()} | {custom_type, TypeName :: atom(), {Mod :: atom(), Encoder :: atom(), Decoder :: atom()}}.
--type record_version() :: non_neg_integer().
--type record_struct() :: record_value()
-    | {record, record_version(), [{field_name(), record_value()}]} %% Used only internally
-    | {record, [{field_name(), record_value()}]} %% For defining model structure
-    | {record, model_behaviour:model_type()}. %% For referencing nasted model
--type ejson() :: term(). %% eJSON
-
-
-%%%===================================================================
-%%% Exports
-%%%===================================================================
-
-%% Types
--export_type([record_struct/0, record_version/0]).
+-include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([encode_record/1, decode_record/1, validate_struct/1]).
--export([encode_record/2, decode_record/2]).
--export([decode_record_vcs/1]).
+-export([encode/1, decode/1]).
 
+-type value() :: datastore_doc:value().
+-type doc() :: datastore_doc:doc(value()).
+-type record_field() :: atom().
+-type record_key() :: atom | boolean | binary | float | integer | string | term.
+-type record_value() :: record_key() | json | custom_coder() |
+                        record_struct() | [record_value()] | {record_value()} |
+                        #{record_key() => record_value()}.
+%% encoder Mod:Encoder(Term) or Mod:Encoder(Type, Term) shell return JSON binary
+%% decoder Mod:Decoder(JSON) or Mod:Encoder(Type, JSON) shell return Erlang term
+%% Encoder defaults to 'encode_value' and Decoder defaults to 'decode_value'
+-type encoder() :: atom().
+-type decoder() :: atom().
+-type custom_coder() :: {custom, module()} |
+                        {custom, {module(), encoder(), decoder()}} |
+                        {custom, atom(), module()} |
+                        {custom, atom(), {module(), encoder(), decoder()}}.
+-type record_struct() :: {record, [{record_field(), record_value()}]}.
+-type ejson() :: jiffy:json_value().
+
+-export_type([record_struct/0, ejson/0]).
 
 %%%===================================================================
 %%% API functions
@@ -70,207 +44,272 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Encodes given datastore document to ejson.
+%% Encodes a document to erlang json format with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec encode_record(datastore:document()) -> ejson() | no_return().
-encode_record(#document{version = undefined, value = Value}) ->
-    Type = element(1, Value),
-    encode_record(Value, {record, Type});
-encode_record(#document{version = Version, value = Value}) when is_integer(Version) ->
-    Type = element(1, Value),
-    {record, Fields} = Type:record_struct(Version),
-    encode_record(Value, {record, Version, Fields}).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Encodes given term to ejson with given structure.
-%% @end
-%%--------------------------------------------------------------------
--spec encode_record(term(), record_struct()) -> ejson() | no_return().
-encode_record(Term, Struct) ->
-    encode_record(value, Term, Struct).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Decodes ejson to term with given structure.
-%% @end
-%%--------------------------------------------------------------------
--spec decode_record(ejson()) -> {record_version(), term()}.
-decode_record({Term}) when is_list(Term) ->
-    Type = decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom),
-    Version = decode_record(proplists:get_value(<<?RECORD_VERSION_MARKER>>, Term), integer),
-    {record, Fields} = Type:record_struct(Version),
-    {Version, decode_record({Term}, {record, Version, Fields})}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Decodes ejson to term with given structure. Returns current version of the record.
-%% @end
-%%--------------------------------------------------------------------
--spec decode_record_vcs(ejson()) -> {WasUpdated :: boolean(), record_version(), term()}.
-decode_record_vcs({Term}) when is_list(Term) ->
-    {Version, Record} = decode_record({Term}),
-    ModelName = element(1, Record),
-    #model_config{version = TargetVersion} = ModelName:model_init(),
-    {NewVersion, NewRecord} = record_upgrade(ModelName, TargetVersion, Version, Record),
-    {Version /= NewVersion, NewVersion, NewRecord}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Upgrades given datastore record to requested version.
-%% @end
-%%--------------------------------------------------------------------
--spec record_upgrade(model_behaviour:model_type(), record_version(), record_version(), term()) ->
-    {record_version(), term()}.
-record_upgrade(ModelName, TargetVersion, CurrentVersion, Record) when TargetVersion > CurrentVersion ->
-    {NextVersion, NextRecord} = ModelName:upgrade_record(CurrentVersion, Record),
-    case NextVersion > CurrentVersion of
+-spec encode(doc() | ejson()) -> ejson() | no_return().
+encode(#document{value = Value, version = Version} = Doc) ->
+    Model = element(1, Value),
+    case lists:member(Model, datastore_config:get_models()) of
         true ->
-            record_upgrade(ModelName, TargetVersion, NextVersion, NextRecord);
+            {Props} = encode_term(Value, Model:get_record_struct(Version)),
+            {[
+                {<<"_key">>, Doc#document.key},
+                {<<"_scope">>, Doc#document.scope},
+                {<<"_mutators">>, Doc#document.mutators},
+                {<<"_revs">>, Doc#document.revs},
+                {<<"_seq">>, Doc#document.seq},
+                {<<"_deleted">>, Doc#document.deleted},
+                {<<"_version">>, Version} |
+                Props
+            ]};
         false ->
-            error({record_not_upgraded, {ModelName, TargetVersion, CurrentVersion, Record}})
+            throw({invalid_doc, Doc})
     end;
-record_upgrade(_ModelName, _TargetVersion, CurrentVersion, Record) ->
-    {CurrentVersion, Record}.
-
+encode(EJson) ->
+    EJson.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Validates given record structure.
+%% Decodes a document from erlang json format with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec validate_struct(record_struct()) -> ok | no_return().
-validate_struct({record, Fields}) when is_list(Fields) ->
-    ok.
-
+-spec decode(ejson()) -> ejson() | doc().
+decode({Term} = EJson) when is_list(Term) ->
+    RecordName2 = case lists:keyfind(<<"_record">>, 1, Term) of
+        {_, RecordName} -> decode_term(RecordName, atom);
+        false -> undefined
+    end,
+    case lists:member(RecordName2, datastore_config:get_models()) of
+        true->
+            {_, Key} = lists:keyfind(<<"_key">>, 1, Term),
+            {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
+            {_, Mutators} = lists:keyfind(<<"_mutators">>, 1, Term),
+            {_, Revs} = lists:keyfind(<<"_revs">>, 1, Term),
+            {_, Seq} = lists:keyfind(<<"_seq">>, 1, Term),
+            {_, Deleted} = lists:keyfind(<<"_deleted">>, 1, Term),
+            {_, Version} = lists:keyfind(<<"_version">>, 1, Term),
+            Model = datastore_versions:rename_record(Version, RecordName2),
+            Record = decode_term(EJson, Model:get_record_struct(Version)),
+            {Version2, Record2} = datastore_versions:upgrade_record(
+                Version, Model, Record
+            ),
+            #document{
+                key = Key,
+                value = Record2,
+                scope = Scope,
+                mutators = Mutators,
+                revs = Revs,
+                seq = Seq,
+                deleted = Deleted,
+                version = Version2
+            };
+        false ->
+            EJson
+    end;
+decode(EJson) ->
+    EJson.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Encodes given term to ejson with given structure. Given term can be either
-%% encoded as json key or value. This distinction is required since JSON disallows keys with types other then string.
+%% Encodes an erlang term to erlang json format with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec encode_record(key | value, term(), record_struct()) -> ejson() | no_return().
-encode_record(value, undefined, _) ->
+-spec encode_term(term(), record_value()) -> ejson() | no_return().
+encode_term(undefined, _) ->
     null;
-encode_record(value, Term, {custom_value, {M, Encoder, _Decoder}}) ->
-    encode_record(value, M:Encoder(Term), json);
-encode_record(value, Term, {custom_type, TypeName, {Mod, Encoder, _Decoder}}) ->
-    encode_record(value, Mod:Encoder(Term, TypeName), json);
-encode_record(value, Term, {custom_type, TypeName, Mod}) ->
-    encode_record(value, Term, {custom_type, TypeName, {Mod, encode_value, decode_value}});
-encode_record(_, Term, {record, Type}) when is_atom(Type), is_tuple(Term) ->
-    #model_config{version = Version} = Type:model_init(),
-    {record, Fields} = Type:record_struct(Version),
-    encode_record(value, Term, {record, Version, Fields});
-encode_record(value, Term, {record, Version, Fields}) when is_list(Fields), is_tuple(Term) ->
-    [RecordType | TupleList] = tuple_to_list(Term),
-    {Names, ValueTypes} = lists:unzip(Fields),
-    RawMap = lists:zip3(Names, ValueTypes, TupleList),
-    {lists:foldl(
-        fun({Name, Type, Value}, Map) ->
-            [{encode_record(key, Name, atom), encode_record(value, Value, Type)} | Map]
-        end,
-        [
-            {<<?RECORD_TYPE_MARKER>>, encode_record(value, RecordType, atom)},
-            {<<?RECORD_VERSION_MARKER>>, encode_record(value, Version, integer)}
-        ], RawMap)};
-encode_record(_, Term, string) when is_binary(Term) ->
-    Term;
-encode_record(key, Term, integer) when is_integer(Term) ->
-    integer_to_binary(Term);
-encode_record(value, Term, integer) when is_integer(Term) ->
-    Term;
-encode_record(key, Term, float) when is_float(Term) ->
-    float_to_binary(Term);
-encode_record(value, Term, float) when is_float(Term) ->
-    Term;
-encode_record(value, Term, #{} = Struct) when is_map(Term) ->
-    [{KeyType, ValueType}] = maps:to_list(Struct),
-    {maps:fold(
-        fun(K, V, Acc) ->
-            [{encode_record(key, K, KeyType), encode_record(value, V, ValueType)} | Acc]
-        end, [], Term)};
-encode_record(value, Term, [ValueType]) when is_list(Term) ->
-    [encode_record(value, V, ValueType) || V <- Term];
-encode_record(_, Term, atom) when is_atom(Term) ->
+encode_term(Term, atom) when is_atom(Term) ->
     atom_to_binary(Term, utf8);
-encode_record(value, Term, {set, Type}) ->
-    [encode_record(value, E, Type) || E <- sets:to_list(Term)];
-encode_record(value, Term, Types) when is_tuple(Types), is_tuple(Term) ->
-    Values = tuple_to_list(Term),
-    [encode_record(value, V, Type) || {V, Type} <- lists:zip(Values, tuple_to_list(Types))];
-encode_record(value, Term, boolean) when is_boolean(Term)  ->
+encode_term(Term, boolean) when is_boolean(Term) ->
     Term;
-encode_record(_, Term, binary) when is_binary(Term)  ->
+encode_term(Term, binary) when is_binary(Term) ->
     base64:encode(Term);
-encode_record(_, Term, term) ->
-    base64:encode(term_to_binary(Term));
-encode_record(value, Term, json) when is_binary(Term) ->
+encode_term(Term, float) when is_integer(Term) orelse is_float(Term) ->
+    Term;
+encode_term(Term, integer) when is_integer(Term) ->
+    Term;
+encode_term(Term, json) when is_binary(Term) ->
     jiffy:decode(Term);
-encode_record(Context, Term, Type)  ->
-    error({invalid_term_structure, Context, Term, Type}).
-
+encode_term(Term, string) when is_binary(Term) ->
+    Term;
+encode_term(Term, string_or_integer) when is_binary(Term) ->
+    Term;
+encode_term(Term, string_or_integer) when is_integer(Term) ->
+    Term;
+encode_term(Term, term) ->
+    base64:encode(term_to_binary(Term));
+encode_term(Term, {custom, {Mod, Encoder, _Decoder}}) ->
+    encode_term(Mod:Encoder(Term), json);
+encode_term(Term, {custom, Mod}) ->
+    encode_term(Term, {custom, {Mod, encode_value, decode_value}});
+encode_term(Term, {custom, Type, {Mod, Encoder, _Decoder}}) ->
+    encode_term(Mod:Encoder(Term, Type), json);
+encode_term(Term, {custom, Type, Mod}) ->
+    encode_term(Term, {custom, Type, {Mod, encode_value, decode_value}});
+encode_term(Term, {record, Fields}) when is_tuple(Term), is_list(Fields) ->
+    Values = tuple_to_list(Term),
+    {Keys, Types} = lists:unzip(Fields),
+    {
+        lists:map(fun({Key, Value, Type}) ->
+            EncodedKey = encode_term(Key, atom),
+            EncodedValue = encode_term(Value, Type),
+            {EncodedKey, EncodedValue}
+        end, lists:zip3(['_record' | Keys], Values, [atom | Types]))
+    };
+encode_term(Term, {set, Type}) ->
+    lists:map(fun(Value) -> encode_term(Value, Type) end, sets:to_list(Term));
+encode_term(Term, [Type]) when is_list(Term) ->
+    lists:map(fun(Value) -> encode_term(Value, Type) end, Term);
+encode_term(Term, Types) when is_list(Term), is_list(Types) ->
+    lists:map(fun({Value, Type}) ->
+        encode_term(Value, Type)
+    end, lists:zip(Term, Types));
+encode_term(Term, {Type}) when is_tuple(Term) ->
+    lists:map(fun(Value) ->
+        encode_term(Value, Type)
+    end, tuple_to_list(Term));
+encode_term(Term, Types) when is_tuple(Term), is_tuple(Types) ->
+    lists:map(fun({Value, Type}) ->
+        encode_term(Value, Type)
+    end, lists:zip(tuple_to_list(Term), tuple_to_list(Types)));
+encode_term(Term, Type) when is_map(Term), is_map(Type) ->
+    [{KeyType, ValueType}] = maps:to_list(Type),
+    {
+        maps:fold(fun(Key, Value, Acc) ->
+            EncodedKey = encode_key(Key, KeyType),
+            EncodedValue = encode_term(Value, ValueType),
+            [{EncodedKey, EncodedValue} | Acc]
+        end, [], Term)
+    };
+encode_term(Term, Type) ->
+    error({invalid_term_structure, Term, Type}).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
-%% Decodes ejson to term with given structure.
+%% Decodes an erlang term from erlang json format with given structure.
 %% @end
 %%--------------------------------------------------------------------
--spec decode_record(ejson(), record_struct()) -> term().
-decode_record(null, _) ->
+-spec decode_term(ejson(), record_value()) -> term() | no_return().
+decode_term(null, _) ->
     undefined;
-decode_record(Term, {custom_value, {M, _Encoder, Decoder}}) ->
-    M:Decoder(decode_record(Term, json));
-decode_record(Term, {custom_type, TypeName, {Mod, _Encoder, Decoder}}) ->
-    Mod:Decoder(decode_record(Term, json), TypeName);
-decode_record(Term, {custom_type, TypeName, Mod}) ->
-    decode_record(Term, {custom_type, TypeName, {Mod, encode_value, decode_value}});
-decode_record({Term}, {record, _Version, Fields}) when is_list(Fields), is_list(Term) ->
-    list_to_tuple(lists:reverse(lists:foldl(
-        fun({Name, Type}, RecordList) ->
-            [decode_record(proplists:get_value(encode_record(key, Name, atom), Term), Type) | RecordList]
-        end,
-        [decode_record(proplists:get_value(<<?RECORD_TYPE_MARKER>>, Term), atom)], Fields)));
-decode_record(Term, string) when is_binary(Term) ->
-    Term;
-decode_record(Term, integer) when is_integer(Term) ->
-    Term;
-decode_record(Term, integer) when is_binary(Term) ->
-    binary_to_integer(Term);
-decode_record(Term, float) when is_float(Term) ->
-    Term;
-decode_record(Term, float) when is_binary(Term) ->
-    binary_to_float(Term);
-decode_record({Term}, #{} = Struct) when is_list(Term) ->
-    [{KeyType, ValueType}] = maps:to_list(Struct),
-    lists:foldl(
-        fun({K, V}, Acc) ->
-            maps:put(decode_record(K, KeyType), decode_record(V, ValueType), Acc)
-        end, #{}, Term);
-decode_record(Term, [ValueType]) when is_list(Term) ->
-    [decode_record(V, ValueType) || V <- Term];
-decode_record(Term, atom) when is_binary(Term) ->
+decode_term(Term, atom) when is_binary(Term) ->
     binary_to_atom(Term, utf8);
-decode_record(Term, {set, Type}) when is_list(Term) ->
-    sets:from_list([decode_record(E, Type) || E <- Term]);
-decode_record(Term, Types) when is_tuple(Types), is_list(Term) ->
-    list_to_tuple([decode_record(V, Type) || {V, Type} <- lists:zip(Term, tuple_to_list(Types))]);
-decode_record(Term, boolean) when is_boolean(Term)  ->
+decode_term(Term, boolean) when is_boolean(Term) ->
     Term;
-decode_record(Term, boolean) when is_binary(Term)  ->
-    binary_to_atom(Term, utf8);
-decode_record(Term, binary) when is_binary(Term)  ->
+decode_term(Term, binary) when is_binary(Term) ->
     base64:decode(Term);
-decode_record(Term, json) ->
+decode_term(Term, float) when is_integer(Term) orelse is_float(Term) ->
+    Term;
+decode_term(Term, integer) when is_integer(Term) ->
+    Term;
+decode_term(Term, json) ->
     jiffy:encode(Term);
-decode_record(Term, term) ->
+decode_term(Term, string) when is_binary(Term) ->
+    Term;
+decode_term(Term, string_or_integer) when is_binary(Term) ->
+    Term;
+decode_term(Term, string_or_integer) when is_integer(Term) ->
+    Term;
+decode_term(Term, term) when is_binary(Term) ->
     binary_to_term(base64:decode(Term));
-decode_record(Term, Type) ->
+decode_term(Term, {custom, {Mod, _Encoder, Decoder}}) ->
+    Mod:Decoder(decode_term(Term, json));
+decode_term(Term, {custom, Mod}) ->
+    decode_term(Term, {custom, {Mod, encode_value, decode_value}});
+decode_term(Term, {custom, Type, {Mod, _Encoder, Decoder}}) ->
+    Mod:Decoder(decode_term(Term, json), Type);
+decode_term(Term, {custom, Type, Mod}) ->
+    decode_term(Term, {custom, Type, {Mod, encode_value, decode_value}});
+decode_term({Term}, {record, Fields}) when is_list(Term), is_list(Fields) ->
+    {<<"_record">>, RecordName} = lists:keyfind(<<"_record">>, 1, Term),
+    list_to_tuple(lists:reverse(lists:foldl(fun({Key, Type}, Values) ->
+        EncodedKey = encode_term(Key, atom),
+        {EncodedKey, Value} = lists:keyfind(EncodedKey, 1, Term),
+        [decode_term(Value, Type) | Values]
+    end, [decode_term(RecordName, atom)], Fields)));
+decode_term(Term, {set, Type}) when is_list(Term) ->
+    sets:from_list(lists:map(fun(Value) ->
+        decode_term(Value, Type)
+    end, Term));
+decode_term(Term, [Type]) when is_list(Term) ->
+    lists:map(fun(Value) -> decode_term(Value, Type) end, Term);
+decode_term(Term, Types) when is_list(Term), is_list(Types) ->
+    lists:map(fun({Value, Type}) ->
+        decode_term(Value, Type)
+    end, lists:zip(Term, Types));
+decode_term(Term, {Type}) when is_list(Term) ->
+    list_to_tuple(lists:map(fun(Value) ->
+        decode_term(Value, Type)
+    end, Term));
+decode_term(Term, Types) when is_list(Term), is_tuple(Types) ->
+    list_to_tuple(lists:map(fun({Value, Type}) ->
+        decode_term(Value, Type)
+    end, lists:zip(Term, tuple_to_list(Types))));
+decode_term({Term}, Type) when is_list(Term), is_map(Type) ->
+    [{KeyType, ValueType}] = maps:to_list(Type),
+    lists:foldl(fun({Key, Value}, Map) ->
+        DecodedKey = decode_key(Key, KeyType),
+        DecodedValue = decode_term(Value, ValueType),
+        maps:put(DecodedKey, DecodedValue, Map)
+    end, #{}, Term);
+decode_term(Term, Type) ->
     error({invalid_json_structure, Term, Type}).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Encodes a record key to erlang json format with given structure.
+%% @end
+%%--------------------------------------------------------------------
+-spec encode_key(term(), record_key()) -> binary().
+encode_key(Key, atom) when is_atom(Key) ->
+    atom_to_binary(Key, utf8);
+encode_key(Key, boolean) when is_boolean(Key) ->
+    atom_to_binary(Key, utf8);
+encode_key(Key, binary) when is_binary(Key) ->
+    base64:encode(Key);
+encode_key(Key, float) when is_integer(Key) ->
+    integer_to_binary(Key);
+encode_key(Key, float) when is_float(Key) ->
+    float_to_binary(Key);
+encode_key(Key, integer) when is_integer(Key) ->
+    integer_to_binary(Key);
+encode_key(Key, string) when is_binary(Key) ->
+    Key;
+encode_key(Key, term) ->
+    base64:encode(term_to_binary(Key));
+encode_key(Key, Type) ->
+    error({invalid_key_type, Key, Type}).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Decodes a record key from erlang json format with given structure.
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_key(binary(), record_key()) -> term().
+decode_key(Key, atom) when is_binary(Key) ->
+    binary_to_atom(Key, utf8);
+decode_key(Key, boolean) when is_binary(Key) ->
+    binary_to_atom(Key, utf8);
+decode_key(Key, binary) when is_binary(Key) ->
+    base64:decode(Key);
+decode_key(Key, float) when is_binary(Key) ->
+    case binary:split(Key, <<".">>) of
+        [_] -> binary_to_integer(Key);
+        [_ | _] -> binary_to_float(Key)
+    end;
+decode_key(Key, integer) when is_binary(Key) ->
+    binary_to_integer(Key);
+decode_key(Key, string) when is_binary(Key) ->
+    Key;
+decode_key(Key, term) when is_binary(Key) ->
+    binary_to_term(base64:decode(Key));
+decode_key(Key, Type) ->
+    error({invalid_key_type, Key, Type}).

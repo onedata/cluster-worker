@@ -14,8 +14,7 @@
 
 -include("global_definitions.hrl").
 -include("elements/task_manager/task_manager.hrl").
--include("modules/datastore/datastore_models_def.hrl").
--include_lib("ctool/include/logging.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
@@ -24,27 +23,33 @@
 -define(DICT_KEY, transactions_list).
 
 %% export for ct
--export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
--export([cm_and_worker_test/1, task_pool_test/1, task_manager_repeats_test/1, task_manager_rerun_test/1,
-    task_manager_delayed_save_test/1, transaction_test/1, transaction_rollback_test/1, transaction_rollback_stop_test/1,
-    multi_transaction_test/1, transaction_retry_test/1, transaction_error_test/1,
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
+-export([cm_and_worker_test/1, task_pool_test/1, task_manager_repeats_test/1,
+    task_manager_rerun_test/1, task_manager_delayed_save_test/1,
+    transaction_test/1, transaction_rollback_test/1,
+    transaction_rollback_stop_test/1, multi_transaction_test/1,
+    transaction_retry_test/1, transaction_error_test/1,
     task_manager_delayed_save_with_type_test/1, throttling_test/1]).
 -export([transaction_retry_test_base/0, transaction_error_test_base/0]).
 -export([configure_throttling/0]).
 
 all() ->
     ?ALL([
-        cm_and_worker_test, task_pool_test, task_manager_repeats_test,
-        task_manager_rerun_test, task_manager_delayed_save_test, transaction_test, transaction_rollback_test,
+        cm_and_worker_test, transaction_test, transaction_rollback_test,
         transaction_rollback_stop_test, multi_transaction_test,
-        transaction_retry_test, transaction_error_test, task_manager_delayed_save_with_type_test, throttling_test]).
+        transaction_retry_test, transaction_error_test,
+        task_pool_test, task_manager_repeats_test,
+        task_manager_rerun_test, task_manager_delayed_save_test,
+        task_manager_delayed_save_with_type_test, throttling_test
+    ]).
 
 -define(TIMEOUT, timer:minutes(1)).
 -define(call(N, M, F, A), rpc:call(N, M, F, A, ?TIMEOUT)).
--define(call_cc(N, F, A), rpc:call(N, caches_controller, F, A, ?TIMEOUT)).
+-define(call_dt(N, F, A), rpc:call(N, datastore_throttling, F, A, ?TIMEOUT)).
 -define(call_test(N, F, A), rpc:call(N, ?MODULE, F, A, ?TIMEOUT)).
 
--define(MNESIA_THROTTLING_KEY, <<"mnesia_throttling">>).
+-define(MNESIA_THROTTLING_KEY, mnesia_throttling).
+-define(MEMORY_PROC_IDLE_KEY, throttling_idle_time).
 -define(THROTTLING_ERROR, {error, load_to_high}).
 
 %%%===================================================================
@@ -52,21 +57,53 @@ all() ->
 %%%===================================================================
 
 throttling_test(Config) ->
-    [Worker1, _Worker2] = Workers = ?config(cluster_worker_nodes, Config),
-    MockUsage = fun(FailedTasks, AllTasks, MemUsage) ->
-        test_utils:mock_expect(Workers, task_pool, count_tasks,
-            fun (_, _, _) -> {ok, {FailedTasks, AllTasks}} end),
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    MockUsage = fun(DBQueue, TPSize, MemUsage) ->
+        test_utils:mock_expect(Workers, couchbase_pool, get_worker_queue_size_stats,
+            fun(_) -> {DBQueue, 0} end),
+        test_utils:mock_expect(Workers, couchbase_pool, get_worker_queue_size_stats,
+            fun(_, _) -> {DBQueue, 0} end),
+        test_utils:mock_expect(Workers, tp, get_processes_number,
+            fun() -> TPSize end),
         test_utils:mock_expect(Workers, monitoring, get_memory_stats,
-            fun () -> [{<<"mem">>, MemUsage}] end)
+            fun() -> [{<<"mem">>, MemUsage}] end)
     end,
 
-    {ok,TBT} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_base_time_ms),
+    DBLimit = 15000,
+    DBExp = 5000,
+    TPLimit = 200000,
+    TPExp = 100000,
+    MemLimit = 95,
+    MemExp = 90,
+    test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_config, [
+        {default, [
+            {base_time_ms, 2048},
+            {strength, 5},
+            {tp_param_strength, 1},
+            {db_max_param_strength, 1},
+            {flush_queue_param_strength, 0},
+            {db_sum_param_strength, 0},
+            {tp_size_sum_param_strength, 0},
+            {mem_param_strength, 1},
+            {tp_proc_expected, TPExp},
+            {tp_proc_limit, TPLimit},
+            {db_queue_max_expected, DBExp},
+            {db_queue_max_limit, DBLimit},
+            {db_flush_queue_expected, 100000},
+            {db_flush_queue_limit, 500000},
+            {db_queue_sum_expected, DBExp},
+            {db_queue_sum_limit, DBLimit},
+            {tp_size_sum_expected, DBExp},
+            {tp_size_sum_limit, DBLimit},
+            {memory_expected, MemExp},
+            {memory_limit, MemLimit}
+        ]}
+    ]),
+
     TCI = 60,
     TOCI = 30,
-    TMT = 4*TBT,
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_check_interval_seconds, TCI),
     ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_active_check_interval_seconds, TOCI),
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_max_time_ms, TMT),
 
     VerifyInterval = fun(Ans) ->
         ?assertEqual(timer:seconds(TCI), Ans)
@@ -76,20 +113,12 @@ throttling_test(Config) ->
         ?assertEqual(timer:seconds(TOCI), Ans)
     end,
 
-    VerifyShortInterval = fun(Ans) ->
-        ?assert(timer:seconds(TCI) > Ans)
-    end,
-
-    VerifyIntervalOverload = fun(Ans) ->
-        ?assertEqual(timer:seconds(TOCI), Ans)
-    end,
-
     CheckThrottling = fun(VerifyIntervalFun, ThrottlingAns, ThrottlingConfig) ->
         {A1, A2} = ?call_test(Worker1, configure_throttling, []),
         ?assertMatch({ok, _}, {A1, A2}),
 
-        NMConfig = case ?call(Worker1, node_management, get, [?MNESIA_THROTTLING_KEY]) of
-            {ok, #document{value = #node_management{value = V}}} ->
+        NMConfig = case test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
+            {ok, V} ->
                 V;
             OtherConfig ->
                 OtherConfig
@@ -98,110 +127,136 @@ throttling_test(Config) ->
 
 
         VerifyIntervalFun(A2),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model])),
-        ?assertEqual(error, ?call_cc(Worker1, throttle, [throttled_model, error])),
-        ?assertEqual(ThrottlingAns, ?call_cc(Worker1, throttle, [throttled_model, ok]))
+        ?assertEqual(ThrottlingAns, ?call_dt(Worker1, throttle_model, [throttled_model]))
     end,
 
     CheckThrottlingDefault = fun() ->
-        CheckThrottling(VerifyInterval, ok, {error, {not_found, node_management}})
+        CheckThrottling(VerifyInterval, ok, [{default,ok}])
     end,
 
     CheckThrottlingAns = fun(Ans, C) ->
         CheckThrottling(VerifyIntervalTh, Ans, C)
     end,
 
+    VerifyIdle = fun(Ans) ->
+        {ok, Idle} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY),
+        ?assertEqual(Idle, Ans)
+    end,
+
     MockUsage(0,0,10),
     CheckThrottlingDefault(),
 
-    TSFTN = 50,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_failed_tasks_number, 2*TSFTN),
-    TSPTN = 500,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_start_pending_tasks_number, 2*TSPTN),
+    MockUsage(DBExp + 1000, 0, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,10}}]),
 
-    MockUsage(TSFTN + 10,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    MockUsage(DBExp + 5000, 0, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,952}}]),
 
-    MockUsage(TSFTN + 2,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    MockUsage(DBExp + 9000, 0, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,1995}}]),
 
-    MockUsage(TSFTN - 10,0,10.0),
-    CheckThrottlingAns(ok, {throttle, TBT, true}),
+    MockUsage(DBLimit, 0, 10.0),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
 
-    MockUsage(TSFTN - 9,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
 
-    MockUsage(TSFTN - 8,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
 
-    MockUsage(TSFTN - 7,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
+    MockUsage(0, TPExp + 10000, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,10}}]),
 
-    MockUsage(TSFTN - 9,0,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
+    MockUsage(0, TPExp + 50000, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,952}}]),
 
-    MockUsage(2*TSFTN,0,10.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
+    MockUsage(0, TPExp + 90000, 10.0),
+    CheckThrottlingAns(ok, [{default,{throttle,1995}}]),
 
-    MockUsage(0,0,10.0),
+    MockUsage(0, TPLimit, 10.0),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
+
+
+
+    MockUsage(0, 0, MemExp + 0.5),
+    CheckThrottlingAns(ok, [{default,{throttle,10}}]),
+
+    MockUsage(0, 0, MemExp + 2.5),
+    CheckThrottlingAns(ok, [{default,{throttle,952}}]),
+
+    MockUsage(0, 0, MemExp + 4.5),
+    CheckThrottlingAns(ok, [{default,{throttle,1995}}]),
+
+    MockUsage(0, 0, MemLimit),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
+
+
+
+    MockUsage(DBExp + 1000, TPExp + 10000, MemExp + 0.5),
+    CheckThrottlingAns(ok, [{default,{throttle,30}}]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemExp + 2.5),
+    CheckThrottlingAns(ok, [{default,{throttle,1734}}]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemLimit),
+    CheckThrottlingAns({error,load_to_high}, [{default,overloaded}]),
+
+    test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_config, [
+        {default, [
+            {base_time_ms, 2048},
+            {strength, 5},
+            {tp_param_strength, 1},
+            {db_max_param_strength, 1},
+            {flush_queue_param_strength, 0},
+            {db_sum_param_strength, 0},
+            {tp_size_sum_param_strength, 0},
+            {mem_param_strength, 0},
+            {tp_proc_expected, TPExp},
+            {tp_proc_limit, TPLimit},
+            {db_queue_max_expected, DBExp},
+            {db_queue_max_limit, DBLimit},
+            {db_flush_queue_expected, 100000},
+            {db_flush_queue_limit, 500000},
+            {db_queue_sum_expected, DBExp},
+            {db_queue_sum_limit, DBLimit},
+            {tp_size_sum_expected, DBExp},
+            {tp_size_sum_limit, DBLimit},
+            {memory_expected, MemExp},
+            {memory_limit, MemLimit}
+        ]}
+    ]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemExp + 2.5),
+    CheckThrottlingAns(ok, [{default,{throttle,1461}}]),
+
+    MockUsage(DBExp + 5000, TPExp + 50000, MemLimit),
+    CheckThrottlingAns(ok, [{default,{throttle,1461}}]),
+
+
+    Idle1 = 100,
+    Idle2 = 1100,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_reduce_idle_time_memory_proc_number, Idle1),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_min_idle_time_memory_proc_number, Idle2),
+    MaxIdle = 10000,
+    MinIdle = 1000,
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, memory_store_idle_timeout_ms, MaxIdle),
+    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, memory_store_min_idle_timeout_ms, MinIdle),
+
+    MockUsage(0, 50, 10.0),
     CheckThrottlingDefault(),
+    VerifyIdle(MaxIdle),
 
-    MockUsage(0, TSPTN + 10,10.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, true}),
-
-    MockUsage(0, TSPTN + 20,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
-
-    MockUsage(0, TSPTN + 2,10.0),
-    CheckThrottlingAns(ok, {throttle, 4*TBT, true}),
-
-    MockUsage(0,2*TSPTN,10.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, true}),
-
-    MockUsage(0,0,10.0),
+    MockUsage(0, 100, 10.0),
     CheckThrottlingDefault(),
+    VerifyIdle(MaxIdle),
 
-    TBMER = 95,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, throttling_block_mem_error_ratio, TBMER),
-    NMRTCC = 80,
-    ok = test_utils:set_env(Worker1, ?CLUSTER_WORKER_APP_NAME, node_mem_ratio_to_clear_cache, NMRTCC),
-    MemTh = (TBMER + NMRTCC)/2,
-
-    MockUsage(0,0,MemTh - 10.0),
+    MockUsage(0, 600, 10.0),
     CheckThrottlingDefault(),
+    VerifyIdle((MinIdle + MaxIdle) div 2),
 
-    MockUsage(0,0,MemTh + 1.0),
-    CheckThrottlingAns(ok, {throttle, 2*TBT, false}),
-
-    MockUsage(0,0,MemTh + 5.0),
-    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
-
-    MockUsage(0,0,MemTh + 7.0),
-    CheckThrottling(VerifyShortInterval, ok, {throttle, 4*TBT, false}),
-
-    MockUsage(0,0,TBMER + 1.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
-
-    MockUsage(0,0,MemTh + 1.0),
-    CheckThrottling(VerifyIntervalOverload, ?THROTTLING_ERROR, {overloaded, false}),
-
-    MockUsage(0,0,MemTh - 1.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
-
-    MockUsage(0,0,MemTh - 5.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT/4), false}),
-
-    MockUsage(0,0,MemTh - 1.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT/2), false}),
-
-    MockUsage(TSFTN + 10,0,10.0),
-    CheckThrottlingAns(ok, {throttle, round(TBT), true}),
-
-    MockUsage(0,0,MemTh + 1.0),
-    CheckThrottling(VerifyShortInterval, ok, {throttle, 2*TBT, false}),
-
-    MockUsage(0,0,NMRTCC - 1.0),
+    MockUsage(0, 1100, 10.0),
     CheckThrottlingDefault(),
+    VerifyIdle(MinIdle),
+
+    MockUsage(0, 2000, 10.0),
+    CheckThrottlingDefault(),
+    VerifyIdle(MinIdle),
 
     ok.
 
@@ -211,39 +266,50 @@ cm_and_worker_test(Config) ->
 
     % then
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [datastore_worker, ping])),
-    ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [dns_worker, ping])),
-    ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [datastore_worker, ping])),
-    ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [dns_worker, ping])).
+    ?assertEqual(pong, rpc:call(Worker2, worker_proxy, call, [datastore_worker, ping])).
 
 task_pool_test(Config) ->
     % given
     [W1, W2] = ?config(cluster_worker_nodes, Config),
 
-    Tasks = [{#task_pool{task = t1}, ?NON_LEVEL, W1}, {#task_pool{task = t2}, ?NODE_LEVEL, W1},
-        {#task_pool{task = t3}, ?CLUSTER_LEVEL, W1}, {#task_pool{task = t4}, ?CLUSTER_LEVEL, W2},
-        {#task_pool{task = t5}, ?PERSISTENT_LEVEL, W1}, {#task_pool{task = t6}, ?PERSISTENT_LEVEL, W2},
-        {#task_pool{task = t7}, ?PERSISTENT_LEVEL, W1}
+    Tasks = [
+        {#task_pool{task = t1}, ?NON_LEVEL, W1},
+        {#task_pool{task = t2}, ?CLUSTER_LEVEL, W1},
+        {#task_pool{task = t3}, ?CLUSTER_LEVEL, W2},
+        {#task_pool{task = t4}, ?PERSISTENT_LEVEL, W1},
+        {#task_pool{task = t5}, ?PERSISTENT_LEVEL, W2},
+        {#task_pool{task = t6}, ?PERSISTENT_LEVEL, W1}
     ],
 
     % then
     CreateAns = lists:foldl(fun({Task, Level, Worker}, Acc) ->
-        {A1, A2} = rpc:call(Worker, task_pool, create, [Level,
-            #document{value = Task#task_pool{owner = pid_to_list(self()), node = node()}}]),
-        ?assertMatch({ok, _}, {A1, A2}),
-        [{A2, Level} | Acc]
+        {ok, Key} = ?assertMatch({ok, _},
+            rpc:call(Worker, task_pool, create, [Level, #document{
+                value = Task#task_pool{
+                    owner = pid_to_list(self()),
+                    node = node()
+                }
+            }])
+        ),
+        [{Key, Level} | Acc]
     end, [], Tasks),
     [_ | Keys] = lists:reverse(CreateAns),
 
-    NewNames = [t2_2, t3_2, t4_2, t5_2, t6_2, t7_2],
+    NewNames = [t2_2, t3_2, t4_2, t5_2, t6_2],
     ToUpdate = lists:zip(Keys, NewNames),
 
     lists:foreach(fun({{Key, Level}, NewName}) ->
-        ?assertMatch({ok, _}, rpc:call(W1, task_pool, update, [Level, Key, #{task => NewName}]))
+        ?assertMatch({ok, _}, rpc:call(W1, task_pool, update, [
+            Level, Key, fun(TaskPool) ->
+                {ok, TaskPool#task_pool{task = NewName}}
+            end
+        ]))
     end, ToUpdate),
 
-    ListTest = [{?NODE_LEVEL, [t2_2]}, {?CLUSTER_LEVEL, [t3_2, t4_2]}],
-    %TODO - add PERSISTENT_LEVEL checking when list on db will be added
-%%     ListTest = [{?NODE_LEVEL, [t2_2]}, {?CLUSTER_LEVEL, [t3_2, t4_2]}, {?PERSISTENT_LEVEL, [t5_2, t6_2, t7_2]}],
+    ListTest = [
+        {?CLUSTER_LEVEL, [t2_2, t3_2]},
+        {?PERSISTENT_LEVEL, [t4_2, t5_2, t6_2]}
+    ],
     lists:foreach(fun({Level, Names}) ->
         ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
         {A1, ListedTasks} = rpc:call(W1, task_pool, list, [Level]),
@@ -261,10 +327,8 @@ task_pool_test(Config) ->
 
 task_manager_repeats_test(Config) ->
     task_manager_repeats_test_base(Config, ?NON_LEVEL, 0),
-    task_manager_repeats_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_repeats_test_base(Config, ?CLUSTER_LEVEL, 5).
-% TODO Uncomment when list on db will be added (without list, task cannot be repeted)
-%%     task_manager_repeats_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_repeats_test_base(Config, ?CLUSTER_LEVEL, 5),
+    task_manager_repeats_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
@@ -281,8 +345,9 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
     ?assertEqual(FirstCheckNum, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(1)),
-    ?assertEqual(5, count_answers(), 1, timer:seconds(10)),
+    timer:sleep(timer:seconds(1)),
+    ?assertEqual(0, count_answers()),
+    ?assertEqual(5, count_answers(), 2, timer:seconds(10)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
@@ -290,10 +355,8 @@ task_manager_repeats_test_base(Config, Level, FirstCheckNum) ->
 
 task_manager_rerun_test(Config) ->
     task_manager_rerun_test_base(Config, ?NON_LEVEL, 0),
-    task_manager_rerun_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_rerun_test_base(Config, ?CLUSTER_LEVEL, 5).
-% TODO Uncomment when list on db will be added (without list, task cannot be repeted)
-%%     task_manager_rerun_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_rerun_test_base(Config, ?CLUSTER_LEVEL, 5),
+    task_manager_rerun_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
@@ -310,26 +373,26 @@ task_manager_rerun_test_base(Config, Level, FirstCheckNum) ->
     ?assertEqual(FirstCheckNum, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+    timer:sleep(timer:seconds(30)),
+    ?assertEqual(0, count_answers()),
 
     case Level of
         ?NON_LEVEL ->
             ok;
         _ ->
             lists:foreach(fun(W) ->
-                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
+                gen_server:cast({?NODE_MANAGER_NAME, W}, force_check_tasks)
             end, WorkersList),
-            ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
-            ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
+            ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
+            ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level]), 2),
             ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level]))
     end,
 
     ControllerPid ! kill.
 
 task_manager_delayed_save_test(Config) ->
-    task_manager_delayed_save_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_delayed_save_test_base(Config, ?CLUSTER_LEVEL, 5).
-%%    task_manager_delayed_save_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_delayed_save_test_base(Config, ?CLUSTER_LEVEL, 5),
+    task_manager_delayed_save_test_base(Config, ?PERSISTENT_LEVEL, 5).
 
 task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
@@ -346,7 +409,8 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     ?assertEqual(0, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+    timer:sleep(timer:seconds(30)),
+    ?assertEqual(0, count_answers()),
 
     {A1_2, A2_2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1_2, A2_2}),
@@ -355,25 +419,17 @@ task_manager_delayed_save_test_base(Config, Level, SecondCheckNum) ->
     ?assertMatch({ok, _}, {A1_3, A2_3}),
     ?assertEqual(SecondCheckNum, length(A2_3)),
 
-    case Level of
-        ?NODE_LEVEL ->
-            lists:foreach(fun(W) ->
-                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
-            end, WorkersList);
-        _ ->
-            gen_server:cast({?NODE_MANAGER_NAME, W1}, check_tasks)
-    end,
+    gen_server:cast({?NODE_MANAGER_NAME, W1}, force_check_tasks),
 
-    ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+    ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
 
     ControllerPid ! kill.
 
 task_manager_delayed_save_with_type_test(Config) ->
-    task_manager_delayed_save_with_type_test_base(Config, ?NODE_LEVEL, 3),
-    task_manager_delayed_save_with_type_test_base(Config, ?CLUSTER_LEVEL, 5).
-%%    task_manager_delayed_save_with_type_test_base(Config, ?PERSISTENT_LEVEL, 5).
+    task_manager_delayed_save_with_type_test_base(Config, ?CLUSTER_LEVEL, 5),
+    task_manager_delayed_save_with_type_test_base(Config, ?PERSISTENT_LEVEL, 5).
 task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     [W1, W2] = WorkersList = ?config(cluster_worker_nodes, Config),
     Workers = [W1, W2, W1, W2, W1],
@@ -391,10 +447,11 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     ?assertMatch({ok, _}, {A1, A2}),
     ?assertEqual(SecondCheckNum, length(A2)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
-    ?assertEqual({ok, {0,0}}, rpc:call(W1, task_pool, count_tasks, [Level, undefined, 10])),
-    ?assertEqual({ok, {0,SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
+    ?assertEqual({ok, {0, 0}}, rpc:call(W1, task_pool, count_tasks, [Level, undefined, 10])),
+    ?assertEqual({ok, {0, SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
 
-    ?assertEqual(0, count_answers(), 1, timer:seconds(30)),
+    timer:sleep(timer:seconds(30)),
+    ?assertEqual(0, count_answers()),
 
     {A1_2, A2_2} = rpc:call(W1, task_pool, list, [Level]),
     ?assertMatch({ok, _}, {A1_2, A2_2}),
@@ -402,21 +459,14 @@ task_manager_delayed_save_with_type_test_base(Config, Level, SecondCheckNum) ->
     {A1_3, A2_3} = rpc:call(W1, task_pool, list_failed, [Level]),
     ?assertMatch({ok, _}, {A1_3, A2_3}),
     ?assertEqual(SecondCheckNum, length(A2_3)),
-    ?assertEqual({ok, {SecondCheckNum,SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
+    ?assertEqual({ok, {SecondCheckNum, SecondCheckNum}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
 
-    case Level of
-        ?NODE_LEVEL ->
-            lists:foreach(fun(W) ->
-                gen_server:cast({?NODE_MANAGER_NAME, W}, check_tasks)
-            end, WorkersList);
-        _ ->
-            gen_server:cast({?NODE_MANAGER_NAME, W1}, check_tasks)
-    end,
+    gen_server:cast({?NODE_MANAGER_NAME, W1}, force_check_tasks),
 
-    ?assertEqual(5, count_answers(), 1, timer:seconds(3)),
+    ?assertEqual(5, count_answers(), 2, timer:seconds(3)),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list, [Level])),
     ?assertEqual({ok, []}, rpc:call(W1, task_pool, list_failed, [Level])),
-    ?assertEqual({ok, {0,0}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
+    ?assertEqual({ok, {0, 0}}, rpc:call(W1, task_pool, count_tasks, [Level, type1, 10])),
 
     ControllerPid ! kill.
 
@@ -665,31 +715,33 @@ get_rollback_ans(Num) ->
         {rollback, Num} -> ok;
         Other -> {error, Other}
     after
-        0 -> non
+        1000 -> non
     end.
 
 %%%===================================================================
 %%% SetUp and TearDown functions
 %%%===================================================================
 
-init_per_suite(Config) ->
-    ?TEST_INIT(Config, ?TEST_FILE(Config, "env_desc.json")).
-
-end_per_suite(Config) ->
-    test_node_starter:clean_environment(Config).
-
 init_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_new(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]),
+    test_utils:mock_new(Workers, [
+        couchbase_pool,
+        monitoring,
+        tp,
+        datastore_throttling,
+        datastore_config
+    ]),
 
-    test_utils:mock_expect(Workers, datastore_config_plugin_default, throttled_models,
-        fun () -> [throttled_model] end),
-
-    test_utils:mock_expect(Workers, caches_controller, send_after,
-        fun (CheckInterval, Master, Args) -> Master ! {send_after, Args, CheckInterval} end),
-
+    test_utils:mock_expect(Workers, datastore_config, get_throttled_models,
+        fun() -> [throttled_model] end
+    ),
+    test_utils:mock_expect(Workers, datastore_throttling, send_after,
+        fun(CheckInterval, Master, Args) ->
+            Master ! {send_after, Args, CheckInterval}
+        end
+    ),
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_cache_control))
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_throttling))
     end, Workers),
 
     Config;
@@ -697,13 +749,25 @@ init_per_testcase(throttling_test, Config) ->
 init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_repeats, 10))
+        ?assertEqual(ok, test_utils:set_env(W, ?CLUSTER_WORKER_APP_NAME, task_repeats, 10)),
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, disable_task_control))
     end, Workers),
     Config.
 
 end_per_testcase(throttling_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:mock_unload(Workers, [monitoring, task_pool, caches_controller, datastore_config_plugin_default]);
+
+    lists:foreach(fun(W) ->
+        ?assertEqual(ok, gen_server:call({?NODE_MANAGER_NAME, W}, enable_throttling))
+    end, Workers),
+
+    test_utils:mock_unload(Workers, [
+        couchbase_pool,
+        monitoring,
+        tp,
+        datastore_throttling,
+        datastore_config
+    ]);
 
 end_per_testcase(_Case, _Config) ->
     ok.
@@ -733,9 +797,10 @@ count_answers() ->
     end.
 
 configure_throttling() ->
-    Ans1 = caches_controller:configure_throttling(),
+    Ans1 = datastore_throttling:configure_throttling(),
     Ans2 = receive
-        {send_after, {timer, configure_throttling}, CheckInterval} -> CheckInterval
+        {send_after, {timer, configure_throttling}, CheckInterval} ->
+            CheckInterval
     after
         5000 -> timeout
     end,

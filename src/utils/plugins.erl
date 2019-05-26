@@ -1,6 +1,6 @@
 %%%--------------------------------------------------------------------
-%%% @author Michal Zmuda
-%%% @copyright (C) 2015 ACK CYFRONET AGH
+%%% @author Krzysztof Trzepla
+%%% @copyright (C) 2017 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
 %%% @end
@@ -9,33 +9,56 @@
 %%% @end
 %%%--------------------------------------------------------------------
 -module(plugins).
--author("Michal Zmuda").
+-author("Krzysztof Trzepla").
 
--include_lib("ctool/include/logging.hrl").
 -include("global_definitions.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([apply/3]).
 
+-type plugin() :: atom().
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes plugin callback if it is present. Otherwise just return ok.
+%% Executes plugin callback or fallbacks to the default implementation.
 %% @end
 %%--------------------------------------------------------------------
--spec apply(PluginName, Function, Args) -> term() when
-  PluginName :: module(),
-  Function :: atom(),
-  Args :: [term()].
+-spec apply(module(), atom(), list()) -> term().
+apply(Plugin, Function, Args) ->
+    {Module, DefaultModule} = get_plugin_module(Plugin),
+    Exports = Module:module_info(functions),
+    Arity = length(Args),
+    case lists:keyfind(Function, 1, Exports) of
+        {Function, Arity} ->
+            erlang:apply(Module, Function, Args);
+        _ ->
+            ?debug("Using default implementation for plugin call ~p:~p/~p.",
+                [Plugin, Function, length(Args)]),
+            erlang:apply(DefaultModule, Function, Args)
+    end.
 
-apply(PluginName, Name, Args) ->
-  case application:get_env(?CLUSTER_WORKER_APP_NAME, PluginName) of
-    undefined ->
-      Default = default_plugin_name(PluginName),
-      ?error("plugin known as '~p' has no module defined - defaulting to ~p", [PluginName, Default]),
-      erlang:apply(Default, Name, Args);
-    {ok, Module} ->
-      erlang:apply(Module, Name, Args)
-  end.
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
-default_plugin_name(PluginName) ->
-  list_to_atom(atom_to_list(PluginName) ++ "_default").
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns pair of custom and default plugin module.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_plugin_module(plugin()) -> {module(), module()}.
+get_plugin_module(Plugin) ->
+    DefaultModule = list_to_atom(atom_to_list(Plugin) ++ "_default"),
+    case application:get_env(?CLUSTER_WORKER_APP_NAME, Plugin) of
+        {ok, Module} ->
+            {Module, DefaultModule};
+        undefined ->
+            ?debug("Module not found for a plugin: ~p. Defaulting to ~p.",
+                [Plugin, DefaultModule]),
+            {DefaultModule, DefaultModule}
+    end.

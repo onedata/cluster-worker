@@ -20,21 +20,13 @@ all: test_rel
 ## Rebar targets
 ##
 
-priv/sync_gateway:
-	mkdir -p vendor/sync_gateway
-	curl https://raw.githubusercontent.com/couchbase/sync_gateway/1.3/bootstrap.sh > vendor/sync_gateway/bootstrap.sh
-	cd vendor/sync_gateway && sh bootstrap.sh && ./build.sh
-	find vendor/sync_gateway -name shallow -type l -exec test ! -e '{}' ';' -delete
-	cp vendor/sync_gateway/godeps/bin/sync_gateway priv/
-	rm -rf vendor
-
-compile: priv/sync_gateway
+compile:
 	$(REBAR) compile
 
-upgrade: priv/sync_gateway
+upgrade:
 	$(REBAR) upgrade
 
-generate: compile priv/sync_gateway
+generate: compile
 	$(REBAR) release $(OVERLAY_VARS)
 
 clean: relclean
@@ -42,6 +34,15 @@ clean: relclean
 
 distclean:
 	$(REBAR) clean --all
+
+##
+## Submodules
+##
+
+submodules:
+	git submodule sync --recursive ${submodule}
+	git submodule update --init --recursive ${submodule}
+
 
 ##
 ## Release targets
@@ -53,6 +54,7 @@ test_rel: generate cm_rel
 
 cm_rel:
 	mkdir -p cluster_manager/bamboos/gen_dev
+	make -C $(LIB_DIR)/cluster_manager/ submodules
 	cp -rf $(LIB_DIR)/cluster_manager/bamboos/gen_dev cluster_manager/bamboos
 	printf "\n{base_dir, \"$(BASE_DIR)/cluster_manager/_build\"}." >> $(LIB_DIR)/cluster_manager/rebar.config
 	make -C $(LIB_DIR)/cluster_manager/ rel
@@ -73,7 +75,7 @@ eunit:
 	@for tout in `find test -name "TEST-*.xml"`; do awk '/testcase/{gsub("_[0-9]+\"", "_" ++i "\"")}1' $$tout > $$tout.tmp; mv $$tout.tmp $$tout; done
 
 coverage:
-	$(BASE_DIR)/bamboos/docker/coverage.escript $(BASE_DIR)
+	$(BASE_DIR)/bamboos/docker/coverage.escript $(BASE_DIR) $(on_bamboo)
 
 ##
 ## Dialyzer targets local

@@ -123,7 +123,7 @@ handle_call(healthcheck, _From, #state{last_update = LastUpdate} = State) ->
                 [{?LB_ADVICE_KEY, undefined}] ->
                     {error, no_lb_advice_received};
                 _ ->
-                    {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, dns_disp_out_of_sync_threshold),
+                    {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, disp_out_of_sync_threshold),
                     % Threshold is in millisecs, LastUpdate is in millisecs
                     case (erlang:monotonic_time(milli_seconds) - LastUpdate) > Threshold of
                         true -> out_of_sync;
@@ -151,7 +151,6 @@ handle_call(_Request, _From, State) ->
     Timeout :: non_neg_integer() | infinity.
 
 handle_cast({update_lb_advice, LBAdvice}, State) ->
-    ?debug("Dispatcher update of load_balancing advice: ~p", [LBAdvice]),
     % Update LB advice
     ets:insert(?WORKER_MAP_ETS, {?LB_ADVICE_KEY, LBAdvice}),
     {noreply, State#state{last_update = erlang:monotonic_time(milli_seconds)}};
@@ -219,14 +218,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Chooses to which worker (on which node) the request should be sent.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
 %% @end
 %%--------------------------------------------------------------------
--spec get_worker_node(WorkerName :: worker_name()) -> {ok, node()} | {error, dispatcher_out_of_sync}.
+-spec get_worker_node(WorkerName :: worker_name()) ->
+    {ok, node()} | {error, dispatcher_out_of_sync}.
 get_worker_node(WorkerName) ->
     case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
         [{?LB_ADVICE_KEY, undefined}] ->
@@ -238,14 +237,14 @@ get_worker_node(WorkerName) ->
 
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Returns all workers that host given worker.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
 %% @end
 %%--------------------------------------------------------------------
--spec get_worker_nodes(WorkerName :: worker_name()) -> {ok, [node()]} | {error, dispatcher_out_of_sync}.
+-spec get_worker_nodes(WorkerName :: worker_name()) ->
+    {ok, [node()]} | {error, dispatcher_out_of_sync}.
 get_worker_nodes(WorkerName) ->
     case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
         [{?LB_ADVICE_KEY, undefined}] ->

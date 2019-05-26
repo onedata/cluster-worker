@@ -10,17 +10,18 @@
 %%% @end
 %%%--------------------------------------------------------------------
 -module(nagios_handler).
+-behaviour(cowboy_handler).
+
 -author("Lukasz Opiola").
 
--behaviour(cowboy_http_handler).
 
 -include("global_definitions.hrl").
 -include_lib("xmerl/include/xmerl.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
 
--export([init/3, handle/2, terminate/3]).
--export([get_cluster_status/1]).
+-export([init/2]).
+-export([get_cluster_status/1, get_cluster_status/2, check_listener/1]).
 
 -export_type([healthcheck_response/0]).
 
@@ -31,110 +32,91 @@
 -compile(export_all).
 -endif.
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+-define(LOG(Msg), ?debug(Msg)).
+-define(LOG(Msg, Args), ?debug(Msg, Args)).
+
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Cowboy handler callback, no state is required
+%% @doc Cowboy handler callback.
+%% Handles a request returning current version of Onezone.
 %% @end
 %%--------------------------------------------------------------------
--spec init(term(), term(), term()) -> {ok, cowboy_req:req(), term()}.
-init(_Type, Req, _Opts) ->
-    {ok, Req, []}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles a request producing an XML response.
-%% @end
-%%--------------------------------------------------------------------
--spec handle(term(), term()) -> {ok, cowboy_req:req(), term()}.
-handle(Req, State) ->
+-spec init(cowboy_req:req(), term()) -> {ok, cowboy_req:req(), term()}.
+init(#{method := <<"GET">>} = Req, State) ->
     {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
     {ok, CachingTime} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_caching_time),
-    CachedResponse = case application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_cache) of
-        {ok, {LastCheck, LastValue}} ->
-            case (erlang:monotonic_time(milli_seconds) - LastCheck) < CachingTime of
-                true ->
-                    ?debug("Serving nagios response from cache"),
-                    {true, LastValue};
-                false ->
-                    false
-            end;
-        _ ->
-            false
-    end,
-    ClusterStatus = case CachedResponse of
-        {true, Value} ->
-            Value;
-        false ->
-            Status = get_cluster_status(Timeout),
+    
+    GetStatus = fun() ->
+        Status = get_cluster_status(Timeout),
+        case Status of
             % Save cluster state in cache, but only if there was no error
-            case Status of
-                {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
-                    application:set_env(?CLUSTER_WORKER_APP_NAME, nagios_cache,
-                        {erlang:monotonic_time(milli_seconds), Status});
-                _ ->
-                    skip
-            end,
-            Status
+            {ok, {?CLUSTER_WORKER_APP_NAME, ok, _}} ->
+                {true, Status, CachingTime};
+            _ -> 
+                {false, Status}
+        end 
     end,
-    NewReq =
-        case ClusterStatus of
-            error ->
-                {ok, Req2} = cowboy_req:reply(500, Req),
-                Req2;
-            {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, NodeStatuses}} ->
-                MappedClusterState = lists:map(
-                    fun({Node, NodeStatus, NodeComponents}) ->
-                        NodeDetails = lists:map(
-                            fun({Component, Status}) ->
-                                StatusList = case Status of
-                                                 {error, Desc} ->
-                                                     "error: " ++ atom_to_list(Desc);
-                                                 A when is_atom(A) -> atom_to_list(A);
-                                                 _ ->
-                                                     ?error("Wrong nagios status: {~p, ~p} at node ~p",
-                                                         [Component, Status, Node]),
-                                                     "error: wrong_status"
-                                             end,
-                                {Component, [{status, StatusList}], []}
-                            end, NodeComponents),
-                        {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
-                        {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
-                    end, NodeStatuses),
+    {ok, ClusterStatus} = simple_cache:get(nagios_cache, GetStatus),
+    NewReq = case ClusterStatus of
+        error ->
+            cowboy_req:reply(500, Req);
+        {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, NodeStatuses}} ->
+            MappedClusterState = lists:map(
+                fun({Node, NodeStatus, NodeComponents}) ->
+                    NodeDetails = lists:map(
+                        fun({Component, Status}) ->
+                            StatusList = case Status of
+                                {error, Desc} ->
+                                    "error: " ++ atom_to_list(Desc);
+                                A when is_atom(A) ->
+                                    atom_to_list(A);
+                                _ ->
+                                    ?LOG("Wrong nagios status: {~p, ~p} at node ~p",
+                                        [Component, Status, Node]),
+                                    "error: wrong_status"
+                            end,
+                            {Component, [{status, StatusList}], []}
+                        end, NodeComponents),
+                    {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
+                    {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
+                end, NodeStatuses
+            ),
 
-                {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(erlang:timestamp()),
-                DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
+            {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(erlang:timestamp()),
+            DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
 
-                % Create the reply
-                HealthData = {healthdata, [{date, DateString}, {status, atom_to_list(AppStatus)}], MappedClusterState},
-                Content = lists:flatten([HealthData]),
-                Export = xmerl:export_simple(Content, xmerl_xml),
-                Reply = io_lib:format("~s", [lists:flatten(Export)]),
+            % Create the reply
+            HealthData = {healthdata, [{date, DateString},
+                {status, atom_to_list(AppStatus)}], MappedClusterState},
+            Content = lists:flatten([HealthData]),
+            Export = xmerl:export_simple(Content, xmerl_xml),
+            Reply = io_lib:format("~s", [lists:flatten(Export)]),
 
-                % Send the reply
-                {ok, Req2} = cowboy_req:reply(200, [{<<"content-type">>, <<"application/xml">>}], Reply, Req),
-                Req2
-        end,
+            % Send the reply
+            cowboy_req:reply(200,
+                #{<<"content-type">> => <<"application/xml">>}, Reply, Req
+            )
+    end,
+    {ok, NewReq, State};
+init(Req, State) ->
+    NewReq = cowboy_req:reply(405, #{<<"allow">> => <<"GET">>}, Req),
     {ok, NewReq, State}.
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Cowboy handler callback, no cleanup needed.
+%% @equiv get_cluster_status(Timeout, healthcheck)
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(term(), term(), term()) -> ok.
-terminate(_Reason, _Req, _State) ->
-    ok.
-
-
-%% ====================================================================
-%% Internal Functions
-%% ====================================================================
+-spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
+    Status :: healthcheck_response(),
+    ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
+    {node(), Status, [
+    {ModuleName :: module(), Status}
+    ]}
+    ]}.
+get_cluster_status(Timeout) ->
+    get_cluster_status(Timeout, healthcheck).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -160,24 +142,32 @@ terminate(_Reason, _Req, _State) ->
 %% If cluster manager cannot be contacted, the function returns 'error' atom.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cluster_status(Timeout :: integer()) -> error | {ok, ClusterStatus} when
+-spec get_cluster_status(Timeout :: integer(),
+    NodeManagerCheck :: healthcheck | internal_healthcheck) ->
+    error | {ok, ClusterStatus} when
     Status :: healthcheck_response(),
     ClusterStatus :: {?CLUSTER_WORKER_APP_NAME, Status, NodeStatuses :: [
-        {node(), Status, [
-            {ModuleName :: module(), Status}
-        ]}
+    {node(), Status, [
+    {ModuleName :: module(), Status}
+    ]}
     ]}.
-get_cluster_status(Timeout) ->
-    case check_cm(Timeout) of
+get_cluster_status(Timeout, NodeManagerCheck) ->
+    case check_cm() of
         error ->
             error;
         Nodes ->
             try
-                NodeManagerStatuses = check_node_managers(Nodes, Timeout),
+                NodeManagerStatuses = check_node_managers(Nodes, Timeout, NodeManagerCheck),
                 DispatcherStatuses = check_dispatchers(Nodes, Timeout),
                 Workers = lists:foldl(fun(Name, Acc) ->
-                    {ok, ModuleNodes} = request_dispatcher:get_worker_nodes(Name),
-                    lists:map(fun(Node) -> {Node, Name} end, ModuleNodes) ++ Acc
+                    case request_dispatcher:get_worker_nodes(Name) of
+                        {ok, ModuleNodes} ->
+                            Acc ++ lists:map(fun(Node) ->
+                                {Node, Name}
+                            end, ModuleNodes);
+                        {error, dispatcher_out_of_sync} ->
+                            Acc
+                    end
                 end, [], node_manager:modules()),
                 WorkerStatuses = check_workers(Nodes, Workers, Timeout),
                 Listeners = [{Node, Name} || Node <- Nodes, Name <- node_manager:listeners()],
@@ -190,6 +180,9 @@ get_cluster_status(Timeout) ->
             end
     end.
 
+%% ====================================================================
+%% Internal Functions
+%% ====================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -252,6 +245,7 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
             end
         end, ok, NodeStatuses),
     % Sort node statuses by node name
+    ?LOG("Cluster status: ~p", [AppStatus]),
     {ok, {?CLUSTER_WORKER_APP_NAME, AppStatus, lists:usort(NodeStatuses)}}.
 
 
@@ -260,14 +254,20 @@ calculate_cluster_status(Nodes, NodeManagerStatuses, DispatcherStatuses, WorkerS
 %% Contacts cluster manager for healthcheck and gathers information about cluster state.
 %% @end
 %%--------------------------------------------------------------------
--spec check_cm(Timeout :: integer()) -> Nodes :: [node()] | error.
-check_cm(Timeout) ->
-    try
-        {ok, Nodes} = gen_server2:call({global, ?CLUSTER_MANAGER}, healthcheck, Timeout),
-        Nodes
+-spec check_cm() -> Nodes :: [node()] | error.
+check_cm() ->
+    try node_manager:get_cluster_nodes() of
+        {ok, Nodes} -> Nodes;
+        {error, cluster_not_ready} -> error
     catch
-        Type:Error ->
-            ?error("Cluster manager error during healthcheck: ~p:~p", [Type, Error]),
+        exit:{noproc, _} ->
+            ?LOG("cluster manager is not reachable"),
+            error;
+        Type:Message ->
+            ?error_stacktrace(
+                "Unexpected error during cluster manager healthcheck - ~p:~p",
+                [Type, Message]
+            ),
             error
     end.
 
@@ -277,15 +277,20 @@ check_cm(Timeout) ->
 %% Contacts node managers on given nodes for healthcheck. The check is performed in parallel (one proces per node).
 %% @end
 %%--------------------------------------------------------------------
--spec check_node_managers(Nodes :: [atom()], Timeout :: integer()) -> [healthcheck_response()].
-check_node_managers(Nodes, Timeout) ->
+-spec check_node_managers(Nodes :: [atom()], Timeout :: integer(),
+    NodeManagerCheck :: healthcheck | internal_healthcheck) ->
+    [healthcheck_response()].
+check_node_managers(Nodes, Timeout, NodeManagerCheck) ->
     utils:pmap(
         fun(Node) ->
             Result =
                 try
-                    gen_server2:call({?NODE_MANAGER_NAME, Node}, healthcheck, Timeout)
+                    Ans = gen_server2:call({?NODE_MANAGER_NAME, Node}, NodeManagerCheck, Timeout),
+                    ?LOG("Healthcheck: node manager ~p, ans: ~p",
+                        [Node, Ans]),
+                    Ans
                 catch T:M ->
-                    ?error("Connection error to ~p at ~p: ~p:~p", [?NODE_MANAGER_NAME, Node, T, M]),
+                    ?LOG("Connection error to ~p at ~p: ~p:~p", [?NODE_MANAGER_NAME, Node, T, M]),
                     {error, timeout}
                 end,
             {Node, Result}
@@ -303,9 +308,12 @@ check_dispatchers(Nodes, Timeout) ->
         fun(Node) ->
             Result =
                 try
-                    gen_server2:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout)
+                    Ans = gen_server2:call({?DISPATCHER_NAME, Node}, healthcheck, Timeout),
+                    ?LOG("Healthcheck: dispatcher ~p, ans: ~p",
+                        [Node, Ans]),
+                    Ans
                 catch T:M ->
-                    ?error("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, Node, T, M]),
+                    ?LOG("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, Node, T, M]),
                     {error, timeout}
                 end,
             {Node, Result}
@@ -321,13 +329,22 @@ check_dispatchers(Nodes, Timeout) ->
 -spec check_workers(Nodes :: [atom()], Workers :: [{Node :: atom(), WorkerName :: atom()}], Timeout :: integer()) ->
     [{Node :: atom(), [{Worker :: atom(), Status :: healthcheck_response()}]}].
 check_workers(Nodes, Workers, Timeout) ->
+    Node = node(),
     WorkerStatuses = utils:pmap(
         fun({WNode, WName}) ->
             Result =
                 try
-                    worker_proxy:call({WName, WNode}, healthcheck, Timeout)
+                    Ans = case WNode of
+                        Node ->
+                            worker_proxy:call_direct({WName, WNode}, healthcheck);
+                        _ ->
+                            worker_proxy:call({WName, WNode}, healthcheck, Timeout)
+                    end,
+                    ?LOG("Healthcheck: worker ~p, node ~p, ans: ~p",
+                        [WName, WNode, Ans]),
+                    Ans
                 catch T:M ->
-                    ?error("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, WNode, T, M]),
+                    ?LOG("Connection error to ~p at ~p: ~p:~p", [?DISPATCHER_NAME, WNode, T, M]),
                     {error, timeout}
                 end,
             {WNode, WName, Result}
@@ -348,15 +365,26 @@ check_listeners(Nodes, Listeners, Timeout) ->
         fun({LNode, LName}) ->
             Result =
                 try
-                    rpc:call(LNode, LName, healthcheck, [], Timeout)
+                    rpc:call(LNode, ?MODULE, check_listener, [LName], Timeout)
                 catch T:M ->
-                    ?error("Connection error during check of listener ~p at ~p: ~p:~p", [LName, LNode, T, M]),
+                    ?LOG("Connection error during check of listener ~p at ~p: ~p:~p", [LName, LNode, T, M]),
                     {error, timeout}
                 end,
             {LNode, LName, Result}
         end, Listeners),
     arrange_by_node(Nodes, ListenerStatuses).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks status of listener with additional logging of answer.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_listener(ListenerName :: atom()) -> healthcheck_response().
+check_listener(LName) ->
+    Ans = apply(LName, healthcheck, []),
+    ?LOG("Healthcheck: listener ~p, ans: ~p",
+        [LName, Ans]),
+    Ans.
 
 %%--------------------------------------------------------------------
 %% @doc

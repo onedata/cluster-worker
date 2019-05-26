@@ -13,7 +13,7 @@
 -author("Mateusz Paciorek").
 
 -include("global_definitions.hrl").
--include("modules/datastore/datastore_models_def.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([run/2, run_on_global/2, run_in_mnesia_transaction/2, run_on_mnesia/2, run_on_mnesia/3]).
@@ -38,9 +38,9 @@ run(RawKey, Fun) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec run_in_mnesia_transaction(Key :: term(), Fun :: fun (() -> Result :: term())) ->
-    Result :: term().
-run_in_mnesia_transaction(Key, Fun) ->
-    mnesia_cache_driver:run_transation(Key, Fun).
+    no_return().
+run_in_mnesia_transaction(_Key, _Fun) ->
+    throw(not_supported).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -50,7 +50,7 @@ run_in_mnesia_transaction(Key, Fun) ->
 -spec run_on_global(Key :: term(), Fun :: fun (() -> Result :: term())) ->
     Result :: term().
 run_on_global(RawKey, Fun) ->
-    Key = couchdb_datastore_driver:to_binary(RawKey),
+    Key = utils:to_binary(RawKey),
     global:trans({Key, self()}, Fun).
 
 %%--------------------------------------------------------------------
@@ -76,7 +76,7 @@ run_on_mnesia(Key, Fun) ->
 -spec run_on_mnesia(RawKey :: term(), Fun :: fun (() -> Result :: term()),
     Recursive :: boolean()) -> Result :: term().
 run_on_mnesia(RawKey, Fun, Recursive) ->
-    Key = couchdb_datastore_driver:to_binary(RawKey),
+    Key = utils:to_binary(RawKey),
     ok = lock(Key, Recursive),
     try
         Fun()
@@ -89,6 +89,7 @@ run_on_mnesia(RawKey, Fun, Recursive) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Enqueues process for lock on given key.
 %% If process is first in the queue, this function returns immediately,
@@ -109,13 +110,15 @@ lock(Key, Recursive) ->
                 after timer:seconds(10) ->
                     case lock:current_owner(Key) of
                         {ok, Owner} when is_pid(Owner) ->
-                            case is_process_alive(Owner) of
+                            case lock:is_pid_alive(Owner) of
                                 true ->
                                     Wait();
                                 false ->
                                     case lock:dequeue(Key, Owner) of
                                         {ok, Pid} ->
                                             Pid ! {acquired, Key},
+                                            Wait();
+                                        {error, not_lock_owner} ->
                                             Wait();
                                         Error ->
                                             throw({?MODULE, unable_to_repair_lock_status, Error})
@@ -130,6 +133,7 @@ lock(Key, Recursive) ->
     end.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Dequeues process from lock on given key.
 %% If process has acquired this lock multiple times, counter is decreased.

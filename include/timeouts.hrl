@@ -5,7 +5,8 @@
 %%% cited in 'LICENSE.txt'.
 %%% @end
 %%%--------------------------------------------------------------------
-%%% @doc dns listener starting & stopping
+%%% @doc
+%%% Macros defining timeouts for various operations in the system.
 %%% @end
 %%%--------------------------------------------------------------------
 -author("Jakub Kudzia").
@@ -20,19 +21,23 @@
 -define(TASK_SAVE_TIMEOUT, timer:seconds(30)).
 
 %%worker_proxy
--define(DEFAULT_REQUEST_TIMEOUT, timer:minutes(5)).
-
-%%couchdb_datastore_driver
--define(WAIT_FOR_STATE_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_wait_for_state_timeout, timer:seconds(30))).
--define(WAIT_FOR_CONNECTION_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_wait_for_connection_timeout, timer:minutes(1))).
--define(DATASTORE_DRIVER_INIT_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_driver_init_timeout, timer:minutes(3))).
--define(DATASTORE_GATEWAY_SPAWN_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_gateway_spawn_timeout, timer:minutes(1))).
--define(TIME_FOR_RESTART, ?DATASTORE_GATEWAY_SPAWN_TIMEOUT).
+-define(DEFAULT_REQUEST_TIMEOUT, timer:seconds(30)).
 
 %%timeout for request to couchdb in form of hackney option
 -define(DEFAULT_DB_REQUEST_TIMEOUT_OPT, [{recv_timeout, timer:minutes(3)}]).
 
 %%mnesia cache driver
--define(MNESIA_WAIT_TIMEOUT, timer:seconds(60)).
+-define(MNESIA_WAIT_TIMEOUT, timer:seconds(5)).
+-define(MNESIA_WAIT_REPEATS, 10).
 
 -define(DEFAULT_DNS_TCP_TIMEOUT, 60).
+
+-define(DOCUMENT_AGGREGATE_SAVE_TIMEOUT, timer:minutes(5)).
+
+-define(DOCUMENT_BATCH_UPGRADE_TIMEOUT, timer:minutes(1)).
+
+% Maximum time the calling process will wait for Graph Sync client to start
+% (start returns after handshake is performed).
+-define(GS_CLIENT_HANDSHAKE_TIMEOUT, 10000).
+% Timeout when waiting for synchronous response from Graph Sync client process.
+-define(GS_CLIENT_REQUEST_TIMEOUT, 10000).
