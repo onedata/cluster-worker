@@ -117,7 +117,7 @@ start(ID, TaskModule, GroupID, Executor, Creator, NweDescription) ->
 -spec on_task_start(key(), traverse:task_module(), traverse:group(),
     traverse:executor(), traverse:description()) -> ok.
 on_task_start(ID, TaskModule, GroupID, Creator, NweDescription) ->
-    {ok, _} = update_description(ID, NweDescription),
+    {ok, _, _} = update_description(ID, NweDescription),
     run_on_trees(?SCHEDULED_KEY(TaskModule), GroupID, fun(Key) ->
         [ok] = datastore_model:delete_links(?CTX(Creator),
             Key, Creator, [ID])
@@ -130,7 +130,7 @@ on_task_start(ID, TaskModule, GroupID, Creator, NweDescription) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec update_description(key(), traverse:description()) ->
-    {ok, traverse:description()} | {error, term()}.
+    {ok, traverse:description(), boolean()} | {error, term()}.
 update_description(ID, NweDescription) ->
     Diff = fun(#traverse_task{description = Description} = Task) ->
         FinalDescription = maps:fold(fun(K, V, Acc) ->
@@ -139,8 +139,9 @@ update_description(ID, NweDescription) ->
         {ok, Task#traverse_task{description = FinalDescription}}
     end,
     case datastore_model:update(?CTX, ID, Diff) of
-        {ok, #document{value = #traverse_task{description = UpdatedDescription}}} ->
-            {ok, UpdatedDescription};
+        {ok, #document{value = #traverse_task{description = UpdatedDescription,
+            canceled = Canceled}}} ->
+            {ok, UpdatedDescription, Canceled};
         Other ->
             Other
     end.
@@ -185,6 +186,7 @@ finish(ID, TaskModule, Executor, GroupID, FinalStatus) ->
 %%--------------------------------------------------------------------
 -spec cancel(key()) -> ok | {error, term()}.
 cancel(ID) ->
+    % TODO - wywalenie z drzew
     Diff = fun(Task) ->
         {ok, Task#traverse_task{canceled = true}}
     end,

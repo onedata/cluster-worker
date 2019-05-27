@@ -28,7 +28,8 @@
     traverse_multitask_sequential_test/1,
     traverse_loadbalancingt_test/1,
     traverse_loadbalancingt_mixed_ids_test/1,
-    traverse_restart_test/1
+    traverse_restart_test/1,
+    traverse_cancel_test/1
 ]).
 
 %% Pool callbacks
@@ -44,7 +45,8 @@ all() ->
         traverse_multitask_sequential_test,
         traverse_loadbalancingt_test,
         traverse_loadbalancingt_mixed_ids_test,
-        traverse_restart_test
+        traverse_restart_test,
+        traverse_cancel_test
     ]).
 
 -define(CACHE, test_cache).
@@ -325,6 +327,62 @@ traverse_restart_test(Config) ->
         rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test3">>])),
     ok.
 
+traverse_cancel_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_cancel_test1">>, {self(), 1, 100}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_cancel_test2">>, {self(), 1, 2}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_cancel_test3">>, {self(), 1, 3}])),
+
+    RecAns = receive
+                 stop ->
+                     ?assertEqual(ok, rpc:call(Worker, traverse_task, cancel, [<<"traverse_cancel_test1">>]))
+             after
+                 5000 ->
+                     timeout
+             end,
+    ?assertEqual(ok, RecAns),
+
+    Expected = [2,3,4,
+        11,12,13,16,17,18,
+        101,102,103,106,107,108,
+        151,152,153,156,157,158,
+        1001,1002,1003,1006,1007,1008,
+        1051,1052,1053,1056,1057,1058,
+        1501,1502, 1503,1506,1507,1508,
+        1551,1552,1553,1556,1557, 1558],
+    ExpLen = length(Expected),
+    Ans = get_slave_ans(),
+    AnsLen = length(Ans),
+
+    SJobsNum = length(Expected),
+    MJobsNum = SJobsNum div 3,
+    Description = #{
+        slave_jobs_delegated => SJobsNum,
+        master_jobs_delegated => MJobsNum,
+        slave_jobs_done => SJobsNum,
+        master_jobs_done => MJobsNum,
+        master_jobs_failed => 0
+    },
+
+    Ans1 = lists:sublist(Ans, 1, AnsLen - 2*ExpLen),
+    Ans2 = lists:sublist(Ans, AnsLen - 2*ExpLen  + 1, ExpLen),
+    Ans3 = lists:sublist(Ans, AnsLen - ExpLen + 1, ExpLen),
+    ?assertEqual(Expected, lists:sort(Ans2)),
+    ?assertEqual(Expected, lists:sort(Ans3)),
+    ?assertEqual([], Ans1 -- Expected),
+    ?assert(length(Expected) > length(Ans1)),
+
+    ?assertMatch({ok, #document{value = #traverse_task{canceled = true}}},
+        rpc:call(Worker, traverse_task, get, [<<"traverse_cancel_test1">>])),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description, canceled = false}}},
+        rpc:call(Worker, traverse_task, get, [<<"traverse_cancel_test2">>])),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description, canceled = false}}},
+        rpc:call(Worker, traverse_task, get, [<<"traverse_cancel_test3">>])),
+    ok.
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -336,7 +394,8 @@ init_per_testcase(Case, Config) when
     Config;
 init_per_testcase(Case, Config) when
     Case =:= traverse_multitask_sequential_test ; Case =:= traverse_loadbalancingt_test ;
-    Case =:= traverse_loadbalancingt_mixed_ids_test ; Case =:= traverse_restart_test ->
+    Case =:= traverse_loadbalancingt_mixed_ids_test ; Case =:= traverse_restart_test ;
+    Case =:= traverse_cancel_test ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 1])),
     Config;

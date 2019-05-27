@@ -83,7 +83,7 @@ init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Executor
             undefined ->
                 ok;
             GR ->
-                {ok, _} = traverse_task:update_description(TaskID, #{
+                {ok, _, _} = traverse_task:update_description(TaskID, #{
                     master_jobs_delegated => 1
                 }),
                 ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
@@ -191,26 +191,31 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
             slave_jobs_delegated => length(SlaveJobsList),
             master_jobs_delegated => length(MasterJobsList)
         },
-        {ok, _} = traverse_task:update_description(TaskID, Description),
+        {ok, _, Canceled} = UpdateAns = traverse_task:update_description(TaskID, Description),
 
-        SlaveAnswers = run_on_slave_pool(SlavePool, TaskModule, TaskID, SlaveJobsList),
-        ok = run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, MasterJobsList),
+        {_, NewDescription, Canceled2} = case Canceled of
+            true ->
+                UpdateAns;
+            _ ->
+                SlaveAnswers = run_on_slave_pool(SlavePool, TaskModule, TaskID, SlaveJobsList),
+                ok = run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, MasterJobsList),
 
-        {SlavesOk, SlavesErrors} = lists:foldl(fun
-            ({ok, ok}, {OkSum, ErrorSum}) -> {OkSum + 1, ErrorSum};
-            (_, {OkSum, ErrorSum}) -> {OkSum, ErrorSum + 1}
-        end, {0, 0}, SlaveAnswers),
+                {SlavesOk, SlavesErrors} = lists:foldl(fun
+                                                           ({ok, ok}, {OkSum, ErrorSum}) -> {OkSum + 1, ErrorSum};
+                                                           (_, {OkSum, ErrorSum}) -> {OkSum, ErrorSum + 1}
+                                                       end, {0, 0}, SlaveAnswers),
 
-        ok = TaskModule:update_job(JobID, Job, TaskID, finish),
-        Description2 = #{
-            slave_jobs_done => SlavesOk,
-            master_jobs_failed => SlavesErrors,
-            master_jobs_done => 1
-        },
-        {ok, NewDescription} = traverse_task:update_description(TaskID, Description2),
+                ok = TaskModule:update_job(JobID, Job, TaskID, finish),
+                Description2 = #{
+                    slave_jobs_done => SlavesOk,
+                    master_jobs_failed => SlavesErrors,
+                    master_jobs_done => 1
+                },
+                {ok, _, _} = traverse_task:update_description(TaskID, Description2)
+        end,
 
         try
-            maybe_finish(TaskModule, TaskID, Executor, GroupID, NewDescription)
+            maybe_finish(TaskModule, TaskID, Executor, GroupID, NewDescription, Canceled2)
         catch
             E3:E4 ->
                 ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
@@ -223,7 +228,15 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
             ErrorDescription = #{
                 master_jobs_failed => 1
             },
-            {ok, _} = traverse_task:update_description(TaskID, ErrorDescription)
+            {ok, ErrorDescription2, Canceled3} = traverse_task:update_description(TaskID, ErrorDescription),
+
+            try
+                maybe_finish(TaskModule, TaskID, Executor, GroupID, ErrorDescription2, Canceled3)
+            catch
+                E5:E6 ->
+                    ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
+                        [Job, TaskID, TaskModule, E5, E6])
+            end
     end,
     ok.
 
@@ -239,7 +252,7 @@ execute_slave_job(TaskModule, TaskID, Job) ->
             ok ->
                 ok;
             {ok, Description} ->
-                {ok, _} = traverse_task:update_description(TaskID, Description),
+                {ok, _, _} = traverse_task:update_description(TaskID, Description),
                 ok
         end
     catch
@@ -273,17 +286,20 @@ run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
                 [MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Job, JobID]})
     end, Jobs).
 
--spec maybe_finish(task_module(), id(), executor(), group(), description()) -> ok.
+-spec maybe_finish(task_module(), id(), executor(), group(), description(), boolean()) -> ok.
 maybe_finish(TaskModule, TaskID, Executor, GroupID, #{
     master_jobs_delegated := Delegated
-} = Description) ->
+} = Description, Canceled) ->
     Done = maps:get(master_jobs_done, Description, 0),
     Failed = maps:get(master_jobs_failed, Description, 0),
-    case Delegated == Done + Failed of
-        true ->
+    case {Delegated == Done + Failed, Canceled} of
+        {true, _} ->
             % Co jesli nigdy sie nie zgra (polecial blad na save'owaniu info o starcie slave'a, a slave sie nie uruchil)
             ok = TaskModule:task_finished(TaskID),
             ok = traverse_task:finish(TaskID, TaskModule, Executor, GroupID, finished),
+            check_task_list_and_run(TaskModule, Executor);
+        {_, true} ->
+            ok = traverse_task:finish(TaskID, TaskModule, Executor, GroupID, canceled),
             check_task_list_and_run(TaskModule, Executor);
         _ -> ok
     end.
