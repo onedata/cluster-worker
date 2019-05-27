@@ -57,10 +57,11 @@ list_task_modules() ->
 %%--------------------------------------------------------------------
 -spec init_task_module(traverse:task_module(), non_neg_integer()) -> ok | {error, term()}.
 init_task_module(TaskModule, Limit) ->
+    Node = node(),
     New = #traverse_tasks_load_balance{task_module = TaskModule,
-        ongoing_tasks_limit = Limit, nodes = [node()]},
+        ongoing_tasks_limit = Limit, nodes = [Node]},
     Diff = fun(#traverse_tasks_load_balance{nodes = Nodes} = Record) ->
-        {ok, Record#traverse_tasks_load_balance{nodes = [node() | Nodes],
+        {ok, Record#traverse_tasks_load_balance{nodes = [Node | (Nodes -- [Node])],
             ongoing_tasks_limit = Limit}}
     end,
     extract_ok(datastore_model:update(?CTX, ?KEY(TaskModule), Diff, New)).

@@ -27,11 +27,13 @@
     traverse_multitask_concurrent_test/1,
     traverse_multitask_sequential_test/1,
     traverse_loadbalancingt_test/1,
-    traverse_loadbalancingt_mixed_ids_test/1
+    traverse_loadbalancingt_mixed_ids_test/1,
+    traverse_restart_test/1
 ]).
 
 %% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, save_job/2, get_job/1]).
+-export([do_master_job/1, do_slave_job/1, task_finished/1, save_job/3, update_job/4,
+    get_job/1, list_ongoing_jobs/0]).
 
 all() ->
     ?ALL([
@@ -41,11 +43,14 @@ all() ->
         traverse_multitask_concurrent_test,
         traverse_multitask_sequential_test,
         traverse_loadbalancingt_test,
-        traverse_loadbalancingt_mixed_ids_test
+        traverse_loadbalancingt_mixed_ids_test,
+        traverse_restart_test
     ]).
 
 -define(CACHE, test_cache).
 -define(CALL_CACHE(Worker, Op, Args), rpc:call(Worker, tmp_cache, Op, [?CACHE | Args])).
+-define(MASTER_POOL_NAME(Pool), list_to_atom(atom_to_list(Pool) ++ "_master")).
+-define(SLAVE_POOL_NAME(Pool), list_to_atom(atom_to_list(Pool) ++ "_slave")).
 
 %%%===================================================================
 %%% Test functions
@@ -263,6 +268,63 @@ traverse_loadbalancingt_base(Config, Tasks, Check) ->
     end, Tasks),
     ok.
 
+traverse_restart_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_restart_test1">>, {self(), 1, 100}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_restart_test2">>, {self(), 1, 2}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run,
+        [?MODULE, <<"traverse_restart_test3">>, {self(), 1, 3}])),
+
+    RecAns = receive
+       stop ->
+           ?assertEqual(ok, rpc:call(Worker, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME(?MODULE)])),
+           ?assertEqual(ok, rpc:call(Worker, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME(?MODULE)]))
+    after
+       5000 ->
+           timeout
+    end,
+    ?assertEqual(ok, RecAns),
+    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 1])),
+
+    Expected = [2,3,4,
+        11,12,13,16,17,18,
+        101,102,103,106,107,108,
+        151,152,153,156,157,158,
+        1001,1002,1003,1006,1007,1008,
+        1051,1052,1053,1056,1057,1058,
+        1501,1502, 1503,1506,1507,1508,
+        1551,1552,1553,1556,1557, 1558],
+    ExpLen = length(Expected),
+    Ans = get_slave_ans(),
+    AnsLen = length(Ans),
+
+    SJobsNum = length(Expected),
+    MJobsNum = SJobsNum div 3,
+    Description = #{
+        slave_jobs_delegated => SJobsNum,
+        master_jobs_delegated => MJobsNum,
+        slave_jobs_done => SJobsNum,
+        master_jobs_done => MJobsNum,
+        master_jobs_failed => 0
+    },
+
+    Ans1 = lists:sublist(Ans, 1, AnsLen - 2*ExpLen),
+    Ans2 = lists:sublist(Ans, AnsLen - 2*ExpLen  + 1, ExpLen),
+    Ans3 = lists:sublist(Ans, AnsLen - ExpLen + 1, ExpLen),
+    ?assertEqual(Expected, lists:sort(Ans2)),
+    ?assertEqual(Expected, lists:sort(Ans3)),
+    ?assertEqual(length(Ans1 -- Expected), length(Ans1) - length(Expected)),
+
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test1">>])),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test2">>])),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test3">>])),
+    ok.
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -274,7 +336,7 @@ init_per_testcase(Case, Config) when
     Config;
 init_per_testcase(Case, Config) when
     Case =:= traverse_multitask_sequential_test ; Case =:= traverse_loadbalancingt_test ;
-    Case =:= traverse_loadbalancingt_mixed_ids_test ->
+    Case =:= traverse_loadbalancingt_mixed_ids_test ; Case =:= traverse_restart_test ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 1])),
     Config;
@@ -337,7 +399,15 @@ get_slave_ans_with_id() ->
 %%% Pool callbacks
 %%%===================================================================
 
+do_master_job({Master, 100, 100}) ->
+    timer:sleep(500),
+    Master ! stop,
+    timer:sleep(500),
+    do_master_job_helper({Master, 100, 100});
 do_master_job({Master, Num, ID}) ->
+    do_master_job_helper({Master, Num, ID}).
+
+do_master_job_helper({Master, Num, ID}) ->
     MasterJobs = case Num < 1000 of
         true -> [{Master, 10 * Num, ID}, {Master, 10 * Num + 5, ID}];
         _ -> []
@@ -345,6 +415,8 @@ do_master_job({Master, Num, ID}) ->
 
     SlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}, {Master, Num + 3, ID}],
     {ok, SlaveJobs, MasterJobs}.
+
+
 
 do_slave_job({Master, Num, ID}) ->
     Master ! {slave, Num, ID},
@@ -354,14 +426,34 @@ task_finished(_) ->
     timer:sleep(100),
     ok.
 
-save_job(Job, waiting) ->
+save_job(Job, TaskID, waiting) ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
     ID = list_to_binary(ref_to_list(make_ref())),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, Job} | List]),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List]),
     {ok, ID};
-save_job(_, _) ->
-    {ok, <<"ID">>}.
+save_job(Job, TaskID, started) ->
+    ID = list_to_binary(ref_to_list(make_ref())),
+    save_started_job(ID, Job, TaskID),
+    {ok, ID}.
+
+update_job(ID, Job, TaskID, started) ->
+    save_started_job(ID, Job, TaskID),
+    ok;
+update_job(ID, _Job, _TaskID, finish) ->
+    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
+    ok.
+
+save_started_job(ID, Job, TaskID) ->
+    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, [{ID, {Job, TaskID}} | proplists:delete(ID, List)]).
 
 get_job(ID) ->
-    {ok, Jobs} = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job),
-    {ok, proplists:get_value(ID, Jobs, undefined), undefined}.
+    Jobs1 = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
+    Jobs2 = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+    {Job, TaskID} =  proplists:get_value(ID, Jobs1 ++ Jobs2, {undefined, undefined}),
+    {ok, Job, TaskID}.
+
+list_ongoing_jobs() ->
+    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+    {ok, proplists:get_keys(List)}.

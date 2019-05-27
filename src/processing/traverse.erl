@@ -19,7 +19,7 @@
 -export([init_pool/4, stop_pool/1,
     run/3, run/4, run/5, run/6, maybe_run_scheduled_task/2]).
 %% Functions executed on pools
--export([execute_master_job/7, execute_slave_job/3]).
+-export([execute_master_job/8, execute_slave_job/3]).
 %% For rpc:
 -export([run_on_master_pool/7, check_task_list_and_run/2]).
 
@@ -54,17 +54,42 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, [node()]).
+%% @equiv init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, ?DEFAULT_EXECUTOR_ID).
 %% @end
 %%--------------------------------------------------------------------
 -spec init_pool(task_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
 init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
+    init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, ?DEFAULT_EXECUTOR_ID).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inits the pool and restarts tasks if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_pool(task_module(), non_neg_integer(), non_neg_integer(), non_neg_integer(), executor()) -> ok.
+init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Executor) ->
     {ok, _} = worker_pool:start_sup_pool(?MASTER_POOL_NAME(TaskModule),
         [{workers, MasterJobsNum}, {queue_type, lifo}]),
     {ok, _} = worker_pool:start_sup_pool(?SLAVE_POOL_NAME(TaskModule),
         [{workers, SlaveJobsNum}, {queue_type, lifo}]),
 
-    ok = traverse_tasks_load_balance:init_task_module(TaskModule, ParallelOrdersLimit).
+    ok = traverse_tasks_load_balance:init_task_module(TaskModule, ParallelOrdersLimit),
+    IDsToGroups = traverse_task:repair_ongoing_tasks(TaskModule, Executor),
+    {ok, JobIDs} = TaskModule:list_ongoing_jobs(),
+
+    lists:foreach(fun(JobID) ->
+        {ok, Job, TaskID} = TaskModule:get_job(JobID),
+        case proplists:get_value(TaskID, IDsToGroups) of
+            undefined ->
+                ok;
+            GR ->
+                {ok, _} = traverse_task:update_description(TaskID, #{
+                    master_jobs_delegated => 1
+                }),
+                ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
+                    TaskModule, TaskID, Executor, GR, [{Job, JobID}])
+        end
+    end, JobIDs).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -117,15 +142,15 @@ run(TaskModule, TaskID, TaskGroup, Job, Creator) ->
 run(TaskModule, TaskID, TaskGroup, Job, Creator, Executor) ->
     case traverse_tasks_load_balance:add_task(TaskModule, TaskGroup) of
         {ok, Node} ->
-            ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, undefined, #{
+            ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, {node, Node}, #{
                 master_jobs_delegated => 1
             }),
             ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
                 ?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
                 TaskModule, TaskID, Executor, TaskGroup, [Job]]);
         _ ->
-            {ok, InitialJob} = TaskModule:save_job(Job, waiting),
-            ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, InitialJob, #{})
+            {ok, InitialJob} = TaskModule:save_job(Job, TaskID, waiting),
+            ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, {job, InitialJob}, #{})
     end.
 
 %%--------------------------------------------------------------------
@@ -151,8 +176,8 @@ maybe_run_scheduled_task(TaskModule, Executor) ->
 %% Executes master job pool. To be executed inside pool.
 %% @end
 %%--------------------------------------------------------------------
--spec execute_master_job(pool(), pool(), task_module(), id(), executor(), group(), job()) -> ok.
-execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Job) ->
+-spec execute_master_job(pool(), pool(), task_module(), id(), executor(), group(), job(), job_id()) -> ok.
+execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Job, JobID) ->
     try
         % TODO - handle failures (jobow lub persystencji informacji co powinno zabic caly task)
         % TODO - przy startowaniu sprawdzamy czy task nie zostal anulowany
@@ -176,7 +201,7 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
             (_, {OkSum, ErrorSum}) -> {OkSum, ErrorSum + 1}
         end, {0, 0}, SlaveAnswers),
 
-        {ok, _} = TaskModule:save_job(Job, finish),
+        ok = TaskModule:update_job(JobID, Job, TaskID, finish),
         Description2 = #{
             slave_jobs_done => SlavesOk,
             master_jobs_failed => SlavesErrors,
@@ -235,12 +260,17 @@ run_on_slave_pool(Pool, TaskModule, TaskID, Jobs) ->
             worker_pool:default_strategy(), ?CALL_TIMEOUT)
     end, Jobs).
 
--spec run_on_master_pool(pool(), pool(), task_module(), id(), executor(), group(), job()) -> ok.
+-spec run_on_master_pool(pool(), pool(), task_module(), id(), executor(), group(), [job() | {job(), job_id()}]) -> ok.
 run_on_master_pool(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Jobs) ->
-    lists:foreach(fun(Job) ->
-        {ok, _} = TaskModule:save_job(Job, started),
-        ok = worker_pool:cast(MasterPool, {?MODULE, execute_master_job,
-            [MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Job]})
+    lists:foreach(fun
+        ({Job, JobID}) ->
+            ok = TaskModule:update_job(JobID, Job, TaskID, started),
+            ok = worker_pool:cast(MasterPool, {?MODULE, execute_master_job,
+                [MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Job, JobID]});
+        (Job) ->
+            {ok, JobID} = TaskModule:save_job(Job, TaskID, started),
+            ok = worker_pool:cast(MasterPool, {?MODULE, execute_master_job,
+                [MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID, Job, JobID]})
     end, Jobs).
 
 -spec maybe_finish(task_module(), id(), executor(), group(), description()) -> ok.
@@ -282,13 +312,13 @@ run_task(TaskModule, TaskID, Executor, GroupID, MainJobID, Creator) ->
     % TODO - zrobic tu case i obsluzyc error not found (nie zsyncowal sie dokument)
     % TODO - wywolac callback on_task_start
     % TODO - osluzyc sytuacje jak juz task zostal uruchomiony na innym node
-    {ok, Job, _Node} = TaskModule:get_job(MainJobID), % A moze info o nodzie przechowywac w linkach?
+    {ok, Job, _} = TaskModule:get_job(MainJobID), % A moze info o nodzie przechowywac w linkach?
     case traverse_task:start(TaskID, TaskModule, GroupID, Executor, Creator, #{
         master_jobs_delegated => 1
     }) of
         ok ->
             ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
-                TaskModule, TaskID, Executor, GroupID, [Job]);
+                TaskModule, TaskID, Executor, GroupID, [{Job, MainJobID}]);
         {error, already_started} ->
             check_task_list_and_run(TaskModule, Executor)
     end.

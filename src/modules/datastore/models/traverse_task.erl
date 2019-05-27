@@ -16,7 +16,8 @@
 
 %% API
 -export([create/7, start/6, on_task_start/5, update_description/2, update_status/2,
-    finish/5, cancel/1, on_task_cancel/1, get/1, get_next_task/2]).
+    finish/5, cancel/1, on_task_cancel/1, get/1, get_next_task/2,
+    repair_ongoing_tasks/2]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
@@ -55,14 +56,14 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec create(key(), traverse:task_module(), traverse:executor(), traverse:executor(),
-    traverse:group(), traverse:job_id() | undefined, traverse:description()) -> ok.
-create(ID, TaskModule, Executor, Creator, GroupID, ScheduledJob, InitialDescription) ->
+    traverse:group(), {job, traverse:job_id()} | {node, node()}, traverse:description()) -> ok.
+create(ID, TaskModule, Executor, Creator, GroupID, StartInfo, InitialDescription) ->
     Value0 = #traverse_task{task_module = TaskModule,
             description = InitialDescription, executor = Executor, group = GroupID},
 
-    {LinkKey, LinkValue, Value} = case ScheduledJob of
-        undefined -> {?ONGOING_KEY(TaskModule), ID, Value0#traverse_task{status = ongoing, enqueued = false}};
-        _ -> {?SCHEDULED_KEY(TaskModule), ScheduledJob, Value0}
+    {LinkKey, LinkValue, Value} = case StartInfo of
+        {node, Node} -> {?ONGOING_KEY(TaskModule), atom_to_binary(Node, utf8), Value0#traverse_task{status = ongoing, enqueued = false}};
+        {job, Job} -> {?SCHEDULED_KEY(TaskModule), Job, Value0}
     end,
 
     {ok, _} = datastore_model:create(?CTX, #document{key = ID, value = Value}),
@@ -89,12 +90,13 @@ start(ID, TaskModule, GroupID, Executor, Creator, NweDescription) ->
         (_) ->
             {error, already_started}
     end,
+    Node = node(),
     case datastore_model:update(?CTX, ID, Diff) of
         {ok, _} ->
             run_on_trees(?ONGOING_KEY(TaskModule), GroupID, fun(Key) ->
                 [{ok, _}] = datastore_model:add_links(?CTX(Executor),
-                    Key, Executor, [{ID, ID}])
-                                                            end),
+                    Key, Executor, [{ID, atom_to_binary(Node, utf8)}])
+            end),
 
             case Creator =:= Executor of
                 true ->
@@ -211,10 +213,42 @@ get(Key) ->
     {ok, {traverse:id(), traverse:job_id(), traverse:executor()} | no_tasks_found}
     | {error, term()}.
 get_next_task(TaskModule, Group) ->
+    % TODO - brac tylko taski danego providera
     datastore_model:fold_links(?CTX, ?GROUP_KEY(?SCHEDULED_KEY(TaskModule), Group), all, fun
         (#link{name = Name, target = Target, tree_id = Creator}, _) ->
             {stop, {Name, Target, Creator}}
     end, no_tasks_found, #{}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Repairs ongoing tasks (after node restart).
+%% @end
+%%--------------------------------------------------------------------
+-spec repair_ongoing_tasks(traverse:task_module(), traverse:executor()) ->
+    [{traverse:id(), traverse:group()}].
+repair_ongoing_tasks(TaskModule, Executor) ->
+    Node = atom_to_binary(node(), utf8),
+    {ok, TaskIDs} = datastore_model:fold_links(?CTX, ?ONGOING_KEY(TaskModule), Executor, fun
+        (#link{name = Name, target = TaskNode}, Acc) ->
+            case TaskNode of
+                Node -> {ok, [Name | Acc]};
+                _ -> {ok, Acc}
+            end
+    end, [], #{}),
+
+    Diff = fun(#traverse_task{description = Description} = Task) ->
+        Done = maps:get(master_jobs_done, Description, 0),
+        Failed = maps:get(master_jobs_failed, Description, 0),
+        % TODO - to samo dla slave_jobs
+        FinalDescription = Description#{master_jobs_delegated => Done + Failed},
+        {ok, Task#traverse_task{description = FinalDescription}}
+    end,
+
+    lists:map(fun(ID) ->
+        {ok, #document{value = #traverse_task{group = GR}}} =
+            datastore_model:update(?CTX, ID, Diff),
+        {ID, GR}
+    end, TaskIDs).
 
 %%%===================================================================
 %%% datastore_model callbacks
