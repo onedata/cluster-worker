@@ -16,7 +16,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init_pool/4, stop_pool/1,
+-export([init_pool/4, init_pool/5, stop_pool/1,
     run/3, run/4, run/5, run/6, maybe_run_scheduled_task/2]).
 %% Functions executed on pools
 -export([execute_master_job/8, execute_slave_job/3]).
@@ -24,6 +24,7 @@
 -export([run_on_master_pool/7, check_task_list_and_run/2]).
 
 -type id() :: traverse_task:key().
+-type task() :: traverse_task:doc().
 -type group() :: binary().
 -type job() :: term().
 -type job_id() :: datastore:key().
@@ -83,7 +84,7 @@ init_pool(TaskModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Executor
             undefined ->
                 ok;
             GR ->
-                {ok, _, _} = traverse_task:update_description(TaskID, #{
+                {ok, _, _} = traverse_task:update_description(TaskID, TaskModule, #{
                     master_jobs_delegated => 1
                 }),
                 ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
@@ -140,14 +141,20 @@ run(TaskModule, TaskID, TaskGroup, Job, Creator) ->
 %%--------------------------------------------------------------------
 -spec run(task_module(), id(), group(), job(), executor(), executor()) -> ok.
 run(TaskModule, TaskID, TaskGroup, Job, Creator, Executor) ->
-    case traverse_tasks_load_balance:add_task(TaskModule, TaskGroup) of
-        {ok, Node} ->
-            ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, {node, Node}, #{
-                master_jobs_delegated => 1
-            }),
-            ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
-                ?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
-                TaskModule, TaskID, Executor, TaskGroup, [Job]]);
+    case Creator =:= Executor of
+        true ->
+            case traverse_tasks_load_balance:add_task(TaskModule, TaskGroup) of
+                {ok, Node} ->
+                    ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, {node, Node}, #{
+                        master_jobs_delegated => 1
+                    }),
+                    ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
+                        ?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
+                        TaskModule, TaskID, Executor, TaskGroup, [Job]]);
+                {error, limit_exceeded} ->
+                    {ok, InitialJob} = TaskModule:save_job(Job, TaskID, waiting),
+                    ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, {job, InitialJob}, #{})
+            end;
         _ ->
             {ok, InitialJob} = TaskModule:save_job(Job, TaskID, waiting),
             ok = traverse_task:create(TaskID, TaskModule, Executor, Creator, TaskGroup, {job, InitialJob}, #{})
@@ -158,13 +165,53 @@ run(TaskModule, TaskID, TaskGroup, Job, Creator, Executor) ->
 %% Checks if there is task to be executed ans starts it if possible.
 %% @end
 %%--------------------------------------------------------------------
--spec maybe_run_scheduled_task(task_module(), executor()) -> ok.
-maybe_run_scheduled_task(TaskModule, Executor) ->
-    case traverse_tasks_load_balance:add_task(TaskModule) of
-        {ok, Node} ->
-            rpc:call(Node, ?MODULE, check_task_list_and_run, [TaskModule, Executor]);
+%%-spec maybe_run_scheduled_task(task()) -> ok.
+maybe_run_scheduled_task({task, Task}, Executor) ->
+    case traverse_task:get_executor(Task) =:= Executor of
+        true ->
+            {TaskModule, MainJobID} = traverse_task:get_task_module_and_job(Task),
+
+            case TaskModule:get_job(MainJobID) of
+                {ok, Job, TaskID} ->
+                    maybe_run_scheduled_task(TaskModule, TaskID, Task, MainJobID, Job);
+                {error, not_found} ->
+                    ok
+            end;
         _ ->
             ok
+    end;
+% TODO - moze podac caly job?
+maybe_run_scheduled_task({job, TaskModule, MainJobID}, Executor) ->
+    case TaskModule:get_job(MainJobID) of
+        {ok, Job, TaskID} ->
+            case traverse_task:get(TaskID) of
+                {ok, Task} ->
+                    case traverse_task:get_executor(Task) =:= Executor of
+                        true ->
+                            maybe_run_scheduled_task(TaskModule, TaskID, Task, MainJobID, Job);
+                        _ ->
+                            ok
+                    end;
+                {error, not_found} ->
+                    ok
+            end;
+        {error, not_found} ->
+            ok
+    end.
+
+maybe_run_scheduled_task(TaskModule, TaskID, Task, MainJobID, Job) ->
+    case traverse_tasks_load_balance:add_task(TaskModule) of
+        {ok, Node} ->
+            case traverse_task:start(Task, #{
+                master_jobs_delegated => 1
+            }) of
+                {ok, Executor, GroupID} ->
+                    ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
+                        ?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
+                        TaskModule, TaskID, Executor, GroupID, [{Job, MainJobID}]]);
+                {error, already_started} ->
+                    ok
+            end
     end.
 
 %%%===================================================================
@@ -191,7 +238,7 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
             slave_jobs_delegated => length(SlaveJobsList),
             master_jobs_delegated => length(MasterJobsList)
         },
-        {ok, _, Canceled} = UpdateAns = traverse_task:update_description(TaskID, Description),
+        {ok, _, Canceled} = UpdateAns = traverse_task:update_description(TaskID, TaskModule, Description),
 
         {_, NewDescription, Canceled2} = case Canceled of
             true ->
@@ -211,7 +258,7 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
                     master_jobs_failed => SlavesErrors,
                     master_jobs_done => 1
                 },
-                {ok, _, _} = traverse_task:update_description(TaskID, Description2)
+                {ok, _, _} = traverse_task:update_description(TaskID, TaskModule, Description2)
         end,
 
         try
@@ -228,7 +275,7 @@ execute_master_job(MasterPool, SlavePool, TaskModule, TaskID, Executor, GroupID,
             ErrorDescription = #{
                 master_jobs_failed => 1
             },
-            {ok, ErrorDescription2, Canceled3} = traverse_task:update_description(TaskID, ErrorDescription),
+            {ok, ErrorDescription2, Canceled3} = traverse_task:update_description(TaskID, TaskModule, ErrorDescription),
 
             try
                 maybe_finish(TaskModule, TaskID, Executor, GroupID, ErrorDescription2, Canceled3)
@@ -252,7 +299,7 @@ execute_slave_job(TaskModule, TaskID, Job) ->
             ok ->
                 ok;
             {ok, Description} ->
-                {ok, _, _} = traverse_task:update_description(TaskID, Description),
+                {ok, _, _} = traverse_task:update_description(TaskID, TaskModule, Description),
                 ok
         end
     catch
@@ -336,6 +383,8 @@ run_task(TaskModule, TaskID, Executor, GroupID, MainJobID, Creator) ->
             ok = run_on_master_pool(?MASTER_POOL_NAME(TaskModule), ?SLAVE_POOL_NAME(TaskModule),
                 TaskModule, TaskID, Executor, GroupID, [{Job, MainJobID}]);
         {error, already_started} ->
+            check_task_list_and_run(TaskModule, Executor);
+        {error, not_found} ->
             check_task_list_and_run(TaskModule, Executor)
     end.
 

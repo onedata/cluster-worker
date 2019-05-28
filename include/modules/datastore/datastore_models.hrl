@@ -74,6 +74,7 @@
 -record(traverse_task, {
     task_module :: traverse:task_module(),
     status = waiting :: traverse:status(),
+    main_job = <<>> :: traverse:job_id(),
     enqueued = true :: boolean(),
     canceled = false :: boolean(),
     executor :: traverse:executor(),
