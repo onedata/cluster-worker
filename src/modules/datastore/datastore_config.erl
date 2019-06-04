@@ -29,7 +29,7 @@
     gs_session,
     gs_subscription,
     traverse_task,
-    traverse_tasks_load_balance
+    traverse_load_balance
 ]).
 
 -define(PLUGIN, datastore_config_plugin).

@@ -72,22 +72,25 @@
 }).
 
 -record(traverse_task, {
-    task_module :: traverse:task_module(),
-    status = waiting :: traverse:status(),
-    main_job = <<>> :: traverse:job_id(),
-    enqueued = true :: boolean(),
-    canceled = false :: boolean(),
+    pool :: traverse:pool(),
+    callback_module :: traverse:callback_module(),
+    creator :: traverse:executor(),
     executor :: traverse:executor(),
     group :: traverse:group(),
-    description = #{} :: maps:map()
+    timestamp :: traverse:timestamp(),
+    main_job_id = <<>> :: traverse:job_id(),
+    enqueued = true :: boolean(),
+    canceled = false :: boolean(),
+    node :: undefined | node(),
+    status = scheduled :: traverse:status(),
+    description = #{} :: traverse:description()
 }).
 
--record(traverse_tasks_load_balance, {
-    task_module :: traverse:task_module(),
+-record(traverse_load_balance, {
+    pool :: traverse:pool(),
     ongoing_tasks = 0 :: non_neg_integer(),
     ongoing_tasks_limit = 0 :: non_neg_integer(),
     groups = [] :: [traverse:group()],
-    groups_to_cancel = [] :: [traverse:group()],
     nodes = [] :: [node()]
 }).
 

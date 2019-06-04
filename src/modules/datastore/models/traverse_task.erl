@@ -14,40 +14,33 @@
 
 -include("modules/datastore/datastore_models.hrl").
 
-%% API
--export([create/7, start/2, start/6, on_task_start/5, update_description/3, update_status/3,
-    finish/5, cancel/2, on_task_cancel/1, get/1, get_next_task/2,
-    repair_ongoing_tasks/2, get_local_executor/0, get_task_module_and_job/1, get_executor/1]).
+%% Lifecycle API
+-export([create/10, start/4, finish/4, cancel/4, on_task_change/2]).
+%%% Setters and getters API
+-export([update_description/4, update_status/4, fix_description/3,
+    get/2, get_info/1, get_info/2]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
 
 %% code/decode description
--export([encode/1, decode/1]).
+-export([encode_description/1, decode_description/1]).
 
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
 -type record() :: #traverse_task{}.
 -type doc() :: datastore_doc:doc(record()).
 
--export_type([key/0, doc/0]).
-
-% TODO - sortowac drzewa po czasie
-% TODO - generowac ID sklejajac ID z nazwa modulu
--define(SCHEDULED_KEY(TaskModule), ?LINK_KEY(TaskModule, "SCHEDULED_")).
--define(ONGOING_KEY(TaskModule), ?LINK_KEY(TaskModule, "ONGOING_")).
--define(ENDED_KEY(TaskModule), ?LINK_KEY(TaskModule, "ENDED_")).
--define(LINK_KEY(TaskModule, Prefix), <<Prefix, (atom_to_binary(TaskModule, utf8))/binary>>).
--define(GROUP_KEY(Key, Group), <<Key/binary, "###", Group/binary>>).
+-export_type([ctx/0, key/0, doc/0]).
 
 -define(CTX, #{
     model => ?MODULE
 }).
 
--define(LOCAL_EXECUTOR_ID, <<"executor">>).
+-define(ID(Pool, ID), <<Pool/binary, "###", ID/binary>>).
 
 %%%===================================================================
-%%% API
+%%% Lifecycle API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
@@ -55,31 +48,25 @@
 %% Creates task document.
 %% @end
 %%--------------------------------------------------------------------
--spec create(key(), traverse:task_module(), traverse:executor(), traverse:executor(),
-    traverse:group(), {job, traverse:job_id()} | {node, node()}, traverse:description()) -> ok.
-create(ID, TaskModule, Executor, Creator, GroupID, StartInfo, InitialDescription) ->
-    Value0 = #traverse_task{task_module = TaskModule,
-            description = InitialDescription, executor = Executor, group = GroupID},
+-spec create(ctx(), traverse:pool(), traverse:callback_module(), key(), traverse:executor(), traverse:executor(),
+    traverse:group(), traverse:job_id(), undefined | node(), traverse:description()) -> ok.
+create(ExtendedCtx, Pool, CallbackModule, ID, Creator, Executor, GroupID, Job, Node, InitialDescription) ->
+    {ok, Timestamp} = get_timestamp(CallbackModule),
+    Value0 = #traverse_task{pool = Pool, callback_module = CallbackModule, creator = Creator, executor = Executor,
+        group = GroupID, description = InitialDescription, timestamp = Timestamp, main_job_id = Job},
 
-    {LinkKey, LinkValue, Value} = case StartInfo of
-        {node, Node} -> {?ONGOING_KEY(TaskModule), atom_to_binary(Node, utf8), Value0#traverse_task{status = ongoing, enqueued = false}};
-        {job, Job} -> {?SCHEDULED_KEY(TaskModule), Job, Value0#traverse_task{main_job = Job}}
+    Value = case Node of
+        undefined -> Value0;
+        _ -> Value0#traverse_task{status = ongoing, enqueued = false, node = Node}
     end,
+    {ok, _} = datastore_model:create(ExtendedCtx, #document{key = ?ID(Pool, ID), value = Value}),
 
-    Ctx = get_ctx(TaskModule),
-    % TODO - ustawianie scope raczej nie potrzebne
-    {ok, _} = datastore_model:create(Ctx, #document{key = ID, value = Value, scope = maps:get(scope, Ctx, <<>>)}),
-
-    run_on_trees(LinkKey, GroupID, fun(Key) ->
-        [{ok, _}] = datastore_model:add_links(get_ctx(TaskModule),
-            Key, Creator, [{ID, LinkValue}])
-    end),
-    % TODO - chyba bez sensu bo rejestrujemy grupy ktore czekaja (wiec nie zawsze trzeba to robic - sprawdz ScheduledJob)
-    case {Executor =:= Creator, StartInfo} of
-        {true, {job, _}} ->
-            ok = traverse_tasks_load_balance:register_group(TaskModule, GroupID);
+    case Node of
+        undefined ->
+            ok = traverse_task_list:add_scheduled_link(ExtendedCtx, Pool, Creator, ID, Timestamp, GroupID, Executor),
+            ok = traverse_load_balance:register_group(Pool, GroupID);
         _ ->
-            ok
+            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, ID, Timestamp)
     end.
 
 %%--------------------------------------------------------------------
@@ -87,39 +74,77 @@ create(ID, TaskModule, Executor, Creator, GroupID, StartInfo, InitialDescription
 %% Updates information about task's start.
 %% @end
 %%--------------------------------------------------------------------
--spec start(key(), traverse:task_module(), traverse:group(),
-    traverse:executor(), traverse:executor(), traverse:description()) -> ok | {error, already_started}.
-start(ID, TaskModule, GroupID, Executor, Creator, NweDescription) ->
-    Diff = fun
-        (#traverse_task{status = waiting} = Task) ->
-            {ok, Task#traverse_task{status = ongoing, enqueued = false}};
-        (_) ->
-            {error, already_started}
-    end,
+-spec start(ctx(), traverse:pool(), key(), traverse:description()) -> ok | {error, term()}.
+start(ExtendedCtx, Pool, ID, NewDescription) ->
     Node = node(),
-    case datastore_model:update(get_ctx(TaskModule), ID, Diff) of
-        {ok, _} ->
-            run_on_trees(?ONGOING_KEY(TaskModule), GroupID, fun(Key) ->
-                [{ok, _}] = datastore_model:add_links(get_ctx(TaskModule),
-                    Key, Executor, [{ID, atom_to_binary(Node, utf8)}])
-            end),
+    Diff = fun
+               (#traverse_task{status = scheduled} = Task) ->
+                   {ok, Task#traverse_task{status = ongoing, enqueued = false, node = Node, description = NewDescription}};
+               (_) ->
+                   {error, already_started}
+           end,
+    case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
+        {ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor, creator = Creator, group = GroupID}}} ->
+            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, ID, Timestamp),
 
             case Creator =:= Executor of
                 true ->
-                    on_task_start(ID, TaskModule, GroupID, Creator, NweDescription);
+                    ok = traverse_task_list:delete_scheduled_link(ExtendedCtx, Pool, Creator, ID, Timestamp, GroupID, Executor);
                 _ ->
-                    {ok, _, _} = update_description(ID, TaskModule, NweDescription)
-            end,
-            ok;
+                    ok
+            end;
         Other ->
             Other
     end.
 
-start(#document{key = ID, value = #traverse_task{task_module = TaskModule, group = GroupID,
-    executor = Executor}}, NweDescription) ->
-    case start(ID, TaskModule, GroupID, Executor, <<>>, NweDescription) of
-        ok -> {ok, Executor, GroupID};
-        Other -> Other
+%%--------------------------------------------------------------------
+%% @doc
+%% Finishes task.
+%% @end
+%%--------------------------------------------------------------------
+-spec finish(ctx(), traverse:pool(), key(), traverse:status()) -> ok | {error, term()}.
+finish(ExtendedCtx, Pool, ID, FinalStatus) ->
+    Diff = fun(Task) ->
+        {ok, Task#traverse_task{status = FinalStatus}}
+    end,
+    case {datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff), FinalStatus} of
+        {{ok, _}, canceled} ->
+            ok;
+        {{ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor}}}, _} ->
+            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, ID, Timestamp),
+            ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, ID, Timestamp);
+        {Other, _} ->
+            Other
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Cancels task.
+%% @end
+%%--------------------------------------------------------------------
+-spec cancel(ctx(), traverse:pool(), key(), traverse:executor()) -> ok | {error, term()}.
+cancel(ExtendedCtx, Pool, ID, Self) ->
+    Diff = fun(Task) ->
+        {ok, Task#traverse_task{canceled = true}}
+    end,
+    case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
+        {ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor, creator = Creator, group = GroupID}}} ->
+            case Self of
+                Executor ->
+                    ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, ID, Timestamp),
+                    ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, ID, Timestamp);
+                _ ->
+                    ok
+            end,
+
+            case Self of
+                Creator ->
+                    ok = traverse_task_list:delete_scheduled_link(ExtendedCtx, Pool, Creator, ID, Timestamp, GroupID, Executor);
+                _ ->
+                    ok
+            end;
+        Other ->
+            Other
     end.
 
 %%--------------------------------------------------------------------
@@ -127,31 +152,29 @@ start(#document{key = ID, value = #traverse_task{task_module = TaskModule, group
 %% Updates information when task is started by other executor.
 %% @end
 %%--------------------------------------------------------------------
--spec on_task_start(key(), traverse:task_module(), traverse:group(),
-    traverse:executor(), traverse:description()) -> ok.
-on_task_start(ID, TaskModule, GroupID, Creator, NweDescription) ->
-    {ok, _, _} = update_description(ID, TaskModule, NweDescription),
-    run_on_trees(?SCHEDULED_KEY(TaskModule), GroupID, fun(Key) ->
-        [ok] = datastore_model:delete_links(get_ctx(TaskModule),
-            Key, Creator, [ID])
-    end),
+-spec on_task_change(doc(), traverse:executor()) -> ok.
+on_task_change(#document{value = #traverse_task{}}, _Self) ->
     ok.
+
+%%%===================================================================
+%%% Setters and getters API
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Updates task description field.
 %% @end
 %%--------------------------------------------------------------------
--spec update_description(key(), traverse:task_module(), traverse:description()) ->
+-spec update_description(ctx(), traverse:pool(), key(), traverse:description()) ->
     {ok, traverse:description(), boolean()} | {error, term()}.
-update_description(ID, TaskModule, NweDescription) ->
+update_description(ExtendedCtx, Pool, ID, NweDescription) ->
     Diff = fun(#traverse_task{description = Description} = Task) ->
         FinalDescription = maps:fold(fun(K, V, Acc) ->
             Acc#{K => V + maps:get(K, Description, 0)}
         end, Description, NweDescription),
         {ok, Task#traverse_task{description = FinalDescription}}
     end,
-    case datastore_model:update(get_ctx(TaskModule), ID, Diff) of
+    case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
         {ok, #document{value = #traverse_task{description = UpdatedDescription,
             canceled = Canceled}}} ->
             {ok, UpdatedDescription, Canceled};
@@ -164,115 +187,78 @@ update_description(ID, TaskModule, NweDescription) ->
 %% Updates task status field.
 %% @end
 %%--------------------------------------------------------------------
--spec update_status(key(), traverse:task_module(), traverse:status()) ->
+-spec update_status(ctx(), traverse:pool(), key(), traverse:status()) ->
     {ok, doc()} | {error, term()}.
-update_status(ID, TaskModule, NewStatus) ->
+update_status(ExtendedCtx, Pool, ID, NewStatus) ->
     Diff = fun(Task) ->
         {ok, Task#traverse_task{status = NewStatus}}
     end,
-    datastore_model:update(get_ctx(TaskModule), ID, Diff).
+    datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Finishes task.
+%% Fix task description after reboot.
 %% @end
 %%--------------------------------------------------------------------
--spec finish(key(), traverse:task_module(), traverse:executor(),
-    traverse:group(), traverse:status()) -> ok | {error, term()}.
-finish(ID, TaskModule, Executor, GroupID, FinalStatus) ->
-    {ok, _} = update_status(ID, TaskModule, FinalStatus),
+-spec fix_description(ctx(), traverse:pool(), key()) -> ok | {error, term()}.
+fix_description(ExtendedCtx, Pool, ID) ->
+    Node = node(),
+    Diff = fun
+               (#traverse_task{node = TaskNode, description = Description} = Task) when TaskNode =:= Node ->
+                   MDone = maps:get(master_jobs_done, Description, 0),
+                   MFailed = maps:get(master_jobs_failed, Description, 0),
 
-    run_on_trees(?ENDED_KEY(TaskModule), GroupID, fun(Key) ->
-        [{ok, _}] = datastore_model:add_links(get_ctx(TaskModule),
-            Key, Executor, [{ID, ID}])
-    end),
-    run_on_trees(?ONGOING_KEY(TaskModule), GroupID, fun(Key) ->
-        [ok] = datastore_model:delete_links(get_ctx(TaskModule),
-            Key, Executor, [ID])
-    end),
-    ok.
+                   SDone = maps:get(slave_jobs_done, Description, 0),
+                   SFailed = maps:get(slave_jobs_failed, Description, 0),
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Cancels task.
-%% @end
-%%--------------------------------------------------------------------
--spec cancel(key(), traverse:task_module()) -> ok | {error, term()}.
-cancel(ID, TaskModule) ->
-    % TODO - wywalenie z drzew
-    Diff = fun(Task) ->
-        {ok, Task#traverse_task{canceled = true}}
-    end,
-    {ok, _} = datastore_model:update(get_ctx(TaskModule), ID, Diff),
-    ok.
+                   FinalDescription = Description#{master_jobs_delegated => MDone + MFailed,
+                       slave_jobs_delegated => SDone + SFailed},
+                   {ok, Task#traverse_task{description = FinalDescription}};
+               (_) ->
+                   {error, other_node}
+           end,
 
-% TODO !!!
-on_task_cancel(_ID) ->
-    ok.
+    case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
+        {ok, _} ->
+            ok;
+        {error, other_node} ->
+            ok
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns task.
 %% @end
 %%--------------------------------------------------------------------
--spec get(key()) -> {ok, doc()} | {error, term()}.
-get(Key) ->
-    datastore_model:get(?CTX, Key).
+-spec get(traverse:pool(), key()) -> {ok, doc()} | {error, term()}.
+get(Pool, ID) ->
+    datastore_model:get(?CTX, ?ID(Pool, ID)).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns next task if for group.
+%% Returns info about task.
 %% @end
 %%--------------------------------------------------------------------
--spec get_next_task(traverse:task_module(), traverse:group()) ->
-    {ok, {traverse:id(), traverse:job_id(), traverse:executor()} | no_tasks_found}
-    | {error, term()}.
-get_next_task(TaskModule, Group) ->
-    % TODO - brac tylko taski danego providera
-    datastore_model:fold_links(get_ctx(TaskModule), ?GROUP_KEY(?SCHEDULED_KEY(TaskModule), Group), all, fun
-        (#link{name = Name, target = Target, tree_id = Creator}, _) ->
-            {stop, {Name, Target, Creator}}
-    end, no_tasks_found, #{}).
+-spec get_info(doc()) -> {ok, traverse:callback_module(),
+    traverse:executor(), traverse:job_id(), boolean(), boolean()}.
+get_info(#document{value = #traverse_task{callback_module = CallbackModule,
+    executor = Executor, main_job_id = MainJobID, enqueued = Enqueued, canceled = Canceled}}) ->
+    {ok, CallbackModule, Executor, MainJobID, Enqueued, Canceled}.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Repairs ongoing tasks (after node restart).
+%% Returns info about task.
 %% @end
 %%--------------------------------------------------------------------
--spec repair_ongoing_tasks(traverse:task_module(), traverse:executor()) ->
-    [{traverse:id(), traverse:group()}].
-repair_ongoing_tasks(TaskModule, Executor) ->
-    Node = atom_to_binary(node(), utf8),
-    {ok, TaskIDs} = datastore_model:fold_links(get_ctx(TaskModule), ?ONGOING_KEY(TaskModule), Executor, fun
-        (#link{name = Name, target = TaskNode}, Acc) ->
-            case TaskNode of
-                Node -> {ok, [Name | Acc]};
-                _ -> {ok, Acc}
-            end
-    end, [], #{}),
-
-    Diff = fun(#traverse_task{description = Description} = Task) ->
-        Done = maps:get(master_jobs_done, Description, 0),
-        Failed = maps:get(master_jobs_failed, Description, 0),
-        % TODO - to samo dla slave_jobs
-        FinalDescription = Description#{master_jobs_delegated => Done + Failed},
-        {ok, Task#traverse_task{description = FinalDescription}}
-    end,
-
-    lists:map(fun(ID) ->
-        {ok, #document{value = #traverse_task{group = GR}}} =
-            datastore_model:update(get_ctx(TaskModule), ID, Diff),
-        {ID, GR}
-    end, TaskIDs).
-
-get_local_executor() ->
-    ?LOCAL_EXECUTOR_ID.
-
-get_task_module_and_job(#document{value = #traverse_task{task_module = TaskModule, main_job = Job}}) ->
-    {TaskModule, Job}.
-
-get_executor(#document{value = #traverse_task{executor = Executor}}) ->
-    Executor.
+-spec get_info(traverse:pool(), key()) -> {ok, traverse:callback_module(),
+    traverse:executor(), traverse:job_id(), boolean(), boolean()} | {error, term()}.
+get_info(Pool, ID) ->
+    case datastore_model:get(?CTX, ?ID(Pool, ID)) of
+        {ok, Doc} ->
+            get_info(Doc);
+        Other ->
+            Other
+    end.
 
 %%%===================================================================
 %%% datastore_model callbacks
@@ -296,14 +282,18 @@ get_ctx() ->
     datastore_model:record_struct().
 get_record_struct(1) ->
     {record, [
-        {task_module, atom},
-        {status, atom},
-        {main_job, string},
-        {enqueued, boolean},
-        {canceled, boolean},
+        {pool, string},
+        {callback_module, atom},
+        {creator, string},
         {executor, string},
         {group, string},
-        {description, {custom, {?MODULE, encode, decode}}}
+        {timestamp, integer},
+        {main_job_id, string},
+        {enqueued, boolean},
+        {canceled, boolean},
+        {node, atom},
+        {status, atom},
+        {description, {custom, {?MODULE, encode_description, decode_description}}}
     ]}.
 
 %%--------------------------------------------------------------------
@@ -311,8 +301,8 @@ get_record_struct(1) ->
 %% Encodes description to JSON format.
 %% @end
 %%--------------------------------------------------------------------
--spec encode(traverse:description()) -> binary().
-encode(Description) ->
+-spec encode_description(traverse:description()) -> binary().
+encode_description(Description) ->
     json_utils:encode(Description).
 
 %%--------------------------------------------------------------------
@@ -320,8 +310,8 @@ encode(Description) ->
 %% Decodes description from JSON format.
 %% @end
 %%--------------------------------------------------------------------
--spec decode(binary()) -> traverse:description().
-decode(Term) ->
+-spec decode_description(binary()) -> traverse:description().
+decode_description(Term) ->
     Map = json_utils:decode(Term),
     lists:foldl(fun({K, V}, Acc) ->
         Acc#{binary_to_atom(K, utf8) => V}
@@ -331,16 +321,10 @@ decode(Term) ->
 %%% Internal functions
 %%%===================================================================
 
-get_ctx(TaskModule) ->
+-spec get_timestamp(traverse:callback_module()) -> {ok, traverse:timestamp()}.
+get_timestamp(CallbackModule) ->
     try
-        maps:merge(?CTX, TaskModule:get_sync_info())
+        CallbackModule:get_timestamp()
     catch
-        _:_ -> ?CTX#{local_links_tree_id => ?LOCAL_EXECUTOR_ID}
+        _:undef -> {ok, time_utils:system_time_millis()}
     end.
-
-
--spec run_on_trees(key(), traverse:group(), fun((key()) -> ok)) -> ok | no_return().
-run_on_trees(Key, Group, Fun) ->
-    Fun(Key),
-    Fun(?GROUP_KEY(Key, Group)),
-    ok.

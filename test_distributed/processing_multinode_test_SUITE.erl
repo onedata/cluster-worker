@@ -27,7 +27,7 @@
 ]).
 
 %% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, save_job/3, update_job/4,
+-export([do_master_job/1, do_slave_job/1, task_finished/1, save_job/5,
     get_job/1, list_ongoing_jobs/0]).
 
 all() ->
@@ -37,8 +37,9 @@ all() ->
         traverse_restart_test
     ]).
 
--define(MASTER_POOL_NAME(Pool), list_to_atom(atom_to_list(Pool) ++ "_master")).
--define(SLAVE_POOL_NAME(Pool), list_to_atom(atom_to_list(Pool) ++ "_slave")).
+-define(POOL, atom_to_binary(?MODULE, utf8)).
+-define(MASTER_POOL_NAME, list_to_atom(atom_to_list(?MODULE) ++ "_master")).
+-define(SLAVE_POOL_NAME, list_to_atom(atom_to_list(?MODULE) ++ "_slave")).
 
 %%%===================================================================
 %%% Test functions
@@ -58,7 +59,7 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
     [Worker, Worker2] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Num) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run,
-            [?MODULE, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>, {self(), 1, Num}]))
+            [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>, {self(), 1, Num}]))
     end, lists:seq(1, RunsNum)),
 
     Expected0 = [2,3,4,
@@ -74,10 +75,10 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
     MJobsNum = SJobsNum div 3,
     Description = #{
         slave_jobs_delegated => SJobsNum,
-        master_jobs_delegated => MJobsNum,
         slave_jobs_done => SJobsNum,
-        master_jobs_done => MJobsNum,
-        master_jobs_failed => 0
+        slave_jobs_failed => 0,
+        master_jobs_delegated => MJobsNum,
+        master_jobs_done => MJobsNum
     },
 
     Ans1 = get_node_slave_ans(Worker, CheckID),
@@ -96,29 +97,29 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
 
     lists:foreach(fun(Num) ->
         ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-            rpc:call(Worker, traverse_task, get, [<<KeyBeg/binary, (integer_to_binary(Num))/binary>>]))
+            rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]))
     end, lists:seq(1, RunsNum)),
     ok.
 
 traverse_restart_test(Config) ->
     [Worker, Worker2] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?MODULE, <<"traverse_restart_test1">>, {self(), 1, 100}])),
+        [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?MODULE, <<"traverse_restart_test1_1">>, {self(), 1, 101}])),
+        [?POOL, <<"traverse_restart_test1_1">>, {self(), 1, 101}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?MODULE, <<"traverse_restart_test2">>, {self(), 1, 2}])),
+        [?POOL, <<"traverse_restart_test2">>, {self(), 1, 2}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?MODULE, <<"traverse_restart_test3">>, {self(), 1, 3}])),
+        [?POOL, <<"traverse_restart_test3">>, {self(), 1, 3}])),
 
     RecAns = receive
                  {stop, W} ->
-                     ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME(?MODULE)])),
-                     ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME(?MODULE)])),
+                     ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
+                     ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME])),
                      receive
                          {stop, W2} ->
-                             ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME(?MODULE)])),
-                             ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME(?MODULE)]))
+                             ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
+                             ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME]))
                      after
                          5000 ->
                              timeout2
@@ -128,8 +129,8 @@ traverse_restart_test(Config) ->
                      timeout
              end,
     ?assertEqual(ok, RecAns),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 1])),
-    ?assertEqual(ok, rpc:call(Worker2, traverse, init_pool, [?MODULE, 3, 3, 1])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
+    ?assertEqual(ok, rpc:call(Worker2, traverse, init_pool, [?POOL, 3, 3, 1])),
 
     Expected = [2,3,4,
         11,12,13,16,17,18,
@@ -150,10 +151,10 @@ traverse_restart_test(Config) ->
     MJobsNum = SJobsNum div 3,
     Description = #{
         slave_jobs_delegated => SJobsNum,
-        master_jobs_delegated => MJobsNum,
         slave_jobs_done => SJobsNum,
-        master_jobs_done => MJobsNum,
-        master_jobs_failed => 0
+        slave_jobs_failed => 0,
+        master_jobs_delegated => MJobsNum,
+        master_jobs_done => MJobsNum
     },
 
     Ans1_1 = lists:sublist(Ans1, 1, Ans1Len - ExpLen),
@@ -166,13 +167,17 @@ traverse_restart_test(Config) ->
     ?assertEqual(length(Ans2_1 -- Expected), length(Ans2_1) - length(Expected)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test2">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test3">>])),
-    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test1">>])),
-    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [<<"traverse_restart_test1_1">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>])),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>])),
+%%    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+%%        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
+%%    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+%%        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>])),
     ok.
 
 %%%===================================================================
@@ -182,21 +187,29 @@ traverse_restart_test(Config) ->
 init_per_testcase(traverse_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 10]))
+        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
+        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
+    end, Workers),
+    lists:foreach(fun(Worker) ->
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10]))
     end, Workers),
     Config;
 init_per_testcase(Case, Config) when
     Case =:= traverse_and_queuing_test ; Case =:= traverse_restart_test ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?MODULE, 3, 3, 2]))
+        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
+        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
+    end, Workers),
+    lists:foreach(fun(Worker) ->
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 2]))
     end, Workers),
     Config.
 
 end_per_testcase(_, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, stop_pool, [?MODULE]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, stop_pool, [?POOL]))
     end, Workers).
 
 %%%===================================================================
@@ -234,7 +247,7 @@ do_master_job_helper({Master, Num, ID}) ->
     end,
 
     SlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}, {Master, Num + 3, ID}],
-    {ok, SlaveJobs, MasterJobs}.
+    {ok, #{slave_jobs => SlaveJobs, master_jobs => MasterJobs}}.
 
 do_slave_job({Master, Num, ID}) ->
     Master ! {slave, Num, ID, node()},
@@ -244,23 +257,22 @@ task_finished(_) ->
     timer:sleep(1000),
     ok.
 
-save_job(Job, TaskID, waiting) ->
+save_job(undefined, Job, _, TaskID, waiting) ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
     ID = list_to_binary(ref_to_list(make_ref())),
     application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List]),
     {ok, ID};
-save_job(Job, TaskID, started) ->
+save_job(undefined, Job, _, TaskID, on_pool) ->
     ID = list_to_binary(ref_to_list(make_ref())),
     save_started_job(ID, Job, TaskID),
-    {ok, ID}.
-
-update_job(ID, Job, TaskID, started) ->
+    {ok, ID};
+save_job(ID, Job, _, TaskID, on_pool) ->
     save_started_job(ID, Job, TaskID),
-    ok;
-update_job(ID, _Job, _TaskID, finish) ->
+    {ok, ID};
+save_job(ID, _Job, _, _TaskID, ended) ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
-    ok.
+    {ok, ID}.
 
 save_started_job(ID, Job, TaskID) ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
@@ -272,7 +284,7 @@ get_job(ID) ->
             rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
     end, [], consistent_hasing:get_all_nodes()),
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
-    {ok, Job, TaskID}.
+    {ok, Job, ?POOL, TaskID}.
 
 list_ongoing_jobs() ->
     List = lists:foldl(fun(Node, Acc) ->
