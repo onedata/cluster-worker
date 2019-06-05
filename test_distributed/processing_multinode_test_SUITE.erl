@@ -27,8 +27,8 @@
 ]).
 
 %% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, save_job/5,
-    get_job/1, list_ongoing_jobs/0]).
+-export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5,
+    get_job/1, list_ongoing_jobs/1]).
 
 all() ->
     ?ALL([
@@ -257,19 +257,19 @@ task_finished(_) ->
     timer:sleep(1000),
     ok.
 
-save_job(undefined, Job, _, TaskID, waiting) ->
+update_job_progress(ID0, Job, _, TaskID, waiting) when ID0 =:= undefined ; ID0 =:= main_job ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
     ID = list_to_binary(ref_to_list(make_ref())),
     application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List]),
     {ok, ID};
-save_job(undefined, Job, _, TaskID, on_pool) ->
+update_job_progress(ID0, Job, _, TaskID, on_pool) when ID0 =:= undefined ; ID0 =:= main_job ->
     ID = list_to_binary(ref_to_list(make_ref())),
     save_started_job(ID, Job, TaskID),
     {ok, ID};
-save_job(ID, Job, _, TaskID, on_pool) ->
+update_job_progress(ID, Job, _, TaskID, on_pool) ->
     save_started_job(ID, Job, TaskID),
     {ok, ID};
-save_job(ID, _Job, _, _TaskID, ended) ->
+update_job_progress(ID, _Job, _, _TaskID, ended) ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
     {ok, ID}.
@@ -286,8 +286,8 @@ get_job(ID) ->
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
     {ok, Job, ?POOL, TaskID}.
 
-list_ongoing_jobs() ->
+list_ongoing_jobs(_) ->
     List = lists:foldl(fun(Node, Acc) ->
         Acc ++ rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
     end, [], consistent_hasing:get_all_nodes()),
-    {ok, proplists:get_keys(List)}.
+    {ok, proplists:get_keys(List), finished}.

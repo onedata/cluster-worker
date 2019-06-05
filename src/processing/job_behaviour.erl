@@ -30,14 +30,6 @@
 %%--------------------------------------------------------------------
 -callback do_slave_job(traverse:job()) -> ok | {ok, traverse:description()} | {error, term()}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Is executed when whole task is finished.
-%% @end
-%%--------------------------------------------------------------------
-% TODO - dodac callback on_task_start (catchowac jak go nie ma - to samo z finished)
--callback task_finished(traverse:id()) -> ok.
-
 %%%===================================================================
 %%% Job persistence API
 %%%===================================================================
@@ -47,7 +39,8 @@
 %% Saves information about master job.
 %% @end
 %%--------------------------------------------------------------------
--callback save_job(traverse:job_id(), traverse:job(), traverse:pool(), traverse:id(), traverse:job_status()) ->
+-callback update_job_progress(undefined | main_job | traverse:job_id(),
+    traverse:job(), traverse:pool(), traverse:id(), traverse:job_status()) ->
     {ok, traverse:job_id()}  | {error, term()}.
 
 %%--------------------------------------------------------------------
@@ -63,11 +56,29 @@
 %% Lists ongoing master jobs.
 %% @end
 %%--------------------------------------------------------------------
--callback list_ongoing_jobs() ->
-    {ok, [traverse:job_id()]}  | {error, term()}.
+-callback list_ongoing_jobs(undefined | traverse:list_job_restart_info()) ->
+    {ok, [traverse:job_id()], finished | traverse:list_job_restart_info()}  | {error, term()}.
 
 %%%===================================================================
-%%% Job sync and queuing API
+%%% Optional task lifecycle API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed when whole task is started.
+%% @end
+%%--------------------------------------------------------------------
+-callback task_started(traverse:id()) -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed when whole task is finished.
+%% @end
+%%--------------------------------------------------------------------
+-callback task_finished(traverse:id()) -> ok.
+
+%%%===================================================================
+%%% Optional job sync and queuing API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
