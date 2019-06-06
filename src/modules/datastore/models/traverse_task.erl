@@ -200,7 +200,7 @@ update_status(ExtendedCtx, Pool, ID, NewStatus) ->
 %% Fix task description after reboot.
 %% @end
 %%--------------------------------------------------------------------
--spec fix_description(ctx(), traverse:pool(), key()) -> ok | {error, term()}.
+-spec fix_description(ctx(), traverse:pool(), key()) -> {ok, doc()} | {error, term()}.
 fix_description(ExtendedCtx, Pool, ID) ->
     Node = node(),
     Diff = fun
@@ -218,12 +218,7 @@ fix_description(ExtendedCtx, Pool, ID) ->
                    {error, other_node}
            end,
 
-    case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
-        {ok, _} ->
-            ok;
-        {error, other_node} ->
-            ok
-    end.
+    datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff).
 
 %%--------------------------------------------------------------------
 %% @doc

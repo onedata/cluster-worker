@@ -34,8 +34,7 @@
 ]).
 
 %% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5,
-    get_job/1, list_ongoing_jobs/1]).
+-export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5, get_job/1]).
 
 all() ->
     ?ALL([
@@ -540,7 +539,7 @@ update_job_progress(ID0, Job, _, TaskID, on_pool) when ID0 =:= undefined ; ID0 =
 update_job_progress(ID, Job, _, TaskID, on_pool) ->
     save_started_job(ID, Job, TaskID),
     {ok, ID};
-update_job_progress(ID, _Job, _, _TaskID, ended) ->
+update_job_progress(ID, _Job, _, _TaskID, Status) when Status =:= ended ; Status =:= canceled ->
     List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
     {ok, ID}.
@@ -554,7 +553,3 @@ get_job(ID) ->
     Jobs2 = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     {Job, TaskID} =  proplists:get_value(ID, Jobs1 ++ Jobs2, {undefined, undefined}),
     {ok, Job, ?POOL, TaskID}.
-
-list_ongoing_jobs(_) ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    {ok, proplists:get_keys(List), finished}.

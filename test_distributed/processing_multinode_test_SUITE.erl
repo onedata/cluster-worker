@@ -27,8 +27,7 @@
 ]).
 
 %% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5,
-    get_job/1, list_ongoing_jobs/1]).
+-export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5, get_job/1]).
 
 all() ->
     ?ALL([
@@ -285,9 +284,3 @@ get_job(ID) ->
     end, [], consistent_hasing:get_all_nodes()),
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
     {ok, Job, ?POOL, TaskID}.
-
-list_ongoing_jobs(_) ->
-    List = lists:foldl(fun(Node, Acc) ->
-        Acc ++ rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
-    end, [], consistent_hasing:get_all_nodes()),
-    {ok, proplists:get_keys(List), finished}.

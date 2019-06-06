@@ -51,14 +51,6 @@
 -callback get_job(traverse:job_id()) ->
     {ok, traverse:job(), traverse:pool(), traverse:id()}  | {error, term()}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Lists ongoing master jobs.
-%% @end
-%%--------------------------------------------------------------------
--callback list_ongoing_jobs(undefined | traverse:list_job_restart_info()) ->
-    {ok, [traverse:job_id()], finished | traverse:list_job_restart_info()}  | {error, term()}.
-
 %%%===================================================================
 %%% Optional task lifecycle API
 %%%===================================================================
