@@ -55,7 +55,7 @@
     group_id => group()
 }.
 -type ctx() :: traverse_task:ctx().
--type ctx_sync_info() ::  #{model := datastore_model:model(),
+-type ctx_sync_info() ::  #{
     mutator => datastore_doc:mutator(),
     scope => datastore_doc:scope(),
     sync_enabled => boolean(),
