@@ -78,13 +78,11 @@
 %% Provides sync info that extends datastore context.
 %% @end
 %%--------------------------------------------------------------------
--callback get_sync_info(traverse:job()) ->
-    {ok, datastore:ctx()}  | {error, term()}.
+-callback get_sync_info(traverse:job()) -> {ok, traverse:ctx_sync_info()}  | {error, term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns timestamp to be added to task. Used for tasks listing.
 %% @end
 %%--------------------------------------------------------------------
--callback get_timestamp() ->
-    {ok, traverse:timestamp()}.
+-callback get_timestamp() -> {ok, traverse:timestamp()}.

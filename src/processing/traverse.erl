@@ -55,10 +55,18 @@
     group_id => group()
 }.
 -type ctx() :: traverse_task:ctx().
+-type ctx_sync_info() ::  #{model := datastore_model:model(),
+    mutator => datastore_doc:mutator(),
+    scope => datastore_doc:scope(),
+    sync_enabled => boolean(),
+    local_links_tree_id => datastore:tree_id(),
+    remote_driver => datastore:remote_driver(),
+    remote_driver_ctx => datastore:remote_driver_ctx()
+}.
 -type list_job_restart_info() :: term().
 
--export_type([pool/0, id/0, group/0, job/0, job_id/0, job_status/0, executor/0,
-    description/0, status/0, timestamp/0, sync_info/0, master_job_map/0, list_job_restart_info/0]).
+-export_type([pool/0, id/0, group/0, job/0, job_id/0, job_status/0, executor/0, description/0, status/0,
+    timestamp/0, sync_info/0, master_job_map/0, list_job_restart_info/0, ctx_sync_info/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
