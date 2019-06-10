@@ -386,6 +386,21 @@ error_to_json(_, ?ERROR_CANNOT_ADD_RELATION_TO_SELF) ->
 error_to_json(_, ?ERROR_TEMPORARY_FAILURE) ->
     #{
         <<"id">> => <<"temporaryFailure">>
+    };
+
+error_to_json(_, ?ERROR_BAD_GUI_PACKAGE) ->
+    #{
+        <<"id">> => <<"badGuiPackage">>
+    };
+
+error_to_json(_, ?ERROR_GUI_PACKAGE_TOO_LARGE) ->
+    #{
+        <<"id">> => <<"guiPackageTooLarge">>
+    };
+
+error_to_json(_, ?ERROR_GUI_PACKAGE_UNVERIFIED) ->
+    #{
+        <<"id">> => <<"guiPackageUnverified">>
     }.
 
 
@@ -611,6 +626,15 @@ json_to_error(_, #{<<"id">> := <<"cannotAddRelationToSelf">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"temporaryFailure">>}) ->
     ?ERROR_TEMPORARY_FAILURE;
+
+json_to_error(_, #{<<"id">> := <<"badGuiPackage">>}) ->
+    ?ERROR_BAD_GUI_PACKAGE;
+
+json_to_error(_, #{<<"id">> := <<"guiPackageTooLarge">>}) ->
+    ?ERROR_GUI_PACKAGE_TOO_LARGE;
+
+json_to_error(_, #{<<"id">> := <<"guiPackageUnverified">>}) ->
+    ?ERROR_GUI_PACKAGE_UNVERIFIED;
 
 % Unknown errors
 json_to_error(_, #{<<"details">> := #{<<"description">> := Description}}) ->

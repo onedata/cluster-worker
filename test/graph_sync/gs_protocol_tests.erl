@@ -684,7 +684,10 @@ encode_decode_error() ->
         ?ERROR_RELATION_ALREADY_EXISTS(user, <<"user1">>, space, <<"space1">>),
         ?ERROR_CANNOT_DELETE_ENTITY(user, <<"user1">>),
         ?ERROR_CANNOT_ADD_RELATION_TO_SELF,
-        ?ERROR_TEMPORARY_FAILURE
+        ?ERROR_TEMPORARY_FAILURE,
+        ?ERROR_BAD_GUI_PACKAGE,
+        ?ERROR_GUI_PACKAGE_TOO_LARGE,
+        ?ERROR_GUI_PACKAGE_UNVERIFIED
     ],
 
     lists:foreach(
