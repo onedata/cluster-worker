@@ -79,10 +79,14 @@
 % Denotes subtype of message so the payload can be properly interpreted
 -type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
 
+% Clients authorization, used during handshake or auth override.
+-type auth() :: undefined | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+
 % Used to override the client authorization established on connection level, per
-% request.
--type auth_override() :: undefined | {token, binary()} | {basic, binary()} |
-{macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+% request. Can be used for example by providers to authorize a certain request
+% with a user's token, while still using the Graph Sync channel that was opened
+% with provider's auth.
+-type auth_override() :: auth().
 
 % Possible entity types
 -type entity_type() :: atom().
@@ -90,7 +94,8 @@
 % Aspect of given entity, one of resource identifiers
 -type aspect() :: atom() | {atom(), term()}.
 % Scope of given aspect, allows to differentiate access to subsets of aspect data
--type scope() :: private | protected | shared | public.
+% 'auto' scope means the maximum scope (if any) the client is authorized to access.
+-type scope() :: private | protected | shared | public | auto.
 % Graph Resource Identifier - a record identifying a certain resource in the graph.
 -type gri() :: #gri{}.
 % Requested operation
@@ -104,7 +109,8 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | asUser | asGroup,
+    throughHandleService | throughHandle | throughHarvester | throughCluster|
+    asUser | asGroup | asSpace,
     EntityId :: binary()
 }.
 % A prefetched entity that can be passed to gs_logic_plugin to speed up request
@@ -125,7 +131,7 @@
 
 -type graph_create_result() :: ok | {ok, value, term()} |
 {ok, resource, {gri(), term()} | {gri(), auth_hint(), term()}} | error().
--type graph_get_result() :: {ok, term()} | error().
+-type graph_get_result() :: {ok, term()} | {ok, gri(), term()} | error().
 -type graph_delete_result() :: ok | error().
 -type graph_update_result() :: ok | error().
 
@@ -352,7 +358,7 @@ null_to_undefined(Other) ->
 -spec string_to_gri(binary()) -> gri().
 string_to_gri(String) ->
     [TypeStr, IdBinary, AspectScope] = binary:split(String, <<".">>, [global]),
-    Type = string_to_entity_type(TypeStr),
+    Type = ?GS_PROTOCOL_PLUGIN:decode_entity_type(TypeStr),
     Id = string_to_id(IdBinary),
     {Aspect, Scope} = case binary:split(AspectScope, <<":">>, [global]) of
         [A, S] -> {string_to_aspect(A), string_to_scope(S)};
@@ -369,7 +375,7 @@ string_to_gri(String) ->
 -spec gri_to_string(gri()) -> binary().
 gri_to_string(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
     <<
-        (entity_type_to_string(Type))/binary, ".",
+        (?GS_PROTOCOL_PLUGIN:encode_entity_type(Type))/binary, ".",
         (id_to_string(Id))/binary, ".",
         (aspect_to_string(Aspect))/binary, ":",
         (scope_to_string(Scope))/binary
@@ -398,7 +404,7 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
         <<"id">> => Id,
         <<"type">> => <<"request">>,
         <<"subtype">> => subtype_to_string(Subtype),
-        <<"authOverride">> => auth_override_to_json(AuthOverride),
+        <<"authOverride">> => auth_to_json(AuthOverride),
         <<"payload">> => Payload
     }.
 
@@ -407,10 +413,11 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
 encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     % Handshake messages do not change regardless of the protocol version
     #gs_req_handshake{
-        supported_versions = SupportedVersions, session_id = SessionId
+        supported_versions = SupportedVersions, auth = Auth, session_id = SessionId
     } = Req,
     #{
         <<"supportedVersions">> => SupportedVersions,
+        <<"auth">> => auth_to_json(Auth),
         <<"sessionId">> => undefined_to_null(SessionId)
     }.
 
@@ -563,10 +570,11 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
 -spec encode_push_nosub(protocol_version(), nosub_push()) -> json_map().
 encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     #gs_push_nosub{
-        gri = GRI, reason = Reason
+        gri = GRI, auth_hint = AuthHint, reason = Reason
     } = Message,
     #{
         <<"gri">> => gri_to_string(GRI),
+        <<"authHint">> => auth_hint_to_json(AuthHint),
         <<"reason">> => nosub_reason_to_json(Reason)
     }.
 
@@ -604,7 +612,7 @@ decode_request(ProtocolVersion, ReqJSON) ->
     #gs_req{
         id = maps:get(<<"id">>, ReqJSON),
         subtype = Subtype,
-        auth_override = json_to_aut_override(AuthOverride),
+        auth_override = json_to_auth(AuthOverride),
         request = Request
     }.
 
@@ -613,9 +621,11 @@ decode_request(ProtocolVersion, ReqJSON) ->
 decode_request_handshake(_, PayloadJSON) ->
     % Handshake messages do not change regardless of the protocol version
     SessionId = maps:get(<<"sessionId">>, PayloadJSON, null),
+    Auth = maps:get(<<"auth">>, PayloadJSON, null),
     SupportedVersions = maps:get(<<"supportedVersions">>, PayloadJSON),
     #gs_req_handshake{
         supported_versions = SupportedVersions,
+        auth = json_to_auth(Auth),
         session_id = null_to_undefined(SessionId)
     }.
 
@@ -771,8 +781,10 @@ decode_push_graph(_, PayloadJSON) ->
 decode_push_nosub(_, PayloadJSON) ->
     GRI = maps:get(<<"gri">>, PayloadJSON),
     Reason = maps:get(<<"reason">>, PayloadJSON),
+    AuthHint = maps:get(<<"authHint">>, PayloadJSON, null),
     #gs_push_nosub{
         gri = string_to_gri(GRI),
+        auth_hint = json_to_auth_hint(AuthHint),
         reason = json_to_nosub_reason(Reason)
     }.
 
@@ -807,24 +819,17 @@ string_to_subtype(<<"nosub">>) -> nosub;
 string_to_subtype(<<"error">>) -> error.
 
 
--spec json_to_aut_override(null | json_map()) -> undefined | auth_override().
-json_to_aut_override(null) -> undefined;
-json_to_aut_override(#{<<"token">> := Token}) -> {token, Token};
-json_to_aut_override(#{<<"basic">> := UserPasswdB64}) ->
-    {basic, UserPasswdB64};
-json_to_aut_override(#{
-    <<"macaroon">> := Macaroon,
-    <<"discharge-macaroons">> := DischargeMacaroons}
-) ->
-    {macaroon, Macaroon, DischargeMacaroons}.
+-spec json_to_auth(null | json_map()) -> auth().
+json_to_auth(null) ->
+    undefined;
+json_to_auth(#{<<"macaroon">> := Macaroon} = Json) ->
+    {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
 
 
--spec auth_override_to_json(undefined | auth_override()) -> null | json_map().
-auth_override_to_json(undefined) -> null;
-auth_override_to_json({token, Token}) -> #{<<"token">> => Token};
-auth_override_to_json({basic, UserPasswdB64}) ->
-    #{<<"basic">> => UserPasswdB64};
-auth_override_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
+-spec auth_to_json(auth()) -> null | json_map().
+auth_to_json(undefined) ->
+    null;
+auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
     <<"macaroon">> => Macaroon,
     <<"discharge-macaroons">> => DischargeMacaroons
 }.
@@ -842,28 +847,6 @@ string_to_operation(<<"create">>) -> create;
 string_to_operation(<<"get">>) -> get;
 string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
-
-
--spec entity_type_to_string(entity_type()) -> binary().
-entity_type_to_string(od_user) -> <<"user">>;
-entity_type_to_string(od_group) -> <<"group">>;
-entity_type_to_string(od_space) -> <<"space">>;
-entity_type_to_string(od_share) -> <<"share">>;
-entity_type_to_string(od_provider) -> <<"provider">>;
-entity_type_to_string(od_handle_service) -> <<"handleService">>;
-entity_type_to_string(od_handle) -> <<"handle">>;
-entity_type_to_string(_) -> throw(?ERROR_BAD_TYPE).
-
-
--spec string_to_entity_type(binary()) -> entity_type().
-string_to_entity_type(<<"user">>) -> od_user;
-string_to_entity_type(<<"group">>) -> od_group;
-string_to_entity_type(<<"space">>) -> od_space;
-string_to_entity_type(<<"share">>) -> od_share;
-string_to_entity_type(<<"provider">>) -> od_provider;
-string_to_entity_type(<<"handleService">>) -> od_handle_service;
-string_to_entity_type(<<"handle">>) -> od_handle;
-string_to_entity_type(_) -> throw(?ERROR_BAD_TYPE).
 
 
 -spec id_to_string(undefined | binary()) -> binary().
@@ -898,14 +881,16 @@ string_to_aspect(String) ->
 scope_to_string(private) -> <<"private">>;
 scope_to_string(protected) -> <<"protected">>;
 scope_to_string(shared) -> <<"shared">>;
-scope_to_string(public) -> <<"public">>.
+scope_to_string(public) -> <<"public">>;
+scope_to_string(auto) -> <<"auto">>.
 
 
 -spec string_to_scope(binary()) -> scope().
 string_to_scope(<<"private">>) -> private;
 string_to_scope(<<"protected">>) -> protected;
 string_to_scope(<<"shared">>) -> shared;
-string_to_scope(<<"public">>) -> public.
+string_to_scope(<<"public">>) -> public;
+string_to_scope(<<"auto">>) -> auto.
 
 
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
@@ -921,8 +906,13 @@ auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) ->
     <<"throughHandleService:", HSId/binary>>;
 auth_hint_to_json(?THROUGH_HANDLE(HandleId)) ->
     <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) ->
+    <<"throughHarvester:", HarvesterId/binary>>;
+auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) ->
+    <<"throughCluster:", ClusterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
-auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>.
+auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
+auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>.
 
 
 -spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
@@ -938,8 +928,13 @@ json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) ->
     ?THROUGH_HANDLE_SERVICE(HSId);
 json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) ->
     ?THROUGH_HANDLE(HandleId);
+json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) ->
+    ?THROUGH_HARVESTER(HarvesterId);
+json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) ->
+    ?THROUGH_CLUSTER(ClusterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
-json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId).
+json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
+json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
 
 
 -spec identity_to_json(identity()) -> binary() | json_map().

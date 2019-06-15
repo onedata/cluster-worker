@@ -21,8 +21,8 @@
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
-    % This is an opaque term to the gs handler
-    client :: term(),
+    % @TODO DEPRECATED VFS-5436 - used when auth macaroons are sent in headers
+    http_auth :: gs_protocol:auth(),
     translator :: module()
 }).
 
@@ -64,16 +64,10 @@
 -spec init(Req :: cowboy_req:req(), Opts :: any()) ->
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
-    case gs_server:authorize(Req) of
-        {ok, Client} ->
-            State = #pre_handshake_state{
-                client = Client, translator = Translator
-            },
-            {cowboy_websocket, Req, State};
-        ?ERROR_UNAUTHORIZED ->
-            NewReq = cowboy_req:reply(401, Req),
-            {ok, NewReq, #pre_handshake_state{}}
-    end.
+    {cowboy_websocket, Req, #pre_handshake_state{
+        http_auth = parse_auth_from_headers(Req),
+        translator = Translator
+    }}.
 
 
 %%--------------------------------------------------------------------
@@ -101,11 +95,14 @@ websocket_init(State) ->
     State :: state(),
     OutFrame :: cowboy_websocket:frame().
 websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
-    #pre_handshake_state{client = Client, translator = Translator} = State,
+    #pre_handshake_state{
+        http_auth = HttpAuth,
+        translator = Translator
+    } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(Client, self(), Translator, Request) of
+            case gs_server:handshake(HttpAuth, self(), Translator, Request) of
                 {ok, Resp} ->
                     #gs_resp{
                         response = #gs_resp_handshake{
@@ -143,10 +140,10 @@ websocket_handle({text, Data}, State) ->
             {reply, {text, json_utils:encode(ErrorJSONMap)}, State}
     end;
 
-websocket_handle(pong, State) ->
+websocket_handle(ping, State) ->
     {ok, State};
 
-websocket_handle(ping, State) ->
+websocket_handle(pong, State) ->
     {ok, State};
 
 websocket_handle(Msg, State) ->
@@ -184,8 +181,8 @@ websocket_info({push, Msg}, #state{protocol_version = ProtoVer} = State) ->
             ?error_stacktrace(
                 "Discarding GS message to client as "
                 "it cannot be encoded - ~p:~p~nMessage: ~p", [
-                Type, Message, Msg
-            ]),
+                    Type, Message, Msg
+                ]),
             {ok, State}
     end;
 
@@ -243,6 +240,7 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Spawns a new process to process a request (or a group of processes in case of
 %% multiple requests). After processing, the response is pushed to the client.
@@ -280,6 +278,7 @@ process_request_async(SessionId, Request) ->
     ok.
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc
 %% Decodes a binary JSON message into gs request record(s).
 %% @end
@@ -300,4 +299,19 @@ decode_body(ProtocolVersion, Data) ->
     catch
         _:_ ->
             ?ERROR_BAD_MESSAGE(Data)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Looks for the "Macaroon" header and return the macaroon GS auth, or undefined
+%% if the header is not found.
+%% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
+%% @end
+%%--------------------------------------------------------------------
+-spec parse_auth_from_headers(cowboy_req:req()) -> gs_protocol:auth().
+parse_auth_from_headers(Req) ->
+    case cowboy_req:header(<<"macaroon">>, Req) of
+        undefined -> undefined;
+        Macaroon -> {macaroon, Macaroon, []}
     end.

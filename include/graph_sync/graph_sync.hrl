@@ -13,13 +13,13 @@
 -ifndef(GRAPH_SYNC_HRL).
 -define(GRAPH_SYNC_HRL, 1).
 
-% Module that must be implemented in projects that use Graph Sync, contains
-% callbacks according to gs_logic_plugin_behaviour.
+% Modules that must be implemented in projects that use Graph Sync, contain
+% callbacks called by gs_server and gs_protocol
 -define(GS_LOGIC_PLUGIN, gs_logic_plugin).
+-define(GS_PROTOCOL_PLUGIN, gs_protocol_plugin).
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
-
 
 % Graph Resource Identifier - a record identifying a certain resource in the
 % graph.
@@ -32,6 +32,7 @@
 
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
+    auth = undefined :: undefined | gs_protocol:auth(),
     session_id :: undefined | gs_protocol:session_id()
 }).
 
@@ -80,6 +81,7 @@
 
 -record(gs_push_nosub, {
     gri :: gs_protocol:gri(),
+    auth_hint :: gs_protocol:auth_hint(),
     reason = forbidden :: gs_protocol:nosub_reason()
 }).
 
@@ -112,14 +114,17 @@
 
 % Possible auth hints
 % Auth hint denoting rights to view certain aspects
--define(THROUGH_USER(__UserId), {throughUser, __UserId}).
--define(THROUGH_GROUP(__GroupId), {throughGroup, __GroupId}).
--define(THROUGH_SPACE(__SpaceId), {throughSpace, __SpaceId}).
--define(THROUGH_PROVIDER(__ProviderId), {throughProvider, __ProviderId}).
--define(THROUGH_HANDLE_SERVICE(__HServiceId), {throughHandleService, __HServiceId}).
--define(THROUGH_HANDLE(__HandleId), {throughHandle, __HandleId}).
+-define(THROUGH_USER(UserId), {throughUser, UserId}).
+-define(THROUGH_GROUP(GroupId), {throughGroup, GroupId}).
+-define(THROUGH_SPACE(SpaceId), {throughSpace, SpaceId}).
+-define(THROUGH_PROVIDER(ProviderId), {throughProvider, ProviderId}).
+-define(THROUGH_HANDLE_SERVICE(HServiceId), {throughHandleService, HServiceId}).
+-define(THROUGH_HANDLE(HandleId), {throughHandle, HandleId}).
+-define(THROUGH_HARVESTER(HarvesterId), {throughHarvester, HarvesterId}).
+-define(THROUGH_CLUSTER(ClusterId), {throughCluster, ClusterId}).
 % Auth hint denoting context in which an aspect is created
--define(AS_USER(__UserId), {asUser, __UserId}).
--define(AS_GROUP(__GroupId), {asGroup, __GroupId}).
+-define(AS_USER(UserId), {asUser, UserId}).
+-define(AS_GROUP(GroupId), {asGroup, GroupId}).
+-define(AS_SPACE(SpaceId), {asSpace, SpaceId}).
 
 -endif.
