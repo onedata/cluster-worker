@@ -6,7 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model that holds information about traverse tasks.
+%%% Basic model that holds information about traverse tasks (see traverse.erl).
+%%% Each traverse_task document represents single traverse that can be scheduled, ongoing (executed on pool)
+%%% or finished (successfully or canceled).
+%%% Model can be synchronized as functions get context as argument (which can include sync info).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(traverse_task).
@@ -45,15 +48,24 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates task document.
+%% Creates task document. Value of document fields is different when task will be started immediately and different
+%% when the task will wait (see traverse_load_balance.erl).
 %% @end
 %%--------------------------------------------------------------------
 -spec create(ctx(), traverse:pool(), traverse:callback_module(), key(), traverse:executor(), traverse:executor(),
     traverse:group(), traverse:job_id(), undefined | node(), traverse:description()) -> ok.
 create(ExtendedCtx, Pool, CallbackModule, ID, Creator, Executor, GroupID, Job, Node, InitialDescription) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
-    Value0 = #traverse_task{pool = Pool, callback_module = CallbackModule, creator = Creator, executor = Executor,
-        group = GroupID, description = InitialDescription, timestamp = Timestamp, main_job_id = Job},
+    Value0 = #traverse_task{
+        pool = Pool,
+        callback_module = CallbackModule,
+        creator = Creator,
+        executor = Executor,
+        group = GroupID,
+        description = InitialDescription,
+        timestamp = Timestamp,
+        main_job_id = Job
+    },
 
     Value = case Node of
         undefined -> Value0;
@@ -62,10 +74,10 @@ create(ExtendedCtx, Pool, CallbackModule, ID, Creator, Executor, GroupID, Job, N
     {ok, _} = datastore_model:create(ExtendedCtx, #document{key = ?ID(Pool, ID), value = Value}),
 
     case Node of
-        undefined ->
+        undefined -> % task is scheduled for later execution
             ok = traverse_task_list:add_scheduled_link(ExtendedCtx, Pool, Creator, ID, Timestamp, GroupID, Executor),
             ok = traverse_load_balance:register_group(Pool, GroupID);
-        _ ->
+        _ -> % task will be immediately started
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, ID, Timestamp)
     end.
 
@@ -78,13 +90,23 @@ create(ExtendedCtx, Pool, CallbackModule, ID, Creator, Executor, GroupID, Job, N
 start(ExtendedCtx, Pool, ID, NewDescription) ->
     Node = node(),
     Diff = fun
-               (#traverse_task{status = scheduled} = Task) ->
-                   {ok, Task#traverse_task{status = ongoing, enqueued = false, node = Node, description = NewDescription}};
-               (_) ->
-                   {error, already_started}
-           end,
+        (#traverse_task{status = scheduled} = Task) ->
+            {ok, Task#traverse_task{
+                status = ongoing,
+                enqueued = false,
+                node = Node,
+                description = NewDescription
+            }};
+        (_) ->
+            {error, already_started}
+    end,
     case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
-        {ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor, creator = Creator, group = GroupID}}} ->
+        {ok, #document{value = #traverse_task{
+            timestamp = Timestamp,
+            executor = Executor,
+            creator = Creator,
+            group = GroupID
+        }}} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, ID, Timestamp),
 
             case Creator =:= Executor of
@@ -108,7 +130,7 @@ finish(ExtendedCtx, Pool, ID, FinalStatus) ->
         {ok, Task#traverse_task{status = FinalStatus}}
     end,
     case {datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff), FinalStatus} of
-        {{ok, _}, canceled} ->
+        {{ok, _}, canceled} -> % TODO - moze olac zabezpieczenie i traverse_task_list wylapywac already_exists lub not found?
             ok;
         {{ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor}}}, _} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, ID, Timestamp),
@@ -128,7 +150,13 @@ cancel(ExtendedCtx, Pool, ID, Self) ->
         {ok, Task#traverse_task{canceled = true}}
     end,
     case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
-        {ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor, creator = Creator, group = GroupID}}} ->
+        {ok, #document{value = #traverse_task{
+            timestamp = Timestamp,
+            executor = Executor,
+            creator = Creator,
+            group = GroupID
+        }}} ->
+            % TODO - zabezpieczyc na race z finish
             case Self of
                 Executor ->
                     ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, ID, Timestamp),
@@ -139,7 +167,8 @@ cancel(ExtendedCtx, Pool, ID, Self) ->
 
             case Self of
                 Creator ->
-                    ok = traverse_task_list:delete_scheduled_link(ExtendedCtx, Pool, Creator, ID, Timestamp, GroupID, Executor);
+                    ok = traverse_task_list:delete_scheduled_link(
+                        ExtendedCtx, Pool, Creator, ID, Timestamp, GroupID, Executor);
                 _ ->
                     ok
             end;
@@ -167,16 +196,18 @@ on_task_change(#document{value = #traverse_task{}}, _Self) ->
 %%--------------------------------------------------------------------
 -spec update_description(ctx(), traverse:pool(), key(), traverse:description()) ->
     {ok, traverse:description(), boolean()} | {error, term()}.
-update_description(ExtendedCtx, Pool, ID, NweDescription) ->
+update_description(ExtendedCtx, Pool, ID, NewDescription) ->
     Diff = fun(#traverse_task{description = Description} = Task) ->
         FinalDescription = maps:fold(fun(K, V, Acc) ->
             Acc#{K => V + maps:get(K, Description, 0)}
-        end, Description, NweDescription),
+        end, Description, NewDescription),
         {ok, Task#traverse_task{description = FinalDescription}}
     end,
     case datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff) of
-        {ok, #document{value = #traverse_task{description = UpdatedDescription,
-            canceled = Canceled}}} ->
+        {ok, #document{value = #traverse_task{
+            description = UpdatedDescription,
+            canceled = Canceled
+        }}} ->
             {ok, UpdatedDescription, Canceled};
         Other ->
             Other
@@ -204,19 +235,24 @@ update_status(ExtendedCtx, Pool, ID, NewStatus) ->
 fix_description(ExtendedCtx, Pool, ID) ->
     Node = node(),
     Diff = fun
-               (#traverse_task{node = TaskNode, description = Description} = Task) when TaskNode =:= Node ->
-                   MDone = maps:get(master_jobs_done, Description, 0),
-                   MFailed = maps:get(master_jobs_failed, Description, 0),
+        (#traverse_task{
+            node = TaskNode,
+            description = Description} = Task
+        ) when TaskNode =:= Node ->
+            MDone = maps:get(master_jobs_done, Description, 0),
+            MFailed = maps:get(master_jobs_failed, Description, 0),
 
-                   SDone = maps:get(slave_jobs_done, Description, 0),
-                   SFailed = maps:get(slave_jobs_failed, Description, 0),
+            SDone = maps:get(slave_jobs_done, Description, 0),
+            SFailed = maps:get(slave_jobs_failed, Description, 0),
 
-                   FinalDescription = Description#{master_jobs_delegated => MDone + MFailed,
-                       slave_jobs_delegated => SDone + SFailed},
-                   {ok, Task#traverse_task{description = FinalDescription}};
-               (_) ->
-                   {error, other_node}
-           end,
+            FinalDescription = Description#{
+                master_jobs_delegated => MDone + MFailed,
+                slave_jobs_delegated => SDone + SFailed
+            },
+            {ok, Task#traverse_task{description = FinalDescription}};
+        (_) ->
+            {error, other_node}
+    end,
 
     datastore_model:update(ExtendedCtx, ?ID(Pool, ID), Diff).
 
@@ -236,8 +272,13 @@ get(Pool, ID) ->
 %%--------------------------------------------------------------------
 -spec get_info(doc()) -> {ok, traverse:callback_module(),
     traverse:executor(), traverse:job_id(), boolean(), boolean()}.
-get_info(#document{value = #traverse_task{callback_module = CallbackModule,
-    executor = Executor, main_job_id = MainJobID, enqueued = Enqueued, canceled = Canceled}}) ->
+get_info(#document{value = #traverse_task{
+    callback_module = CallbackModule,
+    executor = Executor,
+    main_job_id = MainJobID,
+    enqueued = Enqueued,
+    canceled = Canceled
+}}) ->
     {ok, CallbackModule, Executor, MainJobID, Enqueued, Canceled}.
 
 %%--------------------------------------------------------------------
@@ -308,9 +349,9 @@ encode_description(Description) ->
 -spec decode_description(binary()) -> traverse:description().
 decode_description(Term) ->
     Map = json_utils:decode(Term),
-    lists:foldl(fun({K, V}, Acc) ->
+    maps:fold(fun(K, V, Acc) ->
         Acc#{binary_to_atom(K, utf8) => V}
-    end, #{}, maps:to_list(Map)).
+    end, #{}, Map).
 
 %%%===================================================================
 %%% Internal functions

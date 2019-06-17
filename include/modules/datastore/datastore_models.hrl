@@ -71,6 +71,7 @@
     subscribers = [] :: ordsets:ordset(gs_persistence:subscriber())
 }).
 
+% Models for traversing via different structures (see traverse.erl)
 -record(traverse_task, {
     pool :: traverse:pool(),
     callback_module :: traverse:callback_module(),
@@ -78,7 +79,7 @@
     executor :: traverse:executor(),
     group :: traverse:group(),
     timestamp :: traverse:timestamp(),
-    main_job_id = <<>> :: traverse:job_id(),
+    main_job_id = <<>> :: traverse:job_id(), % First job used to init task (see traverse.erl)
     enqueued = true :: boolean(),
     canceled = false :: boolean(),
     node :: undefined | node(),
@@ -89,7 +90,7 @@
 -record(traverse_load_balance, {
     pool :: traverse:pool(),
     ongoing_tasks = 0 :: non_neg_integer(),
-    ongoing_tasks_limit = 0 :: non_neg_integer(),
+    ongoing_tasks_limit = 0 :: traverse_task_list:ongoing_tasks_limit(),
     groups = [] :: [traverse:group()],
     nodes = [] :: [node()]
 }).

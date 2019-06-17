@@ -6,7 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model that allows listing of traverse tasks.
+%%% Module that allows listing of traverse tasks (see traverse.erl) using links.
+%%% The tasks are sorted basing on timestamps provided via callback module or generated automatically.
+%%% Different link forests are used for scheduled, ongoing and ended tasks.
+%%% Additional link forests are created for scheduled tasks for load balancing purposes (each executor uses multiple
+%%% queues for different groups - see traverse_load_balance.erl).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(traverse_task_list).
@@ -15,16 +19,19 @@
 -include("modules/datastore/datastore_links.hrl").
 
 %% List API
--export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_ongoing_jobs/2]).
+-export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_local_ongoing_jobs/2]).
 %% Modify API
 -export([add_link/6, add_scheduled_link/7, add_job_link/3,
     delete_link/6, delete_scheduled_link/7, delete_job_link/3]).
 
--define(SCHEDULED_KEY(Pool), ?LINK_KEY(Pool, "SCHEDULED_")).
--define(ONGOING_KEY(Pool), ?LINK_KEY(Pool, "ONGOING_")).
--define(ENDED_KEY(Pool), ?LINK_KEY(Pool, "ENDED_")).
--define(LINK_KEY(Pool, Prefix), <<Prefix, Pool/binary>>).
--define(GROUP_KEY(Key, Group, Executor), <<Key/binary, "###", Group/binary, "###", Executor/binary>>).
+% Forests for scheduled, ongoing and ended tasks
+-define(SCHEDULED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "SCHEDULED_")).
+-define(ONGOING_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "ONGOING_")).
+-define(ENDED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "ENDED_")).
+-define(FOREST_KEY(Pool, Prefix), <<Prefix, Pool/binary>>).
+% Additional forests for load balancing purposes
+-define(LOAD_BALANCING_FOREST_KEY(Key, Group, Executor), <<Key/binary, "###", Group/binary, "###", Executor/binary>>).
+% Definitions used to list ongoing jobs (used during provider restart)
 -define(ONGOING_JOB_KEY(Pool, CallbackModule),
     <<Pool/binary, "###", (atom_to_binary(CallbackModule, utf8))/binary, "###ONGOING_JOBS">>).
 -define(ONGOING_JOB_TREE, <<"ONGOING_TREE">>).
@@ -37,12 +44,16 @@
 -type tree() :: datastore_links:tree_id().
 -type link_key() :: binary().
 -type list_opts() :: #{
+    % Basic list start options (use only one):
+    token => datastore_links_iter:token(), % use tokens to list faster
+    start_id => link_key(), % List from if
+    prev_traverse => {tree(), link_key()}, % Start in place where last listing finished
+    % Additional list option (can be used with ones above)
     offset => integer(),
-    start_id => link_key(),
-    prev_traverse => {tree(), link_key()},
+    % Other list options
     limit => non_neg_integer(),
-    token => datastore_links_iter:token(),
     tree_id => tree(),
+    % Option used in multi-executor environment
     sync_info => traverse:sync_info()
 }.
 -type restart_info() :: #{
@@ -50,7 +61,7 @@
     prev_traverse => {tree(), link_key()}
 }.
 
--export_type([forest_type/0]).
+-export_type([forest_type/0, tree/0]).
 
 %%%===================================================================
 %%% List API
@@ -97,9 +108,9 @@ list_scheduled(Pool, GroupID, Executor) ->
 -spec list_scheduled(traverse:pool(), traverse:group(), traverse:executor(),
     list_opts()) -> {ok, [traverse:id()], restart_info()} | {error, term()}.
 list_scheduled(Pool, GroupID, Executor, Opts) ->
-    BasicKey = forest_key(Pool, scheduled),
-    Forest = ?GROUP_KEY(BasicKey, GroupID, Executor),
-    list_internal(Forest, Opts).
+    ForestKey = forest_key(Pool, scheduled),
+    GroupForestKey = ?LOAD_BALANCING_FOREST_KEY(ForestKey, GroupID, Executor),
+    list_internal(GroupForestKey, Opts).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -110,25 +121,32 @@ list_scheduled(Pool, GroupID, Executor, Opts) ->
     traverse:executor()) -> {ok, traverse:id() | not_found}.
 get_first_scheduled_link(Pool, GroupID, Executor) ->
     BasicKey = forest_key(Pool, scheduled),
-    datastore_model:fold_links(traverse_task:get_ctx(),
-        ?GROUP_KEY(BasicKey, GroupID, Executor), all,
-        fun(#link{target = Target}, _) ->
-            {stop, Target} end, not_found, #{}).
+    datastore_model:fold_links(
+        traverse_task:get_ctx(),
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, Executor),
+        all,
+        fun(#link{target = Target}, _) -> {stop, Target} end,
+        not_found,
+        #{}
+    ).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Gets list of ongoing jobs.
 %% @end
 %%--------------------------------------------------------------------
--spec list_ongoing_jobs(traverse:pool(), traverse:callback_module()) -> {ok, [traverse:id()]}.
+-spec list_local_ongoing_jobs(traverse:pool(), traverse:callback_module()) -> {ok, [traverse:id()]}.
 % TODO - use batches
-list_ongoing_jobs(Pool, CallbackModule) ->
+list_local_ongoing_jobs(Pool, CallbackModule) ->
     Ctx = traverse_task:get_ctx(),
-    datastore_model:fold_links(Ctx#{local_links_tree_id => ?ONGOING_JOB_TREE, routing => local},
-        ?ONGOING_JOB_KEY(Pool, CallbackModule), ?ONGOING_JOB_TREE,
-        fun(#link{target = Target}, Acc) -> 
-            {ok, [Target | Acc]} 
-        end, [], #{}).
+    datastore_model:fold_links(
+        Ctx#{local_links_tree_id => ?ONGOING_JOB_TREE, routing => local},
+        ?ONGOING_JOB_KEY(Pool, CallbackModule),
+        ?ONGOING_JOB_TREE,
+        fun(#link{target = Target}, Acc) -> {ok, [Target | Acc]} end,
+        [],
+        #{}
+    ).
 
 %%%===================================================================
 %%% Modify API
@@ -136,7 +154,7 @@ list_ongoing_jobs(Pool, CallbackModule) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds link to main tree.
+%% Adds link to tree.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_link(traverse_task:ctx(), traverse:pool(), forest_type(),
@@ -152,7 +170,7 @@ add_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 -spec add_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
     traverse:id(), traverse:timestamp(), traverse:group(), traverse:executor()) -> ok.
 add_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, Executor) ->
-    run_on_trees(forest_key(Pool, scheduled), GroupID, Executor, fun(Key) ->
+    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, Executor, fun(Key) ->
         add_link(Ctx, Key, Tree, ID, Timestamp)
     end).
 
@@ -164,8 +182,12 @@ add_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, Executor) ->
 -spec add_job_link(traverse:pool(), traverse:callback_module(), traverse:job_id()) -> ok.
 add_job_link(Pool, CallbackModule, JobID) ->
     Ctx = traverse_task:get_ctx(),
-    case datastore_model:add_links(Ctx#{local_links_tree_id => ?ONGOING_JOB_TREE, routing => local},
-        ?ONGOING_JOB_KEY(Pool, CallbackModule), ?ONGOING_JOB_TREE, [{JobID, JobID}]) of
+    case datastore_model:add_links(
+        Ctx#{local_links_tree_id => ?ONGOING_JOB_TREE, routing => local},
+        ?ONGOING_JOB_KEY(Pool, CallbackModule),
+        ?ONGOING_JOB_TREE,
+        [{JobID, JobID}]
+    ) of
         [{ok, _}] -> ok;
         [{error,already_exists}] -> ok % in case of restart
     end,
@@ -189,7 +211,7 @@ delete_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 -spec delete_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
     traverse:id(), traverse:timestamp(), traverse:group(), traverse:executor()) -> ok.
 delete_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, Executor) ->
-    run_on_trees(forest_key(Pool, scheduled), GroupID, Executor, fun(Key) ->
+    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, Executor, fun(Key) ->
         delete_link(Ctx, Key, Tree, ID, Timestamp)
     end).
 
@@ -201,8 +223,12 @@ delete_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, Executor) ->
 -spec delete_job_link(traverse:pool(), traverse:callback_module(), traverse:job_id()) -> ok.
 delete_job_link(Pool, CallbackModule, JobID) ->
     Ctx = traverse_task:get_ctx(),
-    [ok] = datastore_model:delete_links(Ctx#{local_links_tree_id => ?ONGOING_JOB_TREE, routing => local},
-        ?ONGOING_JOB_KEY(Pool, CallbackModule), ?ONGOING_JOB_TREE, [JobID]),
+    [ok] = datastore_model:delete_links(
+        Ctx#{local_links_tree_id => ?ONGOING_JOB_TREE, routing => local},
+        ?ONGOING_JOB_KEY(Pool, CallbackModule),
+        ?ONGOING_JOB_TREE,
+        [JobID]
+    ),
     ok.
 
 %%%===================================================================
@@ -232,33 +258,32 @@ link_key(ID, Timestamp) ->
 
 -spec forest_key(traverse:pool(), forest_type()) -> forest_key().
 forest_key(Pool, scheduled) ->
-    ?SCHEDULED_KEY(Pool);
+    ?SCHEDULED_FOREST_KEY(Pool);
 forest_key(Pool, ongoing) ->
-    ?ONGOING_KEY(Pool);
+    ?ONGOING_FOREST_KEY(Pool);
 forest_key(Pool, ended) ->
-    ?ENDED_KEY(Pool).
+    ?ENDED_FOREST_KEY(Pool).
 
 -spec list_internal(forest_key(), list_opts()) -> {ok, [traverse:id()], restart_info()} | {error, term()}.
 list_internal(Forest, Opts) ->
     Ctx0 = traverse_task:get_ctx(),
     Ctx = maps:merge(Ctx0, maps:get(sync_info, Opts, #{})),
     ListOpts = #{offset => maps:get(offset, Opts, 0)},
-    ListOpts2 = case {maps:get(start_id, Opts, undefined),
-        maps:get(prev_traverse, Opts, undefined)} of
-                    {undefined, undefined} -> ListOpts;
-                    {StartId, undefined} -> ListOpts#{prev_link_name => StartId};
-                    {_, {PrevID, PrevTree}} -> ListOpts#{prev_link_name => PrevID, prev_tree_id => PrevTree}
-                end,
+    ListOpts2 = case {maps:get(start_id, Opts, undefined), maps:get(prev_traverse, Opts, undefined)} of
+        {undefined, undefined} -> ListOpts;
+        {StartId, undefined} -> ListOpts#{prev_link_name => StartId};
+        {_, {PrevID, PrevTree}} -> ListOpts#{prev_link_name => PrevID, prev_tree_id => PrevTree}
+    end,
 
     ListOpts3 = case maps:get(limit, Opts, undefined) of
-                    undefined -> ListOpts2;
-                    Limit -> ListOpts2#{size => Limit}
-                end,
+        undefined -> ListOpts2;
+        Limit -> ListOpts2#{size => Limit}
+    end,
 
     ListOpts4 = case maps:get(token, Opts, undefined) of
-                    undefined -> ListOpts3;
-                    Token -> ListOpts3#{token => Token}
-                end,
+        undefined -> ListOpts3;
+        Token -> ListOpts3#{token => Token}
+    end,
 
     Tree = maps:get(tree_id, Opts, all),
     Result = datastore_model:fold_links(Ctx, Forest, Tree, fun
@@ -266,12 +291,9 @@ list_internal(Forest, Opts) ->
     end, [], ListOpts4),
 
     case Result of
-        {{ok, Links}, Token2} ->
-            prepare_list_ans(Links, #{token => Token2});
-        {ok, Links} ->
-            prepare_list_ans(Links, #{});
-        {error, Reason} ->
-            {error, Reason}
+        {{ok, Links}, Token2} -> prepare_list_ans(Links, #{token => Token2});
+        {ok, Links} -> prepare_list_ans(Links, #{});
+        {error, Reason} -> {error, Reason}
     end.
 
 -spec prepare_list_ans([{traverse:id(), tree()}], restart_info()) ->
@@ -283,9 +305,9 @@ prepare_list_ans([{LastTarget, LastTree} | _] = Links, Info) ->
     {ok, Links2, Info#{prev_traverse => {LastTarget, LastTree}}}.
 
 
--spec run_on_trees(forest_key(), traverse:group(), traverse:executor(),
+-spec run_on_load_balancing_trees(forest_key(), traverse:group(), traverse:executor(),
     fun((forest_key()) -> ok)) -> ok.
-run_on_trees(Key, Group, Executor, Fun) ->
+run_on_load_balancing_trees(Key, Group, Executor, Fun) ->
     Fun(Key),
-    Fun(?GROUP_KEY(Key, Group, Executor)),
+    Fun(?LOAD_BALANCING_FOREST_KEY(Key, Group, Executor)),
     ok.

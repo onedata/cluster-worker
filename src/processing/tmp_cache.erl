@@ -6,7 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides ets cache for temporary data.
+%%% This module provides ets cache that is cleaned automatically (size is checked periodically).
+%%% The caches can form groups which size is calculated together. It is useful as caches can be invalidated separately
+%%% while number of slots is fixed regardless number of caches in group.
+%%% The cache stores information in tuples {Key, Value, Timestamp, TimestampCheck} where timestamp and check are used
+%%% to verify if there were no races between insert and invalidation.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(tmp_cache).
@@ -23,19 +27,29 @@
     terminate_cache/2, check_cache_size/1]).
 
 -type cache() :: atom().
--type group() :: atom().
+-type group() :: binary().
 -type key() :: term().
 -type value() :: term().
 -type additional_info() :: cached | term().
--type callback() :: fun((term()) -> {ok, value(), additional_info()} | {error, term()}).
+-type callback() :: fun((callback_args()) -> {ok, value(), additional_info()} | {error, term()}).
 -type callback_args() :: term().
 -type timestamp() :: non_neg_integer().
--type cache_options() :: #{size := non_neg_integer(), check_frequency := non_neg_integer(),
-    group => group()}.
--type group_options() :: #{size := non_neg_integer(), check_frequency := non_neg_integer()}.
+-type cache_options() :: #{
+    size := non_neg_integer(),
+    check_frequency := non_neg_integer(),
+    group => group()
+}.
+-type group_options() :: #{
+    size := non_neg_integer(),
+    check_frequency := non_neg_integer()
+}.
 -type terminate_options() :: #{group => group()}.
--type check_options() :: #{size := non_neg_integer(), name := cache() | group(),
-    check_frequency := non_neg_integer(), group => boolean()}.
+-type check_options() :: #{
+    size := non_neg_integer(),
+    name := cache() | group(),
+    check_frequency := non_neg_integer(),
+    group => boolean()
+}.
 -type in_critical_section() :: boolean().
 
 -define(TIMER_MESSAGE(Options), {tmp_cache_timer, Options}).
@@ -94,6 +108,7 @@ get_or_calculate(Cache, Key, CalculateCallback, Args, true) ->
 get(Cache, Key) ->
     case ets:lookup(Cache, Key) of
         [{Key, Value, Timestamp, Timestamp}] ->
+            % No need to check invalidation (3rd and 4th fields are equal so it was checked during insert).
             {ok, Value};
         [{Key, Value, Timestamp, _}] ->
             case check_invalidation(Cache, Timestamp) of
@@ -124,11 +139,17 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args) ->
 calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
     case CalculateCallback(Args) of
         {ok, Value, _CalculationInfo} = Ans ->
+            % Insert value with timestamp
             case ets:insert_new(Cache, {Key, Value, Timestamp, 0}) of
                 true ->
                     case check_invalidation(Cache, Timestamp) of
-                        invalidated -> ok; % value in cache will be invalid without counter update
-                        _ -> catch ets:update_counter(Cache, Key, {4, Timestamp, Timestamp, Timestamp})
+                        invalidated ->
+                            ok; % value in cache will be invalid without counter update
+                        _ ->
+                            % Increment field number 4 (timestamp check filed) as there was no invalidation.
+                            % Use incrementation threshold in case of insert races.
+                            % As update_counter fails if there is no particular key, races with invalidation are prevented.
+                            catch ets:update_counter(Cache, Key, {4, Timestamp, Timestamp, Timestamp})
                     end;
                 _ ->
                     ok

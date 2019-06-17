@@ -6,7 +6,15 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model that holds information about traverse tasks load balancing.
+%%% Model that holds information about traverse tasks load balancing (see traverse.erl). Single traverse_load_balance
+%%% document is created for all instances of pool working on different nodes of cluster (each pool is balanced separately).
+%%% The model is not synchronized.
+%%% Documents contain information needed to control number of tasks executed in parallel on single pool on all nodes
+%%% and to choose next task to be executed on that pool. The tasks are started immediately until number of parallel
+%%% tasks limit is reached for particular pool. Next tasks are started when an ongoing task is ended.
+%%% Task to be executed is chosen using groups. Choosing task, the group is chosen first (using round robin)
+%%% and than first (according to timestamp - see traverse_task_list) task from the group is processed.
+%%% Nodes for tasks are chosen using round robin.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(traverse_load_balance).
@@ -17,9 +25,9 @@
 %%% Pool management API
 -export([init_pool/2, clear_pool/1]).
 %%% Task management API
--export([add_task/1, finish_task/1]).
+-export([increment_ongoing_tasks/1, decrement_ongoing_tasks/1]).
 %%% Group management API
--export([register_group/2, cancel_group/2, get_next_group/1]).
+-export([register_group/2, deregister_group/2, get_next_group/1]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
@@ -39,19 +47,23 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes document for pool.
+%% Initializes new document for pool. It document exists - updates it.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_pool(traverse:pool(), ongoing_tasks_limit()) -> ok | {error, term()}.
 init_pool(Pool, Limit) ->
     Node = node(),
-    New = #traverse_load_balance{pool = Pool,
-        ongoing_tasks_limit = Limit, nodes = [Node]},
+    Default = #traverse_load_balance{
+        pool = Pool,
+        ongoing_tasks_limit = Limit,
+        nodes = [Node]},
     Diff = fun(#traverse_load_balance{nodes = Nodes} = Record) ->
-        {ok, Record#traverse_load_balance{nodes = [Node | (Nodes -- [Node])],
-            ongoing_tasks_limit = Limit}}
+        {ok, Record#traverse_load_balance{
+            nodes = [Node | (Nodes -- [Node])],
+            ongoing_tasks_limit = Limit
+        }}
     end,
-    extract_ok(datastore_model:update(?CTX, Pool, Diff, New)).
+    extract_ok(datastore_model:update(?CTX, Pool, Diff, Default)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,19 +80,22 @@ clear_pool(Pool) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves information about new task.
+%% Updates information that new task has been scheduled.
+%% Returns error if it can not be executed (limit is reached).
 %% @end
 %%--------------------------------------------------------------------
--spec add_task(traverse:pool()) -> {ok, node()} | {error, term()}.
-add_task(Pool) ->
+-spec increment_ongoing_tasks(traverse:pool()) -> {ok, node()} | {error, term()}.
+increment_ongoing_tasks(Pool) ->
     Diff = fun(#traverse_load_balance{ongoing_tasks = OT,
         ongoing_tasks_limit = TL, nodes = Nodes} = Record) ->
         case OT < TL of
             false ->
                 {error, limit_exceeded};
             _ ->
-                {ok, Record#traverse_load_balance{ongoing_tasks = OT + 1,
-                    nodes = update_nodes(Nodes)}}
+                {ok, Record#traverse_load_balance{
+                    ongoing_tasks = OT + 1,
+                    nodes = update_nodes(Nodes)
+                }}
         end
     end,
     case datastore_model:update(?CTX, Pool, Diff) of
@@ -92,11 +107,11 @@ add_task(Pool) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Saves information about task's finish.
+%% Updates information that task has been ended.
 %% @end
 %%--------------------------------------------------------------------
--spec finish_task(traverse:pool()) -> ok | {error, term()}.
-finish_task(Pool) ->
+-spec decrement_ongoing_tasks(traverse:pool()) -> ok | {error, term()}.
+decrement_ongoing_tasks(Pool) ->
     Diff = fun(#traverse_load_balance{ongoing_tasks = OT} = Record) ->
         {ok, Record#traverse_load_balance{ongoing_tasks = OT - 1}}
     end,
@@ -129,8 +144,8 @@ register_group(Pool, Group) ->
 %% Deletes information about group of tasks.
 %% @end
 %%--------------------------------------------------------------------
--spec cancel_group(traverse:pool(), traverse:group()) -> ok | {error, term()}.
-cancel_group(Pool, Group) ->
+-spec deregister_group(traverse:pool(), traverse:group()) -> ok | {error, term()}.
+deregister_group(Pool, Group) ->
     Diff = fun(#traverse_load_balance{groups = Groups} = Record) ->
         case lists:member(Group, Groups) of
             false ->
@@ -149,14 +164,14 @@ cancel_group(Pool, Group) ->
 -spec get_next_group(traverse:pool()) -> {ok, traverse:group()} | {error, term()}.
 get_next_group(Pool) ->
     Diff = fun
-               (#traverse_load_balance{groups = []}) ->
-                   {error, no_groups};
-               (#traverse_load_balance{groups = [Group]}) ->
-                   {error, {single_group, Group}};
-               (#traverse_load_balance{groups = Groups} = Record) ->
-                   Next = lists:last(Groups),
-                   Groups2 = [Next | lists:droplast(Groups)],
-                   {ok, Record#traverse_load_balance{groups = Groups2}}
+        (#traverse_load_balance{groups = []}) ->
+            {error, no_groups};
+        (#traverse_load_balance{groups = [Group]}) ->
+            {error, {single_group, Group}};
+        (#traverse_load_balance{groups = Groups} = Record) ->
+            Next = lists:last(Groups),
+            Groups2 = [Next | lists:droplast(Groups)],
+            {ok, Record#traverse_load_balance{groups = Groups2}}
     end,
     case datastore_model:update(?CTX, Pool, Diff) of
         {ok, #document{value = #traverse_load_balance{groups = [Next | _]}}} ->
@@ -189,7 +204,7 @@ get_ctx() ->
     datastore_model:record_struct().
 get_record_struct(1) ->
     {record, [
-        {pool, atom},
+        {pool, string},
         {ongoing_tasks, integer},
         {ongoing_tasks_limit, integer},
         {groups, [string]},
@@ -210,11 +225,8 @@ extract_ok(IgnoredResult, IgnoredResult) -> ok;
 extract_ok(Result, _) -> Result.
 
 -spec update_nodes([node()]) -> [node()].
+update_nodes([_] = Nodes) ->
+    Nodes;
 update_nodes(Nodes) ->
-    case Nodes of
-        [_] ->
-            Nodes;
-        _ ->
-            Next = lists:last(Nodes),
-            [Next | lists:droplast(Nodes)]
-    end.
+    Next = lists:last(Nodes),
+    [Next | lists:droplast(Nodes)].
