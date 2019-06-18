@@ -84,6 +84,9 @@
 -type fold_acc() :: datastore_links:fold_acc().
 -type fold_opts() :: datastore_links:fold_opts().
 
+-export_type([link/0, link_name/0, link_target/0, link_rev/0, tree_id/0,
+    tree_ids/0, fold_fun/1, fold_acc/0, fold_opts/0]).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
