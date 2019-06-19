@@ -30,6 +30,7 @@
 -define(ENDED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "ENDED_")).
 -define(FOREST_KEY(Pool, Prefix), <<Prefix, Pool/binary>>).
 % Additional forests for load balancing purposes
+% TODO - moze executor nie potrzebny jak by dodawac link jak task sie synchronizuje przez dbsync
 -define(LOAD_BALANCING_FOREST_KEY(Key, Group, Executor), <<Key/binary, "###", Group/binary, "###", Executor/binary>>).
 % Definitions used to list ongoing jobs (used during provider restart)
 -define(ONGOING_JOB_KEY(Pool, CallbackModule),
