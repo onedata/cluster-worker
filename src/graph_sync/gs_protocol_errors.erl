@@ -130,6 +130,13 @@ error_to_json(_, ?ERROR_MISSING_REQUIRED_VALUE(Key)) ->
             <<"key">> => Key
         }
     };
+error_to_json(_, ?ERROR_BAD_IDP_ACCESS_TOKEN(IdP)) ->
+    #{
+        <<"id">> => <<"badIdpAccessToken">>,
+        <<"details">> => #{
+            <<"idp">> => IdP
+        }
+    };
 error_to_json(_, ?ERROR_MISSING_AT_LEAST_ONE_VALUE(Keys)) ->
     #{
         <<"id">> => <<"missingAtLeastOneValue">>,
@@ -307,21 +314,41 @@ error_to_json(_, ?ERROR_BAD_VALUE_IDENTIFIER(Key)) ->
             <<"key">> => Key
         }
     };
-error_to_json(_, ?ERROR_BAD_VALUE_ALIAS) ->
+error_to_json(_, ?ERROR_BAD_VALUE_FULL_NAME) ->
     #{
-        <<"id">> => <<"badValueAlias">>
+        <<"id">> => <<"badValueFullName">>
     };
-error_to_json(_, ?ERROR_BAD_VALUE_USER_NAME) ->
+error_to_json(_, ?ERROR_BAD_VALUE_USERNAME) ->
     #{
-        <<"id">> => <<"badValueUserName">>
+        <<"id">> => <<"badValueUsername">>
+    };
+error_to_json(_, ?ERROR_BAD_VALUE_PASSWORD) ->
+    #{
+        <<"id">> => <<"badValuePassword">>
     };
 error_to_json(_, ?ERROR_BAD_VALUE_NAME) ->
     #{
         <<"id">> => <<"badValueName">>
     };
+error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED) ->
+    #{
+        <<"id">> => <<"subdomainDelegationNotSupported">>
+    };
 error_to_json(_, ?ERROR_SUBDOMAIN_DELEGATION_DISABLED) ->
     #{
         <<"id">> => <<"subdomainDelegationDisabled">>
+    };
+error_to_json(_, ?ERROR_BASIC_AUTH_NOT_SUPPORTED) ->
+    #{
+        <<"id">> => <<"basicAuthNotSupported">>
+    };
+error_to_json(_, ?ERROR_BASIC_AUTH_DISABLED) ->
+    #{
+        <<"id">> => <<"basicAuthDisabled">>
+    };
+error_to_json(_, ?ERROR_PROTECTED_GROUP) ->
+    #{
+        <<"id">> => <<"protectedGroup">>
     };
 error_to_json(_, ?ERROR_RELATION_DOES_NOT_EXIST(ChType, ChId, ParType, ParId)) ->
     #{
@@ -350,6 +377,30 @@ error_to_json(_, ?ERROR_CANNOT_DELETE_ENTITY(EntityType, EntityId)) ->
             <<"entityType">> => EntityType,
             <<"entityId">> => EntityId
         }
+    };
+error_to_json(_, ?ERROR_CANNOT_ADD_RELATION_TO_SELF) ->
+    #{
+        <<"id">> => <<"cannotAddRelationToSelf">>
+    };
+
+error_to_json(_, ?ERROR_TEMPORARY_FAILURE) ->
+    #{
+        <<"id">> => <<"temporaryFailure">>
+    };
+
+error_to_json(_, ?ERROR_BAD_GUI_PACKAGE) ->
+    #{
+        <<"id">> => <<"badGuiPackage">>
+    };
+
+error_to_json(_, ?ERROR_GUI_PACKAGE_TOO_LARGE) ->
+    #{
+        <<"id">> => <<"guiPackageTooLarge">>
+    };
+
+error_to_json(_, ?ERROR_GUI_PACKAGE_UNVERIFIED) ->
+    #{
+        <<"id">> => <<"guiPackageUnverified">>
     }.
 
 
@@ -431,6 +482,10 @@ json_to_error(_, #{<<"id">> := <<"badBasicCredentials">>}) ->
 json_to_error(_, #{<<"id">> := <<"missingRequiredValue">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_MISSING_REQUIRED_VALUE(Key);
+
+json_to_error(_, #{<<"id">> := <<"badIdpAccessToken">>,
+    <<"details">> := #{<<"idp">> := IdP}}) ->
+    ?ERROR_BAD_IDP_ACCESS_TOKEN(IdP);
 
 json_to_error(_, #{<<"id">> := <<"missingAtLeastOneValue">>,
     <<"details">> := #{<<"keys">> := Keys}}) ->
@@ -519,17 +574,32 @@ json_to_error(_, #{<<"id">> := <<"badValueIntentifier">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_IDENTIFIER(Key);
 
-json_to_error(_, #{<<"id">> := <<"badValueAlias">>}) ->
-    ?ERROR_BAD_VALUE_ALIAS;
+json_to_error(_, #{<<"id">> := <<"badValueFullName">>}) ->
+    ?ERROR_BAD_VALUE_FULL_NAME;
 
-json_to_error(_, #{<<"id">> := <<"badValueUserName">>}) ->
-    ?ERROR_BAD_VALUE_USER_NAME;
+json_to_error(_, #{<<"id">> := <<"badValueUsername">>}) ->
+    ?ERROR_BAD_VALUE_USERNAME;
+
+json_to_error(_, #{<<"id">> := <<"badValuePassword">>}) ->
+    ?ERROR_BAD_VALUE_PASSWORD;
 
 json_to_error(_, #{<<"id">> := <<"badValueName">>}) ->
     ?ERROR_BAD_VALUE_NAME;
 
+json_to_error(_, #{<<"id">> := <<"subdomainDelegationNotSupported">>}) ->
+    ?ERROR_SUBDOMAIN_DELEGATION_NOT_SUPPORTED;
+
 json_to_error(_, #{<<"id">> := <<"subdomainDelegationDisabled">>}) ->
     ?ERROR_SUBDOMAIN_DELEGATION_DISABLED;
+
+json_to_error(_, #{<<"id">> := <<"basicAuthNotSupported">>}) ->
+    ?ERROR_BASIC_AUTH_NOT_SUPPORTED;
+
+json_to_error(_, #{<<"id">> := <<"basicAuthDisabled">>}) ->
+    ?ERROR_BASIC_AUTH_DISABLED;
+
+json_to_error(_, #{<<"id">> := <<"protectedGroup">>}) ->
+    ?ERROR_PROTECTED_GROUP;
 
 json_to_error(_, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{
@@ -549,5 +619,25 @@ json_to_error(_, #{<<"id">> := <<"relationAlreadyExists">>,
 
 json_to_error(_, #{<<"id">> := <<"cannotDeleteEntity">>,
     <<"details">> := #{<<"entityType">> := EntityType, <<"entityId">> := EntityId}}) ->
-    ?ERROR_CANNOT_DELETE_ENTITY(binary_to_existing_atom(EntityType, utf8), EntityId).
+    ?ERROR_CANNOT_DELETE_ENTITY(binary_to_existing_atom(EntityType, utf8), EntityId);
 
+json_to_error(_, #{<<"id">> := <<"cannotAddRelationToSelf">>}) ->
+    ?ERROR_CANNOT_ADD_RELATION_TO_SELF;
+
+json_to_error(_, #{<<"id">> := <<"temporaryFailure">>}) ->
+    ?ERROR_TEMPORARY_FAILURE;
+
+json_to_error(_, #{<<"id">> := <<"badGuiPackage">>}) ->
+    ?ERROR_BAD_GUI_PACKAGE;
+
+json_to_error(_, #{<<"id">> := <<"guiPackageTooLarge">>}) ->
+    ?ERROR_GUI_PACKAGE_TOO_LARGE;
+
+json_to_error(_, #{<<"id">> := <<"guiPackageUnverified">>}) ->
+    ?ERROR_GUI_PACKAGE_UNVERIFIED;
+
+% Unknown errors
+json_to_error(_, #{<<"details">> := #{<<"description">> := Description}}) ->
+    ?ERROR_UNCLASSIFIED_ERROR(Description);
+json_to_error(_, _) ->
+    ?ERROR_UNCLASSIFIED_ERROR(<<"No error description">>).

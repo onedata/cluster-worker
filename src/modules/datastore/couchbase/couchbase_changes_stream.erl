@@ -22,7 +22,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/5]).
+-export([start_link/5, stop_async/1, get_seq_safe/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -42,6 +42,8 @@
 
 -type state() :: #state{}.
 
+-define(STOP, stop).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -56,6 +58,31 @@
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope, Callback, Opts, LinkedProcesses) ->
     gen_server:start_link(?MODULE, [Bucket, Scope, Callback, Opts, LinkedProcesses], []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Asynchronously stops CouchBase changes stream.
+%% @end
+%%--------------------------------------------------------------------
+-spec stop_async(pid()) -> ok.
+stop_async(StreamPid) ->
+    gen_server:cast(StreamPid, ?STOP).
+
+
+%%--------------------------------------------------------------------
+%% Gets seq_safe from memory or from db (if it is not found in memory).
+%% @end
+%%--------------------------------------------------------------------
+-spec get_seq_safe(datastore:scope(), datastore_context:ctx()) -> non_neg_integer().
+get_seq_safe(Scope, Ctx) ->
+    case ets:lookup(?CHANGES_COUNTERS, Scope) of
+        [{_, SeqSafe}] ->
+            SeqSafe;
+        _ ->
+            Key = couchbase_changes:get_seq_safe_key(Scope),
+            {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
+            SeqSafe
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -116,6 +143,8 @@ handle_call(Request, _From, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
+handle_cast(?STOP, #state{} = State) ->
+    {stop, normal, State};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -268,20 +297,3 @@ stream_docs([], #state{interval = Interval}) ->
 stream_docs(Docs, #state{callback = Callback}) ->
     Callback({ok, Docs}),
     erlang:send_after(0, self(), update).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Gets seq_safe from memory or from db (if it is not found in memory).
-%% @end
-%%--------------------------------------------------------------------
--spec get_seq_safe(datastore:scope(), datastore_context:ctx()) -> non_neg_integer().
-get_seq_safe(Scope, Ctx) ->
-    case ets:lookup(?CHANGES_COUNTERS, Scope) of
-        [{_, SeqSafe}] ->
-            SeqSafe;
-        _ ->
-            Key = couchbase_changes:get_seq_safe_key(Scope),
-            {ok, _, SeqSafe} = couchbase_driver:get_counter(Ctx, Key),
-            SeqSafe
-    end.

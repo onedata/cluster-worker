@@ -29,10 +29,10 @@ all() -> ?ALL([test_hashing]).
 test_hashing(Config) ->
     Workers = [Worker1 | _] = ?config(cluster_worker_nodes, Config),
 
-    ?assertEqual(lists:usort(Workers), rpc:call(Worker1, consistent_hasing, get_all_nodes, [])),
-    NodeOfUuid1 = rpc:call(Worker1, consistent_hasing, get_node, [<<"uuid1">>]),
-    NodeOfUuid2 = rpc:call(Worker1, consistent_hasing, get_node, [<<"uuid2">>]),
-    NodeOfObject = rpc:call(Worker1, consistent_hasing, get_node, [{some, <<"object">>}]),
+    ?assertEqual(lists:usort(Workers), rpc:call(Worker1, consistent_hashing, get_all_nodes, [])),
+    NodeOfUuid1 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid1">>]),
+    NodeOfUuid2 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid2">>]),
+    NodeOfObject = rpc:call(Worker1, consistent_hashing, get_node, [{some, <<"object">>}]),
 
     ?assert(erlang:is_atom(NodeOfUuid1)),
     ?assert(erlang:is_atom(NodeOfUuid2)),

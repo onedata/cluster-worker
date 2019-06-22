@@ -383,7 +383,7 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
                         [Ctx, Fun, UniqueKey, Args]);
                 (_, Error) ->
                     Error
-            end, ok, consistent_hasing:get_all_nodes());
+            end, ok, consistent_hashing:get_all_nodes());
         _ ->
             datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args)
     end.
