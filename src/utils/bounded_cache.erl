@@ -6,17 +6,20 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides ets cache that is cleaned automatically (size is checked periodically).
+%%% This module provides ets cache that is cleaned automatically when size is exceeded (size is checked periodically).
 %%% The caches can form groups which size is calculated together. It is useful as caches can be invalidated separately
 %%% while number of slots is fixed regardless number of caches in group.
-%%% The cache stores information in tuples {Key, Value, Timestamp, TimestampCheck} where timestamp and check are used
-%%% to verify if there were no races between insert and invalidation.
+%%% The cache stores information using record cache_item where timestamp and timestamp_check fields are used
+%%% to verify if there were no races between insert and invalidation. Although ets cleaning is atomic, calculation of
+%%% value can take some time. Thus, it is necessary to store timestamp connected with key (invalidation may occur
+%%% during calculation of value). TimestampCheck is used to verify race between invalidation and value calculation to
+%%% prevent comparing invalidation and calculation timestamps during "get" operations.
 %%% @end
 %%%-------------------------------------------------------------------
--module(tmp_cache).
+-module(bounded_cache).
 -author("Michal Wrzeszcz").
 
--dialyzer({nowarn_function, [init_cache/2, terminate_cache/2]}). % silence warning about race on ets
+-dialyzer({nowarn_function, [init_cache/2, terminate_cache/1]}). % silence warning about race on ets
 
 %% Basic cache API
 -export([get_or_calculate/4, get_or_calculate/5, get/2,
@@ -24,7 +27,7 @@
     invalidate/1, get_timestamp/0]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2,
-    terminate_cache/2, check_cache_size/1]).
+    terminate_cache/1, check_cache_size/1]).
 
 -type cache() :: atom().
 -type group() :: binary().
@@ -52,13 +55,21 @@
 }.
 -type in_critical_section() :: boolean().
 
--define(TIMER_MESSAGE(Options), {tmp_cache_timer, Options}).
--define(CACHE_MANAGER, tmp_cache_manager).
+-define(TIMER_MESSAGE(Options), {bounded_cache_timer, Options}).
+-define(CACHE_MANAGER, bounded_cache_manager).
+-define(CACHE_GROUP_KEY(Cache), {cache_group, Cache}).
 -define(INVALIDATION_TIMESTAMP_KEY(Cache), {invalidation_timestamp, Cache}).
 -define(GROUP_MEMBERS_KEY(Group), {group_members, Group}).
--define(CREATE_CRITICAL_SECTION(Group), {tmp_cache_group_create, Group}).
--define(INVALIDATE_CRITICAL_SECTION(Cache), {tmp_cache_invalidation, Cache}).
--define(INSERT_CRITICAL_SECTION(Cache, Key), {tmp_cache_insert, Cache, Key}).
+-define(CREATE_CRITICAL_SECTION(Group), {bounded_cache_group_create, Group}).
+-define(INVALIDATE_CRITICAL_SECTION(Cache), {bounded_cache_invalidation, Cache}).
+-define(INSERT_CRITICAL_SECTION(Cache, Key), {bounded_cache_insert, Cache, Key}).
+
+-record(cache_item, {
+    key :: key(),
+    value :: value(),
+    timestamp :: timestamp(),
+    timestamp_check :: timestamp()
+}).
 
 %%%===================================================================
 %%% Basic cache API
@@ -107,10 +118,10 @@ get_or_calculate(Cache, Key, CalculateCallback, Args, true) ->
 -spec get(cache(), key()) -> {ok, value()} | {error, not_found}.
 get(Cache, Key) ->
     case ets:lookup(Cache, Key) of
-        [{Key, Value, Timestamp, Timestamp}] ->
-            % No need to check invalidation (3rd and 4th fields are equal so it was checked during insert).
+        [#cache_item{value = Value, timestamp = Timestamp, timestamp_check = Timestamp}] ->
+            % No need to check invalidation (timestamp and timestamp_check fields are equal so it was checked during insert).
             {ok, Value};
-        [{Key, Value, Timestamp, _}] ->
+        [#cache_item{value = Value, timestamp = Timestamp}] ->
             case check_invalidation(Cache, Timestamp) of
                 invalidated -> {error, not_found};
                 _ -> {ok, Value}
@@ -140,16 +151,21 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
     case CalculateCallback(Args) of
         {ok, Value, _CalculationInfo} = Ans ->
             % Insert value with timestamp
-            case ets:insert_new(Cache, {Key, Value, Timestamp, 0}) of
+            case ets:insert_new(Cache, #cache_item{
+                key = Key,
+                value = Value,
+                timestamp = Timestamp,
+                timestamp_check = 0
+            }) of
                 true ->
                     case check_invalidation(Cache, Timestamp) of
                         invalidated ->
                             ok; % value in cache will be invalid without counter update
                         _ ->
-                            % Increment field number 4 (timestamp check filed) as there was no invalidation.
-                            % Use incrementation threshold in case of insert races.
+                            % Increment timestamp_check field as there was no invalidation.
+                            % Use incrementation threshold in case of parallel insert race.
                             % As update_counter fails if there is no particular key, races with invalidation are prevented.
-                            catch ets:update_counter(Cache, Key, {4, Timestamp, Timestamp, Timestamp})
+                            catch ets:update_counter(Cache, Key, {#cache_item.timestamp_check, Timestamp, Timestamp, Timestamp})
                     end;
                 _ ->
                     ok
@@ -208,7 +224,8 @@ init_group_manager() ->
 -spec init_cache(cache(), cache_options()) -> ok | {error, term()}.
 init_cache(Cache, #{group := Group}) ->
     try
-        ets:new(Cache, [set, public, named_table]),
+        ets:insert(?CACHE_MANAGER, {?CACHE_GROUP_KEY(Cache), Group}),
+        ets:new(Cache, [set, public, named_table, {keypos, #cache_item.key}]),
         critical_section:run(?CREATE_CRITICAL_SECTION(Group), fun() ->
             [{?GROUP_MEMBERS_KEY(Group), List}] = ets:lookup(?CACHE_MANAGER,
                 ?GROUP_MEMBERS_KEY(Group)),
@@ -220,7 +237,7 @@ init_cache(Cache, #{group := Group}) ->
     end;
 init_cache(Cache, Options) ->
     try
-        ets:new(Cache, [set, public, named_table]),
+        ets:new(Cache, [set, public, named_table, {keypos, #cache_item.key}]),
         send_check_message(Options#{name => Cache}),
         ok
     catch
@@ -247,14 +264,17 @@ init_group(Group, Options) ->
 %% Terminates particular cache (all data is cleared).
 %% @end
 %%--------------------------------------------------------------------
--spec terminate_cache(cache(), terminate_options()) -> ok.
-terminate_cache(Cache, #{group := Group}) ->
-    [{?GROUP_MEMBERS_KEY(Group), List}] =
-        ets:lookup(?CACHE_MANAGER, ?GROUP_MEMBERS_KEY(Group)),
-    ets:insert(?CACHE_MANAGER, {?GROUP_MEMBERS_KEY(Group), [List] -- [Cache]}),
-    ets:delete(Cache),
-    ok;
-terminate_cache(Cache, _Options) ->
+-spec terminate_cache(cache()) -> ok.
+terminate_cache(Cache) ->
+    case ets:lookup(?CACHE_MANAGER, ?CACHE_GROUP_KEY(Cache)) of
+        [{?CACHE_GROUP_KEY(Cache), Group}] ->
+            ets:delete(?CACHE_MANAGER, ?CACHE_GROUP_KEY(Cache)),
+            [{?GROUP_MEMBERS_KEY(Group), Caches}] =
+                ets:lookup(?CACHE_MANAGER, ?GROUP_MEMBERS_KEY(Group)),
+            ets:insert(?CACHE_MANAGER, {?GROUP_MEMBERS_KEY(Group), Caches -- [Cache]});
+        _ ->
+            ok
+    end,
     ets:delete(Cache),
     ok.
 
@@ -265,18 +285,25 @@ terminate_cache(Cache, _Options) ->
 %%--------------------------------------------------------------------
 -spec check_cache_size(check_options()) -> ok.
 check_cache_size(#{size := Size, group := true, name := Group} = Options) ->
-    [{?GROUP_MEMBERS_KEY(Group), List}] =
+    [{?GROUP_MEMBERS_KEY(Group), Caches}] =
         ets:lookup(?CACHE_MANAGER, ?GROUP_MEMBERS_KEY(Group)),
     SizeSum = lists:foldl(fun(Cache, Sum) ->
-        Sum + ets:info(Cache, size)
-    end, 0, List),
+        try
+            Sum + ets:info(Cache, size)
+        catch
+            _:badarg -> Sum % cache has been deleted
+        end
+    end, 0, Caches),
 
     case SizeSum > Size of
-        % TODO - jesli delete all objects byloby wolne to mozna skasowac caly ets i stworzyc od nowa (i dac catch na operacje)
         true ->
             lists:foreach(fun(Cache) ->
-                ets:delete_all_objects(Cache)
-            end, List);
+                try
+                    ets:delete_all_objects(Cache)
+                catch
+                    _:badarg -> ok % cache has been deleted
+                end
+            end, Caches);
         _ -> ok
     end,
     send_check_message(Options),
@@ -284,7 +311,6 @@ check_cache_size(#{size := Size, group := true, name := Group} = Options) ->
 check_cache_size(#{size := Size, name := Cache} = Options) ->
     try
         case ets:info(Cache, size) > Size of
-            % TODO - jesli delete all objects byloby wolne to mozna skasowac caly ets i stworzyc od nowa (i dac catch na operacje)
             true -> ets:delete_all_objects(Cache);
             _ -> ok
         end,

@@ -6,24 +6,24 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model that holds information about traverse tasks load balancing (see traverse.erl). Single traverse_load_balance
+%%% Model that holds information about traverse tasks load balancing (see traverse.erl). Single traverse_tasks_scheduler
 %%% document is created for all instances of pool working on different nodes of cluster (each pool is balanced separately).
 %%% The model is not synchronized.
 %%% Documents contain information needed to control number of tasks executed in parallel on single pool on all nodes
 %%% and to choose next task to be executed on that pool. The tasks are started immediately until number of parallel
 %%% tasks limit is reached for particular pool. Next tasks are started when an ongoing task is ended.
 %%% Task to be executed is chosen using groups. Choosing task, the group is chosen first (using round robin)
-%%% and than first (according to timestamp - see traverse_task_list) task from the group is processed.
+%%% and then first (according to timestamp - see traverse_task_list) task from the group is processed.
 %%% Nodes for tasks are chosen using round robin.
 %%% @end
 %%%-------------------------------------------------------------------
--module(traverse_load_balance).
+-module(traverse_tasks_scheduler).
 -author("Michal Wrzeszcz").
 
 -include("modules/datastore/datastore_models.hrl").
 
 %%% Pool management API
--export([init_pool/2, clear_pool/1]).
+-export([init/2, clear/1]).
 %%% Task management API
 -export([increment_ongoing_tasks/1, decrement_ongoing_tasks/1]).
 %%% Group management API
@@ -50,15 +50,15 @@
 %% Initializes new document for pool. It document exists - updates it.
 %% @end
 %%--------------------------------------------------------------------
--spec init_pool(traverse:pool(), ongoing_tasks_limit()) -> ok | {error, term()}.
-init_pool(Pool, Limit) ->
+-spec init(traverse:pool(), ongoing_tasks_limit()) -> ok | {error, term()}.
+init(Pool, Limit) ->
     Node = node(),
-    Default = #traverse_load_balance{
+    Default = #traverse_tasks_scheduler{
         pool = Pool,
         ongoing_tasks_limit = Limit,
         nodes = [Node]},
-    Diff = fun(#traverse_load_balance{nodes = Nodes} = Record) ->
-        {ok, Record#traverse_load_balance{
+    Diff = fun(#traverse_tasks_scheduler{nodes = Nodes} = Record) ->
+        {ok, Record#traverse_tasks_scheduler{
             nodes = [Node | (Nodes -- [Node])],
             ongoing_tasks_limit = Limit
         }}
@@ -70,8 +70,8 @@ init_pool(Pool, Limit) ->
 %% Clears document for pool.
 %% @end
 %%--------------------------------------------------------------------
--spec clear_pool(traverse:pool()) -> ok | {error, term()}.
-clear_pool(Pool) ->
+-spec clear(traverse:pool()) -> ok | {error, term()}.
+clear(Pool) ->
     datastore_model:delete(?CTX, Pool).
 
 %%%===================================================================
@@ -86,20 +86,20 @@ clear_pool(Pool) ->
 %%--------------------------------------------------------------------
 -spec increment_ongoing_tasks(traverse:pool()) -> {ok, node()} | {error, term()}.
 increment_ongoing_tasks(Pool) ->
-    Diff = fun(#traverse_load_balance{ongoing_tasks = OT,
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT,
         ongoing_tasks_limit = TL, nodes = Nodes} = Record) ->
         case OT < TL of
             false ->
                 {error, limit_exceeded};
             _ ->
-                {ok, Record#traverse_load_balance{
+                {ok, Record#traverse_tasks_scheduler{
                     ongoing_tasks = OT + 1,
                     nodes = update_nodes(Nodes)
                 }}
         end
     end,
     case datastore_model:update(?CTX, Pool, Diff) of
-        {ok, #document{value = #traverse_load_balance{nodes = [Next | _]}}} ->
+        {ok, #document{value = #traverse_tasks_scheduler{nodes = [Next | _]}}} ->
             {ok, Next};
         Other ->
             Other
@@ -112,8 +112,8 @@ increment_ongoing_tasks(Pool) ->
 %%--------------------------------------------------------------------
 -spec decrement_ongoing_tasks(traverse:pool()) -> ok | {error, term()}.
 decrement_ongoing_tasks(Pool) ->
-    Diff = fun(#traverse_load_balance{ongoing_tasks = OT} = Record) ->
-        {ok, Record#traverse_load_balance{ongoing_tasks = OT - 1}}
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT} = Record) ->
+        {ok, Record#traverse_tasks_scheduler{ongoing_tasks = OT - 1}}
     end,
     extract_ok(datastore_model:update(?CTX, Pool, Diff)).
 
@@ -123,58 +123,58 @@ decrement_ongoing_tasks(Pool) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Registers information about group of tasks.
+%% Registers information about group of tasks. Tasks connected with the group will be executed on pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec register_group(traverse:pool(), traverse:group()) -> ok | {error, term()}.
 register_group(Pool, Group) ->
-    Diff = fun(#traverse_load_balance{groups = Groups} = Record) ->
+    Diff = fun(#traverse_tasks_scheduler{groups = Groups} = Record) ->
         case lists:member(Group, Groups) of
             true ->
                 {error, already_registered};
             _ ->
-                {ok, Record#traverse_load_balance{groups = [Group | Groups]}}
+                {ok, Record#traverse_tasks_scheduler{groups = [Group | Groups]}}
         end
     end,
-    Default = #traverse_load_balance{pool = Pool, groups = [Group]},
+    Default = #traverse_tasks_scheduler{pool = Pool, groups = [Group]},
     extract_ok(datastore_model:update(?CTX, Pool, Diff, Default), {error, already_registered}).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes information about group of tasks.
+%% Deletes information about group of tasks. Tasks connected with the group will not be executed on pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec deregister_group(traverse:pool(), traverse:group()) -> ok | {error, term()}.
 deregister_group(Pool, Group) ->
-    Diff = fun(#traverse_load_balance{groups = Groups} = Record) ->
+    Diff = fun(#traverse_tasks_scheduler{groups = Groups} = Record) ->
         case lists:member(Group, Groups) of
             false ->
                 {error, already_canceled};
             _ ->
-                {ok, Record#traverse_load_balance{groups = Groups -- [Group]}}
+                {ok, Record#traverse_tasks_scheduler{groups = Groups -- [Group]}}
         end
     end,
-    extract_ok(datastore_model:update(?CTX, Pool, Diff)).
+    extract_ok(datastore_model:update(?CTX, Pool, Diff), {error, already_canceled}).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns next group for task execution.
+%% Returns next group for task execution (task from the group will be started now).
 %% @end
 %%--------------------------------------------------------------------
 -spec get_next_group(traverse:pool()) -> {ok, traverse:group()} | {error, term()}.
 get_next_group(Pool) ->
     Diff = fun
-        (#traverse_load_balance{groups = []}) ->
+        (#traverse_tasks_scheduler{groups = []}) ->
             {error, no_groups};
-        (#traverse_load_balance{groups = [Group]}) ->
+        (#traverse_tasks_scheduler{groups = [Group]}) ->
             {error, {single_group, Group}};
-        (#traverse_load_balance{groups = Groups} = Record) ->
+        (#traverse_tasks_scheduler{groups = Groups} = Record) ->
             Next = lists:last(Groups),
             Groups2 = [Next | lists:droplast(Groups)],
-            {ok, Record#traverse_load_balance{groups = Groups2}}
+            {ok, Record#traverse_tasks_scheduler{groups = Groups2}}
     end,
     case datastore_model:update(?CTX, Pool, Diff) of
-        {ok, #document{value = #traverse_load_balance{groups = [Next | _]}}} ->
+        {ok, #document{value = #traverse_tasks_scheduler{groups = [Next | _]}}} ->
             {ok, Next};
         {error, {single_group, Group}} ->
             {ok, Group};

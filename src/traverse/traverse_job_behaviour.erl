@@ -10,7 +10,7 @@
 %%% Callbacks define way of handling of all jobs connected with single traverse task.
 %%% @end
 %%%-------------------------------------------------------------------
--module(job_behaviour).
+-module(traverse_job_behaviour).
 -author("Michal Wrzeszcz").
 
 %%%===================================================================
@@ -88,3 +88,14 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback get_timestamp() -> {ok, traverse:timestamp()}.
+
+%%%===================================================================
+%%% Optional debug API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns term that will be used to describe job in lagger logs.
+%% @end
+%%--------------------------------------------------------------------
+-callback to_string(traverse:job()) -> {ok, term()}.

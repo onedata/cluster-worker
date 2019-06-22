@@ -9,7 +9,7 @@
 %%% This file contains tmp cache and traverse tests.
 %%% @end
 %%%-------------------------------------------------------------------
--module(processing_test_SUITE).
+-module(traverse_and_utils_test_SUITE).
 -author("Michal Wrzeszcz").
 
 -include("datastore_test_utils.hrl").
@@ -21,8 +21,8 @@
 
 %% tests
 -export([
-    basic_ops_test/1,
-    clearing_test/1,
+    cache_basic_ops_test/1,
+    cache_clearing_test/1,
     traverse_test/1,
     traverse_multitask_concurrent_test/1,
     traverse_multitask_sequential_test/1,
@@ -30,16 +30,13 @@
     traverse_loadbalancingt_mixed_ids_test/1,
     traverse_restart_test/1,
     traverse_cancel_test/1,
-    traverse_multiexecutor_test/1
+    traverse_multienvironment_test/1
 ]).
-
-%% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5, get_job/1]).
 
 all() ->
     ?ALL([
-        basic_ops_test,
-        clearing_test,
+        cache_basic_ops_test,
+        cache_clearing_test,
         traverse_test,
         traverse_multitask_concurrent_test,
         traverse_multitask_sequential_test,
@@ -47,20 +44,20 @@ all() ->
         traverse_loadbalancingt_mixed_ids_test,
         traverse_restart_test,
         traverse_cancel_test,
-        traverse_multiexecutor_test
+        traverse_multienvironment_test
     ]).
 
 -define(CACHE, test_cache).
--define(CALL_CACHE(Worker, Op, Args), rpc:call(Worker, tmp_cache, Op, [?CACHE | Args])).
--define(POOL, atom_to_binary(?MODULE, utf8)).
--define(MASTER_POOL_NAME, list_to_atom(atom_to_list(?MODULE) ++ "_master")).
--define(SLAVE_POOL_NAME, list_to_atom(atom_to_list(?MODULE) ++ "_slave")).
+-define(CALL_CACHE(Worker, Op, Args), rpc:call(Worker, bounded_cache, Op, [?CACHE | Args])).
+-define(POOL, <<"traverse_test_pool">>).
+-define(MASTER_POOL_NAME, traverse_test_pool_master).
+-define(SLAVE_POOL_NAME, traverse_test_pool_slave).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
 
-basic_ops_test(Config) ->
+cache_basic_ops_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
     Key1 = key1,
     Key2 = key2,
@@ -78,7 +75,7 @@ basic_ops_test(Config) ->
 
     ok.
 
-clearing_test(Config) ->
+cache_clearing_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
     Key1 = key1,
     Key2 = key2,
@@ -112,7 +109,7 @@ traverse_test(Config) ->
         1051,1052,1053,1056,1057,1058,
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
-    Ans = get_slave_ans(),
+    Ans = traverse_test_pool:get_slave_ans(false),
 
     SJobsNum = length(Expected),
     MJobsNum = SJobsNum div 3,
@@ -148,7 +145,7 @@ traverse_multitask_concurrent_test(Config) ->
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
     Expected = Expected0 ++ Expected0 ++ Expected0,
-    Ans = get_slave_ans(),
+    Ans = traverse_test_pool:get_slave_ans(false),
 
     SJobsNum = length(Expected0),
     MJobsNum = SJobsNum div 3,
@@ -188,7 +185,7 @@ traverse_multitask_sequential_test(Config) ->
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
     ExpLen = length(Expected),
-    Ans = get_slave_ans(),
+    Ans = traverse_test_pool:get_slave_ans(false),
 
     SJobsNum = length(Expected),
     MJobsNum = SJobsNum div 3,
@@ -243,7 +240,7 @@ traverse_loadbalancingt_base(Config, Tasks, Check) ->
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
     ExpLen = length(Expected),
-    Ans = get_slave_ans_with_id(),
+    Ans = traverse_test_pool:get_slave_ans(true),
 
     SJobsNum = length(Expected),
     MJobsNum = SJobsNum div 3,
@@ -281,8 +278,8 @@ traverse_restart_test(Config) ->
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_restart_test3">>, {self(), 1, 3}])),
 
-    RecAns = receive
-       stop ->
+    RecAns = receive 
+        {stop, _} ->
            ?assertEqual(ok, rpc:call(Worker, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
            ?assertEqual(ok, rpc:call(Worker, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME]))
     after
@@ -301,7 +298,7 @@ traverse_restart_test(Config) ->
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
     ExpLen = length(Expected),
-    Ans = get_slave_ans(),
+    Ans = traverse_test_pool:get_slave_ans(false),
     AnsLen = length(Ans),
 
     SJobsNum = length(Expected),
@@ -323,8 +320,6 @@ traverse_restart_test(Config) ->
 
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
         rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
-%%    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-%%        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
         rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>])),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
@@ -341,7 +336,7 @@ traverse_cancel_test(Config) ->
         [?POOL, <<"traverse_cancel_test3">>, {self(), 1, 3}])),
 
     RecAns = receive
-                 stop ->
+                 {stop, _} ->
                      ?assertEqual(ok, rpc:call(Worker, traverse, cancel, [?POOL, <<"traverse_cancel_test1">>]))
              after
                  5000 ->
@@ -358,7 +353,7 @@ traverse_cancel_test(Config) ->
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
     ExpLen = length(Expected),
-    Ans = get_slave_ans(),
+    Ans = traverse_test_pool:get_slave_ans(false),
     AnsLen = length(Ans),
 
     SJobsNum = length(Expected),
@@ -387,9 +382,9 @@ traverse_cancel_test(Config) ->
         rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_cancel_test3">>])),
     ok.
 
-traverse_multiexecutor_test(Config) ->
+traverse_multienvironment_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"traverse_multiexecutor_test">>,
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"traverse_multienvironment_test">>,
         {self(), 1, 1}, #{creator => <<"creator">>, executor => <<"executor">>}])),
 
     Expected = [2,3,4,
@@ -400,11 +395,11 @@ traverse_multiexecutor_test(Config) ->
         1051,1052,1053,1056,1057,1058,
         1501,1502, 1503,1506,1507,1508,
         1551,1552,1553,1556,1557, 1558],
-    ?assertEqual([], get_slave_ans()),
+    ?assertEqual([], traverse_test_pool:get_slave_ans(false)),
 
-    {ok, Task} = ?assertMatch({ok, _}, rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multiexecutor_test">>])),
+    {ok, Task} = ?assertMatch({ok, _}, rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multienvironment_test">>])),
     ?assertEqual(ok, rpc:call(Worker, traverse, maybe_run_scheduled_task, [{task, Task}, <<"executor">>])),
-    Ans = get_slave_ans(),
+    Ans = traverse_test_pool:get_slave_ans(false),
 
     SJobsNum = length(Expected),
     MJobsNum = SJobsNum div 3,
@@ -419,7 +414,7 @@ traverse_multiexecutor_test(Config) ->
     ?assertEqual(Expected, lists:sort(Ans)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multiexecutor_test">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multienvironment_test">>])),
     ok.
 
 %%%===================================================================
@@ -428,7 +423,7 @@ traverse_multiexecutor_test(Config) ->
 
 init_per_testcase(Case, Config) when
     Case =:= traverse_test ; Case =:= traverse_multitask_concurrent_test ;
-    Case =:= traverse_multiexecutor_test->
+    Case =:= traverse_multienvironment_test->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
@@ -450,7 +445,7 @@ init_per_testcase(_, Config) ->
     [{cache_pid, CachePid} | Config].
 
 end_per_testcase(Case, Config) when
-    Case =:= basic_ops_test ; Case =:= clearing_test ->
+    Case =:= cache_basic_ops_test ; Case =:= cache_clearing_test ->
     CachePid = ?config(cache_pid, Config),
     CachePid ! {finish, self()},
     ok = receive
@@ -467,89 +462,15 @@ end_per_testcase(_, Config) ->
 %%%===================================================================
 
 cache_proc(Options) ->
-    tmp_cache:init_cache(?CACHE, Options),
+    bounded_cache:init_cache(?CACHE, Options),
     cache_proc().
 
 cache_proc() ->
     receive
-        {tmp_cache_timer, Options} ->
-            tmp_cache:check_cache_size(Options),
+        {bounded_cache_timer, Options} ->
+            bounded_cache:check_cache_size(Options),
             cache_proc();
         {finish, Pid} ->
-            tmp_cache:terminate_cache(?CACHE, #{}),
+            bounded_cache:terminate_cache(?CACHE, #{}),
             Pid ! finished
     end.
-
-get_slave_ans() ->
-    receive
-        {slave, Num, _} ->
-            [Num | get_slave_ans()]
-    after
-        10000 ->
-            []
-    end.
-
-get_slave_ans_with_id() ->
-    receive
-        {slave, Num, ID} ->
-            [{Num, ID} | get_slave_ans_with_id()]
-    after
-        10000 ->
-            []
-    end.
-
-%%%===================================================================
-%%% Pool callbacks
-%%%===================================================================
-
-do_master_job({Master, 100, 100}) ->
-    timer:sleep(500),
-    Master ! stop,
-    timer:sleep(500),
-    do_master_job_helper({Master, 100, 100});
-do_master_job({Master, Num, ID}) ->
-    do_master_job_helper({Master, Num, ID}).
-
-do_master_job_helper({Master, Num, ID}) ->
-    MasterJobs = case Num < 1000 of
-        true -> [{Master, 10 * Num, ID}, {Master, 10 * Num + 5, ID}];
-        _ -> []
-    end,
-
-    SlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}, {Master, Num + 3, ID}],
-    {ok, #{slave_jobs => SlaveJobs, master_jobs => MasterJobs}}.
-
-do_slave_job({Master, Num, ID}) ->
-    Master ! {slave, Num, ID},
-    ok.
-
-task_finished(_) ->
-    timer:sleep(100),
-    ok.
-
-update_job_progress(ID0, Job, _, TaskID, waiting) when ID0 =:= undefined ; ID0 =:= main_job ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
-    ID = list_to_binary(ref_to_list(make_ref())),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List]),
-    {ok, ID};
-update_job_progress(ID0, Job, _, TaskID, on_pool) when ID0 =:= undefined ; ID0 =:= main_job ->
-    ID = list_to_binary(ref_to_list(make_ref())),
-    save_started_job(ID, Job, TaskID),
-    {ok, ID};
-update_job_progress(ID, Job, _, TaskID, on_pool) ->
-    save_started_job(ID, Job, TaskID),
-    {ok, ID};
-update_job_progress(ID, _Job, _, _TaskID, Status) when Status =:= ended ; Status =:= canceled ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
-    {ok, ID}.
-
-save_started_job(ID, Job, TaskID) ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, [{ID, {Job, TaskID}} | proplists:delete(ID, List)]).
-
-get_job(ID) ->
-    Jobs1 = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
-    Jobs2 = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    {Job, TaskID} =  proplists:get_value(ID, Jobs1 ++ Jobs2, {undefined, undefined}),
-    {ok, Job, ?POOL, TaskID}.

@@ -6,12 +6,18 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Module that allows listing of traverse tasks (see traverse.erl) using links.
+%%% Module that allows listing of traverse tasks and jobs (see traverse.erl) using links.
 %%% The tasks are sorted basing on timestamps provided via callback module or generated automatically.
 %%% Different link forests are used for scheduled, ongoing and ended tasks.
+%%% Only task creator can modify scheduled links while task executor ongoing and ended links.
 %%% Additional link forests are created for scheduled tasks for load balancing purposes (each executor uses multiple
 %%% queues for different groups - see traverse_load_balance.erl).
+%%% While task links can be viewed by on different environments, jobs links are local for each environment.
 %%% @end
+%%% TODO - VFS-5528 - Extend listing filters.
+%%% TODO - VFS-5529 - Allow use of different timestamps in different types of trees.
+%%% TODO - VFS-5533 - Task listing functions containing forest type
+%%% TODO - VFS-5534 - Use batches during jobs listing
 %%%-------------------------------------------------------------------
 -module(traverse_task_list).
 -author("Michal Wrzeszcz").
@@ -31,7 +37,7 @@
 -define(FOREST_KEY(Pool, Prefix), <<Prefix, Pool/binary>>).
 % Additional forests for load balancing purposes
 % TODO - moze executor nie potrzebny jak by dodawac link jak task sie synchronizuje przez dbsync
--define(LOAD_BALANCING_FOREST_KEY(Key, Group, Executor), <<Key/binary, "###", Group/binary, "###", Executor/binary>>).
+-define(LOAD_BALANCING_FOREST_KEY(Key, Group, EnvironmentID), <<Key/binary, "###", Group/binary, "###", EnvironmentID/binary>>).
 % Definitions used to list ongoing jobs (used during provider restart)
 -define(ONGOING_JOB_KEY(Pool, CallbackModule),
     <<Pool/binary, "###", (atom_to_binary(CallbackModule, utf8))/binary, "###ONGOING_JOBS">>).
@@ -47,14 +53,14 @@
 -type list_opts() :: #{
     % Basic list start options (use only one):
     token => datastore_links_iter:token(), % use tokens to list faster
-    start_id => link_key(), % List from if
+    start_id => link_key(), % List from particular id
     prev_traverse => {tree(), link_key()}, % Start in place where last listing finished
     % Additional list option (can be used with ones above)
     offset => integer(),
     % Other list options
     limit => non_neg_integer(),
     tree_id => tree(),
-    % Option used in multi-executor environment
+    % Option used to sync data between many environments
     sync_info => traverse:sync_info()
 }.
 -type restart_info() :: #{
@@ -86,45 +92,43 @@ list(Pool, Type) ->
 -spec list(traverse:pool(), forest_type(), list_opts()) ->
     {ok, [traverse:id()], restart_info()} | {error, term()}.
 list(Pool, Type, Opts) ->
-    % TODO - filtrowanie po pozostalych drzewach??!! Tu czy na poziomie op_worker,
-    % TODO - Dodac mozliwosc podawania ExtendedCtx
     Forest = forest_key(Pool, Type),
     list_internal(Forest, Opts).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv list_scheduled(Pool, GroupID, Executor, #{}).
+%% @equiv list_scheduled(Pool, GroupID, EnvironmentID, #{}).
 %% @end
 %%--------------------------------------------------------------------
--spec list_scheduled(traverse:pool(), traverse:group(), traverse:executor()) ->
+-spec list_scheduled(traverse:pool(), traverse:group(), traverse:environment_id()) ->
     {ok, [traverse:id()], restart_info()} | {error, term()}.
-list_scheduled(Pool, GroupID, Executor) ->
-    list_scheduled(Pool, GroupID, Executor, #{}).
+list_scheduled(Pool, GroupID, EnvironmentID) ->
+    list_scheduled(Pool, GroupID, EnvironmentID, #{}).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Lists links of scheduled transfers for group/executor pair.
+%% Lists links of scheduled transfers for group/environment_id pair.
 %% @end
 %%--------------------------------------------------------------------
--spec list_scheduled(traverse:pool(), traverse:group(), traverse:executor(),
+-spec list_scheduled(traverse:pool(), traverse:group(), traverse:environment_id(),
     list_opts()) -> {ok, [traverse:id()], restart_info()} | {error, term()}.
-list_scheduled(Pool, GroupID, Executor, Opts) ->
+list_scheduled(Pool, GroupID, EnvironmentID, Opts) ->
     ForestKey = forest_key(Pool, scheduled),
-    GroupForestKey = ?LOAD_BALANCING_FOREST_KEY(ForestKey, GroupID, Executor),
+    GroupForestKey = ?LOAD_BALANCING_FOREST_KEY(ForestKey, GroupID, EnvironmentID),
     list_internal(GroupForestKey, Opts).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Gets first scheduled transfer for group/executor pair.
+%% Gets first scheduled transfer for group/environment_id pair.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_first_scheduled_link(traverse:pool(), traverse:group(),
-    traverse:executor()) -> {ok, traverse:id() | not_found}.
-get_first_scheduled_link(Pool, GroupID, Executor) ->
+    traverse:environment_id()) -> {ok, traverse:id() | not_found}.
+get_first_scheduled_link(Pool, GroupID, EnvironmentID) ->
     BasicKey = forest_key(Pool, scheduled),
     datastore_model:fold_links(
         traverse_task:get_ctx(),
-        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, Executor),
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID),
         all,
         fun(#link{target = Target}, _) -> {stop, Target} end,
         not_found,
@@ -161,18 +165,18 @@ list_local_ongoing_jobs(Pool, CallbackModule) ->
 -spec add_link(traverse_task:ctx(), traverse:pool(), forest_type(),
     tree(), traverse:id(), traverse:timestamp()) -> ok.
 add_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
-    add_link(Ctx, forest_key(Pool, Type), Tree, ID, Timestamp).
+    add_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, ID, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds link to main and group/executor scheduled trees.
+%% Adds link to main and group/environment_id scheduled trees.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
-    traverse:id(), traverse:timestamp(), traverse:group(), traverse:executor()) -> ok.
-add_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, Executor) ->
-    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, Executor, fun(Key) ->
-        add_link(Ctx, Key, Tree, ID, Timestamp)
+    traverse:id(), traverse:timestamp(), traverse:group(), traverse:environment_id()) -> ok.
+add_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
+    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, EnvironmentID, fun(Key) ->
+        add_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp)
     end).
 
 %%--------------------------------------------------------------------
@@ -202,18 +206,18 @@ add_job_link(Pool, CallbackModule, JobID) ->
 -spec delete_link(traverse_task:ctx(), traverse:pool(), forest_type(),
     tree(), traverse:id(), traverse:timestamp()) -> ok.
 delete_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
-    delete_link(Ctx, forest_key(Pool, Type), Tree, ID, Timestamp).
+    delete_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, ID, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes link from main and group/executor scheduled trees.
+%% Deletes link from main and group/environment_id scheduled trees.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
-    traverse:id(), traverse:timestamp(), traverse:group(), traverse:executor()) -> ok.
-delete_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, Executor) ->
-    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, Executor, fun(Key) ->
-        delete_link(Ctx, Key, Tree, ID, Timestamp)
+    traverse:id(), traverse:timestamp(), traverse:group(), traverse:environment_id()) -> ok.
+delete_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
+    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, EnvironmentID, fun(Key) ->
+        delete_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp)
     end).
 
 %%--------------------------------------------------------------------
@@ -236,16 +240,16 @@ delete_job_link(Pool, CallbackModule, JobID) ->
 %%% Internal functions
 %%%===================================================================
 
--spec add_link(traverse_task:ctx(), forest_key(), tree(), 
+-spec add_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
-add_link(Ctx, Key, Tree, ID, Timestamp) ->
+add_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp) ->
     [{ok, _}] = datastore_model:add_links(Ctx,
         Key, Tree, [{link_key(ID, Timestamp), ID}]),
     ok.
 
--spec delete_link(traverse_task:ctx(), forest_key(), tree(),
+-spec delete_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
-delete_link(Ctx, Key, Tree, ID, Timestamp) ->
+delete_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp) ->
     [ok] = datastore_model:delete_links(Ctx,
         Key, Tree, [link_key(ID, Timestamp)]),
     ok.
@@ -306,9 +310,9 @@ prepare_list_ans([{LastTarget, LastTree} | _] = Links, Info) ->
     {ok, Links2, Info#{prev_traverse => {LastTarget, LastTree}}}.
 
 
--spec run_on_load_balancing_trees(forest_key(), traverse:group(), traverse:executor(),
+-spec run_on_load_balancing_trees(forest_key(), traverse:group(), traverse:environment_id(),
     fun((forest_key()) -> ok)) -> ok.
-run_on_load_balancing_trees(Key, Group, Executor, Fun) ->
+run_on_load_balancing_trees(Key, Group, EnvironmentID, Fun) ->
     Fun(Key),
-    Fun(?LOAD_BALANCING_FOREST_KEY(Key, Group, Executor)),
+    Fun(?LOAD_BALANCING_FOREST_KEY(Key, Group, EnvironmentID)),
     ok.

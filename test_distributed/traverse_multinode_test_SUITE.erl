@@ -9,7 +9,7 @@
 %%% This file contains traverse multi-node tests.
 %%% @end
 %%%-------------------------------------------------------------------
--module(processing_multinode_test_SUITE).
+-module(traverse_multinode_test_SUITE).
 -author("Michal Wrzeszcz").
 
 -include("datastore_test_utils.hrl").
@@ -26,9 +26,6 @@
     traverse_restart_test/1
 ]).
 
-%% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5, get_job/1]).
-
 all() ->
     ?ALL([
         traverse_test,
@@ -36,9 +33,9 @@ all() ->
         traverse_restart_test
     ]).
 
--define(POOL, atom_to_binary(?MODULE, utf8)).
--define(MASTER_POOL_NAME, list_to_atom(atom_to_list(?MODULE) ++ "_master")).
--define(SLAVE_POOL_NAME, list_to_atom(atom_to_list(?MODULE) ++ "_slave")).
+-define(POOL, <<"traverse_test_pool">>).
+-define(MASTER_POOL_NAME, traverse_test_pool_master).
+-define(SLAVE_POOL_NAME, traverse_test_pool_slave).
 
 %%%===================================================================
 %%% Test functions
@@ -80,8 +77,8 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
         master_jobs_done => MJobsNum
     },
 
-    Ans1 = get_node_slave_ans(Worker, CheckID),
-    Ans2 = get_node_slave_ans(Worker2, CheckID),
+    Ans1 = traverse_test_pool:get_node_slave_ans(Worker, CheckID),
+    Ans2 = traverse_test_pool:get_node_slave_ans(Worker2, CheckID),
     GetExpected = fun(Beg) ->
         lists:foldl(fun(ID, Acc) ->
             case CheckID of
@@ -141,8 +138,8 @@ traverse_restart_test(Config) ->
         1551,1552,1553,1556,1557, 1558],
     ExpLen = length(Expected),
 
-    Ans1 = get_node_slave_ans(Worker, false),
-    Ans2 = get_node_slave_ans(Worker2, false),
+    Ans1 = traverse_test_pool:get_node_slave_ans(Worker, false),
+    Ans2 = traverse_test_pool:get_node_slave_ans(Worker2, false),
     Ans1Len = length(Ans1),
     Ans2Len = length(Ans2),
 
@@ -185,10 +182,8 @@ traverse_restart_test(Config) ->
 
 init_per_testcase(traverse_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    lists:foreach(fun(Worker) ->
-        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
-        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
-    end, Workers),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10]))
     end, Workers),
@@ -196,10 +191,8 @@ init_per_testcase(traverse_test, Config) ->
 init_per_testcase(Case, Config) when
     Case =:= traverse_and_queuing_test ; Case =:= traverse_restart_test ->
     Workers = ?config(cluster_worker_nodes, Config),
-    lists:foreach(fun(Worker) ->
-        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),
-        rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
-    end, Workers),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 2]))
     end, Workers),
@@ -215,72 +208,14 @@ end_per_testcase(_, Config) ->
 %%% Internal functions
 %%%===================================================================
 
-get_node_slave_ans(Node, AddID) ->
+traverse_test_pool:get_node_slave_ans(Node, AddID) ->
     receive
         {slave, Num, ID, Node} ->
             case AddID of
-                true -> [{Num, ID} | get_node_slave_ans(Node, AddID)];
-                _ -> [Num | get_node_slave_ans(Node, AddID)]
+                true -> [{Num, ID} | traverse_test_pool:get_node_slave_ans(Node, AddID)];
+                _ -> [Num | traverse_test_pool:get_node_slave_ans(Node, AddID)]
             end
     after
         10000 ->
             []
     end.
-
-%%%===================================================================
-%%% Pool callbacks
-%%%===================================================================
-
-do_master_job({Master, 100, ID}) when ID == 100 ; ID == 101 ->
-    timer:sleep(500),
-    Master ! {stop, node()},
-    timer:sleep(500),
-    do_master_job_helper({Master, 100, 100});
-do_master_job({Master, Num, ID}) ->
-    do_master_job_helper({Master, Num, ID}).
-
-do_master_job_helper({Master, Num, ID}) ->
-    MasterJobs = case Num < 1000 of
-        true -> [{Master, 10 * Num, ID}, {Master, 10 * Num + 5, ID}];
-        _ -> []
-    end,
-
-    SlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}, {Master, Num + 3, ID}],
-    {ok, #{slave_jobs => SlaveJobs, master_jobs => MasterJobs}}.
-
-do_slave_job({Master, Num, ID}) ->
-    Master ! {slave, Num, ID, node()},
-    ok.
-
-task_finished(_) ->
-    timer:sleep(1000),
-    ok.
-
-update_job_progress(ID0, Job, _, TaskID, waiting) when ID0 =:= undefined ; ID0 =:= main_job ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
-    ID = list_to_binary(ref_to_list(make_ref())),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List]),
-    {ok, ID};
-update_job_progress(ID0, Job, _, TaskID, on_pool) when ID0 =:= undefined ; ID0 =:= main_job ->
-    ID = list_to_binary(ref_to_list(make_ref())),
-    save_started_job(ID, Job, TaskID),
-    {ok, ID};
-update_job_progress(ID, Job, _, TaskID, on_pool) ->
-    save_started_job(ID, Job, TaskID),
-    {ok, ID};
-update_job_progress(ID, _Job, _, _TaskID, ended) ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
-    {ok, ID}.
-
-save_started_job(ID, Job, TaskID) ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, [{ID, {Job, TaskID}} | proplists:delete(ID, List)]).
-
-get_job(ID) ->
-    Jobs = lists:foldl(fun(Node, Acc) ->
-        Acc ++ rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]) ++
-            rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
-    end, [], consistent_hasing:get_all_nodes()),
-    {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
-    {ok, Job, ?POOL, TaskID}.

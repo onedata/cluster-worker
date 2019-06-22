@@ -75,8 +75,8 @@
 -record(traverse_task, {
     pool :: traverse:pool(),
     callback_module :: traverse:callback_module(),
-    creator :: traverse:executor(),
-    executor :: traverse:executor(),
+    creator :: traverse:environment_id(),
+    executor :: traverse:environment_id(),
     group :: traverse:group(),
     timestamp :: traverse:timestamp(),
     main_job_id = <<>> :: traverse:job_id(), % First job used to init task (see traverse.erl)
@@ -87,7 +87,7 @@
     description = #{} :: traverse:description()
 }).
 
--record(traverse_load_balance, {
+-record(traverse_tasks_scheduler, {
     pool :: traverse:pool(),
     ongoing_tasks = 0 :: non_neg_integer(),
     ongoing_tasks_limit = 0 :: traverse_task_list:ongoing_tasks_limit(),
