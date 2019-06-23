@@ -93,8 +93,8 @@
 -type execution_pool() :: worker_pool:name(). % internal names of worker pools used by framework
 -type ctx() :: traverse_task:ctx().
 
--export_type([pool/0, id/0, group/0, job/0, job_id/0, job_status/0, executor/0, description/0, status/0,
-    timestamp/0, sync_info/0, master_job_map/0, sync_info/0]).
+-export_type([pool/0, id/0, group/0, job/0, job_id/0, job_status/0, environment_id/0, description/0, status/0,
+    timestamp/0, sync_info/0, master_job_map/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
@@ -283,15 +283,17 @@ cancel(PoolName, TaskID) ->
 %%--------------------------------------------------------------------
 -spec cancel(pool(), id(), environment_id()) -> ok | {error, term()}.
 cancel(PoolName, TaskID, Environment) ->
-    {ok, Task} = traverse_task:get(PoolName, TaskID),
-    case traverse_task:is_canceled_or_enqueued(Task) of
-        {true, canceled} ->
-            ok;
-        _ ->
-            {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
-            {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
-            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-            traverse_task:cancel(ExtendedCtx, PoolName, TaskID, Environment);
+    case traverse_task:get(PoolName, TaskID) of
+        {ok, Task} ->
+            case traverse_task:is_canceled_or_enqueued(Task) of
+                {true, canceled} ->
+                    ok;
+                _ ->
+                    {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
+                    {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
+                    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+                    traverse_task:cancel(ExtendedCtx, PoolName, TaskID, Environment)
+            end;
         Other ->
             Other
     end.
@@ -521,28 +523,31 @@ deregister_group_and_check(PoolName, Group, Executor) ->
 
 -spec get_extended_ctx(callback_module(), job()) -> ctx().
 get_extended_ctx(CallbackModule, Job) ->
-    {ok, CtxExtension} = try
-        CallbackModule:get_sync_info(Job)
-    catch
-        _:undef -> {ok, #{}}
+    {ok, CtxExtension} = case erlang:function_exported(CallbackModule, get_sync_info, 1) of
+        true ->
+            CallbackModule:get_sync_info(Job);
+        _ ->
+            {ok, #{}}
     end,
     maps:merge(traverse_task:get_ctx(), CtxExtension).
 
 -spec task_callback(callback_module(), task_started | task_finished, id()) -> ok.
 task_callback(CallbackModule, Method, TaskID) ->
-    try
-        ok = CallbackModule:Method(TaskID)
-    catch
-        _:undef -> ok
+    case erlang:function_exported(CallbackModule, Method, 1) of
+        true ->
+            ok = CallbackModule:Method(TaskID);
+        _ ->
+            ok
     end.
 
 -spec to_string(callback_module(), job()) -> term().
 to_string(CallbackModule, Job) ->
-    try
-        {ok, JobDescription} = CallbackModule:to_string(Job),
-        JobDescription
-    catch
-        _:undef -> Job
+    case erlang:function_exported(CallbackModule, to_string, 1) of
+        true ->
+            {ok, JobDescription} = CallbackModule:to_string(Job),
+            JobDescription;
+        _ ->
+            Job
     end.
 
 -spec repair_ongoing_tasks(pool(), environment_id()) -> [{id(), ctx() | other_node}].

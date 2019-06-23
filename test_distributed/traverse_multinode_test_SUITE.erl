@@ -16,8 +16,7 @@
 -include("global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_testcase/2,
-    end_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -180,6 +179,12 @@ traverse_restart_test(Config) ->
 %%% Init/teardown functions
 %%%===================================================================
 
+init_per_suite(Config) ->
+    [{?LOAD_MODULES, [traverse_test_pool]} | Config].
+
+end_per_suite(_Config) ->
+    ok.
+
 init_per_testcase(traverse_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
@@ -203,19 +208,3 @@ end_per_testcase(_, Config) ->
     lists:foreach(fun(Worker) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, stop_pool, [?POOL]))
     end, Workers).
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
-traverse_test_pool:get_node_slave_ans(Node, AddID) ->
-    receive
-        {slave, Num, ID, Node} ->
-            case AddID of
-                true -> [{Num, ID} | traverse_test_pool:get_node_slave_ans(Node, AddID)];
-                _ -> [Num | traverse_test_pool:get_node_slave_ans(Node, AddID)]
-            end
-    after
-        10000 ->
-            []
-    end.

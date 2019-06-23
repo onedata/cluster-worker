@@ -16,8 +16,7 @@
 -include("global_definitions.hrl").
 
 %% export for ct
--export([all/0, init_per_testcase/2,
-    end_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -421,6 +420,12 @@ traverse_multienvironment_test(Config) ->
 %%% Init/teardown functions
 %%%===================================================================
 
+init_per_suite(Config) ->
+    [{?LOAD_MODULES, [traverse_test_pool]} | Config].
+
+end_per_suite(_Config) ->
+    ok.
+
 init_per_testcase(Case, Config) when
     Case =:= traverse_test ; Case =:= traverse_multitask_concurrent_test ;
     Case =:= traverse_multienvironment_test->
@@ -471,6 +476,6 @@ cache_proc() ->
             bounded_cache:check_cache_size(Options),
             cache_proc();
         {finish, Pid} ->
-            bounded_cache:terminate_cache(?CACHE, #{}),
+            bounded_cache:terminate_cache(?CACHE),
             Pid ! finished
     end.

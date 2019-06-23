@@ -75,7 +75,7 @@ get_job(ID) ->
     Jobs = lists:foldl(fun(Node, Acc) ->
         Acc ++ rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]) ++
             rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
-                       end, [], consistent_hasing:get_all_nodes()),
+                       end, [], consistent_hashing:get_all_nodes()),
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
     {ok, Job, ?POOL, TaskID}.
 
@@ -84,11 +84,11 @@ get_job(ID) ->
 %%%===================================================================
 
 get_slave_ans(AddID) ->
-    get_node_slave_ans(node(), AddID).
+    get_node_slave_ans(undefined, AddID).
 
 get_node_slave_ans(Node, AddID) ->
     receive
-        {slave, Num, ID, Node} ->
+        {slave, Num, ID, AnsNode} when AnsNode =:= Node ; Node =:= undefined ->
             case AddID of
                 true -> [{Num, ID} | get_node_slave_ans(Node, AddID)];
                 _ -> [Num | get_node_slave_ans(Node, AddID)]
