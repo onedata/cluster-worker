@@ -29,6 +29,29 @@
 %%% functions needed for jobs persistency (master jobs are stored only). They also can provide additional information
 %%% for datastore documents synchronization and tasks sorting (see traverse_task_list.erl). Multiple callback modules
 %%% can be used for single pool (different callback modules for different tasks).
+%%% Task load balancing base on groups. Each task can be connected with a group and load balancing algorithm first
+%%% chooses group and only than task to be executed (to prevent single group from taking all resources while other
+%%% groups are waiting - see traverse_tasks_scheduler.erl).
+%%%
+%%% Typical task lifecycle is as follows:
+%%%     - user calls run function
+%%%     - the job that initializes task is persisted
+%%%     - number of ongoing tasks is verified
+%%%         - if the number is lower than the limit and task executor is local environment,
+%%%             task will be created with status "ongoing" and number of parallel tasks is incremented
+%%%         - otherwise, task will be created with status "scheduled"; if task executor is local environment group
+%%%             connected with task is marked as waiting for execution
+%%%     - if task is created as ongoing, it is put in master worker pool queue, next:
+%%%         - workers from worker pool execute jobs connected with task (main job and jobs created as a result of master
+%%%             jobs processing) until all jobs are finished
+%%%         - last job connected with task updates task status to "finished"
+%%%         - last job connected with task checks if there is any waiting tasks
+%%%             - if some tasks are waiting, longest waiting group for execution is chosen, and oldest task from
+%%%                 this group is put in master worker pool queue; chosen task status is changed to "ongoing"
+%%%             - otherwise, number of parallel tasks is decremented
+%%% Additionally, tasks may be started when task scheduled at other environment appears (and local environment is
+%%% chosen for execution) or during environment restart. In first case, number of ongoing tasks is verified to check if
+%%% task can be executed or has to wait.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(traverse).
