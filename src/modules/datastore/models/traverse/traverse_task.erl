@@ -9,7 +9,7 @@
 %%% Basic model that holds information about traverse tasks (see traverse.erl).
 %%% Each traverse_task document represents single traverse that can be scheduled, ongoing (executed on pool)
 %%% or finished (successfully or canceled).
-%%% Model can be synchronized as functions get context as argument (which can include sync info).
+%%% Model can be synchronized as context is provided to functions as an argument (which can include sync info).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(traverse_task).
@@ -51,8 +51,8 @@
 %% when the task will wait (see traverse_load_balance.erl).
 %% @end
 %%--------------------------------------------------------------------
--spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(), traverse:environment_id(),
-    traverse:group(), traverse:job_id(), undefined | node(), traverse:description()) -> ok.
+-spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(),
+    traverse:environment_id(), traverse:group(), traverse:job_id(), undefined | node(), traverse:description()) -> ok.
 create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Job, Node, InitialDescription) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Value0 = #traverse_task{
@@ -82,7 +82,7 @@ create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Jo
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates information about task's start.
+%% Updates information about task's start (used if task has not been started immediately after creation).
 %% @end
 %%--------------------------------------------------------------------
 -spec start(ctx(), traverse:pool(), traverse:id(), traverse:description()) -> ok | {error, term()}.
@@ -110,7 +110,8 @@ start(ExtendedCtx, Pool, TaskID, NewDescription) ->
 
             case Creator =:= Executor of
                 true ->
-                    ok = traverse_task_list:delete_scheduled_link(ExtendedCtx, Pool, Creator, TaskID, Timestamp, GroupID, Executor);
+                    ok = traverse_task_list:delete_scheduled_link(
+                        ExtendedCtx, Pool, Creator, TaskID, Timestamp, GroupID, Executor);
                 _ ->
                     ok
             end;
@@ -118,11 +119,6 @@ start(ExtendedCtx, Pool, TaskID, NewDescription) ->
             Other
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Finishes task.
-%% @end
-%%--------------------------------------------------------------------
 -spec finish(ctx(), traverse:pool(), traverse:id(), traverse:status()) -> ok | {error, term()}.
 finish(ExtendedCtx, Pool, TaskID, FinalStatus) ->
     Diff = fun(Task) ->
@@ -138,12 +134,7 @@ finish(ExtendedCtx, Pool, TaskID, FinalStatus) ->
             Other
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Cancels task.
-%% @end
 %% TODO - VFS-5531
-%%--------------------------------------------------------------------
 -spec cancel(ctx(), traverse:pool(), traverse:id(), traverse:environment_id()) -> ok | {error, term()}.
 cancel(ExtendedCtx, Pool, TaskID, Self) ->
     Diff = fun(Task) ->
@@ -178,7 +169,7 @@ cancel(ExtendedCtx, Pool, TaskID, Self) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates information when task is scheduled and processed on different environments.
+%% Updates information when task is processed on different environment.
 %% @end
 %% TODO - VFS-5530
 %%--------------------------------------------------------------------
@@ -190,11 +181,6 @@ on_task_change(#document{value = #traverse_task{}}, _Self) ->
 %%% Setters and getters API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Updates task description field.
-%% @end
-%%--------------------------------------------------------------------
 -spec update_description(ctx(), traverse:pool(), traverse:id(), traverse:description()) ->
     {ok, traverse:description(), boolean()} | {error, term()}.
 update_description(ExtendedCtx, Pool, TaskID, NewDescription) ->
@@ -216,7 +202,8 @@ update_description(ExtendedCtx, Pool, TaskID, NewDescription) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates task status field.
+%% Updates task status field. To be used by user of framework if intermediate states are needed
+%% (the function is not used by the framework).
 %% @end
 %%--------------------------------------------------------------------
 -spec update_status(ctx(), traverse:pool(), traverse:id(), traverse:status()) ->
@@ -229,7 +216,7 @@ update_status(ExtendedCtx, Pool, TaskID, NewStatus) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Fix task description after reboot.
+%% Fix task description after reboot clearing information about delegated and not finished tasks.
 %% @end
 %%--------------------------------------------------------------------
 -spec fix_description(ctx(), traverse:pool(), traverse:id()) -> {ok, doc()} | {error, term()}.
@@ -257,11 +244,6 @@ fix_description(ExtendedCtx, Pool, TaskID) ->
 
     datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns task.
-%% @end
-%%--------------------------------------------------------------------
 -spec get(traverse:pool(), traverse:id()) -> {ok, doc()} | {error, term()}.
 get(Pool, TaskID) ->
     datastore_model:get(?CTX, ?DOC_ID(Pool, TaskID)).
@@ -301,18 +283,14 @@ get_execution_info(Pool, TaskID) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns model's context.
+%% Returns basin model's context. It can be extended using callback and such extended context is provided
+%% to functions (see traverse.erl).
 %% @end
 %%--------------------------------------------------------------------
 -spec get_ctx() -> ctx().
 get_ctx() ->
     ?CTX.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns model's record structure in provided version.
-%% @end
-%%--------------------------------------------------------------------
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
@@ -333,7 +311,7 @@ get_record_struct(1) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Encodes description to JSON format.
+%% Encodes description field to JSON format.
 %% @end
 %%--------------------------------------------------------------------
 -spec encode_description(traverse:description()) -> binary().
@@ -342,7 +320,7 @@ encode_description(Description) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Decodes description from JSON format.
+%% Decodes description field from JSON format.
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_description(binary()) -> traverse:description().

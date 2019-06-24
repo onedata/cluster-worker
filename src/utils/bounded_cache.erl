@@ -6,9 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides ets cache that is cleaned automatically when size is exceeded (size is checked periodically).
+%%% This module provides ets cache that is cleaned automatically when defined size is exceeded (size is checked
+%%% periodically).
 %%% The caches can form groups which size is calculated together. It is useful as caches can be invalidated separately
-%%% while number of slots is fixed regardless number of caches in group.
+%%% while number of slots is fixed regardless the number of caches in group.
 %%% The cache stores information using record cache_item where timestamp and timestamp_check fields are used
 %%% to verify if there were no races between insert and invalidation. Although ets cleaning is atomic, calculation of
 %%% value can take some time. Thus, it is necessary to store timestamp connected with key (invalidation may occur
@@ -26,8 +27,7 @@
     calculate_and_cache/4, calculate_and_cache/5,
     invalidate/1, get_timestamp/0]).
 %% Cache management API
--export([init_group_manager/0, init_cache/2, init_group/2,
-    terminate_cache/1, check_cache_size/1]).
+-export([init_group_manager/0, init_cache/2, init_group/2, terminate_cache/1, check_cache_size/1]).
 
 -type cache() :: atom().
 -type group() :: binary().
@@ -46,7 +46,6 @@
     size := non_neg_integer(),
     check_frequency := non_neg_integer()
 }.
--type terminate_options() :: #{group => group()}.
 -type check_options() :: #{
     size := non_neg_integer(),
     name := cache() | group(),
@@ -112,14 +111,14 @@ get_or_calculate(Cache, Key, CalculateCallback, Args, true) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Gets value from cache.
+%% Gets value from cache. Returns {error, not_found} if value is not found or is invalid.
 %% @end
 %%--------------------------------------------------------------------
 -spec get(cache(), key()) -> {ok, value()} | {error, not_found}.
 get(Cache, Key) ->
     case ets:lookup(Cache, Key) of
         [#cache_item{value = Value, timestamp = Timestamp, timestamp_check = Timestamp}] ->
-            % No need to check invalidation (timestamp and timestamp_check fields are equal so it was checked during insert).
+            % No need to check invalidation (timestamp and timestamp_check fields are equal so it was checked on insert).
             {ok, Value};
         [#cache_item{value = Value, timestamp = Timestamp}] ->
             case check_invalidation(Cache, Timestamp) of
@@ -164,8 +163,10 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
                         _ ->
                             % Increment timestamp_check field as there was no invalidation.
                             % Use incrementation threshold in case of parallel insert race.
-                            % As update_counter fails if there is no particular key, races with invalidation are prevented.
-                            catch ets:update_counter(Cache, Key, {#cache_item.timestamp_check, Timestamp, Timestamp, Timestamp})
+                            % As update_counter fails if there is no particular key, races
+                            % with invalidation are prevented.
+                            catch ets:update_counter(Cache, Key,
+                                {#cache_item.timestamp_check, Timestamp, Timestamp, Timestamp})
                     end;
                 _ ->
                     ok
@@ -177,7 +178,7 @@ calculate_and_cache(Cache, Key, CalculateCallback, Args, Timestamp) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes all data in cache.
+%% Deletes all data in cache. Saves invalidation timestamp for possible races.
 %% @end
 %%--------------------------------------------------------------------
 -spec invalidate(cache()) -> ok.
@@ -204,7 +205,7 @@ get_timestamp() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes tmp cache group manager ets.
+%% Initializes tmp cache group manager ets. Thus, the process calling this function should be permanent.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_group_manager() -> ok | {error, term()}.
@@ -218,7 +219,7 @@ init_group_manager() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes particular cache and binds it with process.
+%% Initializes particular cache and binds it with calling process.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_cache(cache(), cache_options()) -> ok | {error, term()}.
@@ -246,7 +247,7 @@ init_cache(Cache, Options) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes particular group and binds it with process.
+%% Initializes particular group and binds it with calling process.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_group(group(), group_options()) -> ok | {error, term()}.
@@ -280,7 +281,7 @@ terminate_cache(Cache) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Verified if cache should be cleared.
+%% Verifies if cache should be cleared and clears it if needed.
 %% @end
 %%--------------------------------------------------------------------
 -spec check_cache_size(check_options()) -> ok.

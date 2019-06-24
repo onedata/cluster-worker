@@ -6,11 +6,11 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% It is the behaviour of traverse job (see traverse.erl).
-%%% Callbacks define way of handling of all jobs connected with single traverse task.
+%%% It is the behaviour of traverse callback module (see traverse.erl).
+%%% It defines way of handling of single traverse task and all jobs connected with it.
 %%% @end
 %%%-------------------------------------------------------------------
--module(traverse_job_behaviour).
+-module(traverse_behaviour).
 -author("Michal Wrzeszcz").
 
 %%%===================================================================
@@ -38,7 +38,7 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Saves information about master job. Callback module is responsible for management of jobs and generation of ids.
-%% When job is persisted first time the key is undefined or main_job (see traverse.erl).
+%% When job is persisted first time the key is undefined or main_job (for first job used to init task).
 %% @end
 %%--------------------------------------------------------------------
 -callback update_job_progress(undefined | main_job | traverse:job_id(),
@@ -77,7 +77,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Provides sync info that extends datastore context.
+%% Provides sync info that extends datastore context (to sync task documents between environments).
 %% @end
 %%--------------------------------------------------------------------
 -callback get_sync_info(traverse:job()) -> {ok, traverse:sync_info()}  | {error, term()}.

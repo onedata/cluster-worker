@@ -11,12 +11,15 @@
 %%% Different link forests are used for scheduled, ongoing and ended tasks.
 %%% Only task creator can modify scheduled links while task executor ongoing and ended links.
 %%% Additional link forests are created for scheduled tasks for load balancing purposes (each executor uses multiple
-%%% queues for different groups - see traverse_load_balance.erl).
-%%% While task links can be viewed by on different environments, jobs links are local for each environment.
+%%% queues for different groups - see traverse_load_balance.erl). Such forests gather tasks of particular pool,
+%%% to be executed on particular environment and belonging to particular group.
+%%% While task links can be viewed by on different environments, job links are local for each environment (they
+%%% are used during environment restart).
+%%% The links are synchronized between environments similarly to travers tasks (see travers_task.erl).
 %%% @end
 %%% TODO - VFS-5528 - Extend listing filters.
 %%% TODO - VFS-5529 - Allow use of different timestamps in different types of trees.
-%%% TODO - VFS-5533 - Task listing functions containing forest type
+%%% TODO - VFS-5533 - Task listing functions containing forest type (and information that it is tasks listing)
 %%% TODO - VFS-5534 - Use batches during jobs listing
 %%%-------------------------------------------------------------------
 -module(traverse_task_list).
@@ -37,12 +40,13 @@
 -define(FOREST_KEY(Pool, Prefix), <<Prefix, Pool/binary>>).
 % Additional forests for load balancing purposes
 % TODO - moze executor nie potrzebny jak by dodawac link jak task sie synchronizuje przez dbsync
--define(LOAD_BALANCING_FOREST_KEY(Key, Group, EnvironmentID), <<Key/binary, "###", Group/binary, "###", EnvironmentID/binary>>).
+-define(LOAD_BALANCING_FOREST_KEY(ScheduledForestKey, Group, EnvironmentID),
+    <<ScheduledForestKey/binary, "###", Group/binary, "###", EnvironmentID/binary>>).
 % Definitions used to list ongoing jobs (used during provider restart)
 -define(ONGOING_JOB_KEY(Pool, CallbackModule),
     <<Pool/binary, "###", (atom_to_binary(CallbackModule, utf8))/binary, "###ONGOING_JOBS">>).
 -define(ONGOING_JOB_TREE, <<"ONGOING_TREE">>).
-
+% Other definitions
 -define(LINK_NAME_ID_PART_LENGTH, 6).
 -define(EPOCH_INFINITY, 9999999999). % GMT: Saturday, 20 November 2286 17:46:39
 
@@ -52,10 +56,10 @@
 -type link_key() :: binary().
 -type list_opts() :: #{
     % Basic list start options (use only one):
-    token => datastore_links_iter:token(), % use tokens to list faster
+    token => datastore_links_iter:token(), % Use tokens to list faster
     start_id => link_key(), % List from particular id
     prev_traverse => {tree(), link_key()}, % Start in place where last listing finished
-    % Additional list option (can be used with ones above)
+    % Additional list start option (can be used with ones above)
     offset => integer(),
     % Other list options
     limit => non_neg_integer(),
@@ -86,7 +90,7 @@ list(Pool, Type) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Lists links of particular type.
+%% Lists tasks connected with particular forest.
 %% @end
 %%--------------------------------------------------------------------
 -spec list(traverse:pool(), forest_type(), list_opts()) ->
@@ -159,7 +163,7 @@ list_local_ongoing_jobs(Pool, CallbackModule) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds link to tree.
+%% Adds link to tree of tasks.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_link(traverse_task:ctx(), traverse:pool(), forest_type(),
@@ -169,7 +173,7 @@ add_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds link to main and group/environment_id scheduled trees.
+%% Adds link to main and group/environment_id scheduled trees of tasks.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
@@ -200,7 +204,7 @@ add_job_link(Pool, CallbackModule, JobID) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes link from main tree.
+%% Deletes link from main tree of tasks.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_link(traverse_task:ctx(), traverse:pool(), forest_type(),
@@ -210,7 +214,7 @@ delete_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes link from main and group/environment_id scheduled trees.
+%% Deletes link from main and group/environment_id scheduled trees of tasks.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),

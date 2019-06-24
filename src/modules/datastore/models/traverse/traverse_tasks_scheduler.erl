@@ -6,12 +6,12 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model that holds information about traverse tasks load balancing (see traverse.erl). Single traverse_tasks_scheduler
-%%% document is created for all instances of pool working on different nodes of cluster (each pool is balanced separately).
-%%% The model is not synchronized.
+%%% Model that holds information about traverse tasks load balancing (see traverse.erl).
+%%% Single traverse_tasks_scheduler document is created for all instances of pool working on different nodes of cluster
+%%% (each pool is balanced separately). The model is not synchronized between environments.
 %%% Documents contain information needed to control number of tasks executed in parallel on single pool on all nodes
-%%% and to choose next task to be executed on that pool. The tasks are started immediately until number of parallel
-%%% tasks limit is reached for particular pool. Next tasks are started when an ongoing task is ended.
+%%% and to choose next task to be executed on that pool. The tasks are started immediately until parallel
+%%% tasks limit is reached for particular pool. Next tasks are started when an ongoing tasks are ended.
 %%% Task to be executed is chosen using groups. Choosing task, the group is chosen first (using round robin)
 %%% and then first (according to timestamp - see traverse_task_list) task from the group is processed.
 %%% Nodes for tasks are chosen using round robin.
@@ -67,7 +67,7 @@ init(Pool, Limit) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Clears document for pool.
+%% Deletes document for pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec clear(traverse:pool()) -> ok | {error, term()}.
@@ -107,7 +107,7 @@ increment_ongoing_tasks(Pool) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates information that task has been ended.
+%% Updates information that task has been ended (and no task has been started in its place).
 %% @end
 %%--------------------------------------------------------------------
 -spec decrement_ongoing_tasks(traverse:pool()) -> ok | {error, term()}.
@@ -123,7 +123,7 @@ decrement_ongoing_tasks(Pool) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Registers information about group of tasks. Tasks connected with the group will be executed on pool.
+%% Registers information about group of tasks. Tasks connected with the group are waiting to be executed on pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec register_group(traverse:pool(), traverse:group()) -> ok | {error, term()}.
@@ -141,7 +141,7 @@ register_group(Pool, Group) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes information about group of tasks. Tasks connected with the group will not be executed on pool.
+%% Deletes information about group of tasks. No tasks connected with the group is waiting be executed on pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec deregister_group(traverse:pool(), traverse:group()) -> ok | {error, term()}.
@@ -186,20 +186,10 @@ get_next_group(Pool) ->
 %%% datastore_model callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns model's context.
-%% @end
-%%--------------------------------------------------------------------
 -spec get_ctx() -> ctx().
 get_ctx() ->
     ?CTX.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns model's record structure in provided version.
-%% @end
-%%--------------------------------------------------------------------
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->

@@ -100,26 +100,8 @@ traverse_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"traverse_test1">>, {self(), 1, 1}])),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     Ans = traverse_test_pool:get_slave_ans(false),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
-
     ?assertEqual(Expected, lists:sort(Ans)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, status = finished}}},
@@ -135,27 +117,9 @@ traverse_multitask_concurrent_test(Config) ->
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_multitask_concurrent_test3">>, {self(), 1, 3}])),
 
-    Expected0 = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected0, Description} = traverse_test_pool:get_expected(),
     Expected = Expected0 ++ Expected0 ++ Expected0,
     Ans = traverse_test_pool:get_slave_ans(false),
-
-    SJobsNum = length(Expected0),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
-
     ?assertEqual(lists:sort(Expected), lists:sort(Ans)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
@@ -175,26 +139,9 @@ traverse_multitask_sequential_test(Config) ->
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_multitask_sequential_test3">>, {self(), 1, 3}])),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
     Ans = traverse_test_pool:get_slave_ans(false),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
 
     Ans1 = lists:sublist(Ans, 1, ExpLen),
     Ans2 = lists:sublist(Ans, ExpLen + 1, ExpLen),
@@ -230,26 +177,9 @@ traverse_loadbalancingt_base(Config, Tasks, Check) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}]))
     end, Tasks),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
     Ans = traverse_test_pool:get_slave_ans(true),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
 
     AddID = fun(ID, List) ->
         lists:map(fun(Element) -> {Element, ID} end, List)
@@ -288,27 +218,10 @@ traverse_restart_test(Config) ->
     ?assertEqual(ok, RecAns),
     ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
     Ans = traverse_test_pool:get_slave_ans(false),
     AnsLen = length(Ans),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
 
     Ans1 = lists:sublist(Ans, 1, AnsLen - 2*ExpLen),
     Ans2 = lists:sublist(Ans, AnsLen - 2*ExpLen  + 1, ExpLen),
@@ -335,35 +248,18 @@ traverse_cancel_test(Config) ->
         [?POOL, <<"traverse_cancel_test3">>, {self(), 1, 3}])),
 
     RecAns = receive
-                 {stop, _} ->
-                     ?assertEqual(ok, rpc:call(Worker, traverse, cancel, [?POOL, <<"traverse_cancel_test1">>]))
-             after
-                 5000 ->
-                     timeout
-             end,
+        {stop, _} ->
+            ?assertEqual(ok, rpc:call(Worker, traverse, cancel, [?POOL, <<"traverse_cancel_test1">>]))
+    after
+        5000 ->
+            timeout
+    end,
     ?assertEqual(ok, RecAns),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
     Ans = traverse_test_pool:get_slave_ans(false),
     AnsLen = length(Ans),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
 
     Ans1 = lists:sublist(Ans, 1, AnsLen - 2*ExpLen),
     Ans2 = lists:sublist(Ans, AnsLen - 2*ExpLen  + 1, ExpLen),
@@ -386,29 +282,12 @@ traverse_multienvironment_test(Config) ->
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"traverse_multienvironment_test">>,
         {self(), 1, 1}, #{creator => <<"creator">>, executor => <<"executor">>}])),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     ?assertEqual([], traverse_test_pool:get_slave_ans(false)),
 
     {ok, Task} = ?assertMatch({ok, _}, rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multienvironment_test">>])),
     ?assertEqual(ok, rpc:call(Worker, traverse, maybe_run_scheduled_task, [{task, Task}, <<"executor">>])),
     Ans = traverse_test_pool:get_slave_ans(false),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
 
     ?assertEqual(Expected, lists:sort(Ans)),
 

@@ -57,24 +57,7 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
             [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>, {self(), 1, Num}]))
     end, lists:seq(1, RunsNum)),
 
-    Expected0 = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
-
-    SJobsNum = length(Expected0),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
+    {Expected0, Description} = traverse_test_pool:get_expected(),
 
     Ans1 = traverse_test_pool:get_node_slave_ans(Worker, CheckID),
     Ans2 = traverse_test_pool:get_node_slave_ans(Worker2, CheckID),
@@ -108,49 +91,32 @@ traverse_restart_test(Config) ->
         [?POOL, <<"traverse_restart_test3">>, {self(), 1, 3}])),
 
     RecAns = receive
-                 {stop, W} ->
-                     ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
-                     ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME])),
-                     receive
-                         {stop, W2} ->
-                             ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
-                             ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME]))
-                     after
-                         5000 ->
-                             timeout2
-                     end
-             after
-                 5000 ->
-                     timeout
-             end,
+        {stop, W} ->
+            ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
+            ?assertEqual(ok, rpc:call(W, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME])),
+            receive
+                {stop, W2} ->
+                    ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?MASTER_POOL_NAME])),
+                    ?assertEqual(ok, rpc:call(W2, worker_pool, stop_sup_pool, [?SLAVE_POOL_NAME]))
+            after
+                5000 ->
+                    timeout2
+            end
+    after
+        5000 ->
+            timeout
+    end,
     ?assertEqual(ok, RecAns),
     ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
     ?assertEqual(ok, rpc:call(Worker2, traverse, init_pool, [?POOL, 3, 3, 1])),
 
-    Expected = [2,3,4,
-        11,12,13,16,17,18,
-        101,102,103,106,107,108,
-        151,152,153,156,157,158,
-        1001,1002,1003,1006,1007,1008,
-        1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+    {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
 
     Ans1 = traverse_test_pool:get_node_slave_ans(Worker, false),
     Ans2 = traverse_test_pool:get_node_slave_ans(Worker2, false),
     Ans1Len = length(Ans1),
     Ans2Len = length(Ans2),
-
-    SJobsNum = length(Expected),
-    MJobsNum = SJobsNum div 3,
-    Description = #{
-        slave_jobs_delegated => SJobsNum,
-        slave_jobs_done => SJobsNum,
-        slave_jobs_failed => 0,
-        master_jobs_delegated => MJobsNum,
-        master_jobs_done => MJobsNum
-    },
 
     Ans1_1 = lists:sublist(Ans1, 1, Ans1Len - ExpLen),
     Ans1_2 = lists:sublist(Ans1, Ans1Len - ExpLen + 1, ExpLen),
@@ -169,10 +135,6 @@ traverse_restart_test(Config) ->
         rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
         rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>])),
-%%    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-%%        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
-%%    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-%%        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>])),
     ok.
 
 %%%===================================================================

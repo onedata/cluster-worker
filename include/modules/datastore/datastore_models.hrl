@@ -68,7 +68,7 @@
     creator :: traverse:environment_id(),
     executor :: traverse:environment_id(),
     group :: traverse:group(),
-    timestamp :: traverse:timestamp(),
+    timestamp :: traverse:timestamp(), % Used for tasks sorting (see traverse_task_list.erl)
     main_job_id = <<>> :: traverse:job_id(), % First job used to init task (see traverse.erl)
     enqueued = true :: boolean(),
     canceled = false :: boolean(),

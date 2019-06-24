@@ -17,7 +17,7 @@
 %% Pool callbacks
 -export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5, get_job/1]).
 %% Helper functions
--export([get_slave_ans/1, get_node_slave_ans/2]).
+-export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0]).
 
 -define(POOL, <<"traverse_test_pool">>).
 
@@ -97,3 +97,25 @@ get_node_slave_ans(Node, AddID) ->
         10000 ->
             []
     end.
+
+get_expected() ->
+    Expected = [2,3,4,
+        11,12,13,16,17,18,
+        101,102,103,106,107,108,
+        151,152,153,156,157,158,
+        1001,1002,1003,1006,1007,1008,
+        1051,1052,1053,1056,1057,1058,
+        1501,1502, 1503,1506,1507,1508,
+        1551,1552,1553,1556,1557, 1558],
+
+    SJobsNum = length(Expected),
+    MJobsNum = SJobsNum div 3,
+    Description = #{
+        slave_jobs_delegated => SJobsNum,
+        slave_jobs_done => SJobsNum,
+        slave_jobs_failed => 0,
+        master_jobs_delegated => MJobsNum,
+        master_jobs_done => MJobsNum
+    },
+
+    {Expected, Description}.
