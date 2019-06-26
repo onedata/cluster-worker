@@ -1163,7 +1163,7 @@ fold_links_token_id_and_tree(Key, Worker, Model, Opts) ->
             [Last | _] = Links,
             Opts2 = Opts#{token => Token, prev_link_name => Last#link.name,
                 prev_tree_id => Last#link.tree_id},
-            timer:sleep(timer:seconds(10)),
+            timer:sleep(timer:seconds(10)), % sleep to allow token cache cleaning
             Reversed ++ fold_links_token_id_and_tree(Key, Worker, Model, Opts2)
     end.
 

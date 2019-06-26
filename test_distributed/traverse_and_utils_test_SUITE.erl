@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This file contains tmp cache and traverse tests.
+%%% This file contains bounded_cache and traverse tests.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(traverse_and_utils_test_SUITE).

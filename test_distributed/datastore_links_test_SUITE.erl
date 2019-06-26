@@ -632,7 +632,7 @@ fold_links_token_id_and_tree(Worker, Ctx, Key, Opts) ->
     {{ok, Links}, Token} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, datastore_links_iter,
         fold, [Ctx, Key, all, fun(Link, Acc) ->
             {ok, [Link | Acc]}
-                              end, [], Opts]
+        end, [], Opts]
     )),
     Reversed = lists:reverse(Links),
     case Token#link_token.is_last of

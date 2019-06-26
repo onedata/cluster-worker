@@ -48,7 +48,7 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates task document. Values of document fields are different when task will be started immediately and different
-%% when the task will wait (see traverse_load_balance.erl).
+%% when the task will wait (see traverse_tasks_scheduler.erl).
 %% @end
 %%--------------------------------------------------------------------
 -spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(),
@@ -125,7 +125,7 @@ finish(ExtendedCtx, Pool, TaskID, FinalStatus) ->
         {ok, Task#traverse_task{status = FinalStatus}}
     end,
     case {datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff), FinalStatus} of
-        {{ok, _}, canceled} -> % TODO - moze olac zabezpieczenie i traverse_task_list wylapywac already_exists lub not found?
+        {{ok, _}, canceled} -> % TODO VFS-5546 - maybe filter already_exists during link add insted of this
             ok;
         {{ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor}}}, _} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
@@ -147,7 +147,7 @@ cancel(ExtendedCtx, Pool, TaskID, Self) ->
             creator = Creator,
             group = GroupID
         }}} ->
-            % TODO - zabezpieczyc na race z finish
+            % TODO VFS-5546
             case Self of
                 Executor ->
                     ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
@@ -336,8 +336,9 @@ decode_description(Term) ->
 
 -spec get_timestamp(traverse:callback_module()) -> {ok, traverse:timestamp()}.
 get_timestamp(CallbackModule) ->
-    try
-        CallbackModule:get_timestamp()
-    catch
-        _:undef -> {ok, time_utils:system_time_millis()}
+    case erlang:function_exported(CallbackModule, get_timestamp, 0) of
+        true ->
+            CallbackModule:get_timestamp();
+        _ ->
+            {ok, time_utils:system_time_millis()}
     end.

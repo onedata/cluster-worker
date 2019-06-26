@@ -25,7 +25,7 @@
 %%% Pool management API
 -export([init/2, clear/1]).
 %%% Task management API
--export([increment_ongoing_tasks/1, decrement_ongoing_tasks/1]).
+-export([increment_ongoing_tasks_and_choose_node/1, decrement_ongoing_tasks/1]).
 %%% Group management API
 -export([register_group/2, deregister_group/2, get_next_group/1]).
 
@@ -47,7 +47,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes new document for pool. It document exists - updates it.
+%% Initializes new document for pool. If document exists - updates it.
 %% @end
 %%--------------------------------------------------------------------
 -spec init(traverse:pool(), ongoing_tasks_limit()) -> ok | {error, term()}.
@@ -81,11 +81,11 @@ clear(Pool) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Updates information that new task has been scheduled.
-%% Returns error if it can not be executed (limit is reached).
+%% Returns node chosen for task execution of error if it can not be executed (limit is reached).
 %% @end
 %%--------------------------------------------------------------------
--spec increment_ongoing_tasks(traverse:pool()) -> {ok, node()} | {error, term()}.
-increment_ongoing_tasks(Pool) ->
+-spec increment_ongoing_tasks_and_choose_node(traverse:pool()) -> {ok, node()} | {error, term()}.
+increment_ongoing_tasks_and_choose_node(Pool) ->
     Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT,
         ongoing_tasks_limit = TL, nodes = Nodes} = Record) ->
         case OT < TL of

@@ -11,7 +11,7 @@
 %%% Different link forests are used for scheduled, ongoing and ended tasks.
 %%% Only task creator can modify scheduled links while task executor ongoing and ended links.
 %%% Additional link forests are created for scheduled tasks for load balancing purposes (each executor uses multiple
-%%% queues for different groups - see traverse_load_balance.erl). Such forests gather tasks of particular pool,
+%%% queues for different groups - see traverse_tasks_scheduler.erl). Such forests gather tasks of particular pool,
 %%% to be executed on particular environment and belonging to particular group.
 %%% While task links can be viewed by on different environments, job links are local for each environment (they
 %%% are used during environment restart).
@@ -39,7 +39,6 @@
 -define(ENDED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "ENDED_")).
 -define(FOREST_KEY(Pool, Prefix), <<Prefix, Pool/binary>>).
 % Additional forests for load balancing purposes
-% TODO - moze executor nie potrzebny jak by dodawac link jak task sie synchronizuje przez dbsync
 -define(LOAD_BALANCING_FOREST_KEY(ScheduledForestKey, Group, EnvironmentID),
     <<ScheduledForestKey/binary, "###", Group/binary, "###", EnvironmentID/binary>>).
 % Definitions used to list ongoing jobs (used during provider restart)
@@ -145,7 +144,7 @@ get_first_scheduled_link(Pool, GroupID, EnvironmentID) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec list_local_ongoing_jobs(traverse:pool(), traverse:callback_module()) -> {ok, [traverse:id()]}.
-% TODO - use batches
+% TODO VFS-5528 - use batches
 list_local_ongoing_jobs(Pool, CallbackModule) ->
     Ctx = traverse_task:get_ctx(),
     datastore_model:fold_links(
