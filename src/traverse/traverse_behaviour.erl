@@ -1,0 +1,101 @@
+%%%-------------------------------------------------------------------
+%%% @author Michal Wrzeszcz
+%%% @copyright (C) 2019 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
+%%% @end
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% It is the behaviour of traverse callback module (see traverse.erl).
+%%% It defines way of handling of single traverse task and all jobs connected with it.
+%%% @end
+%%%-------------------------------------------------------------------
+-module(traverse_behaviour).
+-author("Michal Wrzeszcz").
+
+%%%===================================================================
+%%% Traverse API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes master job.
+%% @end
+%%--------------------------------------------------------------------
+-callback do_master_job(traverse:job()) -> {ok, traverse:master_job_map()} | {error, term()}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Executes slave job.
+%% @end
+%%--------------------------------------------------------------------
+-callback do_slave_job(traverse:job()) -> ok | {ok, traverse:description()} | {error, term()}.
+
+%%%===================================================================
+%%% Job persistence API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves information about master job. Callback module is responsible for management of jobs and generation of ids.
+%% When job is persisted first time the key is undefined or main_job (for first job used to init task).
+%% @end
+%%--------------------------------------------------------------------
+-callback update_job_progress(undefined | main_job | traverse:job_id(),
+    traverse:job(), traverse:pool(), traverse:id(), traverse:job_status()) ->
+    {ok, traverse:job_id()}  | {error, term()}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets information about master job.
+%% @end
+%%--------------------------------------------------------------------
+-callback get_job(traverse:job_id()) ->
+    {ok, traverse:job(), traverse:pool(), traverse:id()}  | {error, term()}.
+
+%%%===================================================================
+%%% Optional task lifecycle API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed when whole task is started.
+%% @end
+%%--------------------------------------------------------------------
+-callback task_started(traverse:id()) -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed when whole task is finished.
+%% @end
+%%--------------------------------------------------------------------
+-callback task_finished(traverse:id()) -> ok.
+
+%%%===================================================================
+%%% Optional job sync and queuing API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Provides sync info that extends datastore context (to sync task documents between environments).
+%% @end
+%%--------------------------------------------------------------------
+-callback get_sync_info(traverse:job()) -> {ok, traverse:sync_info()}  | {error, term()}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns timestamp to be added to task. Used for tasks listing.
+%% @end
+%%--------------------------------------------------------------------
+-callback get_timestamp() -> {ok, traverse:timestamp()}.
+
+%%%===================================================================
+%%% Optional debug API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns term that will be used to describe job in lagger logs.
+%% @end
+%%--------------------------------------------------------------------
+-callback to_string(traverse:job()) -> {ok, term()}.

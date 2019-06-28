@@ -25,7 +25,7 @@
 
 %% API
 -export([
-    start_pool/1, start_pool/2, start_sup_pool/2, stop_pool/1,
+    start_pool/1, start_pool/2, start_sup_pool/2, stop_pool/1, stop_sup_pool/1,
     call/2, call/3, call/4,
     cast/2, cast/3,
     stats/0, stats/1,
@@ -95,6 +95,16 @@ start_sup_pool(PoolName, Options) ->
 -spec stop_pool(name()) -> true.
 stop_pool(PoolName) ->
     wpool:stop_pool(PoolName).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Stops supervised pool.
+%% @equiv wpool:stop_sup_pool(PoolName).
+%% @end
+%%--------------------------------------------------------------------
+-spec stop_sup_pool(name()) -> ok.
+stop_sup_pool(PoolName) ->
+    wpool:stop_sup_pool(PoolName).
 
 %%--------------------------------------------------------------------
 %% @doc

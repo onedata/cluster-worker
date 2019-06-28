@@ -59,7 +59,7 @@
 -type fold_opts() :: maps:map([fold_opt()]).
 -type token() :: #link_token{}.
 
--export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0]).
+-export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0, token/0]).
 
 %%%===================================================================
 %%% API
