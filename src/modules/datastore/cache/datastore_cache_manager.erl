@@ -205,7 +205,7 @@ mark_active(Pool, Entry = #entry{key = Key}) ->
                             activate(Pool, Entry)
                     end;
                 _ ->
-                    activate(Pool, Entry)
+                    mark_active(Pool, Entry)
             end;
         _ ->
             activate(Pool, Entry)
@@ -262,9 +262,9 @@ relocate(Pool, Entry) ->
                             driver = Driver,
                             driver_ctx = Ctx
                         }] ->
+                            Driver:delete(Ctx, Key),
                             ets:delete(inactive(Pool), Key),
                             ets:delete(clear(Pool), Key),
-                            Driver:delete(Ctx, Key),
                             ets:insert(active(Pool), Entry),
                             true;
                         [] ->
