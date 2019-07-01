@@ -71,6 +71,20 @@
 %%--------------------------------------------------------------------
 -callback task_finished(traverse:id()) -> ok.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed when last job of canceled task has ended.
+%% @end
+%%--------------------------------------------------------------------
+-callback task_canceled(traverse:id()) -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed to allow user-defined init of cancel procedure (e.g., to send cancel signal to task related processes).
+%% @end
+%%--------------------------------------------------------------------
+-callback on_cancel_init(traverse:id()) -> ok.
+
 %%%===================================================================
 %%% Optional job sync and queuing API
 %%%===================================================================

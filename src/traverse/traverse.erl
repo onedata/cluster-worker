@@ -250,12 +250,10 @@ run(PoolName, TaskID, Job, Options) ->
 -spec maybe_run_scheduled_task({task, task()} | {job, callback_module(), job_id()} |
     {job, job(), job_id(), pool(), id()}, environment_id()) -> ok.
 maybe_run_scheduled_task({task, Task}, Environment) ->
-    case traverse_task:is_canceled_or_enqueued(Task) of
-        {true, canceled} ->
-            ok;
+    case traverse_task:is_enqueued(Task) of
         false ->
             ok;
-        _ ->
+        true ->
             {ok, CallbackModule, Executor, MainJobID} = traverse_task:get_execution_info(Task),
             case Executor =:= Environment of
                 true ->
@@ -272,12 +270,10 @@ maybe_run_scheduled_task({task, Task}, Environment) ->
 maybe_run_scheduled_task({job, Job, JobID, PoolName, TaskID}, Environment) ->
     case traverse_task:get(PoolName, TaskID) of
         {ok, Task} ->
-            case traverse_task:is_canceled_or_enqueued(Task) of
-                {true, canceled} ->
-                    ok;
+            case traverse_task:is_enqueued(Task) of
                 false ->
                     ok;
-                _ ->
+                true ->
                     {ok, CallbackModule, Executor, _} = traverse_task:get_execution_info(Task),
                     case Executor =:= Environment of
                         true ->
@@ -311,15 +307,10 @@ cancel(PoolName, TaskID) ->
 cancel(PoolName, TaskID, Environment) ->
     case traverse_task:get(PoolName, TaskID) of
         {ok, Task} ->
-            case traverse_task:is_canceled_or_enqueued(Task) of
-                {true, canceled} ->
-                    ok;
-                _ ->
-                    {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
-                    {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
-                    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-                    traverse_task:cancel(ExtendedCtx, PoolName, TaskID, Environment)
-            end;
+            {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
+            {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
+            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+            traverse_task:cancel(ExtendedCtx, PoolName, TaskID, Environment);
         Other ->
             Other
     end.
@@ -346,13 +337,17 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
             slave_jobs_delegated => length(SlaveJobsList),
             master_jobs_delegated => length(MasterJobsList)
         },
-        {ok, _, Canceled} = UpdateAns = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
+        {ok, _, Canceled} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
 
         {_, NewDescription, Canceled2} = case Canceled of
             true ->
                 ok = traverse_task_list:delete_job_link(PoolName, CallbackModule, JobID),
                 {ok, _} = CallbackModule:update_job_progress(JobID, Job, PoolName, TaskID, canceled),
-                UpdateAns;
+                CancelDescription = #{
+                    slave_jobs_delegated => -1 * length(SlaveJobsList),
+                    master_jobs_delegated => -1 * length(MasterJobsList) - 1
+                },
+                {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
             _ ->
                 SlaveAnswers = run_on_slave_pool(
                     PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, SlaveJobsList),
@@ -377,7 +372,6 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         end,
 
         try
-            % TODO VFS-5546 - many jobs can do finish with canceled field - check it
             maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, NewDescription, Canceled2)
         catch
             E2:R2 ->
@@ -466,14 +460,16 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, #{
 } = Description, Canceled) ->
     Done = maps:get(master_jobs_done, Description, 0),
     Failed = maps:get(master_jobs_failed, Description, 0),
-    case {Delegated == Done + Failed, Canceled} of
-        {true, _} ->
+    ?info("aaaaaa ~p", [Description]),
+    case Delegated == Done + Failed of
+        true ->
             % VFS-5532 - can never be equal in case of description saving error
-            ok = task_callback(CallbackModule, task_finished, TaskID),
-            ok = traverse_task:finish(ExtendedCtx, PoolName, TaskID, finished),
-            check_task_list_and_run(PoolName, Executor);
-        {_, true} ->
-            ok = traverse_task:finish(ExtendedCtx, PoolName, TaskID, canceled),
+            ok = case Canceled of
+                true -> task_callback(CallbackModule, task_canceled, TaskID);
+                _ -> task_callback(CallbackModule, task_finished, TaskID)
+            end,
+
+            ok = traverse_task:finish(ExtendedCtx, PoolName, TaskID),
             check_task_list_and_run(PoolName, Executor);
         _ -> ok
     end.
@@ -499,24 +495,18 @@ check_task_list_and_run(PoolName, Executor) ->
 
 -spec run_task(pool(), id(), environment_id()) -> ok.
 run_task(PoolName, TaskID, Executor) ->
-    {ok, Task} = traverse_task:get(PoolName, TaskID),
-    case traverse_task:is_canceled_or_enqueued(Task) of
-        {true, canceled} ->
+    {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(PoolName, TaskID),
+    {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
+    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+    case traverse_task:start(ExtendedCtx, PoolName, TaskID, #{master_jobs_delegated => 1}) of
+        ok ->
+            ok = task_callback(CallbackModule, task_started, TaskID),
+            ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
+                CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
+        {error, start_aborted} ->
             check_task_list_and_run(PoolName, Executor);
-        _ ->
-            {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
-            {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
-            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-            case traverse_task:start(ExtendedCtx, PoolName, TaskID, #{master_jobs_delegated => 1}) of
-                ok ->
-                    ok = task_callback(CallbackModule, task_started, TaskID),
-                    ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                        CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
-                {error, already_started} ->
-                    check_task_list_and_run(PoolName, Executor);
-                {error, not_found} ->
-                    check_task_list_and_run(PoolName, Executor)
-            end
+        {error, not_found} ->
+            check_task_list_and_run(PoolName, Executor)
     end.
 
 -spec maybe_run_scheduled_task(pool(), callback_module(), id(), environment_id(), job(), job_id()) -> ok.
@@ -529,7 +519,7 @@ maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Executor, Job, MainJo
                     ok = task_callback(CallbackModule, task_started, TaskID),
                     ok = rpc:call(Node, ?MODULE, run_on_master_pool, [PoolName, ?MASTER_POOL_NAME(PoolName),
                         ?SLAVE_POOL_NAME(PoolName), CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID]);
-                {error, already_started} ->
+                {error, start_aborted} ->
                     traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName)
             end
     end.
@@ -556,7 +546,7 @@ get_extended_ctx(CallbackModule, Job) ->
     end,
     maps:merge(traverse_task:get_ctx(), CtxExtension).
 
--spec task_callback(callback_module(), task_started | task_finished, id()) -> ok.
+-spec task_callback(callback_module(), task_started | task_finished | task_canceled, id()) -> ok.
 task_callback(CallbackModule, Method, TaskID) ->
     case erlang:function_exported(CallbackModule, Method, 1) of
         true ->

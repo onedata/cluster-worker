@@ -18,10 +18,10 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/10, start/4, finish/4, cancel/4, on_task_change/2]).
+-export([create/10, start/4, finish/3, cancel/4, on_task_change/5]).
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/3,
-    get/2, get_execution_info/1, get_execution_info/2, is_canceled_or_enqueued/1]).
+    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
@@ -89,15 +89,26 @@ create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Jo
 start(ExtendedCtx, Pool, TaskID, NewDescription) ->
     Node = node(),
     Diff = fun
-        (#traverse_task{status = scheduled} = Task) ->
+        (#traverse_task{
+            status = scheduled,
+            canceled = false,
+            executor = Executor,
+            creator = Creator
+        } = Task) when Creator =:= Executor ->
             {ok, Task#traverse_task{
                 status = ongoing,
                 enqueued = false,
                 node = Node,
                 description = NewDescription
             }};
+        (#traverse_task{status = scheduled, canceled = false} = Task) ->
+            {ok, Task#traverse_task{
+                status = ongoing,
+                node = Node,
+                description = NewDescription
+            }};
         (_) ->
-            {error, already_started}
+            {error, start_aborted}
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
         {ok, #document{value = #traverse_task{
@@ -119,50 +130,60 @@ start(ExtendedCtx, Pool, TaskID, NewDescription) ->
             Other
     end.
 
--spec finish(ctx(), traverse:pool(), traverse:id(), traverse:status()) -> ok | {error, term()}.
-finish(ExtendedCtx, Pool, TaskID, FinalStatus) ->
-    Diff = fun(Task) ->
-        {ok, Task#traverse_task{status = FinalStatus}}
+-spec finish(ctx(), traverse:pool(), traverse:id()) -> ok | {error, term()}.
+finish(ExtendedCtx, Pool, TaskID) ->
+    Diff = fun
+        (#traverse_task{status = ongoing, canceled = false} = Task) ->
+            {ok, Task#traverse_task{status = finished}};
+        (#traverse_task{status = ongoing, canceled = true} = Task) ->
+            {ok, Task#traverse_task{status = canceled}}
     end,
-    case {datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff), FinalStatus} of
-        {{ok, _}, canceled} -> % TODO VFS-5546 - maybe filter already_exists during link add insted of this
-            ok;
-        {{ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor}}}, _} ->
+    case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
+        {ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor}}} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
-        {Other, _} ->
+        Other ->
             Other
     end.
 
 %% TODO - VFS-5531
 -spec cancel(ctx(), traverse:pool(), traverse:id(), traverse:environment_id()) -> ok | {error, term()}.
 cancel(ExtendedCtx, Pool, TaskID, Self) ->
-    Diff = fun(Task) ->
-        {ok, Task#traverse_task{canceled = true}}
+    Diff = fun
+        (#traverse_task{status = scheduled, canceled = false, executor = Executor, creator = Creator} = Task) when
+            Executor =:= Self, Creator =:= Self ->
+            {ok, Task#traverse_task{status = canceled, canceled = true, enqueued = false}};
+        (#traverse_task{status = scheduled, canceled = false, executor = Executor} = Task) when Executor =:= Self ->
+            {ok, Task#traverse_task{status = canceled, canceled = true}};
+        (#traverse_task{status = Status, canceled = false} = Task) when Status =/= finished ->
+            {ok, Task#traverse_task{canceled = true}};
+        (_) ->
+            {error, already_canceled}
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
         {ok, #document{value = #traverse_task{
             timestamp = Timestamp,
             executor = Executor,
             creator = Creator,
-            group = GroupID
+            group = GroupID,
+            status = Status
         }}} ->
-            % TODO VFS-5546
-            case Self of
-                Executor ->
-                    ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
-                    ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
+            case {Status, Self} of
+                {canceled, Executor} ->
+                    ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp);
                 _ ->
                     ok
             end,
 
-            case Self of
-                Creator ->
+            case {Status, Self} of
+                {canceled, Creator} ->
                     ok = traverse_task_list:delete_scheduled_link(
                         ExtendedCtx, Pool, Creator, TaskID, Timestamp, GroupID, Executor);
                 _ ->
                     ok
             end;
+        {error, already_canceled} ->
+            ok;
         Other ->
             Other
     end.
@@ -173,8 +194,59 @@ cancel(ExtendedCtx, Pool, TaskID, Self) ->
 %% @end
 %% TODO - VFS-5530
 %%--------------------------------------------------------------------
--spec on_task_change(doc(), traverse:environment_id()) -> ok.
-on_task_change(#document{value = #traverse_task{}}, _Self) ->
+-spec on_task_change(ctx(), traverse:pool(), traverse:id(), doc(), traverse:environment_id()) -> ok.
+on_task_change(ExtendedCtx, Pool, TaskID, #document{key = DocID, value = #traverse_task{
+    status = scheduled,
+    canceled = true,
+    executor = Self}
+} = Doc, Self) ->
+    % TODO - konflikty na dokumentach
+    % TODO - zabezpieczyc jak ktos scancelowal zdalnie i lokalnie
+    % TODO - wywolac callback o cancelowaniu z taskID (bedzie potrzebny taskID w callbacku jobu) - inny task na koniec a inny na zlecenie cancelacji?
+    % uporzadkowac API czy job ma w sobie przechowywac czy wszystkie callbacki dostaja
+    Diff = fun
+        (#traverse_task{status = scheduled} = Task) ->
+            {ok, Task#traverse_task{status = canceled}};
+        (ChangedRecord) ->
+            {error, {update_not_needed, ChangedRecord}}
+    end,
+
+    UpdatedDoc = case datastore_model:update(ExtendedCtx, DocID, Diff) of
+        {ok, #document{value = #traverse_task{
+            timestamp = Timestamp,
+            executor = Executor
+        }} = NewDoc} ->
+            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
+            NewDoc;
+        {error, {update_not_needed, Changed}} ->
+            Doc#document{value = Changed}
+    end,
+    on_task_change(ExtendedCtx, Pool, TaskID, UpdatedDoc, Self);
+on_task_change(ExtendedCtx, Pool, TaskID, #document{key = DocID, value = #traverse_task{
+    status = Status,
+    enqueued = true,
+    creator = Self}
+}, Self) when Status =/= scheduled ->
+    Diff = fun
+        (#traverse_task{enqueued = true} = Task) ->
+            {ok, Task#traverse_task{enqueued = false}};
+        (_) ->
+            {error, update_not_needed}
+    end,
+
+    case datastore_model:update(ExtendedCtx, DocID, Diff) of
+        {ok, #document{value = #traverse_task{
+            timestamp = Timestamp,
+            executor = Executor,
+            creator = Creator,
+            group = GroupID
+        }}} ->
+            ok = traverse_task_list:delete_scheduled_link(
+                ExtendedCtx, Pool, Creator, TaskID, Timestamp, GroupID, Executor);
+        {error, update_not_needed} ->
+            ok
+    end;
+on_task_change(_ExtendedCtx, _Pool, _TaskID, _Doc, _Self) ->
     ok.
 
 %%%===================================================================
@@ -248,16 +320,12 @@ fix_description(ExtendedCtx, Pool, TaskID) ->
 get(Pool, TaskID) ->
     datastore_model:get(?CTX, ?DOC_ID(Pool, TaskID)).
 
--spec is_canceled_or_enqueued(doc()) -> {true, canceled | enqueued} | false.
-is_canceled_or_enqueued(#document{value = #traverse_task{
+-spec is_enqueued(doc()) -> boolean().
+is_enqueued(#document{value = #traverse_task{
     enqueued = Enqueued,
     canceled = Canceled
 }}) ->
-    case {Canceled, Enqueued} of
-        {true, _} -> {true, canceled};
-        {_, true} -> {true, enqueued};
-        _ -> false
-    end.
+    Enqueued and not Canceled.
 
 -spec get_execution_info(doc()) -> {ok, traverse:callback_module(), traverse:environment_id(), traverse:job_id()}.
 get_execution_info(#document{value = #traverse_task{

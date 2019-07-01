@@ -172,7 +172,6 @@ traverse_loadbalancingt_mixed_ids_test(Config) ->
 
 traverse_loadbalancingt_base(Config, Tasks, Check) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    % TODO - zmienic idki zeby nie byly po kolei
     lists:foreach(fun({ID, GR, Ans}) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}]))
     end, Tasks),
