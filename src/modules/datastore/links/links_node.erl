@@ -70,8 +70,11 @@ encode(#bp_tree_node{leaf = Leaf, children = Children, order = Order, rebalance_
     end,
 
     FinalMap3 = case RI of
-        undefined -> FinalMap2;
-        _ -> maps:put(<<"rebalance_info">>, RI, FinalMap2)
+        undefined ->
+            FinalMap2;
+        _ ->
+            RI_Lists = lists:map(fun({_NodeId, _Key} = Term) -> base64:encode(term_to_binary(Term)) end, RI),
+            maps:put(<<"rebalance_info">>, RI_Lists, FinalMap2)
     end,
 
     jiffy:encode(FinalMap3).
@@ -104,11 +107,16 @@ decode(Term) ->
             Map#{Key => Value}
     end, #{}, Children),
 
+    RI = case maps:get(<<"rebalance_info">>, InputMap, undefined) of
+        undefined -> undefined;
+        List -> lists:map(fun(Binary) -> binary_to_term(base64:decode(Binary)) end, List)
+    end,
+
     #bp_tree_node{
         leaf = Leaf,
         children = bp_tree_children:from_map(Children2),
         order = maps:get(<<"order">>, InputMap, undefined),
-        rebalance_info = maps:get(<<"rebalance_info">>, InputMap, undefined)
+        rebalance_info = RI
     }.
 
 %%%===================================================================
