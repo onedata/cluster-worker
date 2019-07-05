@@ -16,6 +16,7 @@
 -include("graph_sync/graph_sync.hrl").
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 
@@ -26,15 +27,12 @@
 ]).
 -export([
     verify_handshake_auth/1,
-    client_to_identity/1,
-    client_connected/3,
-    client_disconnected/3,
+    client_connected/2,
+    client_disconnected/2,
     verify_auth_override/2,
     is_authorized/5,
-    root_client/0,
     encode_entity_type/1,
     decode_entity_type/1,
-    guest_client/0,
     handle_rpc/4,
     handle_graph_request/6,
     is_subscribable/1
@@ -50,13 +48,10 @@ mock_callbacks(Config) ->
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_to_identity, fun client_to_identity/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/3),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/3),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_auth_override, fun verify_auth_override/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_authorized, fun is_authorized/5),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, root_client, fun root_client/0),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, guest_client, fun guest_client/0),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_rpc, fun handle_rpc/4),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_graph_request, fun handle_graph_request/6),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_subscribable, fun is_subscribable/1),
@@ -92,42 +87,31 @@ unmock_callbacks(Config) ->
 
 
 verify_handshake_auth({macaroon, ?USER_1_MACAROON, []}) ->
-    {ok, ?USER_AUTH(?USER_1), ?CONNECTION_INFO(?USER_AUTH(?USER_1))};
+    {ok, ?USER(?USER_1)};
 verify_handshake_auth({macaroon, ?USER_2_MACAROON, []}) ->
-    {ok, ?USER_AUTH(?USER_2), ?CONNECTION_INFO(?USER_AUTH(?USER_2))};
+    {ok, ?USER(?USER_2)};
 verify_handshake_auth({macaroon, ?PROVIDER_1_MACAROON, []}) ->
-    {ok, ?PROVIDER_AUTH(?PROVIDER_1), ?CONNECTION_INFO(?PROVIDER_AUTH(?PROVIDER_1))};
+    {ok, ?PROVIDER(?PROVIDER_1)};
 verify_handshake_auth(undefined) ->
-    {ok, ?NOBODY_AUTH, ?CONNECTION_INFO(?NOBODY_AUTH)};
+    {ok, ?NOBODY};
 verify_handshake_auth(_) ->
     ?ERROR_UNAUTHORIZED.
 
 
-verify_auth_override(_Client, {macaroon, ?USER_1_MACAROON, []}) ->
-    {ok, ?USER_AUTH(?USER_1)};
-verify_auth_override(_Client, {macaroon, ?USER_2_MACAROON, []}) ->
-    {ok, ?USER_AUTH(?USER_2)};
-verify_auth_override(_Client, {macaroon, ?PROVIDER_1_MACAROON, []}) ->
-    {ok, ?PROVIDER_AUTH(?PROVIDER_1)};
-verify_auth_override(_Client, _) ->
+verify_auth_override(_Auth, {macaroon, ?USER_1_MACAROON, []}) ->
+    {ok, ?USER(?USER_1)};
+verify_auth_override(_Auth, {macaroon, ?USER_2_MACAROON, []}) ->
+    {ok, ?USER(?USER_2)};
+verify_auth_override(_Auth, {macaroon, ?PROVIDER_1_MACAROON, []}) ->
+    {ok, ?PROVIDER(?PROVIDER_1)};
+verify_auth_override(_Auth, _) ->
     ?ERROR_UNAUTHORIZED.
 
 
-client_to_identity(?NOBODY_AUTH) -> nobody;
-client_to_identity(?USER_AUTH(UId)) -> {user, UId};
-client_to_identity(?PROVIDER_AUTH(PId)) -> {provider, PId}.
+client_connected(_Auth, _) -> ok.
 
 
-root_client() -> ?ROOT_AUTH.
-
-
-guest_client() -> ?NOBODY_AUTH.
-
-
-client_connected(Client, ?CONNECTION_INFO(Client), _) -> ok.
-
-
-client_disconnected(Client, ?CONNECTION_INFO(Client), _) -> ok.
+client_disconnected(_Auth, _) -> ok.
 
 
 mock_max_scope_towards_handle_service(Config, UserId, MaxScope) ->
@@ -136,11 +120,11 @@ mock_max_scope_towards_handle_service(Config, UserId, MaxScope) ->
     test_utils:set_env(Nodes, ?CLUSTER_WORKER_APP_NAME, mock_hservice_scope, CurrentMock#{UserId => MaxScope}).
 
 
-is_authorized(?ROOT_AUTH, _, GRI, _, _) ->
+is_authorized(?ROOT, _, GRI, _, _) ->
     {true, GRI};
-is_authorized(?USER_AUTH(UserId), _AuthHint, GRI = #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
+is_authorized(?USER(UserId), _AuthHint, GRI = #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
     {true, GRI};
-is_authorized(?USER_AUTH(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), GRI = #gri{type = od_user, id = _UserId}, get, UserData) ->
+is_authorized(?USER(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), GRI = #gri{type = od_user, id = _UserId}, get, UserData) ->
     case UserData of
         % Used to test nosub push message
         #{<<"name">> := ?USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE} ->
@@ -148,7 +132,7 @@ is_authorized(?USER_AUTH(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), GRI = #gri{typ
         _ ->
             {true, GRI}
     end;
-is_authorized(?USER_AUTH(UserId), _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, _, _) ->
+is_authorized(?USER(UserId), _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, _, _) ->
     MaxScope = maps:get(
         UserId,
         application:get_env(?CLUSTER_WORKER_APP_NAME, mock_hservice_scope, #{}),
@@ -170,11 +154,11 @@ is_authorized(_, _, _, _, _) ->
     false.
 
 
-handle_rpc(_, ?USER_AUTH(?USER_1), <<"user1Fun">>, Args) ->
+handle_rpc(_, ?USER(?USER_1), <<"user1Fun">>, Args) ->
     {ok, Args};
 handle_rpc(_, _, <<"user1Fun">>, _Args) ->
     ?ERROR_FORBIDDEN;
-handle_rpc(_, ?USER_AUTH(?USER_2), <<"user2Fun">>, Args) ->
+handle_rpc(_, ?USER(?USER_2), <<"user2Fun">>, Args) ->
     {ok, Args};
 handle_rpc(_, _, <<"user2Fun">>, _Args) ->
     ?ERROR_FORBIDDEN;
@@ -182,7 +166,7 @@ handle_rpc(_, _, _, _) ->
     ?ERROR_RPC_UNDEFINED.
 
 
-handle_graph_request(Client, AuthHint, #gri{type = od_user, id = UserId, aspect = instance}, get, _Data, Entity) ->
+handle_graph_request(Auth, AuthHint, #gri{type = od_user, id = UserId, aspect = instance}, get, _Data, Entity) ->
     UserData = case Entity of
         undefined ->
             ?USER_DATA_WITHOUT_GRI(UserId);
@@ -190,18 +174,18 @@ handle_graph_request(Client, AuthHint, #gri{type = od_user, id = UserId, aspect 
             % Used in gs_server:updated
             Fetched
     end,
-    case Client of
-        ?ROOT_AUTH -> {ok, UserData};
-        ?USER_AUTH(UserId) -> {ok, UserData};
-        ?USER_AUTH(_OtherUser) ->
+    case Auth of
+        ?ROOT -> {ok, UserData};
+        ?USER(UserId) -> {ok, UserData};
+        ?USER(_OtherUser) ->
             case AuthHint of
                 undefined -> ?ERROR_FORBIDDEN;
                 ?THROUGH_SPACE(?SPACE_1) -> {ok, UserData}
             end
     end;
-handle_graph_request(Client, _, #gri{type = od_user, id = UserId, aspect = instance}, update, Data, _Entity) ->
-    case Client of
-        ?USER_AUTH(UserId) ->
+handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instance}, update, Data, _Entity) ->
+    case Auth of
+        ?USER(UserId) ->
             case Data of
                 #{<<"name">> := NewName} when is_binary(NewName) ->
                     % Updates are typically asynchronous
@@ -219,9 +203,9 @@ handle_graph_request(Client, _, #gri{type = od_user, id = UserId, aspect = insta
         _ ->
             ?ERROR_FORBIDDEN
     end;
-handle_graph_request(Client, _, #gri{type = od_user, id = UserId, aspect = instance}, delete, _Data, _Entity) ->
-    case Client of
-        ?USER_AUTH(UserId) ->
+handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instance}, delete, _Data, _Entity) ->
+    case Auth of
+        ?USER(UserId) ->
             gs_server:deleted(
                 od_user, UserId
             ),
@@ -230,7 +214,7 @@ handle_graph_request(Client, _, #gri{type = od_user, id = UserId, aspect = insta
             ?ERROR_FORBIDDEN
     end;
 
-handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_group, id = undefined, aspect = instance}, create, Data, _Entity) ->
+handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_group, id = undefined, aspect = instance}, create, Data, _Entity) ->
     #{<<"name">> := ?GROUP_1_NAME} = Data,
     case AuthHint of
         ?AS_USER(UserId) ->
@@ -239,11 +223,11 @@ handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_group, id = un
             ?ERROR_FORBIDDEN
     end;
 
-handle_graph_request(?USER_AUTH(?USER_1), _AuthHint, #gri{type = od_group, id = ?GROUP_1, aspect = int_value}, create, Data, _Entity) ->
+handle_graph_request(?USER(?USER_1), _AuthHint, #gri{type = od_group, id = ?GROUP_1, aspect = int_value}, create, Data, _Entity) ->
     #{<<"value">> := Value} = Data,
     {ok, value, binary_to_integer(Value)};
 
-handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_space, id = undefined, aspect = instance}, create, Data, _Entity) ->
+handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_space, id = undefined, aspect = instance}, create, Data, _Entity) ->
     #{<<"name">> := ?SPACE_1_NAME} = Data,
     case AuthHint of
         ?AS_USER(UserId) ->
@@ -251,10 +235,10 @@ handle_graph_request(?USER_AUTH(UserId), AuthHint, #gri{type = od_space, id = un
         _ ->
             ?ERROR_FORBIDDEN
     end;
-handle_graph_request(?USER_AUTH(?USER_1), _, #gri{type = od_space, id = ?SPACE_1, aspect = instance}, get, _Data, _Entity) ->
+handle_graph_request(?USER(?USER_1), _, #gri{type = od_space, id = ?SPACE_1, aspect = instance}, get, _Data, _Entity) ->
     {ok, #{<<"name">> => ?SPACE_1_NAME}};
 
-handle_graph_request(Client, _AuthHint, #gri{type = od_user, id = UserId, aspect = {name_substring, LenBin}}, get, _Data, Entity) ->
+handle_graph_request(Auth, _AuthHint, #gri{type = od_user, id = UserId, aspect = {name_substring, LenBin}}, get, _Data, Entity) ->
     Len = binary_to_integer(LenBin),
     UserName = case Entity of
         undefined ->
@@ -264,14 +248,14 @@ handle_graph_request(Client, _AuthHint, #gri{type = od_user, id = UserId, aspect
             maps:get(<<"name">>, Fetched)
     end,
     NameSubstring = binary:part(UserName, 0, Len),
-    case Client of
-        ?ROOT_AUTH -> {ok, #{<<"nameSubstring">> => NameSubstring}};
-        ?USER_AUTH(UserId) -> {ok, #{<<"nameSubstring">> => NameSubstring}};
+    case Auth of
+        ?ROOT -> {ok, #{<<"nameSubstring">> => NameSubstring}};
+        ?USER(UserId) -> {ok, #{<<"nameSubstring">> => NameSubstring}};
         _ -> ?ERROR_FORBIDDEN
     end;
 
-handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, create, _, _) ->
-    case is_authorized(Client, undefined, GRI, create, #{}) of
+handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, create, _, _) ->
+    case is_authorized(Auth, undefined, GRI, create, #{}) of
         false ->
             ?ERROR_FORBIDDEN;
         {true, #gri{scope = ResScope}} ->
@@ -279,7 +263,7 @@ handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDL
             {ok, resource, {GRI#gri{scope = ResScope}, ?LIMIT_HANDLE_SERVICE_DATA(ResScope, Data)}}
     end;
 
-handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, get, _, Entity) ->
+handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, get, _, Entity) ->
     Data = case Entity of
         undefined ->
             ?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>);
@@ -287,7 +271,7 @@ handle_graph_request(Client, _, GRI = #gri{type = od_handle_service, id = ?HANDL
             % Used in gs_server:updated
             Fetched
     end,
-    case is_authorized(Client, undefined, GRI, get, #{}) of
+    case is_authorized(Auth, undefined, GRI, get, #{}) of
         false ->
             ?ERROR_FORBIDDEN;
         {true, GRI} ->
@@ -319,7 +303,7 @@ handshake_attributes(_) ->
 translate_resource(_, _GRI, Data) ->
     case rand:uniform(2) of
         1 -> Data;
-        2 -> fun(_Client) -> Data end
+        2 -> fun(_Auth) -> Data end
     end.
 
 
@@ -328,7 +312,7 @@ translate_resource(_, _GRI, Data) ->
 translate_value(_, _GRI, Data) ->
     case rand:uniform(2) of
         1 -> Data;
-        2 -> fun(_Client) -> Data end
+        2 -> fun(_Auth) -> Data end
     end.
 
 get_throttled_models() ->

@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([create/1, get/1, delete/1, update/3, list/0]).
+-export([create/1, get/1, delete/1, update/2, list/0]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
@@ -71,9 +71,9 @@ delete(Key) ->
 %% Updates existing Graph Sync session record or creates default one.
 %% @end
 %%--------------------------------------------------------------------
--spec update(key(), diff(), record()) -> {ok, doc()} | {error, term()}.
-update(Key, Diff, Default) ->
-    datastore_model:update(?CTX, Key, Diff, Default).
+-spec update(key(), diff()) -> {ok, doc()} | {error, term()}.
+update(Key, Diff) ->
+    datastore_model:update(?CTX, Key, Diff).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -13,8 +13,9 @@
 -module(gs_protocol).
 -author("Lukasz Opiola").
 
--include_lib("ctool/include/api_errors.hrl").
 -include("graph_sync/graph_sync.hrl").
+-include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 
@@ -62,14 +63,9 @@
 
 % Unique message id used to match requests to responses.
 -type message_id() :: binary().
-% An opaque term, understood by gs_logic_plugin, identifying requesting client
-% and his authorization.
--type client() :: term().
 -type protocol_version() :: non_neg_integer().
 % Graph Sync session id, used as reference to store subscriptions data
 -type session_id() :: gs_session:id().
-% Identity of the client that connects to the Graph Sync server
--type identity() :: nobody | {user, UId :: binary()} | {provider, PId :: binary()}.
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
 -type handshake_attributes() :: undefined | maps:map().
@@ -80,13 +76,13 @@
 -type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
 
 % Clients authorization, used during handshake or auth override.
--type auth() :: undefined | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+-type client_auth() :: undefined | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
 
 % Used to override the client authorization established on connection level, per
 % request. Can be used for example by providers to authorize a certain request
 % with a user's token, while still using the Graph Sync channel that was opened
 % with provider's auth.
--type auth_override() :: auth().
+-type auth_override() :: client_auth().
 
 % Possible entity types
 -type entity_type() :: atom().
@@ -142,10 +138,8 @@ graph_update_result() | graph_delete_result().
 
 -export_type([
     message_id/0,
-    client/0,
     protocol_version/0,
     session_id/0,
-    identity/0,
     handshake_attributes/0,
     message_type/0,
     message_subtype/0,
@@ -404,7 +398,7 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
         <<"id">> => Id,
         <<"type">> => <<"request">>,
         <<"subtype">> => subtype_to_string(Subtype),
-        <<"authOverride">> => auth_to_json(AuthOverride),
+        <<"authOverride">> => client_auth_to_json(AuthOverride),
         <<"payload">> => Payload
     }.
 
@@ -417,7 +411,7 @@ encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     } = Req,
     #{
         <<"supportedVersions">> => SupportedVersions,
-        <<"auth">> => auth_to_json(Auth),
+        <<"auth">> => client_auth_to_json(Auth),
         <<"sessionId">> => undefined_to_null(SessionId)
     }.
 
@@ -612,7 +606,7 @@ decode_request(ProtocolVersion, ReqJSON) ->
     #gs_req{
         id = maps:get(<<"id">>, ReqJSON),
         subtype = Subtype,
-        auth_override = json_to_auth(AuthOverride),
+        auth_override = json_to_client_auth(AuthOverride),
         request = Request
     }.
 
@@ -625,7 +619,7 @@ decode_request_handshake(_, PayloadJSON) ->
     SupportedVersions = maps:get(<<"supportedVersions">>, PayloadJSON),
     #gs_req_handshake{
         supported_versions = SupportedVersions,
-        auth = json_to_auth(Auth),
+        auth = json_to_client_auth(Auth),
         session_id = null_to_undefined(SessionId)
     }.
 
@@ -819,17 +813,17 @@ string_to_subtype(<<"nosub">>) -> nosub;
 string_to_subtype(<<"error">>) -> error.
 
 
--spec json_to_auth(null | json_map()) -> auth().
-json_to_auth(null) ->
+-spec json_to_client_auth(null | json_map()) -> client_auth().
+json_to_client_auth(null) ->
     undefined;
-json_to_auth(#{<<"macaroon">> := Macaroon} = Json) ->
+json_to_client_auth(#{<<"macaroon">> := Macaroon} = Json) ->
     {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
 
 
--spec auth_to_json(auth()) -> null | json_map().
-auth_to_json(undefined) ->
+-spec client_auth_to_json(client_auth()) -> null | json_map().
+client_auth_to_json(undefined) ->
     null;
-auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
+client_auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
     <<"macaroon">> => Macaroon,
     <<"discharge-macaroons">> => DischargeMacaroons
 }.
@@ -937,16 +931,16 @@ json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
 json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
 
 
--spec identity_to_json(identity()) -> binary() | json_map().
-identity_to_json(nobody) -> <<"nobody">>;
-identity_to_json({user, UserId}) -> #{<<"user">> => UserId};
-identity_to_json({provider, ProviderId}) -> #{<<"provider">> => ProviderId}.
+-spec identity_to_json(aai:subject()) -> binary() | json_map().
+identity_to_json(?SUB(nobody)) -> <<"nobody">>;
+identity_to_json(?SUB(user, UserId)) -> #{<<"user">> => UserId};
+identity_to_json(?SUB(?ONEPROVIDER, PrId)) -> #{<<"provider">> => PrId}.
 
 
--spec json_to_identity(binary() | json_map()) -> identity().
-json_to_identity(<<"nobody">>) -> nobody;
-json_to_identity(#{<<"user">> := UserId}) -> {user, UserId};
-json_to_identity(#{<<"provider">> := ProviderId}) -> {provider, ProviderId}.
+-spec json_to_identity(binary() | json_map()) -> aai:subject().
+json_to_identity(<<"nobody">>) -> ?SUB(nobody);
+json_to_identity(#{<<"user">> := UserId}) -> ?SUB(user, UserId);
+json_to_identity(#{<<"provider">> := PrId}) -> ?SUB(?ONEPROVIDER, PrId).
 
 
 -spec nosub_reason_to_json(nosub_reason()) -> binary().
