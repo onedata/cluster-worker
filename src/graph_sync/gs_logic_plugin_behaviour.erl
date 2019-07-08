@@ -16,7 +16,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Resolves the authorization the requesting client based on handshake auth.
+%% Resolves the authorization of the requesting client based on handshake auth.
 %% If error is returned, the handshake is denied.
 %% @end
 %%--------------------------------------------------------------------
