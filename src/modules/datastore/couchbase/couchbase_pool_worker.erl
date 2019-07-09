@@ -317,7 +317,7 @@ batch_requests(Requests) ->
 %% Adds request to a batch if possible.
 %% @end
 %%--------------------------------------------------------------------
--spec batch_request(couchbase_pool:request(), maps:map()) ->
+-spec batch_request(couchbase_pool:request(), map()) ->
     batch_requests().
 batch_request({save, Ctx, Key, Value}, RequestsBatch) ->
     #{save := SaveRequests} = RequestsBatch,

@@ -68,7 +68,7 @@
 -type session_id() :: gs_session:id().
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
--type handshake_attributes() :: undefined | maps:map().
+-type handshake_attributes() :: undefined | json_map().
 
 % Denotes type of message so the payload can be properly interpreted
 -type message_type() :: request | response | push.
@@ -119,7 +119,7 @@
 % Function identifier in RPC
 -type rpc_function() :: binary().
 % Arguments map in RPC
--type rpc_args() :: maps:map().
+-type rpc_args() :: json_map().
 
 -type rpc_result() :: {ok, data()} | {error, term()}.
 
@@ -134,7 +134,7 @@
 -type graph_request_result() :: graph_create_result() | graph_get_result() |
 graph_update_result() | graph_delete_result().
 
--type json_map() :: maps:map().
+-type json_map() :: #{binary() => json_utils:json_term()}.
 
 -export_type([
     message_id/0,
