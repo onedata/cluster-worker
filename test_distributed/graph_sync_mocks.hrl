@@ -23,14 +23,7 @@
 % Current protocol version
 -define(SUPPORTED_PROTO_VERSIONS, [1, 2]).
 
--define(CONNECTION_INFO(__Client), {arbitrary_connection_info, __Client}).
-
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
-
--define(USER_AUTH(__UserId), {user_auth, __UserId}).
--define(PROVIDER_AUTH(__ProviderId), {provider_auth, __ProviderId}).
--define(NOBODY_AUTH, nobody).
--define(ROOT_AUTH, root).
 
 -define(USER_1, <<"user1Id">>).
 -define(USER_2, <<"user2Id">>).
