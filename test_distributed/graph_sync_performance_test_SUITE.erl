@@ -15,6 +15,7 @@
 -include("global_definitions.hrl").
 -include("graph_sync_mocks.hrl").
 -include("performance_test_utils.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 
 %% API
 -export([all/0]).
@@ -139,13 +140,13 @@ concurrent_active_clients_spawning_performance_base(Config) ->
     ClientNum = ?CLIENT_NUM,
     RequestInterval = ?REQUEST_INTERVAL_SECONDS,
 
-    MakeRequestRegularly = fun(Client) ->
+    MakeRequestRegularly = fun(Auth) ->
         Pid = spawn_link(fun Loop() ->
             receive
                 perform_request ->
                     ?assertMatch(
                         {ok, #gs_resp_graph{}},
-                        gs_client:graph_request(Client, ?USER_1_GRI, get)
+                        gs_client:graph_request(Auth, ?USER_1_GRI, get)
                     ),
                     erlang:send_after(round(timer:seconds(RequestInterval)), self(), perform_request),
                     Loop()
@@ -227,21 +228,21 @@ update_propagation_performance_base(Config) ->
         <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
     },
 
-    OnSuccessFun = fun(Client) ->
+    OnSuccessFun = fun(Auth) ->
         ?assertMatch(
             {ok, #gs_resp_graph{data = User1Data}},
-            gs_client:graph_request(Client, #gri{
+            gs_client:graph_request(Auth, #gri{
                 type = od_user, id = ?USER_1, aspect = instance
             }, get, #{}, true)
         )
     end,
 
-    {ok, SupervisorPid, Clients} = spawn_clients(
+    {ok, SupervisorPid, Auths} = spawn_clients(
         Config, ClientNum, true, GatherUpdate, OnSuccessFun
     ),
 
     utils:pforeach(fun(Seq) ->
-        {ok, #gs_resp_graph{}} = gs_client:graph_request(hd(Clients), #gri{
+        {ok, #gs_resp_graph{}} = gs_client:graph_request(hd(Auths), #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, update, #{
             <<"name">> => <<"name", (integer_to_binary(Seq))/binary>>
@@ -281,7 +282,7 @@ subscriptions_performance_base(Config) ->
     StartSubscriptions = ?START_SUBSCRIPTIONS,
     EndSubscriptions = ?END_SUBSCRIPTIONS,
 
-    Client = {client, user, ?USER_1},
+    Auth = ?USER(?USER_1),
     AuthHint = ?THROUGH_GROUP(?GROUP_1),
     SessionId = <<"12345">>,
     GRI = fun(Integer) ->
@@ -289,13 +290,13 @@ subscriptions_performance_base(Config) ->
     end,
 
     lists:map(fun(Seq) ->
-        simulate_subscribe(Config, GRI(Seq), SessionId, Client, AuthHint)
+        simulate_subscribe(Config, GRI(Seq), SessionId, Auth, AuthHint)
     end, lists:seq(1, StartSubscriptions)),
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
     utils:pforeach(fun(Seq) ->
-        simulate_subscribe(Config, GRI(Seq), SessionId, Client, AuthHint)
+        simulate_subscribe(Config, GRI(Seq), SessionId, Auth, AuthHint)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
 
     utils:pforeach(fun(Seq) ->
@@ -333,20 +334,20 @@ subscribers_performance_base(Config) ->
     StartSubscribers = ?START_SUBSCRIBERS,
     EndSubscribers = ?END_SUBSCRIBERS,
 
-    Client = {client, user, ?USER_1},
+    Auth = ?USER(?USER_1),
     AuthHint = ?THROUGH_GROUP(?GROUP_1),
     SessionId = fun(Integer) ->
         integer_to_binary(Integer)
     end,
 
     lists:map(fun(Seq) ->
-        simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Client, AuthHint)
+        simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Auth, AuthHint)
     end, lists:seq(1, StartSubscribers)),
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
     utils:pforeach(fun(Seq) ->
-        simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Client, AuthHint)
+        simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Auth, AuthHint)
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
 
     utils:pforeach(fun(Seq) ->
@@ -380,7 +381,7 @@ spawn_clients(Config, ClientNum) ->
 spawn_clients(Config, ClientNum, RetryFlag, CallbackFunction, OnSuccessFun) ->
     URL = get_gs_ws_url(Config),
     Auth = {macaroon, ?USER_1_MACAROON, []},
-    Identity = {user, ?USER_1},
+    Identity = ?SUB(user, ?USER_1),
     AuthsAndIdentities = lists:duplicate(ClientNum, {Auth, Identity}),
     graph_sync_test_utils:spawn_clients(
         URL, ssl_opts(Config), AuthsAndIdentities, RetryFlag, CallbackFunction, OnSuccessFun
@@ -394,8 +395,8 @@ terminate_clients(Config, SupervisorPid) ->
     graph_sync_test_utils:terminate_clients(SupervisorPid, KeepaliveInterval * 2).
 
 
-simulate_subscribe(Config, Gri, SessionId, Client, AuthHint) ->
-    rpc:call(random_node(Config), gs_persistence, add_subscriber, [Gri, SessionId, Client, AuthHint]),
+simulate_subscribe(Config, Gri, SessionId, Auth, AuthHint) ->
+    rpc:call(random_node(Config), gs_persistence, add_subscriber, [Gri, SessionId, Auth, AuthHint]),
     rpc:call(random_node(Config), gs_persistence, add_subscription, [SessionId, Gri]).
 
 

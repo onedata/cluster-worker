@@ -22,7 +22,7 @@
 
 -record(pre_handshake_state, {
     % @TODO DEPRECATED VFS-5436 - used when auth macaroons are sent in headers
-    http_auth :: gs_protocol:auth(),
+    http_auth :: gs_protocol:client_auth(),
     translator :: module()
 }).
 
@@ -309,7 +309,7 @@ decode_body(ProtocolVersion, Data) ->
 %% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
 %% @end
 %%--------------------------------------------------------------------
--spec parse_auth_from_headers(cowboy_req:req()) -> gs_protocol:auth().
+-spec parse_auth_from_headers(cowboy_req:req()) -> gs_protocol:client_auth().
 parse_auth_from_headers(Req) ->
     case cowboy_req:header(<<"macaroon">>, Req) of
         undefined -> undefined;

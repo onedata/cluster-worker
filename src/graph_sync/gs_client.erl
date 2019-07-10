@@ -17,6 +17,7 @@
 -include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -25,7 +26,7 @@
     handshake_status = false :: false | {pending, MsgId :: binary(), pid()} | true,
     session_id :: undefined | gs_protocol:session_id(),
     protocol_version = ?BASIC_PROTOCOL :: gs_protocol:protocol_version(),
-    identity = nobody :: gs_protocol:identity(),
+    identity = ?SUB(nobody) :: aai:subject(),
     handshake_attributes = #{} :: gs_protocol:handshake_attributes(),
     push_callback = fun(_) -> ok end :: push_callback(),
     promises = #{} :: maps:map(Id :: binary(), CallingProcess :: pid())
@@ -45,7 +46,7 @@
 % @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
 % {http, websocket_req:authorization()} is DEPRECATED - since 19.02.*
 % auth should be sent in GraphSync handshake.
--type auth() :: gs_protocol:auth() | {http, websocket_req:authorization()}.
+-type auth() :: gs_protocol:client_auth() | {http, websocket_req:authorization()}.
 
 -export([init/2, websocket_handle/3, websocket_info/3, websocket_terminate/3]).
 -export([start_link/4, start_link/5, kill/1]).

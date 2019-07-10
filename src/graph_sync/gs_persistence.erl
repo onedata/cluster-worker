@@ -6,8 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module contains procedures to encode and decode Graph Sync messages
-%%% and definitions of types used both on client and server side.
+%%% This module implements a high-level API for GraphSync persistence -
+%%% gs_session and gs_subscription records.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(gs_persistence).
@@ -21,7 +21,7 @@
 % List of subscriptions of given client
 -type subscriptions() :: ordsets:ordset(gs_protocol:gri()).
 % Identifier of a subscriber client
--type subscriber() :: {gs_protocol:session_id(), {gs_protocol:client(), gs_protocol:auth_hint()}}.
+-type subscriber() :: {gs_protocol:session_id(), {aai:auth(), gs_protocol:auth_hint()}}.
 % A map of subscribers per {Aspect, Scope} for an entity
 -type subscribers() :: maps:map({gs_protocol:aspect(), gs_protocol:scope()}, ordsets:ordset(subscriber())).
 
@@ -84,18 +84,18 @@ delete_session(SessionId) ->
 %% @doc
 %% Adds a subscriber for given GRI, i.e. a client that would like to receive
 %% updates of given resource. The subscriber is identified by session id and
-%% client + auth_hint that were used to access the resource.
+%% auth + auth_hint that were used to access the resource.
 %% If the client with the same session id performs a second subscription,
 %% the old one is deleted.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_subscriber(gs_protocol:gri(), gs_protocol:session_id(),
-    gs_protocol:client(), gs_protocol:auth_hint()) -> ok.
-add_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId, Client, AuthHint) ->
+    aai:auth(), gs_protocol:auth_hint()) -> ok.
+add_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId, Auth, AuthHint) ->
     modify_subscribers(Type, Id, fun(AllSubscribers) ->
         Subscribers = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
         NewSubscribers = ordsets:add_element(
-            {SessionId, {Client, AuthHint}},
+            {SessionId, {Auth, AuthHint}},
             proplists:delete(SessionId, Subscribers)
         ),
         AllSubscribers#{
@@ -194,7 +194,7 @@ remove_all_subscribers(GRI = #gri{type = Type, id = Id, aspect = Aspect, scope =
     {ok, AllSubscribers} = get_subscribers(Type, Id),
     SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
     lists:foreach(
-        fun({SessionId, {_Client, _AuthHint}}) ->
+        fun({SessionId, {_Auth, _AuthHint}}) ->
             remove_subscription(SessionId, GRI)
         end, SubscribersForAspect),
     modify_subscribers(Type, Id, fun(Subscribers) ->
@@ -236,9 +236,7 @@ modify_subscribers(Type, Id, UpdateFun) ->
 
 -spec modify_subscriptions(gs_protocol:session_id(), gs_session:diff()) -> ok.
 modify_subscriptions(SessionId, UpdateFun) ->
-    Default = #gs_session{subscriptions = UpdateFun(ordsets:new())},
-    Diff = fun(Session = #gs_session{subscriptions = Subscriptions}) ->
-        {ok, Session#gs_session{subscriptions = UpdateFun(Subscriptions)}}
-    end,
-    {ok, _} = gs_session:update(SessionId, Diff, Default),
+    {ok, _} = gs_session:update(SessionId, fun(Session = #gs_session{subscriptions = Subs}) ->
+        {ok, Session#gs_session{subscriptions = UpdateFun(Subs)}}
+    end),
     ok.

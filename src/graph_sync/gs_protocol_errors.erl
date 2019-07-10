@@ -115,6 +115,18 @@ error_to_json(_, ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl)) ->
             <<"maxTtl">> => MaxTtl
         }
     };
+error_to_json(_, ?ERROR_BAD_AUDIENCE_TOKEN) ->
+    #{
+        <<"id">> => <<"badAudienceToken">>
+    };
+error_to_json(_, ?ERROR_TOKEN_AUDIENCE_FORBIDDEN) ->
+    #{
+        <<"id">> => <<"tokenAudienceForbidden">>
+    };
+error_to_json(_, ?ERROR_TOKEN_SESSION_INVALID) ->
+    #{
+        <<"id">> => <<"tokenSessionInvalid">>
+    };
 error_to_json(_, ?ERROR_MALFORMED_DATA) ->
     #{
         <<"id">> => <<"malformedData">>
@@ -472,6 +484,15 @@ json_to_error(_, #{<<"id">> := <<"macaroonExpired">>}) ->
 json_to_error(_, #{<<"id">> := <<"macaroonTtlTooLong">>,
     <<"details">> := #{<<"maxTtl">> := MaxTtl}}) ->
     ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl);
+
+json_to_error(_, #{<<"id">> := <<"badAudienceToken">>}) ->
+    ?ERROR_BAD_AUDIENCE_TOKEN;
+
+json_to_error(_, #{<<"id">> := <<"tokenAudienceForbidden">>}) ->
+    ?ERROR_TOKEN_AUDIENCE_FORBIDDEN;
+
+json_to_error(_, #{<<"id">> := <<"tokenSessionInvalid">>}) ->
+    ?ERROR_TOKEN_SESSION_INVALID;
 
 json_to_error(_, #{<<"id">> := <<"malformedData">>}) ->
     ?ERROR_MALFORMED_DATA;
