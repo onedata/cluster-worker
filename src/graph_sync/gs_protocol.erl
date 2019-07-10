@@ -279,7 +279,7 @@ decode(ProtocolVersion, JSONMap) ->
 %% success response.
 %% @end
 %%--------------------------------------------------------------------
--spec generate_success_response(req_wrapper(), data()) -> resp_wrapper().
+-spec generate_success_response(req_wrapper(), resp()) -> resp_wrapper().
 generate_success_response(#gs_req{id = Id, subtype = Subtype}, Response) ->
     #gs_resp{
         id = Id,
