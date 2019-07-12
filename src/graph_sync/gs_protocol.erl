@@ -76,7 +76,10 @@
 -type message_subtype() :: handshake | rpc | graph | unsub | nosub | error.
 
 % Clients authorization, used during handshake or auth override.
--type client_auth() :: undefined | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+% Special 'nobody' auth can be used to indicate that the client is requesting
+% public access (typically works the same as not providing any auth, but might
+% be subject to server's implementation).
+-type client_auth() :: undefined | nobody | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
 
 % Used to override the client authorization established on connection level, per
 % request. Can be used for example by providers to authorize a certain request
@@ -191,7 +194,7 @@ graph_update_result() | graph_delete_result().
 %% @end
 %%--------------------------------------------------------------------
 -spec supported_versions() -> [protocol_version()].
-supported_versions() -> [1, 2].
+supported_versions() -> [1, 2, 3].
 
 
 %%--------------------------------------------------------------------
@@ -515,7 +518,8 @@ encode_response_graph(1, #gs_resp_graph{data_format = Format, data = Result}) ->
         value -> #{<<"data">> => undefined_to_null(Result)};
         resource -> Result
     end;
-encode_response_graph(2, #gs_resp_graph{data_format = Format, data = Result}) ->
+% Covers all versions since 2
+encode_response_graph(_, #gs_resp_graph{data_format = Format, data = Result}) ->
     FormatStr = data_format_to_str(Format),
     #{
         <<"format">> => FormatStr,
@@ -577,7 +581,7 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
 encode_push_error(?BASIC_PROTOCOL, Message) ->
     % Error push message may be sent before negotiating handshake, so it must
     % support the basic protocol (currently the same as 1. protocol version).
-    encode_push_error(2, Message);
+    encode_push_error(3, Message);
 encode_push_error(ProtocolVersion, #gs_push_error{} = Message) ->
     #gs_push_error{
         error = Error
@@ -723,11 +727,12 @@ decode_response_graph(1, DataJSON) ->
                 data = DataJSON
             }
     end;
-decode_response_graph(2, null) ->
+% Covers all versions since 2
+decode_response_graph(_, null) ->
     #gs_resp_graph{};
-decode_response_graph(2, Map) when map_size(Map) == 0 ->
+decode_response_graph(_, Map) when map_size(Map) == 0 ->
     #gs_resp_graph{};
-decode_response_graph(2, DataJSON) ->
+decode_response_graph(_, DataJSON) ->
     FormatStr = maps:get(<<"format">>, DataJSON),
     #gs_resp_graph{
         data_format = str_to_data_format(FormatStr),
@@ -787,7 +792,7 @@ decode_push_nosub(_, PayloadJSON) ->
 decode_push_error(?BASIC_PROTOCOL, PayloadJSON) ->
     % Error push message may be sent before negotiating handshake, so it must
     % support the basic protocol (currently the same as 1. protocol version).
-    decode_push_error(2, PayloadJSON);
+    decode_push_error(3, PayloadJSON);
 decode_push_error(ProtocolVersion, PayloadJSON) ->
     Error = maps:get(<<"error">>, PayloadJSON),
     #gs_push_error{
@@ -813,16 +818,20 @@ string_to_subtype(<<"nosub">>) -> nosub;
 string_to_subtype(<<"error">>) -> error.
 
 
--spec json_to_client_auth(null | json_map()) -> client_auth().
+-spec json_to_client_auth(null | json_map() | binary()) -> client_auth().
 json_to_client_auth(null) ->
     undefined;
+json_to_client_auth(<<"nobody">>) ->
+    nobody;
 json_to_client_auth(#{<<"macaroon">> := Macaroon} = Json) ->
     {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
 
 
--spec client_auth_to_json(client_auth()) -> null | json_map().
+-spec client_auth_to_json(client_auth()) -> null | json_map() | binary().
 client_auth_to_json(undefined) ->
     null;
+client_auth_to_json(nobody) ->
+    <<"nobody">>;
 client_auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
     <<"macaroon">> => Macaroon,
     <<"discharge-macaroons">> => DischargeMacaroons
