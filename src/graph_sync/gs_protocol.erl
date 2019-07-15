@@ -112,9 +112,12 @@
     asUser | asGroup | asSpace,
     EntityId :: binary()
 }.
-% A prefetched entity that can be passed to gs_logic_plugin to speed up request
-% handling. Undefined if no entity was prefetched.
+% Generic term representing an entity in the system. If prefetched, it can be
+% passed to gs_logic_plugin to speed up request handling.
 -type entity() :: undefined | term().
+% Revision of the entity - rises strictly monotonically with every modification
+-type revision() :: pos_integer().
+-type versioned_entity() :: {entity(), revision()}.
 
 -type change_type() :: updated | deleted.
 -type nosub_reason() :: forbidden.
@@ -129,8 +132,10 @@
 -type error() :: {error, term()}.
 
 -type graph_create_result() :: ok | {ok, value, term()} |
-{ok, resource, {gri(), term()} | {gri(), auth_hint(), term()}} | error().
--type graph_get_result() :: {ok, term()} | {ok, gri(), term()} | error().
+{ok, resource, {gri(), {term(), revision()}} | {gri(), auth_hint(), {term(), revision()}}} |
+error().
+-type graph_get_result() :: {ok, {term(), revision()}} |
+{ok, gri(), {term(), revision()}} | error().
 -type graph_delete_result() :: ok | error().
 -type graph_update_result() :: ok | error().
 
@@ -157,6 +162,8 @@ graph_update_result() | graph_delete_result().
     data/0,
     auth_hint/0,
     entity/0,
+    revision/0,
+    versioned_entity/0,
     change_type/0,
     nosub_reason/0,
     rpc_function/0,

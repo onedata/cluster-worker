@@ -40,6 +40,7 @@
     unsubscribe_test/1,
     nosub_test/1,
     auth_override_test/1,
+    nobody_auth_override_test/1,
     auto_scope_test/1,
     session_persistence_test/1,
     subscribers_persistence_test/1,
@@ -56,6 +57,7 @@
     unsubscribe_test,
     nosub_test,
     auth_override_test,
+    nobody_auth_override_test,
     auto_scope_test,
     session_persistence_test,
     subscribers_persistence_test,
@@ -144,7 +146,8 @@ graph_req_test(Config) ->
 
 graph_req_test_base(Config, ProtoVersion) ->
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
     },
 
     Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
@@ -232,7 +235,8 @@ graph_req_test_base(Config, ProtoVersion) ->
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> := NewSpaceGRI,
-            <<"name">> := ?SPACE_1_NAME
+            <<"name">> := ?SPACE_1_NAME,
+            <<"revision">> := 1
         }}},
         gs_client:graph_request(Client1, #gri{
             type = od_space, id = undefined, aspect = instance
@@ -246,7 +250,8 @@ graph_req_test_base(Config, ProtoVersion) ->
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> := NewGroupGRI,
-            <<"name">> := ?GROUP_1_NAME
+            <<"name">> := ?GROUP_1_NAME,
+            <<"revision">> := 1
         }}},
         gs_client:graph_request(Client1, #gri{
             type = od_group, id = undefined, aspect = instance
@@ -277,10 +282,12 @@ subscribe_test_base(Config, ProtoVersion) ->
     end),
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
     },
     User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance})
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"revision">> => 1
     },
 
     Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
@@ -301,7 +308,10 @@ subscribe_test_base(Config, ProtoVersion) ->
     User1NameSubstring = binary:part(maps:get(<<"name">>, User1Data), 0, 4),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{data_format = resource, data = #{<<"nameSubstring">> := User1NameSubstring}}},
+        {ok, #gs_resp_graph{data_format = resource, data = #{
+            <<"nameSubstring">> := User1NameSubstring,
+            <<"revision">> := 1
+        }}},
         gs_client:graph_request(Client1, #gri{
             type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
         }, get, #{}, true)
@@ -317,7 +327,10 @@ subscribe_test_base(Config, ProtoVersion) ->
     User2NameSubstring = binary:part(maps:get(<<"name">>, User2Data), 0, 6),
 
     ?assertMatch(
-        {ok, #gs_resp_graph{data_format = resource, data = #{<<"nameSubstring">> := User2NameSubstring}}},
+        {ok, #gs_resp_graph{data_format = resource, data = #{
+            <<"nameSubstring">> := User2NameSubstring,
+            <<"revision">> := 1
+        }}},
         gs_client:graph_request(Client2, #gri{
             type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
         }, get, #{}, true)
@@ -345,10 +358,12 @@ subscribe_test_base(Config, ProtoVersion) ->
     ),
 
     NewUser1Data = User1Data#{
-        <<"name">> => <<"newName1">>
+        <<"name">> => <<"newName1">>,
+        <<"revision">> => 2
     },
     NewUser2Data = User2Data#{
-        <<"name">> => <<"newName2">>
+        <<"name">> => <<"newName2">>,
+        <<"revision">> => 2
     },
 
     NewUser1NameSubstring = binary:part(maps:get(<<"name">>, NewUser1Data), 0, 4),
@@ -369,7 +384,10 @@ subscribe_test_base(Config, ProtoVersion) ->
         case Msg of
             #gs_push_graph{gri = #gri{
                 type = od_user, id = ?USER_1, aspect = {name_substring, <<"4">>}
-            }, change_type = updated, data = #{<<"nameSubstring">> := NewUser1NameSubstring}} ->
+            }, change_type = updated, data = #{
+                <<"nameSubstring">> := NewUser1NameSubstring,
+                <<"revision">> := 2
+            }} ->
                 true;
             _ ->
                 false
@@ -402,7 +420,10 @@ subscribe_test_base(Config, ProtoVersion) ->
         case Msg of
             #gs_push_graph{gri = #gri{
                 type = od_user, id = ?USER_2, aspect = {name_substring, <<"6">>}
-            }, change_type = updated, data = #{<<"nameSubstring">> := NewUser2NameSubstring}} ->
+            }, change_type = updated, data = #{
+                <<"nameSubstring">> := NewUser2NameSubstring,
+                <<"revision">> := 2
+            }} ->
                 true;
             _ ->
                 false
@@ -423,7 +444,8 @@ unsubscribe_test_base(Config, ProtoVersion) ->
     end),
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
     },
 
     Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
@@ -445,7 +467,8 @@ unsubscribe_test_base(Config, ProtoVersion) ->
     ),
 
     NewUser1Data = User1Data#{
-        <<"name">> => <<"newName1">>
+        <<"name">> => <<"newName1">>,
+        <<"revision">> => 2
     },
 
     ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
@@ -474,7 +497,8 @@ unsubscribe_test_base(Config, ProtoVersion) ->
     ),
 
     NewestUser1Data = User1Data#{
-        <<"name">> => <<"newName2">>
+        <<"name">> => <<"newName2">>,
+        <<"revision">> => 2
     },
 
     ?assert(verify_message_absent(GathererPid, client1, fun(Msg) ->
@@ -502,7 +526,8 @@ nosub_test_base(Config, ProtoVersion) ->
     end),
 
     User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance})
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"revision">> => 1
     },
 
     Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
@@ -535,7 +560,8 @@ nosub_test_base(Config, ProtoVersion) ->
     ),
 
     NewUser2Data = User2Data#{
-        <<"name">> => <<"newName1">>
+        <<"name">> => <<"newName1">>,
+        <<"revision">> => 2
     },
 
     ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
@@ -557,7 +583,8 @@ nosub_test_base(Config, ProtoVersion) ->
     ),
 
     NewestUser2Data = User2Data#{
-        <<"name">> => ?USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE
+        <<"name">> => ?USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE,
+        <<"revision">> => 2
     },
 
     ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
@@ -602,7 +629,8 @@ auth_override_test_base(Config, ProtoVersion) ->
     % User 1 should be able to get user's 2 data by possessing his macaroon and
     % using it as auth override during the request.
     User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance})
+        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"revision">> => 1
     },
 
     ?assertMatch(
@@ -620,7 +648,8 @@ auth_override_test_base(Config, ProtoVersion) ->
 
     NewUser2Name = <<"newName2">>,
     NewUser2Data = User2Data#{
-        <<"name">> => NewUser2Name
+        <<"name">> => NewUser2Name,
+        <<"revision">> => 2
     },
 
     % Subscribing should work too - user1 should be receiving future changes of
@@ -652,7 +681,50 @@ auth_override_test_base(Config, ProtoVersion) ->
     end)).
 
 
+% Nobody auth override is supported since protocol version 3
+nobody_auth_override_test(Config) ->
+    [nobody_auth_override_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS -- [1, 2]].
+
+nobody_auth_override_test_base(Config, ProtoVersion) ->
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
+
+    % Request with auth based on connection owner
+    ExpPrivateShareData = ?SHARE_DATA(<<"private">>),
+    ?assertMatch(
+        {ok, #gs_resp_graph{data_format = resource, data = ExpPrivateShareData}},
+        gs_client:sync_request(Client1, #gs_req{
+            subtype = graph,
+            request = #gs_req_graph{
+                gri = #gri{type = od_share, id = ?SHARE, aspect = instance},
+                operation = get
+            }
+        })
+    ),
+
+    % Request with nobody auth override
+    ExpPublicShareData = ?SHARE_DATA(<<"public">>),
+    ?assertMatch(
+        {ok, #gs_resp_graph{data_format = resource, data = ExpPublicShareData}},
+        gs_client:sync_request(Client1, #gs_req{
+            subtype = graph,
+            auth_override = nobody,
+            request = #gs_req_graph{
+                gri = #gri{type = od_share, id = ?SHARE, aspect = instance},
+                operation = get
+            }
+        })
+    ),
+
+    disconnect_client([Client1]),
+
+    ok.
+
+
+% Auto scope is supported since protocol version 2
 auto_scope_test(Config) ->
+    [auto_scope_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS -- [1]].
+
+auto_scope_test_base(Config, ProtoVersion) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
 
     GathererPid = spawn(fun() ->
@@ -662,11 +734,11 @@ auto_scope_test(Config) ->
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, none),
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, public),
 
-    Client1 = spawn_client(Config, ?SUPPORTED_PROTO_VERSIONS, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
         GathererPid ! {gather_message, client1, Push}
     end),
 
-    Client2 = spawn_client(Config, ?SUPPORTED_PROTO_VERSIONS, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2), fun(Push) ->
+    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2), fun(Push) ->
         GathererPid ! {gather_message, client2, Push}
     end),
 
@@ -686,8 +758,9 @@ auto_scope_test(Config) ->
 
     ?assertEqual(
         {ok, #gs_resp_graph{data_format = resource, data = #{
-            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>}
-        }},
+            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>,
+            <<"revision">> => 1
+        }}},
         gs_client:graph_request(Client2, HsGRI#gri{scope = auto}, get, #{}, true)
     ),
 
@@ -695,18 +768,23 @@ auto_scope_test(Config) ->
 
     ?assertEqual(
         {ok, #gs_resp_graph{data_format = resource, data = #{
-            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>, <<"shared">> => <<"sha1">>}
-        }},
+            <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>, <<"shared">> => <<"sha1">>,
+            <<"revision">> => 1
+        }}},
         gs_client:graph_request(Client1, HsGRI#gri{scope = auto}, get, #{}, true)
     ),
 
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, private),
 
+    Revision2 = 5,
     HServiceData2 = ?HANDLE_SERVICE_DATA(<<"pub2">>, <<"sha2">>, <<"pro2">>, <<"pri2">>),
-    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData2]),
+    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, {HServiceData2, Revision2}]),
 
     ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
-        Expected = ?LIMIT_HANDLE_SERVICE_DATA(shared, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(shared, HServiceData2)#{
+            <<"gri">> => HsGRIAutoStr,
+            <<"revision">> => Revision2
+        },
         case Msg of
             #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
                 true;
@@ -716,7 +794,10 @@ auto_scope_test(Config) ->
     end)),
 
     ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
-        Expected = ?LIMIT_HANDLE_SERVICE_DATA(private, HServiceData2)#{<<"gri">> => HsGRIAutoStr},
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(private, HServiceData2)#{
+            <<"gri">> => HsGRIAutoStr,
+            <<"revision">> => Revision2
+        },
         case Msg of
             #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
                 true;
@@ -728,11 +809,15 @@ auto_scope_test(Config) ->
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, protected),
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, none),
 
+    Revision3 = 12,
     HServiceData3 = ?HANDLE_SERVICE_DATA(<<"pub3">>, <<"sha3">>, <<"pro3">>, <<"pri3">>),
-    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData3]),
+    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, {HServiceData3, Revision3}]),
 
     ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
-        Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData3)#{<<"gri">> => HsGRIAutoStr},
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData3)#{
+            <<"gri">> => HsGRIAutoStr,
+            <<"revision">> => Revision3
+        },
         case Msg of
             #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
                 true;
@@ -755,16 +840,21 @@ auto_scope_test(Config) ->
     ?assertEqual(
         {ok, #gs_resp_graph{data_format = resource, data = #{
             <<"gri">> => HsGRIAutoStr, <<"public">> => <<"pub1">>,
-            <<"shared">> => <<"sha1">>, <<"protected">> => <<"pro1">>}
-        }},
+            <<"shared">> => <<"sha1">>, <<"protected">> => <<"pro1">>,
+            <<"revision">> => 1
+        }}},
         gs_client:graph_request(Client2, HsGRI#gri{scope = auto}, create, #{}, true)
     ),
 
+    Revision4 = 14,
     HServiceData4 = ?HANDLE_SERVICE_DATA(<<"pub4">>, <<"sha4">>, <<"pro4">>, <<"pri4">>),
-    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, HServiceData4]),
+    rpc:call(Node, gs_server, updated, [od_handle_service, ?HANDLE_SERVICE, {HServiceData4, Revision4}]),
 
     ?wait_until_true(verify_message_present(GathererPid, client2, fun(Msg) ->
-        Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData4)#{<<"gri">> => HsGRIAutoStr},
+        Expected = ?LIMIT_HANDLE_SERVICE_DATA(protected, HServiceData4)#{
+            <<"gri">> => HsGRIAutoStr,
+            <<"revision">> => Revision4
+        },
         case Msg of
             #gs_push_graph{gri = HsGRIAuto, change_type = updated, data = Expected} ->
                 true;
