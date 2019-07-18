@@ -436,7 +436,6 @@ get_ctx() ->
     datastore_model:record_struct().
 get_record_struct(1) ->
     {record, [
-        {pool, string},
         {callback_module, atom},
         {creator, string},
         {executor, string},

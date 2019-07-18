@@ -465,7 +465,7 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, #{
 } = Description, Canceled) ->
     Done = maps:get(master_jobs_done, Description, 0),
     Failed = maps:get(master_jobs_failed, Description, 0),
-    ?info("aaaaaa ~p", [Description]),
+
     case Delegated == Done + Failed of
         true ->
             % VFS-5532 - can never be equal in case of description saving error
