@@ -22,14 +22,14 @@
 %% Executes master job.
 %% @end
 %%--------------------------------------------------------------------
--callback do_master_job(traverse:job()) -> {ok, traverse:master_job_map()} | {error, term()}.
+-callback do_master_job(traverse:job(), traverse:id()) -> {ok, traverse:master_job_map()} | {error, term()}.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Executes slave job.
 %% @end
 %%--------------------------------------------------------------------
--callback do_slave_job(traverse:job()) -> ok | {ok, traverse:description()} | {error, term()}.
+-callback do_slave_job(traverse:job(), traverse:id()) -> ok | {ok, traverse:description()} | {error, term()}.
 
 %%%===================================================================
 %%% Job persistence API
@@ -73,7 +73,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Is executed when last job of canceled task has ended.
+%% Is executed when last job of canceled task has ended or immediately after cancel if task is scheduled.
 %% @end
 %%--------------------------------------------------------------------
 -callback task_canceled(traverse:id()) -> ok.

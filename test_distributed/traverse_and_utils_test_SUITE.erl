@@ -285,7 +285,7 @@ traverse_multienvironment_test(Config) ->
     ?assertEqual([], traverse_test_pool:get_slave_ans(false)),
 
     {ok, Task} = ?assertMatch({ok, _}, rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multienvironment_test">>])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, maybe_run_scheduled_task, [{task, Task}, <<"executor">>])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, on_task_change, [Task, <<"executor">>])),
     Ans = traverse_test_pool:get_slave_ans(false),
 
     ?assertEqual(Expected, lists:sort(Ans)),

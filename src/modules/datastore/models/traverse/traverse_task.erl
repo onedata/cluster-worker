@@ -18,13 +18,13 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/10, start/4, finish/3, cancel/4, on_task_change/5]).
+-export([create/10, start/5, finish/4, cancel/5, on_task_change/2, on_remote_change/4]).
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/3,
     get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1]).
 
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1]).
+-export([get_ctx/0, get_record_struct/1, resolve_conflict/3]).
 
 %% code/decode description
 -export([encode_description/1, decode_description/1]).
@@ -39,7 +39,9 @@
     model => ?MODULE
 }).
 
--define(DOC_ID(Pool, TASK_ID), <<Pool/binary, "###", TASK_ID/binary>>).
+-define(ID_SEPARATOR, "###").
+-define(ID_SEPARATOR_BINARY, <<?ID_SEPARATOR>>).
+-define(DOC_ID(Pool, TASK_ID), <<Pool/binary, ?ID_SEPARATOR, TASK_ID/binary>>).
 
 %%%===================================================================
 %%% Lifecycle API
@@ -56,19 +58,18 @@
 create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Job, Node, InitialDescription) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Value0 = #traverse_task{
-        pool = Pool,
         callback_module = CallbackModule,
         creator = Creator,
         executor = Executor,
         group = GroupID,
         description = InitialDescription,
-        timestamp = Timestamp,
+        schedule_time = Timestamp,
         main_job_id = Job
     },
 
     Value = case Node of
         undefined -> Value0;
-        _ -> Value0#traverse_task{status = ongoing, enqueued = false, node = Node}
+        _ -> Value0#traverse_task{status = ongoing, enqueued = false, node = Node, start_time = Timestamp}
     end,
     {ok, _} = datastore_model:create(ExtendedCtx, #document{key = ?DOC_ID(Pool, TaskID), value = Value}),
 
@@ -85,9 +86,11 @@ create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Jo
 %% Updates information about task's start (used if task has not been started immediately after creation).
 %% @end
 %%--------------------------------------------------------------------
--spec start(ctx(), traverse:pool(), traverse:id(), traverse:description()) -> ok | {error, term()}.
-start(ExtendedCtx, Pool, TaskID, NewDescription) ->
+-spec start(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:description()) ->
+    ok | {error, term()}.
+start(ExtendedCtx, Pool, CallbackModule, TaskID, NewDescription) ->
     Node = node(),
+    {ok, Timestamp} = get_timestamp(CallbackModule),
     Diff = fun
         (#traverse_task{
             status = scheduled,
@@ -99,20 +102,22 @@ start(ExtendedCtx, Pool, TaskID, NewDescription) ->
                 status = ongoing,
                 enqueued = false,
                 node = Node,
-                description = NewDescription
+                description = NewDescription,
+                start_time = Timestamp
             }};
         (#traverse_task{status = scheduled, canceled = false} = Task) ->
             {ok, Task#traverse_task{
                 status = ongoing,
                 node = Node,
-                description = NewDescription
+                description = NewDescription,
+                start_time = Timestamp
             }};
         (_) ->
             {error, start_aborted}
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
         {ok, #document{value = #traverse_task{
-            timestamp = Timestamp,
+            schedule_time = ScheduleTimestamp,
             executor = Executor,
             creator = Creator,
             group = GroupID
@@ -122,7 +127,7 @@ start(ExtendedCtx, Pool, TaskID, NewDescription) ->
             case Creator =:= Executor of
                 true ->
                     ok = traverse_task_list:delete_scheduled_link(
-                        ExtendedCtx, Pool, Creator, TaskID, Timestamp, GroupID, Executor);
+                        ExtendedCtx, Pool, Creator, TaskID, ScheduleTimestamp, GroupID, Executor);
                 _ ->
                     ok
             end;
@@ -130,31 +135,39 @@ start(ExtendedCtx, Pool, TaskID, NewDescription) ->
             Other
     end.
 
--spec finish(ctx(), traverse:pool(), traverse:id()) -> ok | {error, term()}.
-finish(ExtendedCtx, Pool, TaskID) ->
+-spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id()) -> ok | {error, term()}.
+finish(ExtendedCtx, Pool, CallbackModule, TaskID) ->
+    {ok, Timestamp} = get_timestamp(CallbackModule),
     Diff = fun
         (#traverse_task{status = ongoing, canceled = false} = Task) ->
-            {ok, Task#traverse_task{status = finished}};
+            {ok, Task#traverse_task{status = finished, finish_time = Timestamp}};
         (#traverse_task{status = ongoing, canceled = true} = Task) ->
-            {ok, Task#traverse_task{status = canceled}}
+            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
+        (#traverse_task{status = canceling, canceled = true} = Task) ->
+            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}}
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
-        {ok, #document{value = #traverse_task{timestamp = Timestamp, executor = Executor}}} ->
+        {ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
-            ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
+            ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, StartTimestamp);
         Other ->
             Other
     end.
 
 %% TODO - VFS-5531
--spec cancel(ctx(), traverse:pool(), traverse:id(), traverse:environment_id()) -> ok | {error, term()}.
-cancel(ExtendedCtx, Pool, TaskID, Self) ->
+-spec cancel(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id()) ->
+    ok | {error, term()}.
+cancel(ExtendedCtx, Pool, CallbackModule, TaskID, Environment) ->
+    {ok, Timestamp} = get_timestamp(CallbackModule),
     Diff = fun
         (#traverse_task{status = scheduled, canceled = false, executor = Executor, creator = Creator} = Task) when
-            Executor =:= Self, Creator =:= Self ->
-            {ok, Task#traverse_task{status = canceled, canceled = true, enqueued = false}};
-        (#traverse_task{status = scheduled, canceled = false, executor = Executor} = Task) when Executor =:= Self ->
-            {ok, Task#traverse_task{status = canceled, canceled = true}};
+            Executor =:= Environment, Creator =:= Environment ->
+            {ok, Task#traverse_task{status = canceled, canceled = true, enqueued = false, finish_time = Timestamp}};
+        (#traverse_task{status = scheduled, canceled = false, executor = Executor} = Task) when Executor =:= Environment ->
+            {ok, Task#traverse_task{status = canceled, canceled = true, finish_time = Timestamp}};
+        (#traverse_task{status = Status, canceled = false, executor = Executor} = Task) when
+            Executor =:= Environment, Status =/= finished ->
+            {ok, Task#traverse_task{status = canceling, canceled = true}};
         (#traverse_task{status = Status, canceled = false} = Task) when Status =/= finished ->
             {ok, Task#traverse_task{canceled = true}};
         (_) ->
@@ -162,31 +175,72 @@ cancel(ExtendedCtx, Pool, TaskID, Self) ->
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
         {ok, #document{value = #traverse_task{
-            timestamp = Timestamp,
+            schedule_time = ScheduleTimestamp,
             executor = Executor,
             creator = Creator,
             group = GroupID,
             status = Status
         }}} ->
-            case {Status, Self} of
-                {canceled, Executor} ->
-                    ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp);
+            case {Status, Environment} of
+                {canceled, Creator} ->
+                    ok = traverse_task_list:delete_scheduled_link(
+                        ExtendedCtx, Pool, Creator, TaskID, ScheduleTimestamp, GroupID, Executor);
                 _ ->
                     ok
             end,
 
-            case {Status, Self} of
-                {canceled, Creator} ->
-                    ok = traverse_task_list:delete_scheduled_link(
-                        ExtendedCtx, Pool, Creator, TaskID, Timestamp, GroupID, Executor);
+            case {Status, Environment} of
+                {canceled, Executor} ->
+                    ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
+                    {ok, ended};
+                {_, Executor} ->
+                    {ok, local_cancel};
                 _ ->
-                    ok
+                    {ok, remote_cancel}
             end;
         {error, already_canceled} ->
-            ok;
+            {ok, already_canceled};
         Other ->
             Other
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Decides action to be done on remote task change.
+%% @end
+%%--------------------------------------------------------------------
+-spec on_task_change(doc(), traverse:environment_id()) ->
+    {remote_change, traverse:callback_module(), traverse:job_id()} |
+    {run, traverse:callback_module(), traverse:job_id()} |
+    ignore.
+on_task_change(#document{value = #traverse_task{
+    status = Status,
+    enqueued = true,
+    creator = Environment,
+    callback_module = CallbackModule,
+    main_job_id = MainJobID}
+}, Environment) when Status =/= scheduled ->
+    {remote_change, CallbackModule, MainJobID};
+on_task_change(#document{value = #traverse_task{
+    status = Status,
+    canceled = true,
+    executor = Environment,
+    callback_module = CallbackModule,
+    main_job_id = MainJobID}
+}, Environment) when Status =:= scheduled ; Status =:= ongoing ->
+    {remote_change, CallbackModule, MainJobID};
+on_task_change(#document{value = #traverse_task{
+    status = scheduled,
+    canceled = false,
+    executor = Environment,
+    callback_module = CallbackModule,
+    main_job_id = MainJobID}
+}, Environment) ->
+    {run, CallbackModule, MainJobID};
+on_task_change(_Doc, _Environment) ->
+    ignore.
+
+% TODO - customowy conflict resolver !!!
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -194,39 +248,13 @@ cancel(ExtendedCtx, Pool, TaskID, Self) ->
 %% @end
 %% TODO - VFS-5530
 %%--------------------------------------------------------------------
--spec on_task_change(ctx(), traverse:pool(), traverse:id(), doc(), traverse:environment_id()) -> ok.
-on_task_change(ExtendedCtx, Pool, TaskID, #document{key = DocID, value = #traverse_task{
-    status = scheduled,
-    canceled = true,
-    executor = Self}
-} = Doc, Self) ->
-    % TODO - konflikty na dokumentach
-    % TODO - zabezpieczyc jak ktos scancelowal zdalnie i lokalnie
-    % TODO - wywolac callback o cancelowaniu z taskID (bedzie potrzebny taskID w callbacku jobu) - inny task na koniec a inny na zlecenie cancelacji?
-    % uporzadkowac API czy job ma w sobie przechowywac czy wszystkie callbacki dostaja
-    Diff = fun
-        (#traverse_task{status = scheduled} = Task) ->
-            {ok, Task#traverse_task{status = canceled}};
-        (ChangedRecord) ->
-            {error, {update_not_needed, ChangedRecord}}
-    end,
-
-    UpdatedDoc = case datastore_model:update(ExtendedCtx, DocID, Diff) of
-        {ok, #document{value = #traverse_task{
-            timestamp = Timestamp,
-            executor = Executor
-        }} = NewDoc} ->
-            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
-            NewDoc;
-        {error, {update_not_needed, Changed}} ->
-            Doc#document{value = Changed}
-    end,
-    on_task_change(ExtendedCtx, Pool, TaskID, UpdatedDoc, Self);
-on_task_change(ExtendedCtx, Pool, TaskID, #document{key = DocID, value = #traverse_task{
+-spec on_remote_change(ctx(), doc(), traverse:callback_module(), traverse:environment_id()) -> ok.
+on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
     status = Status,
     enqueued = true,
-    creator = Self}
-}, Self) when Status =/= scheduled ->
+    creator = Environment}
+}, _CallbackModule, Environment) when Status =/= scheduled ->
+    {Pool, TaskID} = decode_id(DocID),
     Diff = fun
         (#traverse_task{enqueued = true} = Task) ->
             {ok, Task#traverse_task{enqueued = false}};
@@ -236,7 +264,7 @@ on_task_change(ExtendedCtx, Pool, TaskID, #document{key = DocID, value = #traver
 
     case datastore_model:update(ExtendedCtx, DocID, Diff) of
         {ok, #document{value = #traverse_task{
-            timestamp = Timestamp,
+            schedule_time = Timestamp,
             executor = Executor,
             creator = Creator,
             group = GroupID
@@ -246,8 +274,53 @@ on_task_change(ExtendedCtx, Pool, TaskID, #document{key = DocID, value = #traver
         {error, update_not_needed} ->
             ok
     end;
-on_task_change(_ExtendedCtx, _Pool, _TaskID, _Doc, _Self) ->
-    ok.
+on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
+    status = scheduled,
+    canceled = true,
+    executor = Environment}
+} = Doc, CallbackModule, Environment) ->
+    % TODO - konflikty na dokumentach
+    % TODO - zabezpieczyc jak ktos scancelowal zdalnie i lokalnie
+    % TODO - wywolac callback o cancelowaniu z taskID (bedzie potrzebny taskID w callbacku jobu) - inny task na koniec a inny na zlecenie cancelacji?
+    % uporzadkowac API czy job ma w sobie przechowywac czy wszystkie callbacki dostaja
+    % TODO - ogarnac init cancelowania jak powyzej, polaczyc z funkcja maybe_run_scheduled_task
+    {ok, Timestamp} = get_timestamp(CallbackModule),
+    {Pool, TaskID} = decode_id(DocID),
+    Diff = fun
+        (#traverse_task{status = scheduled} = Task) ->
+            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
+        (ChangedRecord) ->
+            {error, {update_not_needed, ChangedRecord}}
+    end,
+
+    UpdatedDoc = case datastore_model:update(ExtendedCtx, DocID, Diff) of
+        {ok, NewDoc} ->
+            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Environment, TaskID, Timestamp),
+            NewDoc;
+        {error, {update_not_needed, Changed}} ->
+            Doc#document{value = Changed}
+    end,
+    on_remote_change(ExtendedCtx, UpdatedDoc, CallbackModule, Environment);
+on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
+    status = ongoing,
+    canceled = true,
+    executor = Environment}
+}, _CallbackModule, Environment) ->
+    Diff = fun
+        (#traverse_task{status = ongoing} = Task) ->
+            {ok, Task#traverse_task{status = canceling}};
+        (_) ->
+            {error, update_not_needed}
+    end,
+
+    case datastore_model:update(ExtendedCtx, DocID, Diff) of
+        {ok, _} ->
+            {ok, remote_cancel};
+        {error, update_not_needed} ->
+            ok
+    end;
+on_remote_change(_ExtendedCtx, _Doc, _CallbackModule, _Environment) ->
+    ok. % Task has been modified in parallel - ignore
 
 %%%===================================================================
 %%% Setters and getters API
@@ -368,7 +441,9 @@ get_record_struct(1) ->
         {creator, string},
         {executor, string},
         {group, string},
-        {timestamp, integer},
+        {schedule_time, integer},
+        {start_time, integer},
+        {finish_time, integer},
         {main_job_id, string},
         {enqueued, boolean},
         {canceled, boolean},
@@ -376,6 +451,44 @@ get_record_struct(1) ->
         {status, atom},
         {description, {custom, {?MODULE, encode_description, decode_description}}}
     ]}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Provides custom resolution of remote, concurrent modification conflicts.
+%% Prefers documents modified by task executor. Allows canceled and enqueued fields modification on other environments.
+%% @end
+%%--------------------------------------------------------------------
+-spec resolve_conflict(ctx(), doc(), doc()) -> {boolean(), doc()} | ignore | default.
+resolve_conflict(_Ctx, NewDoc, PrevDoc) ->
+    #document{value = #traverse_task{executor = Executor} = NewValue, mutators = [NewExecutor | _]} = NewDoc,
+    #document{value = PrevValue, mutators = [PrevExecutor | _]} = PrevDoc,
+
+    #traverse_task{canceled = C1, enqueued = E1} = NewValue,
+    #traverse_task{canceled = C2, enqueued = E2} = PrevValue,
+
+    Diff = (C1 =/= C2) orelse (E1 =/= E2),
+
+    case {Executor, Diff} of
+        {NewExecutor, false} ->
+            {false, NewDoc};
+        {PrevExecutor, false} ->
+            ignore;
+        {NewExecutor, true} ->
+            {true, NewDoc#document{value = NewValue#traverse_task{canceled = C1 or C2, enqueued = E1 and E2}}};
+        {PrevExecutor, true} ->
+            {true, PrevDoc#document{value = PrevValue#traverse_task{canceled = C1 or C2, enqueued = E1 and E2}}};
+        {_, true} ->
+            #document{revs = [NewRev | _]} = NewDoc,
+            #document{revs = [PrevRev | _]} = PrevDoc,
+            case datastore_utils:is_greater_rev(NewRev, PrevRev) of
+                true ->
+                    {true, NewDoc#document{value = NewValue#traverse_task{canceled = C1 or C2, enqueued = E1 and E2}}};
+                false ->
+                    {true, PrevDoc#document{value = PrevValue#traverse_task{canceled = C1 or C2, enqueued = E1 and E2}}}
+            end;
+        _ ->
+            default
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -405,8 +518,10 @@ decode_description(Term) ->
 -spec get_timestamp(traverse:callback_module()) -> {ok, traverse:timestamp()}.
 get_timestamp(CallbackModule) ->
     case erlang:function_exported(CallbackModule, get_timestamp, 0) of
-        true ->
-            CallbackModule:get_timestamp();
-        _ ->
-            {ok, time_utils:system_time_millis()}
+        true -> CallbackModule:get_timestamp();
+        _ -> {ok, time_utils:system_time_millis()}
     end.
+
+decode_id(DocID) ->
+    [Pool, TaskID] = binary:split(DocID, ?ID_SEPARATOR_BINARY),
+    {Pool, TaskID}.

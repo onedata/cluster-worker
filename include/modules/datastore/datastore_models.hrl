@@ -63,12 +63,16 @@
 
 % Models for traversing via different structures (see traverse.erl)
 -record(traverse_task, {
-    pool :: traverse:pool(),
     callback_module :: traverse:callback_module(),
     creator :: traverse:environment_id(),
     executor :: traverse:environment_id(),
     group :: traverse:group(),
-    timestamp :: traverse:timestamp(), % Used for tasks sorting (see traverse_task_list.erl)
+
+    % Used for tasks sorting (see traverse_task_list.erl)
+    schedule_time = 0 :: traverse:timestamp(),
+    start_time = 0 :: traverse:timestamp(),
+    finish_time = 0 :: traverse:timestamp(),
+
     main_job_id = <<>> :: traverse:job_id(), % First job used to init task (see traverse.erl)
     enqueued = true :: boolean(),
     canceled = false :: boolean(),
