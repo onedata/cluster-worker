@@ -35,6 +35,7 @@
 -export([
     handshake_test/1,
     rpc_req_test/1,
+    async_req_test/1,
     graph_req_test/1,
     subscribe_test/1,
     unsubscribe_test/1,
@@ -52,6 +53,7 @@
 -define(TEST_CASES, [
     handshake_test,
     rpc_req_test,
+    async_req_test,
     graph_req_test,
     subscribe_test,
     unsubscribe_test,
@@ -137,6 +139,38 @@ rpc_req_test_base(Config, ProtoVersion) ->
     ),
 
     disconnect_client([Client1, Client2]),
+
+    ok.
+
+
+async_req_test(Config) ->
+    [async_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+async_req_test_base(Config, ProtoVersion) ->
+    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
+
+    Id = gs_client:async_request(Client1, #gs_req{
+        subtype = rpc,
+        request = #gs_req_rpc{
+            function = <<"veryLongOperation">>,
+            args = #{<<"someDummy">> => <<"arguments127">>}
+        }
+    }),
+
+    AsyncResponse = receive
+        {response, Id, Resp} ->
+            Resp
+    after
+        timer:seconds(60) ->
+            {error, timeout}
+    end,
+
+    ?assertEqual(
+        {ok, #gs_resp_rpc{result = #{<<"someDummy">> => <<"arguments127">>}}},
+        AsyncResponse
+    ),
+
+    disconnect_client([Client1]),
 
     ok.
 

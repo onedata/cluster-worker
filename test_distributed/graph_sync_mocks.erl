@@ -162,6 +162,9 @@ handle_rpc(_, ?USER(?USER_2), <<"user2Fun">>, Args) ->
     {ok, Args};
 handle_rpc(_, _, <<"user2Fun">>, _Args) ->
     ?ERROR_FORBIDDEN;
+handle_rpc(_, _, <<"veryLongOperation">>, Args) ->
+    timer:sleep(15000 + rand:uniform(10000)),
+    {ok, Args};
 handle_rpc(_, _, _, _) ->
     ?ERROR_RPC_UNDEFINED.
 

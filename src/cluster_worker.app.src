@@ -51,10 +51,6 @@
             {monitoring_log_file, "./log/node_manager_monitoring.log"},
             {throttling_log_file, "./log/throttling_monitoring.log"},
 
-            % This option sets default time interval between sending ping frames
-            % by Graph Sync websocket server and client to each other.
-            {graph_sync_websocket_keepalive, 30000},
-
             %% How long (in ms) should worker wait between heartbeats (when connected to cm)
             {heartbeat_interval, 500},
             %% How long (in ms) should worker wait between heartbeats (when registered in cm)
@@ -283,6 +279,21 @@
             % Time in seconds for link document (saved in memory only) to expire
             % after delete
             {link_memory_expiry, 5},
+
+            %% ===================================================================
+            %% Graph Sync
+            %% ===================================================================
+
+            % This option sets default time interval between sending ping frames
+            % by Graph Sync websocket server and client to each other.
+            {graph_sync_websocket_keepalive, 30000},
+
+            % Maximum time the calling process will wait for Graph Sync client to start
+            % (start returns after handshake is performed).
+            {graph_sync_client_handshake_timeout, 10000},
+
+            % Timeout when waiting for synchronous response from Graph Sync client process.
+            {graph_sync_client_request_timeout, 30000},
 
             %% ===================================================================
             %% EXOMETER
