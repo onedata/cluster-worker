@@ -348,7 +348,7 @@ sync_request(ClientRef, Request) ->
 %% @doc
 %% Sends an asynchronous request to GS server using given GS client instance.
 %% Returns the request Id. Caller process should expect an answer in form
-%% {response, Id, Response} (Response can be {error, _} or {ok, #gs_esp_*}).
+%% {response, Id, Response} (Response can be {error, _} or {ok, #gs_resp_*}).
 %% @end
 %%--------------------------------------------------------------------
 -spec async_request(client_ref(), gs_protocol:req_wrapper()) ->
