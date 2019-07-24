@@ -29,7 +29,7 @@
 %% Callback called when a new client connects to the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_connected(aai:auth(), gs_server:connection_ref()) ->
+-callback client_connected(aai:auth(), gs_server:conn_ref()) ->
     ok.
 
 
@@ -38,7 +38,7 @@
 %% Callback called when a client disconnects from the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_disconnected(aai:auth(), gs_server:connection_ref()) ->
+-callback client_disconnected(aai:auth(), gs_server:conn_ref()) ->
     ok.
 
 

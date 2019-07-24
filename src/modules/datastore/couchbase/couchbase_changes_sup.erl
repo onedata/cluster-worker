@@ -42,7 +42,7 @@ start_link() ->
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker(couchbase_config:bucket(), datastore:scope()) ->
+-spec start_worker(couchbase_config:bucket(), datastore_doc:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_worker(Bucket, Scope) ->
     Spec = couchbase_changes_worker_spec(Bucket, Scope),
@@ -53,7 +53,7 @@ start_worker(Bucket, Scope) ->
 %% Stops CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec stop_worker(couchbase_config:bucket(), datastore:scope()) ->
+-spec stop_worker(couchbase_config:bucket(), datastore_doc:scope()) ->
     ok | {error, Reason :: term()}.
 stop_worker(Bucket, Scope) ->
     supervisor:terminate_child(?MODULE, {Bucket, Scope}).
@@ -89,7 +89,7 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec couchbase_changes_worker_spec(couchbase_config:bucket(),
-    datastore:scope()) -> supervisor:child_spec().
+    datastore_doc:scope()) -> supervisor:child_spec().
 couchbase_changes_worker_spec(Bucket, Scope) ->
     #{
         id => {Bucket, Scope},

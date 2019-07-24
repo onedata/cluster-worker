@@ -79,7 +79,7 @@
 -record(traverse_tasks_scheduler, {
     pool :: traverse:pool(),
     ongoing_tasks = 0 :: non_neg_integer(),
-    ongoing_tasks_limit = 0 :: traverse_task_list:ongoing_tasks_limit(),
+    ongoing_tasks_limit = 0 :: traverse_tasks_scheduler:ongoing_tasks_limit(),
     groups = [] :: [traverse:group()],
     nodes = [] :: [node()]
 }).

@@ -32,7 +32,7 @@
 
 -record(state, {
     bucket :: couchbase_config:bucket(),
-    scope :: datastore:scope(),
+    scope :: datastore_doc:scope(),
     seq :: couchbase_changes:since(),
     seq_safe :: couchbase_changes:until(),
     batch_size :: non_neg_integer(),
@@ -51,7 +51,7 @@
 %% Starts CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_config:bucket(), datastore:scope()) ->
+-spec start_link(couchbase_config:bucket(), datastore_doc:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope) ->
     gen_server2:start_link(?MODULE, [Bucket, Scope], []).

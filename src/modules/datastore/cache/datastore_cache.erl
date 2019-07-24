@@ -42,7 +42,7 @@
 -type durability() :: memory | disc | remote.
 -type future() :: #future{}.
 
--export_type([durability/0, future/0]).
+-export_type([durability/0, future/0, ctx/0]).
 
 -define(FUTURE(Value), ?FUTURE(undefined, Value)).
 -define(FUTURE(Durability, Value), ?FUTURE(Durability, undefined, Value)).

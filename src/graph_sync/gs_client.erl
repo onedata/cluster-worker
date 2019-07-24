@@ -29,7 +29,7 @@
     identity = ?SUB(nobody) :: aai:subject(),
     handshake_attributes = #{} :: gs_protocol:handshake_attributes(),
     push_callback = fun(_) -> ok end :: push_callback(),
-    promises = #{} :: maps:map(Id :: binary(), CallingProcess :: pid())
+    promises = #{} :: #{binary() => pid()}
 }).
 
 -type state() :: #state{}.

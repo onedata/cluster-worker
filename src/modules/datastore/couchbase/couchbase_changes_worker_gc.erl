@@ -28,8 +28,8 @@
 
 -record(state, {
     bucket :: couchbase_config:bucket(),
-    scope :: datastore:scope(),
-    seq_safe_cas :: cberl:cas(),
+    scope :: datastore_doc:scope(),
+    seq_safe_cas :: cberl:cas() | undefined,
     batch_begin = 0 :: couchbase_changes:until(),
     batch_end = 0 :: cberl:cas(),
     processing = false ::boolean()
@@ -49,7 +49,7 @@
 %% Starts CouchBase changes worker garbage collector.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_config:bucket(), datastore:scope()) ->
+-spec start_link(couchbase_config:bucket(), datastore_doc:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope) ->
     gen_server2:start_link(?MODULE, [Bucket, Scope], []).

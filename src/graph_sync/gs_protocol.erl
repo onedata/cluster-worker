@@ -65,7 +65,7 @@
 -type message_id() :: binary().
 -type protocol_version() :: non_neg_integer().
 % Graph Sync session id, used as reference to store subscriptions data
--type session_id() :: gs_session:id().
+-type session_id() :: gs_session:key().
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
 -type handshake_attributes() :: undefined | json_map().
@@ -165,7 +165,8 @@ graph_update_result() | graph_delete_result().
     graph_delete_result/0,
     graph_update_result/0,
     graph_request_result/0,
-    json_map/0
+    json_map/0,
+    client_auth/0
 ]).
 
 %% API
