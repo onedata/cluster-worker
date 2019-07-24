@@ -30,7 +30,7 @@
 %% Simple cache used to remember calculated payloads per GRI and limit the
 %% number of requests to GS_LOGIC_PLUGIN when there is a lot of subscribers
 %% for the same records.
--type payload_cache() :: #{gs_protocol:gri() => gs_protocol:data()}.
+-type payload_cache() :: #{gs_protocol:gri() => {gs_protocol:data(), gs_protocol:revision()}}.
 
 
 %% API
@@ -123,8 +123,8 @@ terminate_connection(ConnRef) ->
 %% will broadcast 'updated' messages to interested clients.
 %% @end
 %%--------------------------------------------------------------------
--spec updated(gs_protocol:entity_type(), gs_protocol:entity_id(), gs_protocol:entity()) -> ok.
-updated(EntityType, EntityId, Entity) ->
+-spec updated(gs_protocol:entity_type(), gs_protocol:entity_id(), gs_protocol:versioned_entity()) -> ok.
+updated(EntityType, EntityId, VersionedEntity) ->
     {ok, AllSubscribers} = gs_persistence:get_subscribers(EntityType, EntityId),
     maps:fold(fun
         ({_Aspect, _Scope}, [], PayloadCache) ->
@@ -132,24 +132,25 @@ updated(EntityType, EntityId, Entity) ->
         ({Aspect, Scope}, Subscribers, PayloadCache) ->
             GRI = #gri{type = EntityType, id = EntityId, aspect = Aspect, scope = Scope},
             lists:foldl(fun(Subscriber, PayloadCacheAcc) ->
-                push_updated(GRI, Entity, Subscriber, PayloadCacheAcc)
+                push_updated(GRI, VersionedEntity, Subscriber, PayloadCacheAcc)
             end, PayloadCache, Subscribers)
     end, #{}, AllSubscribers),
     ok.
 
 
--spec push_updated(gs_protocol:gri(), gs_protocol:entity(),
+%% @private
+-spec push_updated(gs_protocol:gri(), gs_protocol:versioned_entity(),
     gs_persistence:subscriber(), payload_cache()) -> payload_cache().
-push_updated(ReqGRI, Entity, {SessionId, {Auth, AuthHint}}, PayloadCache) ->
+push_updated(ReqGRI, VersionedEntity, {SessionId, {Auth, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
         {error, not_found} ->
             % Possible when session cleanup is in progress
             PayloadCache;
         {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
-            case ?GS_LOGIC_PLUGIN:is_authorized(Auth, AuthHint, ReqGRI, get, Entity) of
+            case ?GS_LOGIC_PLUGIN:is_authorized(Auth, AuthHint, ReqGRI, get, VersionedEntity) of
                 {true, ResGRI} ->
                     {Data, NewPayloadCache} = updated_payload(
-                        ReqGRI, ResGRI, Translator, ProtoVer, Auth, Entity, PayloadCache
+                        ReqGRI, ResGRI, Translator, ProtoVer, Auth, VersionedEntity, PayloadCache
                     ),
                     gs_ws_handler:push(ConnRef, #gs_push{
                         subtype = graph, message = #gs_push_graph{
@@ -292,7 +293,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
             ok
     end,
     Result = ?GS_LOGIC_PLUGIN:handle_graph_request(
-        Auth, AuthHint, RequestedGRI, Operation, Data, undefined
+        Auth, AuthHint, RequestedGRI, Operation, Data, {undefined, 1}
     ),
     case Result of
         {error, _} = Error -> throw(Error);
@@ -366,21 +367,21 @@ translate_value(Translator, ProtoVer, GRI, Auth, Data) ->
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(), gs_protocol:gri(),
-    aai:auth(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_resource(Translator, ProtoVer, GRI, Auth, Data) ->
-    translate_resource(Translator, ProtoVer, GRI, GRI, Auth, Data).
+    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
+translate_resource(Translator, ProtoVer, GRI, Auth, DatAndRev) ->
+    translate_resource(Translator, ProtoVer, GRI, GRI, Auth, DatAndRev).
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(),
     RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
-    aai:auth(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, Data) ->
+    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
+translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, {Data, Revision}) ->
     Resp = case Translator:translate_resource(ProtoVer, ResultGRI, Data) of
         Fun when is_function(Fun, 1) -> Fun(Auth);
         Result -> Result
     end,
     %% GRI must be sent back with every GET response
-    insert_gri(RequestedGRI, ResultGRI, Resp).
+    insert_gri_and_rev(RequestedGRI, ResultGRI, Resp, Revision).
 
 
 %%--------------------------------------------------------------------
@@ -394,34 +395,40 @@ translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, Data) ->
 %%--------------------------------------------------------------------
 -spec updated_payload(ReqGRI :: gs_protocol:gri(), ResGRI :: gs_protocol:gri(),
     translator(), gs_protocol:protocol_version(), aai:auth(),
-    gs_protocol:entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
-updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Auth, Entity, PayloadCache) ->
+    gs_protocol:versioned_entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
+updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Auth, VersionedEntity, PayloadCache) ->
     case maps:find({Translator, ResGRI}, PayloadCache) of
-        {ok, Fun} when is_function(Fun, 1) ->
+        {ok, {Fun, Revision}} when is_function(Fun, 1) ->
             % Function-type translator, must be evaluated per client
-            {insert_gri(ReqGRI, ResGRI, Fun(Auth)), PayloadCache};
-        {ok, Data} ->
+            {insert_gri_and_rev(ReqGRI, ResGRI, Fun(Auth), Revision), PayloadCache};
+        {ok, {Result, Revision}} ->
             % Literal translator, the results can be reused for all clients
-            {insert_gri(ReqGRI, ResGRI, Data), PayloadCache};
+            {insert_gri_and_rev(ReqGRI, ResGRI, Result, Revision), PayloadCache};
         _ ->
-            {ok, Data} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                ?ROOT, undefined, ResGRI, get, #{}, Entity
+            {ok, {GetResult, Revision}} = ?GS_LOGIC_PLUGIN:handle_graph_request(
+                ?ROOT, undefined, ResGRI, get, #{}, VersionedEntity
             ),
-            TranslateResult = Translator:translate_resource(ProtoVer, ResGRI, Data),
+            TranslateResult = Translator:translate_resource(ProtoVer, ResGRI, GetResult),
             Result = case TranslateResult of
                 Fun when is_function(Fun, 1) -> Fun(Auth);
                 DataJSONMap -> DataJSONMap
             end,
             % Cache the translator result for faster consecutive calls
-            {insert_gri(ReqGRI, ResGRI, Result), PayloadCache#{{Translator, ResGRI} => TranslateResult}}
+            {
+                insert_gri_and_rev(ReqGRI, ResGRI, Result, Revision),
+                PayloadCache#{{Translator, ResGRI} => {TranslateResult, Revision}}
+            }
     end.
 
 
 %% @private
--spec insert_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
-    gs_protocol:data()) -> gs_protocol:data().
-insert_gri(RequestedGRI, ResultGRI, Data) ->
-    Data#{<<"gri">> => gs_protocol:gri_to_string(coalesce_gri(RequestedGRI, ResultGRI))}.
+-spec insert_gri_and_rev(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+    gs_protocol:data(), gs_protocol:revision()) -> gs_protocol:data().
+insert_gri_and_rev(RequestedGRI, ResultGRI, Data, Revision) ->
+    Data#{
+        <<"gri">> => gs_protocol:gri_to_string(coalesce_gri(RequestedGRI, ResultGRI)),
+        <<"revision">> => Revision
+    }.
 
 
 %%--------------------------------------------------------------------

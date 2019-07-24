@@ -124,7 +124,7 @@ is_authorized(?ROOT, _, GRI, _, _) ->
     {true, GRI};
 is_authorized(?USER(UserId), _AuthHint, GRI = #gri{type = od_user, id = UserId}, _Operation, _Entity) ->
     {true, GRI};
-is_authorized(?USER(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), GRI = #gri{type = od_user, id = _UserId}, get, UserData) ->
+is_authorized(?USER(_OtherUserId), ?THROUGH_SPACE(?SPACE_1), GRI = #gri{type = od_user, id = _UserId}, get, {UserData, _}) ->
     case UserData of
         % Used to test nosub push message
         #{<<"name">> := ?USER_NAME_THAT_CAUSES_NO_ACCESS_THROUGH_SPACE} ->
@@ -162,25 +162,28 @@ handle_rpc(_, ?USER(?USER_2), <<"user2Fun">>, Args) ->
     {ok, Args};
 handle_rpc(_, _, <<"user2Fun">>, _Args) ->
     ?ERROR_FORBIDDEN;
+handle_rpc(_, _, <<"veryLongOperation">>, Args) ->
+    timer:sleep(15000 + rand:uniform(10000)),
+    {ok, Args};
 handle_rpc(_, _, _, _) ->
     ?ERROR_RPC_UNDEFINED.
 
 
-handle_graph_request(Auth, AuthHint, #gri{type = od_user, id = UserId, aspect = instance}, get, _Data, Entity) ->
-    UserData = case Entity of
-        undefined ->
-            ?USER_DATA_WITHOUT_GRI(UserId);
-        Fetched ->
+handle_graph_request(Auth, AuthHint, #gri{type = od_user, id = UserId, aspect = instance}, get, _Data, VersionedEntity) ->
+    Result = case VersionedEntity of
+        {undefined, _} ->
+            {?USER_DATA_WITHOUT_GRI(UserId), 1};
+        {_, _} ->
             % Used in gs_server:updated
-            Fetched
+            VersionedEntity
     end,
     case Auth of
-        ?ROOT -> {ok, UserData};
-        ?USER(UserId) -> {ok, UserData};
+        ?ROOT -> {ok, Result};
+        ?USER(UserId) -> {ok, Result};
         ?USER(_OtherUser) ->
             case AuthHint of
                 undefined -> ?ERROR_FORBIDDEN;
-                ?THROUGH_SPACE(?SPACE_1) -> {ok, UserData}
+                ?THROUGH_SPACE(?SPACE_1) -> {ok, Result}
             end
     end;
 handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instance}, update, Data, _Entity) ->
@@ -190,8 +193,9 @@ handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instanc
                 #{<<"name">> := NewName} when is_binary(NewName) ->
                     % Updates are typically asynchronous
                     spawn(fun() ->
+                        timer:sleep(100),
                         gs_server:updated(
-                            od_user, UserId, #{<<"name">> => NewName}
+                            od_user, UserId, {#{<<"name">> => NewName}, 2}
                         )
                     end),
                     ok;
@@ -206,9 +210,13 @@ handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instanc
 handle_graph_request(Auth, _, #gri{type = od_user, id = UserId, aspect = instance}, delete, _Data, _Entity) ->
     case Auth of
         ?USER(UserId) ->
-            gs_server:deleted(
-                od_user, UserId
-            ),
+            % Updates are typically asynchronous
+            spawn(fun() ->
+                timer:sleep(100),
+                gs_server:deleted(
+                    od_user, UserId
+                )
+            end),
             ok;
         _ ->
             ?ERROR_FORBIDDEN
@@ -218,7 +226,7 @@ handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_group, id = undefin
     #{<<"name">> := ?GROUP_1_NAME} = Data,
     case AuthHint of
         ?AS_USER(UserId) ->
-            {ok, resource, {#gri{type = od_group, id = ?GROUP_1, aspect = instance}, #{<<"name">> => ?GROUP_1_NAME}}};
+            {ok, resource, {#gri{type = od_group, id = ?GROUP_1, aspect = instance}, {#{<<"name">> => ?GROUP_1_NAME}, 1}}};
         _ ->
             ?ERROR_FORBIDDEN
     end;
@@ -231,53 +239,70 @@ handle_graph_request(?USER(UserId), AuthHint, #gri{type = od_space, id = undefin
     #{<<"name">> := ?SPACE_1_NAME} = Data,
     case AuthHint of
         ?AS_USER(UserId) ->
-            {ok, resource, {#gri{type = od_space, id = ?SPACE_1, aspect = instance}, #{<<"name">> => ?SPACE_1_NAME}}};
+            {ok, resource, {#gri{type = od_space, id = ?SPACE_1, aspect = instance}, {#{<<"name">> => ?SPACE_1_NAME}, 1}}};
         _ ->
             ?ERROR_FORBIDDEN
     end;
 handle_graph_request(?USER(?USER_1), _, #gri{type = od_space, id = ?SPACE_1, aspect = instance}, get, _Data, _Entity) ->
-    {ok, #{<<"name">> => ?SPACE_1_NAME}};
+    {ok, {#{<<"name">> => ?SPACE_1_NAME}, 1}};
 
-handle_graph_request(Auth, _AuthHint, #gri{type = od_user, id = UserId, aspect = {name_substring, LenBin}}, get, _Data, Entity) ->
+handle_graph_request(Auth, _AuthHint, #gri{type = od_user, id = UserId, aspect = {name_substring, LenBin}}, get, _Data, VersionedEntity) ->
     Len = binary_to_integer(LenBin),
-    UserName = case Entity of
-        undefined ->
-            maps:get(<<"name">>, ?USER_DATA_WITHOUT_GRI(UserId));
-        Fetched ->
+    {UserName, Revision} = case VersionedEntity of
+        {undefined, _} ->
+            {maps:get(<<"name">>, ?USER_DATA_WITHOUT_GRI(UserId)), 1};
+        {Entity, Rev} ->
             % Used in gs_server:updated
-            maps:get(<<"name">>, Fetched)
+            {maps:get(<<"name">>, Entity), Rev}
     end,
     NameSubstring = binary:part(UserName, 0, Len),
     case Auth of
-        ?ROOT -> {ok, #{<<"nameSubstring">> => NameSubstring}};
-        ?USER(UserId) -> {ok, #{<<"nameSubstring">> => NameSubstring}};
+        ?ROOT -> {ok, {#{<<"nameSubstring">> => NameSubstring}, Revision}};
+        ?USER(UserId) -> {ok, {#{<<"nameSubstring">> => NameSubstring}, Revision}};
         _ -> ?ERROR_FORBIDDEN
     end;
 
 handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, create, _, _) ->
-    case is_authorized(Auth, undefined, GRI, create, #{}) of
+    case is_authorized(Auth, undefined, GRI, create, {#{}, 1}) of
         false ->
             ?ERROR_FORBIDDEN;
         {true, #gri{scope = ResScope}} ->
             Data = ?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>),
-            {ok, resource, {GRI#gri{scope = ResScope}, ?LIMIT_HANDLE_SERVICE_DATA(ResScope, Data)}}
+            {ok, resource, {GRI#gri{scope = ResScope}, {?LIMIT_HANDLE_SERVICE_DATA(ResScope, Data), 1}}}
     end;
 
-handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, get, _, Entity) ->
-    Data = case Entity of
-        undefined ->
-            ?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>);
-        Fetched ->
+handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance}, get, _, VersionedEntity) ->
+    {Data, Revision} = case VersionedEntity of
+        {undefined, _} ->
+            {?HANDLE_SERVICE_DATA(<<"pub1">>, <<"sha1">>, <<"pro1">>, <<"pri1">>), 1};
+        {_, _} ->
             % Used in gs_server:updated
-            Fetched
+            VersionedEntity
     end,
-    case is_authorized(Auth, undefined, GRI, get, #{}) of
+    case is_authorized(Auth, undefined, GRI, get, {#{}, Revision}) of
         false ->
             ?ERROR_FORBIDDEN;
         {true, GRI} ->
-            {ok, ?LIMIT_HANDLE_SERVICE_DATA(GRI#gri.scope, Data)};
+            {ok, {?LIMIT_HANDLE_SERVICE_DATA(GRI#gri.scope, Data), Revision}};
         {true, ResultGRI = #gri{scope = Scope}} ->
-            {ok, ResultGRI, ?LIMIT_HANDLE_SERVICE_DATA(Scope, Data)}
+            {ok, ResultGRI, {?LIMIT_HANDLE_SERVICE_DATA(Scope, Data), Revision}}
+    end;
+
+handle_graph_request(Auth, _, #gri{type = od_share, id = ?SHARE, aspect = instance, scope = RequestedScope}, get, _, _) ->
+    Scope = case {Auth, RequestedScope} of
+        {?USER(_), auto} -> private;
+        {?NOBODY, auto} -> public;
+        {_, Other} -> Other
+    end,
+    Data = ?SHARE_DATA(atom_to_binary(Scope, utf8)),
+    Revision = 1,
+    case {Auth, Scope} of
+        {?USER(_), _} ->
+            {ok, {Data, Revision}};
+        {?NOBODY, public} ->
+            {ok, {Data, Revision}};
+        {?NOBODY, _} ->
+            ?ERROR_FORBIDDEN
     end;
 
 handle_graph_request(_, _, _, _, _, _) ->
