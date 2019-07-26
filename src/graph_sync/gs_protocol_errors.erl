@@ -91,6 +91,17 @@ error_to_json(_, ?ERROR_FORBIDDEN) ->
     #{
         <<"id">> => <<"forbidden">>
     };
+error_to_json(_, ?ERROR_ALREADY_EXISTS) ->
+    #{
+        <<"id">> => <<"alreadyExists">>
+    };
+error_to_json(_, ?ERROR_POSIX(Errno)) ->
+    #{
+        <<"id">> => <<"posix">>,
+        <<"details">> => #{
+            <<"errno">> => Errno
+        }
+    };
 error_to_json(_, ?ERROR_BAD_MACAROON) ->
     #{
         <<"id">> => <<"badMacaroon">>
@@ -300,6 +311,13 @@ error_to_json(_, ?ERROR_BAD_VALUE_ID_NOT_FOUND(Key)) ->
             <<"key">> => Key
         }
     };
+error_to_json(_, ?ERROR_BAD_VALUE_AMBIGUOUS_ID(Key)) ->
+    #{
+        <<"id">> => <<"badValueAmbiguousId">>,
+        <<"details">> => #{
+            <<"key">> => Key
+        }
+    };
 error_to_json(_, ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(Key)) ->
     #{
         <<"id">> => <<"badValueIdentifierOccupied">>,
@@ -356,6 +374,28 @@ error_to_json(_, ?ERROR_BASIC_AUTH_DISABLED) ->
 error_to_json(_, ?ERROR_PROTECTED_GROUP) ->
     #{
         <<"id">> => <<"protectedGroup">>
+    };
+error_to_json(_, ?ERROR_SPACE_NOT_SUPPORTED_BY(ProviderId)) ->
+    #{
+        <<"id">> => <<"spaceNotSupportedBy">>,
+        <<"details">> => #{
+            <<"providerId">> => ProviderId
+        }
+    };
+error_to_json(_, ?ERROR_INDEX_NOT_EXISTS_ON(ProviderId)) ->
+    #{
+        <<"id">> => <<"indexNotExistsOn">>,
+        <<"details">> => #{
+            <<"providerId">> => ProviderId
+        }
+    };
+error_to_json(_, ?ERROR_TRANSFER_ALREADY_ENDED) ->
+    #{
+        <<"id">> => <<"transferAlreadyEnded">>
+    };
+error_to_json(_, ?ERROR_TRANSFER_NOT_ENDED) ->
+    #{
+        <<"id">> => <<"transferNotEnded">>
     };
 error_to_json(_, ?ERROR_RELATION_DOES_NOT_EXIST(ChType, ChId, ParType, ParId)) ->
     #{
@@ -462,6 +502,15 @@ json_to_error(_, #{<<"id">> := <<"unauthorized">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"forbidden">>}) ->
     ?ERROR_FORBIDDEN;
+
+json_to_error(_, #{<<"id">> := <<"alreadyExists">>}) ->
+    ?ERROR_ALREADY_EXISTS;
+
+json_to_error(_, #{
+    <<"id">> := <<"posix">>,
+    <<"details">> := #{<<"errno">> := Errno}
+}) ->
+    ?ERROR_POSIX(binary_to_existing_atom(Errno, utf8));
 
 json_to_error(_, #{<<"id">> := <<"badMacaroon">>}) ->
     ?ERROR_BAD_MACAROON;
@@ -574,6 +623,12 @@ json_to_error(_, #{<<"id">> := <<"badValueIdNotFound">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_ID_NOT_FOUND(Key);
 
+json_to_error(_, #{
+    <<"id">> := <<"badValueAmbiguousId">>,
+    <<"details">> := #{<<"key">> := Key}
+}) ->
+    ?ERROR_BAD_VALUE_AMBIGUOUS_ID(Key);
+
 json_to_error(_, #{<<"id">> := <<"badValueIdentifierOccupied">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(Key);
@@ -612,6 +667,24 @@ json_to_error(_, #{<<"id">> := <<"basicAuthDisabled">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"protectedGroup">>}) ->
     ?ERROR_PROTECTED_GROUP;
+
+json_to_error(_, #{
+    <<"id">> := <<"spaceNotSupportedBy">>,
+    <<"details">> := #{<<"providerId">> := ProviderId}
+}) ->
+    ?ERROR_SPACE_NOT_SUPPORTED_BY(ProviderId);
+
+json_to_error(_, #{
+    <<"id">> := <<"indexNotExistsOn">>,
+    <<"details">> := #{<<"providerId">> := ProviderId}
+}) ->
+    ?ERROR_INDEX_NOT_EXISTS_ON(ProviderId);
+
+json_to_error(_, #{<<"id">> := <<"transferAlreadyEnded">>}) ->
+    ?ERROR_TRANSFER_ALREADY_ENDED;
+
+json_to_error(_, #{<<"id">> := <<"transferNotEnded">>}) ->
+    ?ERROR_TRANSFER_NOT_ENDED;
 
 json_to_error(_, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{
