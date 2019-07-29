@@ -253,7 +253,13 @@ on_task_change(Task, Environment) ->
         {remote_change, CallbackModule, MainJobID} ->
             {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-            traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment);
+            case traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment) of
+                ok ->
+                    ok;
+                {ok, remote_cancel, TaskID} ->
+                    task_callback(CallbackModule, on_cancel_init, TaskID),
+                    ok
+            end;
         {run, CallbackModule, MainJobID} ->
             case CallbackModule:get_job(MainJobID) of
                 {ok, Job, PoolName, TaskID} ->

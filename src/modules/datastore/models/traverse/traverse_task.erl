@@ -156,7 +156,7 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskID) ->
 
 %% TODO - VFS-5531
 -spec cancel(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id()) ->
-    ok | {error, term()}.
+    {ok, local_cancel | remote_cancel | already_canceled} | {error, term()}.
 cancel(ExtendedCtx, Pool, CallbackModule, TaskID, Environment) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Diff = fun
@@ -246,7 +246,8 @@ on_task_change(_Doc, _Environment) ->
 %% @end
 %% TODO - VFS-5530
 %%--------------------------------------------------------------------
--spec on_remote_change(ctx(), doc(), traverse:callback_module(), traverse:environment_id()) -> ok.
+-spec on_remote_change(ctx(), doc(), traverse:callback_module(), traverse:environment_id()) ->
+    ok | {ok, remote_cancel, traverse:id()}.
 on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
     status = Status,
     enqueued = true,
@@ -308,7 +309,8 @@ on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
 
     case datastore_model:update(ExtendedCtx, DocID, Diff) of
         {ok, _} ->
-            {ok, remote_cancel};
+            {_Pool, TaskID} = decode_id(DocID),
+            {ok, remote_cancel, TaskID};
         {error, update_not_needed} ->
             ok
     end;
