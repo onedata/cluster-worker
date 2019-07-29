@@ -16,7 +16,7 @@
 % Modules that must be implemented in projects that use Graph Sync, contain
 % callbacks called by gs_server and gs_protocol
 -define(GS_LOGIC_PLUGIN, (gs_server:gs_logic_plugin_module())).
--define(GS_PROTOCOL_PLUGIN, (gs_server:gs_logic_plugin_module())).
+-define(GS_PROTOCOL_PLUGIN, (gs_server:gs_protocol_plugin_module())).
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
