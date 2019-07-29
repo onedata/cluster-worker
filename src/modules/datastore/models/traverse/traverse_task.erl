@@ -240,8 +240,6 @@ on_task_change(#document{value = #traverse_task{
 on_task_change(_Doc, _Environment) ->
     ignore.
 
-% TODO - customowy conflict resolver !!!
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Updates information when task is processed on different environment.
@@ -279,11 +277,6 @@ on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
     canceled = true,
     executor = Environment}
 } = Doc, CallbackModule, Environment) ->
-    % TODO - konflikty na dokumentach
-    % TODO - zabezpieczyc jak ktos scancelowal zdalnie i lokalnie
-    % TODO - wywolac callback o cancelowaniu z taskID (bedzie potrzebny taskID w callbacku jobu) - inny task na koniec a inny na zlecenie cancelacji?
-    % uporzadkowac API czy job ma w sobie przechowywac czy wszystkie callbacki dostaja
-    % TODO - ogarnac init cancelowania jak powyzej, polaczyc z funkcja maybe_run_scheduled_task
     {ok, Timestamp} = get_timestamp(CallbackModule),
     {Pool, TaskID} = decode_id(DocID),
     Diff = fun
@@ -521,6 +514,7 @@ get_timestamp(CallbackModule) ->
         _ -> {ok, time_utils:system_time_millis()}
     end.
 
+-spec decode_id(datastore:key()) -> {traverse:pool(), traverse:id()}.
 decode_id(DocID) ->
     [Pool, TaskID] = binary:split(DocID, ?ID_SEPARATOR_BINARY),
     {Pool, TaskID}.

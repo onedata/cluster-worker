@@ -505,7 +505,6 @@ check_task_list_and_run(PoolName, Executor) ->
 -spec run_task(pool(), id(), environment_id()) -> ok.
 run_task(PoolName, TaskID, Executor) ->
     {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(PoolName, TaskID),
-    % TODO - a co jak job sie nie zsyncowal?
     {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
     case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
