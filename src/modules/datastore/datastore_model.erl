@@ -49,7 +49,8 @@
 -type fold_opts() :: datastore:fold_opts().
 -type one_or_many(Type) :: Type | [Type].
 
--export_type([model/0, record/0, record_struct/0, record_version/0, key/0]).
+-export_type([model/0, record/0, record_struct/0, record_version/0,
+    key/0, ctx/0, diff/0, fold_opts/0, tree_ids/0]).
 
 % Default time in seconds for document to expire after delete (one year)
 -define(EXPIRY, 31536000).

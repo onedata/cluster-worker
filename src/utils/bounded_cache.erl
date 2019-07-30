@@ -59,6 +59,8 @@
 }.
 -type in_critical_section() :: boolean().
 
+-export_type([additional_info/0, cache/0, callback/0, timestamp/0, value/0]).
+
 -define(TIMER_MESSAGE(Options), {bounded_cache_timer, Options}).
 -define(CACHE_MANAGER, bounded_cache_manager).
 -define(CACHE_GROUP_KEY(Cache), {cache_group, Cache}).
