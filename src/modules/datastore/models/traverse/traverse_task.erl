@@ -154,7 +154,6 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskID) ->
             Other
     end.
 
-%% TODO - VFS-5531
 -spec cancel(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id()) ->
     {ok, local_cancel | remote_cancel | already_canceled} | {error, term()}.
 cancel(ExtendedCtx, Pool, CallbackModule, TaskID, Environment) ->
