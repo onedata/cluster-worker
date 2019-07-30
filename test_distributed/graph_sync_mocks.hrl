@@ -51,6 +51,9 @@ end).
 % Used for auto scope tests
 -define(HANDLE_SERVICE, <<"handleService">>).
 
+% Used for nobody auth override tests
+-define(SHARE, <<"share">>).
+
 -define(HANDLE_SERVICE_DATA(__Public, __Shared, __Protected, __Private), #{
     <<"public">> => __Public,
     <<"shared">> => __Shared,
@@ -65,5 +68,8 @@ end).
     public -> maps:without([<<"private">>, <<"protected">>, <<"shared">>], __Data)
 end).
 
+-define(SHARE_DATA(ScopeBin), #{
+    <<"scope">> => ScopeBin
+}).
 
 -endif.

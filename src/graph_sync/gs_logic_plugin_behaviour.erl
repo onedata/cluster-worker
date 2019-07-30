@@ -60,7 +60,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback is_authorized(aai:auth(), gs_protocol:auth_hint(),
-    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data()) ->
+    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:versioned_entity()) ->
     {true, gs_protocol:gri()} | false.
 
 
@@ -81,7 +81,7 @@
 %%--------------------------------------------------------------------
 -callback handle_graph_request(aai:auth(), gs_protocol:auth_hint(),
     gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data(),
-    gs_protocol:entity()) -> gs_protocol:graph_request_result().
+    gs_protocol:versioned_entity()) -> gs_protocol:graph_request_result().
 
 
 %%--------------------------------------------------------------------

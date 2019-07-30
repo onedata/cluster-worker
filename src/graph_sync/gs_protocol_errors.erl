@@ -53,13 +53,8 @@ error_to_json(_, ?ERROR_HANDSHAKE_ALREADY_DONE) ->
     #{
         <<"id">> => <<"handshakeAlreadyDone">>
     };
-error_to_json(_, ?ERROR_UNCLASSIFIED_ERROR(ReadableDescription)) ->
-    #{
-        <<"id">> => <<"unclassifiedError">>,
-        <<"details">> => #{
-            <<"description">> => ReadableDescription
-        }
-    };
+error_to_json(_, ?ERROR_UNKNOWN_ERROR(ErrorObject)) ->
+    ErrorObject;
 error_to_json(_, ?ERROR_BAD_TYPE) ->
     #{
         <<"id">> => <<"badType">>
@@ -441,10 +436,6 @@ json_to_error(_, #{<<"id">> := <<"expectedHandshakeMessage">>}) ->
 json_to_error(_, #{<<"id">> := <<"handshakeAlreadyDone">>}) ->
     ?ERROR_HANDSHAKE_ALREADY_DONE;
 
-json_to_error(_, #{<<"id">> := <<"unclassifiedError">>,
-    <<"details">> := #{<<"description">> := Description}}) ->
-    ?ERROR_UNCLASSIFIED_ERROR(Description);
-
 json_to_error(_, #{<<"id">> := <<"badType">>}) ->
     ?ERROR_BAD_TYPE;
 
@@ -657,8 +648,5 @@ json_to_error(_, #{<<"id">> := <<"guiPackageTooLarge">>}) ->
 json_to_error(_, #{<<"id">> := <<"guiPackageUnverified">>}) ->
     ?ERROR_GUI_PACKAGE_UNVERIFIED;
 
-% Unknown errors
-json_to_error(_, #{<<"details">> := #{<<"description">> := Description}}) ->
-    ?ERROR_UNCLASSIFIED_ERROR(Description);
-json_to_error(_, _) ->
-    ?ERROR_UNCLASSIFIED_ERROR(<<"No error description">>).
+json_to_error(_, ErrorObject) ->
+    ?ERROR_UNKNOWN_ERROR(ErrorObject).

@@ -187,7 +187,7 @@ do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSu
             receive
                 {client_pid, Pid, ClientPid} ->
                     Loop([{ClientPid, proplists:get_value(Pid, ProxyPids)} | Connections]);
-                {'EXIT', Pid, _} ->
+                {'EXIT', _, _} ->
                     Loop(Connections)
             after timer:seconds(10) ->
                 Connections

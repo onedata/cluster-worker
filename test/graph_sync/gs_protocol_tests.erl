@@ -633,7 +633,7 @@ encode_decode_error() ->
         ?ERROR_BAD_VERSION([123, 345, 234, 1, 34]),
         ?ERROR_EXPECTED_HANDSHAKE_MESSAGE,
         ?ERROR_HANDSHAKE_ALREADY_DONE,
-        ?ERROR_UNCLASSIFIED_ERROR(<<"desc">>),
+        ?ERROR_UNKNOWN_ERROR(#{<<"id">> => <<"unknownErrorId">>, <<"details">> => #{<<"desc">> => <<"serious">>}}),
         ?ERROR_BAD_TYPE,
         ?ERROR_NOT_SUBSCRIBABLE,
         ?ERROR_RPC_UNDEFINED,

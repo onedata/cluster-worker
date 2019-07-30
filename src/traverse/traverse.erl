@@ -61,7 +61,7 @@
 
 %% API
 -export([init_pool/4, init_pool/5, stop_pool/1,
-    run/3, run/4, cancel/2, cancel/3, maybe_run_scheduled_task/2]).
+    run/3, run/4, cancel/2, cancel/3, on_task_change/2, on_job_change/5]).
 %% Functions executed on pools
 -export([execute_master_job/9, execute_slave_job/5]).
 %% For rpc
@@ -244,40 +244,46 @@ run(PoolName, TaskID, Job, Options) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Executes action connected with remote task change (can start task).
+%% @end
+%%--------------------------------------------------------------------
+-spec on_task_change(task(), environment_id()) -> ok.
+on_task_change(Task, Environment) ->
+    case traverse_task:on_task_change(Task, Environment) of
+        {remote_change, CallbackModule, MainJobID} ->
+            {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
+            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+            case traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment) of
+                ok ->
+                    ok;
+                {ok, remote_cancel, TaskID} ->
+                    task_callback(CallbackModule, on_cancel_init, TaskID),
+                    ok
+            end;
+        {run, CallbackModule, MainJobID} ->
+            case CallbackModule:get_job(MainJobID) of
+                {ok, Job, PoolName, TaskID} ->
+                    maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Environment, Job, MainJobID);
+                {error, not_found} ->
+                    ok
+            end;
+        ignore ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Starts task scheduled on other environment if possible (limit of parallel tasks is not reached).
 %% @end
 %%--------------------------------------------------------------------
--spec maybe_run_scheduled_task({task, task()} | {job, callback_module(), job_id()} |
-    {job, job(), job_id(), pool(), id()}, environment_id()) -> ok.
-maybe_run_scheduled_task({task, Task}, Environment) ->
-    case traverse_task:is_canceled_or_enqueued(Task) of
-        {true, canceled} ->
-            ok;
-        false ->
-            ok;
-        _ ->
-            {ok, CallbackModule, Executor, MainJobID} = traverse_task:get_execution_info(Task),
-            case Executor =:= Environment of
-                true ->
-                    case CallbackModule:get_job(MainJobID) of
-                        {ok, Job, PoolName, TaskID} ->
-                            maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Executor, Job, MainJobID);
-                        {error, not_found} ->
-                            ok
-                    end;
-                _ ->
-                    ok
-            end
-    end;
-maybe_run_scheduled_task({job, Job, JobID, PoolName, TaskID}, Environment) ->
+-spec on_job_change(job(), job_id(), pool(), id(), environment_id()) -> ok.
+on_job_change(Job, JobID, PoolName, TaskID, Environment) ->
     case traverse_task:get(PoolName, TaskID) of
         {ok, Task} ->
-            case traverse_task:is_canceled_or_enqueued(Task) of
-                {true, canceled} ->
-                    ok;
+            case traverse_task:is_enqueued(Task) of
                 false ->
                     ok;
-                _ ->
+                true ->
                     {ok, CallbackModule, Executor, _} = traverse_task:get_execution_info(Task),
                     case Executor =:= Environment of
                         true ->
@@ -288,10 +294,7 @@ maybe_run_scheduled_task({job, Job, JobID, PoolName, TaskID}, Environment) ->
             end;
         {error, not_found} ->
             ok
-    end;
-maybe_run_scheduled_task({job, CallbackModule, JobID}, Environment) ->
-    {ok, Job, PoolName, TaskID} = CallbackModule:get_job(JobID),
-    maybe_run_scheduled_task({job, Job, JobID, PoolName, TaskID}, Environment).
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -311,14 +314,17 @@ cancel(PoolName, TaskID) ->
 cancel(PoolName, TaskID, Environment) ->
     case traverse_task:get(PoolName, TaskID) of
         {ok, Task} ->
-            case traverse_task:is_canceled_or_enqueued(Task) of
-                {true, canceled} ->
-                    ok;
-                _ ->
-                    {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
-                    {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
+            {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
+            case CallbackModule:get_job(MainJobID) of
+                {ok, Job, _, _} ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-                    traverse_task:cancel(ExtendedCtx, PoolName, TaskID, Environment)
+                    {ok, Info} = traverse_task:cancel(ExtendedCtx, PoolName, CallbackModule, TaskID, Environment),
+                    case Info of
+                        local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskID);
+                        _ -> ok
+                    end;
+                {error, not_found} ->
+                    {error, main_job_not_found}
             end;
         Other ->
             Other
@@ -337,7 +343,7 @@ cancel(PoolName, TaskID, Environment) ->
     id(), job(), job_id()) -> ok.
 execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, Job, JobID) ->
     try
-        {ok, MasterAns} =  CallbackModule:do_master_job(Job),
+        {ok, MasterAns} =  CallbackModule:do_master_job(Job, TaskID),
         MasterJobsList = maps:get(master_jobs, MasterAns),
         SlaveJobsList = maps:get(slave_jobs, MasterAns),
 
@@ -346,13 +352,17 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
             slave_jobs_delegated => length(SlaveJobsList),
             master_jobs_delegated => length(MasterJobsList)
         },
-        {ok, _, Canceled} = UpdateAns = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
+        {ok, _, Canceled} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
 
         {_, NewDescription, Canceled2} = case Canceled of
             true ->
                 ok = traverse_task_list:delete_job_link(PoolName, CallbackModule, JobID),
                 {ok, _} = CallbackModule:update_job_progress(JobID, Job, PoolName, TaskID, canceled),
-                UpdateAns;
+                CancelDescription = #{
+                    slave_jobs_delegated => -1 * length(SlaveJobsList),
+                    master_jobs_delegated => -1 * length(MasterJobsList) - 1
+                },
+                {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
             _ ->
                 SlaveAnswers = run_on_slave_pool(
                     PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, SlaveJobsList),
@@ -377,7 +387,6 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         end,
 
         try
-            % TODO VFS-5546 - many jobs can do finish with canceled field - check it
             maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, NewDescription, Canceled2)
         catch
             E2:R2 ->
@@ -415,7 +424,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
 -spec execute_slave_job(pool(), callback_module(), ctx(), id(), job()) -> ok | error.
 execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
     try
-        case CallbackModule:do_slave_job(Job) of
+        case CallbackModule:do_slave_job(Job, TaskID) of
             ok ->
                 ok;
             {ok, Description} ->
@@ -466,14 +475,16 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, #{
 } = Description, Canceled) ->
     Done = maps:get(master_jobs_done, Description, 0),
     Failed = maps:get(master_jobs_failed, Description, 0),
-    case {Delegated == Done + Failed, Canceled} of
-        {true, _} ->
+
+    case Delegated == Done + Failed of
+        true ->
             % VFS-5532 - can never be equal in case of description saving error
-            ok = task_callback(CallbackModule, task_finished, TaskID),
-            ok = traverse_task:finish(ExtendedCtx, PoolName, TaskID, finished),
-            check_task_list_and_run(PoolName, Executor);
-        {_, true} ->
-            ok = traverse_task:finish(ExtendedCtx, PoolName, TaskID, canceled),
+            ok = case Canceled of
+                true -> task_callback(CallbackModule, task_canceled, TaskID);
+                _ -> task_callback(CallbackModule, task_finished, TaskID)
+            end,
+
+            ok = traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskID),
             check_task_list_and_run(PoolName, Executor);
         _ -> ok
     end.
@@ -499,24 +510,18 @@ check_task_list_and_run(PoolName, Executor) ->
 
 -spec run_task(pool(), id(), environment_id()) -> ok.
 run_task(PoolName, TaskID, Executor) ->
-    {ok, Task} = traverse_task:get(PoolName, TaskID),
-    case traverse_task:is_canceled_or_enqueued(Task) of
-        {true, canceled} ->
+    {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(PoolName, TaskID),
+    {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
+    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+    case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
+        ok ->
+            ok = task_callback(CallbackModule, task_started, TaskID),
+            ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
+                CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
+        {error, start_aborted} ->
             check_task_list_and_run(PoolName, Executor);
-        _ ->
-            {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(Task),
-            {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
-            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-            case traverse_task:start(ExtendedCtx, PoolName, TaskID, #{master_jobs_delegated => 1}) of
-                ok ->
-                    ok = task_callback(CallbackModule, task_started, TaskID),
-                    ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                        CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
-                {error, already_started} ->
-                    check_task_list_and_run(PoolName, Executor);
-                {error, not_found} ->
-                    check_task_list_and_run(PoolName, Executor)
-            end
+        {error, not_found} ->
+            check_task_list_and_run(PoolName, Executor)
     end.
 
 -spec maybe_run_scheduled_task(pool(), callback_module(), id(), environment_id(), job(), job_id()) -> ok.
@@ -524,12 +529,12 @@ maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Executor, Job, MainJo
     case traverse_tasks_scheduler:increment_ongoing_tasks_and_choose_node(PoolName) of
         {ok, Node} ->
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-            case traverse_task:start(ExtendedCtx, PoolName, TaskID, #{master_jobs_delegated => 1}) of
+            case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
                 ok ->
                     ok = task_callback(CallbackModule, task_started, TaskID),
                     ok = rpc:call(Node, ?MODULE, run_on_master_pool, [PoolName, ?MASTER_POOL_NAME(PoolName),
                         ?SLAVE_POOL_NAME(PoolName), CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID]);
-                {error, already_started} ->
+                {error, start_aborted} ->
                     traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName)
             end
     end.
@@ -556,7 +561,7 @@ get_extended_ctx(CallbackModule, Job) ->
     end,
     maps:merge(traverse_task:get_ctx(), CtxExtension).
 
--spec task_callback(callback_module(), task_started | task_finished, id()) -> ok.
+-spec task_callback(callback_module(), task_started | task_finished | task_canceled | on_cancel_init, id()) -> ok.
 task_callback(CallbackModule, Method, TaskID) ->
     case erlang:function_exported(CallbackModule, Method, 1) of
         true ->
