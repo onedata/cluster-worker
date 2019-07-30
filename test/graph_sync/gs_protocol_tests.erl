@@ -18,6 +18,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 
 %%%===================================================================
 %%% Tests generator
@@ -439,7 +440,7 @@ encode_decode_message() ->
             response = #gs_resp_handshake{
                 version = 21,
                 session_id = <<"adsfadsfadsf">>,
-                identity = nobody,
+                identity = ?SUB(nobody),
                 attributes = #{<<"attr21">> => 21}
             }
         },
@@ -451,7 +452,7 @@ encode_decode_message() ->
             response = #gs_resp_handshake{
                 version = 22,
                 session_id = <<"adsfadsfadsf">>,
-                identity = {user, <<"u22">>},
+                identity = ?SUB(user, <<"u22">>),
                 attributes = #{<<"attr22">> => 22}
             }
         },
@@ -463,19 +464,19 @@ encode_decode_message() ->
             response = #gs_resp_handshake{
                 version = 23,
                 session_id = <<"adsfadsfadsf">>,
-                identity = {user, <<"p23">>},
+                identity = ?SUB(?ONEPROVIDER, <<"p23">>),
                 attributes = #{<<"attr23">> => 23}
             }
         },
         #gs_resp{
-            id = <<"mess23">>,
+            id = <<"mess23.3">>,
             subtype = rpc,
             success = false,
             error = ?ERROR_RPC_UNDEFINED,
             response = undefined
         },
         #gs_resp{
-            id = <<"mess23">>,
+            id = <<"mess23.6">>,
             subtype = rpc,
             success = true,
             error = undefined,
@@ -632,7 +633,7 @@ encode_decode_error() ->
         ?ERROR_BAD_VERSION([123, 345, 234, 1, 34]),
         ?ERROR_EXPECTED_HANDSHAKE_MESSAGE,
         ?ERROR_HANDSHAKE_ALREADY_DONE,
-        ?ERROR_UNCLASSIFIED_ERROR(<<"desc">>),
+        ?ERROR_UNKNOWN_ERROR(#{<<"id">> => <<"unknownErrorId">>, <<"details">> => #{<<"desc">> => <<"serious">>}}),
         ?ERROR_BAD_TYPE,
         ?ERROR_NOT_SUBSCRIBABLE,
         ?ERROR_RPC_UNDEFINED,
@@ -643,6 +644,12 @@ encode_decode_error() ->
         ?ERROR_UNAUTHORIZED,
         ?ERROR_FORBIDDEN,
         ?ERROR_BAD_MACAROON,
+        ?ERROR_MACAROON_INVALID,
+        ?ERROR_MACAROON_EXPIRED,
+        ?ERROR_MACAROON_TTL_TO_LONG(10202),
+        ?ERROR_BAD_AUDIENCE_TOKEN,
+        ?ERROR_TOKEN_AUDIENCE_FORBIDDEN,
+        ?ERROR_TOKEN_SESSION_INVALID,
         ?ERROR_BAD_BASIC_CREDENTIALS,
         ?ERROR_MALFORMED_DATA,
         ?ERROR_MISSING_REQUIRED_VALUE(<<"spaceId">>),

@@ -21,7 +21,7 @@
 %% authorized.
 %% @end
 %%--------------------------------------------------------------------
--callback handshake_attributes(gs_protocol:client()) ->
+-callback handshake_attributes(aai:auth()) ->
     gs_protocol:handshake_attributes().
 
 
@@ -29,12 +29,12 @@
 %% @doc
 %% Translates result with data_format = 'value' (currently only applicable to
 %% CREATE operation) to the format understood by client.
-%% Can return a function taking one argument - the Client, that returns result
-%% depending on the client.
+%% Can return a function taking one argument - the Auth object, that returns
+%% result depending on the authorized client.
 %% @end
 %%--------------------------------------------------------------------
 -callback translate_value(gs_protocol:protocol_version(), gs_protocol:gri(),
-    Value :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
+    Value :: term()) -> Result | fun((aai:auth()) -> Result) when
     Result :: gs_protocol:data() | gs_protocol:error().
 
 
@@ -43,10 +43,10 @@
 %% Translates result with data_format = 'resource' (can be returned from
 %% CREATE or GET operations) to the format understood by client. The requested
 %% GRI will be automatically included in the answer.
-%% Can return a function taking one argument - the Client, that returns result
-%% depending on the client.
+%% Can return a function taking one argument - the Auth object, that returns
+%% result depending on the authorized client.
 %% @end
 %%--------------------------------------------------------------------
 -callback translate_resource(gs_protocol:protocol_version(), gs_protocol:gri(),
-    ResourceData :: term()) -> Result | fun((gs_protocol:client()) -> Result) when
+    ResourceData :: term()) -> Result | fun((aai:auth()) -> Result) when
     Result :: gs_protocol:data() | gs_protocol:error().

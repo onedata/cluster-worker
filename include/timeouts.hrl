@@ -38,6 +38,10 @@
 
 % Maximum time the calling process will wait for Graph Sync client to start
 % (start returns after handshake is performed).
--define(GS_CLIENT_HANDSHAKE_TIMEOUT, 10000).
+-define(GS_CLIENT_HANDSHAKE_TIMEOUT, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_client_handshake_timeout, 10000
+)).
 % Timeout when waiting for synchronous response from Graph Sync client process.
--define(GS_CLIENT_REQUEST_TIMEOUT, 10000).
+-define(GS_CLIENT_REQUEST_TIMEOUT, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_client_request_timeout, 30000
+)).

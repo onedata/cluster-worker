@@ -16,31 +16,12 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Authorizes the requesting client based on handshake auth.
+%% Resolves the authorization of the requesting client based on handshake auth.
 %% If error is returned, the handshake is denied.
 %% @end
 %%--------------------------------------------------------------------
--callback verify_handshake_auth(gs_protocol:auth()) ->
-    {ok, gs_protocol:client(), gs_server:connection_info()} | gs_protocol:error().
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Converts client, which is an opaque term for gs_server, into identity of
-%% the client.
-%% @end
-%%--------------------------------------------------------------------
--callback client_to_identity(gs_protocol:client()) -> gs_protocol:identity().
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns the ROOT client as understood by gs_logic_plugin, i.e. a client that
-%% is authorized to do everything. ROOT client can be used only in internal
-%% code (i.e. cannot be accessed via any API).
-%% @end
-%%--------------------------------------------------------------------
--callback root_client() -> gs_protocol:client().
+-callback verify_handshake_auth(gs_protocol:client_auth()) ->
+    {ok, aai:auth()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
@@ -48,7 +29,7 @@
 %% Callback called when a new client connects to the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_connected(gs_protocol:client(), gs_server:connection_info(), gs_server:connection_ref()) ->
+-callback client_connected(aai:auth(), gs_server:connection_ref()) ->
     ok.
 
 
@@ -57,7 +38,7 @@
 %% Callback called when a client disconnects from the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------
--callback client_disconnected(gs_protocol:client(), gs_server:connection_info(), gs_server:connection_ref()) ->
+-callback client_disconnected(aai:auth(), gs_server:connection_ref()) ->
     ok.
 
 
@@ -67,19 +48,19 @@
 %% {@link gs_protocol:auth_override()}.
 %% @end
 %%--------------------------------------------------------------------
--callback verify_auth_override(gs_protocol:client(), gs_protocol:auth_override()) ->
-    {ok, gs_protocol:client()} | gs_protocol:error().
+-callback verify_auth_override(aai:auth(), gs_protocol:auth_override()) ->
+    {ok, aai:auth()} | gs_protocol:error().
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Determines if given client is authorized to perform certain operation.
+%% Determines if given authorization allows to perform certain operation.
 %% GRI is returned to indicate how auto scope was resolved. If a specific
 %% scope was requested, it must return the same gri.
 %% @end
 %%--------------------------------------------------------------------
--callback is_authorized(gs_protocol:client(), gs_protocol:auth_hint(),
-    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data()) ->
+-callback is_authorized(aai:auth(), gs_protocol:auth_hint(),
+    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:versioned_entity()) ->
     {true, gs_protocol:gri()} | false.
 
 
@@ -88,7 +69,7 @@
 %% Handles an RPC request and returns the result.
 %% @end
 %%--------------------------------------------------------------------
--callback handle_rpc(gs_protocol:protocol_version(), gs_protocol:client(),
+-callback handle_rpc(gs_protocol:protocol_version(), aai:auth(),
     gs_protocol:rpc_function(), gs_protocol:rpc_args()) ->
     gs_protocol:rpc_result().
 
@@ -98,9 +79,9 @@
 %% Handles a graph request and returns the result.
 %% @end
 %%--------------------------------------------------------------------
--callback handle_graph_request(gs_protocol:client(), gs_protocol:auth_hint(),
+-callback handle_graph_request(aai:auth(), gs_protocol:auth_hint(),
     gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data(),
-    gs_protocol:entity()) -> gs_protocol:graph_request_result().
+    gs_protocol:versioned_entity()) -> gs_protocol:graph_request_result().
 
 
 %%--------------------------------------------------------------------

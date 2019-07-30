@@ -48,8 +48,7 @@
 % Holds information about Graph Sync session
 -record(gs_session, {
     id :: undefined | gs_protocol:session_id(),
-    client :: gs_protocol:client(),
-    connection_info :: gs_server:connection_info(),
+    auth :: aai:auth(),
     protocol_version = 0 :: gs_protocol:protocol_version(),
     conn_ref :: undefined | gs_server:conn_ref(),
     translator :: gs_server:translator(),

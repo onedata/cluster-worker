@@ -32,14 +32,14 @@
 
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
-    auth = undefined :: undefined | gs_protocol:auth(),
+    auth = undefined :: undefined | gs_protocol:client_auth(),
     session_id :: undefined | gs_protocol:session_id()
 }).
 
 -record(gs_resp_handshake, {
     version = ?BASIC_PROTOCOL :: gs_protocol:protocol_version(),
     session_id :: undefined | gs_protocol:session_id(),
-    identity = nobody :: gs_protocol:identity(),
+    identity = nobody :: aai:subject(),
     attributes = undefined :: gs_protocol:handshake_attributes()
 }).
 

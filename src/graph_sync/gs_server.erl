@@ -15,24 +15,22 @@
 
 -include("graph_sync/graph_sync.hrl").
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 
-% An opaque term, understood by gs_logic_plugin, attached to a connection and
-% carrying arbitrary data for internal use in gs_logic_plugin.
--type connection_info() :: undefined | term().
 % Identifier of connection process, one per session.
 -type conn_ref() :: pid().
 % Plugin module used to translate request results.
 -type translator() :: module().
 
--export_type([conn_ref/0, translator/0, connection_info/0]).
+-export_type([conn_ref/0, translator/0]).
 
 %% Simple cache used to remember calculated payloads per GRI and limit the
 %% number of requests to GS_LOGIC_PLUGIN when there is a lot of subscribers
 %% for the same records.
--type payload_cache() :: #{gs_protocol:gri() => gs_protocol:data()}.
+-type payload_cache() :: #{gs_protocol:gri() => {gs_protocol:data(), gs_protocol:revision()}}.
 
 
 %% API
@@ -52,42 +50,40 @@
 %% Returns success or error handshake response depending on the outcome.
 %% @end
 %%--------------------------------------------------------------------
--spec handshake(gs_protocol:auth(), conn_ref(), translator(), gs_protocol:req_wrapper()) ->
+-spec handshake(gs_protocol:client_auth(), conn_ref(), translator(), gs_protocol:req_wrapper()) ->
     {ok, gs_protocol:resp_wrapper()} | {error, gs_protocol:resp_wrapper()}.
 handshake(HttpAuth, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req) ->
-    #gs_req_handshake{supported_versions = ClientVersions} = HReq,
+    #gs_req_handshake{supported_versions = AuthVersions} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
-    case gs_protocol:greatest_common_version(ClientVersions, ServerVersions) of
+    case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
         false ->
             {error, gs_protocol:generate_error_response(
                 Req, ?ERROR_BAD_VERSION(ServerVersions))
             };
         {true, Version} ->
             %% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
-            Auth = case HttpAuth of
+            ClientAuth = case HttpAuth of
                 undefined -> HReq#gs_req_handshake.auth;
                 _ -> HttpAuth
             end,
-            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(Auth) of
+            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth) of
                 ?ERROR_UNAUTHORIZED ->
                     {error, gs_protocol:generate_error_response(
                         Req, ?ERROR_UNAUTHORIZED)
                     };
-                {ok, Client, ConnectionInfo} ->
+                {ok, Auth} ->
                     {ok, SessionId} = gs_persistence:create_session(#gs_session{
-                        client = Client,
-                        connection_info = ConnectionInfo,
+                        auth = Auth,
                         conn_ref = ConnRef,
                         protocol_version = Version,
                         translator = Translator
                     }),
-                    ?GS_LOGIC_PLUGIN:client_connected(Client, ConnectionInfo, ConnRef),
-                    Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
-                    Attributes = Translator:handshake_attributes(Client),
+                    ?GS_LOGIC_PLUGIN:client_connected(Auth, ConnRef),
+                    Attributes = Translator:handshake_attributes(Auth),
                     {ok, gs_protocol:generate_success_response(Req, #gs_resp_handshake{
                         version = Version,
                         session_id = SessionId,
-                        identity = Identity,
+                        identity = Auth#auth.subject,
                         attributes = Attributes
                     })}
             end
@@ -102,9 +98,9 @@ handshake(HttpAuth, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} =
 -spec cleanup_client_session(gs_protocol:session_id()) -> ok.
 cleanup_client_session(SessionId) ->
     {ok, #gs_session{
-        client = Client, conn_ref = ConnRef, connection_info = ConnectionInfo
+        auth = Auth, conn_ref = ConnRef
     }} = gs_persistence:get_session(SessionId),
-    ?GS_LOGIC_PLUGIN:client_disconnected(Client, ConnectionInfo, ConnRef),
+    ?GS_LOGIC_PLUGIN:client_disconnected(Auth, ConnRef),
     gs_persistence:remove_all_subscriptions(SessionId),
     gs_persistence:delete_session(SessionId),
     ok.
@@ -127,8 +123,8 @@ terminate_connection(ConnRef) ->
 %% will broadcast 'updated' messages to interested clients.
 %% @end
 %%--------------------------------------------------------------------
--spec updated(gs_protocol:entity_type(), gs_protocol:entity_id(), gs_protocol:entity()) -> ok.
-updated(EntityType, EntityId, Entity) ->
+-spec updated(gs_protocol:entity_type(), gs_protocol:entity_id(), gs_protocol:versioned_entity()) -> ok.
+updated(EntityType, EntityId, VersionedEntity) ->
     {ok, AllSubscribers} = gs_persistence:get_subscribers(EntityType, EntityId),
     maps:fold(fun
         ({_Aspect, _Scope}, [], PayloadCache) ->
@@ -136,24 +132,25 @@ updated(EntityType, EntityId, Entity) ->
         ({Aspect, Scope}, Subscribers, PayloadCache) ->
             GRI = #gri{type = EntityType, id = EntityId, aspect = Aspect, scope = Scope},
             lists:foldl(fun(Subscriber, PayloadCacheAcc) ->
-                push_updated(GRI, Entity, Subscriber, PayloadCacheAcc)
+                push_updated(GRI, VersionedEntity, Subscriber, PayloadCacheAcc)
             end, PayloadCache, Subscribers)
     end, #{}, AllSubscribers),
     ok.
 
 
--spec push_updated(gs_protocol:gri(), gs_protocol:entity(),
+%% @private
+-spec push_updated(gs_protocol:gri(), gs_protocol:versioned_entity(),
     gs_persistence:subscriber(), payload_cache()) -> payload_cache().
-push_updated(ReqGRI, Entity, {SessionId, {Client, AuthHint}}, PayloadCache) ->
+push_updated(ReqGRI, VersionedEntity, {SessionId, {Auth, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
         {error, not_found} ->
             % Possible when session cleanup is in progress
             PayloadCache;
         {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
-            case ?GS_LOGIC_PLUGIN:is_authorized(Client, AuthHint, ReqGRI, get, Entity) of
+            case ?GS_LOGIC_PLUGIN:is_authorized(Auth, AuthHint, ReqGRI, get, VersionedEntity) of
                 {true, ResGRI} ->
                     {Data, NewPayloadCache} = updated_payload(
-                        ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache
+                        ReqGRI, ResGRI, Translator, ProtoVer, Auth, VersionedEntity, PayloadCache
                     ),
                     gs_ws_handler:push(ConnRef, #gs_push{
                         subtype = graph, message = #gs_push_graph{
@@ -225,11 +222,11 @@ handle_request(Session, #gs_req{auth_override = undefined, request = Req}) ->
 
 % This request has the authorization field specified, override the default
 % authorization.
-handle_request(Session = #gs_session{client = Client}, #gs_req{auth_override = AuthOverride} = Req) ->
-    case ?GS_LOGIC_PLUGIN:verify_auth_override(Client, AuthOverride) of
-        {ok, OverridenClient} ->
+handle_request(Session = #gs_session{auth = Auth}, #gs_req{auth_override = AuthOverride} = Req) ->
+    case ?GS_LOGIC_PLUGIN:verify_auth_override(Auth, AuthOverride) of
+        {ok, OverridenAuth} ->
             handle_request(
-                Session#gs_session{client = OverridenClient},
+                Session#gs_session{auth = OverridenAuth},
                 Req#gs_req{auth_override = undefined}
             );
         {error, _} = Error ->
@@ -241,9 +238,9 @@ handle_request(_Session, #gs_req_handshake{}) ->
     ?ERROR_HANDSHAKE_ALREADY_DONE;
 
 handle_request(Session, #gs_req_rpc{} = Req) ->
-    #gs_session{client = Client, protocol_version = ProtoVer} = Session,
+    #gs_session{auth = Auth, protocol_version = ProtoVer} = Session,
     #gs_req_rpc{function = Function, args = Args} = Req,
-    case ?GS_LOGIC_PLUGIN:handle_rpc(ProtoVer, Client, Function, Args) of
+    case ?GS_LOGIC_PLUGIN:handle_rpc(ProtoVer, Auth, Function, Args) of
         {ok, Result} ->
             {ok, #gs_resp_rpc{result = Result}};
         {error, _} = Error ->
@@ -251,26 +248,24 @@ handle_request(Session, #gs_req_rpc{} = Req) ->
     end;
 
 handle_request(Session, #gs_req_graph{gri = #gri{id = ?SELF} = GRI} = Req) ->
-    #gs_session{client = Client} = Session,
-    Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
-    case {GRI#gri.type, Identity} of
-        {od_user, {user, UserId}} ->
+    #gs_session{auth = Auth} = Session,
+    case {GRI#gri.type, Auth#auth.subject} of
+        {od_user, ?SUB(user, UserId)} ->
             handle_request(Session, Req#gs_req_graph{gri = GRI#gri{id = UserId}});
-        {od_provider, {provider, ProviderId}} ->
+        {od_provider, ?SUB(?ONEPROVIDER, ProviderId)} ->
             handle_request(Session, Req#gs_req_graph{gri = GRI#gri{id = ProviderId}});
         _ ->
             ?ERROR_NOT_FOUND
     end;
 
 handle_request(Session, #gs_req_graph{auth_hint = AuthHint = {_, ?SELF}} = Req) ->
-    #gs_session{client = Client} = Session,
-    Identity = ?GS_LOGIC_PLUGIN:client_to_identity(Client),
-    case {AuthHint, Identity} of
-        {?THROUGH_USER(?SELF), {user, UserId}} ->
+    #gs_session{auth = Auth} = Session,
+    case {AuthHint, Auth#auth.subject} of
+        {?THROUGH_USER(?SELF), ?SUB(user, UserId)} ->
             handle_request(Session, Req#gs_req_graph{auth_hint = ?THROUGH_USER(UserId)});
-        {?AS_USER(?SELF), {user, UserId}} ->
+        {?AS_USER(?SELF), ?SUB(user, UserId)} ->
             handle_request(Session, Req#gs_req_graph{auth_hint = ?AS_USER(UserId)});
-        {?THROUGH_PROVIDER(?SELF), {provider, ProviderId}} ->
+        {?THROUGH_PROVIDER(?SELF), ?SUB(?ONEPROVIDER, ProviderId)} ->
             handle_request(Session, Req#gs_req_graph{auth_hint = ?THROUGH_PROVIDER(ProviderId)});
         _ ->
             ?ERROR_FORBIDDEN
@@ -278,7 +273,7 @@ handle_request(Session, #gs_req_graph{auth_hint = AuthHint = {_, ?SELF}} = Req) 
 
 handle_request(Session, #gs_req_graph{} = Req) ->
     #gs_session{
-        id = SessionId, client = Client, protocol_version = ProtoVer,
+        id = SessionId, auth = Auth, protocol_version = ProtoVer,
         translator = Translator
     } = Session,
     #gs_req_graph{
@@ -298,7 +293,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
             ok
     end,
     Result = ?GS_LOGIC_PLUGIN:handle_graph_request(
-        Client, AuthHint, RequestedGRI, Operation, Data, undefined
+        Auth, AuthHint, RequestedGRI, Operation, Data, {undefined, 1}
     ),
     case Result of
         {error, _} = Error -> throw(Error);
@@ -310,28 +305,28 @@ handle_request(Session, #gs_req_graph{} = Req) ->
         {create, {ok, value, Value}} ->
             {not_subscribable, AuthHint, #gs_resp_graph{
                 data_format = value,
-                data = translate_value(Translator, ProtoVer, RequestedGRI, Client, Value)
+                data = translate_value(Translator, ProtoVer, RequestedGRI, Auth, Value)
             }};
         {create, {ok, resource, {ResultGRI, ResData}}} ->
             {coalesce_gri(RequestedGRI, ResultGRI), AuthHint, #gs_resp_graph{
                 data_format = resource,
-                data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, ResData)
+                data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, ResData)
             }};
         {create, {ok, resource, {ResultGRI, NAuthHint, ResData}}} ->
             {coalesce_gri(RequestedGRI, ResultGRI), NAuthHint, #gs_resp_graph{
                 data_format = resource,
-                data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, ResData)
+                data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, ResData)
             }};
 
         {get, {ok, ResData}} ->
             {RequestedGRI, AuthHint, #gs_resp_graph{
                 data_format = resource,
-                data = translate_resource(Translator, ProtoVer, RequestedGRI, Client, ResData)
+                data = translate_resource(Translator, ProtoVer, RequestedGRI, Auth, ResData)
             }};
         {get, {ok, ResultGRI, ResData}} ->
             {RequestedGRI, AuthHint, #gs_resp_graph{
                 data_format = resource,
-                data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, ResData)
+                data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, ResData)
             }};
 
         {update, ok} ->
@@ -344,7 +339,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
         {true, _, not_subscribable} ->
             throw(?ERROR_NOT_SUBSCRIBABLE);
         {true, _, _} ->
-            subscribe(SessionId, NewGRI, Client, NewAuthHint);
+            subscribe(SessionId, NewGRI, Auth, NewAuthHint);
         {false, _, _} ->
             ok
     end,
@@ -361,32 +356,32 @@ handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
 
 %% @private
 -spec translate_value(translator(), gs_protocol:protocol_version(), gs_protocol:gri(),
-    gs_protocol:client(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_value(Translator, ProtoVer, GRI, Client, Data) ->
+    aai:auth(), term()) -> gs_protocol:data() | gs_protocol:error().
+translate_value(Translator, ProtoVer, GRI, Auth, Data) ->
     % Used only when data is returned rather than GRI and resource
     case Translator:translate_value(ProtoVer, GRI, Data) of
-        Fun when is_function(Fun, 1) -> Fun(Client);
+        Fun when is_function(Fun, 1) -> Fun(Auth);
         Result -> Result
     end.
 
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(), gs_protocol:gri(),
-    gs_protocol:client(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_resource(Translator, ProtoVer, GRI, Client, Data) ->
-    translate_resource(Translator, ProtoVer, GRI, GRI, Client, Data).
+    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
+translate_resource(Translator, ProtoVer, GRI, Auth, DatAndRev) ->
+    translate_resource(Translator, ProtoVer, GRI, GRI, Auth, DatAndRev).
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(),
     RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
-    gs_protocol:client(), term()) -> gs_protocol:data() | gs_protocol:error().
-translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, Data) ->
+    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
+translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, {Data, Revision}) ->
     Resp = case Translator:translate_resource(ProtoVer, ResultGRI, Data) of
-        Fun when is_function(Fun, 1) -> Fun(Client);
+        Fun when is_function(Fun, 1) -> Fun(Auth);
         Result -> Result
     end,
     %% GRI must be sent back with every GET response
-    insert_gri(RequestedGRI, ResultGRI, Resp).
+    insert_gri_and_rev(RequestedGRI, ResultGRI, Resp, Revision).
 
 
 %%--------------------------------------------------------------------
@@ -399,35 +394,41 @@ translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Client, Data) 
 %% @end
 %%--------------------------------------------------------------------
 -spec updated_payload(ReqGRI :: gs_protocol:gri(), ResGRI :: gs_protocol:gri(),
-    translator(), gs_protocol:protocol_version(), gs_protocol:client(),
-    gs_protocol:entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
-updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Client, Entity, PayloadCache) ->
+    translator(), gs_protocol:protocol_version(), aai:auth(),
+    gs_protocol:versioned_entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
+updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Auth, VersionedEntity, PayloadCache) ->
     case maps:find({Translator, ResGRI}, PayloadCache) of
-        {ok, Fun} when is_function(Fun, 1) ->
+        {ok, {Fun, Revision}} when is_function(Fun, 1) ->
             % Function-type translator, must be evaluated per client
-            {insert_gri(ReqGRI, ResGRI, Fun(Client)), PayloadCache};
-        {ok, Data} ->
+            {insert_gri_and_rev(ReqGRI, ResGRI, Fun(Auth), Revision), PayloadCache};
+        {ok, {Result, Revision}} ->
             % Literal translator, the results can be reused for all clients
-            {insert_gri(ReqGRI, ResGRI, Data), PayloadCache};
+            {insert_gri_and_rev(ReqGRI, ResGRI, Result, Revision), PayloadCache};
         _ ->
-            {ok, Data} = ?GS_LOGIC_PLUGIN:handle_graph_request(
-                ?GS_LOGIC_PLUGIN:root_client(), undefined, ResGRI, get, #{}, Entity
+            {ok, {GetResult, Revision}} = ?GS_LOGIC_PLUGIN:handle_graph_request(
+                ?ROOT, undefined, ResGRI, get, #{}, VersionedEntity
             ),
-            TranslateResult = Translator:translate_resource(ProtoVer, ResGRI, Data),
+            TranslateResult = Translator:translate_resource(ProtoVer, ResGRI, GetResult),
             Result = case TranslateResult of
-                Fun when is_function(Fun, 1) -> Fun(Client);
+                Fun when is_function(Fun, 1) -> Fun(Auth);
                 DataJSONMap -> DataJSONMap
             end,
             % Cache the translator result for faster consecutive calls
-            {insert_gri(ReqGRI, ResGRI, Result), PayloadCache#{{Translator, ResGRI} => TranslateResult}}
+            {
+                insert_gri_and_rev(ReqGRI, ResGRI, Result, Revision),
+                PayloadCache#{{Translator, ResGRI} => {TranslateResult, Revision}}
+            }
     end.
 
 
 %% @private
--spec insert_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
-    gs_protocol:data()) -> gs_protocol:data().
-insert_gri(RequestedGRI, ResultGRI, Data) ->
-    Data#{<<"gri">> => gs_protocol:gri_to_string(coalesce_gri(RequestedGRI, ResultGRI))}.
+-spec insert_gri_and_rev(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+    gs_protocol:data(), gs_protocol:revision()) -> gs_protocol:data().
+insert_gri_and_rev(RequestedGRI, ResultGRI, Data, Revision) ->
+    Data#{
+        <<"gri">> => gs_protocol:gri_to_string(coalesce_gri(RequestedGRI, ResultGRI)),
+        <<"revision">> => Revision
+    }.
 
 
 %%--------------------------------------------------------------------
@@ -446,10 +447,10 @@ coalesce_gri(_RequestedGRI, ResultGRI) ->
 
 
 %% @private
--spec subscribe(gs_protocol:session_id(), gs_protocol:gri(), gs_protocol:client(),
+-spec subscribe(gs_protocol:session_id(), gs_protocol:gri(), aai:auth(),
     gs_protocol:auth_hint()) -> ok.
-subscribe(SessionId, GRI, Client, AuthHint) ->
-    gs_persistence:add_subscriber(GRI, SessionId, Client, AuthHint),
+subscribe(SessionId, GRI, Auth, AuthHint) ->
+    gs_persistence:add_subscriber(GRI, SessionId, Auth, AuthHint),
     gs_persistence:add_subscription(SessionId, GRI),
     ok.
 

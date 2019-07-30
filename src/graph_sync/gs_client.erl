@@ -17,6 +17,7 @@
 -include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/api_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -25,7 +26,7 @@
     handshake_status = false :: false | {pending, MsgId :: binary(), pid()} | true,
     session_id :: undefined | gs_protocol:session_id(),
     protocol_version = ?BASIC_PROTOCOL :: gs_protocol:protocol_version(),
-    identity = nobody :: gs_protocol:identity(),
+    identity = ?SUB(nobody) :: aai:subject(),
     handshake_attributes = #{} :: gs_protocol:handshake_attributes(),
     push_callback = fun(_) -> ok end :: push_callback(),
     promises = #{} :: maps:map(Id :: binary(), CallingProcess :: pid())
@@ -45,7 +46,7 @@
 % @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
 % {http, websocket_req:authorization()} is DEPRECATED - since 19.02.*
 % auth should be sent in GraphSync handshake.
--type auth() :: gs_protocol:auth() | {http, websocket_req:authorization()}.
+-type auth() :: gs_protocol:client_auth() | {http, websocket_req:authorization()}.
 
 -export([init/2, websocket_handle/3, websocket_info/3, websocket_terminate/3]).
 -export([start_link/4, start_link/5, kill/1]).
@@ -53,7 +54,8 @@
     rpc_request/3,
     graph_request/3, graph_request/4, graph_request/5, graph_request/6,
     unsub_request/2,
-    sync_request/2
+    sync_request/2,
+    async_request/2
 ]).
 
 %%%===================================================================
@@ -207,7 +209,7 @@ websocket_info({queue_request, #gs_req{id = Id} = Request, Pid}, _, State) ->
             {reply, {text, json_utils:encode(JSONMap)}, NewState};
         {error, _} = Error ->
             ?error("Discarding GS request as it cannot be encoded: ~p", [Error]),
-            Pid ! {response, Error},
+            Pid ! {response, Id, Error},
             {ok, State}
     end;
 
@@ -317,7 +319,8 @@ unsub_request(ClientRef, GRI) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Sends a synchronous request to GS server using given GS client instance
-%% (waits for response or returns with a timeout error).
+%% (waits for response or returns with a timeout error). It is possible that the
+%% response message still reaches the caller process after the timeout.
 %% @end
 %%--------------------------------------------------------------------
 -spec sync_request(client_ref(), gs_protocol:req_wrapper() |
@@ -330,19 +333,32 @@ sync_request(ClientRef, #gs_req_graph{} = GraphReq) ->
     sync_request(ClientRef, #gs_req{subtype = graph, request = GraphReq});
 sync_request(ClientRef, #gs_req_unsub{} = UnsubReq) ->
     sync_request(ClientRef, #gs_req{subtype = unsub, request = UnsubReq});
-sync_request(ClientRef, #gs_req{id = undefined} = Request) ->
-    sync_request(ClientRef, Request#gs_req{id = datastore_utils:gen_key()});
 sync_request(ClientRef, Request) ->
-    ClientRef ! {queue_request, Request, self()},
+    Id = async_request(ClientRef, Request),
     receive
-        {response, {error, _} = Error} ->
-            Error;
-        {response, Response} ->
-            {ok, Response}
+        {response, Id, Response} ->
+            Response
     after
         ?GS_CLIENT_REQUEST_TIMEOUT ->
             ?ERROR_TIMEOUT
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sends an asynchronous request to GS server using given GS client instance.
+%% Returns the request Id. Caller process should expect an answer in form
+%% {response, Id, Response} (Response can be {error, _} or {ok, #gs_resp_*}).
+%% @end
+%%--------------------------------------------------------------------
+-spec async_request(client_ref(), gs_protocol:req_wrapper()) ->
+    gs_protocol:message_id().
+async_request(ClientRef, #gs_req{id = undefined} = Request) ->
+    async_request(ClientRef, Request#gs_req{id = datastore_utils:gen_key()});
+async_request(ClientRef, #gs_req{id = Id} = Request) ->
+    ClientRef ! {queue_request, Request, self()},
+    Id.
+
 
 %%%===================================================================
 %%% Internal functions
@@ -386,9 +402,9 @@ handle_message(#gs_resp{id = Id} = GSResp, State) ->
     CallingProcess = maps:get(Id, State#state.promises),
     case GSResp of
         #gs_resp{success = false, error = Error} ->
-            CallingProcess ! {response, Error};
+            CallingProcess ! {response, Id, Error};
         #gs_resp{success = true, response = Resp} ->
-            CallingProcess ! {response, Resp}
+            CallingProcess ! {response, Id, {ok, Resp}}
     end,
     {ok, State#state{
         promises = maps:remove(Id, State#state.promises)
