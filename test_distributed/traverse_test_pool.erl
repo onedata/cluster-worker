@@ -15,7 +15,7 @@
 -include("global_definitions.hrl").
 
 %% Pool callbacks
--export([do_master_job/1, do_slave_job/1, task_finished/1, update_job_progress/5, get_job/1]).
+-export([do_master_job/2, do_slave_job/2, task_finished/1, update_job_progress/5, get_job/1]).
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0]).
 
@@ -25,12 +25,12 @@
 %%% Pool callbacks
 %%%===================================================================
 
-do_master_job({Master, 100, ID}) when ID == 100 ; ID == 101 ->
+do_master_job({Master, 100, ID}, _) when ID == 100 ; ID == 101 ->
     timer:sleep(500),
     Master ! {stop, node()},
     timer:sleep(500),
     do_master_job_helper({Master, 100, 100});
-do_master_job({Master, Num, ID}) ->
+do_master_job({Master, Num, ID}, _) ->
     do_master_job_helper({Master, Num, ID}).
 
 do_master_job_helper({Master, Num, ID}) ->
@@ -42,7 +42,7 @@ do_master_job_helper({Master, Num, ID}) ->
     SlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}, {Master, Num + 3, ID}],
     {ok, #{slave_jobs => SlaveJobs, master_jobs => MasterJobs}}.
 
-do_slave_job({Master, Num, ID}) ->
+do_slave_job({Master, Num, ID}, _) ->
     Master ! {slave, Num, ID, node()},
     ok.
 
