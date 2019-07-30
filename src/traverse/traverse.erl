@@ -104,7 +104,7 @@
 }.
 -type job_finish_callback() :: fun(() -> ok).
 % Types used to provide additional information to framework
--type timestamp() :: integer(). % Timestamp used to sort tasks (usually provided by callback function)
+-type timestamp() :: non_neg_integer(). % Timestamp used to sort tasks (usually provided by callback function)
 -type sync_info() ::  #{
     mutator => datastore_doc:mutator(),
     scope => datastore_doc:scope(),
