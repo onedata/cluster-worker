@@ -694,7 +694,14 @@ encode_decode_error() ->
         ?ERROR_TEMPORARY_FAILURE,
         ?ERROR_BAD_GUI_PACKAGE,
         ?ERROR_GUI_PACKAGE_TOO_LARGE,
-        ?ERROR_GUI_PACKAGE_UNVERIFIED
+        ?ERROR_GUI_PACKAGE_UNVERIFIED,
+        ?ERROR_ALREADY_EXISTS,
+        ?ERROR_POSIX(eacess),
+        ?ERROR_BAD_VALUE_AMBIGUOUS_ID(<<"indexName">>),
+        ?ERROR_SPACE_NOT_SUPPORTED_BY(<<"providerId">>),
+        ?ERROR_INDEX_NOT_EXISTS_ON(<<"providerId">>),
+        ?ERROR_TRANSFER_ALREADY_ENDED,
+        ?ERROR_TRANSFER_NOT_ENDED
     ],
 
     lists:foreach(
