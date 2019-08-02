@@ -39,7 +39,9 @@
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
 % Functions returning plugin module names
--export([gs_logic_plugin_module/0, gs_protocol_plugin_module/0]).
+-export([gs_logic_plugin_module/0]).
+
+-define(GS_LOGIC_PLUGIN, (gs_logic_plugin_module())).
 
 %%%===================================================================
 %%% Plugin module names. Defined as functions instead of using it literally in code to prevent dialyzer warnings about
@@ -49,10 +51,6 @@
 -spec gs_logic_plugin_module() -> module().
 gs_logic_plugin_module() ->
     gs_logic_plugin.
-
--spec gs_protocol_plugin_module() -> module().
-gs_protocol_plugin_module() ->
-    gs_protocol_plugin.
 
 %%%===================================================================
 %%% API
