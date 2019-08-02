@@ -93,7 +93,7 @@ websocket_init(State) ->
     {stop, State} when
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
-    OutFrame :: cowboy_websocket:frame().
+    OutFrame :: cow_ws:frame().
 websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     #pre_handshake_state{
         http_auth = HttpAuth,
@@ -164,7 +164,7 @@ websocket_handle(Msg, State) ->
     {stop, State} when
     Info :: any(),
     State :: state(),
-    OutFrame :: cowboy_websocket:frame().
+    OutFrame :: cow_ws:frame().
 websocket_info(terminate, State) ->
     {stop, State};
 

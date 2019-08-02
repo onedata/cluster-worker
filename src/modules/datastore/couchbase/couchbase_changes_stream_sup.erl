@@ -40,7 +40,7 @@ start_link() ->
 %% Starts CouchBase changes stream worker.
 %% @end
 %%--------------------------------------------------------------------
--spec start_worker(couchbase_config:bucket(), datastore:scope(),
+-spec start_worker(couchbase_config:bucket(), datastore_doc:scope(),
     couchbase_changes:callback(), proplists:proplist(), [pid()]) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_worker(Bucket, Scope, Callback, Opts, LinkedProcesses) ->

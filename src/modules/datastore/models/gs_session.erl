@@ -27,7 +27,7 @@
 -type doc() :: datastore_doc:doc(record()).
 -type diff() :: datastore_doc:diff(record()).
 
--export_type([doc/0, diff/0]).
+-export_type([key/0, doc/0, diff/0]).
 
 -define(CTX, #{
     model => ?MODULE,

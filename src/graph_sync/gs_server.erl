@@ -38,7 +38,19 @@
 -export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
+% Functions returning plugin module names
+-export([gs_logic_plugin_module/0]).
 
+-define(GS_LOGIC_PLUGIN, (gs_logic_plugin_module())).
+
+%%%===================================================================
+%%% Plugin module names. Defined as functions instead of using it literally in code to prevent dialyzer warnings about
+%%  unknown module, since the module exists only in apps having cluster_worker as a dependency.
+%%%===================================================================
+
+-spec gs_logic_plugin_module() -> module().
+gs_logic_plugin_module() ->
+    gs_logic_plugin.
 
 %%%===================================================================
 %%% API

@@ -23,7 +23,7 @@
 % Identifier of a subscriber client
 -type subscriber() :: {gs_protocol:session_id(), {aai:auth(), gs_protocol:auth_hint()}}.
 % A map of subscribers per {Aspect, Scope} for an entity
--type subscribers() :: maps:map({gs_protocol:aspect(), gs_protocol:scope()}, ordsets:ordset(subscriber())).
+-type subscribers() :: #{{gs_protocol:aspect(), gs_protocol:scope()} => ordsets:ordset(subscriber())}.
 
 -export_type([subscriptions/0, subscriber/0, subscribers/0]).
 

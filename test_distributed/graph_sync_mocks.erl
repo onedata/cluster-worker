@@ -42,6 +42,8 @@
     translate_value/3
 ]).
 
+-define(GS_LOGIC_PLUGIN, (gs_server:gs_logic_plugin_module())).
+-define(GS_PROTOCOL_PLUGIN, (gs_protocol:gs_protocol_plugin_module())).
 
 mock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),

@@ -81,7 +81,7 @@ delete_design_doc(Connection, DesignName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec query(cberl:connection(), couchbase_driver:design(),
-    couchbase_driver:view(), [couchbase_dirver:view_opt()]) ->
+    couchbase_driver:view(), [couchbase_driver:view_opt()]) ->
     {ok, datastore_json:ejson()} | {error, term()}.
 query(Connection, DesignName, ViewName, Opts) ->
     Type = case proplists:get_value(spatial, Opts, false) of
@@ -141,7 +141,7 @@ parse_design_doc_response(_Method, {error, Reason}) ->
 %% Converts view arguments to query parameters.
 %% @end
 %%--------------------------------------------------------------------
--spec get_query_params([couchbase_dirver:view_opt()]) -> binary().
+-spec get_query_params([couchbase_driver:view_opt()]) -> binary().
 get_query_params([]) ->
     <<>>;
 get_query_params([Opt | Opts]) ->
@@ -155,7 +155,7 @@ get_query_params([Opt | Opts]) ->
 %% Converts view argument to query parameter.
 %% @end
 %%--------------------------------------------------------------------
--spec get_query_param(couchbase_dirver:view_opt()) -> binary().
+-spec get_query_param(couchbase_driver:view_opt()) -> binary().
 get_query_param({descending, true}) -> <<"descending=true">>;
 get_query_param({descending, false}) -> <<"descending=false">>;
 get_query_param({endkey, Key}) -> <<"endkey=", (json_utils:encode(Key))/binary>>;

@@ -65,7 +65,7 @@
 -type message_id() :: binary().
 -type protocol_version() :: non_neg_integer().
 % Graph Sync session id, used as reference to store subscriptions data
--type session_id() :: gs_session:id().
+-type session_id() :: gs_session:key().
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
 -type handshake_attributes() :: undefined | json_map().
@@ -175,7 +175,8 @@ graph_update_result() | graph_delete_result().
     graph_delete_result/0,
     graph_update_result/0,
     graph_request_result/0,
-    json_map/0
+    json_map/0,
+    client_auth/0
 ]).
 
 %% API
@@ -190,6 +191,20 @@ graph_update_result() | graph_delete_result().
 ]).
 -export([string_to_gri/1, gri_to_string/1]).
 -export([undefined_to_null/1, null_to_undefined/1]).
+
+% Functions returning plugin module names
+-export([gs_protocol_plugin_module/0]).
+
+-define(GS_PROTOCOL_PLUGIN, (gs_protocol_plugin_module())).
+
+%%%===================================================================
+%%% Plugin module names. Defined as functions instead of using it literally in code to prevent dialyzer warnings about
+%%  unknown module, since the module exists only in apps having cluster_worker as a dependency.
+%%%===================================================================
+
+-spec gs_protocol_plugin_module() -> module().
+gs_protocol_plugin_module() ->
+    gs_protocol_plugin.
 
 %%%===================================================================
 %%% API

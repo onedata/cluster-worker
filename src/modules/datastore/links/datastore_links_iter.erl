@@ -41,22 +41,22 @@
 -type batch() :: undefined | datastore_doc_batch:batch().
 -type tree_id() :: datastore_links:tree_id().
 -type tree_ids() :: datastore_links:tree_ids().
--type forest() :: datastore_links:forest().
 -type link() :: datastore_links:link().
 -type link_name() :: datastore_links:link_name().
 -type tree_it() :: #tree_it{}.
 -opaque forest_it() :: #forest_it{}.
 -type fold_fun() :: datastore:fold_fun(link()).
 -type fold_acc() :: any().
--type fold_opt() :: {prev_link_name, link_name()} |
-    {offset, integer()} |
-    {size, non_neg_integer()} |
-    {token, token()} |
+-type fold_opts() :: #{
+    prev_link_name => link_name(),
+    offset => integer(),
+    size => non_neg_integer(),
+    token => token(),
     % Datastore internal options
-    {node_id, links_node:id()} |
-    {prev_tree_id, tree_id()} | % Warning - link must exist with this opt!
-    {node_prev_to_key, link_name()}. % To walk back with neg offset
--type fold_opts() :: maps:map([fold_opt()]).
+    node_id => links_node:id(),
+    prev_tree_id => tree_id(), % Warning - link must exist with this opt!
+    node_prev_to_key => link_name() % To walk back with neg offset
+}.
 -type token() :: #link_token{}.
 
 -export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0, token/0]).
@@ -291,7 +291,7 @@ get_from_tree(LinkName, TreeId, #forest_it{
 %% Initializes link forest fold state.
 %% @end
 %%--------------------------------------------------------------------
--spec init_forest_fold(forest(), fold_opts()) ->
+-spec init_forest_fold(forest_it(), fold_opts()) ->
     {ok | {error, term()}, forest_it()}.
 init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
     Ans = lists:foldl(fun

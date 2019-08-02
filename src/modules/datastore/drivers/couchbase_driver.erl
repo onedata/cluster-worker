@@ -56,8 +56,9 @@
                     {bbox, binary()} |
                     {start_range, binary()} |
                     {end_range, binary()}.
+-type db_host() :: list().
 
--export_type([ctx/0, key/0, value/0, item/0, design/0, view/0, view_opt/0]).
+-export_type([ctx/0, key/0, value/0, item/0, design/0, view/0, view_opt/0, db_host/0]).
 
 % below parameters are described in
 % https://docs.couchbase.com/server/4.1/developer-guide/views-operation.html#automated-index-updates
@@ -313,7 +314,7 @@ save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec query_view(ctx(), design(), view(), [view_opt()]) ->
-    {ok, datastore_json:ejson()} | {error, term()}.
+    {ok, term()} | {error, term()}.
 query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
     Mode = maps:get(pool_mode, Ctx, read),
     couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).
@@ -328,7 +329,7 @@ query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
 %% Returns view definition in EJSON format.
 %% @end
 %%-------------------------------------------------------------------
--spec view_definition(view(), binary(), binary() | undefined) -> datastore_json:ejson().
+-spec view_definition(view(), binary(), binary() | undefined) -> {view(), datastore_json:ejson()}.
 view_definition(ViewName, MapFunction, undefined) ->
     {ViewName, {[
         {<<"map">>, MapFunction}
