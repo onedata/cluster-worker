@@ -697,9 +697,9 @@ encode_decode_error() ->
         ?ERROR_GUI_PACKAGE_UNVERIFIED,
         ?ERROR_ALREADY_EXISTS,
         ?ERROR_POSIX(eacess),
-        ?ERROR_BAD_VALUE_AMBIGUOUS_ID(<<"indexName">>),
+        ?ERROR_BAD_VALUE_AMBIGUOUS_ID(<<"viewName">>),
         ?ERROR_SPACE_NOT_SUPPORTED_BY(<<"providerId">>),
-        ?ERROR_INDEX_NOT_EXISTS_ON(<<"providerId">>),
+        ?ERROR_VIEW_NOT_EXISTS_ON(<<"providerId">>),
         ?ERROR_TRANSFER_ALREADY_ENDED,
         ?ERROR_TRANSFER_NOT_ENDED
     ],

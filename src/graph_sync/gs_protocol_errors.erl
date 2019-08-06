@@ -382,9 +382,9 @@ error_to_json(_, ?ERROR_SPACE_NOT_SUPPORTED_BY(ProviderId)) ->
             <<"providerId">> => ProviderId
         }
     };
-error_to_json(_, ?ERROR_INDEX_NOT_EXISTS_ON(ProviderId)) ->
+error_to_json(_, ?ERROR_VIEW_NOT_EXISTS_ON(ProviderId)) ->
     #{
-        <<"id">> => <<"indexNotExistsOn">>,
+        <<"id">> => <<"viewNotExistsOn">>,
         <<"details">> => #{
             <<"providerId">> => ProviderId
         }
@@ -675,10 +675,10 @@ json_to_error(_, #{
     ?ERROR_SPACE_NOT_SUPPORTED_BY(ProviderId);
 
 json_to_error(_, #{
-    <<"id">> := <<"indexNotExistsOn">>,
+    <<"id">> := <<"viewNotExistsOn">>,
     <<"details">> := #{<<"providerId">> := ProviderId}
 }) ->
-    ?ERROR_INDEX_NOT_EXISTS_ON(ProviderId);
+    ?ERROR_VIEW_NOT_EXISTS_ON(ProviderId);
 
 json_to_error(_, #{<<"id">> := <<"transferAlreadyEnded">>}) ->
     ?ERROR_TRANSFER_ALREADY_ENDED;
