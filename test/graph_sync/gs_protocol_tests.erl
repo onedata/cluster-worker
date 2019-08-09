@@ -274,7 +274,7 @@ encode_decode_message() ->
             auth_override = undefined,
             request = #gs_req_handshake{
                 supported_versions = [123123, 34534, 123, 5],
-                auth = {macaroon, <<"macaroon">>, []},
+                auth = {token, <<"token-token">>},
                 session_id = <<"zxvcert245234234234234">>
             }
         },
@@ -284,14 +284,14 @@ encode_decode_message() ->
             auth_override = undefined,
             request = #gs_req_handshake{
                 supported_versions = [1],
-                auth = {macaroon, <<"macaroon">>, [<<"d1">>, <<"d2">>]},
+                auth = {token, <<"another-token">>},
                 session_id = <<"ccxvsdfsdfsdfsdf">>
             }
         },
         #gs_req{
             id = <<"mess7">>,
             subtype = rpc,
-            auth_override = {macaroon, <<"123sdfadsfq345r123">>, [<<"dfsghdsy456ergadfg">>]},
+            auth_override = {token, <<"third-token">>},
             request = #gs_req_rpc{
                 function = <<"f6">>,
                 args = #{<<"args6">> => 6}
@@ -643,13 +643,13 @@ encode_decode_error() ->
         ?ERROR_NOT_FOUND,
         ?ERROR_UNAUTHORIZED,
         ?ERROR_FORBIDDEN,
-        ?ERROR_BAD_MACAROON,
-        ?ERROR_MACAROON_INVALID,
-        ?ERROR_MACAROON_EXPIRED,
-        ?ERROR_MACAROON_TTL_TO_LONG(10202),
-        ?ERROR_BAD_AUDIENCE_TOKEN,
+        ?ERROR_BAD_TOKEN,
+        ?ERROR_TOKEN_INVALID,
+        ?ERROR_TOKEN_CAVEAT_UNVERIFIED(caveats:serialize(#cv_time{valid_until = 12323746234})),
+        ?ERROR_TOKEN_SUBJECT_INVALID,
         ?ERROR_TOKEN_AUDIENCE_FORBIDDEN,
         ?ERROR_TOKEN_SESSION_INVALID,
+        ?ERROR_BAD_AUDIENCE_TOKEN,
         ?ERROR_BAD_BASIC_CREDENTIALS,
         ?ERROR_MALFORMED_DATA,
         ?ERROR_MISSING_REQUIRED_VALUE(<<"spaceId">>),

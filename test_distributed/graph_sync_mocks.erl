@@ -88,11 +88,11 @@ unmock_callbacks(Config) ->
     test_utils:mock_unload([node()], ?GS_LOGIC_PLUGIN).
 
 
-verify_handshake_auth({macaroon, ?USER_1_MACAROON, []}) ->
+verify_handshake_auth({token, ?USER_1_TOKEN}) ->
     {ok, ?USER(?USER_1)};
-verify_handshake_auth({macaroon, ?USER_2_MACAROON, []}) ->
+verify_handshake_auth({token, ?USER_2_TOKEN}) ->
     {ok, ?USER(?USER_2)};
-verify_handshake_auth({macaroon, ?PROVIDER_1_MACAROON, []}) ->
+verify_handshake_auth({token, ?PROVIDER_1_TOKEN}) ->
     {ok, ?PROVIDER(?PROVIDER_1)};
 verify_handshake_auth(undefined) ->
     {ok, ?NOBODY};
@@ -100,12 +100,14 @@ verify_handshake_auth(_) ->
     ?ERROR_UNAUTHORIZED.
 
 
-verify_auth_override(_Auth, {macaroon, ?USER_1_MACAROON, []}) ->
+verify_auth_override(_Auth, {token, ?USER_1_TOKEN}) ->
     {ok, ?USER(?USER_1)};
-verify_auth_override(_Auth, {macaroon, ?USER_2_MACAROON, []}) ->
+verify_auth_override(_Auth, {token, ?USER_2_TOKEN}) ->
     {ok, ?USER(?USER_2)};
-verify_auth_override(_Auth, {macaroon, ?PROVIDER_1_MACAROON, []}) ->
+verify_auth_override(_Auth, {token, ?PROVIDER_1_TOKEN}) ->
     {ok, ?PROVIDER(?PROVIDER_1)};
+verify_auth_override(_Auth, nobody) ->
+    {ok, ?NOBODY};
 verify_auth_override(_Auth, _) ->
     ?ERROR_UNAUTHORIZED.
 
