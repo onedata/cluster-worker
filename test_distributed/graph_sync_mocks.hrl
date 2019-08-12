@@ -20,9 +20,6 @@
 -define(GS_LISTENER_ID, "gs_listener_id").
 -define(GS_HTTPS_ACCEPTORS, 100).
 
-% Current protocol version
--define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
-
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
 
 -define(USER_1, <<"user1Id">>).

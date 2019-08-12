@@ -18,7 +18,6 @@
 -include_lib("ctool/include/test/test_utils.hrl").
 
 -define(NO_OP_FUN, fun(_) -> ok end).
--define(SUPPORTED_PROTO_VERSIONS, [1, 2]).
 
 %% API
 -export([spawn_clients/3, spawn_clients/4, spawn_clients/5, spawn_clients/6]).

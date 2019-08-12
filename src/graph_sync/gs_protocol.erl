@@ -216,7 +216,7 @@ gs_protocol_plugin_module() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec supported_versions() -> [protocol_version()].
-supported_versions() -> [3, 4].
+supported_versions() -> ?SUPPORTED_PROTO_VERSIONS.
 
 
 %%--------------------------------------------------------------------
