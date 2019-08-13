@@ -16,6 +16,9 @@
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
 
+% Protocol versions currently supported by this software
+-define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
+
 % Graph Resource Identifier - a record identifying a certain resource in the
 % graph.
 -record(gri, {

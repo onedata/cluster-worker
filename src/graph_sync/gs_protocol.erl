@@ -79,7 +79,7 @@
 % Special 'nobody' auth can be used to indicate that the client is requesting
 % public access (typically works the same as not providing any auth, but might
 % be subject to server's implementation).
--type client_auth() :: undefined | nobody | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+-type client_auth() :: undefined | nobody | {token, tokens:serialized()}.
 
 % Used to override the client authorization established on connection level, per
 % request. Can be used for example by providers to authorize a certain request
@@ -216,7 +216,7 @@ gs_protocol_plugin_module() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec supported_versions() -> [protocol_version()].
-supported_versions() -> [1, 2, 3].
+supported_versions() -> ?SUPPORTED_PROTO_VERSIONS.
 
 
 %%--------------------------------------------------------------------
@@ -535,12 +535,6 @@ encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
 -spec encode_response_graph(protocol_version(), graph_resp()) -> json_map().
 encode_response_graph(_, #gs_resp_graph{data_format = undefined}) ->
     undefined;
-encode_response_graph(1, #gs_resp_graph{data_format = Format, data = Result}) ->
-    case Format of
-        value -> #{<<"data">> => undefined_to_null(Result)};
-        resource -> Result
-    end;
-% Covers all versions since 2
 encode_response_graph(_, #gs_resp_graph{data_format = Format, data = Result}) ->
     FormatStr = data_format_to_str(Format),
     #{
@@ -732,24 +726,6 @@ decode_response_rpc(_, DataJSON) ->
 
 
 -spec decode_response_graph(protocol_version(), json_map()) -> graph_resp().
-decode_response_graph(1, DataJSON) ->
-    case DataJSON of
-        null ->
-            #gs_resp_graph{};
-        Map when map_size(Map) == 0 ->
-            #gs_resp_graph{};
-        #{<<"data">> := Data} ->
-            #gs_resp_graph{
-                data_format = value,
-                data = Data
-            };
-        #{<<"gri">> := _} ->
-            #gs_resp_graph{
-                data_format = resource,
-                data = DataJSON
-            }
-    end;
-% Covers all versions since 2
 decode_response_graph(_, null) ->
     #gs_resp_graph{};
 decode_response_graph(_, Map) when map_size(Map) == 0 ->
@@ -845,8 +821,11 @@ json_to_client_auth(null) ->
     undefined;
 json_to_client_auth(<<"nobody">>) ->
     nobody;
-json_to_client_auth(#{<<"macaroon">> := Macaroon} = Json) ->
-    {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
+json_to_client_auth(#{<<"token">> := Token}) ->
+    {token, Token};
+%% @todo VFS-5554 Deprecated, kept for backward compatibility
+json_to_client_auth(#{<<"macaroon">> := Token}) ->
+    {token, Token}.
 
 
 -spec client_auth_to_json(client_auth()) -> null | json_map() | binary().
@@ -854,9 +833,10 @@ client_auth_to_json(undefined) ->
     null;
 client_auth_to_json(nobody) ->
     <<"nobody">>;
-client_auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
-    <<"macaroon">> => Macaroon,
-    <<"discharge-macaroons">> => DischargeMacaroons
+client_auth_to_json({token, Token}) -> #{
+    <<"token">> => Token,
+%% @todo VFS-5554 Deprecated, kept for backward compatibility
+    <<"macaroon">> => Token
 }.
 
 

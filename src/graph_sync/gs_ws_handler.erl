@@ -21,8 +21,6 @@
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
-    % @TODO DEPRECATED VFS-5436 - used when auth macaroons are sent in headers
-    http_auth :: gs_protocol:client_auth(),
     translator :: module()
 }).
 
@@ -65,7 +63,6 @@
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
     {cowboy_websocket, Req, #pre_handshake_state{
-        http_auth = parse_auth_from_headers(Req),
         translator = Translator
     }}.
 
@@ -96,13 +93,12 @@ websocket_init(State) ->
     OutFrame :: cow_ws:frame().
 websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     #pre_handshake_state{
-        http_auth = HttpAuth,
         translator = Translator
     } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(HttpAuth, self(), Translator, Request) of
+            case gs_server:handshake(self(), Translator, Request) of
                 {ok, Resp} ->
                     #gs_resp{
                         response = #gs_resp_handshake{
@@ -299,19 +295,4 @@ decode_body(ProtocolVersion, Data) ->
     catch
         _:_ ->
             ?ERROR_BAD_MESSAGE(Data)
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Looks for the "Macaroon" header and return the macaroon GS auth, or undefined
-%% if the header is not found.
-%% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
-%% @end
-%%--------------------------------------------------------------------
--spec parse_auth_from_headers(cowboy_req:req()) -> gs_protocol:client_auth().
-parse_auth_from_headers(Req) ->
-    case cowboy_req:header(<<"macaroon">>, Req) of
-        undefined -> undefined;
-        Macaroon -> {macaroon, Macaroon, []}
     end.

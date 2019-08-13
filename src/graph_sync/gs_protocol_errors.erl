@@ -102,28 +102,25 @@ error_to_json(_, ?ERROR_POSIX(Errno)) ->
             <<"errno">> => Errno
         }
     };
-error_to_json(_, ?ERROR_BAD_MACAROON) ->
+
+error_to_json(_, ?ERROR_BAD_TOKEN) ->
     #{
-        <<"id">> => <<"badMacaroon">>
+        <<"id">> => <<"badToken">>
     };
-error_to_json(_, ?ERROR_MACAROON_INVALID) ->
+error_to_json(_, ?ERROR_TOKEN_INVALID) ->
     #{
-        <<"id">> => <<"macaroonInvalid">>
+        <<"id">> => <<"tokenInvalid">>
     };
-error_to_json(_, ?ERROR_MACAROON_EXPIRED) ->
+error_to_json(_, ?ERROR_TOKEN_CAVEAT_UNVERIFIED(Caveat)) ->
     #{
-        <<"id">> => <<"macaroonExpired">>
-    };
-error_to_json(_, ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl)) ->
-    #{
-        <<"id">> => <<"macaroonTtlTooLong">>,
+        <<"id">> => <<"tokenCaveatUnverified">>,
         <<"details">> => #{
-            <<"maxTtl">> => MaxTtl
+            <<"caveat">> => Caveat
         }
     };
-error_to_json(_, ?ERROR_BAD_AUDIENCE_TOKEN) ->
+error_to_json(_, ?ERROR_TOKEN_SUBJECT_INVALID) ->
     #{
-        <<"id">> => <<"badAudienceToken">>
+        <<"id">> => <<"tokenSubjectInvalid">>
     };
 error_to_json(_, ?ERROR_TOKEN_AUDIENCE_FORBIDDEN) ->
     #{
@@ -133,6 +130,11 @@ error_to_json(_, ?ERROR_TOKEN_SESSION_INVALID) ->
     #{
         <<"id">> => <<"tokenSessionInvalid">>
     };
+error_to_json(_, ?ERROR_BAD_AUDIENCE_TOKEN) ->
+    #{
+        <<"id">> => <<"badAudienceToken">>
+    };
+
 error_to_json(_, ?ERROR_MALFORMED_DATA) ->
     #{
         <<"id">> => <<"malformedData">>
@@ -512,27 +514,26 @@ json_to_error(_, #{
 }) ->
     ?ERROR_POSIX(binary_to_existing_atom(Errno, utf8));
 
-json_to_error(_, #{<<"id">> := <<"badMacaroon">>}) ->
-    ?ERROR_BAD_MACAROON;
+json_to_error(_, #{<<"id">> := <<"badToken">>}) ->
+    ?ERROR_BAD_TOKEN;
 
-json_to_error(_, #{<<"id">> := <<"macaroonInvalid">>}) ->
-    ?ERROR_MACAROON_INVALID;
+json_to_error(_, #{<<"id">> := <<"tokenInvalid">>}) ->
+    ?ERROR_TOKEN_INVALID;
 
-json_to_error(_, #{<<"id">> := <<"macaroonExpired">>}) ->
-    ?ERROR_MACAROON_EXPIRED;
+json_to_error(_, #{<<"id">> := <<"tokenCaveatUnverified">>, <<"details">> := #{<<"caveat">> := Caveat}}) ->
+    ?ERROR_TOKEN_CAVEAT_UNVERIFIED(Caveat);
 
-json_to_error(_, #{<<"id">> := <<"macaroonTtlTooLong">>,
-    <<"details">> := #{<<"maxTtl">> := MaxTtl}}) ->
-    ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl);
-
-json_to_error(_, #{<<"id">> := <<"badAudienceToken">>}) ->
-    ?ERROR_BAD_AUDIENCE_TOKEN;
+json_to_error(_, #{<<"id">> := <<"tokenSubjectInvalid">>}) ->
+    ?ERROR_TOKEN_SUBJECT_INVALID;
 
 json_to_error(_, #{<<"id">> := <<"tokenAudienceForbidden">>}) ->
     ?ERROR_TOKEN_AUDIENCE_FORBIDDEN;
 
 json_to_error(_, #{<<"id">> := <<"tokenSessionInvalid">>}) ->
     ?ERROR_TOKEN_SESSION_INVALID;
+
+json_to_error(_, #{<<"id">> := <<"badAudienceToken">>}) ->
+    ?ERROR_BAD_AUDIENCE_TOKEN;
 
 json_to_error(_, #{<<"id">> := <<"malformedData">>}) ->
     ?ERROR_MALFORMED_DATA;
