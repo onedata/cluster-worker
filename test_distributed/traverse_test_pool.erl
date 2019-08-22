@@ -25,6 +25,19 @@
 %%% Pool callbacks
 %%%===================================================================
 
+do_master_job({Master, Num, ID}, #{task_id := <<"sequential_traverse_test">>,
+    master_job_starter_callback := MasterJobCallback}) ->
+    MasterJobs = case Num < 1000 of
+        true ->
+            ok = MasterJobCallback([{Master, 10 * Num, ID}]),
+            [{Master, 10 * Num + 5, ID}];
+        _ ->
+            []
+    end,
+
+    SequentialSlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}],
+    SlaveJobs = [{Master, Num + 3, ID}],
+    {ok, #{sequential_slave_jobs => SequentialSlaveJobs, slave_jobs => SlaveJobs, async_master_jobs => MasterJobs}};
 do_master_job({Master, 100, ID}, _) when ID == 100 ; ID == 101 ->
     timer:sleep(500),
     Master ! {stop, node()},
@@ -105,8 +118,8 @@ get_expected() ->
         151,152,153,156,157,158,
         1001,1002,1003,1006,1007,1008,
         1051,1052,1053,1056,1057,1058,
-        1501,1502, 1503,1506,1507,1508,
-        1551,1552,1553,1556,1557, 1558],
+        1501,1502,1503,1506,1507,1508,
+        1551,1552,1553,1556,1557,1558],
 
     SJobsNum = length(Expected),
     MJobsNum = SJobsNum div 3,

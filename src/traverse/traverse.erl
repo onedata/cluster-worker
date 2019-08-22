@@ -97,11 +97,18 @@
 -type job_id() :: datastore:key().
 -type job_status() :: waiting | on_pool | ended | failed | canceled.
 -type master_job_map() :: #{
-    slave_jobs := [job()],
-    master_jobs := [job()],
+    slave_jobs => [job()],
+    sequential_slave_jobs => [job()],
+    master_jobs => [job()],
+    async_master_jobs => [job()],
     description => description(),
     finish_callback => job_finish_callback()
 }.
+-type master_job_extended_args() :: #{
+    task_id => id(),
+    master_job_starter_callback => master_job_starter_callback()
+}.
+-type master_job_starter_callback() :: fun(([job()]) -> ok).
 -type job_finish_callback() :: fun(() -> ok).
 % Types used to provide additional information to framework
 -type timestamp() :: non_neg_integer(). % Timestamp used to sort tasks (usually provided by callback function)
@@ -118,7 +125,7 @@
 -type ctx() :: traverse_task:ctx().
 
 -export_type([pool/0, id/0, group/0, job/0, job_id/0, job_status/0, environment_id/0, description/0, status/0,
-    timestamp/0, sync_info/0, master_job_map/0]).
+    master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
@@ -349,14 +356,19 @@ cancel(PoolName, TaskID, Environment) ->
     id(), job(), job_id()) -> ok.
 execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, Job, JobID) ->
     try
-        {ok, MasterAns} =  CallbackModule:do_master_job(Job, TaskID),
-        MasterJobsList = maps:get(master_jobs, MasterAns),
-        SlaveJobsList = maps:get(slave_jobs, MasterAns),
+        MasterJobCallback = prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule,
+            ExtendedCtx, Executor, TaskID),
+        MasterJobExtendedArgs = #{task_id => TaskID, master_job_starter_callback => MasterJobCallback},
+        {ok, MasterAns} =  CallbackModule:do_master_job(Job, MasterJobExtendedArgs),
+        MasterJobsList = maps:get(master_jobs, MasterAns, []),
+        AsyncMasterJobsList = maps:get(async_master_jobs, MasterAns, []),
+        SlaveJobsList = maps:get(slave_jobs, MasterAns, []),
+        SequentialSlaveJobsList = maps:get(sequential_slave_jobs, MasterAns, []),
 
         Description0 = maps:get(description, MasterAns, #{}),
         Description = Description0#{
-            slave_jobs_delegated => length(SlaveJobsList),
-            master_jobs_delegated => length(MasterJobsList)
+            slave_jobs_delegated => length(SlaveJobsList) + length(SequentialSlaveJobsList),
+            master_jobs_delegated => length(MasterJobsList) + length(AsyncMasterJobsList)
         },
         {ok, _, Canceled} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
 
@@ -365,13 +377,19 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 ok = traverse_task_list:delete_job_link(PoolName, CallbackModule, JobID),
                 {ok, _} = CallbackModule:update_job_progress(JobID, Job, PoolName, TaskID, canceled),
                 CancelDescription = #{
-                    slave_jobs_delegated => -1 * length(SlaveJobsList),
-                    master_jobs_delegated => -1 * length(MasterJobsList) - 1
+                    slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(SequentialSlaveJobsList)),
+                    master_jobs_delegated => -1 * (length(MasterJobsList) + length(AsyncMasterJobsList)) - 1
                 },
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
             _ ->
+                ok = run_on_master_pool(
+                    PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, AsyncMasterJobsList),
+
+                SequentialSlaveAnswers = sequential_run_on_slave_pool(
+                    PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, SequentialSlaveJobsList),
                 SlaveAnswers = run_on_slave_pool(
                     PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, SlaveJobsList),
+
                 Fun = maps:get(finish_callback, MasterAns, fun() -> ok end),
                 Fun(),
                 ok = run_on_master_pool(
@@ -380,7 +398,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 {SlavesOk, SlavesErrors} = lists:foldl(fun
                     ({ok, ok}, {OkSum, ErrorSum}) -> {OkSum + 1, ErrorSum};
                     (_, {OkSum, ErrorSum}) -> {OkSum, ErrorSum + 1}
-                end, {0, 0}, SlaveAnswers),
+                end, {0, 0}, SequentialSlaveAnswers ++ SlaveAnswers),
 
                 ok = traverse_task_list:delete_job_link(PoolName, CallbackModule, JobID),
                 {ok, _} = CallbackModule:update_job_progress(JobID, Job, PoolName, TaskID, ended),
@@ -455,6 +473,13 @@ run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs
             worker_pool:default_strategy(), ?CALL_TIMEOUT)
     end, Jobs).
 
+-spec sequential_run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), job()) -> [ok | error].
+sequential_run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
+    lists:map(fun(Job) ->
+        worker_pool:call(SlavePool, {?MODULE, execute_slave_job, [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]},
+            worker_pool:default_strategy(), ?CALL_TIMEOUT)
+    end, Jobs).
+
 -spec run_on_master_pool(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
     id(), [job() | {job(), job_id()}]) -> ok.
 run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, Jobs) ->
@@ -466,6 +491,25 @@ run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
             run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule,
                 ExtendedCtx, Executor, TaskID, Job, undefined)
     end, Jobs).
+
+-spec prepare_master_callback(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
+    id()) -> master_job_starter_callback().
+prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID) ->
+    fun(Jobs) ->
+        Description = #{
+            master_jobs_delegated => length(Jobs)
+        },
+        {ok, _, Canceled} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
+        case Canceled of
+            true ->
+                CancelDescription = #{
+                    master_jobs_delegated => -1 * length(Jobs)
+                },
+                {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
+            _ ->
+                run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, Jobs)
+        end
+    end.
 
 -spec run_on_master_pool(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
     id(), job(), job_id()) -> ok.

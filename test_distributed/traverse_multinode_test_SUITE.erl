@@ -117,6 +117,7 @@ traverse_restart_test(Config) ->
     Ans2 = traverse_test_pool:get_node_slave_ans(Worker2, false),
     Ans1Len = length(Ans1),
     Ans2Len = length(Ans2),
+    ct:print("ans1: ~p~n, ans2: ~p~n, expected: ~p", [Ans1, Ans2, Expected]),
 
     Ans1_1 = lists:sublist(Ans1, 1, Ans1Len - ExpLen),
     Ans1_2 = lists:sublist(Ans1, Ans1Len - ExpLen + 1, ExpLen),
