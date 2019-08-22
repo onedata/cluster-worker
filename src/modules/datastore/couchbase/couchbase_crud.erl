@@ -46,6 +46,8 @@
 }}.
 -type change_key_map() :: #{couchbase_driver:key() => couchbase_driver:key()}.
 
+-export_type([save_requests_map/0]).
+
 -define(OP_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     couchbase_operation_timeout, 60000)).
 -define(DUR_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -217,7 +219,7 @@ update_counter(Connection, Key, Delta, Default) ->
 %% Returns values count by scope.
 %% @end
 %%--------------------------------------------------------------------
--spec count_by_scope([save_request()]) -> #{datastore:scope() => pos_integer()}.
+-spec count_by_scope([save_request()]) -> #{datastore_doc:scope() => pos_integer()}.
 count_by_scope(Requests) ->
     lists:foldl(fun
         ({#{no_seq := true}, _Key, #document{}}, Scopes) ->
@@ -235,8 +237,8 @@ count_by_scope(Requests) ->
 %% Allocates sequence numbers by scopes.
 %% @end
 %%--------------------------------------------------------------------
--spec allocate_seq(cberl:connection(), #{datastore:scope() => pos_integer()}) ->
-    #{datastore:scope() => [pos_integer()]}.
+-spec allocate_seq(cberl:connection(), #{datastore_doc:scope() => pos_integer()}) ->
+    #{datastore_doc:scope() => [pos_integer()]}.
 allocate_seq(Connection, CountByScope) ->
     maps:fold(fun(Scope, Count, SeqByScope) ->
         Key = couchbase_changes:get_seq_key(Scope),
@@ -255,7 +257,7 @@ allocate_seq(Connection, CountByScope) ->
 %% Builds save requests map and fills sequence numbers in documents.
 %% @end
 %%--------------------------------------------------------------------
--spec assign_seq(#{datastore:scope() => [pos_integer()]},
+-spec assign_seq(#{datastore_doc:scope() => [pos_integer()]},
     [save_request()]) -> {save_requests_map(), [save_response()]}.
 assign_seq(SeqsByScope, Requests) ->
     {_, SaveRequests2, SaveResponses2} = lists:foldl(fun

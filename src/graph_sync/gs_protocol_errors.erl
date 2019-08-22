@@ -91,28 +91,36 @@ error_to_json(_, ?ERROR_FORBIDDEN) ->
     #{
         <<"id">> => <<"forbidden">>
     };
-error_to_json(_, ?ERROR_BAD_MACAROON) ->
+error_to_json(_, ?ERROR_ALREADY_EXISTS) ->
     #{
-        <<"id">> => <<"badMacaroon">>
+        <<"id">> => <<"alreadyExists">>
     };
-error_to_json(_, ?ERROR_MACAROON_INVALID) ->
+error_to_json(_, ?ERROR_POSIX(Errno)) ->
     #{
-        <<"id">> => <<"macaroonInvalid">>
-    };
-error_to_json(_, ?ERROR_MACAROON_EXPIRED) ->
-    #{
-        <<"id">> => <<"macaroonExpired">>
-    };
-error_to_json(_, ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl)) ->
-    #{
-        <<"id">> => <<"macaroonTtlTooLong">>,
+        <<"id">> => <<"posix">>,
         <<"details">> => #{
-            <<"maxTtl">> => MaxTtl
+            <<"errno">> => Errno
         }
     };
-error_to_json(_, ?ERROR_BAD_AUDIENCE_TOKEN) ->
+
+error_to_json(_, ?ERROR_BAD_TOKEN) ->
     #{
-        <<"id">> => <<"badAudienceToken">>
+        <<"id">> => <<"badToken">>
+    };
+error_to_json(_, ?ERROR_TOKEN_INVALID) ->
+    #{
+        <<"id">> => <<"tokenInvalid">>
+    };
+error_to_json(_, ?ERROR_TOKEN_CAVEAT_UNVERIFIED(Caveat)) ->
+    #{
+        <<"id">> => <<"tokenCaveatUnverified">>,
+        <<"details">> => #{
+            <<"caveat">> => Caveat
+        }
+    };
+error_to_json(_, ?ERROR_TOKEN_SUBJECT_INVALID) ->
+    #{
+        <<"id">> => <<"tokenSubjectInvalid">>
     };
 error_to_json(_, ?ERROR_TOKEN_AUDIENCE_FORBIDDEN) ->
     #{
@@ -122,6 +130,11 @@ error_to_json(_, ?ERROR_TOKEN_SESSION_INVALID) ->
     #{
         <<"id">> => <<"tokenSessionInvalid">>
     };
+error_to_json(_, ?ERROR_BAD_AUDIENCE_TOKEN) ->
+    #{
+        <<"id">> => <<"badAudienceToken">>
+    };
+
 error_to_json(_, ?ERROR_MALFORMED_DATA) ->
     #{
         <<"id">> => <<"malformedData">>
@@ -300,6 +313,13 @@ error_to_json(_, ?ERROR_BAD_VALUE_ID_NOT_FOUND(Key)) ->
             <<"key">> => Key
         }
     };
+error_to_json(_, ?ERROR_BAD_VALUE_AMBIGUOUS_ID(Key)) ->
+    #{
+        <<"id">> => <<"badValueAmbiguousId">>,
+        <<"details">> => #{
+            <<"key">> => Key
+        }
+    };
 error_to_json(_, ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(Key)) ->
     #{
         <<"id">> => <<"badValueIdentifierOccupied">>,
@@ -356,6 +376,28 @@ error_to_json(_, ?ERROR_BASIC_AUTH_DISABLED) ->
 error_to_json(_, ?ERROR_PROTECTED_GROUP) ->
     #{
         <<"id">> => <<"protectedGroup">>
+    };
+error_to_json(_, ?ERROR_SPACE_NOT_SUPPORTED_BY(ProviderId)) ->
+    #{
+        <<"id">> => <<"spaceNotSupportedBy">>,
+        <<"details">> => #{
+            <<"providerId">> => ProviderId
+        }
+    };
+error_to_json(_, ?ERROR_VIEW_NOT_EXISTS_ON(ProviderId)) ->
+    #{
+        <<"id">> => <<"viewNotExistsOn">>,
+        <<"details">> => #{
+            <<"providerId">> => ProviderId
+        }
+    };
+error_to_json(_, ?ERROR_TRANSFER_ALREADY_ENDED) ->
+    #{
+        <<"id">> => <<"transferAlreadyEnded">>
+    };
+error_to_json(_, ?ERROR_TRANSFER_NOT_ENDED) ->
+    #{
+        <<"id">> => <<"transferNotEnded">>
     };
 error_to_json(_, ?ERROR_RELATION_DOES_NOT_EXIST(ChType, ChId, ParType, ParId)) ->
     #{
@@ -463,27 +505,35 @@ json_to_error(_, #{<<"id">> := <<"unauthorized">>}) ->
 json_to_error(_, #{<<"id">> := <<"forbidden">>}) ->
     ?ERROR_FORBIDDEN;
 
-json_to_error(_, #{<<"id">> := <<"badMacaroon">>}) ->
-    ?ERROR_BAD_MACAROON;
+json_to_error(_, #{<<"id">> := <<"alreadyExists">>}) ->
+    ?ERROR_ALREADY_EXISTS;
 
-json_to_error(_, #{<<"id">> := <<"macaroonInvalid">>}) ->
-    ?ERROR_MACAROON_INVALID;
+json_to_error(_, #{
+    <<"id">> := <<"posix">>,
+    <<"details">> := #{<<"errno">> := Errno}
+}) ->
+    ?ERROR_POSIX(binary_to_existing_atom(Errno, utf8));
 
-json_to_error(_, #{<<"id">> := <<"macaroonExpired">>}) ->
-    ?ERROR_MACAROON_EXPIRED;
+json_to_error(_, #{<<"id">> := <<"badToken">>}) ->
+    ?ERROR_BAD_TOKEN;
 
-json_to_error(_, #{<<"id">> := <<"macaroonTtlTooLong">>,
-    <<"details">> := #{<<"maxTtl">> := MaxTtl}}) ->
-    ?ERROR_MACAROON_TTL_TO_LONG(MaxTtl);
+json_to_error(_, #{<<"id">> := <<"tokenInvalid">>}) ->
+    ?ERROR_TOKEN_INVALID;
 
-json_to_error(_, #{<<"id">> := <<"badAudienceToken">>}) ->
-    ?ERROR_BAD_AUDIENCE_TOKEN;
+json_to_error(_, #{<<"id">> := <<"tokenCaveatUnverified">>, <<"details">> := #{<<"caveat">> := Caveat}}) ->
+    ?ERROR_TOKEN_CAVEAT_UNVERIFIED(Caveat);
+
+json_to_error(_, #{<<"id">> := <<"tokenSubjectInvalid">>}) ->
+    ?ERROR_TOKEN_SUBJECT_INVALID;
 
 json_to_error(_, #{<<"id">> := <<"tokenAudienceForbidden">>}) ->
     ?ERROR_TOKEN_AUDIENCE_FORBIDDEN;
 
 json_to_error(_, #{<<"id">> := <<"tokenSessionInvalid">>}) ->
     ?ERROR_TOKEN_SESSION_INVALID;
+
+json_to_error(_, #{<<"id">> := <<"badAudienceToken">>}) ->
+    ?ERROR_BAD_AUDIENCE_TOKEN;
 
 json_to_error(_, #{<<"id">> := <<"malformedData">>}) ->
     ?ERROR_MALFORMED_DATA;
@@ -574,6 +624,12 @@ json_to_error(_, #{<<"id">> := <<"badValueIdNotFound">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_ID_NOT_FOUND(Key);
 
+json_to_error(_, #{
+    <<"id">> := <<"badValueAmbiguousId">>,
+    <<"details">> := #{<<"key">> := Key}
+}) ->
+    ?ERROR_BAD_VALUE_AMBIGUOUS_ID(Key);
+
 json_to_error(_, #{<<"id">> := <<"badValueIdentifierOccupied">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_IDENTIFIER_OCCUPIED(Key);
@@ -612,6 +668,24 @@ json_to_error(_, #{<<"id">> := <<"basicAuthDisabled">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"protectedGroup">>}) ->
     ?ERROR_PROTECTED_GROUP;
+
+json_to_error(_, #{
+    <<"id">> := <<"spaceNotSupportedBy">>,
+    <<"details">> := #{<<"providerId">> := ProviderId}
+}) ->
+    ?ERROR_SPACE_NOT_SUPPORTED_BY(ProviderId);
+
+json_to_error(_, #{
+    <<"id">> := <<"viewNotExistsOn">>,
+    <<"details">> := #{<<"providerId">> := ProviderId}
+}) ->
+    ?ERROR_VIEW_NOT_EXISTS_ON(ProviderId);
+
+json_to_error(_, #{<<"id">> := <<"transferAlreadyEnded">>}) ->
+    ?ERROR_TRANSFER_ALREADY_ENDED;
+
+json_to_error(_, #{<<"id">> := <<"transferNotEnded">>}) ->
+    ?ERROR_TRANSFER_NOT_ENDED;
 
 json_to_error(_, #{<<"id">> := <<"relationDoesNotExist">>,
     <<"details">> := #{

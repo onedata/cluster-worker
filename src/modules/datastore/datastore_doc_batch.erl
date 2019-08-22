@@ -56,7 +56,7 @@
 -type cached_keys() :: #{key() => ctx()}.
 -opaque batch() :: #batch{}.
 
--export_type([batch/0]).
+-export_type([batch/0, cached_keys/0]).
 
 %%%===================================================================
 %%% API

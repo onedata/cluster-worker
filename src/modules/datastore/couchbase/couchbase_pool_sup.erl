@@ -130,7 +130,7 @@ init([]) ->
 %% Returns a worker child_spec for a CouchBase worker pool manager.
 %% @end
 %%--------------------------------------------------------------------
--spec worker_spec(couchbase_config:bucket(), couchbase_pool:type(),
+-spec worker_spec(couchbase_config:bucket(), couchbase_pool:mode(),
     couchbase_pool_worker:id(), [couchbase_driver:db_host()],
     cberl_nif:client()) -> supervisor:child_spec().
 worker_spec(Bucket, Mode, Id, DbHosts, Client) ->

@@ -52,7 +52,7 @@
 init_counters() ->
     TimeSpan = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_timeouts_time_span, ?EXOMETER_DEFAULT_TIME_SPAN),
-    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
 
     Counters = [
@@ -102,8 +102,8 @@ init_report() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec check_timeout([couchbase_crud:delete_response()]
-    | [couchbase_crud:get_response()] | [couchbase_crud:save_response()]
-    | [{ok, cberl:cas(), non_neg_integer()} | {error, term()}],
+| [couchbase_crud:get_response()] | [couchbase_crud:save_response()]
+| [{ok, cberl:cas(), non_neg_integer()} | {error, term()}],
     atom(), non_neg_integer()) -> ok | timeout.
 check_timeout(Responses, Name, Time) ->
     ?update_counter(?EXOMETER_CRUD_NAME(Name), Time),
@@ -155,7 +155,7 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
                 ok = ?update_counter(?EXOMETER_NAME(timeouts_history));
             _ ->
                 ok = exometer_utils:update_counter(?EXOMETER_NAME(times),
-                    round(lists:max(Times)/1000))
+                    round(lists:max(Times) / 1000))
         end,
 
         ok = exometer_utils:update_counter(?EXOMETER_NAME(sizes), maps:size(Requests)),
@@ -194,7 +194,8 @@ verify_batch_size_increase(Requests, Times, Timeouts) ->
     catch
         E1:E2 ->
             ?error_stacktrace("Error during reconfiguration of couchbase "
-            "batch size: ~p:~p", [E1, E2])
+            "batch size: ~p:~p", [E1, E2]),
+            ok
     end.
 
 %%%===================================================================

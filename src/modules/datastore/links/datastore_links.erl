@@ -71,8 +71,8 @@
 -type fold_acc() :: datastore_links_iter:fold_acc().
 -type fold_opts() :: datastore_links_iter:fold_opts().
 
--export_type([ctx/0, tree_id/0, tree_ids/0, forest_id/0]).
--export_type([link_name/0, link_target/0, link_rev/0, link/0]).
+-export_type([ctx/0, tree_id/0, tree_ids/0, tree/0, forest_id/0]).
+-export_type([link_name/0, link_target/0, link_rev/0, link/0, remove_pred/0]).
 -export_type([forest_it/0, fold_fun/0, fold_acc/0, fold_opts/0]).
 
 %%%===================================================================
@@ -93,7 +93,7 @@ get_forest_id(Key) ->
 %% Returns links mask pointer ID.
 %% @end
 %%--------------------------------------------------------------------
--spec get_mask_root_id(key()) -> link_mask_ptr:id().
+-spec get_mask_root_id(key()) -> key().
 get_mask_root_id(Key) ->
     datastore_utils:gen_key(<<"links_mask">>, Key).
 

@@ -125,7 +125,7 @@
 -type ctx() :: traverse_task:ctx().
 
 -export_type([pool/0, id/0, group/0, job/0, job_id/0, job_status/0, environment_id/0, description/0, status/0,
-    master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0]).
+    master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0, callback_module/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).

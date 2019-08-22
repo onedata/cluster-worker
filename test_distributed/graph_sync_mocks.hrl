@@ -20,16 +20,13 @@
 -define(GS_LISTENER_ID, "gs_listener_id").
 -define(GS_HTTPS_ACCEPTORS, 100).
 
-% Current protocol version
--define(SUPPORTED_PROTO_VERSIONS, [1, 2]).
-
 -define(GS_EXAMPLE_TRANSLATOR, gs_example_translator).
 
 -define(USER_1, <<"user1Id">>).
 -define(USER_2, <<"user2Id">>).
 
--define(USER_1_MACAROON, <<"user1Macaroon">>).
--define(USER_2_MACAROON, <<"user2Macaroon">>).
+-define(USER_1_TOKEN, <<"user1Token">>).
+-define(USER_2_TOKEN, <<"user2Token">>).
 
 -define(USER_DATA_WITHOUT_GRI(__UserId), case __UserId of
     ?USER_1 -> #{<<"name">> => <<"mockUser1Name">>};
@@ -46,7 +43,7 @@ end).
 
 -define(PROVIDER_1, <<"provider1Id">>).
 
--define(PROVIDER_1_MACAROON, <<"provider1macaroon">>).
+-define(PROVIDER_1_TOKEN, <<"provider1token">>).
 
 % Used for auto scope tests
 -define(HANDLE_SERVICE, <<"handleService">>).
@@ -70,6 +67,9 @@ end).
 
 -define(SHARE_DATA(ScopeBin), #{
     <<"scope">> => ScopeBin
+}).
+-define(SHARE_DATA_MATCHER(ScopeBin), #{
+    <<"scope">> := ScopeBin
 }).
 
 -endif.

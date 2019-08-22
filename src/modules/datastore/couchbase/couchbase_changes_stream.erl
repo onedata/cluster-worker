@@ -30,11 +30,11 @@
 
 -record(state, {
     bucket :: couchbase_config:bucket(),
-    scope :: datastore:scope(),
+    scope :: datastore_doc:scope(),
     callback :: couchbase_changes:callback(),
     since :: couchbase_changes:since(),
     until :: couchbase_changes:until(),
-    except_mutator :: datastore:mutator(),
+    except_mutator :: datastore_doc:mutator(),
     batch_size :: non_neg_integer(),
     interval :: non_neg_integer(),
     linked_processes :: [pid()]
@@ -53,7 +53,7 @@
 %% Starts CouchBase changes stream.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(couchbase_config:bucket(), datastore:scope(),
+-spec start_link(couchbase_config:bucket(), datastore_doc:scope(),
     couchbase_changes:callback(), proplists:proplist(), [pid()]) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope, Callback, Opts, LinkedProcesses) ->
@@ -73,7 +73,7 @@ stop_async(StreamPid) ->
 %% Gets seq_safe from memory or from db (if it is not found in memory).
 %% @end
 %%--------------------------------------------------------------------
--spec get_seq_safe(datastore:scope(), datastore_context:ctx()) -> non_neg_integer().
+-spec get_seq_safe(datastore_doc:scope(), couchbase_driver:ctx()) -> non_neg_integer().
 get_seq_safe(Scope, Ctx) ->
     case ets:lookup(?CHANGES_COUNTERS, Scope) of
         [{_, SeqSafe}] ->
@@ -264,7 +264,7 @@ get_changes(Since, Until, #state{} = State) ->
 %% included in the future changes).
 %% @end
 %%--------------------------------------------------------------------
--spec get_docs([couchbase_changes:change()], state()) -> [datastore:document()].
+-spec get_docs([couchbase_changes:change()], state()) -> [datastore:doc()].
 get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
     KeyRevisionsAnsSequences = lists:filtermap(fun(Change) ->
         {<<"id">>, Key} = lists:keyfind(<<"id">>, 1, Change),
@@ -291,7 +291,7 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
 %% Streams documents and schedules next update.
 %% @end
 %%--------------------------------------------------------------------
--spec stream_docs([datastore:document()], state()) -> reference().
+-spec stream_docs([datastore:doc()], state()) -> reference().
 stream_docs([], #state{interval = Interval}) ->
     erlang:send_after(Interval, self(), update);
 stream_docs(Docs, #state{callback = Callback}) ->

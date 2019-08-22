@@ -21,7 +21,7 @@
 -export([set_defaults/1, set_defaults/2]).
 
 -type model() :: datastore_model:model().
--type version() :: datastore_model:version().
+-type version() :: datastore_model:record_version().
 -type doc() :: datastore:doc().
 -type ctx() :: datastore:ctx().
 

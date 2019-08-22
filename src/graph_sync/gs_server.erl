@@ -34,11 +34,23 @@
 
 
 %% API
--export([handshake/4]).
+-export([handshake/3]).
 -export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
+% Functions returning plugin module names
+-export([gs_logic_plugin_module/0]).
 
+-define(GS_LOGIC_PLUGIN, (gs_logic_plugin_module())).
+
+%%%===================================================================
+%%% Plugin module names. Defined as functions instead of using it literally in code to prevent dialyzer warnings about
+%%  unknown module, since the module exists only in apps having cluster_worker as a dependency.
+%%%===================================================================
+
+-spec gs_logic_plugin_module() -> module().
+gs_logic_plugin_module() ->
+    gs_logic_plugin.
 
 %%%===================================================================
 %%% API
@@ -50,10 +62,10 @@
 %% Returns success or error handshake response depending on the outcome.
 %% @end
 %%--------------------------------------------------------------------
--spec handshake(gs_protocol:client_auth(), conn_ref(), translator(), gs_protocol:req_wrapper()) ->
+-spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper()) ->
     {ok, gs_protocol:resp_wrapper()} | {error, gs_protocol:resp_wrapper()}.
-handshake(HttpAuth, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req) ->
-    #gs_req_handshake{supported_versions = AuthVersions} = HReq,
+handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req) ->
+    #gs_req_handshake{supported_versions = AuthVersions, auth = ClientAuth} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
         false ->
@@ -61,11 +73,6 @@ handshake(HttpAuth, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} =
                 Req, ?ERROR_BAD_VERSION(ServerVersions))
             };
         {true, Version} ->
-            %% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
-            ClientAuth = case HttpAuth of
-                undefined -> HReq#gs_req_handshake.auth;
-                _ -> HttpAuth
-            end,
             case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth) of
                 ?ERROR_UNAUTHORIZED ->
                     {error, gs_protocol:generate_error_response(

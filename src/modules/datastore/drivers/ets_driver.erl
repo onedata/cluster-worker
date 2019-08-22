@@ -22,7 +22,7 @@
 -type ctx() :: #{table => table()}.
 -type key() :: datastore:key().
 -type doc() :: datastore:doc().
--type init_opt() :: {type, ets:type()} |
+-type init_opt() :: {type, set | ordered_set | bag | duplicate_bag} |
                     {read_concurrency, boolean()} |
                     {write_concurrency, boolean()}.
 
