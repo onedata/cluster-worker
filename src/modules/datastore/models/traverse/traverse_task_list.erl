@@ -30,8 +30,8 @@
 %% List API
 -export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_local_ongoing_jobs/2]).
 %% Modify API
--export([add_link/6, add_scheduled_link/7, add_job_link/3,
-    delete_link/6, delete_scheduled_link/7, delete_job_link/3]).
+-export([add_link/6, add_scheduled_link/6, add_job_link/3,
+    delete_link/6, delete_scheduled_link/6, delete_job_link/3]).
 
 % Forests for scheduled, ongoing and ended tasks
 -define(SCHEDULED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "SCHEDULED_")).
@@ -175,12 +175,12 @@ add_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 %% Adds link to main and group/environment_id scheduled trees of tasks.
 %% @end
 %%--------------------------------------------------------------------
--spec add_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
-    traverse:id(), traverse:timestamp(), traverse:group(), traverse:environment_id()) -> ok.
-add_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
-    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, EnvironmentID, fun(Key) ->
-        add_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp)
-    end).
+-spec add_scheduled_link(traverse:pool(), tree(), traverse:id(), traverse:timestamp(), traverse:group(),
+    traverse:environment_id()) -> ok.
+add_scheduled_link(Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
+    BasicKey = forest_key(Pool, scheduled),
+    add_link_with_timestamp(traverse_task:get_ctx(),
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID), Tree, ID, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -216,12 +216,12 @@ delete_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 %% Deletes link from main and group/environment_id scheduled trees of tasks.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_scheduled_link(traverse_task:ctx(), traverse:pool(), tree(),
-    traverse:id(), traverse:timestamp(), traverse:group(), traverse:environment_id()) -> ok.
-delete_scheduled_link(Ctx, Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
-    run_on_load_balancing_trees(forest_key(Pool, scheduled), GroupID, EnvironmentID, fun(Key) ->
-        delete_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp)
-    end).
+-spec delete_scheduled_link(traverse:pool(), tree(), traverse:id(), traverse:timestamp(), traverse:group(),
+    traverse:environment_id()) -> ok.
+delete_scheduled_link(Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
+    BasicKey = forest_key(Pool, scheduled),
+    delete_link_with_timestamp(traverse_task:get_ctx(),
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID), Tree, ID, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -311,11 +311,3 @@ prepare_list_ans([], Info) ->
 prepare_list_ans([{LastTarget, LastTree} | _] = Links, Info) ->
     Links2 = lists:map(fun({Target, _}) -> Target end, lists:reverse(Links)),
     {ok, Links2, Info#{prev_traverse => {LastTarget, LastTree}}}.
-
-
--spec run_on_load_balancing_trees(forest_key(), traverse:group(), traverse:environment_id(),
-    fun((forest_key()) -> ok)) -> ok.
-run_on_load_balancing_trees(Key, Group, EnvironmentID, Fun) ->
-    Fun(Key),
-    Fun(?LOAD_BALANCING_FOREST_KEY(Key, Group, EnvironmentID)),
-    ok.

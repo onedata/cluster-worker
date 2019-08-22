@@ -225,7 +225,7 @@ run(PoolName, TaskID, Job, Options) ->
                     {waiting, undefined, #{}}
             end;
         _ ->
-            {waiting, undefined, #{}}
+            {waiting, remote, #{}}
     end,
 
     {ok, JobID} = CallbackModule:update_job_progress(main_job, Job, PoolName, TaskID, JobStatus),
@@ -234,6 +234,8 @@ run(PoolName, TaskID, Job, Options) ->
 
     case Node of
         undefined ->
+            ok;
+        remote ->
             ok;
         _ ->
             ok = task_callback(CallbackModule, task_started, TaskID),
@@ -251,19 +253,23 @@ run(PoolName, TaskID, Job, Options) ->
 on_task_change(Task, Environment) ->
     case traverse_task:on_task_change(Task, Environment) of
         {remote_change, CallbackModule, MainJobID} ->
-            {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
-            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-            case traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment) of
-                ok ->
-                    ok;
-                {ok, remote_cancel, TaskID} ->
-                    task_callback(CallbackModule, on_cancel_init, TaskID),
+            case CallbackModule:get_job(MainJobID) of
+                {ok, Job, _, _} ->
+                    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+                    case traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment) of
+                        ok ->
+                            ok;
+                        {ok, remote_cancel, TaskID} ->
+                            task_callback(CallbackModule, on_cancel_init, TaskID),
+                            ok
+                    end;
+                {error, not_found} ->
                     ok
             end;
         {run, CallbackModule, MainJobID} ->
             case CallbackModule:get_job(MainJobID) of
                 {ok, Job, PoolName, TaskID} ->
-                    maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Environment, Job, MainJobID);
+                    maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Task, Environment, Job, MainJobID);
                 {error, not_found} ->
                     ok
             end;
@@ -287,7 +293,7 @@ on_job_change(Job, JobID, PoolName, TaskID, Environment) ->
                     {ok, CallbackModule, Executor, _} = traverse_task:get_execution_info(Task),
                     case Executor =:= Environment of
                         true ->
-                            maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Executor, Job, JobID);
+                            maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Task, Executor, Job, JobID);
                         _ ->
                             ok
                     end
@@ -485,47 +491,78 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, #{
             end,
 
             ok = traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskID),
-            check_task_list_and_run(PoolName, Executor);
+            check_task_list_and_run(PoolName, Executor, []);
         _ -> ok
     end.
 
--spec check_task_list_and_run(pool(), environment_id()) -> ok.
-check_task_list_and_run(PoolName, Executor) ->
+-spec check_task_list_and_run(pool(), environment_id(), [traverse:group()]) -> ok.
+check_task_list_and_run(PoolName, Executor, CheckedGroups) ->
     case traverse_tasks_scheduler:get_next_group(PoolName) of
         {error, no_groups} ->
-            ok = traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName);
+            ok = traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName),
+            case traverse_tasks_scheduler:get_next_group(PoolName) of
+                {error, no_groups} ->
+                    ok;
+                _ ->
+                    retry_run(PoolName, Executor, 0)
+            end;
         {ok, GroupID} ->
-            case traverse_task_list:get_first_scheduled_link(PoolName, GroupID, Executor) of
-                {ok, not_found} ->
-                    case deregister_group_and_check(PoolName, GroupID, Executor) of
+            case lists:member(GroupID, CheckedGroups) of
+                true ->
+                    ok = traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName),
+                    retry_run(PoolName, Executor, 10000);
+                false ->
+                    StartAns = case traverse_task_list:get_first_scheduled_link(PoolName, GroupID, Executor) of
+                        {ok, not_found} ->
+                            case deregister_group_and_check(PoolName, GroupID, Executor) of
+                                ok ->
+                                    start_interrupted;
+                                {abort, TaskID} ->
+                                    run_task(PoolName, TaskID, Executor)
+                            end;
+                        {ok, TaskID} ->
+                            run_task(PoolName, TaskID, Executor)
+                    end,
+
+                    case StartAns of
                         ok ->
-                            check_task_list_and_run(PoolName, Executor);
-                        {abort, TaskID} ->
-                            ok = run_task(PoolName, TaskID, Executor)
-                    end;
-                {ok, TaskID} ->
-                    ok = run_task(PoolName, TaskID, Executor)
+                            ok;
+                        start_interrupted ->
+                            check_task_list_and_run(PoolName, Executor, [GroupID | CheckedGroups])
+                    end
             end
     end.
 
--spec run_task(pool(), id(), environment_id()) -> ok.
+-spec run_task(pool(), id(), environment_id()) -> ok | start_interrupted.
 run_task(PoolName, TaskID, Executor) ->
     {ok, CallbackModule, _, MainJobID} = traverse_task:get_execution_info(PoolName, TaskID),
-    {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
-    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-    case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
-        ok ->
-            ok = task_callback(CallbackModule, task_started, TaskID),
-            ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
-        {error, start_aborted} ->
-            check_task_list_and_run(PoolName, Executor);
+    case  CallbackModule:get_job(MainJobID) of
+        {ok, Job, _, _} ->
+            ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+            case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
+                ok ->
+                    ok = task_callback(CallbackModule, task_started, TaskID),
+                    ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
+                        CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
+                {error, start_aborted} ->
+                    start_interrupted;
+                {error, not_found} ->
+                    start_interrupted
+            end;
         {error, not_found} ->
-            check_task_list_and_run(PoolName, Executor)
+            start_interrupted
     end.
 
--spec maybe_run_scheduled_task(pool(), callback_module(), id(), environment_id(), job(), job_id()) -> ok.
-maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Executor, Job, MainJobID) ->
+-spec retry_run(pool(), environment_id(), non_neg_integer()) -> ok.
+retry_run(PoolName, Executor, Delay) ->
+    spawn(fun() ->
+        timer:sleep(Delay),
+        check_task_list_and_run(PoolName, Executor, [])
+    end),
+    ok.
+
+-spec maybe_run_scheduled_task(pool(), callback_module(), id(), task(), environment_id(), job(), job_id()) -> ok.
+maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Task, Executor, Job, MainJobID) ->
     case traverse_tasks_scheduler:increment_ongoing_tasks_and_choose_node(PoolName) of
         {ok, Node} ->
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
@@ -536,7 +573,9 @@ maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Executor, Job, MainJo
                         ?SLAVE_POOL_NAME(PoolName), CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID]);
                 {error, start_aborted} ->
                     traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName)
-            end
+            end;
+        {error, limit_exceeded} ->
+            traverse_task:schedule_for_local_execution(PoolName, TaskID, Task)
     end.
 
 -spec deregister_group_and_check(pool(), group(), environment_id()) -> ok| {abort, traverse:id()}.
