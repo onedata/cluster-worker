@@ -35,7 +35,7 @@ do_master_job({Master, Num, ID}, #{task_id := <<"sequential_traverse_test">>,
             []
     end,
 
-    SequentialSlaveJobs = [{Master, Num + 1, ID}, {Master, Num + 2, ID}],
+    SequentialSlaveJobs = [{Master, Num + 1, ID}, [{Master, Num + 2, ID}]],
     SlaveJobs = [{Master, Num + 3, ID}],
     {ok, #{sequential_slave_jobs => SequentialSlaveJobs, slave_jobs => SlaveJobs, async_master_jobs => MasterJobs}};
 do_master_job({Master, 100, ID}, _) when ID == 100 ; ID == 101 ->

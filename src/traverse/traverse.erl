@@ -367,7 +367,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
 
         Description0 = maps:get(description, MasterAns, #{}),
         Description = Description0#{
-            slave_jobs_delegated => length(SlaveJobsList) + length(SequentialSlaveJobsList),
+            slave_jobs_delegated => length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList)),
             master_jobs_delegated => length(MasterJobsList) + length(AsyncMasterJobsList)
         },
         {ok, _, Canceled} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
@@ -377,7 +377,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 ok = traverse_task_list:delete_job_link(PoolName, CallbackModule, JobID),
                 {ok, _} = CallbackModule:update_job_progress(JobID, Job, PoolName, TaskID, canceled),
                 CancelDescription = #{
-                    slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(SequentialSlaveJobsList)),
+                    slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList))),
                     master_jobs_delegated => -1 * (length(MasterJobsList) + length(AsyncMasterJobsList)) - 1
                 },
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
@@ -466,19 +466,22 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
 %%% Internal functions
 %%%===================================================================
 
--spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), job()) -> [ok | error].
+-spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), [job()]) -> [ok | error].
 run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
     utils:pmap(fun(Job) ->
         worker_pool:call(SlavePool, {?MODULE, execute_slave_job, [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]},
             worker_pool:default_strategy(), ?CALL_TIMEOUT)
     end, Jobs).
 
--spec sequential_run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), job()) -> [ok | error].
+-spec sequential_run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), [job() | [job()]]) ->
+    [ok | error].
 sequential_run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
-    lists:map(fun(Job) ->
-        worker_pool:call(SlavePool, {?MODULE, execute_slave_job, [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]},
-            worker_pool:default_strategy(), ?CALL_TIMEOUT)
-    end, Jobs).
+    Ans = lists:map(fun
+        (List) when is_list(List) -> run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, List);
+        (Job) -> worker_pool:call(SlavePool, {?MODULE, execute_slave_job,
+            [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]}, worker_pool:default_strategy(), ?CALL_TIMEOUT)
+    end, Jobs),
+    lists:flatten(Ans).
 
 -spec run_on_master_pool(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
     id(), [job() | {job(), job_id()}]) -> ok.
