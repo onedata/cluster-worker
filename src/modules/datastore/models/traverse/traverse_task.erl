@@ -133,8 +133,8 @@ start(ExtendedCtx, Pool, CallbackModule, TaskID, NewDescription) ->
             group = GroupID
         }}} ->
             case Canceled of
-                true -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
-                false -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp)
+                false -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
+                true -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp)
             end,
 
             ok = traverse_task_list:delete_scheduled_link(Pool, Creator, TaskID, ScheduleTimestamp, GroupID, Executor),
@@ -175,12 +175,18 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskID) ->
         (#traverse_task{status = ongoing, canceled = true} = Task) ->
             {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
         (#traverse_task{status = canceling, canceled = true} = Task) ->
-            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}}
+            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
+        (#traverse_task{status = finished}) ->
+            {error, already_finished};
+        (#traverse_task{status = canceled}) ->
+            {error, already_finished}
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
         {ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, StartTimestamp);
+        {error, already_finished} ->
+            ok;
         Other ->
             Other
     end.

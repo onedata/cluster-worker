@@ -167,7 +167,7 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
     IdToCtx = repair_ongoing_tasks(PoolName, Executor),
 
     lists:foreach(fun(CallbackModule) ->
-        {ok, JobIDs} = traverse_task_list:list_local_ongoing_jobs(PoolName, CallbackModule),
+        {ok, JobIDs} = traverse_task_list:list_local_jobs(PoolName, CallbackModule),
 
         lists:foreach(fun(JobID) ->
             {ok, Job, _, TaskID} = CallbackModule:get_job(JobID),
@@ -466,20 +466,20 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
 %%% Internal functions
 %%%===================================================================
 
--spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), [job()]) -> [ok | error].
-run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
+-spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), job() | [job()]) -> [ok | error].
+run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) when is_list(Jobs) ->
     utils:pmap(fun(Job) ->
         worker_pool:call(SlavePool, {?MODULE, execute_slave_job, [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]},
             worker_pool:default_strategy(), ?CALL_TIMEOUT)
-    end, Jobs).
+    end, Jobs);
+run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Job) ->
+    run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, [Job]).
 
 -spec sequential_run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), [job() | [job()]]) ->
     [ok | error].
 sequential_run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
-    Ans = lists:map(fun
-        (List) when is_list(List) -> run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, List);
-        (Job) -> worker_pool:call(SlavePool, {?MODULE, execute_slave_job,
-            [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]}, worker_pool:default_strategy(), ?CALL_TIMEOUT)
+    Ans = lists:map(fun(ParallelJobs) ->
+        run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, ParallelJobs)
     end, Jobs),
     lists:flatten(Ans).
 
@@ -551,6 +551,7 @@ check_task_list_and_run(PoolName, Executor, CheckedGroups) ->
                 {error, no_groups} ->
                     ok;
                 _ ->
+                    % Race with task starting
                     retry_run(PoolName, Executor, 0)
             end;
         {ok, GroupID} ->

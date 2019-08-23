@@ -42,7 +42,7 @@ do_master_job({Master, 100, ID}, _) when ID == 100 ; ID == 101 ->
     timer:sleep(500),
     Master ! {stop, node()},
     timer:sleep(500),
-    do_master_job_helper({Master, 100, 100});
+    do_master_job_helper({Master, 100, ID});
 do_master_job({Master, Num, ID}, _) ->
     do_master_job_helper({Master, Num, ID}).
 
@@ -107,7 +107,7 @@ get_node_slave_ans(Node, AddID) ->
                 _ -> [Num | get_node_slave_ans(Node, AddID)]
             end
     after
-        10000 ->
+        15000 ->
             []
     end.
 

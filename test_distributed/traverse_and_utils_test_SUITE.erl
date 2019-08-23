@@ -381,6 +381,7 @@ end_per_testcase(Case, Config) when
     end;
 end_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
+    timer:sleep(2000), % Allow pool processes to finish jobs
     ?assertEqual(ok, rpc:call(Worker, traverse, stop_pool, [?POOL])).
 
 %%%===================================================================
