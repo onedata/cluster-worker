@@ -64,9 +64,11 @@ task_finished(_) ->
     ok.
 
 update_job_progress(ID0, Job, _, TaskID, waiting) when ID0 =:= undefined ; ID0 =:= main_job ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
     ID = list_to_binary(ref_to_list(make_ref())),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List]),
+    critical_section:run(test_job, fun() ->
+        List = application:get_env(?CLUSTER_WORKER_APP_NAME, test_job, []),
+        application:set_env(?CLUSTER_WORKER_APP_NAME, test_job, [{ID, {Job, TaskID}} | List])
+    end),
     {ok, ID};
 update_job_progress(ID0, Job, _, TaskID, on_pool) when ID0 =:= undefined ; ID0 =:= main_job ->
     ID = list_to_binary(ref_to_list(make_ref())),
@@ -76,19 +78,23 @@ update_job_progress(ID, Job, _, TaskID, on_pool) ->
     save_started_job(ID, Job, TaskID),
     {ok, ID};
 update_job_progress(ID, _Job, _, _TaskID, Status) when Status =:= ended ; Status =:= canceled ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List)),
+    critical_section:run(test_job, fun() ->
+        List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+        application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, proplists:delete(ID, List))
+    end),
     {ok, ID}.
 
 save_started_job(ID, Job, TaskID) ->
-    List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, [{ID, {Job, TaskID}} | proplists:delete(ID, List)]).
+    critical_section:run(test_job, fun() ->
+        List = application:get_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+        application:set_env(?CLUSTER_WORKER_APP_NAME, ongoing_job, [{ID, {Job, TaskID}} | proplists:delete(ID, List)])
+    end).
 
 get_job(ID) ->
     Jobs = lists:foldl(fun(Node, Acc) ->
         Acc ++ rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]) ++
             rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
-                       end, [], consistent_hashing:get_all_nodes()),
+    end, [], consistent_hashing:get_all_nodes()),
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
     {ok, Job, ?POOL, TaskID}.
 

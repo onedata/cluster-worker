@@ -78,7 +78,7 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
 
     lists:foreach(fun(Num) ->
         ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-            rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]))
+            rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]), 2)
     end, lists:seq(1, RunsNum)),
     ok.
 
@@ -122,13 +122,13 @@ traverse_restart_test(Config) ->
     Ans2Len = length(Ans2),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>])),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>]), 2),
 
     case Ans1Len of
         _ when Ans1Len >= 3 * ExpLen ->
