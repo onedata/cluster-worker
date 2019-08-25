@@ -114,7 +114,8 @@ start(ExtendedCtx, Pool, CallbackModule, TaskID, NewDescription) ->
             {ok, Task#traverse_task{
                 status = ongoing,
                 node = Node,
-                description = NewDescription
+                description = NewDescription,
+                start_time = Timestamp
             }};
         (#traverse_task{status = scheduled, canceled = true} = Task) ->
             {ok, Task#traverse_task{
