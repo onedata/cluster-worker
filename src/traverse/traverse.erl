@@ -350,6 +350,10 @@ cancel(PoolName, TaskID, Environment) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Executes master job using function provided by callback module. To be executed by worker pool process.
+%% Master job is provided with function to enqueue next master jobs during the callback execution if needed.
+%% After callback execution, async_master_jobs from master job answer are enqueued. Afterwards, sequential_slave_jobs
+%% and next slave_jobs are executed on slave pool and the process awaits for their finish. At the end, master_jobs
+%% are enqueued and finish_callback is executed.
 %% @end
 %%--------------------------------------------------------------------
 -spec execute_master_job(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
