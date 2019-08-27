@@ -17,6 +17,7 @@
 
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0, listeners/0, modules_with_args/0]).
+-export([upgrade_cluster/1]).
 -export([before_init/1, on_cluster_initialized/1, after_init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
@@ -65,6 +66,15 @@ db_nodes() ->
 -spec renamed_models() -> #{{record_version(), model()} => model()}.
 renamed_models() ->
     #{}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Maps old model name to new one.
+%% @end
+%%--------------------------------------------------------------------
+-spec upgrade_cluster(integer()) -> {ok, integer()}.
+upgrade_cluster(CurrentGeneration) ->
+    {ok, CurrentGeneration + 1}.
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -14,7 +14,7 @@
 -define(NODE_MANAGER_HRL, 1).
 
 %% This record is used by node_manager (it contains its state).
-%% It hold the status of connection to cluster manager.
+%% It holds the status of connection to cluster manager.
 -record(state, {
   cm_con_status = not_connected :: not_connected | connected | registered,
   initialized = {false, 0} :: true | {false, TriesNum :: non_neg_integer()},
