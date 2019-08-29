@@ -17,8 +17,8 @@
 
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0, listeners/0, modules_with_args/0]).
+-export([before_init/1, after_init/1]).
 -export([upgrade_cluster/1]).
--export([before_init/1, on_cluster_initialized/1, after_init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
@@ -69,15 +69,6 @@ renamed_models() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Maps old model name to new one.
-%% @end
-%%--------------------------------------------------------------------
--spec upgrade_cluster(integer()) -> {ok, integer()}.
-upgrade_cluster(CurrentGeneration) ->
-    {ok, CurrentGeneration + 1}.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% List of listeners to be loaded by node_manager.
 %% @end
 %%--------------------------------------------------------------------
@@ -100,6 +91,7 @@ modules_with_args() -> [].
 %% This callback is executed when node manager starts. At time
 %% of invocation, node_manager is not set init'ed yet. Use to inject
 %% custom initialisation.
+%% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
 -spec before_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
@@ -108,26 +100,26 @@ before_init([]) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% This callback is executed when the cluster has been initialized, i.e. all
-%% nodes have connected to cluster manager.
-%% @end
-%%--------------------------------------------------------------------
--spec on_cluster_initialized(Nodes :: [node()]) ->
-    Result :: ok | {error, Reason :: term()}.
-on_cluster_initialized(_Nodes) ->
-    ok.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% This callback is executed when cluster has finished to initialize
 %% (nagios has reported healthy status).
 %% Use to run custom code required for application initialization that might
 %% need working services (e.g. database).
+%% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
 -spec after_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
 after_init([]) ->
     ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Upgrades cluster to newer generation. Should return new current generation.
+%% This callback is executed only on one cluster node.
+%% @end
+%%--------------------------------------------------------------------
+-spec upgrade_cluster(integer()) -> {ok, integer()}.
+upgrade_cluster(CurrentGeneration) ->
+    {ok, CurrentGeneration + 1}.
 
 %%--------------------------------------------------------------------
 %% @private
