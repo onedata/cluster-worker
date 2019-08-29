@@ -414,12 +414,12 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
             maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, NewDescription, Canceled2)
         catch
             E2:R2 ->
-                ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
+                ?error_stacktrace("Checking finish of job ~s of task ~p (module ~p) error ~p:~p",
                     [to_string(CallbackModule, Job), TaskID, CallbackModule, E2, R2])
         end
     catch
         E1:R1 ->
-            ?error_stacktrace("Master job ~p of task ~p (module ~p) error ~p:~p",
+            ?error_stacktrace("Master job ~s of task ~p (module ~p) error ~w:~w",
                 [to_string(CallbackModule, Job), TaskID, CallbackModule, E1, R1]),
             ErrorDescription = #{
                 master_jobs_failed => 1
@@ -434,7 +434,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, ErrorDescription2, Canceled3)
             catch
                 E3:R3 ->
-                    ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
+                    ?error_stacktrace("Checking finish of job ~s of task ~p (module ~p) error ~p:~p",
                         [to_string(CallbackModule, Job), TaskID, CallbackModule, E3, R3])
             end
     end,
@@ -457,8 +457,8 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
         end
     catch
         E1:E2 ->
-            ?error_stacktrace("Slave job ~p of task ~p (module ~p) error ~p:~p",
-                [to_string(CallbackModule, Job), TaskID, CallbackModule, E1, E2]),
+            ?error_stacktrace("Slave job ~s of task ~p (module ~p) error ~p:~p",
+                [to_string(CallbackModule, Job), TaskID, CallbackModule]),
             error
     end.
 
