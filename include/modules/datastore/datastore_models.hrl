@@ -77,7 +77,8 @@
     canceled = false :: boolean(),
     node :: undefined | node(),
     status = scheduled :: traverse:status(),
-    description = #{} :: traverse:description()
+    description = #{} :: traverse:description(),
+    addititional_data = #{} :: traverse:addititional_data()
 }).
 
 -record(traverse_tasks_scheduler, {

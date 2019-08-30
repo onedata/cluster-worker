@@ -83,6 +83,7 @@
                                                 % master_jobs_done, slave_jobs_failed, master_jobs_failed;
                                                 % the user can add own counters returning map with value upgrade from
                                                 % job (see traverse_behaviour.erl)
+-type addititional_data() :: #{binary() => binary()}.
 -type status() :: atom().   % framework uses statuses: scheduled, ongoing, finished and canceled but user can set
                             % any intermediary status using traverse_task:update_status function
 -type group() :: binary(). % group used for load balancing (see traverse_tasks_scheduler.erl)
@@ -90,7 +91,8 @@
     executor => environment_id(),
     creator => environment_id(),
     callback_module => callback_module(),
-    group_id => group()
+    group_id => group(),
+    addititional_data => addititional_data()
 }.
 % Basic types for jobs management
 -type job() :: term().
@@ -125,7 +127,7 @@
 -type ctx() :: traverse_task:ctx().
 
 -export_type([pool/0, id/0, task/0, group/0, job/0, job_id/0, job_status/0, environment_id/0, description/0, status/0,
-    master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0, callback_module/0]).
+    addititional_data/0, master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0, callback_module/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
@@ -221,6 +223,7 @@ run(PoolName, TaskID, Job, Options) ->
     Creator = maps:get(creator, Options, Executor),
     CallbackModule = maps:get(callback_module, Options, binary_to_atom(PoolName, utf8)),
     TaskGroup = maps:get(group_id, Options, ?DEFAULT_GROUP),
+    AdditionalData = maps:get(addititional_data, Options, #{}),
     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
 
     {JobStatus, Node, Description} = case Creator =:= Executor of
@@ -237,7 +240,7 @@ run(PoolName, TaskID, Job, Options) ->
 
     {ok, JobID} = CallbackModule:update_job_progress(main_job, Job, PoolName, TaskID, JobStatus),
     ok = traverse_task:create(ExtendedCtx, PoolName, CallbackModule, TaskID, Creator, Executor,
-        TaskGroup, JobID, Node, Description),
+        TaskGroup, JobID, Node, Description, AdditionalData),
 
     case Node of
         undefined ->
