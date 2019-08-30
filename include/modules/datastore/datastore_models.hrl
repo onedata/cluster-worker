@@ -78,7 +78,7 @@
     node :: undefined | node(),
     status = scheduled :: traverse:status(),
     description = #{} :: traverse:description(),
-    addititional_data = #{} :: traverse:addititional_data()
+    additional_data = #{} :: traverse:additional_data()
 }).
 
 -record(traverse_tasks_scheduler, {

@@ -22,7 +22,7 @@
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/3,
     get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1,
-    get_addititional_data/1, get_addititional_data/2, update_addititional_data/4]).
+    get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1, resolve_conflict/3]).
@@ -56,7 +56,7 @@
 %%--------------------------------------------------------------------
 -spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(),
     traverse:environment_id(), traverse:group(), traverse:job_id(), remote | undefined | node(),
-    traverse:description(), traverse:addititional_data()) -> ok.
+    traverse:description(), traverse:additional_data()) -> ok.
 create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Job, Node, InitialDescription,
     AdditionalData) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
@@ -68,7 +68,7 @@ create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Jo
         description = InitialDescription,
         schedule_time = Timestamp,
         main_job_id = Job,
-        addititional_data = AdditionalData
+        additional_data = AdditionalData
     },
 
     Value = case Node of
@@ -457,24 +457,24 @@ get_execution_info(Pool, TaskID) ->
             Other
     end.
 
--spec get_addititional_data(doc()) -> {ok, traverse:addititional_data()}.
-get_addititional_data(#document{value = #traverse_task{addititional_data = AdditionalData}}) ->
+-spec get_additional_data(doc()) -> {ok, traverse:additional_data()}.
+get_additional_data(#document{value = #traverse_task{additional_data = AdditionalData}}) ->
     {ok, AdditionalData}.
 
--spec get_addititional_data(traverse:pool(), traverse:id()) -> {ok, traverse:addititional_data()} | {error, term()}.
-get_addititional_data(Pool, TaskID) ->
+-spec get_additional_data(traverse:pool(), traverse:id()) -> {ok, traverse:additional_data()} | {error, term()}.
+get_additional_data(Pool, TaskID) ->
     case datastore_model:get(?CTX, ?DOC_ID(Pool, TaskID)) of
         {ok, Doc} ->
-            get_addititional_data(Doc);
+            get_additional_data(Doc);
         Other ->
             Other
     end.
 
--spec update_addititional_data(ctx(), traverse:pool(), traverse:id(), traverse:status()) ->
+-spec update_additional_data(ctx(), traverse:pool(), traverse:id(), traverse:status()) ->
     {ok, doc()} | {error, term()}.
-update_addititional_data(ExtendedCtx, Pool, TaskID, NewAdditionalData) ->
+update_additional_data(ExtendedCtx, Pool, TaskID, NewAdditionalData) ->
     Diff = fun(Task) ->
-        {ok, Task#traverse_task{addititional_data = NewAdditionalData}}
+        {ok, Task#traverse_task{additional_data = NewAdditionalData}}
     end,
     datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff).
 
@@ -509,7 +509,7 @@ get_record_struct(1) ->
         {node, atom},
         {status, atom},
         {description, {custom, {?MODULE, encode_description, decode_description}}},
-        {addititional_data, #{string => binary}}
+        {additional_data, #{string => binary}}
     ]}.
 
 %%--------------------------------------------------------------------
