@@ -55,9 +55,9 @@ error_to_json(_, ?ERROR_HANDSHAKE_ALREADY_DONE) ->
     };
 error_to_json(_, ?ERROR_UNKNOWN_ERROR(ErrorObject)) ->
     ErrorObject;
-error_to_json(_, ?ERROR_BAD_TYPE) ->
+error_to_json(_, ?ERROR_BAD_GRI) ->
     #{
-        <<"id">> => <<"badType">>
+        <<"id">> => <<"badGRI">>
     };
 error_to_json(_, ?ERROR_NOT_SUBSCRIBABLE) ->
     #{
@@ -99,7 +99,7 @@ error_to_json(_, ?ERROR_POSIX(Errno)) ->
     #{
         <<"id">> => <<"posix">>,
         <<"details">> => #{
-            <<"errno">> => Errno
+            <<"errno">> => atom_to_binary(Errno, utf8)
         }
     };
 
@@ -115,7 +115,7 @@ error_to_json(_, ?ERROR_TOKEN_CAVEAT_UNVERIFIED(Caveat)) ->
     #{
         <<"id">> => <<"tokenCaveatUnverified">>,
         <<"details">> => #{
-            <<"caveat">> => Caveat
+            <<"caveat">> => caveats:serialize(Caveat)
         }
     };
 error_to_json(_, ?ERROR_TOKEN_SUBJECT_INVALID) ->
@@ -239,6 +239,13 @@ error_to_json(_, ?ERROR_BAD_VALUE_JSON(Key)) ->
 error_to_json(_, ?ERROR_BAD_VALUE_TOKEN(Key)) ->
     #{
         <<"id">> => <<"badValueToken">>,
+        <<"details">> => #{
+            <<"key">> => Key
+        }
+    };
+error_to_json(_, ?ERROR_BAD_VALUE_IPV4_ADDRESS(Key)) ->
+    #{
+        <<"id">> => <<"badValueIPv4Address">>,
         <<"details">> => #{
             <<"key">> => Key
         }
@@ -478,8 +485,8 @@ json_to_error(_, #{<<"id">> := <<"expectedHandshakeMessage">>}) ->
 json_to_error(_, #{<<"id">> := <<"handshakeAlreadyDone">>}) ->
     ?ERROR_HANDSHAKE_ALREADY_DONE;
 
-json_to_error(_, #{<<"id">> := <<"badType">>}) ->
-    ?ERROR_BAD_TYPE;
+json_to_error(_, #{<<"id">> := <<"badGRI">>}) ->
+    ?ERROR_BAD_GRI;
 
 json_to_error(_, #{<<"id">> := <<"notSubscribable">>}) ->
     ?ERROR_NOT_SUBSCRIBABLE;
@@ -521,7 +528,7 @@ json_to_error(_, #{<<"id">> := <<"tokenInvalid">>}) ->
     ?ERROR_TOKEN_INVALID;
 
 json_to_error(_, #{<<"id">> := <<"tokenCaveatUnverified">>, <<"details">> := #{<<"caveat">> := Caveat}}) ->
-    ?ERROR_TOKEN_CAVEAT_UNVERIFIED(Caveat);
+    ?ERROR_TOKEN_CAVEAT_UNVERIFIED(caveats:deserialize(Caveat));
 
 json_to_error(_, #{<<"id">> := <<"tokenSubjectInvalid">>}) ->
     ?ERROR_TOKEN_SUBJECT_INVALID;
@@ -588,6 +595,10 @@ json_to_error(_, #{<<"id">> := <<"badValueJSON">>,
 json_to_error(_, #{<<"id">> := <<"badValueToken">>,
     <<"details">> := #{<<"key">> := Key}}) ->
     ?ERROR_BAD_VALUE_TOKEN(Key);
+
+json_to_error(_, #{<<"id">> := <<"badValueIPv4Address">>,
+    <<"details">> := #{<<"key">> := Key}}) ->
+    ?ERROR_BAD_VALUE_IPV4_ADDRESS(Key);
 
 json_to_error(_, #{<<"id">> := <<"badValueListOfIPv4Addresses">>,
     <<"details">> := #{<<"key">> := Key}}) ->

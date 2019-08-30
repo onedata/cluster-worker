@@ -19,7 +19,7 @@
 
 
 % List of subscriptions of given client
--type subscriptions() :: ordsets:ordset(gs_protocol:gri()).
+-type subscriptions() :: ordsets:ordset(gri:gri()).
 % Identifier of a subscriber client
 -type subscriber() :: {gs_protocol:session_id(), {aai:auth(), gs_protocol:auth_hint()}}.
 % A map of subscribers per {Aspect, Scope} for an entity
@@ -89,7 +89,7 @@ delete_session(SessionId) ->
 %% the old one is deleted.
 %% @end
 %%--------------------------------------------------------------------
--spec add_subscriber(gs_protocol:gri(), gs_protocol:session_id(),
+-spec add_subscriber(gri:gri(), gs_protocol:session_id(),
     aai:auth(), gs_protocol:auth_hint()) -> ok.
 add_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId, Auth, AuthHint) ->
     modify_subscribers(Type, Id, fun(AllSubscribers) ->
@@ -110,7 +110,7 @@ add_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, Sessi
 %% of resource about which he would like to receive updates.
 %% @end
 %%--------------------------------------------------------------------
--spec add_subscription(gs_protocol:session_id(), gs_protocol:gri()) -> ok.
+-spec add_subscription(gs_protocol:session_id(), gri:gri()) -> ok.
 add_subscription(SessionId, GRI) ->
     modify_subscriptions(SessionId, fun(Subscriptions) ->
         ordsets:add_element(GRI, Subscriptions)
@@ -153,7 +153,7 @@ get_subscriptions(SessionId) ->
 %% Removes a subscriber (client) from the list of subscribers of given resource.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_subscriber(gs_protocol:gri(), gs_protocol:session_id()) -> ok.
+-spec remove_subscriber(gri:gri(), gs_protocol:session_id()) -> ok.
 remove_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, SessionId) ->
     modify_subscribers(Type, Id, fun(AllSubscribers) ->
         SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
@@ -177,7 +177,7 @@ remove_subscriber(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}, Se
 %% Removes a subscription from the list of resources given client is subscribed for.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_subscription(gs_protocol:session_id(), gs_protocol:gri()) -> ok.
+-spec remove_subscription(gs_protocol:session_id(), gri:gri()) -> ok.
 remove_subscription(SessionId, GRI) ->
     modify_subscriptions(SessionId, fun(Subscriptions) ->
         ordsets:del_element(GRI, Subscriptions)
@@ -189,7 +189,7 @@ remove_subscription(SessionId, GRI) ->
 %% Removes all subscribers of given resource.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_all_subscribers(gs_protocol:gri()) -> ok.
+-spec remove_all_subscribers(gri:gri()) -> ok.
 remove_all_subscribers(GRI = #gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
     {ok, AllSubscribers} = get_subscribers(Type, Id),
     SubscribersForAspect = maps:get({Aspect, Scope}, AllSubscribers, ordsets:new()),
