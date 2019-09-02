@@ -484,7 +484,7 @@ update_additional_data(ExtendedCtx, Pool, TaskID, NewAdditionalData) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns basin model's context. It can be extended using callback and such extended context is provided
+%% Returns basic model's context. It can be extended using callback and such extended context is provided
 %% to functions (see traverse.erl).
 %% @end
 %%--------------------------------------------------------------------
