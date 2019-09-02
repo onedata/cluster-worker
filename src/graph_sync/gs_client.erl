@@ -244,7 +244,7 @@ rpc_request(ClientRef, Function, Args) ->
 %% @equiv graph_request(ClientRef, GRI, Operation, undefined, false, undefined).
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation()) ->
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation()) ->
     {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation) ->
     graph_request(ClientRef, GRI, Operation, undefined, false, undefined).
@@ -255,7 +255,7 @@ graph_request(ClientRef, GRI, Operation) ->
 %% @equiv graph_request(ClientRef, GRI, Operation, Data, false, undefined).
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation(),
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data()) -> {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation, Data) ->
     graph_request(ClientRef, GRI, Operation, Data, false, undefined).
@@ -266,7 +266,7 @@ graph_request(ClientRef, GRI, Operation, Data) ->
 %% @equiv graph_request(ClientRef, GRI, Operation, Data, Subscribe, undefined).
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation(),
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data(), Subscribe :: boolean()) ->
     {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation, Data, Subscribe) ->
@@ -281,7 +281,7 @@ graph_request(ClientRef, GRI, Operation, Data, Subscribe) ->
 %% wishes to subscribe for the resource and authorization hint.
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation(),
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data(), Subscribe :: boolean(), gs_protocol:auth_hint()) ->
     {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation, Data, Subscribe, AuthHint) ->
@@ -300,7 +300,7 @@ graph_request(ClientRef, GRI, Operation, Data, Subscribe, AuthHint) ->
 %% (waits for response or returns with a timeout error).
 %% @end
 %%--------------------------------------------------------------------
--spec unsub_request(client_ref(), gs_protocol:gri()) ->
+-spec unsub_request(client_ref(), gri:gri()) ->
     {ok, gs_protocol:unsub_resp()} | gs_protocol:error().
 unsub_request(ClientRef, GRI) ->
     sync_request(ClientRef, #gs_req_unsub{gri = GRI}).

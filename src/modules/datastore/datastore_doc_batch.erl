@@ -96,9 +96,9 @@ apply(Batch = #batch{cache = Cache, cache_mod_keys = CMK,
         ({error, Reason}) -> {error, Reason}
     end, Responses),
     Batch2 = Batch#batch{cache_mod_keys = [], cache_added_keys = []},
-    lists:foldl(fun({Key, Status}, Batch2 = #batch{cache = Cache2}) ->
+    lists:foldl(fun({Key, Status}, Batch3 = #batch{cache = Cache2}) ->
         Entry = maps:get(Key, Cache2),
-        Batch2#batch{
+        Batch3#batch{
             cache = maps:put(Key, Entry#entry{status = Status}, Cache2)
         }
     end, Batch2, lists:zip(Keys, Statuses)).

@@ -21,6 +21,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
+    peer_ip :: ip_utils:ip(),
     translator :: module()
 }).
 
@@ -62,7 +63,9 @@
 -spec init(Req :: cowboy_req:req(), Opts :: any()) ->
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
+    {PeerIp, _} = cowboy_req:peer(Req),
     {cowboy_websocket, Req, #pre_handshake_state{
+        peer_ip = PeerIp,
         translator = Translator
     }}.
 
@@ -91,14 +94,14 @@ websocket_init(State) ->
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
+websocket_handle({text, Data}, #pre_handshake_state{peer_ip = PeerIp} = State) ->
     #pre_handshake_state{
         translator = Translator
     } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(self(), Translator, Request) of
+            case gs_server:handshake(self(), Translator, Request, PeerIp) of
                 {ok, Resp} ->
                     #gs_resp{
                         response = #gs_resp_handshake{

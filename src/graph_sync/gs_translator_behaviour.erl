@@ -33,7 +33,7 @@
 %% result depending on the authorized client.
 %% @end
 %%--------------------------------------------------------------------
--callback translate_value(gs_protocol:protocol_version(), gs_protocol:gri(),
+-callback translate_value(gs_protocol:protocol_version(), gri:gri(),
     Value :: term()) -> Result | fun((aai:auth()) -> Result) when
     Result :: gs_protocol:data() | gs_protocol:error().
 
@@ -47,6 +47,6 @@
 %% result depending on the authorized client.
 %% @end
 %%--------------------------------------------------------------------
--callback translate_resource(gs_protocol:protocol_version(), gs_protocol:gri(),
+-callback translate_resource(gs_protocol:protocol_version(), gri:gri(),
     ResourceData :: term()) -> Result | fun((aai:auth()) -> Result) when
     Result :: gs_protocol:data() | gs_protocol:error().
