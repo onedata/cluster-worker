@@ -102,7 +102,7 @@ traverse_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     TestMap = #{<<"key">> => <<"value">>},
     ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, <<"traverse_test1">>, {self(), 1, 1},
-        #{addititional_data => TestMap}])),
+        #{additional_data => TestMap}])),
     ?assertMatch({ok, [<<"traverse_test1">>], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing])),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
@@ -110,8 +110,8 @@ traverse_test(Config) ->
     ?assertEqual(Expected, lists:sort(Ans)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, enqueued = false, status = finished,
-        addititional_data = TestMap}}}, rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_test1">>]), 5),
-    ?assertMatch({ok, TestMap}, rpc:call(Worker, traverse_task, get_addititional_data, [?POOL, <<"traverse_test1">>]), 5),
+        additional_data = TestMap}}}, rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_test1">>]), 5),
+    ?assertMatch({ok, TestMap}, rpc:call(Worker, traverse_task, get_additional_data, [?POOL, <<"traverse_test1">>]), 5),
     ?assertMatch({ok, [], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing]), 1),
     check_ended(Worker, [<<"traverse_test1">>]).
 
