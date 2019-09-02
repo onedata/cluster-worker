@@ -473,7 +473,7 @@ encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
     #{
         <<"version">> => Version,
         <<"sessionId">> => SessionId,
-        <<"identity">> => aai:serialize_subject(Identity),
+        <<"identity">> => aai:subject_to_json(Identity),
         <<"attributes">> => undefined_to_null(Attributes)
     }.
 
@@ -667,7 +667,7 @@ decode_response_handshake(_, DataJSON) ->
     #gs_resp_handshake{
         version = Version,
         session_id = null_to_undefined(SessionId),
-        identity = aai:deserialize_subject(Identity),
+        identity = aai:json_to_subject(Identity),
         attributes = null_to_undefined(Attributes)
     }.
 

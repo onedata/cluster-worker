@@ -86,8 +86,8 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns if given GRI is subscribable, i.e. clients can subscribe for changes
-%% concerning that GRI.
+%% Returns whether given GRI is subscribable, i.e. clients can subscribe for
+%% changes concerning that GRI.
 %% @end
 %%--------------------------------------------------------------------
 -callback is_subscribable(gri:gri()) -> boolean().
@@ -95,7 +95,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns if entity type in given GRI is supported by the server.
+%% Returns whether entity type in given GRI is supported by the server.
 %% @end
 %%--------------------------------------------------------------------
 -callback is_type_supported(gri:gri()) -> boolean().
