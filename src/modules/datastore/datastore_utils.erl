@@ -13,7 +13,7 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([gen_key/0, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
+-export([gen_key/0, gen_short_key/1, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
 -export([set_expiry/2]).
 
 -type key() :: datastore:key().
@@ -37,6 +37,9 @@
 -spec gen_key() -> key().
 gen_key() ->
     str_utils:rand_hex(?KEY_LENGTH).
+
+gen_short_key(Shorten) ->
+    str_utils:rand_hex(?KEY_LENGTH - Shorten).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -86,7 +86,8 @@ init(Ctx) ->
 % TODO - VFS-3975 - allow routing via generic key without model
 % problem with links application that need such routing key
 get_unique_key(#{model := Model}, Key) ->
-    datastore_utils:gen_key(atom_to_binary(Model, utf8), Key).
+    <<Key/binary, (atom_to_binary(Model, utf8))/binary>>.
+%%    datastore_utils:gen_key(atom_to_binary(Model, utf8), Key).
 
 %%--------------------------------------------------------------------
 %% @doc
