@@ -66,6 +66,7 @@
 
 % When cluster is not in newest generation it will be upgraded during initialization.
 % This can be used to e.g. move models between services.
+% Newest known generation is equivalent to this software cluster generation.
 % Oldest known generation is the lowest one that can be directly upgraded to newest.
 -define(NEWEST_KNOWN_CLUSTER_GENERATION, 1).
 -define(OLDEST_KNOWN_CLUSTER_GENERATION, 1).
@@ -508,7 +509,7 @@ handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
 handle_cast(force_stop, State) ->
-    ?critical("Node could not be initialized - force stopping applicaiton"),
+    ?critical("Cluster could not be initialized - force stopping applicaiton"),
     init:stop(),
     {stop, normal, State};
 
@@ -717,7 +718,8 @@ upgrade_cluster(_CurrentGeneration) ->
 %% by cluster manager during cluster initialization.
 %% @end
 %%--------------------------------------------------------------------
--spec perform_healthcheck(atom(), state()) -> cluster_status:status() | [{module(), cluster_status:status()}].
+-spec perform_healthcheck(cluster_status:component(), state()) ->
+    cluster_status:status() | [{module(), cluster_status:status()}].
 perform_healthcheck(node_manager_internal, #state{cm_con_status = connected}) -> ok;
 perform_healthcheck(node_manager_internal, _State) -> out_of_sync;
 perform_healthcheck(node_manager, #state{cm_con_status = connected, initialized = true}) -> ok;

@@ -22,10 +22,8 @@
 
 -export([init/2]).
 
-
--define(LOG(Msg), ?debug(Msg)).
--define(LOG(Msg, Args), ?debug(Msg, Args)).
-
+-define(NAGIOS_HEALTHCHECK_TIMEOUT,
+    application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout, timer:seconds(10))).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -35,9 +33,7 @@
 %%--------------------------------------------------------------------
 -spec init(cowboy_req:req(), term()) -> {ok, cowboy_req:req(), term()}.
 init(#{method := <<"GET">>} = Req, State) ->
-    {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
-
-    NewReq = case get_cluster_status(Timeout) of
+    NewReq = case get_cluster_status(?NAGIOS_HEALTHCHECK_TIMEOUT) of
         {error, _} ->
             cowboy_req:reply(500, Req);
         {ok, {AppStatus, NodeStatuses}} ->
@@ -66,26 +62,20 @@ get_cluster_status(Timeout) ->
 %% @private
 -spec format_reply(cluster_status:status(), [cluster_status:node_status()]) -> io_lib:chars().
 format_reply(AppStatus, NodeStatuses) ->
-    MappedClusterState = lists:map(
-        fun({Node, NodeStatus, NodeComponents}) ->
-            NodeDetails = lists:map(
-                fun({Component, Status}) ->
-                    StatusList = case Status of
-                        {error, Desc} ->
-                            "error: " ++ atom_to_list(Desc);
-                        A when is_atom(A) ->
-                            atom_to_list(A);
-                        _ ->
-                            ?LOG("Wrong nagios status: {~p, ~p} at node ~p",
-                                [Component, Status, Node]),
-                            "error: wrong_status"
-                    end,
-                    {Component, [{status, StatusList}], []}
-                end, NodeComponents),
-            {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
-            {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
-        end, NodeStatuses
-    ),
+    MappedClusterState = lists:map(fun({Node, NodeStatus, NodeComponents}) ->
+        NodeDetails = lists:map(fun({Component, Status}) ->
+            StatusList = case Status of
+                {error, Desc} -> "error: " ++ atom_to_list(Desc);
+                A when is_atom(A) -> atom_to_list(A);
+                _ ->
+                    ?debug("Wrong nagios status: {~p, ~p} at node ~p", [Component, Status, Node]),
+                    "error: wrong_status"
+            end,
+            {Component, [{status, StatusList}], []}
+        end, NodeComponents),
+        {ok, NodeName} = plugins:apply(node_manager_plugin, app_name, []),
+        {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
+    end, NodeStatuses),
 
     {{YY, MM, DD}, {Hour, Min, Sec}} = calendar:now_to_local_time(erlang:timestamp()),
     DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
