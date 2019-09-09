@@ -21,6 +21,7 @@
 
 -include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get/2, get/3, fetch/2, get_remote/2, save/1, save/3]).
@@ -28,6 +29,9 @@
 -export([flush_async/2, wait/1]).
 -export([inactivate/1, inactivate/2]).
 -export([init_counters/0, init_report/0]).
+
+%% For RPC
+-export([save_memory_copy/4]).
 
 -record(future, {
     durability :: undefined | durability(),
@@ -437,7 +441,9 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _, _) ->
     Pool = datastore_multiplier:extend_name(Key, memory),
     case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
         true ->
-            ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
+            Ans = ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc)),
+            save_memory_copies(Ctx, Key, Doc, memory),
+            Ans;
         false ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end;
@@ -459,9 +465,49 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
               _ ->
                 ok
             end,
+            save_memory_copies(Ctx, Key, Doc, disc),
             Ans;
         {false, true} ->
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
         {false, false} ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves copy to memory of nodes listed in ctx.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_memory_copies(ctx(), key(), doc(), memory | disc) -> ok.
+save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
+    lists:foreach(fun(Node) ->
+        case rpc:call(Node, ?MODULE, save_memory_copy, [Ctx, Key, Doc, PoolType]) of
+            {ok, _} -> ok;
+            Error -> ?error("Error saving memory copies for key: ~p: ~p~ndoc: ~p", [Key, Error, Doc])
+        end
+    end, Nodes);
+save_memory_copies(_Ctx, _Key, _Doc, _PoolType) ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves copy to memory of node.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_memory_copy(ctx(), key(), doc(), memory | disc) -> {ok, doc()} | {error, term()}.
+save_memory_copy(#{
+    memory_driver := MemoryDriver,
+    memory_driver_ctx := MemoryCtx
+} = Ctx, Key, Doc, PoolType) ->
+    Pool = datastore_multiplier:extend_name(Key, PoolType),
+    case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
+        true ->
+            Ans = MemoryDriver:save(MemoryCtx, Key, Doc),
+            % TODO - dla modeli memory przydaloby sie nie invalidowac zeby moc polegac na tym jak zwroci {error, not_found}
+            datastore_cache_manager:mark_inactive(Pool, Key, fun(_) -> true end),
+            Ans;
+        false ->
+            {error, {enomem, Doc}}
     end.

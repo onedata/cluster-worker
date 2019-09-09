@@ -24,7 +24,7 @@
 
 %% API
 -export([init/0, reset/2, get_size/1]).
--export([mark_active/3, mark_inactive/2]).
+-export([mark_active/3, mark_inactive/2, mark_inactive/3]).
 
 -record(entry, {
     key :: key() | '_',

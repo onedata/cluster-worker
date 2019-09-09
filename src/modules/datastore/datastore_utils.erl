@@ -38,6 +38,13 @@
 gen_key() ->
     str_utils:rand_hex(?KEY_LENGTH).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Generates shorter version of datastore key (used to generate keys
+%% with same consistent hashing part).
+%% @end
+%%--------------------------------------------------------------------
+-spec gen_short_key(non_neg_integer()) -> key().
 gen_short_key(Shorten) ->
     str_utils:rand_hex(?KEY_LENGTH - Shorten).
 

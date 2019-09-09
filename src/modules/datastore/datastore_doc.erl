@@ -162,6 +162,7 @@ get(#{include_deleted := true} = Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
         {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
+        % TODO - jaki sens dla memory_only?
         {error, not_found} -> datastore_writer:fetch(Ctx, Key);
         {error, Reason} -> {error, Reason}
     end;
