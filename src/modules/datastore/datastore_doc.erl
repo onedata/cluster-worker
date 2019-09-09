@@ -22,9 +22,9 @@
 
 %% API
 -export([create/4, save/4, update/4, update/5]).
--export([get/2, fetch/3, fetch/4, fetch_deleted/3, exists/2]).
+-export([get/3, fetch/3, fetch/4, fetch_deleted/3, exists/3]).
 -export([delete/3, delete/4]).
--export([get_links/4, get_links_trees/2]).
+-export([get_links/5, get_links_trees/3]).
 
 -type ctx() :: datastore:ctx().
 -type key() :: undefined | binary().
@@ -47,7 +47,7 @@
 -export_type([diff/1, pred/1]).
 
 %%%===================================================================
-%%% API
+%%% Batch API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
@@ -153,42 +153,6 @@ update(Ctx, Key, Diff, Default, Batch) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns datastore document first using memory only store and fallbacking
-%% to persistent store if missing.
-%% @end
-%%--------------------------------------------------------------------
--spec get(ctx(), key()) -> {ok, doc(value())} | {error, term()}.
-get(#{include_deleted := true} = Ctx, Key) ->
-    case datastore_cache:get(Ctx, Key) of
-        {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
-        {ok, Doc} -> {ok, Doc};
-        % TODO - jaki sens dla memory_only?
-        {error, not_found} -> datastore_writer:fetch(Ctx, Key);
-        {error, Reason} -> {error, Reason}
-    end;
-get(Ctx, Key) ->
-    case datastore_cache:get(Ctx, Key) of
-        {ok, #document{deleted = true}} -> {error, not_found};
-        {ok, Doc} -> {ok, Doc};
-        {error, not_found} -> datastore_writer:fetch(Ctx, Key);
-        {error, Reason} -> {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks whether datastore document exists.
-%% @end
-%%--------------------------------------------------------------------
--spec exists(ctx(), key()) -> {ok, boolean()} | {error, term()}.
-exists(Ctx, Key) ->
-    case get(Ctx, Key) of
-        {ok, _Doc} -> {ok, true};
-        {error, not_found} -> {ok, false};
-        {error, Reason} -> {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% @equiv fetch(Ctx, Key, Batch, false)
 %% @end
 %%--------------------------------------------------------------------
@@ -269,14 +233,62 @@ delete(Ctx, Key, Pred, Batch) ->
             {{error, Reason}, Batch2}
     end.
 
+%%%===================================================================
+%%% Direct access API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns datastore document first using memory only store and fallbacking
+%% to persistent store if missing.
+%% @end
+%%--------------------------------------------------------------------
+-spec get(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
+    case datastore_cache:get(Ctx, Key) of
+        {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
+        {ok, Doc} -> {ok, Doc};
+        % TODO - jaki sens dla memory_only?
+        {error, not_found} ->
+            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
+        {error, Reason2} -> {error, Reason2}
+    end;
+get(FetchNode, Ctx, Key) ->
+    case datastore_cache:get(Ctx, Key) of
+        {ok, #document{deleted = true}} -> {error, not_found};
+        {ok, Doc} -> {ok, Doc};
+        {error, not_found} ->
+            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
+        {error, Reason2} -> {error, Reason2}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks whether datastore document exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists(node(), ctx(), key()) -> {ok, boolean()} | {error, term()}.
+exists(FetchNode, Ctx, Key) ->
+    case get(FetchNode, Ctx, Key) of
+        {ok, _Doc} -> {ok, true};
+        {error, not_found} -> {ok, false};
+        {error, Reason} -> {error, Reason}
+    end.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns datastore document links.
 %% @end
 %%--------------------------------------------------------------------
--spec get_links(ctx(), key(), tree_id(), [link_name()]) ->
+-spec get_links(node(), ctx(), key(), tree_id(), [link_name()]) ->
     [{ok, link()} | {error, term()}].
-get_links(Ctx, Key, TreeIds, LinkNames) ->
+get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
     {ok, ForestIt} = datastore_links_iter:init(Ctx, Key, TreeIds),
     Links = lists:map(fun(LinkName) ->
         {Result, _} = datastore_links:get(LinkName, ForestIt),
@@ -286,9 +298,14 @@ get_links(Ctx, Key, TreeIds, LinkNames) ->
         ({LinkName, {error, not_found}}) -> {true, LinkName};
         (_) -> false
     end, Links),
-    FetchedLinks = datastore_writer:fetch_links(
-        Ctx, Key, TreeIds, NotFoundLinkNames
-    ),
+    FetchedLinks = case NotFoundLinkNames of
+        [] -> [];
+        _ ->
+            case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, NotFoundLinkNames]) of
+                {badrpc, RpcReason} -> {error, RpcReason};
+                RpcResult -> RpcResult
+            end
+    end,
     FetchedLinks2 = lists:zip(NotFoundLinkNames, FetchedLinks),
     lists:map(fun
         ({_, {ok, MemoryLinks}}) ->
@@ -306,13 +323,16 @@ get_links(Ctx, Key, TreeIds, LinkNames) ->
 %% forest.
 %% @end
 %%--------------------------------------------------------------------
--spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
-get_links_trees(Ctx, Key) ->
+-spec get_links_trees(node(), ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
+get_links_trees(FetchNode, Ctx, Key) ->
     case datastore_links:get_links_trees(Ctx, Key, undefined) of
         {{ok, TreeIds}, _} ->
             {ok, TreeIds};
         {{error, not_found}, _} ->
-            datastore_writer:fetch_links_trees(Ctx, Key);
+            case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
         {{error, Reason}, _} ->
             {error, Reason}
     end.

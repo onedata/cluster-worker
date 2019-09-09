@@ -67,9 +67,18 @@ route(Key, Function, Args) ->
     {Node, Args2} = select_node(Key, Args),
     Module = select_module(Function),
     FinalArgs = [Module, Function, Args2],
-    case rpc:call(Node, datastore_router, process, FinalArgs) of
-        {badrpc, Reason} -> {error, Reason};
-        Result -> Result
+    case Module of
+        datastore_writer ->
+            case rpc:call(Node, datastore_router, process, FinalArgs) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
+        _ ->
+            try
+                datastore_router:process(Module, Function, [Node | Args2])
+            catch
+                _:Reason2 -> {error, Reason2}
+            end
     end.
 
 %%--------------------------------------------------------------------
