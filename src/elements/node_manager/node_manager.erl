@@ -742,7 +742,7 @@ perform_healthcheck(listeners, _) ->
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: #state{}) ->
+-spec do_heartbeat(State :: state()) ->
     {monitoring:node_monitoring_state(), {erlang:timestamp(), pid()}}.
 do_heartbeat(#state{cm_con_status = connected, monitoring_state = MonState, last_state_analysis = LSA,
     scheduler_info = SchedulerInfo} = _State) ->
@@ -764,7 +764,7 @@ do_heartbeat(#state{monitoring_state = MonState, last_state_analysis = LSA} = _S
 %% Receives lb advices update from cluster manager and follows it to dispatcher.
 %% @end
 %%--------------------------------------------------------------------
--spec update_lb_advices(State :: #state{}, DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> #state{}.
+-spec update_lb_advices(State :: state(), DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> state().
 update_lb_advices(State, DispatcherAdvice) ->
     gen_server2:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
     State.
