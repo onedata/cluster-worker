@@ -66,10 +66,10 @@
 
 % When cluster is not in newest generation it will be upgraded during initialization.
 % This can be used to e.g. move models between services.
-% Newest known generation is equivalent to this software cluster generation.
 % Oldest known generation is the lowest one that can be directly upgraded to newest.
--define(NEWEST_KNOWN_CLUSTER_GENERATION, 1).
+-define(INSTALLED_CLUSTER_GENERATION, 1).
 -define(OLDEST_KNOWN_CLUSTER_GENERATION, 1).
+-define(HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION, <<"19.02.1">>).
 
 %%%===================================================================
 %%% API
@@ -309,7 +309,7 @@ start_worker(Module, Args, Options) ->
     | {ok, State, hibernate}
     | {stop, Reason :: term()}
     | ignore,
-    State :: term(),
+    State :: state(),
     Timeout :: non_neg_integer() | infinity.
 init([]) ->
     process_flag(trap_exit, true),
@@ -365,7 +365,7 @@ init([]) ->
 %% Handling call messages
 %% @end
 %%--------------------------------------------------------------------
--spec handle_call(Request :: term(), From :: {pid(), Tag :: term()}, State :: term()) -> Result when
+-spec handle_call(Request :: term(), From :: {pid(), Tag :: term()}, State :: state()) -> Result when
     Result :: {reply, Reply, NewState}
     | {reply, Reply, NewState, Timeout}
     | {reply, Reply, NewState, hibernate}
@@ -375,7 +375,7 @@ init([]) ->
     | {stop, Reason, Reply, NewState}
     | {stop, Reason, NewState},
     Reply :: cluster_status:status() | term(),
-    NewState :: term(),
+    NewState :: state(),
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
 
@@ -410,12 +410,12 @@ handle_call(_Request, _From, State) ->
 %% Handling cast messages
 %% @end
 %%--------------------------------------------------------------------
--spec handle_cast(Request :: term(), State :: term()) -> Result when
+-spec handle_cast(Request :: term(), State :: state()) -> Result when
     Result :: {noreply, NewState}
     | {noreply, NewState, Timeout}
     | {noreply, NewState, hibernate}
     | {stop, Reason :: term(), NewState},
-    NewState :: term(),
+    NewState :: state(),
     Timeout :: non_neg_integer() | infinity.
 handle_cast(connect_to_cm, State) ->
     NewState = connect_to_cm(State),
@@ -525,12 +525,12 @@ handle_cast(_Request, State) ->
 %% Handling all non call/cast messages
 %% @end
 %%--------------------------------------------------------------------
--spec handle_info(Info :: timeout | term(), State :: term()) -> Result when
+-spec handle_info(Info :: timeout | term(), State :: state()) -> Result when
     Result :: {noreply, NewState}
     | {noreply, NewState, Timeout}
     | {noreply, NewState, hibernate}
     | {stop, Reason :: term(), NewState},
-    NewState :: term(),
+    NewState :: state(),
     Timeout :: non_neg_integer() | infinity.
 handle_info({timer, Msg}, State) ->
     gen_server2:cast(?NODE_MANAGER_NAME, Msg),
@@ -563,7 +563,7 @@ handle_info(Request, State) ->
 %% with Reason. The return value is ignored.
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(Reason, State :: term()) -> Any :: term() when
+-spec terminate(Reason, State :: state()) -> Any :: term() when
     Reason :: normal
     | shutdown
     | {shutdown, term()}
@@ -608,7 +608,7 @@ code_change(OldVsn, State, Extra) ->
 %% First it establishes network connection, next sends message to cluster manager.
 %% @end
 %%--------------------------------------------------------------------
--spec connect_to_cm(State :: #state{}) -> #state{}.
+-spec connect_to_cm(State :: state()) -> state().
 connect_to_cm(State = #state{cm_con_status = connected}) ->
     % Already connected, do nothing
     State;
@@ -664,7 +664,7 @@ cluster_init_step(upgrade_cluster) ->
                 {error, _} = Error ->
                     ?error("Error when retrieving current cluster generation: ~p", [Error]),
                     throw(Error);
-                ClusterGeneration ->
+                {ok, ClusterGeneration} ->
                     upgrade_cluster(ClusterGeneration)
             end,
             ok;
@@ -697,15 +697,18 @@ cluster_init_step(ready) ->
 %%--------------------------------------------------------------------
 -spec upgrade_cluster(cluster_generation()) -> ok.
 upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?OLDEST_KNOWN_CLUSTER_GENERATION->
-    ?critical("Cluster in too old generation to be upgraded directly. Upgrade to intermediate generation first."
-    "~nOldest supported generation: ~p", [?OLDEST_KNOWN_CLUSTER_GENERATION]),
+    ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
+    "~nOldest supported version: ~p", [?HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION]),
     throw({error, too_old_cluster_generation});
-upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?NEWEST_KNOWN_CLUSTER_GENERATION ->
-    ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGeneration, ?NEWEST_KNOWN_CLUSTER_GENERATION]),
+
+upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?INSTALLED_CLUSTER_GENERATION ->
+    ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGeneration, ?INSTALLED_CLUSTER_GENERATION]),
     {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGeneration]),
-    ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
-    cluster_generation:save(NewGeneration),
-    upgrade_cluster(NewGeneration);
+    NormalizedNewGeneration = min(NewGeneration, ?INSTALLED_CLUSTER_GENERATION),
+    ?info("Cluster succesfully upgraded to generation ~p", [NormalizedNewGeneration]),
+    cluster_generation:save(NormalizedNewGeneration),
+    upgrade_cluster(NormalizedNewGeneration);
+
 upgrade_cluster(_CurrentGeneration) ->
     ?info("No upgrade needed - the cluster is in newest generation").
 
@@ -714,14 +717,14 @@ upgrade_cluster(_CurrentGeneration) ->
 %% @private
 %% @doc
 %% Performs healthcheck of given component.
-%% Node manager internal check is only performed
+%% Cluster manager connection check is only performed
 %% by cluster manager during cluster initialization.
 %% @end
 %%--------------------------------------------------------------------
 -spec perform_healthcheck(cluster_status:component(), state()) ->
     cluster_status:status() | [{module(), cluster_status:status()}].
-perform_healthcheck(node_manager_internal, #state{cm_con_status = connected}) -> ok;
-perform_healthcheck(node_manager_internal, _State) -> out_of_sync;
+perform_healthcheck(cluster_manager_connection, #state{cm_con_status = connected}) -> ok;
+perform_healthcheck(cluster_manager_connection, _State) -> out_of_sync;
 perform_healthcheck(node_manager, #state{cm_con_status = connected, initialized = true}) -> ok;
 perform_healthcheck(node_manager, _State) -> out_of_sync;
 perform_healthcheck(dispatcher, _) -> gen_server2:call(?DISPATCHER_NAME, healthcheck);
@@ -1207,8 +1210,8 @@ get_cluster_ips() ->
 -spec get_current_cluster_generation() -> cluster_generation() | {error, term()}.
 get_current_cluster_generation() ->
     case cluster_generation:get() of
-        {ok, Generation} -> Generation;
-        {error, not_found} -> ?NEWEST_KNOWN_CLUSTER_GENERATION;
+        {ok, Generation} -> {ok, Generation};
+        {error, not_found} -> {ok, ?INSTALLED_CLUSTER_GENERATION};
         {error, _} = Error -> Error
     end.
 

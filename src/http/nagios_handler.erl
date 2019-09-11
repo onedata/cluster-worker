@@ -83,6 +83,5 @@ format_reply(AppStatus, NodeStatuses) ->
     % Create the reply
     HealthData = {healthdata, [{date, DateString},
         {status, atom_to_list(AppStatus)}], MappedClusterState},
-    Content = lists:flatten([HealthData]),
-    Export = xmerl:export_simple(Content, xmerl_xml),
-    io_lib:format("~s", [lists:flatten(Export)]).
+    Export = xmerl:export_simple([HealthData], xmerl_xml),
+    io_lib:format("~s", [Export]).

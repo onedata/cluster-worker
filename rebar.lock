@@ -18,7 +18,7 @@
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},2},
  {<<"cluster_manager">>,
   {raw,"ssh://git@git.onedata.org:7999/vfs/cluster-manager.git",
-       {mod_ref,git,{ref,"08e934bf464fcb82e93bfa62939762c5ac20ec88"},[]}},
+       {mod_ref,git,{ref,"e73c8ae8e7a823ca7f52a71b4ae9cebe89a2adc0"},[]}},
   0},
  {<<"cowboy">>,
   {git,"git://github.com/ninenines/cowboy.git",
