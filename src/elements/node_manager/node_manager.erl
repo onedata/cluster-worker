@@ -704,10 +704,17 @@ upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?OLDEST_KNOWN_CLUSTE
 upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?INSTALLED_CLUSTER_GENERATION ->
     ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGeneration, ?INSTALLED_CLUSTER_GENERATION]),
     {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGeneration]),
-    NormalizedNewGeneration = min(NewGeneration, ?INSTALLED_CLUSTER_GENERATION),
-    ?info("Cluster succesfully upgraded to generation ~p", [NormalizedNewGeneration]),
-    cluster_generation:save(NormalizedNewGeneration),
-    upgrade_cluster(NormalizedNewGeneration);
+    case NewGeneration > ?INSTALLED_CLUSTER_GENERATION of
+        true ->
+            ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
+                [NewGeneration, ?INSTALLED_CLUSTER_GENERATION]),
+            throw({error, too_high_generation});
+        false ->
+            ok
+    end,
+    ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
+    cluster_generation:save(NewGeneration),
+    upgrade_cluster(NewGeneration);
 
 upgrade_cluster(_CurrentGeneration) ->
     ?info("No upgrade needed - the cluster is in newest generation").
