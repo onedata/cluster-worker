@@ -225,7 +225,7 @@ update_propagation_performance_base(Config) ->
     end,
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
         <<"revision">> => 1
     },
 

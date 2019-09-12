@@ -30,11 +30,11 @@
 %% Simple cache used to remember calculated payloads per GRI and limit the
 %% number of requests to GS_LOGIC_PLUGIN when there is a lot of subscribers
 %% for the same records.
--type payload_cache() :: #{gs_protocol:gri() => {gs_protocol:data(), gs_protocol:revision()}}.
+-type payload_cache() :: #{gri:gri() => {gs_protocol:data(), gs_protocol:revision()}}.
 
 
 %% API
--export([handshake/3]).
+-export([handshake/4]).
 -export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
@@ -62,9 +62,9 @@ gs_logic_plugin_module() ->
 %% Returns success or error handshake response depending on the outcome.
 %% @end
 %%--------------------------------------------------------------------
--spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper()) ->
+-spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip()) ->
     {ok, gs_protocol:resp_wrapper()} | {error, gs_protocol:resp_wrapper()}.
-handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req) ->
+handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req, PeerIp) ->
     #gs_req_handshake{supported_versions = AuthVersions, auth = ClientAuth} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
@@ -73,7 +73,7 @@ handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = R
                 Req, ?ERROR_BAD_VERSION(ServerVersions))
             };
         {true, Version} ->
-            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth) of
+            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth, PeerIp) of
                 ?ERROR_UNAUTHORIZED ->
                     {error, gs_protocol:generate_error_response(
                         Req, ?ERROR_UNAUTHORIZED)
@@ -146,7 +146,7 @@ updated(EntityType, EntityId, VersionedEntity) ->
 
 
 %% @private
--spec push_updated(gs_protocol:gri(), gs_protocol:versioned_entity(),
+-spec push_updated(gri:gri(), gs_protocol:versioned_entity(),
     gs_persistence:subscriber(), payload_cache()) -> payload_cache().
 push_updated(ReqGRI, VersionedEntity, {SessionId, {Auth, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
@@ -228,8 +228,8 @@ handle_request(Session, #gs_req{auth_override = undefined, request = Req}) ->
     handle_request(Session, Req);
 
 % This request has the authorization field specified, override the default
-% authorization.
-handle_request(Session = #gs_session{auth = Auth}, #gs_req{auth_override = AuthOverride} = Req) ->
+% authorization - but only allow this for op-worker and op-panel (?PROVIDER auth).
+handle_request(Session = #gs_session{auth = ?PROVIDER = Auth}, #gs_req{auth_override = AuthOverride} = Req) ->
     case ?GS_LOGIC_PLUGIN:verify_auth_override(Auth, AuthOverride) of
         {ok, OverridenAuth} ->
             handle_request(
@@ -239,6 +239,10 @@ handle_request(Session = #gs_session{auth = Auth}, #gs_req{auth_override = AuthO
         {error, _} = Error ->
             Error
     end;
+handle_request(#gs_session{auth = _Auth}, #gs_req{auth_override = _AuthOverride}) ->
+    % Non-provider auth, disallow auth overrides
+    ?ERROR_FORBIDDEN;
+
 
 handle_request(_Session, #gs_req_handshake{}) ->
     % Handshake is done in handshake/4 function
@@ -290,6 +294,7 @@ handle_request(Session, #gs_req_graph{} = Req) ->
         auth_hint = AuthHint,
         subscribe = Subscribe
     } = Req,
+    ?GS_LOGIC_PLUGIN:is_type_supported(RequestedGRI) orelse throw(?ERROR_BAD_GRI),
     case Subscribe of
         true ->
             case is_subscribable(Operation, RequestedGRI) of
@@ -362,7 +367,7 @@ handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
 %%%===================================================================
 
 %% @private
--spec translate_value(translator(), gs_protocol:protocol_version(), gs_protocol:gri(),
+-spec translate_value(translator(), gs_protocol:protocol_version(), gri:gri(),
     aai:auth(), term()) -> gs_protocol:data() | gs_protocol:error().
 translate_value(Translator, ProtoVer, GRI, Auth, Data) ->
     % Used only when data is returned rather than GRI and resource
@@ -373,14 +378,14 @@ translate_value(Translator, ProtoVer, GRI, Auth, Data) ->
 
 
 %% @private
--spec translate_resource(translator(), gs_protocol:protocol_version(), gs_protocol:gri(),
+-spec translate_resource(translator(), gs_protocol:protocol_version(), gri:gri(),
     aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
 translate_resource(Translator, ProtoVer, GRI, Auth, DatAndRev) ->
     translate_resource(Translator, ProtoVer, GRI, GRI, Auth, DatAndRev).
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(),
-    RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+    RequestedGRI :: gri:gri(), ResultGRI :: gri:gri(),
     aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
 translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, {Data, Revision}) ->
     Resp = case Translator:translate_resource(ProtoVer, ResultGRI, Data) of
@@ -400,7 +405,7 @@ translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, {Data, R
 %% generating the same payload for many subscribers.
 %% @end
 %%--------------------------------------------------------------------
--spec updated_payload(ReqGRI :: gs_protocol:gri(), ResGRI :: gs_protocol:gri(),
+-spec updated_payload(ReqGRI :: gri:gri(), ResGRI :: gri:gri(),
     translator(), gs_protocol:protocol_version(), aai:auth(),
     gs_protocol:versioned_entity(), payload_cache()) -> {gs_protocol:data(), payload_cache()}.
 updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Auth, VersionedEntity, PayloadCache) ->
@@ -429,11 +434,11 @@ updated_payload(ReqGRI, ResGRI, Translator, ProtoVer, Auth, VersionedEntity, Pay
 
 
 %% @private
--spec insert_gri_and_rev(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri(),
+-spec insert_gri_and_rev(RequestedGRI :: gri:gri(), ResultGRI :: gri:gri(),
     gs_protocol:data(), gs_protocol:revision()) -> gs_protocol:data().
 insert_gri_and_rev(RequestedGRI, ResultGRI, Data, Revision) ->
     Data#{
-        <<"gri">> => gs_protocol:gri_to_string(coalesce_gri(RequestedGRI, ResultGRI)),
+        <<"gri">> => gri:serialize(coalesce_gri(RequestedGRI, ResultGRI)),
         <<"revision">> => Revision
     }.
 
@@ -445,8 +450,8 @@ insert_gri_and_rev(RequestedGRI, ResultGRI, Data, Revision) ->
 %% result GRI to auto.
 %% @end
 %%--------------------------------------------------------------------
--spec coalesce_gri(RequestedGRI :: gs_protocol:gri(), ResultGRI :: gs_protocol:gri()) ->
-    gs_protocol:gri().
+-spec coalesce_gri(RequestedGRI :: gri:gri(), ResultGRI :: gri:gri()) ->
+    gri:gri().
 coalesce_gri(#gri{scope = auto}, ResultGRI) ->
     ResultGRI#gri{scope = auto};
 coalesce_gri(_RequestedGRI, ResultGRI) ->
@@ -454,7 +459,7 @@ coalesce_gri(_RequestedGRI, ResultGRI) ->
 
 
 %% @private
--spec subscribe(gs_protocol:session_id(), gs_protocol:gri(), aai:auth(),
+-spec subscribe(gs_protocol:session_id(), gri:gri(), aai:auth(),
     gs_protocol:auth_hint()) -> ok.
 subscribe(SessionId, GRI, Auth, AuthHint) ->
     gs_persistence:add_subscriber(GRI, SessionId, Auth, AuthHint),
@@ -463,7 +468,7 @@ subscribe(SessionId, GRI, Auth, AuthHint) ->
 
 
 %% @private
--spec unsubscribe(gs_protocol:session_id(), gs_protocol:gri()) -> ok.
+-spec unsubscribe(gs_protocol:session_id(), gri:gri()) -> ok.
 unsubscribe(SessionId, GRI) ->
     gs_persistence:remove_subscriber(GRI, SessionId),
     gs_persistence:remove_subscription(SessionId, GRI),
@@ -471,7 +476,7 @@ unsubscribe(SessionId, GRI) ->
 
 
 %% @private
--spec is_subscribable(gs_protocol:operation(), gs_protocol:gri()) -> boolean().
+-spec is_subscribable(gs_protocol:operation(), gri:gri()) -> boolean().
 is_subscribable(Operation, GRI = #gri{scope = auto}) ->
     is_subscribable(Operation, GRI#gri{scope = private}) orelse
         is_subscribable(Operation, GRI#gri{scope = protected}) orelse

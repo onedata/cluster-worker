@@ -26,7 +26,7 @@
     mock_max_scope_towards_handle_service/3
 ]).
 -export([
-    verify_handshake_auth/1,
+    verify_handshake_auth/2,
     client_connected/2,
     client_disconnected/2,
     verify_auth_override/2,
@@ -43,13 +43,12 @@
 ]).
 
 -define(GS_LOGIC_PLUGIN, (gs_server:gs_logic_plugin_module())).
--define(GS_PROTOCOL_PLUGIN, (gs_protocol:gs_protocol_plugin_module())).
 
 mock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_auth_override, fun verify_auth_override/2),
@@ -57,6 +56,7 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_rpc, fun handle_rpc/4),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, handle_graph_request, fun handle_graph_request/6),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_subscribable, fun is_subscribable/1),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, is_type_supported, fun is_type_supported/1),
 
     ok = test_utils:mock_new(Nodes, ?GS_EXAMPLE_TRANSLATOR, [non_strict]),
     ok = test_utils:mock_expect(Nodes, ?GS_EXAMPLE_TRANSLATOR, handshake_attributes, fun handshake_attributes/1),
@@ -66,47 +66,37 @@ mock_callbacks(Config) ->
     ok = test_utils:mock_new(Nodes, datastore_config_plugin, [non_strict]),
     ok = test_utils:mock_expect(Nodes, datastore_config_plugin, get_throttled_models, fun get_throttled_models/0),
 
-    ok = test_utils:mock_new(Nodes, ?GS_PROTOCOL_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect(Nodes, ?GS_PROTOCOL_PLUGIN, encode_entity_type, fun encode_entity_type/1),
-    ok = test_utils:mock_expect(Nodes, ?GS_PROTOCOL_PLUGIN, decode_entity_type, fun decode_entity_type/1),
-
-    % GS_LOGIC_PLUGIN is called in gs_client on the testmaster node
-    ok = test_utils:mock_new([node()], ?GS_PROTOCOL_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect([node()], ?GS_PROTOCOL_PLUGIN, encode_entity_type, fun encode_entity_type/1),
-    ok = test_utils:mock_expect([node()], ?GS_PROTOCOL_PLUGIN, decode_entity_type, fun decode_entity_type/1),
-
     ok.
 
 
 unmock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
     test_utils:mock_unload(Nodes, ?GS_LOGIC_PLUGIN),
-    test_utils:mock_unload(Nodes, ?GS_PROTOCOL_PLUGIN),
     test_utils:mock_unload(Nodes, ?GS_EXAMPLE_TRANSLATOR),
     test_utils:mock_unload(Nodes, datastore_config_plugin),
 
     test_utils:mock_unload([node()], ?GS_LOGIC_PLUGIN).
 
 
-verify_handshake_auth({token, ?USER_1_TOKEN}) ->
+verify_handshake_auth({token, ?USER_1_TOKEN}, _) ->
     {ok, ?USER(?USER_1)};
-verify_handshake_auth({token, ?USER_2_TOKEN}) ->
+verify_handshake_auth({token, ?USER_2_TOKEN}, _) ->
     {ok, ?USER(?USER_2)};
-verify_handshake_auth({token, ?PROVIDER_1_TOKEN}) ->
+verify_handshake_auth({token, ?PROVIDER_1_TOKEN}, _) ->
     {ok, ?PROVIDER(?PROVIDER_1)};
-verify_handshake_auth(undefined) ->
+verify_handshake_auth(undefined, _) ->
     {ok, ?NOBODY};
-verify_handshake_auth(_) ->
+verify_handshake_auth(_, _) ->
     ?ERROR_UNAUTHORIZED.
 
 
-verify_auth_override(_Auth, {token, ?USER_1_TOKEN}) ->
+verify_auth_override(_Auth, {{token, ?USER_1_TOKEN}, _}) ->
     {ok, ?USER(?USER_1)};
-verify_auth_override(_Auth, {token, ?USER_2_TOKEN}) ->
+verify_auth_override(_Auth, {{token, ?USER_2_TOKEN}, _}) ->
     {ok, ?USER(?USER_2)};
-verify_auth_override(_Auth, {token, ?PROVIDER_1_TOKEN}) ->
+verify_auth_override(_Auth, {{token, ?PROVIDER_1_TOKEN}, _}) ->
     {ok, ?PROVIDER(?PROVIDER_1)};
-verify_auth_override(_Auth, nobody) ->
+verify_auth_override(_Auth, {nobody, _}) ->
     {ok, ?NOBODY};
 verify_auth_override(_Auth, _) ->
     ?ERROR_UNAUTHORIZED.
@@ -295,6 +285,7 @@ handle_graph_request(Auth, _, GRI = #gri{type = od_handle_service, id = ?HANDLE_
 handle_graph_request(Auth, _, #gri{type = od_share, id = ?SHARE, aspect = instance, scope = RequestedScope}, get, _, _) ->
     Scope = case {Auth, RequestedScope} of
         {?USER(_), auto} -> private;
+        {?PROVIDER(_), auto} -> private;
         {?NOBODY, auto} -> public;
         {_, Other} -> Other
     end,
@@ -302,6 +293,8 @@ handle_graph_request(Auth, _, #gri{type = od_share, id = ?SHARE, aspect = instan
     Revision = 1,
     case {Auth, Scope} of
         {?USER(_), _} ->
+            {ok, {Data, Revision}};
+        {?PROVIDER(_), _} ->
             {ok, {Data, Revision}};
         {?NOBODY, public} ->
             {ok, {Data, Revision}};
@@ -321,6 +314,14 @@ is_subscribable(#gri{type = od_handle_service, aspect = instance}) ->
     true;
 is_subscribable(_) ->
     false.
+
+
+is_type_supported(#gri{type = od_user}) -> true;
+is_type_supported(#gri{type = od_group}) -> true;
+is_type_supported(#gri{type = od_space}) -> true;
+is_type_supported(#gri{type = od_share}) -> true;
+is_type_supported(#gri{type = od_handle_service}) -> true;
+is_type_supported(#gri{type = _}) -> false.
 
 
 handshake_attributes(_) ->
