@@ -111,10 +111,9 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 -spec select_node(key(), list()) -> {node(), list()}.
 select_node(_Key, [#{routing := local} | _] = Args) ->
     {node(), Args};
-select_node(Key, [#{memory_copies := all} = Ctx | ArgsTail]) ->
-    Nodes = consistent_hashing:get_all_nodes(),
+select_node(Key, [#{memory_copies := all}] = Args) ->
     Node = consistent_hashing:get_node(Key),
-    {Node, [Ctx#{memory_copies => Nodes -- [Node]} | ArgsTail]};
+    {Node, Args};
 select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
     [Node | Nodes] = consistent_hashing:get_nodes(Key, Num),
     {Node, [Ctx#{memory_copies => Nodes} | ArgsTail]};

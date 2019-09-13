@@ -480,6 +480,12 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_memory_copies(ctx(), key(), doc(), memory | disc) -> ok.
+save_memory_copies(#{memory_copies := all} = Ctx, Key, Doc, PoolType) ->
+    Nodes = consistent_hashing:get_all_nodes(),
+    save_memory_copies(Ctx#{memory_copies => Nodes -- [node()]}, Key, Doc, PoolType);
+save_memory_copies(#{memory_copies := Num} = Ctx, Key, Doc, PoolType) when is_integer(Num) ->
+    [_ | Nodes] = consistent_hashing:get_nodes(Key, Num),
+    save_memory_copies(Ctx#{memory_copies => Nodes}, Key, Doc, PoolType);
 save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
     lists:foreach(fun(Node) ->
         case rpc:call(Node, ?MODULE, save_memory_copy, [Ctx, Key, Doc, PoolType]) of
