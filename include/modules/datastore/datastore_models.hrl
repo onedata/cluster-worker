@@ -89,4 +89,8 @@
     nodes = [] :: [node()]
 }).
 
+-record(cluster_generation, {
+    generation :: node_manager:cluster_generation()
+}).
+
 -endif.
