@@ -22,7 +22,7 @@
 
 %% API
 -export([create/3, save/3, update/3, update/4, fetch/2, delete/3]).
--export([add_links/4, fetch_links/4, delete_links/4, mark_links_deleted/4]).
+-export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
 %% For ct tests
 -export([call/4, call_async/4, wait/2]).
@@ -127,6 +127,17 @@ delete(Ctx, Key, Pred) ->
 add_links(Ctx, Key, TreeId, Links) ->
     Size = length(Links),
     multi_call(Ctx, get_key(Key, links), add_links, [Key, TreeId, Links], Size).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Synchronous and thread safe {@link datastore:check_and_add_links/4} implementation.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_and_add_links(ctx(), key(), tree_id(), [tree_id()], [{link_name(), link_target()}]) ->
+    [{ok, link()} | {error, term()}].
+check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
+    Size = length(Links),
+    multi_call(Ctx, get_key(Key, links), check_and_add_links, [Key, TreeId, CheckTrees, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc

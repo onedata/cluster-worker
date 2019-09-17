@@ -439,6 +439,30 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
         add_links(Items, Tree, TreeId, [], [])
     end);
+batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batch, _LinkTokens) ->
+    GetTreesAns = case CheckTrees of
+        all ->
+            datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch);
+        _ ->
+            {{ok, CheckTrees}, Batch}
+    end,
+    case GetTreesAns of
+        {{ok, TreeIds}, Batch2} ->
+            {FetchResult, Batch3} = batch_request({fetch_links, [Ctx, Key, TreeIds -- [TreeId],
+                lists:map(fun({Name, _}) -> Name end, Links)]}, Batch2, _LinkTokens),
+
+            ToAdd = lists:filtermap(fun
+                ({{_, {error, not_found}}, Link}) -> {true, Link};
+                (_) -> false
+            end, lists:zip(lists:reverse(FetchResult), Links)),
+            {AddResult, Batch4} = batch_request({add_links, [Ctx, Key, TreeId, ToAdd]}, Batch3, _LinkTokens),
+
+            {prepare_check_and_add_ans(FetchResult, AddResult), Batch4};
+        {{error, not_found}, Batch2} ->
+            batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch2, _LinkTokens);
+        Other ->
+            {generate_error_ans(length(Links), Other), Batch}
+    end;
 batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
@@ -863,3 +887,19 @@ set_link_token(Tokens, Token, #link_token{} = OldToken) ->
         OldToken#link_token{restart_token = {cached_token, Token2}});
 set_link_token(Tokens, Token, _OldToken) ->
     set_link_token(Tokens, Token, #link_token{}).
+
+-spec prepare_check_and_add_ans(list(), list()) -> list().
+prepare_check_and_add_ans([], []) ->
+    [];
+prepare_check_and_add_ans([{_, {error, not_found}} | FetchTail], [AddAns | AddTail]) ->
+    [AddAns | prepare_check_and_add_ans(FetchTail, AddTail)];
+prepare_check_and_add_ans([{Ref, {ok, _}} | FetchTail], AddAnsList) ->
+    [{Ref, {error, already_exists}} | prepare_check_and_add_ans(FetchTail, AddAnsList)];
+prepare_check_and_add_ans([FetchAns | FetchTail], AddAnsList) ->
+    [FetchAns | prepare_check_and_add_ans(FetchTail, AddAnsList)].
+
+-spec generate_error_ans(non_neg_integer(), term()) -> list().
+generate_error_ans(0, _Error) ->
+    [];
+generate_error_ans(N, Error) ->
+    [{make_ref(), Error} | generate_error_ans(N - 1, Error)].

@@ -18,7 +18,7 @@
 -export([create/3, save/3, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/3, delete_all/2]).
--export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
+-export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, get_links_trees/2]).
 
 -type ctx() :: #{model := datastore_model:model(),
@@ -195,6 +195,18 @@ delete_all(_, _) ->
     [{ok, link()} | {error, term()}].
 add_links(Ctx, Key, TreeId, Links) ->
     datastore_hooks:wrap(Ctx, add_links, [Ctx, Key, TreeId, Links], fun
+        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates named links between a document and targets. Checks if links do not exists in selected trees.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_and_add_links(ctx(), key(), tree_id(), [tree_id()], [{link_name(), link_target()}]) ->
+    [{ok, link()} | {error, term()}].
+check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
+    datastore_hooks:wrap(Ctx, check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links], fun
         (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
     end).
 
