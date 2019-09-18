@@ -414,7 +414,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_failed => SlavesErrors
                 },
                 Fun = maps:get(finish_callback, MasterAns, fun(_TaskID, _SlavesDescription) -> ok end),
-                Fun(TaskID, SlavesDescription),
+                Fun(MasterJobExtendedArgs, SlavesDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description2)
         end,
 
@@ -427,7 +427,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         end
     catch
         E1:R1 ->
-            ?error_stacktrace("Master job ~s of task ~s (module ~p) error ~p:~p",
+            ?error_stacktrace("Master job ~s of task ~s (module ~p) error ~w:~w",
                 [to_string(CallbackModule, Job), TaskID, CallbackModule, E1, R1]),
             ErrorDescription = #{
                 master_jobs_failed => 1
@@ -461,12 +461,16 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
                 ok;
             {ok, Description} ->
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
-                ok
+                ok;
+            Error = {error, _} ->
+                ?error("Slave job ~s of task ~p (module ~p) error ~p",
+                    [to_string(CallbackModule, Job), TaskID, CallbackModule, Error]),
+                error
         end
     catch
-        E1:E2 ->
+        E:R ->
             ?error_stacktrace("Slave job ~s of task ~p (module ~p) error ~p:~p",
-                [to_string(CallbackModule, Job), TaskID, CallbackModule, E1, E2]),
+                [to_string(CallbackModule, Job), TaskID, CallbackModule, E, R]),
             error
     end.
 
