@@ -38,6 +38,7 @@
     fold_should_return_all_values2/1,
     fold_keys_should_return_all_keys/1,
     add_links_should_succeed/1,
+    check_and_add_links_test/1,
     get_links_should_succeed/1,
     get_links_should_return_missing_error/1,
     delete_links_should_succeed/1,
@@ -80,6 +81,7 @@ all() ->
         fold_should_return_all_values2,
         fold_keys_should_return_all_keys,
         add_links_should_succeed,
+        check_and_add_links_test,
         get_links_should_succeed,
         get_links_should_return_missing_error,
         delete_links_should_succeed,
@@ -327,6 +329,46 @@ add_links_should_succeed(Config) ->
             ?assertEqual(LinkTarget, Link#link.target),
             ?assertEqual(undefined, Link#link.rev)
         end, lists:zip(Results, Links))
+    end, ?TEST_MODELS).
+
+check_and_add_links_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        LinksNum = 1000,
+
+        Links = lists:sort(lists:map(fun(N) ->
+            {?LINK_NAME(N), ?LINK_TARGET(N)}
+        end, lists:seq(1, LinksNum, 2))),
+        Results = rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID(1), Links
+        ]),
+        lists:foreach(fun({Result, {LinkName, LinkTarget}}) ->
+            {ok, Link} = ?assertMatch({ok, #link{}}, Result),
+            ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
+            ?assertEqual(LinkName, Link#link.name),
+            ?assertEqual(LinkTarget, Link#link.target),
+            ?assertEqual(undefined, Link#link.rev)
+        end, lists:zip(Results, Links)),
+
+        Links2 = lists:sort(lists:map(fun(N) ->
+            {?LINK_NAME(N), ?LINK_TARGET(N)}
+        end, lists:seq(1, LinksNum))),
+        Results2 = rpc:call(Worker, Model, check_and_add_links, [
+            ?KEY, ?LINK_TREE_ID(2), all, Links2
+        ]),
+
+        lists:foreach(fun({Result, {LinkName, LinkTarget} = LinkDef}) ->
+            case lists:member(LinkDef, Links) of
+                false ->
+                    {ok, Link} = ?assertMatch({ok, #link{}}, Result),
+                    ?assertEqual(?LINK_TREE_ID(2), Link#link.tree_id),
+                    ?assertEqual(LinkName, Link#link.name),
+                    ?assertEqual(LinkTarget, Link#link.target),
+                    ?assertEqual(undefined, Link#link.rev);
+                _ ->
+                    ?assertMatch({error, already_exists}, Result)
+            end
+        end, lists:zip(Results2, Links2))
     end, ?TEST_MODELS).
 
 get_links_should_succeed(Config) ->
