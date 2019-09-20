@@ -443,6 +443,10 @@ batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batc
     GetTreesAns = case CheckTrees of
         all ->
             datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch);
+        [TreeId] ->
+            {{error, not_found}, Batch};
+        [] ->
+            {{error, not_found}, Batch};
         _ ->
             {{ok, CheckTrees}, Batch}
     end,

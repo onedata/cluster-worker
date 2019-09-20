@@ -133,7 +133,7 @@ add_links(Ctx, Key, TreeId, Links) ->
 %% Synchronous and thread safe {@link datastore:check_and_add_links/4} implementation.
 %% @end
 %%--------------------------------------------------------------------
--spec check_and_add_links(ctx(), key(), tree_id(), [tree_id()], [{link_name(), link_target()}]) ->
+-spec check_and_add_links(ctx(), key(), tree_id(), tree_ids(), [{link_name(), link_target()}]) ->
     [{ok, link()} | {error, term()}].
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
     Size = length(Links),

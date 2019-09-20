@@ -203,7 +203,7 @@ add_links(Ctx, Key, TreeId, Links) ->
 %% Creates named links between a document and targets. Checks if links do not exists in selected trees.
 %% @end
 %%--------------------------------------------------------------------
--spec check_and_add_links(ctx(), key(), tree_id(), [tree_id()], [{link_name(), link_target()}]) ->
+-spec check_and_add_links(ctx(), key(), tree_id(), tree_ids(), [{link_name(), link_target()}]) ->
     [{ok, link()} | {error, term()}].
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
     datastore_hooks:wrap(Ctx, check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links], fun

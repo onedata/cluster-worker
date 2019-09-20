@@ -268,7 +268,7 @@ add_links(Ctx, Key, TreeId, Link) ->
 %% Creates named links between a model document and targets. Checks if links do not exists in selected trees.
 %% @end
 %%--------------------------------------------------------------------
--spec check_and_add_links(ctx(), key(), tree_id(), [tree_id()],
+-spec check_and_add_links(ctx(), key(), tree_id(), tree_ids(),
     one_or_many({link_name(), link_target()})) ->
     one_or_many({ok, link()} | {error, term()}).
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) when is_list(Links) ->
