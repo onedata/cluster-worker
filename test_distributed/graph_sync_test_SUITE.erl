@@ -26,6 +26,7 @@
 -include_lib("ctool/include/test/performance.hrl").
 
 -define(SSL_OPTS(__Config), [{secure, only_verify_peercert}, {cacerts, get_cacerts(__Config)}]).
+-define(DUMMY_IP, {13, 190, 241, 56}).
 
 %% API
 -export([all/0]).
@@ -43,6 +44,7 @@
     auth_override_test/1,
     nobody_auth_override_test/1,
     auto_scope_test/1,
+    bad_entity_type_test/1,
     session_persistence_test/1,
     subscribers_persistence_test/1,
     subscriptions_persistence_test/1,
@@ -61,6 +63,7 @@
     auth_override_test,
     nobody_auth_override_test,
     auto_scope_test,
+    bad_entity_type_test,
     session_persistence_test,
     subscribers_persistence_test,
     subscriptions_persistence_test,
@@ -85,27 +88,23 @@ handshake_test_base(Config, ProtoVersion) ->
     % Try to connect with no cookie - should be treated as anonymous
     Client1 = spawn_client(Config, ProtoVersion, undefined, ?SUB(nobody)),
 
-    % Try to connect with user 1 macaroon, auth via HTTP or handshake
-    Client2 = spawn_client(Config, ProtoVersion, {http, {macaroon, ?USER_1_MACAROON}}, ?SUB(user, ?USER_1)),
-    Client3 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
+    % Try to connect with user 1 token
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
-    % Try to connect with user 2 macaroon, auth via HTTP or handshake
-    Client4 = spawn_client(Config, ProtoVersion, {http, {macaroon, ?USER_2_MACAROON}}, ?SUB(user, ?USER_2)),
-    Client5 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2)),
+    % Try to connect with user 2 token
+    Client3 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
 
-    % Try to connect with bad macaroon, auth via HTTP or handshake
-    spawn_client(Config, ProtoVersion, {http, {macaroon, <<"bkkwksdf">>}}, ?ERROR_UNAUTHORIZED),
-    spawn_client(Config, ProtoVersion, {macaroon, <<"bkkwksdf">>, []}, ?ERROR_UNAUTHORIZED),
+    % Try to connect with bad token
+    spawn_client(Config, ProtoVersion, {token, <<"bkkwksdf">>}, ?ERROR_UNAUTHORIZED),
 
-    % Try to connect with provider macaroon, auth via HTTP or handshake
-    Client6 = spawn_client(Config, ProtoVersion, {http, {macaroon, ?PROVIDER_1_MACAROON}}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
-    Client7 = spawn_client(Config, ProtoVersion, {macaroon, ?PROVIDER_1_MACAROON, []}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
+    % Try to connect with provider token
+    Client4 = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
 
     % Try to connect with bad protocol version
     SuppVersions = gs_protocol:supported_versions(),
     spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERROR_BAD_VERSION(SuppVersions)),
 
-    disconnect_client([Client1, Client2, Client3, Client4, Client5, Client6, Client7]),
+    disconnect_client([Client1, Client2, Client3, Client4]),
 
     ok.
 
@@ -114,8 +113,8 @@ rpc_req_test(Config) ->
     [rpc_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
 rpc_req_test_base(Config, ProtoVersion) ->
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
-    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2)),
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
 
     ?assertMatch(
         {ok, #gs_resp_rpc{result = #{<<"a">> := <<"b">>}}},
@@ -147,7 +146,7 @@ async_req_test(Config) ->
     [async_req_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
 async_req_test_base(Config, ProtoVersion) ->
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
 
     Id = gs_client:async_request(Client1, #gs_req{
         subtype = rpc,
@@ -180,12 +179,12 @@ graph_req_test(Config) ->
 
 graph_req_test_base(Config, ProtoVersion) ->
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
         <<"revision">> => 1
     },
 
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
-    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2)),
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
 
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User1Data}},
@@ -263,7 +262,7 @@ graph_req_test_base(Config, ProtoVersion) ->
         }, delete)
     ),
 
-    NewSpaceGRI = gs_protocol:gri_to_string(
+    NewSpaceGRI = gri:serialize(
         #gri{type = od_space, id = ?SPACE_1, aspect = instance}
     ),
     ?assertMatch(
@@ -278,7 +277,7 @@ graph_req_test_base(Config, ProtoVersion) ->
     ),
 
     % Make sure "self" works in auth hints
-    NewGroupGRI = gs_protocol:gri_to_string(
+    NewGroupGRI = gri:serialize(
         #gri{type = od_group, id = ?GROUP_1, aspect = instance}
     ),
     ?assertMatch(
@@ -316,19 +315,19 @@ subscribe_test_base(Config, ProtoVersion) ->
     end),
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
         <<"revision">> => 1
     },
     User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_2, aspect = instance}),
         <<"revision">> => 1
     },
 
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
         GathererPid ! {gather_message, client1, Push}
     end),
 
-    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2), fun(Push) ->
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2), fun(Push) ->
         GathererPid ! {gather_message, client2, Push}
     end),
 
@@ -478,11 +477,11 @@ unsubscribe_test_base(Config, ProtoVersion) ->
     end),
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
         <<"revision">> => 1
     },
 
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
         GathererPid ! {gather_message, client1, Push}
     end),
 
@@ -560,15 +559,15 @@ nosub_test_base(Config, ProtoVersion) ->
     end),
 
     User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_2, aspect = instance}),
         <<"revision">> => 1
     },
 
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
         GathererPid ! {gather_message, client1, Push}
     end),
 
-    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2), fun(Push) ->
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2), fun(Push) ->
         GathererPid ! {gather_message, client2, Push}
     end),
 
@@ -656,22 +655,26 @@ auth_override_test_base(Config, ProtoVersion) ->
         gatherer_loop(#{})
     end),
 
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
+    UserClient = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
         GathererPid ! {gather_message, client1, Push}
     end),
 
-    % User 1 should be able to get user's 2 data by possessing his macaroon and
-    % using it as auth override during the request.
+    ProviderClient = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1), fun(Push) ->
+        GathererPid ! {gather_message, provider_client, Push}
+    end),
+
     User2Data = (?USER_DATA_WITHOUT_GRI(?USER_2))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_2, aspect = instance}),
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_2, aspect = instance}),
         <<"revision">> => 1
     },
 
+    % Provider should be able to get user's 2 data by possessing his token and
+    % using it as auth override during the request.
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User2Data}},
-        gs_client:sync_request(Client1, #gs_req{
+        gs_client:sync_request(ProviderClient, #gs_req{
             subtype = graph,
-            auth_override = {macaroon, ?USER_2_MACAROON, []},
+            auth_override = {{token, ?USER_2_TOKEN}, undefined},
             request = #gs_req_graph{
                 gri = #gri{type = od_user, id = ?SELF, aspect = instance},
                 operation = get,
@@ -680,19 +683,33 @@ auth_override_test_base(Config, ProtoVersion) ->
         })
     ),
 
+    % Auth override is allowed only for providers
+    ?assertMatch(
+        ?ERROR_FORBIDDEN,
+        gs_client:sync_request(UserClient, #gs_req{
+            subtype = graph,
+            auth_override = {{token, ?USER_2_TOKEN}, undefined},
+            request = #gs_req_graph{
+                gri = #gri{type = od_user, id = ?SELF, aspect = instance},
+                operation = get,
+                subscribe = true
+            }
+        })
+    ),
+
+    % Subscribing should work too - provider should be receiving future changes of
+    % user's 2 record.
     NewUser2Name = <<"newName2">>,
     NewUser2Data = User2Data#{
         <<"name">> => NewUser2Name,
         <<"revision">> => 2
     },
 
-    % Subscribing should work too - user1 should be receiving future changes of
-    % user's 2 record.
     ?assertMatch(
         {ok, #gs_resp_graph{}},
-        gs_client:sync_request(Client1, #gs_req{
+        gs_client:sync_request(ProviderClient, #gs_req{
             subtype = graph,
-            auth_override = {macaroon, ?USER_2_MACAROON, []},
+            auth_override = {{token, ?USER_2_TOKEN}, ?DUMMY_IP},
             request = #gs_req_graph{
                 gri = #gri{type = od_user, id = ?SELF, aspect = instance},
                 operation = update,
@@ -701,7 +718,7 @@ auth_override_test_base(Config, ProtoVersion) ->
         })
     ),
 
-    ?wait_until_true(verify_message_present(GathererPid, client1, fun(Msg) ->
+    ?wait_until_true(verify_message_present(GathererPid, provider_client, fun(Msg) ->
         case Msg of
             #gs_push_graph{
                 gri = #gri{type = od_user, id = ?USER_2, aspect = instance},
@@ -715,48 +732,42 @@ auth_override_test_base(Config, ProtoVersion) ->
     end)).
 
 
-% Nobody auth override is supported since protocol version 3
 nobody_auth_override_test(Config) ->
-    [nobody_auth_override_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS -- [1, 2]].
+    [nobody_auth_override_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
 nobody_auth_override_test_base(Config, ProtoVersion) ->
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1)),
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
 
     % Request with auth based on connection owner
-    ExpPrivateShareData = ?SHARE_DATA(<<"private">>),
     ?assertMatch(
-        {ok, #gs_resp_graph{data_format = resource, data = ExpPrivateShareData}},
+        {ok, #gs_resp_graph{data_format = resource, data = ?SHARE_DATA_MATCHER(<<"private">>)}},
         gs_client:sync_request(Client1, #gs_req{
             subtype = graph,
             request = #gs_req_graph{
-                gri = #gri{type = od_share, id = ?SHARE, aspect = instance},
+                gri = #gri{type = od_share, id = ?SHARE, aspect = instance, scope = auto},
                 operation = get
             }
         })
     ),
 
     % Request with nobody auth override
-    ExpPublicShareData = ?SHARE_DATA(<<"public">>),
     ?assertMatch(
-        {ok, #gs_resp_graph{data_format = resource, data = ExpPublicShareData}},
+        {ok, #gs_resp_graph{data_format = resource, data = ?SHARE_DATA_MATCHER(<<"public">>)}},
         gs_client:sync_request(Client1, #gs_req{
             subtype = graph,
-            auth_override = nobody,
+            auth_override = {nobody, undefined},
             request = #gs_req_graph{
-                gri = #gri{type = od_share, id = ?SHARE, aspect = instance},
+                gri = #gri{type = od_share, id = ?SHARE, aspect = instance, scope = auto},
                 operation = get
             }
         })
     ),
 
-    disconnect_client([Client1]),
-
-    ok.
+    disconnect_client([Client1]).
 
 
-% Auto scope is supported since protocol version 2
 auto_scope_test(Config) ->
-    [auto_scope_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS -- [1]].
+    [auto_scope_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
 
 auto_scope_test_base(Config, ProtoVersion) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
@@ -768,17 +779,17 @@ auto_scope_test_base(Config, ProtoVersion) ->
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_1, none),
     graph_sync_mocks:mock_max_scope_towards_handle_service(Config, ?USER_2, public),
 
-    Client1 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_1_MACAROON, []}, ?SUB(user, ?USER_1), fun(Push) ->
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1), fun(Push) ->
         GathererPid ! {gather_message, client1, Push}
     end),
 
-    Client2 = spawn_client(Config, ProtoVersion, {macaroon, ?USER_2_MACAROON, []}, ?SUB(user, ?USER_2), fun(Push) ->
+    Client2 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2), fun(Push) ->
         GathererPid ! {gather_message, client2, Push}
     end),
 
     HsGRI = #gri{type = od_handle_service, id = ?HANDLE_SERVICE, aspect = instance},
     HsGRIAuto = HsGRI#gri{scope = auto},
-    HsGRIAutoStr = gs_protocol:gri_to_string(HsGRIAuto),
+    HsGRIAutoStr = gri:serialize(HsGRIAuto),
 
     ?assertEqual(
         ?ERROR_FORBIDDEN,
@@ -897,7 +908,25 @@ auto_scope_test_base(Config, ProtoVersion) ->
         end
     end)),
 
-    ok.
+    disconnect_client([Client1, Client2]).
+
+
+bad_entity_type_test(Config) ->
+    [bad_entity_type_test_base(Config, ProtoVersion) || ProtoVersion <- ?SUPPORTED_PROTO_VERSIONS].
+
+bad_entity_type_test_base(Config, ProtoVersion) ->
+    Client1 = spawn_client(Config, ProtoVersion, {token, ?USER_1_TOKEN}, ?SUB(user, ?USER_1)),
+
+    ?assertMatch(
+        ?ERROR_BAD_GRI,
+        % op_file entity type is not supported (as per gs_logic_plugin)
+        gs_client:graph_request(Client1, #gri{
+            type = op_file, id = <<"123">>, aspect = instance
+        }, get, #{}, false)
+    ),
+
+    disconnect_client([Client1]).
+
 
 
 session_persistence_test(Config) ->
@@ -1039,7 +1068,7 @@ subscriptions_persistence_test(Config) ->
 
 gs_server_session_clearing_test_api_level(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
-    Auth = {macaroon, ?USER_1_MACAROON, []},
+    Auth = {token, ?USER_1_TOKEN},
     ConnRef = self(),
     Translator = ?GS_EXAMPLE_TRANSLATOR,
     HandshakeReq = #gs_req{request = #gs_req_handshake{
@@ -1052,7 +1081,7 @@ gs_server_session_clearing_test_api_level(Config) ->
         identity = ?SUB(user, ?USER_1)
     }}} = ?assertMatch(
         {ok, _},
-        rpc:call(Node, gs_server, handshake, [Auth, ConnRef, Translator, HandshakeReq])
+        rpc:call(Node, gs_server, handshake, [ConnRef, Translator, HandshakeReq, ?DUMMY_IP])
     ),
 
     GRI1 = #gri{type = od_user, id = ?USER_1, aspect = instance},
@@ -1097,7 +1126,7 @@ gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
 
     {ok, Client1, #gs_resp_handshake{session_id = SessionId}} = gs_client:start_link(
         get_gs_ws_url(Config),
-        {macaroon, ?USER_1_MACAROON, []},
+        {token, ?USER_1_TOKEN},
         [ProtoVersion],
         fun(_) -> ok end,
         ?SSL_OPTS(Config)

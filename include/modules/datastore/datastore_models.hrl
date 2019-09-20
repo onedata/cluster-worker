@@ -77,7 +77,8 @@
     canceled = false :: boolean(),
     node :: undefined | node(),
     status = scheduled :: traverse:status(),
-    description = #{} :: traverse:description()
+    description = #{} :: traverse:description(),
+    additional_data = #{} :: traverse:additional_data()
 }).
 
 -record(traverse_tasks_scheduler, {
@@ -86,6 +87,10 @@
     ongoing_tasks_limit = 0 :: traverse_tasks_scheduler:ongoing_tasks_limit(),
     groups = [] :: [traverse:group()],
     nodes = [] :: [node()]
+}).
+
+-record(cluster_generation, {
+    generation :: node_manager:cluster_generation()
 }).
 
 -endif.

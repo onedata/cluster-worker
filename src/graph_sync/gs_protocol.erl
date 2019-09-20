@@ -79,13 +79,17 @@
 % Special 'nobody' auth can be used to indicate that the client is requesting
 % public access (typically works the same as not providing any auth, but might
 % be subject to server's implementation).
--type client_auth() :: undefined | nobody | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+-type client_auth() :: undefined | nobody | {token, tokens:serialized()}.
 
 % Used to override the client authorization established on connection level, per
 % request. Can be used for example by providers to authorize a certain request
 % with a user's token, while still using the Graph Sync channel that was opened
 % with provider's auth.
--type auth_override() :: client_auth().
+% PeerIp is used to indicate the IP address of the client on behalf of whom the
+% channel owner is authorizing.
+% Auth override can only be specified if the owner of the GS channel is
+% an op-worker or op-panel service.
+-type auth_override() :: undefined | {client_auth(), PeerIp :: undefined | ip_utils:ip()}.
 
 % Possible entity types
 -type entity_type() :: atom().
@@ -95,8 +99,6 @@
 % Scope of given aspect, allows to differentiate access to subsets of aspect data
 % 'auto' scope means the maximum scope (if any) the client is authorized to access.
 -type scope() :: private | protected | shared | public | auto.
-% Graph Resource Identifier - a record identifying a certain resource in the graph.
--type gri() :: #gri{}.
 % Requested operation
 -type operation() :: create | get | update | delete.
 % Data included in the request or response and its format:
@@ -132,10 +134,10 @@
 -type error() :: {error, term()}.
 
 -type graph_create_result() :: ok | {ok, value, term()} |
-{ok, resource, {gri(), {term(), revision()}} | {gri(), auth_hint(), {term(), revision()}}} |
+{ok, resource, {gri:gri(), {term(), revision()}} | {gri:gri(), auth_hint(), {term(), revision()}}} |
 error().
 -type graph_get_result() :: {ok, {term(), revision()}} |
-{ok, gri(), {term(), revision()}} | error().
+{ok, gri:gri(), {term(), revision()}} | error().
 -type graph_delete_result() :: ok | error().
 -type graph_update_result() :: ok | error().
 
@@ -156,7 +158,6 @@ graph_update_result() | graph_delete_result().
     entity_id/0,
     aspect/0,
     scope/0,
-    gri/0,
     operation/0,
     data_format/0,
     data/0,
@@ -189,22 +190,7 @@ graph_update_result() | graph_delete_result().
     generate_error_response/2,
     generate_error_push_message/1
 ]).
--export([string_to_gri/1, gri_to_string/1]).
 -export([undefined_to_null/1, null_to_undefined/1]).
-
-% Functions returning plugin module names
--export([gs_protocol_plugin_module/0]).
-
--define(GS_PROTOCOL_PLUGIN, (gs_protocol_plugin_module())).
-
-%%%===================================================================
-%%% Plugin module names. Defined as functions instead of using it literally in code to prevent dialyzer warnings about
-%%  unknown module, since the module exists only in apps having cluster_worker as a dependency.
-%%%===================================================================
-
--spec gs_protocol_plugin_module() -> module().
-gs_protocol_plugin_module() ->
-    gs_protocol_plugin.
 
 %%%===================================================================
 %%% API
@@ -216,7 +202,7 @@ gs_protocol_plugin_module() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec supported_versions() -> [protocol_version()].
-supported_versions() -> [1, 2, 3].
+supported_versions() -> ?SUPPORTED_PROTO_VERSIONS.
 
 
 %%--------------------------------------------------------------------
@@ -368,38 +354,6 @@ null_to_undefined(null) ->
 null_to_undefined(Other) ->
     Other.
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Converts GRI expressed as string into record.
-%% @end
-%%--------------------------------------------------------------------
--spec string_to_gri(binary()) -> gri().
-string_to_gri(String) ->
-    [TypeStr, IdBinary, AspectScope] = binary:split(String, <<".">>, [global]),
-    Type = ?GS_PROTOCOL_PLUGIN:decode_entity_type(TypeStr),
-    Id = string_to_id(IdBinary),
-    {Aspect, Scope} = case binary:split(AspectScope, <<":">>, [global]) of
-        [A, S] -> {string_to_aspect(A), string_to_scope(S)};
-        [A] -> {string_to_aspect(A), private}
-    end,
-    #gri{type = Type, id = Id, aspect = Aspect, scope = Scope}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Converts GRI expressed as record into string.
-%% @end
-%%--------------------------------------------------------------------
--spec gri_to_string(gri()) -> binary().
-gri_to_string(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
-    <<
-        (?GS_PROTOCOL_PLUGIN:encode_entity_type(Type))/binary, ".",
-        (id_to_string(Id))/binary, ".",
-        (aspect_to_string(Aspect))/binary, ":",
-        (scope_to_string(Scope))/binary
-    >>.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -423,7 +377,7 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
         <<"id">> => Id,
         <<"type">> => <<"request">>,
         <<"subtype">> => subtype_to_string(Subtype),
-        <<"authOverride">> => client_auth_to_json(AuthOverride),
+        <<"authOverride">> => auth_override_to_json(ProtocolVersion, AuthOverride),
         <<"payload">> => Payload
     }.
 
@@ -459,7 +413,7 @@ encode_request_graph(_, #gs_req_graph{} = Req) ->
         subscribe = Subscribe, auth_hint = AuthHint
     } = Req,
     #{
-        <<"gri">> => gri_to_string(GRI),
+        <<"gri">> => gri:serialize(GRI),
         <<"operation">> => operation_to_string(Operation),
         <<"data">> => undefined_to_null(Data),
         <<"subscribe">> => Subscribe,
@@ -473,7 +427,7 @@ encode_request_unsub(_, #gs_req_unsub{} = Req) ->
         gri = GRI
     } = Req,
     #{
-        <<"gri">> => gri_to_string(GRI)
+        <<"gri">> => gri:serialize(GRI)
     }.
 
 
@@ -519,7 +473,7 @@ encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
     #{
         <<"version">> => Version,
         <<"sessionId">> => SessionId,
-        <<"identity">> => identity_to_json(Identity),
+        <<"identity">> => aai:subject_to_json(Identity),
         <<"attributes">> => undefined_to_null(Attributes)
     }.
 
@@ -535,12 +489,6 @@ encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
 -spec encode_response_graph(protocol_version(), graph_resp()) -> json_map().
 encode_response_graph(_, #gs_resp_graph{data_format = undefined}) ->
     undefined;
-encode_response_graph(1, #gs_resp_graph{data_format = Format, data = Result}) ->
-    case Format of
-        value -> #{<<"data">> => undefined_to_null(Result)};
-        resource -> Result
-    end;
-% Covers all versions since 2
 encode_response_graph(_, #gs_resp_graph{data_format = Format, data = Result}) ->
     FormatStr = data_format_to_str(Format),
     #{
@@ -581,7 +529,7 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
         gri = GRI, change_type = UpdateType, data = Data
     } = Message,
     #{
-        <<"gri">> => gri_to_string(GRI),
+        <<"gri">> => gri:serialize(GRI),
         <<"updateType">> => update_type_to_string(UpdateType),
         <<"data">> => undefined_to_null(Data)
     }.
@@ -593,7 +541,7 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
         gri = GRI, auth_hint = AuthHint, reason = Reason
     } = Message,
     #{
-        <<"gri">> => gri_to_string(GRI),
+        <<"gri">> => gri:serialize(GRI),
         <<"authHint">> => auth_hint_to_json(AuthHint),
         <<"reason">> => nosub_reason_to_json(Reason)
     }.
@@ -632,7 +580,7 @@ decode_request(ProtocolVersion, ReqJSON) ->
     #gs_req{
         id = maps:get(<<"id">>, ReqJSON),
         subtype = Subtype,
-        auth_override = json_to_client_auth(AuthOverride),
+        auth_override = json_to_auth_override(ProtocolVersion, AuthOverride),
         request = Request
     }.
 
@@ -661,7 +609,7 @@ decode_request_rpc(_, PayloadJSON) ->
 -spec decode_request_graph(protocol_version(), json_map()) -> graph_req().
 decode_request_graph(_, PayloadJSON) ->
     #gs_req_graph{
-        gri = string_to_gri(maps:get(<<"gri">>, PayloadJSON)),
+        gri = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
         operation = string_to_operation(maps:get(<<"operation">>, PayloadJSON)),
         data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
         subscribe = maps:get(<<"subscribe">>, PayloadJSON, false),
@@ -672,7 +620,7 @@ decode_request_graph(_, PayloadJSON) ->
 -spec decode_request_unsub(protocol_version(), json_map()) -> unsub_req().
 decode_request_unsub(_, PayloadJSON) ->
     #gs_req_unsub{
-        gri = string_to_gri(maps:get(<<"gri">>, PayloadJSON))
+        gri = gri:deserialize(maps:get(<<"gri">>, PayloadJSON))
     }.
 
 
@@ -719,7 +667,7 @@ decode_response_handshake(_, DataJSON) ->
     #gs_resp_handshake{
         version = Version,
         session_id = null_to_undefined(SessionId),
-        identity = json_to_identity(Identity),
+        identity = aai:json_to_subject(Identity),
         attributes = null_to_undefined(Attributes)
     }.
 
@@ -732,24 +680,6 @@ decode_response_rpc(_, DataJSON) ->
 
 
 -spec decode_response_graph(protocol_version(), json_map()) -> graph_resp().
-decode_response_graph(1, DataJSON) ->
-    case DataJSON of
-        null ->
-            #gs_resp_graph{};
-        Map when map_size(Map) == 0 ->
-            #gs_resp_graph{};
-        #{<<"data">> := Data} ->
-            #gs_resp_graph{
-                data_format = value,
-                data = Data
-            };
-        #{<<"gri">> := _} ->
-            #gs_resp_graph{
-                data_format = resource,
-                data = DataJSON
-            }
-    end;
-% Covers all versions since 2
 decode_response_graph(_, null) ->
     #gs_resp_graph{};
 decode_response_graph(_, Map) when map_size(Map) == 0 ->
@@ -788,7 +718,7 @@ decode_push(ProtocolVersion, ReqJSON) ->
 
 -spec decode_push_graph(protocol_version(), json_map()) -> graph_push().
 decode_push_graph(_, PayloadJSON) ->
-    GRI = string_to_gri(maps:get(<<"gri">>, PayloadJSON)),
+    GRI = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
     UpdateType = string_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
     Data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
     #gs_push_graph{
@@ -804,7 +734,7 @@ decode_push_nosub(_, PayloadJSON) ->
     Reason = maps:get(<<"reason">>, PayloadJSON),
     AuthHint = maps:get(<<"authHint">>, PayloadJSON, null),
     #gs_push_nosub{
-        gri = string_to_gri(GRI),
+        gri = gri:deserialize(GRI),
         auth_hint = json_to_auth_hint(AuthHint),
         reason = json_to_nosub_reason(Reason)
     }.
@@ -845,8 +775,11 @@ json_to_client_auth(null) ->
     undefined;
 json_to_client_auth(<<"nobody">>) ->
     nobody;
-json_to_client_auth(#{<<"macaroon">> := Macaroon} = Json) ->
-    {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
+json_to_client_auth(#{<<"token">> := Token}) ->
+    {token, Token};
+%% @todo VFS-5554 Deprecated, kept for backward compatibility
+json_to_client_auth(#{<<"macaroon">> := Token}) ->
+    {token, Token}.
 
 
 -spec client_auth_to_json(client_auth()) -> null | json_map() | binary().
@@ -854,10 +787,39 @@ client_auth_to_json(undefined) ->
     null;
 client_auth_to_json(nobody) ->
     <<"nobody">>;
-client_auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
-    <<"macaroon">> => Macaroon,
-    <<"discharge-macaroons">> => DischargeMacaroons
+client_auth_to_json({token, Token}) -> #{
+    <<"token">> => Token,
+%% @todo VFS-5554 Deprecated, kept for backward compatibility
+    <<"macaroon">> => Token
 }.
+
+
+-spec json_to_auth_override(protocol_version(), null | json_map() | binary()) -> auth_override().
+json_to_auth_override(_, null) ->
+    undefined;
+json_to_auth_override(3, Data) ->
+    {json_to_client_auth(Data), undefined};
+json_to_auth_override(4, #{<<"auth">> := ClientAuth} = Data) ->
+    PeerIp = case maps:get(<<"peerIp">>, Data, null) of
+        null -> undefined;
+        IpBin -> element(2, {ok, _} = ip_utils:to_ip4_address(IpBin))
+    end,
+    {json_to_client_auth(ClientAuth), PeerIp}.
+
+
+-spec auth_override_to_json(protocol_version(), auth_override()) -> null | json_map() | binary().
+auth_override_to_json(_, undefined) ->
+    null;
+auth_override_to_json(3, {ClientAuth, _PeerIp}) ->
+    client_auth_to_json(ClientAuth);
+auth_override_to_json(4, {ClientAuth, PeerIp}) ->
+    #{
+        <<"auth">> => client_auth_to_json(ClientAuth),
+        <<"peerIp">> => case PeerIp of
+            undefined -> null;
+            _ -> element(2, {ok, _} = ip_utils:to_binary(PeerIp))
+        end
+    }.
 
 
 -spec operation_to_string(operation()) -> binary().
@@ -872,50 +834,6 @@ string_to_operation(<<"create">>) -> create;
 string_to_operation(<<"get">>) -> get;
 string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
-
-
--spec id_to_string(undefined | binary()) -> binary().
-id_to_string(undefined) -> <<"null">>;
-id_to_string(?SELF) -> <<"self">>;
-id_to_string(Bin) -> Bin.
-
-
--spec string_to_id(binary()) -> undefined | binary().
-string_to_id(<<"null">>) -> undefined;
-string_to_id(<<"self">>) -> ?SELF;
-string_to_id(Bin) -> Bin.
-
-
--spec aspect_to_string(aspect()) -> binary().
-aspect_to_string(Aspect) ->
-    case Aspect of
-        {A, B} -> <<(atom_to_binary(A, utf8))/binary, ",", B/binary>>;
-        A -> atom_to_binary(A, utf8)
-    end.
-
-
--spec string_to_aspect(binary()) -> aspect().
-string_to_aspect(String) ->
-    case binary:split(String, <<",">>, [global]) of
-        [A] -> binary_to_existing_atom(A, utf8);
-        [A, B] -> {binary_to_existing_atom(A, utf8), B}
-    end.
-
-
--spec scope_to_string(scope()) -> binary().
-scope_to_string(private) -> <<"private">>;
-scope_to_string(protected) -> <<"protected">>;
-scope_to_string(shared) -> <<"shared">>;
-scope_to_string(public) -> <<"public">>;
-scope_to_string(auto) -> <<"auto">>.
-
-
--spec string_to_scope(binary()) -> scope().
-string_to_scope(<<"private">>) -> private;
-string_to_scope(<<"protected">>) -> protected;
-string_to_scope(<<"shared">>) -> shared;
-string_to_scope(<<"public">>) -> public;
-string_to_scope(<<"auto">>) -> auto.
 
 
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
@@ -960,18 +878,6 @@ json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) ->
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
 json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
-
-
--spec identity_to_json(aai:subject()) -> binary() | json_map().
-identity_to_json(?SUB(nobody)) -> <<"nobody">>;
-identity_to_json(?SUB(user, UserId)) -> #{<<"user">> => UserId};
-identity_to_json(?SUB(?ONEPROVIDER, PrId)) -> #{<<"provider">> => PrId}.
-
-
--spec json_to_identity(binary() | json_map()) -> aai:subject().
-json_to_identity(<<"nobody">>) -> ?SUB(nobody);
-json_to_identity(#{<<"user">> := UserId}) -> ?SUB(user, UserId);
-json_to_identity(#{<<"provider">> := PrId}) -> ?SUB(?ONEPROVIDER, PrId).
 
 
 -spec nosub_reason_to_json(nosub_reason()) -> binary().

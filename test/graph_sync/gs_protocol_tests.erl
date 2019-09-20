@@ -21,165 +21,10 @@
 -include_lib("ctool/include/aai/aai.hrl").
 
 %%%===================================================================
-%%% Tests generator
-%%%===================================================================
-
-gs_protocol_test_() ->
-    {foreach,
-        fun setup/0,
-        fun teardown/1,
-        [
-            fun gri_conversion/0,
-            fun greatest_common_version/0,
-            fun encode_decode_message/0,
-            fun encode_decode_error/0
-        ]
-    }.
-
-
-%%%===================================================================
-%%% Setup/teardown functions
-%%%===================================================================
-
-setup() ->
-    meck:new(gs_protocol_plugin, [non_strict]),
-    meck:expect(gs_protocol_plugin, encode_entity_type, fun(Atom) -> atom_to_binary(Atom, utf8) end),
-    meck:expect(gs_protocol_plugin, decode_entity_type, fun(Bin) -> binary_to_atom(Bin, utf8) end).
-
-teardown(_) ->
-    ?assert(meck:validate(gs_protocol_plugin)),
-    ok = meck:unload(gs_protocol_plugin).
-
-
-%%%===================================================================
 %%% Tests
 %%%===================================================================
 
-gri_conversion() ->
-    ?assertEqual(
-        #gri{
-            type = user, id = <<"12345">>,
-            aspect = instance, scope = protected
-        },
-        gs_protocol:string_to_gri(<<"user.12345.instance:protected">>)
-    ),
-    ?assertEqual(
-        <<"user.12345.instance:protected">>,
-        gs_protocol:gri_to_string(#gri{
-            type = user, id = <<"12345">>,
-            aspect = instance, scope = protected
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = group, id = <<"ghdkeos2wsrt4">>,
-            aspect = user_invite_token, scope = private
-        },
-        gs_protocol:string_to_gri(<<"group.ghdkeos2wsrt4.user_invite_token">>)
-    ),
-    ?assertEqual(
-        <<"group.ghdkeos2wsrt4.user_invite_token:private">>,
-        gs_protocol:gri_to_string(#gri{
-            type = group, id = <<"ghdkeos2wsrt4">>,
-            aspect = user_invite_token, scope = private
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = space, id = <<"spaceId">>,
-            aspect = {user, <<"12345">>}, scope = private
-        },
-        gs_protocol:string_to_gri(<<"space.spaceId.user,12345">>)
-    ),
-    ?assertEqual(
-        <<"space.spaceId.user,12345:private">>,
-        gs_protocol:gri_to_string(#gri{
-            type = space, id = <<"spaceId">>,
-            aspect = {user, <<"12345">>}, scope = private
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = space, id = <<"spaceId">>,
-            aspect = {user, <<"12345">>}, scope = public
-        },
-        gs_protocol:string_to_gri(<<"space.spaceId.user,12345:public">>)
-    ),
-    ?assertEqual(
-        <<"space.spaceId.user,12345:public">>,
-        gs_protocol:gri_to_string(#gri{
-            type = space, id = <<"spaceId">>,
-            aspect = {user, <<"12345">>}, scope = public
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = share, id = <<"sh732js">>,
-            aspect = space, scope = protected
-        },
-        gs_protocol:string_to_gri(<<"share.sh732js.space:protected">>)
-    ),
-    ?assertEqual(
-        <<"share.sh732js.space:protected">>,
-        gs_protocol:gri_to_string(#gri{
-            type = share, id = <<"sh732js">>,
-            aspect = space, scope = protected
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = provider, id = <<"pr2ndv7y3bs">>,
-            aspect = {space, <<"sp9fhh83">>}, scope = private
-        },
-        gs_protocol:string_to_gri(<<"provider.pr2ndv7y3bs.space,sp9fhh83:private">>)
-    ),
-    ?assertEqual(
-        <<"provider.pr2ndv7y3bs.space,sp9fhh83:private">>,
-        gs_protocol:gri_to_string(#gri{
-            type = provider, id = <<"pr2ndv7y3bs">>,
-            aspect = {space, <<"sp9fhh83">>}, scope = private
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = handle, id = <<"hndl76dhsha">>,
-            aspect = handle, scope = public
-        },
-        gs_protocol:string_to_gri(<<"handle.hndl76dhsha.handle:public">>)
-    ),
-    ?assertEqual(
-        <<"handle.hndl76dhsha.handle:public">>,
-        gs_protocol:gri_to_string(#gri{
-            type = handle, id = <<"hndl76dhsha">>,
-            aspect = handle, scope = public
-        })
-    ),
-
-    ?assertEqual(
-        #gri{
-            type = handle_service, id = <<"hs726shshao">>,
-            aspect = instance, scope = private
-        },
-        gs_protocol:string_to_gri(<<"handle_service.hs726shshao.instance">>)
-    ),
-    ?assertEqual(
-        <<"handle_service.hs726shshao.instance:private">>,
-        gs_protocol:gri_to_string(#gri{
-            type = handle_service, id = <<"hs726shshao">>,
-            aspect = instance, scope = private
-        })
-    ),
-
-    ok.
-
-
-greatest_common_version() ->
+greatest_common_version_test() ->
     ?assertEqual(
         {true, 7},
         gs_protocol:greatest_common_version([1, 2, 5, 6, 7], [7])
@@ -228,7 +73,7 @@ greatest_common_version() ->
     ok.
 
 
-encode_decode_message() ->
+encode_decode_message_test() ->
     % Check if requests are encoded and decoded correctly
     RequestsToCheck = [
         #gs_req{
@@ -274,7 +119,7 @@ encode_decode_message() ->
             auth_override = undefined,
             request = #gs_req_handshake{
                 supported_versions = [123123, 34534, 123, 5],
-                auth = {macaroon, <<"macaroon">>, []},
+                auth = {token, <<"token-token">>},
                 session_id = <<"zxvcert245234234234234">>
             }
         },
@@ -284,14 +129,14 @@ encode_decode_message() ->
             auth_override = undefined,
             request = #gs_req_handshake{
                 supported_versions = [1],
-                auth = {macaroon, <<"macaroon">>, [<<"d1">>, <<"d2">>]},
+                auth = {token, <<"another-token">>},
                 session_id = <<"ccxvsdfsdfsdfsdf">>
             }
         },
         #gs_req{
             id = <<"mess7">>,
             subtype = rpc,
-            auth_override = {macaroon, <<"123sdfadsfq345r123">>, [<<"dfsghdsy456ergadfg">>]},
+            auth_override = {{token, <<"third-token">>}, undefined},
             request = #gs_req_rpc{
                 function = <<"f6">>,
                 args = #{<<"args6">> => 6}
@@ -302,7 +147,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = undefined, aspect = whatever},
+                gri = #gri{type = od_user, id = undefined, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = false,
@@ -314,7 +159,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id9">>, aspect = whatever, scope = shared},
+                gri = #gri{type = od_user, id = <<"id9">>, aspect = whatever, scope = shared},
                 operation = create,
                 data = #{<<"data9">> => 9},
                 subscribe = true,
@@ -326,7 +171,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = space, id = <<"id10">>, aspect = whatever},
+                gri = #gri{type = od_space, id = <<"id10">>, aspect = whatever},
                 operation = update,
                 data = #{<<"data10">> => 10},
                 subscribe = false,
@@ -338,7 +183,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = space, id = <<"id11">>, aspect = whatever},
+                gri = #gri{type = od_space, id = <<"id11">>, aspect = whatever},
                 operation = delete,
                 data = undefined,
                 subscribe = false,
@@ -350,7 +195,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id12">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id12">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -362,7 +207,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id13">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id13">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -374,7 +219,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id14">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id14">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -386,7 +231,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id15">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id15">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -398,7 +243,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id17">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id17">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -410,7 +255,7 @@ encode_decode_message() ->
             subtype = graph,
             auth_override = undefined,
             request = #gs_req_graph{
-                gri = #gri{type = user, id = <<"id18">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id18">>, aspect = whatever},
                 operation = get,
                 data = undefined,
                 subscribe = true,
@@ -422,7 +267,7 @@ encode_decode_message() ->
             subtype = unsub,
             auth_override = undefined,
             request = #gs_req_unsub{
-                gri = #gri{type = user, id = <<"id19">>, aspect = whatever}
+                gri = #gri{type = od_user, id = <<"id19">>, aspect = whatever}
             }
         },
         #gs_resp{
@@ -580,7 +425,7 @@ encode_decode_message() ->
         #gs_push{
             subtype = graph,
             message = #gs_push_graph{
-                gri = #gri{type = user, id = <<"id30">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id30">>, aspect = whatever},
                 change_type = updated,
                 data = #{<<"data30">> => 30}
             }
@@ -588,7 +433,7 @@ encode_decode_message() ->
         #gs_push{
             subtype = graph,
             message = #gs_push_graph{
-                gri = #gri{type = user, id = <<"id31">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id31">>, aspect = whatever},
                 change_type = deleted,
                 data = undefined
             }
@@ -596,14 +441,14 @@ encode_decode_message() ->
         #gs_push{
             subtype = nosub,
             message = #gs_push_nosub{
-                gri = #gri{type = user, id = <<"id32">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id32">>, aspect = whatever},
                 reason = forbidden
             }
         },
         #gs_push{
             subtype = nosub,
             message = #gs_push_nosub{
-                gri = #gri{type = user, id = <<"id33">>, aspect = whatever},
+                gri = #gri{type = od_user, id = <<"id33">>, aspect = whatever},
                 auth_hint = ?THROUGH_USER(<<"otherid33">>),
                 reason = forbidden
             }
@@ -625,7 +470,7 @@ encode_decode_message() ->
     ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(2, <<"sdfsdviuyasd9fas">>)).
 
 
-encode_decode_error() ->
+encode_decode_error_test() ->
     % Tuple means that after encoding and decoding the left hand side error,
     % right one should be obtained.
     ErrorsToCheck = [
@@ -634,7 +479,7 @@ encode_decode_error() ->
         ?ERROR_EXPECTED_HANDSHAKE_MESSAGE,
         ?ERROR_HANDSHAKE_ALREADY_DONE,
         ?ERROR_UNKNOWN_ERROR(#{<<"id">> => <<"unknownErrorId">>, <<"details">> => #{<<"desc">> => <<"serious">>}}),
-        ?ERROR_BAD_TYPE,
+        ?ERROR_BAD_GRI,
         ?ERROR_NOT_SUBSCRIBABLE,
         ?ERROR_RPC_UNDEFINED,
         ?ERROR_INTERNAL_SERVER_ERROR,
@@ -643,13 +488,13 @@ encode_decode_error() ->
         ?ERROR_NOT_FOUND,
         ?ERROR_UNAUTHORIZED,
         ?ERROR_FORBIDDEN,
-        ?ERROR_BAD_MACAROON,
-        ?ERROR_MACAROON_INVALID,
-        ?ERROR_MACAROON_EXPIRED,
-        ?ERROR_MACAROON_TTL_TO_LONG(10202),
-        ?ERROR_BAD_AUDIENCE_TOKEN,
+        ?ERROR_BAD_TOKEN,
+        ?ERROR_TOKEN_INVALID,
+        ?ERROR_TOKEN_CAVEAT_UNVERIFIED(#cv_time{valid_until = 12323746234}),
+        ?ERROR_TOKEN_SUBJECT_INVALID,
         ?ERROR_TOKEN_AUDIENCE_FORBIDDEN,
         ?ERROR_TOKEN_SESSION_INVALID,
+        ?ERROR_BAD_AUDIENCE_TOKEN,
         ?ERROR_BAD_BASIC_CREDENTIALS,
         ?ERROR_MALFORMED_DATA,
         ?ERROR_MISSING_REQUIRED_VALUE(<<"spaceId">>),

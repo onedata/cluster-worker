@@ -61,21 +61,24 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
 
     Ans1 = traverse_test_pool:get_node_slave_ans(Worker, CheckID),
     Ans2 = traverse_test_pool:get_node_slave_ans(Worker2, CheckID),
-    GetExpected = fun(Beg) ->
-        lists:foldl(fun(ID, Acc) ->
-            case CheckID of
-                true -> lists:map(fun(Element) -> {Element, ID} end, Expected0) ++ Acc;
-                _ -> Expected0 ++ Acc
-            end
-        end, [], lists:seq(Beg, RunsNum, 2))
-    end,
 
-    ?assertEqual(lists:sort(GetExpected(1)), lists:sort(Ans1)),
-    ?assertEqual(lists:sort(GetExpected(2)), lists:sort(Ans2)),
+    case CheckID of
+        true ->
+            GetExpected = fun(Beg) ->
+                lists:foldl(fun(ID, Acc) ->
+                    lists:map(fun(Element) -> {Element, ID} end, Expected0) ++ Acc
+                end, [], lists:seq(Beg, RunsNum, 2))
+            end,
+
+            ?assertEqual(lists:sort(GetExpected(1)), lists:sort(Ans1)),
+            ?assertEqual(lists:sort(GetExpected(2)), lists:sort(Ans2));
+        _ ->
+            ?assertEqual(lists:sort(lists:flatten(lists:duplicate(RunsNum, Expected0))), lists:sort(Ans1 ++ Ans2))
+    end,
 
     lists:foreach(fun(Num) ->
         ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-            rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]))
+            rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]), 2)
     end, lists:seq(1, RunsNum)),
     ok.
 
@@ -118,23 +121,45 @@ traverse_restart_test(Config) ->
     Ans1Len = length(Ans1),
     Ans2Len = length(Ans2),
 
-    Ans1_1 = lists:sublist(Ans1, 1, Ans1Len - ExpLen),
-    Ans1_2 = lists:sublist(Ans1, Ans1Len - ExpLen + 1, ExpLen),
-    Ans2_1 = lists:sublist(Ans2, 1, Ans2Len - ExpLen),
-    Ans2_2 = lists:sublist(Ans2, Ans2Len - ExpLen + 1, ExpLen),
-    ?assertEqual(Expected, lists:sort(Ans1_2)),
-    ?assertEqual(Expected, lists:sort(Ans2_2)),
-    ?assertEqual(length(Ans1_1 -- Expected), length(Ans1_1) - length(Expected)),
-    ?assertEqual(length(Ans2_1 -- Expected), length(Ans2_1) - length(Expected)),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>]), 2),
+    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>]), 2),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>]), 2),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>]), 2),
 
-    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>])),
-    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>])),
-    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>])),
-    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>])),
+    case Ans1Len of
+        _ when Ans1Len >= 3 * ExpLen ->
+            Ans1_1 = lists:sublist(Ans1, 1, Ans1Len - 2 * ExpLen),
+            Ans1_2 = lists:sublist(Ans1, Ans1Len - 2* ExpLen + 1, ExpLen),
+            Ans1_3 = lists:sublist(Ans1, Ans1Len - ExpLen + 1, ExpLen),
+
+            ?assertEqual(Expected, lists:sort(Ans1_2)),
+            ?assertEqual(Expected, lists:sort(Ans1_3)),
+            ?assertEqual(length(Ans1_1 -- Expected), length(Ans1_1) - length(Expected)),
+            ?assertEqual(length(Ans2 -- Expected), length(Ans2) - length(Expected));
+        _ when Ans2Len >= 3 * ExpLen ->
+            Ans2_1 = lists:sublist(Ans2, 1, Ans2Len - 2 * ExpLen),
+            Ans2_2 = lists:sublist(Ans2, Ans2Len - 2* ExpLen + 1, ExpLen),
+            Ans2_3 = lists:sublist(Ans2, Ans2Len - ExpLen + 1, ExpLen),
+
+            ?assertEqual(Expected, lists:sort(Ans2_2)),
+            ?assertEqual(Expected, lists:sort(Ans2_3)),
+            ?assertEqual(length(Ans2_1 -- Expected), length(Ans2_1) - length(Expected)),
+            ?assertEqual(length(Ans1 -- Expected), length(Ans1) - length(Expected));
+        _ ->
+            Ans1_1 = lists:sublist(Ans1, 1, Ans1Len - ExpLen),
+            Ans1_2 = lists:sublist(Ans1, Ans1Len - ExpLen + 1, ExpLen),
+            Ans2_1 = lists:sublist(Ans2, 1, Ans2Len - ExpLen),
+            Ans2_2 = lists:sublist(Ans2, Ans2Len - ExpLen + 1, ExpLen),
+            ?assertEqual(Expected, lists:sort(Ans1_2)),
+            ?assertEqual(Expected, lists:sort(Ans2_2)),
+            ?assertEqual(length(Ans1_1 -- Expected), length(Ans1_1) - length(Expected)),
+            ?assertEqual(length(Ans2_1 -- Expected), length(Ans2_1) - length(Expected))
+    end,
+
     ok.
 
 %%%===================================================================
@@ -167,6 +192,7 @@ init_per_testcase(Case, Config) when
 
 end_per_testcase(_, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
+    timer:sleep(2000), % Allow pool processes to finish jobs
     lists:foreach(fun(Worker) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, stop_pool, [?POOL]))
     end, Workers).

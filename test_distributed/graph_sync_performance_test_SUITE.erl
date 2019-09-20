@@ -225,7 +225,8 @@ update_propagation_performance_base(Config) ->
     end,
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
     },
 
     OnSuccessFun = fun(Auth) ->
@@ -380,7 +381,7 @@ spawn_clients(Config, ClientNum) ->
 
 spawn_clients(Config, ClientNum, RetryFlag, CallbackFunction, OnSuccessFun) ->
     URL = get_gs_ws_url(Config),
-    Auth = {macaroon, ?USER_1_MACAROON, []},
+    Auth = {token, ?USER_1_TOKEN},
     Identity = ?SUB(user, ?USER_1),
     AuthsAndIdentities = lists:duplicate(ClientNum, {Auth, Identity}),
     graph_sync_test_utils:spawn_clients(

@@ -10,20 +10,16 @@
 %%% @end
 %%%-------------------------------------------------------------------
 
--ifndef(GRAPH_SYNC_HRL).
--define(GRAPH_SYNC_HRL, 1).
+-ifndef(GRAPH_SYNC_CW_HRL).
+-define(GRAPH_SYNC_CW_HRL, 1).
+
+-include_lib("ctool/include/graph_sync/graph_sync.hrl").
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
 
-% Graph Resource Identifier - a record identifying a certain resource in the
-% graph.
--record(gri, {
-    type :: undefined | gs_protocol:entity_type(),
-    id :: undefined | gs_protocol:entity_id(),
-    aspect :: undefined | gs_protocol:aspect(),
-    scope = private :: gs_protocol:scope()
-}).
+% Protocol versions currently supported by this software
+-define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
 
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
@@ -48,7 +44,7 @@
 }).
 
 -record(gs_req_graph, {
-    gri :: gs_protocol:gri(),
+    gri :: gri:gri(),
     operation :: gs_protocol:operation(),
     data :: gs_protocol:data(),
     subscribe = false :: boolean(),
@@ -61,7 +57,7 @@
 }).
 
 -record(gs_req_unsub, {
-    gri :: gs_protocol:gri()
+    gri :: gri:gri()
 }).
 
 -record(gs_resp_unsub, {
@@ -69,13 +65,13 @@
 }).
 
 -record(gs_push_graph, {
-    gri :: gs_protocol:gri(),
+    gri :: gri:gri(),
     change_type = updated :: gs_protocol:change_type(),
     data :: gs_protocol:data()
 }).
 
 -record(gs_push_nosub, {
-    gri :: gs_protocol:gri(),
+    gri :: gri:gri(),
     auth_hint :: gs_protocol:auth_hint(),
     reason = forbidden :: gs_protocol:nosub_reason()
 }).
@@ -103,9 +99,6 @@
     subtype :: gs_protocol:message_subtype(),
     message :: gs_protocol:push()
 }).
-
-% Special id expressing "myself" (the client that is authenticated)
--define(SELF, <<"self">>).
 
 % Possible auth hints
 % Auth hint denoting rights to view certain aspects

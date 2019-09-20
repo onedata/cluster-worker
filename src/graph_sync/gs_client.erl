@@ -43,11 +43,6 @@
 -type client_ref() :: pid().
 -export_type([push_callback/0, client_ref/0]).
 
-% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
-% {http, websocket_req:authorization()} is DEPRECATED - since 19.02.*
-% auth should be sent in GraphSync handshake.
--type auth() :: gs_protocol:client_auth() | {http, websocket_req:authorization()}.
-
 -export([init/2, websocket_handle/3, websocket_info/3, websocket_terminate/3]).
 -export([start_link/4, start_link/5, kill/1]).
 -export([
@@ -67,7 +62,7 @@
 %% @equiv start_link(URL, Auth, SupportedVersions, PushCallback, []).
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(URL :: string() | binary(), auth(),
+-spec start_link(URL :: string() | binary(), gs_protocol:client_auth(),
     SupportedVersions :: [gs_protocol:protocol_version()], push_callback()) ->
     {ok, client_ref(), gs_protocol:handshake_resp()} | gs_protocol:error().
 start_link(URL, Auth, SupportedVersions, PushCallback) ->
@@ -82,21 +77,16 @@ start_link(URL, Auth, SupportedVersions, PushCallback) ->
 %% Allows to pass options to websocket_client:start_link.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(URL :: string() | binary(), auth(),
+-spec start_link(URL :: string() | binary(), gs_protocol:client_auth(),
     SupportedVersions :: [gs_protocol:protocol_version()], push_callback(),
     Opts :: list()) ->
     {ok, client_ref(), gs_protocol:handshake_resp()} | gs_protocol:error().
 start_link(URL, Auth, SupportedVersions, PushCallback, Opts) when is_binary(URL) ->
     start_link(binary_to_list(URL), Auth, SupportedVersions, PushCallback, Opts);
 start_link(URL, Auth, SupportedVersions, PushCallback, Opts) ->
-    % @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
-    {HttpAuth, HandshakeAuth} = case Auth of
-        {http, HttpA} -> {HttpA, undefined};
-        HandshakeA -> {undefined, HandshakeA}
-    end,
-    case websocket_client:start_link(URL, HttpAuth, ?MODULE, [], Opts) of
+    case websocket_client:start_link(URL, ?MODULE, [], Opts) of
         {ok, Pid} ->
-            Pid ! {init, self(), SupportedVersions, HandshakeAuth, PushCallback},
+            Pid ! {init, self(), SupportedVersions, Auth, PushCallback},
             receive
                 {init_result, #gs_resp_handshake{} = HandshakeResponse} ->
                     {ok, Pid, HandshakeResponse};
@@ -182,12 +172,12 @@ websocket_handle(Msg, _, State) ->
     {ok, state()} |
     {reply, websocket_req:frame(), state()} |
     {close, Reply :: binary(), state()}.
-websocket_info({init, CallerPid, SupportedVersions, HandshakeAuth, PushCallback}, _, State) ->
+websocket_info({init, CallerPid, SupportedVersions, Auth, PushCallback}, _, State) ->
     Id = datastore_utils:gen_key(),
     HandshakeRequest = #gs_req{
         id = Id, subtype = handshake, request = #gs_req_handshake{
             supported_versions = SupportedVersions,
-            auth = HandshakeAuth
+            auth = Auth
         }},
     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, HandshakeRequest),
     NewState = State#state{
@@ -254,7 +244,7 @@ rpc_request(ClientRef, Function, Args) ->
 %% @equiv graph_request(ClientRef, GRI, Operation, undefined, false, undefined).
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation()) ->
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation()) ->
     {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation) ->
     graph_request(ClientRef, GRI, Operation, undefined, false, undefined).
@@ -265,7 +255,7 @@ graph_request(ClientRef, GRI, Operation) ->
 %% @equiv graph_request(ClientRef, GRI, Operation, Data, false, undefined).
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation(),
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data()) -> {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation, Data) ->
     graph_request(ClientRef, GRI, Operation, Data, false, undefined).
@@ -276,7 +266,7 @@ graph_request(ClientRef, GRI, Operation, Data) ->
 %% @equiv graph_request(ClientRef, GRI, Operation, Data, Subscribe, undefined).
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation(),
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data(), Subscribe :: boolean()) ->
     {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation, Data, Subscribe) ->
@@ -291,7 +281,7 @@ graph_request(ClientRef, GRI, Operation, Data, Subscribe) ->
 %% wishes to subscribe for the resource and authorization hint.
 %% @end
 %%--------------------------------------------------------------------
--spec graph_request(client_ref(), gs_protocol:gri(), gs_protocol:operation(),
+-spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data(), Subscribe :: boolean(), gs_protocol:auth_hint()) ->
     {ok, gs_protocol:graph_resp()} | gs_protocol:error().
 graph_request(ClientRef, GRI, Operation, Data, Subscribe, AuthHint) ->
@@ -310,7 +300,7 @@ graph_request(ClientRef, GRI, Operation, Data, Subscribe, AuthHint) ->
 %% (waits for response or returns with a timeout error).
 %% @end
 %%--------------------------------------------------------------------
--spec unsub_request(client_ref(), gs_protocol:gri()) ->
+-spec unsub_request(client_ref(), gri:gri()) ->
     {ok, gs_protocol:unsub_resp()} | gs_protocol:error().
 unsub_request(ClientRef, GRI) ->
     sync_request(ClientRef, #gs_req_unsub{gri = GRI}).
