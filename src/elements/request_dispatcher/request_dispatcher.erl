@@ -114,7 +114,7 @@ init(_) ->
     | {noreply, NewState, hibernate}
     | {stop, Reason, Reply, NewState}
     | {stop, Reason, NewState},
-    Reply :: nagios_handler:healthcheck_response() | term(),
+    Reply :: cluster_status:status() | term(),
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
