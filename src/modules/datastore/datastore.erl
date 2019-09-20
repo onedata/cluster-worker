@@ -208,7 +208,7 @@ add_links(Ctx, Key, TreeId, Links) ->
     [{ok, link()} | {error, term()}].
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
     datastore_hooks:wrap(Ctx, check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+        (Function, Args) -> datastore_router:route(Key, Function, Args)
     end).
 
 %%--------------------------------------------------------------------
