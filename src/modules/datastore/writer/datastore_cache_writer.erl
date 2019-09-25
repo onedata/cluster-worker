@@ -440,18 +440,19 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
         add_links(Items, Tree, TreeId, [], [])
     end);
 batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batch, _LinkTokens) ->
-    GetTreesAns = case CheckTrees of
+    TreesToFetch = case CheckTrees of
         all ->
             datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch);
-        [TreeId] ->
+        [TreeId] -> % tree where links are added are not fetched
             {{error, not_found}, Batch};
         [] ->
             {{error, not_found}, Batch};
         _ ->
             {{ok, CheckTrees}, Batch}
     end,
-    case GetTreesAns of
+    case TreesToFetch of
         {{ok, TreeIds}, Batch2} ->
+            % do not fetch tree where links are added - links will be checked during add_links execution
             {FetchResult, Batch3} = batch_request({fetch_links, [Ctx, Key, TreeIds -- [TreeId],
                 lists:map(fun({Name, _}) -> Name end, Links)]}, Batch2, _LinkTokens),
 
