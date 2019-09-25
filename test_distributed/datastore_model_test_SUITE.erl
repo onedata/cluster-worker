@@ -40,6 +40,7 @@
     add_links_should_succeed/1,
     check_and_add_links_test/1,
     get_links_should_succeed/1,
+    disk_fetch_links_should_succeed/1,
     get_links_should_return_missing_error/1,
     delete_links_should_succeed/1,
     delete_links_should_ignore_missing_links/1,
@@ -83,6 +84,7 @@ all() ->
         add_links_should_succeed,
         check_and_add_links_test,
         get_links_should_succeed,
+        disk_fetch_links_should_succeed,
         get_links_should_return_missing_error,
         delete_links_should_succeed,
         delete_links_should_ignore_missing_links,
@@ -393,6 +395,49 @@ get_links_should_succeed(Config) ->
             ?assertEqual(undefined, Link#link.rev)
         end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
+
+disk_fetch_links_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+
+    Master = self(),
+    test_utils:mock_expect(Worker, links_tree, update_node, fun(NodeID, Node, State) ->
+        Master ! {link_node_id, NodeID},
+        meck:passthrough([NodeID, Node, State])
+    end),
+
+    lists:foreach(fun(Model) ->
+        Links = [{?LINK_NAME, ?LINK_TARGET}],
+        {LinksNames, _} = lists:unzip(Links),
+        ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+            ?KEY, ?LINK_TREE_ID, Links
+        ])),
+        Results = rpc:call(Worker, Model, get_links, [
+            ?KEY, ?LINK_TREE_ID, LinksNames
+        ]),
+        [{ok, [Link]}] = ?assertMatch([{ok, [#link{}]}], Results),
+        ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
+        ?assertEqual(?LINK_NAME, Link#link.name),
+        ?assertEqual(?LINK_TARGET, Link#link.target),
+        ?assertEqual(undefined, Link#link.rev),
+
+        [LinkNode |__] = get_link_nodes(),
+
+        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
+        ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [Ctx, LinkNode])),
+        ?assertEqual({error, not_found}, rpc:call(Worker, ?MEM_DRV(Model), get, [Ctx, LinkNode])),
+
+        Results2 = rpc:call(Worker, Model, get_links, [
+            ?KEY, ?LINK_TREE_ID, LinksNames
+        ]),
+        ?assertEqual(Results, Results2)
+    end, ?TEST_CACHED_MODELS).
+
+get_link_nodes() ->
+    receive
+        {link_node_id, NodeID} -> [NodeID | get_link_nodes()]
+    after
+        1000 -> []
+    end.
 
 get_links_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -1016,6 +1061,10 @@ init_per_testcase(link_del_should_delay_inactivate = Case, Config) ->
         end),
 
     init_per_testcase(?DEFAULT_CASE(Case), Config);
+init_per_testcase(disk_fetch_links_should_succeed = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_new(Workers, links_tree),
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1036,6 +1085,9 @@ end_per_testcase(link_doc_should_expire, Config) ->
 end_per_testcase(link_del_should_delay_inactivate, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:mock_unload(Workers, [links_tree, datastore_cache]);
+end_per_testcase(disk_fetch_links_should_succeed, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Workers, [links_tree]);
 end_per_testcase(_Case, _Config) ->
     ok.
 
