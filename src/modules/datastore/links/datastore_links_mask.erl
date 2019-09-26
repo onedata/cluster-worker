@@ -66,7 +66,7 @@ init(Ctx, Key, TreeId, Batch) ->
             FinalHead = maps:get(TreeId, Heads, Head),
             FinalTail = maps:get(TreeId, Tails, Tail),
 
-            case (FinalHead =:= FinalTail) =:= Head of
+            case (FinalHead =:= Head) andalso (FinalTail =:= Tail) of
                 true ->
                     {ok, Mask#mask{batch = Batch2}, true};
                 _ ->

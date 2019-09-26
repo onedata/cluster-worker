@@ -686,7 +686,7 @@ links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
                         {{error, Reason}, Batch2} -> {{error, Reason}, Batch2}
                     end
             end;
-        {{error, Reason}, Mask} ->
+        {{error, Reason}, Mask, _} ->
             {_, Batch2} = datastore_links_mask:terminate(Mask),
             {{error, Reason}, Batch2}
     end.
