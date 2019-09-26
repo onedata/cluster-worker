@@ -675,7 +675,7 @@ links_tree_apply(Ctx, Key, TreeId, Batch, Fun) ->
 links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
     Ctx2 = set_mutator_pid(Ctx),
     case datastore_links_mask:init(Ctx2, Key, TreeId, Batch) of
-        {ok, Mask} ->
+        {ok, Mask, _} ->
             case Fun(Mask) of
                 {{error, Reason}, Mask2} ->
                     {_, Batch2} = datastore_links_mask:terminate(Mask2),

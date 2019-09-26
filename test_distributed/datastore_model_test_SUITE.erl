@@ -422,14 +422,17 @@ disk_fetch_links_should_succeed(Config) ->
 
         [LinkNode |__] = get_link_nodes(),
 
-        Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
-        ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [Ctx, LinkNode])),
-        ?assertEqual({error, not_found}, rpc:call(Worker, ?MEM_DRV(Model), get, [Ctx, LinkNode])),
+        MemCtx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, ?KEY), ?MEM_CTX(Model)),
+        ?assertMatch({ok, _}, rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNode])),
+        ?assertMatch({ok, _, _}, rpc:call(Worker, ?DISC_DRV(Model), get, [?DISC_CTX, LinkNode]), 15),
+        ?assertEqual(ok, rpc:call(Worker, ?MEM_DRV(Model), delete, [MemCtx, LinkNode])),
+        ?assertEqual({error, not_found}, rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNode])),
 
         Results2 = rpc:call(Worker, Model, get_links, [
             ?KEY, ?LINK_TREE_ID, LinksNames
         ]),
-        ?assertEqual(Results, Results2)
+        ?assertEqual(Results, Results2),
+        ?assertMatch({ok, _}, rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNode]))
     end, ?TEST_CACHED_MODELS).
 
 get_link_nodes() ->

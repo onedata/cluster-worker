@@ -21,12 +21,14 @@
 
 %% tests
 -export([
-    save_should_succeed/1
+    save_should_succeed/1,
+    disk_fetch_should_succeed/1
 ]).
 
 all() ->
     ?ALL([
-        save_should_succeed
+        save_should_succeed,
+        disk_fetch_should_succeed
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
@@ -50,6 +52,36 @@ save_should_succeed(Config) ->
         lists:foreach(fun(W) -> assert_in_memory(W, Model, Key) end, Workers),
         assert_on_disc(Worker, Model, Key)
     end, ?TEST_MODELS).
+
+disk_fetch_should_succeed(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
+            rpc:call(Worker, Model, save, [?DOC(Model)])
+        ),
+
+        assert_on_disc(Worker, Model, Key),
+
+        UniqueKey = ?UNIQUE_KEY(Model, Key),
+        MemCtx = datastore_multiplier:extend_name(UniqueKey, ?MEM_CTX(Model)),
+        lists:foreach(fun(W) ->
+            ?assertMatch({ok, _}, rpc:call(W, ?MEM_DRV(Model), get, [MemCtx, UniqueKey])),
+            ?assertEqual(ok, rpc:call(W, ?MEM_DRV(Model), delete, [MemCtx, UniqueKey])),
+            ?assertMatch({error, not_found}, rpc:call(W, ?MEM_DRV(Model), get, [MemCtx, UniqueKey]))
+        end, Workers),
+
+        lists:foreach(fun(W) ->
+            ?assertMatch({ok, #document{}}, rpc:call(W, Model, get, [Key])),
+            ?assertMatch({ok, _}, rpc:call(W, ?MEM_DRV(Model), get, [MemCtx, UniqueKey]))
+        end, Workers),
+
+        lists:foreach(fun(W) ->
+            ?assertEqual(ok, rpc:call(W, ?MEM_DRV(Model), delete, [MemCtx, UniqueKey])),
+            ?assertMatch({error, not_found}, rpc:call(W, ?MEM_DRV(Model), get, [MemCtx, UniqueKey])),
+            ?assertMatch({ok, #document{}}, rpc:call(W, Model, get, [Key])),
+            ?assertMatch({ok, _}, rpc:call(W, ?MEM_DRV(Model), get, [MemCtx, UniqueKey]))
+        end, lists:reverse(Workers))
+    end, ?TEST_CACHED_MODELS).
 
 %%%===================================================================
 %%% Init/teardown functions
@@ -87,6 +119,20 @@ assert_in_memory(Worker, Model, Key, Deleted) ->
             Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, Key),
                 ?MEM_CTX(Model)),
             ?assertMatch({ok, #document{deleted = Deleted}},
+                rpc:call(Worker, Driver, get, [
+                    Ctx, ?UNIQUE_KEY(Model, Key)
+                ])
+            )
+    end.
+
+assert_not_in_memory(Worker, Model, Key) ->
+    case ?MEM_DRV(Model) of
+        undefined ->
+            ok;
+        Driver ->
+            Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, Key),
+                ?MEM_CTX(Model)),
+            ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
                     Ctx, ?UNIQUE_KEY(Model, Key)
                 ])

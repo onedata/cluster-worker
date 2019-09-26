@@ -291,15 +291,19 @@ exists(FetchNode, Ctx, Key) ->
     [{ok, link()} | {error, term()}].
 get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
     try
-        MemoryCtx = Ctx#{disc_driver := undefined, remote_driver := undefined},
+        MemoryCtx = case {Ctx, node()} of
+            {#{disc_driver := undefined}, FetchNode} -> Ctx;
+            _ -> Ctx#{disc_driver => undefined, remote_driver => undefined, throw_not_found => true}
+        end,
         {ok, ForestIt} = datastore_links_iter:init(MemoryCtx, Key, TreeIds),
         lists:map(fun(LinkName) ->
             {Result, _} = datastore_links:get(LinkName, ForestIt),
             Result
         end, LinkNames)
     catch
-        Error:Reason ->
-            ?debug_stacktrace("Get links from memory error ~p:~p", [Error, Reason]),
+        _Error:_Reason ->
+%%            ?debug_stacktrace("Get links from memory error ~p:~p for links ~p (key ~p)",
+%%                [Error, Reason, LinkNames, Key]),
             case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames]) of
                 {badrpc, RpcReason} -> {error, RpcReason};
                 RpcResult -> RpcResult
@@ -315,7 +319,10 @@ get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
 -spec get_links_trees(node(), ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 get_links_trees(FetchNode, Ctx, Key) ->
     try
-        MemoryCtx = Ctx#{disc_driver := undefined, remote_driver := undefined},
+        MemoryCtx = case {Ctx, node()} of
+            {#{disc_driver := undefined}, FetchNode} -> Ctx;
+            _ -> Ctx#{disc_driver => undefined, remote_driver => undefined, throw_not_found => true}
+        end,
         case datastore_links:get_links_trees(MemoryCtx, Key, undefined) of
             {{ok, TreeIds}, _} ->
                 {ok, TreeIds};
@@ -323,8 +330,8 @@ get_links_trees(FetchNode, Ctx, Key) ->
                 {error, Reason}
         end
     catch
-        Error2:Reason2 ->
-            ?debug_stacktrace("Get links' trees from memory error ~p:~p", [Error2, Reason2]),
+        _Error2:_Reason2 ->
+%%            ?debug_stacktrace("Get links' trees from memory error ~p:~p for key ~p", [Error2, Reason2, Key]),
             case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
                 {badrpc, Reason3} -> {error, Reason3};
                 Result -> Result
@@ -343,6 +350,13 @@ get_links_trees(FetchNode, Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec fetch_deleted(ctx(), key(), undefined | batch(), boolean()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
+fetch_deleted(#{throw_not_found := true} = Ctx, Key, Batch, _) ->
+    case datastore_cache:get(Ctx, Key, false) of
+        {error, not_found} ->
+            throw(not_found);
+        Result ->
+            {Result, Batch}
+    end;
 fetch_deleted(Ctx, Key, Batch = undefined, false) ->
     {datastore_cache:get(Ctx, Key, true), Batch};
 fetch_deleted(Ctx, Key, Batch = undefined, true) ->

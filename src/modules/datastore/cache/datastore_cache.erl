@@ -387,7 +387,8 @@ fetch_local_or_remote(Ctx, Keys) ->
     [{ok, durability(), doc()} | {error, term()}].
 cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD =/= undefined ->
     Futures = lists:map(fun
-        ({_Key, {ok, memory, Doc}}) ->
+        ({Key, {ok, memory, Doc}}) ->
+            save_memory_copies(Ctx, Key, Doc, disc),
             ?FUTURE(memory, {ok, Doc});
         ({Key, {ok, disc, Doc}}) ->
             save_async(Ctx, Key, Doc, false, true);
@@ -402,6 +403,19 @@ cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD 
     end, lists:zip(Keys, Results)),
 
     wait(Futures);
+cache_disc_or_remote_results(#{memory_driver := MD} = Ctx, Keys, Results) when MD =/= undefined ->
+    lists:foreach(fun
+        ({Key, {ok, memory, Doc} = Ans}) ->
+            save_memory_copies(Ctx, Key, Doc, memory),
+            Ans;
+        ({Key, {error, not_found} = Error}) ->
+            Doc = #document{key = Key, value = undefined, deleted = true},
+            save_memory_copies(Ctx, Key, Doc, memory),
+            Error;
+        ({_Key, Error}) ->
+            Error
+    end, lists:zip(Keys, Results)),
+    Results;
 cache_disc_or_remote_results(_Ctx, _Keys, Results) ->
     Results.
 
