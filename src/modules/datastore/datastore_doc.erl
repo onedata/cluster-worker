@@ -251,6 +251,7 @@ get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
         {ok, Doc} -> {ok, Doc};
         % TODO - jaki sens dla memory_only?
         {error, not_found} ->
+            ?info("aaaaaa ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]),
             case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result
@@ -262,6 +263,7 @@ get(FetchNode, Ctx, Key) ->
         {ok, #document{deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
         {error, not_found} ->
+            ?info("aaaaaa2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]),
             case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result
@@ -302,6 +304,7 @@ get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
         end, LinkNames)
     catch
         _Error:_Reason ->
+            ?info("aaaaaa3 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]),
 %%            ?debug_stacktrace("Get links from memory error ~p:~p for links ~p (key ~p)",
 %%                [Error, Reason, LinkNames, Key]),
             case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames]) of
@@ -331,6 +334,7 @@ get_links_trees(FetchNode, Ctx, Key) ->
         end
     catch
         _Error2:_Reason2 ->
+            ?info("aaaaaa4 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]),
 %%            ?debug_stacktrace("Get links' trees from memory error ~p:~p for key ~p", [Error2, Reason2, Key]),
             case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
                 {badrpc, Reason3} -> {error, Reason3};

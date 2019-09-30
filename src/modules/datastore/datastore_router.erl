@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([route/3, process/3]).
@@ -113,12 +114,37 @@ select_node(_Key, [#{routing := local} | _] = Args) ->
     {node(), Args};
 select_node(Key, [#{memory_copies := all}] = Args) ->
     Node = consistent_hashing:get_node(Key),
+
+    SelfNode = node(),
+    case Node of
+        SelfNode -> ok;
+        _ ->
+            ?info("rrrrr1 ~p", [{Key, Args}])
+    end,
+
     {Node, Args};
 select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
     [Node | Nodes] = consistent_hashing:get_nodes(Key, Num),
+
+    SelfNode = node(),
+    case Node of
+        SelfNode -> ok;
+        _ ->
+            ?info("rrrrr2 ~p", [{Key, Ctx, ArgsTail}])
+    end,
+
     {Node, [Ctx#{memory_copies => Nodes} | ArgsTail]};
 select_node(Key, Args) ->
-    {consistent_hashing:get_node(Key), Args}.
+    Node = consistent_hashing:get_node(Key),
+
+    SelfNode = node(),
+    case Node of
+        SelfNode -> ok;
+        _ ->
+            ?info("rrrrr3 ~p", [{Key, Args}])
+    end,
+
+    {Node, Args}.
 
 %%--------------------------------------------------------------------
 %% @private

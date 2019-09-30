@@ -423,7 +423,14 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
 choose_node(WorkerRef) ->
     case WorkerRef of
         {id, WName, ID} ->
-            {ok, WName, consistent_hashing:get_node(ID)};
+            Node = node(),
+            case consistent_hashing:get_node(ID) of
+                Node -> {ok, WName, Node};
+                Other ->
+                    ?info("wwwww ~p", [{WorkerRef, erlang:process_info(self(), current_stacktrace)}]),
+                    {ok, WName, Other}
+            end;
+%%            {ok, WName, consistent_hashing:get_node(ID)};
         {WName, WNode} ->
             {ok, WName, WNode};
         WName ->

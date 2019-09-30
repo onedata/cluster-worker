@@ -256,14 +256,14 @@ wait(Futures) when is_list(Futures) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec inactivate(pid() | map()) -> boolean().
-inactivate(MutatorPid) when is_pid(MutatorPid) ->
-    lists:foldl(fun(Pool, Acc) ->
-        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
-    end, false, datastore_multiplier:get_names(memory)),
-
-    lists:foldl(fun(Pool, Acc) ->
-        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
-    end, false, datastore_multiplier:get_names(disc));
+%%inactivate(MutatorPid) when is_pid(MutatorPid) ->
+%%    lists:foldl(fun(Pool, Acc) ->
+%%        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
+%%    end, false, datastore_multiplier:get_names(memory)),
+%%
+%%    lists:foldl(fun(Pool, Acc) ->
+%%        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
+%%    end, false, datastore_multiplier:get_names(disc));
 inactivate(KeysMap) ->
     lists:foreach(fun
         ({K, #{disc_driver := DD}}) when DD =/= undefined ->
