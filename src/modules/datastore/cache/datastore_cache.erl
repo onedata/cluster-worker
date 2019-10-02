@@ -494,6 +494,8 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save_memory_copies(ctx(), key(), doc(), memory | disc) -> ok.
+save_memory_copies(#{routing := local}, _Key, _Doc, _PoolType) ->
+    ok;
 save_memory_copies(#{memory_copies := all} = Ctx, Key, Doc, PoolType) ->
     Nodes = consistent_hashing:get_all_nodes(),
     save_memory_copies(Ctx#{memory_copies => Nodes -- [node()]}, Key, Doc, PoolType);
