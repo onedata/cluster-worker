@@ -250,16 +250,22 @@ get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
         {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
         % TODO - jaki sens dla memory_only?
-        {error, not_found} ->
-            case node() of
-                FetchNode ->
-                    ?info("aaaaaa ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
+        {error, not_found} = NotFound ->
+            case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
+                true ->
+                    case node() of
+                        FetchNode ->
+                            ?info("aaaaaa ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
+                        _ ->
+                            ?info("nnnnnn ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
+                    end,
+
+                    case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
+                        {badrpc, Reason} -> {error, Reason};
+                        Result -> Result
+                    end;
                 _ ->
-                    ?info("nnnnnn ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-            end,
-            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
-                {badrpc, Reason} -> {error, Reason};
-                Result -> Result
+                    NotFound
             end;
         {error, Reason2} -> {error, Reason2}
     end;
@@ -267,16 +273,22 @@ get(FetchNode, Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
         {ok, #document{deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
-        {error, not_found} ->
-            case node() of
-                FetchNode ->
-                    ?info("aaaaaa2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
+        {error, not_found} = NotFound ->
+            case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
+                true ->
+                    case node() of
+                        FetchNode ->
+                            ?info("aaaaaa2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
+                        _ ->
+                            ?info("nnnnnn2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
+                    end,
+
+                    case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
+                        {badrpc, Reason} -> {error, Reason};
+                        Result -> Result
+                    end;
                 _ ->
-                    ?info("nnnnnn2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-            end,
-            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
-                {badrpc, Reason} -> {error, Reason};
-                Result -> Result
+                    NotFound
             end;
         {error, Reason2} -> {error, Reason2}
     end.
