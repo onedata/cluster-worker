@@ -17,7 +17,7 @@
 
 -include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
@@ -283,7 +283,7 @@ process_request_async(SessionId, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_body(gs_protocol:protocol_version(), Data :: binary()) ->
-    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | gs_protocol:error().
+    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | errors:error().
 decode_body(ProtocolVersion, Data) ->
     try
         case json_utils:decode(Data) of

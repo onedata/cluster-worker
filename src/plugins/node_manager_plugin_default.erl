@@ -15,6 +15,8 @@
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
+-export([installed_cluster_generation/0]).
+-export([oldest_known_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0, listeners/0, modules_with_args/0]).
 -export([before_init/1, after_init/1]).
@@ -30,6 +32,26 @@
 %%%===================================================================
 %%% node_manager_plugin_behaviour callbacks
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns the current cluster generation of this software.
+%% @end
+%%--------------------------------------------------------------------
+-spec installed_cluster_generation() -> node_manager:cluster_generation().
+installed_cluster_generation() ->
+    1.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns the oldest known generation - the lowest one that can be directly
+%% upgraded to installed_cluster_generation.
+%% @end
+%%--------------------------------------------------------------------
+-spec oldest_known_cluster_generation() ->
+    {node_manager:cluster_generation(), HumanReadableVersion :: binary()}.
+oldest_known_cluster_generation() ->
+    {1, <<"19.02.*">>}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -117,7 +139,8 @@ after_init([]) ->
 %% This callback is executed only on one cluster node.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_cluster(integer()) -> {ok, integer()}.
+-spec upgrade_cluster(node_manager:cluster_generation()) ->
+    {ok, node_manager:cluster_generation()}.
 upgrade_cluster(CurrentGeneration) ->
     {ok, CurrentGeneration + 1}.
 

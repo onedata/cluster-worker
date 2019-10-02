@@ -21,7 +21,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback verify_handshake_auth(gs_protocol:client_auth(), ip_utils:ip()) ->
-    {ok, aai:auth()} | gs_protocol:error().
+    {ok, aai:auth()} | errors:error().
 
 
 %%--------------------------------------------------------------------
@@ -49,7 +49,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback verify_auth_override(aai:auth(), gs_protocol:auth_override()) ->
-    {ok, aai:auth()} | gs_protocol:error().
+    {ok, aai:auth()} | errors:error().
 
 
 %%--------------------------------------------------------------------
