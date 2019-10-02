@@ -83,6 +83,7 @@
                                                 % master_jobs_done, slave_jobs_failed, master_jobs_failed;
                                                 % the user can add own counters returning map with value upgrade from
                                                 % job (see traverse_behaviour.erl)
+-type additional_data() :: #{binary() => binary()}.
 -type status() :: atom().   % framework uses statuses: scheduled, ongoing, finished and canceled but user can set
                             % any intermediary status using traverse_task:update_status function
 -type group() :: binary(). % group used for load balancing (see traverse_tasks_scheduler.erl)
@@ -90,7 +91,8 @@
     executor => environment_id(),
     creator => environment_id(),
     callback_module => callback_module(),
-    group_id => group()
+    group_id => group(),
+    additional_data => additional_data()
 }.
 % Basic types for jobs management
 -type job() :: term().
@@ -126,7 +128,7 @@
 -type ctx() :: traverse_task:ctx().
 
 -export_type([pool/0, id/0, task/0, group/0, job/0, job_id/0, job_status/0, environment_id/0, description/0, status/0,
-    master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0, callback_module/0]).
+    additional_data/0, master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0, callback_module/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
@@ -168,7 +170,7 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
     IdToCtx = repair_ongoing_tasks(PoolName, Executor),
 
     lists:foreach(fun(CallbackModule) ->
-        {ok, JobIDs} = traverse_task_list:list_local_ongoing_jobs(PoolName, CallbackModule),
+        {ok, JobIDs} = traverse_task_list:list_local_jobs(PoolName, CallbackModule),
 
         lists:foreach(fun(JobID) ->
             {ok, Job, _, TaskID} = CallbackModule:get_job(JobID),
@@ -222,6 +224,7 @@ run(PoolName, TaskID, Job, Options) ->
     Creator = maps:get(creator, Options, Executor),
     CallbackModule = maps:get(callback_module, Options, binary_to_atom(PoolName, utf8)),
     TaskGroup = maps:get(group_id, Options, ?DEFAULT_GROUP),
+    AdditionalData = maps:get(additional_data, Options, #{}),
     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
 
     {JobStatus, Node, Description} = case Creator =:= Executor of
@@ -238,7 +241,7 @@ run(PoolName, TaskID, Job, Options) ->
 
     {ok, JobID} = CallbackModule:update_job_progress(main_job, Job, PoolName, TaskID, JobStatus),
     ok = traverse_task:create(ExtendedCtx, PoolName, CallbackModule, TaskID, Creator, Executor,
-        TaskGroup, JobID, Node, Description),
+        TaskGroup, JobID, Node, Description, AdditionalData),
 
     case Node of
         undefined ->
@@ -351,6 +354,10 @@ cancel(PoolName, TaskID, Environment) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Executes master job using function provided by callback module. To be executed by worker pool process.
+%% Master job is provided with function to enqueue next master jobs during the callback execution if needed.
+%% After callback execution, async_master_jobs from master job answer are enqueued. Afterwards, sequential_slave_jobs
+%% and next slave_jobs are executed on slave pool and the process awaits for their finish. At the end, master_jobs
+%% are enqueued and finish_callback is executed.
 %% @end
 %%--------------------------------------------------------------------
 -spec execute_master_job(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
@@ -478,20 +485,20 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
 %%% Internal functions
 %%%===================================================================
 
--spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), [job()]) -> [ok | error].
-run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
+-spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), job() | [job()]) -> [ok | error].
+run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) when is_list(Jobs) ->
     utils:pmap(fun(Job) ->
         worker_pool:call(SlavePool, {?MODULE, execute_slave_job, [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]},
             worker_pool:default_strategy(), ?CALL_TIMEOUT)
-    end, Jobs).
+    end, Jobs);
+run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Job) ->
+    run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, [Job]).
 
 -spec sequential_run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), [job() | [job()]]) ->
     [ok | error].
 sequential_run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, Jobs) ->
-    Ans = lists:map(fun
-        (List) when is_list(List) -> run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, List);
-        (Job) -> worker_pool:call(SlavePool, {?MODULE, execute_slave_job,
-            [PoolName, CallbackModule, ExtendedCtx, TaskID, Job]}, worker_pool:default_strategy(), ?CALL_TIMEOUT)
+    Ans = lists:map(fun(ParallelJobs) ->
+        run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, ParallelJobs)
     end, Jobs),
     lists:flatten(Ans).
 
@@ -563,6 +570,7 @@ check_task_list_and_run(PoolName, Executor, CheckedGroups) ->
                 {error, no_groups} ->
                     ok;
                 _ ->
+                    % Race with task starting
                     retry_run(PoolName, Executor, 0)
             end;
         {ok, GroupID} ->

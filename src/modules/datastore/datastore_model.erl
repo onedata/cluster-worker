@@ -23,7 +23,7 @@
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
 -export([fold/3, fold/5, fold_keys/3]).
--export([add_links/4, get_links/4, delete_links/4, mark_links_deleted/4]).
+-export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
 %% for rpc
@@ -262,6 +262,19 @@ add_links(Ctx, Key, TreeId, Links) when is_list(Links) ->
     datastore_apply(Ctx, Key, fun datastore:add_links/4, add_links, [TreeId, Links]);
 add_links(Ctx, Key, TreeId, Link) ->
     hd_if_list(add_links(Ctx, Key, TreeId, [Link])).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates named links between a model document and targets. Checks if links do not exist in selected trees.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_and_add_links(ctx(), key(), tree_id(), tree_ids(),
+    one_or_many({link_name(), link_target()})) ->
+    one_or_many({ok, link()} | {error, term()}).
+check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) when is_list(Links) ->
+    datastore_apply(Ctx, Key, fun datastore:check_and_add_links/5, check_and_add_links, [TreeId, CheckTrees, Links]);
+check_and_add_links(Ctx, Key, TreeId, CheckTrees, Link) ->
+    hd_if_list(check_and_add_links(Ctx, Key, TreeId, CheckTrees, [Link])).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -113,6 +113,9 @@ mock_model(Model) ->
         {add_links, fun(Key, TreeId, Links) ->
             datastore_model:add_links(get_ctx(Model), Key, TreeId, Links)
         end},
+        {check_and_add_links, fun(Key, TreeId, CheckTrees, Links) ->
+            datastore_model:check_and_add_links(get_ctx(Model), Key, TreeId, CheckTrees, Links)
+        end},
         {get_links, fun(Key, TreeId, LinkNames) ->
             datastore_model:get_links(get_ctx(Model), Key, TreeId, LinkNames)
         end},

@@ -24,6 +24,7 @@
     links_node,
     lock,
     node_management,
+    cluster_generation,
     task_pool,
     gs_session,
     gs_subscription,

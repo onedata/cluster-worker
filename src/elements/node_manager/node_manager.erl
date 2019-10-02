@@ -54,10 +54,22 @@
 %% for tests
 -export([init_workers/0, init_workers/1]).
 
+-type state() :: #state{}.
+-type cluster_generation() :: non_neg_integer().
+
+-export_type([cluster_generation/0]).
+
 -define(EXOMETER_COUNTERS,
             [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
+
+% When cluster is not in newest generation it will be upgraded during initialization.
+% This can be used to e.g. move models between services.
+% Oldest known generation is the lowest one that can be directly upgraded to newest.
+-define(INSTALLED_CLUSTER_GENERATION, 1).
+-define(OLDEST_KNOWN_CLUSTER_GENERATION, 1).
+-define(HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION, <<"19.02.1">>).
 
 %%%===================================================================
 %%% API
@@ -69,7 +81,7 @@
 %%--------------------------------------------------------------------
 -spec init_counters() -> ok.
 init_counters() ->
-    Size = application:get_env(?CLUSTER_WORKER_APP_NAME, 
+    Size = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_data_points_number, ?EXOMETER_DEFAULT_DATA_POINTS_NUMBER),
     Counters = lists:map(fun(Name) ->
         {?EXOMETER_NAME(Name), uniform, [{size, Size}]}
@@ -297,7 +309,7 @@ start_worker(Module, Args, Options) ->
     | {ok, State, hibernate}
     | {stop, Reason :: term()}
     | ignore,
-    State :: term(),
+    State :: state(),
     Timeout :: non_neg_integer() | infinity.
 init([]) ->
     process_flag(trap_exit, true),
@@ -353,7 +365,7 @@ init([]) ->
 %% Handling call messages
 %% @end
 %%--------------------------------------------------------------------
--spec handle_call(Request :: term(), From :: {pid(), Tag :: term()}, State :: term()) -> Result when
+-spec handle_call(Request :: term(), From :: {pid(), Tag :: term()}, State :: state()) -> Result when
     Result :: {reply, Reply, NewState}
     | {reply, Reply, NewState, Timeout}
     | {reply, Reply, NewState, hibernate}
@@ -362,21 +374,16 @@ init([]) ->
     | {noreply, NewState, hibernate}
     | {stop, Reason, Reply, NewState}
     | {stop, Reason, NewState},
-    Reply :: nagios_handler:healthcheck_response() | term(),
-    NewState :: term(),
+    Reply :: cluster_status:status() | term(),
+    NewState :: state(),
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
 
-handle_call(healthcheck, _From,
-    #state{cm_con_status = registered, initialized = true} = State) ->
-    {reply, ok, State};
 handle_call(healthcheck, _From, State) ->
-    {reply, out_of_sync, State};
+    {reply, perform_healthcheck(node_manager, State), State};
 
-handle_call(internal_healthcheck, _From, #state{cm_con_status = registered} = State) ->
-    {reply, ok, State};
-handle_call(internal_healthcheck, _From, State) ->
-    {reply, out_of_sync, State};
+handle_call({healthcheck, Component}, _From, State) ->
+    {reply, perform_healthcheck(Component, State), State};
 
 handle_call(disable_task_control, _From, State) ->
     {reply, ok, State#state{task_control = false}};
@@ -403,24 +410,34 @@ handle_call(_Request, _From, State) ->
 %% Handling cast messages
 %% @end
 %%--------------------------------------------------------------------
--spec handle_cast(Request :: term(), State :: term()) -> Result when
+-spec handle_cast(Request :: term(), State :: state()) -> Result when
     Result :: {noreply, NewState}
     | {noreply, NewState, Timeout}
     | {noreply, NewState, hibernate}
     | {stop, Reason :: term(), NewState},
-    NewState :: term(),
+    NewState :: state(),
     Timeout :: non_neg_integer() | infinity.
 handle_cast(connect_to_cm, State) ->
     NewState = connect_to_cm(State),
     {noreply, NewState};
 
-handle_cast(cm_conn_ack, State) ->
-    NewState = cm_conn_ack(State),
-    {noreply, NewState};
+handle_cast({cluster_init_step, ready}, State) ->
+    ok = cluster_init_step(ready),
+    {noreply, State};
+handle_cast({cluster_init_step, Step}, State) ->
+    try
+        ok = cluster_init_step(Step),
+        report_step_finished(Step)
+    catch
+        Error:Reason ->
+            ?error("Error during cluster initialization in step ~p: ~p:~p",
+                [Step, Error, Reason]),
+            report_step_finished(cluster_init_step_failure)
+    end,
+    {noreply, State};
 
-handle_cast({cluster_init_finished, Nodes}, State) ->
-    NewState = cluster_init_finished(State, Nodes),
-    {noreply, NewState};
+handle_cast(node_initialized, State) ->
+    {noreply, State#state{initialized = true}};
 
 handle_cast(configure_throttling, #state{throttling = true} = State) ->
     try
@@ -484,63 +501,17 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
-handle_cast(check_cluster_status, State) ->
-    % Check if cluster is initialized - this must be done in different process
-    % as healthcheck performs a gen_server call to node_manager and
-    % calling it from node_manager would cause a deadlock.
-    spawn(fun() ->
-        {ok, Timeout} = application:get_env(
-            ?CLUSTER_WORKER_APP_NAME, nagios_healthcheck_timeout),
-        Status = case nagios_handler:get_cluster_status(Timeout, internal_healthcheck) of
-            {ok, {_AppName, ok, _NodeStatuses}} ->
-                ok;
-            {ok, {_AppName, GenericError, NodeStatuses}}  ->
-                {error, {GenericError, NodeStatuses}};
-            Error ->
-                {error, Error}
-        end,
-        % Cast cluster status back to node manager
-        gen_server2:cast(?NODE_MANAGER_NAME, {cluster_status, Status})
-    end),
-    {noreply, State};
-
-
-handle_cast({cluster_status, _}, #state{initialized = true} = State) ->
-    % Already initialized, do nothing
-    {noreply, State};
-
-handle_cast({cluster_status, CStatus}, #state{initialized = {false, TriesNum}} = State) ->
-    % Not yet initialized, run after_init if cluster health is ok.
-    case CStatus of
-        ok ->
-            % Cluster initialized, run after_init callback
-            % of node_manager_plugin.
-            ?info("All nodes initialized. Running 'after_init' procedures."),
-            ok = plugins:apply(node_manager_plugin, after_init, [[]]),
-            {noreply, State#state{initialized = true}};
-        {error, Error} ->
-            MaxChecksNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                cluster_status_max_checks_number, 30),
-            case TriesNum < MaxChecksNum of
-                true ->
-                    % Cluster not yet initialized, try in a second.
-                    ?debug("Cluster not initialized. Next check in a second."),
-                    erlang:send_after(timer:seconds(1), self(), {timer, check_cluster_status}),
-                    {noreply, State#state{initialized = {false, TriesNum + 1}}};
-                _ ->
-                    ?error("Stopping application. Reason: "
-                    "cannot initialize cluster, status: ~p", [Error]),
-                    init:stop(),
-                    {stop, normal, State}
-            end
-    end;
-
 handle_cast({update_lb_advices, Advices}, State) ->
     NewState = update_lb_advices(State, Advices),
     {noreply, NewState};
 
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
+
+handle_cast(force_stop, State) ->
+    ?critical("Cluster could not be initialized - force stopping applicaiton"),
+    init:stop(),
+    {stop, normal, State};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -554,12 +525,12 @@ handle_cast(_Request, State) ->
 %% Handling all non call/cast messages
 %% @end
 %%--------------------------------------------------------------------
--spec handle_info(Info :: timeout | term(), State :: term()) -> Result when
+-spec handle_info(Info :: timeout | term(), State :: state()) -> Result when
     Result :: {noreply, NewState}
     | {noreply, NewState, Timeout}
     | {noreply, NewState, hibernate}
     | {stop, Reason :: term(), NewState},
-    NewState :: term(),
+    NewState :: state(),
     Timeout :: non_neg_integer() | infinity.
 handle_info({timer, Msg}, State) ->
     gen_server2:cast(?NODE_MANAGER_NAME, Msg),
@@ -592,7 +563,7 @@ handle_info(Request, State) ->
 %% with Reason. The return value is ignored.
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(Reason, State :: term()) -> Any :: term() when
+-spec terminate(Reason, State :: state()) -> Any :: term() when
     Reason :: normal
     | shutdown
     | {shutdown, term()}
@@ -637,15 +608,9 @@ code_change(OldVsn, State, Extra) ->
 %% First it establishes network connection, next sends message to cluster manager.
 %% @end
 %%--------------------------------------------------------------------
--spec connect_to_cm(State :: #state{}) -> #state{}.
-connect_to_cm(State = #state{cm_con_status = registered}) ->
-    % Already registered, do nothing
-    State;
+-spec connect_to_cm(State :: state()) -> state().
 connect_to_cm(State = #state{cm_con_status = connected}) ->
-    % Connected, but not registered (workers did not start), check again in some time
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, cm_connection_retry_period),
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {cm_conn_req, node()}),
-    erlang:send_after(Interval, self(), {timer, connect_to_cm}),
+    % Already connected, do nothing
     State;
 connect_to_cm(State = #state{cm_con_status = not_connected}) ->
     % Not connected to cluster manager, try and automatically schedule the next try
@@ -669,63 +634,124 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
             end
     end.
 
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Saves information about cluster manager connection when cluster manager answers to its request
+%% Performs all cluster init operations in given step.
 %% @end
 %%--------------------------------------------------------------------
--spec cm_conn_ack(State :: term()) -> #state{}.
-cm_conn_ack(State = #state{cm_con_status = connected}) ->
+-spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok.
+cluster_init_step(init) ->
     ?info("Successfully connected to cluster manager"),
+    gen_server2:cast(self(), do_heartbeat),
+    ok;
+cluster_init_step(start_default_workers) ->
     ?info("Starting default workers..."),
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {init_ok, node()}),
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, heartbeat_interval),
-    erlang:send_after(Interval, self(), {timer, do_heartbeat}),
-    State#state{cm_con_status = registered};
-cm_conn_ack(State) ->
-    % Already registered or not connected, do nothing
-    ?warning("node_manager received redundant cm_conn_ack"),
-    State.
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Receives information that cluster has been successfully initialized.
-%% @end
-%%--------------------------------------------------------------------
--spec cluster_init_finished(State :: term(), ClusterNodes :: [node()]) -> #state{}.
-cluster_init_finished(State, Nodes) ->
-    ?info("Cluster initialized. Running 'on_cluster_initialized' procedures"),
-    plugins:apply(node_manager_plugin, on_cluster_initialized, [Nodes]),
+    ok;
+cluster_init_step(start_custom_workers) ->
     ?info("Starting custom workers..."),
     Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
     init_workers(Workers),
     ?info("Custom workers started successfully"),
+    ok;
+cluster_init_step(upgrade_cluster) ->
+    case node() == consistent_hashing:get_node(upgrade_cluster) of
+        true ->
+            case get_current_cluster_generation() of
+                {error, _} = Error ->
+                    ?error("Error when retrieving current cluster generation: ~p", [Error]),
+                    throw(Error);
+                {ok, ClusterGeneration} ->
+                    upgrade_cluster(ClusterGeneration)
+            end,
+            ok;
+        false ->
+            ok
+    end;
+cluster_init_step(start_listeners) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
         ok = erlang:apply(Module, start, []),
         ?info("   * ~p started", [Module])
     end, node_manager:listeners()),
     ?info("All listeners started"),
-    self() ! {timer, check_cluster_status},
-    State.
+    ok;
+cluster_init_step(ready) ->
+    ?info("All nodes initialized. Running 'after_init' procedures."),
+    spawn(fun() ->
+        ok = plugins:apply(node_manager_plugin, after_init, [[]]),
+        gen_server2:cast(?NODE_MANAGER_NAME, node_initialized)
+    end),
+    ok.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Performs necessary upgrades if cluster is not in newest generation.
+%% Executed by one node in cluster.
+%% @end
+%%--------------------------------------------------------------------
+-spec upgrade_cluster(cluster_generation()) -> ok.
+upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?OLDEST_KNOWN_CLUSTER_GENERATION->
+    ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
+    "~nOldest supported version: ~p", [?HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION]),
+    throw({error, too_old_cluster_generation});
+
+upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?INSTALLED_CLUSTER_GENERATION ->
+    ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGeneration, ?INSTALLED_CLUSTER_GENERATION]),
+    {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGeneration]),
+    case NewGeneration > ?INSTALLED_CLUSTER_GENERATION of
+        true ->
+            ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
+                [NewGeneration, ?INSTALLED_CLUSTER_GENERATION]),
+            throw({error, too_high_generation});
+        false ->
+            ok
+    end,
+    ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
+    cluster_generation:save(NewGeneration),
+    upgrade_cluster(NewGeneration);
+
+upgrade_cluster(_CurrentGeneration) ->
+    ?info("No upgrade needed - the cluster is in newest generation").
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Performs healthcheck of given component.
+%% Cluster manager connection check is only performed
+%% by cluster manager during cluster initialization.
+%% @end
+%%--------------------------------------------------------------------
+-spec perform_healthcheck(cluster_status:component(), state()) ->
+    cluster_status:status() | [{module(), cluster_status:status()}].
+perform_healthcheck(cluster_manager_connection, #state{cm_con_status = connected}) -> ok;
+perform_healthcheck(cluster_manager_connection, _State) -> out_of_sync;
+perform_healthcheck(node_manager, #state{cm_con_status = connected, initialized = true}) -> ok;
+perform_healthcheck(node_manager, _State) -> out_of_sync;
+perform_healthcheck(dispatcher, _) -> gen_server2:call(?DISPATCHER_NAME, healthcheck);
+perform_healthcheck(workers, _) ->
+    lists:map(fun(WorkerName) -> {WorkerName, worker_proxy:call_direct(WorkerName, healthcheck)} end, modules());
+perform_healthcheck(listeners, _) ->
+    lists:map(fun(Listener) -> {Listener, apply(Listener, healthcheck, [])} end, listeners()).
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Performs calls to cluster manager with heartbeat. The heartbeat message consists of
 %% current monitoring data. The data is updated directly before sending.
-%% The cluster manager will perform an 'update_lb_advices' cast perodically, using
+%% The cluster manager will perform an 'update_lb_advices' cast periodically, using
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: #state{}) ->
+-spec do_heartbeat(State :: state()) ->
     {monitoring:node_monitoring_state(), {erlang:timestamp(), pid()}}.
-do_heartbeat(#state{cm_con_status = registered, monitoring_state = MonState, last_state_analysis = LSA,
+do_heartbeat(#state{cm_con_status = connected, monitoring_state = MonState, last_state_analysis = LSA,
     scheduler_info = SchedulerInfo} = _State) ->
     NewMonState = monitoring:update(MonState),
     NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
@@ -745,7 +771,7 @@ do_heartbeat(#state{monitoring_state = MonState, last_state_analysis = LSA} = _S
 %% Receives lb advices update from cluster manager and follows it to dispatcher.
 %% @end
 %%--------------------------------------------------------------------
--spec update_lb_advices(State :: #state{}, DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> #state{}.
+-spec update_lb_advices(State :: state(), DispatcherAdvice :: load_balancing:dispatcher_lb_advice()) -> state().
 update_lb_advices(State, DispatcherAdvice) ->
     gen_server2:cast(?DISPATCHER_NAME, {update_lb_advice, DispatcherAdvice}),
     State.
@@ -813,17 +839,13 @@ init_workers(Workers) ->
             end;
         ({Module, Args, Options}) ->
             case proplists:get_value(prehook, Options) of
-              undefined ->
-                ok;
-              Prehook ->
-                ok = apply(Module, Prehook, [])
+              undefined -> ok;
+              Prehook -> ok = apply(Module, Prehook, [])
             end,
             ok = start_worker(Module, Args, Options),
             case proplists:get_value(posthook, Options) of
-              undefined ->
-                ok;
-              Posthook ->
-                ok = apply(Module, Posthook, [])
+              undefined -> ok;
+              Posthook -> ok = apply(Module, Posthook, [])
             end
     end, Workers),
     ok.
@@ -1183,3 +1205,32 @@ get_cluster_ips() ->
     lists:map(fun(Node) ->
         {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
     end, Nodes).
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Retrieves current cluster generation from database.
+%% Defaults to newest known cluster generation.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_current_cluster_generation() -> cluster_generation() | {error, term()}.
+get_current_cluster_generation() ->
+    case cluster_generation:get() of
+        {ok, Generation} -> {ok, Generation};
+        {error, not_found} -> {ok, ?INSTALLED_CLUSTER_GENERATION};
+        {error, _} = Error -> Error
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Reports to cluster manager that given cluster init step is finished
+%% or step ended with failure.
+%% @end
+%%--------------------------------------------------------------------
+-spec report_step_finished(cluster_manager_server:cluster_init_step()
+    | cluster_init_step_failure) -> ok.
+report_step_finished(Msg) ->
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {Msg, node()}).

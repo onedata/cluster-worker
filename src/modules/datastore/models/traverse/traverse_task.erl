@@ -18,10 +18,13 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/10, start/5, schedule_for_local_execution/3, finish/4, cancel/5, on_task_change/2, on_remote_change/4, delete_ended/2]).
+-export([create/11, start/5, schedule_for_local_execution/3, finish/4, cancel/5, on_task_change/2,
+    on_remote_change/4, delete_ended/2]).
+
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/3,
-    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1]).
+    get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1,
+    get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1, resolve_conflict/3]).
@@ -55,8 +58,9 @@
 %%--------------------------------------------------------------------
 -spec create(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), traverse:environment_id(),
     traverse:environment_id(), traverse:group(), traverse:job_id(), remote | undefined | node(),
-    traverse:description()) -> ok.
-create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Job, Node, InitialDescription) ->
+    traverse:description(), traverse:additional_data()) -> ok.
+create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Job, Node, InitialDescription,
+    AdditionalData) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Value0 = #traverse_task{
         callback_module = CallbackModule,
@@ -65,7 +69,8 @@ create(ExtendedCtx, Pool, CallbackModule, TaskID, Creator, Executor, GroupID, Jo
         group = GroupID,
         description = InitialDescription,
         schedule_time = Timestamp,
-        main_job_id = Job
+        main_job_id = Job,
+        additional_data = AdditionalData
     },
 
     Value = case Node of
@@ -114,7 +119,8 @@ start(ExtendedCtx, Pool, CallbackModule, TaskID, NewDescription) ->
             {ok, Task#traverse_task{
                 status = ongoing,
                 node = Node,
-                description = NewDescription
+                description = NewDescription,
+                start_time = Timestamp
             }};
         (#traverse_task{status = scheduled, canceled = true} = Task) ->
             {ok, Task#traverse_task{
@@ -133,8 +139,8 @@ start(ExtendedCtx, Pool, CallbackModule, TaskID, NewDescription) ->
             group = GroupID
         }}} ->
             case Canceled of
-                true -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
-                false -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp)
+                false -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, Timestamp);
+                true -> ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp)
             end,
 
             ok = traverse_task_list:delete_scheduled_link(Pool, Creator, TaskID, ScheduleTimestamp, GroupID, Executor),
@@ -175,12 +181,18 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskID) ->
         (#traverse_task{status = ongoing, canceled = true} = Task) ->
             {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
         (#traverse_task{status = canceling, canceled = true} = Task) ->
-            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}}
+            {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
+        (#traverse_task{status = finished}) ->
+            {error, already_finished};
+        (#traverse_task{status = canceled}) ->
+            {error, already_finished}
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff) of
         {ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, StartTimestamp);
+        {error, already_finished} ->
+            ok;
         Other ->
             Other
     end.
@@ -457,13 +469,34 @@ get_execution_info(Pool, TaskID) ->
             Other
     end.
 
+-spec get_additional_data(doc()) -> {ok, traverse:additional_data()}.
+get_additional_data(#document{value = #traverse_task{additional_data = AdditionalData}}) ->
+    {ok, AdditionalData}.
+
+-spec get_additional_data(traverse:pool(), traverse:id()) -> {ok, traverse:additional_data()} | {error, term()}.
+get_additional_data(Pool, TaskID) ->
+    case datastore_model:get(?CTX, ?DOC_ID(Pool, TaskID)) of
+        {ok, Doc} ->
+            get_additional_data(Doc);
+        Other ->
+            Other
+    end.
+
+-spec update_additional_data(ctx(), traverse:pool(), traverse:id(), traverse:status()) ->
+    {ok, doc()} | {error, term()}.
+update_additional_data(ExtendedCtx, Pool, TaskID, NewAdditionalData) ->
+    Diff = fun(Task) ->
+        {ok, Task#traverse_task{additional_data = NewAdditionalData}}
+    end,
+    datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskID), Diff).
+
 %%%===================================================================
 %%% datastore_model callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns basin model's context. It can be extended using callback and such extended context is provided
+%% Returns basic model's context. It can be extended using callback and such extended context is provided
 %% to functions (see traverse.erl).
 %% @end
 %%--------------------------------------------------------------------
@@ -487,7 +520,8 @@ get_record_struct(1) ->
         {canceled, boolean},
         {node, atom},
         {status, atom},
-        {description, {custom, {?MODULE, encode_description, decode_description}}}
+        {description, {custom, {?MODULE, encode_description, decode_description}}},
+        {additional_data, #{string => binary}}
     ]}.
 
 %%--------------------------------------------------------------------
