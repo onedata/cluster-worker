@@ -30,4 +30,11 @@
   throttling = true
 }).
 
+% When cluster is not in newest generation it will be upgraded during initialization.
+% This can be used to e.g. move models between services.
+% Oldest known generation is the lowest one that can be directly upgraded to newest.
+-define(INSTALLED_CLUSTER_GENERATION, 1).
+-define(OLDEST_KNOWN_CLUSTER_GENERATION, 0).
+-define(HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION, <<"19.02.1">>).
+
 -endif.

@@ -52,10 +52,10 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% for tests
--export([init_workers/0, init_workers/1]).
+-export([init_workers/0, init_workers/1, upgrade_cluster/0]).
 
 -type state() :: #state{}.
--type cluster_generation() :: non_neg_integer().
+-type cluster_generation() :: integer().
 
 -export_type([cluster_generation/0]).
 
@@ -63,13 +63,6 @@
             [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
-
-% When cluster is not in newest generation it will be upgraded during initialization.
-% This can be used to e.g. move models between services.
-% Oldest known generation is the lowest one that can be directly upgraded to newest.
--define(INSTALLED_CLUSTER_GENERATION, 1).
--define(OLDEST_KNOWN_CLUSTER_GENERATION, 1).
--define(HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION, <<"19.02.1">>).
 
 %%%===================================================================
 %%% API
@@ -660,13 +653,7 @@ cluster_init_step(start_custom_workers) ->
 cluster_init_step(upgrade_cluster) ->
     case node() == consistent_hashing:get_node(upgrade_cluster) of
         true ->
-            case get_current_cluster_generation() of
-                {error, _} = Error ->
-                    ?error("Error when retrieving current cluster generation: ~p", [Error]),
-                    throw(Error);
-                {ok, ClusterGeneration} ->
-                    upgrade_cluster(ClusterGeneration)
-            end,
+            upgrade_cluster(),
             ok;
         false ->
             ok
@@ -687,7 +674,6 @@ cluster_init_step(ready) ->
     end),
     ok.
 
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -695,10 +681,21 @@ cluster_init_step(ready) ->
 %% Executed by one node in cluster.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_cluster(cluster_generation()) -> ok.
+-spec upgrade_cluster() -> ok | no_return().
+upgrade_cluster() ->
+    case get_current_cluster_generation() of
+        {error, _} = Error ->
+            ?error("Error when retrieving current cluster generation: ~p", [Error]),
+            throw(Error);
+        {ok, ClusterGeneration} ->
+            upgrade_cluster(ClusterGeneration)
+    end.
+
+%% @private
+-spec upgrade_cluster(cluster_generation()) -> ok | no_return().
 upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?OLDEST_KNOWN_CLUSTER_GENERATION->
     ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
-    "~nOldest supported version: ~p", [?HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION]),
+    "~nOldest supported version: ~s", [?HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION]),
     throw({error, too_old_cluster_generation});
 
 upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?INSTALLED_CLUSTER_GENERATION ->
@@ -713,10 +710,11 @@ upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?INSTALLED_CLUSTER_G
             ok
     end,
     ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
-    cluster_generation:save(NewGeneration),
+    {ok, _} = cluster_generation:save(NewGeneration),
     upgrade_cluster(NewGeneration);
 
-upgrade_cluster(_CurrentGeneration) ->
+upgrade_cluster(CurrentGeneration) ->
+    {ok, _} = cluster_generation:save(CurrentGeneration),
     ?info("No upgrade needed - the cluster is in newest generation").
 
 
