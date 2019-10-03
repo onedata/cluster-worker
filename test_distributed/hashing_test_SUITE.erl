@@ -31,7 +31,7 @@ test_hashing(Config) ->
 
     ?assertEqual(lists:usort(Workers), rpc:call(Worker1, consistent_hashing, get_all_nodes, [])),
     NodeOfUuid1 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid1">>]),
-    NodeOfUuid2 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid2">>]),
+    NodeOfUuid2 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid3">>]),
     NodeOfObject = rpc:call(Worker1, consistent_hashing, get_node, [{some, <<"object">>}]),
 
     ?assert(erlang:is_atom(NodeOfUuid1)),
