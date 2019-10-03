@@ -15,7 +15,6 @@
 
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([route/3, process/3]).
@@ -66,11 +65,10 @@ init_report() ->
 -spec route(key(), atom(), list()) -> term().
 route(Key, Function, Args) ->
     Module = select_module(Function),
-    {Node, Args2} = select_node(Key, Args, Module),
-    FinalArgs = [Module, Function, Args2],
+    {Node, Args2} = select_node(Key, Args),
     case Module of
         datastore_writer ->
-            case rpc:call(Node, datastore_router, process, FinalArgs) of
+            case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result
             end;
@@ -109,44 +107,14 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
-%%-spec select_node(key(), list()) -> {node(), list()}.
-select_node(_Key, [#{routing := local} | _] = Args, Module) ->
+-spec select_node(key(), list()) -> {node(), list()}.
+select_node(_Key, [#{routing := local} | _] = Args) ->
     {node(), Args};
-select_node(Key, [#{memory_copies := all}] = Args, Module) ->
-    Node = consistent_hashing:get_node(Key),
-
-    SelfNode = node(),
-    case {Node, Module} of
-        {SelfNode, _} -> ok;
-        {_, datastore_doc} -> ok;
-        _ ->
-            ?info("rrrrr1 ~p", [{Key, Args}])
-    end,
-
-    {Node, Args};
-select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail], Module) when is_integer(Num) ->
+select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
     [Node | Nodes] = consistent_hashing:get_nodes(Key, Num),
-
-    SelfNode = node(),
-    case {Node, Module} of
-        {SelfNode, _} -> ok;
-        {_, datastore_doc} -> ok;
-        _ ->
-            ?info("rrrrr2 ~p", [{Key, Ctx, ArgsTail}])
-    end,
-
     {Node, [Ctx#{memory_copies => Nodes} | ArgsTail]};
-select_node(Key, Args, Module) ->
+select_node(Key, Args) ->
     Node = consistent_hashing:get_node(Key),
-
-    SelfNode = node(),
-    case {Node, Module} of
-        {SelfNode, _} -> ok;
-        {_, datastore_doc} -> ok;
-        _ ->
-            ?info("rrrrr3 ~p", [{Key, Args}])
-    end,
-
     {Node, Args}.
 
 %%--------------------------------------------------------------------

@@ -19,7 +19,6 @@
 -author("Krzysztof Trzepla").
 
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([create/4, save/4, update/4, update/5]).
@@ -249,47 +248,14 @@ get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
         {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
-        % TODO - jaki sens dla memory_only?
-        {error, not_found} = NotFound ->
-            case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
-                true ->
-                    case node() of
-                        FetchNode ->
-                            ?info("aaaaaa ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
-                        _ ->
-                            ?info("nnnnnn ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-                    end,
-
-                    case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
-                        {badrpc, Reason} -> {error, Reason};
-                        Result -> Result
-                    end;
-                _ ->
-                    NotFound
-            end;
+        {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
         {error, Reason2} -> {error, Reason2}
     end;
 get(FetchNode, Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
         {ok, #document{deleted = true}} -> {error, not_found};
         {ok, Doc} -> {ok, Doc};
-        {error, not_found} = NotFound ->
-            case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
-                true ->
-                    case node() of
-                        FetchNode ->
-                            ?info("aaaaaa2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
-                        _ ->
-                            ?info("nnnnnn2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-                    end,
-
-                    case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
-                        {badrpc, Reason} -> {error, Reason};
-                        Result -> Result
-                    end;
-                _ ->
-                    NotFound
-            end;
+        {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
         {error, Reason2} -> {error, Reason2}
     end.
 
@@ -325,15 +291,7 @@ get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
             Result
         end, LinkNames)
     catch
-        _Error:_Reason ->
-            case node() of
-                FetchNode ->
-                    ?info("aaaaaa3 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
-                _ ->
-                    ?info("nnnnnn3 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-            end,
-%%            ?debug_stacktrace("Get links from memory error ~p:~p for links ~p (key ~p)",
-%%                [Error, Reason, LinkNames, Key]),
+        _:_ ->
             case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames]) of
                 {badrpc, RpcReason} -> {error, RpcReason};
                 RpcResult -> RpcResult
@@ -360,14 +318,7 @@ get_links_trees(FetchNode, Ctx, Key) ->
                 {error, Reason}
         end
     catch
-        _Error2:_Reason2 ->
-            case node() of
-                FetchNode ->
-                    ?info("aaaaaa4 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}]);
-                _ ->
-                    ?info("nnnnnn4 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-            end,
-%%            ?debug_stacktrace("Get links' trees from memory error ~p:~p for key ~p", [Error2, Reason2, Key]),
+        _:_ ->
             case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
                 {badrpc, Reason3} -> {error, Reason3};
                 Result -> Result
@@ -377,6 +328,24 @@ get_links_trees(FetchNode, Ctx, Key) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Tries to fetch missing document via tp process if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_missing(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+fetch_missing(FetchNode, Ctx, Key) ->
+    case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
+        true ->
+            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
+        _ ->
+            {error, not_found}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private

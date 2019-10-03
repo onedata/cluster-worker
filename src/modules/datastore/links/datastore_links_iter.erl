@@ -230,8 +230,8 @@ fold(Ctx, Key, TreeId, Fun, Acc, Opts, InitBatch) ->
     {ok | {error, term()}, forest_it()}.
 init_tree_mask(Ctx, Key, TreeId, Batch, ForestIt) ->
     case datastore_links_mask:init(Ctx, Key, TreeId, Batch) of
-        {ok, Mask, New} ->
-            init_tree_mask_cache(TreeId, Mask, ForestIt, New);
+        {ok, Mask, Empty} ->
+            init_tree_mask_cache(TreeId, Mask, ForestIt, Empty);
         {{error, Reason}, Mask, _} ->
             {_, Batch} = datastore_links_mask:terminate_read_only_mask(Mask),
             {{error, Reason}, ForestIt#forest_it{batch = Batch}}
@@ -247,8 +247,8 @@ init_tree_mask(Ctx, Key, TreeId, Batch, ForestIt) ->
     {ok | {error, term()}, forest_it()}.
 init_tree_mask_cache(TreeId, Mask, ForestIt = #forest_it{
     masks_cache = MasksCache
-}, New) ->
-    case datastore_links_mask:load(Mask, New) of
+}, Empty) ->
+    case datastore_links_mask:load(Mask, Empty) of
         {{ok, Cache}, Mask2} ->
             {ok, Batch} = datastore_links_mask:terminate_read_only_mask(Mask2),
             {ok, ForestIt#forest_it{

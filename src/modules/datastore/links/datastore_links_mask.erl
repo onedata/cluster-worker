@@ -44,7 +44,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes links tree mask.
+%% Initializes links tree mask. Returns information if mask is empty.
 %% @end
 %%--------------------------------------------------------------------
 -spec init(ctx(), key(), tree_id(), batch()) -> {ok | {error, term()}, mask(), boolean()}.
@@ -91,7 +91,7 @@ init(Ctx, Key, TreeId, Batch) ->
 -spec load(mask(), boolean()) -> {{ok, cache()} | {error, term()}, mask()}.
 load(Mask, true) ->
     {{ok, gb_sets:new()}, Mask};
-load(Mask = #mask{head = Head}, _New) ->
+load(Mask = #mask{head = Head}, _Empty) ->
     Cache = gb_sets:new(),
     load(Head, Cache, Mask).
 

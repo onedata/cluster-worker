@@ -255,15 +255,7 @@ wait(Futures) when is_list(Futures) ->
 %% limit is reached.
 %% @end
 %%--------------------------------------------------------------------
--spec inactivate(pid() | map()) -> boolean().
-%%inactivate(MutatorPid) when is_pid(MutatorPid) ->
-%%    lists:foldl(fun(Pool, Acc) ->
-%%        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
-%%    end, false, datastore_multiplier:get_names(memory)),
-%%
-%%    lists:foldl(fun(Pool, Acc) ->
-%%        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
-%%    end, false, datastore_multiplier:get_names(disc));
+-spec inactivate(map()) -> boolean().
 inactivate(KeysMap) ->
     lists:foreach(fun
         ({K, #{disc_driver := DD}}) when DD =/= undefined ->
@@ -405,15 +397,13 @@ cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD 
     wait(Futures);
 cache_disc_or_remote_results(#{memory_driver := MD} = Ctx, Keys, Results) when MD =/= undefined ->
     lists:foreach(fun
-        ({Key, {ok, memory, Doc} = Ans}) ->
-            save_memory_copies(Ctx, Key, Doc, memory),
-            Ans;
-        ({Key, {error, not_found} = Error}) ->
+        ({Key, {ok, memory, Doc}}) ->
+            save_memory_copies(Ctx, Key, Doc, memory);
+        ({Key, {error, not_found}}) ->
             Doc = #document{key = Key, value = undefined, deleted = true},
-            save_memory_copies(Ctx, Key, Doc, memory),
-            Error;
-        ({_Key, Error}) ->
-            Error
+            save_memory_copies(Ctx, Key, Doc, memory);
+        (_) ->
+            ok
     end, lists:zip(Keys, Results)),
     Results;
 cache_disc_or_remote_results(_Ctx, _Keys, Results) ->
@@ -493,7 +483,7 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
 %% Saves copy to memory of nodes listed in ctx.
 %% @end
 %%--------------------------------------------------------------------
--spec save_memory_copies(ctx(), key(), doc(), memory | disc) -> ok.
+-spec save_memory_copies(ctx(), key(), doc(),datastore_cache_manager:pool_type()) -> ok.
 save_memory_copies(#{routing := local}, _Key, _Doc, _PoolType) ->
     ok;
 save_memory_copies(#{memory_copies := all} = Ctx, Key, Doc, PoolType) ->
@@ -503,8 +493,9 @@ save_memory_copies(#{memory_copies := Num} = Ctx, Key, Doc, PoolType) when is_in
     [_ | Nodes] = consistent_hashing:get_nodes(Key, Num),
     save_memory_copies(Ctx#{memory_copies => Nodes}, Key, Doc, PoolType);
 save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
+    Pool = datastore_multiplier:extend_name(Key, PoolType),
     lists:foreach(fun(Node) ->
-        case rpc:call(Node, ?MODULE, save_memory_copy, [Ctx, Key, Doc, PoolType]) of
+        case rpc:call(Node, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]) of
             {ok, _} -> ok;
             Error -> ?error("Error saving memory copies for key: ~p: ~p~ndoc: ~p", [Key, Error, Doc])
         end
@@ -518,16 +509,14 @@ save_memory_copies(_Ctx, _Key, _Doc, _PoolType) ->
 %% Saves copy to memory of node.
 %% @end
 %%--------------------------------------------------------------------
--spec save_memory_copy(ctx(), key(), doc(), memory | disc) -> {ok, doc()} | {error, term()}.
+-spec save_memory_copy(ctx(), key(), doc(), datastore_cache_manager:pool()) -> {ok, doc()} | {error, term()}.
 save_memory_copy(#{
     memory_driver := MemoryDriver,
     memory_driver_ctx := MemoryCtx
-} = Ctx, Key, Doc, PoolType) ->
-    Pool = datastore_multiplier:extend_name(Key, PoolType),
+} = Ctx, Key, Doc, Pool) ->
     case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
         true ->
             Ans = MemoryDriver:save(MemoryCtx, Key, Doc),
-            % TODO - dla modeli memory przydaloby sie nie invalidowac zeby moc polegac na tym jak zwroci {error, not_found}
             datastore_cache_manager:mark_inactive(Pool, Key, fun(_) -> true end),
             Ans;
         false ->

@@ -435,13 +435,6 @@ disk_fetch_links_should_succeed(Config) ->
         ?assertMatch({ok, _}, rpc:call(Worker, ?MEM_DRV(Model), get, [MemCtx, LinkNode]))
     end, ?TEST_CACHED_MODELS).
 
-get_link_nodes() ->
-    receive
-        {link_node_id, NodeID} -> [NodeID | get_link_nodes()]
-    after
-        1000 -> []
-    end.
-
 get_links_should_return_missing_error(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Model) ->
@@ -1279,4 +1272,11 @@ fold_links_id_and_neg_offset(Key, Worker, Model, Opts, TmpAns) ->
                 TmpAns ++ Links2Reversed);
         _ ->
             TmpAns
+    end.
+
+get_link_nodes() ->
+    receive
+        {link_node_id, NodeID} -> [NodeID | get_link_nodes()]
+    after
+        1000 -> []
     end.

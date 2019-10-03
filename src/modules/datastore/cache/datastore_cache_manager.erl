@@ -42,10 +42,11 @@
 
 -type ctx() :: datastore_cache:ctx().
 -type key() :: datastore:key().
--type pool() :: memory | disc.
+-type pool() :: atom().
+-type pool_type() :: memory | disc.
 -type entry() :: #entry{}.
 
--export_type([pool/0]).
+-export_type([pool/0, pool_type/0]).
 
 %%%===================================================================
 %%% API
