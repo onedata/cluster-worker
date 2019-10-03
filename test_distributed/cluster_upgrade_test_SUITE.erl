@@ -38,35 +38,38 @@ all() ->
 
 same_version_upgrade_test(Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    ?assertEqual({ok, ?INSTALLED_CLUSTER_GENERATION}, get_cluster_generation(Workers)),
-    test_utils:mock_assert_num_calls_sum(Workers, node_manager_plugin_default, upgrade_cluster, 1, 0),
+    {ok, CurrGen} = get_cluster_generation(Workers),
+    mock_installed_generation(Workers, CurrGen),
     ?assertEqual(ok, upgrade_cluster(Workers)),
-    ?assertEqual({ok, ?INSTALLED_CLUSTER_GENERATION}, get_cluster_generation(Workers)).
+    test_utils:mock_assert_num_calls_sum(Workers, node_manager_plugin_default, upgrade_cluster, 1, 0),
+    ?assertEqual({ok, CurrGen}, get_cluster_generation(Workers)).
 
 
 upgrade_ok_test(Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    {ok, _} = set_cluster_generation(Workers, ?OLDEST_KNOWN_CLUSTER_GENERATION),
+    mock_installed_generation(Workers, 100),
+    {ok, _} = set_cluster_generation(Workers, 90),
     ?assertEqual(ok, upgrade_cluster(Workers)),
-    test_utils:mock_assert_num_calls_sum(Workers, node_manager_plugin_default, upgrade_cluster, 1,
-        ?INSTALLED_CLUSTER_GENERATION - ?OLDEST_KNOWN_CLUSTER_GENERATION),
-    ?assertEqual({ok, ?INSTALLED_CLUSTER_GENERATION}, get_cluster_generation(Workers)).
+    test_utils:mock_assert_num_calls_sum(Workers, node_manager_plugin_default, upgrade_cluster, 1, 10),
+    ?assertEqual({ok, 100}, get_cluster_generation(Workers)).
 
 
 upgrade_fail_test(Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    {ok, _} = set_cluster_generation(Workers, ?OLDEST_KNOWN_CLUSTER_GENERATION),
+    mock_installed_generation(Workers, 100),
+    {ok, _} = set_cluster_generation(Workers, 90),
     ?assertEqual({error, ?UPGRADE_ERROR}, upgrade_cluster(Workers)),
     test_utils:mock_assert_num_calls_sum(Workers, node_manager_plugin_default, upgrade_cluster, 1, 1),
-    ?assertEqual({ok, ?OLDEST_KNOWN_CLUSTER_GENERATION}, get_cluster_generation(Workers)).
+    ?assertEqual({ok, 90}, get_cluster_generation(Workers)).
 
 
 too_old_version_upgrade_test(Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    {ok, _} = set_cluster_generation(Workers, ?OLDEST_KNOWN_CLUSTER_GENERATION-1),
+    mock_oldest_known_generation(Workers, 100),
+    {ok, _} = set_cluster_generation(Workers, 90),
     ?assertEqual({error, too_old_cluster_generation}, upgrade_cluster(Workers)),
     test_utils:mock_assert_num_calls_sum(Workers, node_manager_plugin_default, upgrade_cluster, 1, 0),
-    ?assertEqual({ok, ?OLDEST_KNOWN_CLUSTER_GENERATION-1}, get_cluster_generation(Workers)).
+    ?assertEqual({ok, 90}, get_cluster_generation(Workers)).
 
 
 %%%===================================================================
@@ -82,6 +85,8 @@ init_per_testcase(upgrade_fail_test, Config) ->
 init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:mock_new(Workers, node_manager_plugin_default, [passthrough]),
+    test_utils:mock_expect(Workers, node_manager_plugin_default, upgrade_cluster,
+        fun(Gen) -> {ok, Gen+1} end),
     Config.
 
 end_per_testcase(_Case, Config) ->
@@ -104,3 +109,11 @@ upgrade_cluster(Workers) ->
 
 get_random_node(Workers) ->
     lists:nth(rand:uniform(length(Workers)), Workers).
+
+mock_installed_generation(Workers, Gen) ->
+    test_utils:mock_expect(Workers, node_manager_plugin_default, installed_cluster_generation,
+        fun() -> Gen end).
+
+mock_oldest_known_generation(Workers, Gen) ->
+    test_utils:mock_expect(Workers, node_manager_plugin_default, oldest_known_cluster_generation,
+        fun() -> {Gen, <<>>} end).
