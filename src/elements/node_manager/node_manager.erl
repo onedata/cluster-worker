@@ -502,7 +502,7 @@ handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
 handle_cast(force_stop, State) ->
-    ?critical("Cluster could not be initialized - force stopping applicaiton"),
+    ?critical("Cluster could not be initialized - force stopping application"),
     init:stop(),
     {stop, normal, State};
 
