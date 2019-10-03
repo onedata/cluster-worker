@@ -86,7 +86,7 @@ init_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:mock_new(Workers, node_manager_plugin_default, [passthrough]),
     test_utils:mock_expect(Workers, node_manager_plugin_default, upgrade_cluster,
-        fun(Gen) -> {ok, Gen+1} end),
+        fun(Gen) -> {ok, Gen + 1} end),
     Config.
 
 end_per_testcase(_Case, Config) ->
@@ -99,16 +99,13 @@ end_per_testcase(_Case, Config) ->
 %%%===================================================================
 
 get_cluster_generation(Workers) ->
-    rpc:call(get_random_node(Workers), cluster_generation, get, []).
+    rpc:call(utils:random_element(Workers), cluster_generation, get, []).
 
 set_cluster_generation(Workers, Generation) ->
-    rpc:call(get_random_node(Workers), cluster_generation, save, [Generation]).
+    rpc:call(utils:random_element(Workers), cluster_generation, save, [Generation]).
 
 upgrade_cluster(Workers) ->
-    rpc:call(get_random_node(Workers), node_manager, upgrade_cluster, []).
-
-get_random_node(Workers) ->
-    lists:nth(rand:uniform(length(Workers)), Workers).
+    rpc:call(utils:random_element(Workers), node_manager, upgrade_cluster, []).
 
 mock_installed_generation(Workers, Gen) ->
     test_utils:mock_expect(Workers, node_manager_plugin_default, installed_cluster_generation,
