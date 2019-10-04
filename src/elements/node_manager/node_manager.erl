@@ -52,7 +52,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% for tests
--export([init_workers/0, init_workers/1]).
+-export([init_workers/0, init_workers/1, upgrade_cluster/0]).
 
 -type state() :: #state{}.
 -type cluster_generation() :: non_neg_integer().
@@ -63,13 +63,6 @@
             [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
-
-% When cluster is not in newest generation it will be upgraded during initialization.
-% This can be used to e.g. move models between services.
-% Oldest known generation is the lowest one that can be directly upgraded to newest.
--define(INSTALLED_CLUSTER_GENERATION, 1).
--define(OLDEST_KNOWN_CLUSTER_GENERATION, 1).
--define(HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION, <<"19.02.1">>).
 
 %%%===================================================================
 %%% API
@@ -509,7 +502,7 @@ handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
 handle_cast(force_stop, State) ->
-    ?critical("Cluster could not be initialized - force stopping applicaiton"),
+    ?critical("Cluster could not be initialized - force stopping application"),
     init:stop(),
     {stop, normal, State};
 
@@ -660,13 +653,7 @@ cluster_init_step(start_custom_workers) ->
 cluster_init_step(upgrade_cluster) ->
     case node() == consistent_hashing:get_node(upgrade_cluster) of
         true ->
-            case get_current_cluster_generation() of
-                {error, _} = Error ->
-                    ?error("Error when retrieving current cluster generation: ~p", [Error]),
-                    throw(Error);
-                {ok, ClusterGeneration} ->
-                    upgrade_cluster(ClusterGeneration)
-            end,
+            upgrade_cluster(),
             ok;
         false ->
             ok
@@ -687,7 +674,6 @@ cluster_init_step(ready) ->
     end),
     ok.
 
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -695,28 +681,43 @@ cluster_init_step(ready) ->
 %% Executed by one node in cluster.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_cluster(cluster_generation()) -> ok.
-upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?OLDEST_KNOWN_CLUSTER_GENERATION->
+-spec upgrade_cluster() -> ok | no_return().
+upgrade_cluster() ->
+    case get_current_cluster_generation() of
+        {error, _} = Error ->
+            ?error("Error when retrieving current cluster generation: ~p", [Error]),
+            throw(Error);
+        {ok, CurrentGen} ->
+            InstalledGen = plugins:apply(node_manager_plugin, installed_cluster_generation, []),
+            OldestKnownGen = plugins:apply(node_manager_plugin, oldest_known_cluster_generation, []),
+            upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
+    end.
+
+%% @private
+-spec upgrade_cluster(CurrentGen :: cluster_generation(), InstalledGen :: cluster_generation(),
+    {OldestKnownGen :: cluster_generation(), ReadableVersion :: binary()}) -> ok.
+upgrade_cluster(CurrentGen, _InstalledGen, {OldestKnownGen, ReadableVersion}) when CurrentGen < OldestKnownGen ->
     ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
-    "~nOldest supported version: ~p", [?HUMAN_READABLE_OLDEST_KNOWN_CLUSTER_GENERATION]),
+    "~nOldest supported version: ~s", [ReadableVersion]),
     throw({error, too_old_cluster_generation});
 
-upgrade_cluster(CurrentGeneration) when CurrentGeneration < ?INSTALLED_CLUSTER_GENERATION ->
-    ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGeneration, ?INSTALLED_CLUSTER_GENERATION]),
-    {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGeneration]),
-    case NewGeneration > ?INSTALLED_CLUSTER_GENERATION of
+upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < InstalledGen ->
+    ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGen, InstalledGen]),
+    {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGen]),
+    case NewGeneration > InstalledGen of
         true ->
             ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
-                [NewGeneration, ?INSTALLED_CLUSTER_GENERATION]),
+                [NewGeneration, InstalledGen]),
             throw({error, too_high_generation});
         false ->
             ok
     end,
     ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
-    cluster_generation:save(NewGeneration),
-    upgrade_cluster(NewGeneration);
+    {ok, _} = cluster_generation:save(NewGeneration),
+    upgrade_cluster(NewGeneration, InstalledGen, OldestKnownGen);
 
-upgrade_cluster(_CurrentGeneration) ->
+upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
+    {ok, _} = cluster_generation:save(CurrentGen),
     ?info("No upgrade needed - the cluster is in newest generation").
 
 
@@ -1218,7 +1219,7 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> {ok, ?INSTALLED_CLUSTER_GENERATION};
+        {error, not_found} -> {ok, plugins:apply(node_manager_plugin, installed_cluster_generation, [])};
         {error, _} = Error -> Error
     end.
 
