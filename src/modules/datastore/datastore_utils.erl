@@ -31,21 +31,23 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv gen_key(?KEY_LENGTH)
+%% %% Generates random key.
 %% @end
 %%--------------------------------------------------------------------
 -spec gen_key() -> key().
 gen_key() ->
-    gen_key(?KEY_LENGTH).
+    HashPart = consistent_hashing:gen_hashing_key(),
+    gen_key(HashPart).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Generates random datastore key.
+%% Generates random key with hash part from arg.
 %% @end
 %%--------------------------------------------------------------------
--spec gen_key(non_neg_integer()) -> key().
-gen_key(Length) ->
-    str_utils:rand_hex(Length).
+-spec gen_key(binary()) -> key().
+gen_key(HashPart) ->
+    RandPart = str_utils:rand_hex(?KEY_LENGTH),
+    consistent_hashing:create_label(HashPart, RandPart).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,10 +56,15 @@ gen_key(Length) ->
 %%--------------------------------------------------------------------
 -spec gen_key(binary(), key()) -> key().
 gen_key(Seed, Key) when is_binary(Seed) ->
-    Ctx = crypto:hash_init(md5),
-    Ctx2 = crypto:hash_update(Ctx, Seed),
-    Ctx3 = crypto:hash_update(Ctx2, Key),
-    hex_utils:hex(crypto:hash_final(Ctx3)).
+    case consistent_hashing:has_hash_part(Key) of
+        true ->
+            <<Key/binary, Seed/binary>>;
+        _ ->
+            Ctx = crypto:hash_init(md5),
+            Ctx2 = crypto:hash_update(Ctx, Seed),
+            Ctx3 = crypto:hash_update(Ctx2, Key),
+            hex_utils:hex(crypto:hash_final(Ctx3))
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
