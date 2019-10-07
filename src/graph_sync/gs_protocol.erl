@@ -137,7 +137,7 @@
 {ok, resource, {gri:gri(), {term(), revision()}} | {gri:gri(), auth_hint(), {term(), revision()}}} |
 error().
 -type graph_get_result() :: {ok, {term(), revision()}} |
-{ok, gri:gri(), {term(), revision()}} | error().
+{ok, gri:gri(), {term(), revision()}} | {ok, value, term()} | error().
 -type graph_delete_result() :: ok | error().
 -type graph_update_result() :: ok | error().
 
