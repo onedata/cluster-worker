@@ -258,7 +258,8 @@ delete_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp) ->
     ok.
 
 -spec link_key(traverse:id(), traverse:timestamp()) -> link_key().
-link_key(ID, Timestamp) ->
+link_key(ID0, Timestamp) ->
+    ID = consistent_hashing:get_random_labal_part(ID0),
     TimestampPart = (integer_to_binary(?EPOCH_INFINITY - Timestamp)),
     Length = min(byte_size(ID), ?LINK_NAME_ID_PART_LENGTH),
     IdPart = binary:part(ID, 0, Length),

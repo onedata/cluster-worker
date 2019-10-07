@@ -50,7 +50,8 @@
 -spec init(ctx(), key(), tree_id(), batch()) -> {ok | {error, term()}, mask(), boolean()}.
 init(Ctx, Key, TreeId, Batch) ->
     MaskRootId = datastore_links:get_mask_root_id(Key),
-    Head = Tail = datastore_utils:gen_key(),
+    HashPart = consistent_hashing:get_hashing_key(Key),
+    Head = Tail = datastore_utils:gen_key(HashPart),
     Mask = #mask{
         ctx = Ctx,
         key = Key,
