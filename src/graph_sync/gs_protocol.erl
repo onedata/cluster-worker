@@ -14,7 +14,7 @@
 -author("Lukasz Opiola").
 
 -include("graph_sync/graph_sync.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -131,15 +131,13 @@
 
 -type rpc_result() :: {ok, data()} | {error, term()}.
 
--type error() :: {error, term()}.
-
 -type graph_create_result() :: ok | {ok, value, term()} |
 {ok, resource, {gri:gri(), {term(), revision()}} | {gri:gri(), auth_hint(), {term(), revision()}}} |
-error().
+errors:error().
 -type graph_get_result() :: {ok, {term(), revision()}} |
-{ok, gri:gri(), {term(), revision()}} | {ok, value, term()} | error().
--type graph_delete_result() :: ok | error().
--type graph_update_result() :: ok | error().
+{ok, gri:gri(), {term(), revision()}} | {ok, value, term()} | errors:error().
+-type graph_delete_result() :: ok | errors:error().
+-type graph_update_result() :: ok | errors:error().
 
 -type graph_request_result() :: graph_create_result() | graph_get_result() |
 graph_update_result() | graph_delete_result().
@@ -170,7 +168,6 @@ graph_update_result() | graph_delete_result().
     rpc_function/0,
     rpc_args/0,
     rpc_result/0,
-    error/0,
     graph_create_result/0,
     graph_get_result/0,
     graph_delete_result/0,
@@ -237,7 +234,7 @@ greatest_common_version_sorted(_, _) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec encode(protocol_version(), req_wrapper() | resp_wrapper() | push_wrapper()) ->
-    {ok, json_map()} | error().
+    {ok, json_map()} | errors:error().
 encode(ProtocolVersion, Record) ->
     try
         JSONMap = case Record of
@@ -264,7 +261,7 @@ encode(ProtocolVersion, Record) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec decode(protocol_version(), json_map()) ->
-    {ok, req_wrapper() | resp_wrapper() | push_wrapper()} | error().
+    {ok, req_wrapper() | resp_wrapper() | push_wrapper()} | errors:error().
 decode(ProtocolVersion, JSONMap) ->
     try
         Record = case maps:get(<<"type">>, JSONMap) of
@@ -306,7 +303,7 @@ generate_success_response(#gs_req{id = Id, subtype = Subtype}, Response) ->
 %% error response.
 %% @end
 %%--------------------------------------------------------------------
--spec generate_error_response(req_wrapper(), Error :: error()) ->
+-spec generate_error_response(req_wrapper(), errors:error()) ->
     resp_wrapper().
 generate_error_response(#gs_req{id = Id, subtype = Subtype}, Error) ->
     #gs_resp{
@@ -323,7 +320,7 @@ generate_error_response(#gs_req{id = Id, subtype = Subtype}, Error) ->
 %% that could not be coupled with any request.
 %% @end
 %%--------------------------------------------------------------------
--spec generate_error_push_message(Error :: error()) -> push_wrapper().
+-spec generate_error_push_message(errors:error()) -> push_wrapper().
 generate_error_push_message(Error) ->
     #gs_push{
         subtype = error, message = #gs_push_error{
@@ -457,14 +454,14 @@ encode_response(ProtocolVersion, #gs_resp{} = GSReq) ->
         <<"subtype">> => subtype_to_string(Subtype),
         <<"payload">> => #{
             <<"success">> => Success,
-            <<"error">> => gs_protocol_errors:error_to_json(ProtocolVersion, Error),
+            <<"error">> => errors:to_json(Error),
             <<"data">> => undefined_to_null(Data)
         }
     }.
 
 
 -spec encode_response_handshake(protocol_version(), handshake_resp()) -> json_map().
-encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
+encode_response_handshake(ProtocolVersion, #gs_resp_handshake{} = Resp) ->
     % Handshake messages do not change regardless of the protocol version
     #gs_resp_handshake{
         version = Version, session_id = SessionId,
@@ -473,7 +470,10 @@ encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
     #{
         <<"version">> => Version,
         <<"sessionId">> => SessionId,
-        <<"identity">> => aai:subject_to_json(Identity),
+        <<"identity">> => case ProtocolVersion >= 5 of
+            true -> aai:serialize_subject(Identity);
+            false -> deprecated_subject_to_json(Identity)
+        end,
         <<"attributes">> => undefined_to_null(Attributes)
     }.
 
@@ -514,7 +514,7 @@ encode_push(ProtocolVersion, #gs_push{} = GSReq) ->
         #gs_push_nosub{} ->
             encode_push_nosub(ProtocolVersion, Message);
         #gs_push_error{} ->
-            encode_push_error(ProtocolVersion, Message)
+            encode_push_error(Message)
     end,
     #{
         <<"type">> => <<"push">>,
@@ -547,17 +547,10 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     }.
 
 
--spec encode_push_error(protocol_version(), error_push()) -> json_map().
-encode_push_error(?BASIC_PROTOCOL, Message) ->
-    % Error push message may be sent before negotiating handshake, so it must
-    % support the basic protocol (currently the same as 1. protocol version).
-    encode_push_error(3, Message);
-encode_push_error(ProtocolVersion, #gs_push_error{} = Message) ->
-    #gs_push_error{
-        error = Error
-    } = Message,
+-spec encode_push_error(error_push()) -> json_map().
+encode_push_error(#gs_push_error{error = Error}) ->
     #{
-        <<"error">> => gs_protocol_errors:error_to_json(ProtocolVersion, Error)
+        <<"error">> => errors:to_json(Error)
     }.
 
 
@@ -628,9 +621,7 @@ decode_request_unsub(_, PayloadJSON) ->
 decode_response(ProtocolVersion, ReqJSON) ->
     PayloadJSON = maps:get(<<"payload">>, ReqJSON),
     Success = maps:get(<<"success">>, PayloadJSON),
-    Error = gs_protocol_errors:json_to_error(
-        ProtocolVersion, maps:get(<<"error">>, PayloadJSON, null)
-    ),
+    Error = errors:from_json(maps:get(<<"error">>, PayloadJSON, null)),
     DataJSON = maps:get(<<"data">>, PayloadJSON, #{}),
     Subtype = string_to_subtype(maps:get(<<"subtype">>, ReqJSON)),
     Response = case Success of
@@ -658,7 +649,7 @@ decode_response(ProtocolVersion, ReqJSON) ->
 
 
 -spec decode_response_handshake(protocol_version(), json_map()) -> handshake_resp().
-decode_response_handshake(_, DataJSON) ->
+decode_response_handshake(ProtocolVersion, DataJSON) ->
     % Handshake messages do not change regardless of the protocol version
     Version = maps:get(<<"version">>, DataJSON),
     SessionId = maps:get(<<"sessionId">>, DataJSON),
@@ -667,7 +658,10 @@ decode_response_handshake(_, DataJSON) ->
     #gs_resp_handshake{
         version = Version,
         session_id = null_to_undefined(SessionId),
-        identity = aai:json_to_subject(Identity),
+        identity = case ProtocolVersion >= 5 of
+            true -> aai:deserialize_subject(Identity);
+            false -> deprecated_json_to_subject(Identity)
+        end,
         attributes = null_to_undefined(Attributes)
     }.
 
@@ -709,7 +703,7 @@ decode_push(ProtocolVersion, ReqJSON) ->
         nosub ->
             decode_push_nosub(ProtocolVersion, PayloadJSON);
         error ->
-            decode_push_error(ProtocolVersion, PayloadJSON)
+            decode_push_error(PayloadJSON)
     end,
     #gs_push{
         subtype = Subtype, message = Message
@@ -740,15 +734,10 @@ decode_push_nosub(_, PayloadJSON) ->
     }.
 
 
--spec decode_push_error(protocol_version(), json_map()) -> error_push().
-decode_push_error(?BASIC_PROTOCOL, PayloadJSON) ->
-    % Error push message may be sent before negotiating handshake, so it must
-    % support the basic protocol (currently the same as 1. protocol version).
-    decode_push_error(3, PayloadJSON);
-decode_push_error(ProtocolVersion, PayloadJSON) ->
-    Error = maps:get(<<"error">>, PayloadJSON),
+-spec decode_push_error(json_map()) -> error_push().
+decode_push_error(#{<<"error">> := Error}) ->
     #gs_push_error{
-        error = gs_protocol_errors:json_to_error(ProtocolVersion, Error)
+        error = errors:from_json(Error)
     }.
 
 
@@ -799,7 +788,7 @@ json_to_auth_override(_, null) ->
     undefined;
 json_to_auth_override(3, Data) ->
     {json_to_client_auth(Data), undefined};
-json_to_auth_override(4, #{<<"auth">> := ClientAuth} = Data) ->
+json_to_auth_override(_, #{<<"auth">> := ClientAuth} = Data) ->
     PeerIp = case maps:get(<<"peerIp">>, Data, null) of
         null -> undefined;
         IpBin -> element(2, {ok, _} = ip_utils:to_ip4_address(IpBin))
@@ -812,7 +801,7 @@ auth_override_to_json(_, undefined) ->
     null;
 auth_override_to_json(3, {ClientAuth, _PeerIp}) ->
     client_auth_to_json(ClientAuth);
-auth_override_to_json(4, {ClientAuth, PeerIp}) ->
+auth_override_to_json(_, {ClientAuth, PeerIp}) ->
     #{
         <<"auth">> => client_auth_to_json(ClientAuth),
         <<"peerIp">> => case PeerIp of
@@ -906,3 +895,29 @@ data_format_to_str(value) -> <<"value">>.
 -spec str_to_data_format(binary()) -> atom().
 str_to_data_format(<<"resource">>) -> resource;
 str_to_data_format(<<"value">>) -> value.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deprecated - used for backward compatibility with 19.02.* (proto version < 5).
+%% @end
+%%--------------------------------------------------------------------
+-spec deprecated_subject_to_json(aai:subject()) -> json_utils:json_term().
+deprecated_subject_to_json(?SUB(nobody)) -> <<"nobody">>;
+% root subject must not have a representation outside of the application
+deprecated_subject_to_json(?SUB(root)) -> <<"nobody">>;
+deprecated_subject_to_json(?SUB(user, UserId)) -> #{<<"user">> => UserId};
+deprecated_subject_to_json(?SUB(?ONEPROVIDER, PrId)) -> #{<<"provider">> => PrId}.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deprecated - used for backward compatibility with 19.02.* (proto version < 5).
+%% @end
+%%--------------------------------------------------------------------
+-spec deprecated_json_to_subject(json_utils:json_term()) -> aai:subject().
+deprecated_json_to_subject(<<"nobody">>) -> ?SUB(nobody);
+deprecated_json_to_subject(#{<<"user">> := UserId}) -> ?SUB(user, UserId);
+deprecated_json_to_subject(#{<<"provider">> := PrId}) -> ?SUB(?ONEPROVIDER, PrId).
