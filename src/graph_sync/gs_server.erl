@@ -335,10 +335,15 @@ handle_request(Session, #gs_req_graph{} = Req) ->
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, Auth, ResData)
             }};
-        {get, {ok, ResultGRI, ResData}} ->
+        {get, {ok, #gri{} = ResultGRI, ResData}} ->
             {RequestedGRI, AuthHint, #gs_resp_graph{
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, ResData)
+            }};
+        {get, {ok, value, Value}} ->
+            {not_subscribable, AuthHint, #gs_resp_graph{
+                data_format = value,
+                data = translate_value(Translator, ProtoVer, RequestedGRI, Auth, Value)
             }};
 
         {update, ok} ->
