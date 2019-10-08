@@ -15,7 +15,7 @@
 
 -include("graph_sync/graph_sync.hrl").
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -74,10 +74,8 @@ handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = R
             };
         {true, Version} ->
             case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth, PeerIp) of
-                ?ERROR_UNAUTHORIZED ->
-                    {error, gs_protocol:generate_error_response(
-                        Req, ?ERROR_UNAUTHORIZED)
-                    };
+                {error, _} = Error ->
+                    {error, gs_protocol:generate_error_response(Req, Error)};
                 {ok, Auth} ->
                     {ok, SessionId} = gs_persistence:create_session(#gs_session{
                         auth = Auth,
@@ -217,7 +215,7 @@ deleted(EntityType, EntityId) ->
 %%--------------------------------------------------------------------
 -spec handle_request(gs_protocol:session_id() | #gs_session{},
     gs_protocol:req_wrapper() | gs_protocol:req()) ->
-    {ok, gs_protocol:resp()} | gs_protocol:error().
+    {ok, gs_protocol:resp()} | errors:error().
 handle_request(SessionId, Req) when is_binary(SessionId) ->
     {ok, Session} = gs_persistence:get_session(SessionId),
     handle_request(Session, Req);
@@ -335,10 +333,15 @@ handle_request(Session, #gs_req_graph{} = Req) ->
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, Auth, ResData)
             }};
-        {get, {ok, ResultGRI, ResData}} ->
+        {get, {ok, #gri{} = ResultGRI, ResData}} ->
             {RequestedGRI, AuthHint, #gs_resp_graph{
                 data_format = resource,
                 data = translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, ResData)
+            }};
+        {get, {ok, value, Value}} ->
+            {not_subscribable, AuthHint, #gs_resp_graph{
+                data_format = value,
+                data = translate_value(Translator, ProtoVer, RequestedGRI, Auth, Value)
             }};
 
         {update, ok} ->
@@ -368,7 +371,7 @@ handle_request(#gs_session{id = SessionId}, #gs_req_unsub{gri = GRI}) ->
 
 %% @private
 -spec translate_value(translator(), gs_protocol:protocol_version(), gri:gri(),
-    aai:auth(), term()) -> gs_protocol:data() | gs_protocol:error().
+    aai:auth(), term()) -> gs_protocol:data() | errors:error().
 translate_value(Translator, ProtoVer, GRI, Auth, Data) ->
     % Used only when data is returned rather than GRI and resource
     case Translator:translate_value(ProtoVer, GRI, Data) of
@@ -379,14 +382,14 @@ translate_value(Translator, ProtoVer, GRI, Auth, Data) ->
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(), gri:gri(),
-    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
+    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | errors:error().
 translate_resource(Translator, ProtoVer, GRI, Auth, DatAndRev) ->
     translate_resource(Translator, ProtoVer, GRI, GRI, Auth, DatAndRev).
 
 %% @private
 -spec translate_resource(translator(), gs_protocol:protocol_version(),
     RequestedGRI :: gri:gri(), ResultGRI :: gri:gri(),
-    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | gs_protocol:error().
+    aai:auth(), {term(), gs_protocol:revision()}) -> gs_protocol:data() | errors:error().
 translate_resource(Translator, ProtoVer, RequestedGRI, ResultGRI, Auth, {Data, Revision}) ->
     Resp = case Translator:translate_resource(ProtoVer, ResultGRI, Data) of
         Fun when is_function(Fun, 1) -> Fun(Auth);

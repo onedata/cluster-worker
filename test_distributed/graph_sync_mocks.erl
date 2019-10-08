@@ -17,7 +17,7 @@
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 
 -export([

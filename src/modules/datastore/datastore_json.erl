@@ -29,10 +29,7 @@
 %% Encoder defaults to 'encode_value' and Decoder defaults to 'decode_value'
 -type encoder() :: atom().
 -type decoder() :: atom().
--type custom_coder() :: {custom, module()} |
-                        {custom, {module(), encoder(), decoder()}} |
-                        {custom, atom(), module()} |
-                        {custom, atom(), {module(), encoder(), decoder()}}.
+-type custom_coder() ::{custom, json | string, {module(), encoder(), decoder()}}.
 -type record_struct() :: {record, [{record_field(), record_value()}]}.
 -type ejson() :: jiffy:json_value().
 
@@ -143,14 +140,10 @@ encode_term(Term, string_or_integer) when is_integer(Term) ->
     Term;
 encode_term(Term, term) ->
     base64:encode(term_to_binary(Term));
-encode_term(Term, {custom, {Mod, Encoder, _Decoder}}) ->
+encode_term(Term, {custom, json, {Mod, Encoder, _Decoder}}) ->
     encode_term(Mod:Encoder(Term), json);
-encode_term(Term, {custom, Mod}) ->
-    encode_term(Term, {custom, {Mod, encode_value, decode_value}});
-encode_term(Term, {custom, Type, {Mod, Encoder, _Decoder}}) ->
-    encode_term(Mod:Encoder(Term, Type), json);
-encode_term(Term, {custom, Type, Mod}) ->
-    encode_term(Term, {custom, Type, {Mod, encode_value, decode_value}});
+encode_term(Term, {custom, string, {Mod, Encoder, _Decoder}}) ->
+    encode_term(Mod:Encoder(Term), string);
 encode_term(Term, {record, Fields}) when is_tuple(Term), is_list(Fields) ->
     Values = tuple_to_list(Term),
     {Keys, Types} = lists:unzip(Fields),
@@ -218,14 +211,10 @@ decode_term(Term, string_or_integer) when is_integer(Term) ->
     Term;
 decode_term(Term, term) when is_binary(Term) ->
     binary_to_term(base64:decode(Term));
-decode_term(Term, {custom, {Mod, _Encoder, Decoder}}) ->
+decode_term(Term, {custom, json, {Mod, _Encoder, Decoder}}) ->
     Mod:Decoder(decode_term(Term, json));
-decode_term(Term, {custom, Mod}) ->
-    decode_term(Term, {custom, {Mod, encode_value, decode_value}});
-decode_term(Term, {custom, Type, {Mod, _Encoder, Decoder}}) ->
-    Mod:Decoder(decode_term(Term, json), Type);
-decode_term(Term, {custom, Type, Mod}) ->
-    decode_term(Term, {custom, Type, {Mod, encode_value, decode_value}});
+decode_term(Term, {custom, string, {Mod, _Encoder, Decoder}}) ->
+    Mod:Decoder(decode_term(Term, string));
 decode_term({Term}, {record, Fields}) when is_list(Term), is_list(Fields) ->
     {<<"_record">>, RecordName} = lists:keyfind(<<"_record">>, 1, Term),
     list_to_tuple(lists:reverse(lists:foldl(fun({Key, Type}, Values) ->
