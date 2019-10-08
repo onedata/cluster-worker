@@ -46,16 +46,21 @@
     size := non_neg_integer(),
     check_frequency := non_neg_integer(),
     group => group()
+} | #{
+    group => group(),
+    worker := boolean()
 }.
 -type group_options() :: #{
     size := non_neg_integer(),
-    check_frequency := non_neg_integer()
+    check_frequency := non_neg_integer(),
+    worker := boolean()
 }.
 -type check_options() :: #{
     size := non_neg_integer(),
     name := cache() | group(),
     check_frequency := non_neg_integer(),
-    group => boolean()
+    group => boolean(),
+    worker := boolean()
 }.
 -type in_critical_section() :: boolean().
 
