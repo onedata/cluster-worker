@@ -19,7 +19,7 @@
 -define(BASIC_PROTOCOL, 0).
 
 % Protocol versions currently supported by this software
--define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
+-define(SUPPORTED_PROTO_VERSIONS, [3, 4, 5]).
 
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
@@ -77,7 +77,7 @@
 }).
 
 -record(gs_push_error, {
-    error :: gs_protocol:error()
+    error :: errors:error()
 }).
 
 -record(gs_req, {
@@ -91,7 +91,7 @@
     id :: gs_protocol:entity_id(),
     subtype :: gs_protocol:message_subtype(),
     success :: boolean(),
-    error :: undefined | gs_protocol:error(),
+    error :: undefined | errors:error(),
     response :: undefined | gs_protocol:resp()
 }).
 
