@@ -445,9 +445,8 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _, _) ->
     Pool = datastore_multiplier:extend_name(Key, memory),
     case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
         true ->
-            Ans = ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc)),
             save_memory_copies(Ctx, Key, Doc, memory),
-            Ans;
+            ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
         false ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
     end;
