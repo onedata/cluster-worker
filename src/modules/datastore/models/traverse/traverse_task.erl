@@ -520,7 +520,7 @@ get_record_struct(1) ->
         {canceled, boolean},
         {node, atom},
         {status, atom},
-        {description, {custom, {?MODULE, encode_description, decode_description}}},
+        {description, {custom, json, {?MODULE, encode_description, decode_description}}},
         {additional_data, #{string => binary}}
     ]}.
 

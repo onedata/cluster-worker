@@ -18,7 +18,7 @@
 -include("graph_sync/graph_sync.hrl").
 -include("timeouts.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 % Client state record
@@ -64,7 +64,7 @@
 %%--------------------------------------------------------------------
 -spec start_link(URL :: string() | binary(), gs_protocol:client_auth(),
     SupportedVersions :: [gs_protocol:protocol_version()], push_callback()) ->
-    {ok, client_ref(), gs_protocol:handshake_resp()} | gs_protocol:error().
+    {ok, client_ref(), gs_protocol:handshake_resp()} | errors:error().
 start_link(URL, Auth, SupportedVersions, PushCallback) ->
     start_link(URL, Auth, SupportedVersions, PushCallback, []).
 
@@ -80,7 +80,7 @@ start_link(URL, Auth, SupportedVersions, PushCallback) ->
 -spec start_link(URL :: string() | binary(), gs_protocol:client_auth(),
     SupportedVersions :: [gs_protocol:protocol_version()], push_callback(),
     Opts :: list()) ->
-    {ok, client_ref(), gs_protocol:handshake_resp()} | gs_protocol:error().
+    {ok, client_ref(), gs_protocol:handshake_resp()} | errors:error().
 start_link(URL, Auth, SupportedVersions, PushCallback, Opts) when is_binary(URL) ->
     start_link(binary_to_list(URL), Auth, SupportedVersions, PushCallback, Opts);
 start_link(URL, Auth, SupportedVersions, PushCallback, Opts) ->
@@ -234,7 +234,7 @@ websocket_terminate(Reason, _ConnState, _State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec rpc_request(client_ref(), gs_protocol:rpc_function(), gs_protocol:rpc_args()) ->
-    {ok, gs_protocol:rpc_resp()} | gs_protocol:error().
+    {ok, gs_protocol:rpc_resp()} | errors:error().
 rpc_request(ClientRef, Function, Args) ->
     sync_request(ClientRef, #gs_req_rpc{function = Function, args = Args}).
 
@@ -245,7 +245,7 @@ rpc_request(ClientRef, Function, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec graph_request(client_ref(), gri:gri(), gs_protocol:operation()) ->
-    {ok, gs_protocol:graph_resp()} | gs_protocol:error().
+    {ok, gs_protocol:graph_resp()} | errors:error().
 graph_request(ClientRef, GRI, Operation) ->
     graph_request(ClientRef, GRI, Operation, undefined, false, undefined).
 
@@ -256,7 +256,7 @@ graph_request(ClientRef, GRI, Operation) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
-    gs_protocol:data()) -> {ok, gs_protocol:graph_resp()} | gs_protocol:error().
+    gs_protocol:data()) -> {ok, gs_protocol:graph_resp()} | errors:error().
 graph_request(ClientRef, GRI, Operation, Data) ->
     graph_request(ClientRef, GRI, Operation, Data, false, undefined).
 
@@ -268,7 +268,7 @@ graph_request(ClientRef, GRI, Operation, Data) ->
 %%--------------------------------------------------------------------
 -spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data(), Subscribe :: boolean()) ->
-    {ok, gs_protocol:graph_resp()} | gs_protocol:error().
+    {ok, gs_protocol:graph_resp()} | errors:error().
 graph_request(ClientRef, GRI, Operation, Data, Subscribe) ->
     graph_request(ClientRef, GRI, Operation, Data, Subscribe, undefined).
 
@@ -283,7 +283,7 @@ graph_request(ClientRef, GRI, Operation, Data, Subscribe) ->
 %%--------------------------------------------------------------------
 -spec graph_request(client_ref(), gri:gri(), gs_protocol:operation(),
     gs_protocol:data(), Subscribe :: boolean(), gs_protocol:auth_hint()) ->
-    {ok, gs_protocol:graph_resp()} | gs_protocol:error().
+    {ok, gs_protocol:graph_resp()} | errors:error().
 graph_request(ClientRef, GRI, Operation, Data, Subscribe, AuthHint) ->
     sync_request(ClientRef, #gs_req_graph{
         gri = GRI,
@@ -301,7 +301,7 @@ graph_request(ClientRef, GRI, Operation, Data, Subscribe, AuthHint) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec unsub_request(client_ref(), gri:gri()) ->
-    {ok, gs_protocol:unsub_resp()} | gs_protocol:error().
+    {ok, gs_protocol:unsub_resp()} | errors:error().
 unsub_request(ClientRef, GRI) ->
     sync_request(ClientRef, #gs_req_unsub{gri = GRI}).
 
@@ -316,7 +316,7 @@ unsub_request(ClientRef, GRI) ->
 -spec sync_request(client_ref(), gs_protocol:req_wrapper() |
     gs_protocol:rpc_req() | gs_protocol:graph_req() | gs_protocol:unsub_req()) ->
     {ok, gs_protocol:rpc_resp() | gs_protocol:graph_resp() |
-    gs_protocol:unsub_resp()} | gs_protocol:error().
+    gs_protocol:unsub_resp()} | errors:error().
 sync_request(ClientRef, #gs_req_rpc{} = RPCReq) ->
     sync_request(ClientRef, #gs_req{subtype = rpc, request = RPCReq});
 sync_request(ClientRef, #gs_req_graph{} = GraphReq) ->
