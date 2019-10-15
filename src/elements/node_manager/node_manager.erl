@@ -52,7 +52,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% for tests
--export([init_workers/0, init_workers/1]).
+-export([init_workers/0, init_workers/1, upgrade_cluster/0]).
 
 -type state() :: #state{}.
 -type cluster_generation() :: non_neg_integer().
@@ -503,7 +503,7 @@ handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
 handle_cast(force_stop, State) ->
-    ?critical("Cluster could not be initialized - force stopping applicaiton"),
+    ?critical("Cluster could not be initialized - force stopping application"),
     init:stop(),
     {stop, normal, State};
 
@@ -654,15 +654,7 @@ cluster_init_step(start_custom_workers) ->
 cluster_init_step(upgrade_cluster) ->
     case node() == consistent_hashing:get_node(upgrade_cluster) of
         true ->
-            case get_current_cluster_generation() of
-                {error, _} = Error ->
-                    ?error("Error when retrieving current cluster generation: ~p", [Error]),
-                    throw(Error);
-                {ok, CurrentGen} ->
-                    InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
-                    OldestKnownGen = ?CALL_PLUGIN(oldest_known_cluster_generation, []),
-                    upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
-            end,
+            upgrade_cluster(),
             ok;
         false ->
             ok
@@ -683,7 +675,6 @@ cluster_init_step(ready) ->
     end),
     ok.
 
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -691,6 +682,19 @@ cluster_init_step(ready) ->
 %% Executed by one node in cluster.
 %% @end
 %%--------------------------------------------------------------------
+-spec upgrade_cluster() -> ok | no_return().
+upgrade_cluster() ->
+    case get_current_cluster_generation() of
+        {error, _} = Error ->
+            ?error("Error when retrieving current cluster generation: ~p", [Error]),
+            throw(Error);
+        {ok, CurrentGen} ->
+            InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
+            OldestKnownGen = ?CALL_PLUGIN(oldest_known_cluster_generation, []),
+            upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
+    end.
+
+%% @private
 -spec upgrade_cluster(CurrentGen :: cluster_generation(), InstalledGen :: cluster_generation(),
     {OldestKnownGen :: cluster_generation(), ReadableVersion :: binary()}) -> ok.
 upgrade_cluster(CurrentGen, _InstalledGen, {OldestKnownGen, ReadableVersion}) when CurrentGen < OldestKnownGen ->
@@ -703,18 +707,18 @@ upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < Inst
     {ok, NewGeneration} = ?CALL_PLUGIN(upgrade_cluster, [CurrentGen]),
     case NewGeneration > InstalledGen of
         true ->
-            ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p", [
-                NewGeneration, InstalledGen
-            ]),
+            ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
+                [NewGeneration, InstalledGen]),
             throw({error, too_high_generation});
         false ->
             ok
     end,
     ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
-    cluster_generation:save(NewGeneration),
+    {ok, _} = cluster_generation:save(NewGeneration),
     upgrade_cluster(NewGeneration, InstalledGen, OldestKnownGen);
 
-upgrade_cluster(_CurrentGen, _InstalledGen, _OldestKnownGen) ->
+upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
+    {ok, _} = cluster_generation:save(CurrentGen),
     ?info("No upgrade needed - the cluster is in newest generation").
 
 
