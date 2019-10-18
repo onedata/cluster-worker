@@ -21,6 +21,7 @@
 
 -include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get/2, get/3, fetch/2, get_remote/2, save/1, save/3]).
@@ -28,6 +29,9 @@
 -export([flush_async/2, wait/1]).
 -export([inactivate/1, inactivate/2]).
 -export([init_counters/0, init_report/0]).
+
+%% For RPC
+-export([save_memory_copy/4]).
 
 -record(future, {
     durability :: undefined | durability(),
@@ -251,15 +255,7 @@ wait(Futures) when is_list(Futures) ->
 %% limit is reached.
 %% @end
 %%--------------------------------------------------------------------
--spec inactivate(pid() | map()) -> boolean().
-inactivate(MutatorPid) when is_pid(MutatorPid) ->
-    lists:foldl(fun(Pool, Acc) ->
-        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
-    end, false, datastore_multiplier:get_names(memory)),
-
-    lists:foldl(fun(Pool, Acc) ->
-        Acc or datastore_cache_manager:mark_inactive(Pool, MutatorPid)
-    end, false, datastore_multiplier:get_names(disc));
+-spec inactivate(map()) -> boolean().
 inactivate(KeysMap) ->
     lists:foreach(fun
         ({K, #{disc_driver := DD}}) when DD =/= undefined ->
@@ -383,7 +379,8 @@ fetch_local_or_remote(Ctx, Keys) ->
     [{ok, durability(), doc()} | {error, term()}].
 cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD =/= undefined ->
     Futures = lists:map(fun
-        ({_Key, {ok, memory, Doc}}) ->
+        ({Key, {ok, memory, Doc}}) ->
+            save_memory_copies(Ctx, Key, Doc, disc),
             ?FUTURE(memory, {ok, Doc});
         ({Key, {ok, disc, Doc}}) ->
             save_async(Ctx, Key, Doc, false, true);
@@ -398,6 +395,17 @@ cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD 
     end, lists:zip(Keys, Results)),
 
     wait(Futures);
+cache_disc_or_remote_results(#{memory_driver := MD} = Ctx, Keys, Results) when MD =/= undefined ->
+    lists:foreach(fun
+        ({Key, {ok, memory, Doc}}) ->
+            save_memory_copies(Ctx, Key, Doc, memory);
+        ({Key, {error, not_found}}) ->
+            Doc = #document{key = Key, value = undefined, deleted = true},
+            save_memory_copies(Ctx, Key, Doc, memory);
+        (_) ->
+            ok
+    end, lists:zip(Keys, Results)),
+    Results;
 cache_disc_or_remote_results(_Ctx, _Keys, Results) ->
     Results.
 
@@ -437,6 +445,7 @@ save_async(Ctx = #{disc_driver := undefined}, Key, Doc, _, _) ->
     Pool = datastore_multiplier:extend_name(Key, memory),
     case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
         true ->
+            save_memory_copies(Ctx, Key, Doc, memory),
             ?FUTURE(memory, MemoryDriver, MemoryDriver:save(MemoryCtx, Key, Doc));
         false ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
@@ -459,9 +468,56 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
               _ ->
                 ok
             end,
+            save_memory_copies(Ctx, Key, Doc, disc),
             Ans;
         {false, true} ->
             ?FUTURE(disc, DiscDriver, DiscDriver:save_async(DiscCtx, Key, Doc));
         {false, false} ->
             ?FUTURE(memory, MemoryDriver, {error, {enomem, Doc}})
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves copy to memory of nodes listed in ctx.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_memory_copies(ctx(), key(), doc(),datastore_cache_manager:pool_type()) -> ok.
+save_memory_copies(#{routing := local}, _Key, _Doc, _PoolType) ->
+    ok;
+save_memory_copies(#{memory_copies := all} = Ctx, Key, Doc, PoolType) ->
+    Nodes = consistent_hashing:get_all_nodes(),
+    save_memory_copies(Ctx#{memory_copies => Nodes -- [node()]}, Key, Doc, PoolType);
+save_memory_copies(#{memory_copies := Num} = Ctx, Key, Doc, PoolType) when is_integer(Num) ->
+    [_ | Nodes] = consistent_hashing:get_nodes(Key, Num),
+    save_memory_copies(Ctx#{memory_copies => Nodes}, Key, Doc, PoolType);
+save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
+    Pool = datastore_multiplier:extend_name(Key, PoolType),
+    lists:foreach(fun(Node) ->
+        case rpc:call(Node, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]) of
+            {ok, _} -> ok;
+            Error -> ?error("Error saving memory copies for key: ~p: ~p~ndoc: ~p", [Key, Error, Doc])
+        end
+    end, Nodes);
+save_memory_copies(_Ctx, _Key, _Doc, _PoolType) ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Saves copy to memory of node.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_memory_copy(ctx(), key(), doc(), datastore_cache_manager:pool()) -> {ok, doc()} | {error, term()}.
+save_memory_copy(#{
+    memory_driver := MemoryDriver,
+    memory_driver_ctx := MemoryCtx
+} = Ctx, Key, Doc, Pool) ->
+    case datastore_cache_manager:mark_active(Pool, Ctx, Key) of
+        true ->
+            Ans = MemoryDriver:save(MemoryCtx, Key, Doc),
+            datastore_cache_manager:mark_inactive(Pool, Key, fun(_) -> true end),
+            Ans;
+        false ->
+            {error, {enomem, Doc}}
     end.

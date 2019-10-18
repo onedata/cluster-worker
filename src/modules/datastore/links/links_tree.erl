@@ -170,7 +170,8 @@ get_root_id(State = #state{
 -spec create_node(links_node(), state()) ->
     {{ok, node_id()} | {error, term()}, state()}.
 create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
-    NodeId = datastore_utils:gen_key(),
+    HashPart = consistent_hashing:get_hashing_key(Key),
+    NodeId = datastore_utils:gen_key(HashPart),
     Ctx2 = Ctx#{generated_key => true},
     Doc = #document{
         key = NodeId,
