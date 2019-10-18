@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([init/4, load/1, terminate/1, terminate_read_only_mask/1]).
+-export([init/4, load/2, terminate/1, terminate_read_only_mask/1]).
 -export([mark_deleted/3, is_deleted/3]).
 
 -record(mask, {
@@ -44,13 +44,14 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Initializes links tree mask.
+%% Initializes links tree mask. Returns information if mask is empty.
 %% @end
 %%--------------------------------------------------------------------
--spec init(ctx(), key(), tree_id(), batch()) -> {ok | {error, term()}, mask()}.
+-spec init(ctx(), key(), tree_id(), batch()) -> {ok | {error, term()}, mask(), boolean()}.
 init(Ctx, Key, TreeId, Batch) ->
     MaskRootId = datastore_links:get_mask_root_id(Key),
-    Head = Tail = datastore_utils:gen_key(),
+    HashPart = consistent_hashing:get_hashing_key(Key),
+    Head = Tail = datastore_utils:gen_key(HashPart),
     Mask = #mask{
         ctx = Ctx,
         key = Key,
@@ -63,15 +64,23 @@ init(Ctx, Key, TreeId, Batch) ->
             heads = Heads,
             tails = Tails
         }}}, Batch2} ->
-            {ok, Mask#mask{
-                head = maps:get(TreeId, Heads, Head),
-                tail = maps:get(TreeId, Tails, Tail),
-                batch = Batch2
-            }};
+            FinalHead = maps:get(TreeId, Heads, Head),
+            FinalTail = maps:get(TreeId, Tails, Tail),
+
+            case (FinalHead =:= Head) andalso (FinalTail =:= Tail) of
+                true ->
+                    {ok, Mask#mask{batch = Batch2}, true};
+                _ ->
+                    {ok, Mask#mask{
+                        head = FinalHead,
+                        tail = FinalTail,
+                        batch = Batch2
+                    }, false}
+            end;
         {{error, not_found}, Batch2} ->
-            {ok, Mask#mask{batch = Batch2}};
+            {ok, Mask#mask{batch = Batch2}, true};
         {{error, Reason}, Batch2} ->
-            {{error, Reason}, Mask#mask{batch = Batch2}}
+            {{error, Reason}, Mask#mask{batch = Batch2}, true}
     end.
 
 %%--------------------------------------------------------------------
@@ -80,8 +89,10 @@ init(Ctx, Key, TreeId, Batch) ->
 %% into a cache object.
 %% @end
 %%--------------------------------------------------------------------
--spec load(mask()) -> {{ok, cache()} | {error, term()}, mask()}.
-load(Mask = #mask{head = Head}) ->
+-spec load(mask(), boolean()) -> {{ok, cache()} | {error, term()}, mask()}.
+load(Mask, true) ->
+    {{ok, gb_sets:new()}, Mask};
+load(Mask = #mask{head = Head}, _Empty) ->
     Cache = gb_sets:new(),
     load(Head, Cache, Mask).
 

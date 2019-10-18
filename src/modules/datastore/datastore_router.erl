@@ -17,10 +17,9 @@
 -include("exometer_utils.hrl").
 
 %% API
--export([route/4, process/3]).
+-export([route/3, process/3]).
 -export([init_counters/0, init_report/0]).
 
--type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
 
 -define(EXOMETER_COUNTERS,
@@ -63,14 +62,22 @@ init_report() ->
 %% Redirects datastore call to designated node and module.
 %% @end
 %%--------------------------------------------------------------------
--spec route(ctx(), key(), atom(), list()) -> term().
-route(Ctx, Key, Function, Args) ->
-    Node = select_node(Ctx, Key),
+-spec route(key(), atom(), list()) -> term().
+route(Key, Function, Args) ->
     Module = select_module(Function),
-    Args2 = [Module, Function, Args],
-    case rpc:call(Node, datastore_router, process, Args2) of
-        {badrpc, Reason} -> {error, Reason};
-        Result -> Result
+    {Node, Args2} = select_node(Key, Args),
+    case Module of
+        datastore_writer ->
+            case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
+        _ ->
+            try
+                datastore_router:process(Module, Function, [Node | Args2])
+            catch
+                _:Reason2 -> {error, Reason2}
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -97,13 +104,18 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %% @private
 %% @doc
 %% Returns node responsible for handling datastore call.
+%% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec select_node(ctx(), key()) -> node().
-select_node(#{routing := local}, _Key) ->
-    node();
-select_node(_Ctx, Key) ->
-    consistent_hashing:get_node(Key).
+-spec select_node(key(), list()) -> {node(), list()}.
+select_node(_Key, [#{routing := local} | _] = Args) ->
+    {node(), Args};
+select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
+    [Node | Nodes] = consistent_hashing:get_nodes(Key, Num),
+    {Node, [Ctx#{memory_copies => Nodes} | ArgsTail]};
+select_node(Key, Args) ->
+    Node = consistent_hashing:get_node(Key),
+    {Node, Args}.
 
 %%--------------------------------------------------------------------
 %% @private
