@@ -44,16 +44,15 @@
 -type timestamp() :: non_neg_integer().
 -type cache_options() :: #{
     size := non_neg_integer(),
-    check_frequency := non_neg_integer(),
-    group => group()
-} | #{
+    check_frequency := non_neg_integer()
+} | #{group => group()} | #{
     group => group(),
     worker := boolean()
 }.
 -type group_options() :: #{
     size := non_neg_integer(),
     check_frequency := non_neg_integer(),
-    worker := boolean()
+    worker := boolean() | undefined
 }.
 -type check_options() :: #{
     size := non_neg_integer(),
