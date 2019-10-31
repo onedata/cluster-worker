@@ -27,7 +27,8 @@
 
 % Types used in request routing.
 -type worker_name() :: atom().
--type worker_ref() :: worker_name() | {WorkerName :: worker_name(), Node :: node()}.
+-type worker_ref() :: worker_name() | {WorkerName :: worker_name(), Node :: node()} |
+    {id, WorkerName :: worker_name(), ID :: term()}.
 -export_type([worker_name/0, worker_ref/0]).
 
 %% This record is used by requests_dispatcher (it contains its state).

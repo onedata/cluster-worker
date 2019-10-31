@@ -422,6 +422,8 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
         WorkerNode :: atom()} | {error, term()}.
 choose_node(WorkerRef) ->
     case WorkerRef of
+        {id, WName, ID} ->
+            {ok, WName, consistent_hashing:get_node(ID)};
         {WName, WNode} ->
             {ok, WName, WNode};
         WName ->

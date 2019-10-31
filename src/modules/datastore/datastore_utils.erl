@@ -13,7 +13,7 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([gen_key/0, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
+-export([gen_key/0, gen_key/1, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
 -export([set_expiry/2]).
 
 -type key() :: datastore:key().
@@ -31,12 +31,23 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Generates random datastore key.
+%% %% Generates random key.
 %% @end
 %%--------------------------------------------------------------------
 -spec gen_key() -> key().
 gen_key() ->
-    str_utils:rand_hex(?KEY_LENGTH).
+    HashPart = consistent_hashing:gen_hashing_key(),
+    gen_key(HashPart).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Generates random key with hash part from arg.
+%% @end
+%%--------------------------------------------------------------------
+-spec gen_key(binary()) -> key().
+gen_key(HashPart) ->
+    RandPart = str_utils:rand_hex(?KEY_LENGTH),
+    consistent_hashing:create_label(HashPart, RandPart).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -45,10 +56,15 @@ gen_key() ->
 %%--------------------------------------------------------------------
 -spec gen_key(binary(), key()) -> key().
 gen_key(Seed, Key) when is_binary(Seed) ->
-    Ctx = crypto:hash_init(md5),
-    Ctx2 = crypto:hash_update(Ctx, Seed),
-    Ctx3 = crypto:hash_update(Ctx2, Key),
-    hex_utils:hex(crypto:hash_final(Ctx3)).
+    case consistent_hashing:has_hash_part(Key) of
+        true ->
+            <<Key/binary, Seed/binary>>;
+        _ ->
+            Ctx = crypto:hash_init(md5),
+            Ctx2 = crypto:hash_update(Ctx, Seed),
+            Ctx3 = crypto:hash_update(Ctx2, Key),
+            hex_utils:hex(crypto:hash_final(Ctx3))
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
