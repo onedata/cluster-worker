@@ -27,7 +27,7 @@
 %% Executes master job.
 %% @end
 %%--------------------------------------------------------------------
--callback do_master_job(traverse:job(), traverse:master_job_extended_args()) ->
+-callback do_master_job(traverse:job(), traverse:master_job_extended_args() | traverse:id()) ->
     {ok, traverse:master_job_map()} | {error, term()}.
 
 %%--------------------------------------------------------------------
