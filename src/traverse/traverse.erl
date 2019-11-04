@@ -689,8 +689,7 @@ task_callback(CallbackModule, Method, TaskID) ->
 to_string(CallbackModule, Job) ->
     case erlang:function_exported(CallbackModule, to_string, 1) of
         true ->
-            {ok, JobDescription} = CallbackModule:to_string(Job),
-            JobDescription;
+            CallbackModule:to_string(Job);
         _ -> 
             str_utils:format_bin("~p", [Job])
     end.
