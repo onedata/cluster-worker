@@ -479,8 +479,6 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
                 ok;
             Error = {error, _} ->
-                ?error("Slave job ~s of task ~p (module ~p) error ~p",
-                    [to_string(CallbackModule, Job), TaskID, CallbackModule, Error]),
                 error
         end
     catch
