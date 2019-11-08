@@ -159,11 +159,10 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
 init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) ->
     MasterPool = worker_pool:start_sup_pool(?MASTER_POOL_NAME(PoolName), [{workers, MasterJobsNum}, {queue_type, lifo}]),
     SlavePool = worker_pool:start_sup_pool(?SLAVE_POOL_NAME(PoolName), [{workers, SlaveJobsNum}, {queue_type, lifo}]),
-
-    case {MasterPool, SlavePool} of
-        {{ok, _}, {ok, _}} ->
-            ok;
-        {{error, {already_started, _}}, {error, {already_started, _}}} ->
+    try
+        {{ok, _}, {ok, _}} = {MasterPool, SlavePool}
+    catch
+        error:{badmatch, {{error, {already_started, _}}, {error, {already_started, _}}}} ->
             throw({error, already_exists})
     end,
 
