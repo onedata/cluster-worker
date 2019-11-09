@@ -13,6 +13,11 @@
 -module(traverse_behaviour).
 -author("Michal Wrzeszcz").
 
+-optional_callbacks([
+    to_string/1, get_timestamp/0, get_sync_info/1, task_started/1,
+    task_finished/1, task_canceled/1, on_cancel_init/1
+]).
+
 %%%===================================================================
 %%% Traverse API
 %%%===================================================================
