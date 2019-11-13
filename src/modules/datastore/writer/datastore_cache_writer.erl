@@ -34,7 +34,8 @@
     keys_times = #{} :: #{key() => erlang:timestamp()},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
-    to_execute = [] :: [flush | inactivate],
+    flush_timer :: undefined | reference(),
+    inactivate_timer :: undefined | reference(),
     link_tokens = #{} :: cached_token_map()
 }).
 
@@ -153,8 +154,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     master_pid = Pid,
     keys_in_flush = KIF,
     keys_to_expire = ToExpire,
-    flush_times = FT,
-    to_execute = ToExecute
+    flush_times = FT
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
@@ -192,12 +192,12 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
     {noreply, check_inactivate(schedule_flush(State#state{
         cached_keys_to_flush = NewKeys,
-        to_execute = ToExecute -- [flush],
+        flush_timer = undefined,
         requests_ref = NewRef,
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
         flush_times = FT2
-    }, 0))};
+    }, 100))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -220,7 +220,7 @@ handle_info(flush, State = #state{
     keys_to_inactivate = ToInactivate,
     flush_times = FT
 }) ->
-    {NewCachedKeys, NewKiF, NewFT, Schedule} =
+    {NewCachedKeys, NewKiF, NewFT, State2} =
         case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             KiFKeys = maps:keys(KiF),
@@ -238,9 +238,9 @@ handle_info(flush, State = #state{
 
             case {maps:size(ToFlush), maps:size(ToFlush0)} of
                 {0, 0} ->
-                    {CachedKeys, KiF, FT, false};
+                    {CachedKeys, KiF, FT, State#state{flush_timer = undefined}};
                 {0, _} ->
-                    {CachedKeys, KiF, FT, true};
+                    {CachedKeys, KiF, FT, schedule_flush(State#state{flush_timer = undefined})};
                 _ ->
                     Waiting = maps:without(maps:keys(ToFlush), CachedKeys),
 
@@ -274,7 +274,7 @@ handle_info(flush, State = #state{
                         maps:put(K, Timestamp, Acc)
                     end, FT, ToFlush2),
 
-                    {Waiting, KiF2, FT2, false}
+                    {Waiting, KiF2, FT2, State}
             end;
         _ ->
             tp_router:delete_process_size(Pid),
@@ -283,7 +283,7 @@ handle_info(flush, State = #state{
                 maps:put(K, {Ref, Ctx}, Acc)
             end, KiF, CachedKeys),
 
-            {#{}, KiF2, #{}, false}
+            {#{}, KiF2, #{}, State}
     end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
@@ -293,21 +293,16 @@ handle_info(flush, State = #state{
             ok
     end,
 
-    State2 = State#state{
+    State3 = State2#state{
         cached_keys_to_flush = NewCachedKeys,
         keys_in_flush = NewKiF,
         keys_to_inactivate = maps:merge(ToInactivate, CachedKeys),
         flush_times = NewFT
     },
 
-    State3 = case Schedule of
-        true -> schedule_flush(State2);
-        _ -> State2
-    end,
-
     {noreply, State3};
 handle_info(inactivate, #state{} = State) ->
-    {noreply, check_inactivate(State)};
+    {noreply, check_inactivate(State#state{inactivate_timer = undefined})};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -750,19 +745,24 @@ schedule_flush(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_flush(state(), non_neg_integer()) -> state().
-schedule_flush(State = #state{to_execute = ToExecute}, Delay) ->
-    case lists:member(flush, ToExecute) of
-        true ->
+schedule_flush(State = #state{cached_keys_to_flush = #{}}, _Delay) ->
+    State;
+schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
+    case {OldTimer, Delay} of
+        {undefined, _} ->
+            Timer = erlang:send_after(Delay, self(), flush),
+            State#state{flush_timer = Timer};
+        {_, 100} ->
             case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
                 on ->
-                    erlang:send_after(Delay, self(), flush),
-                    State;
+                    erlang:cancel_timer(OldTimer, [{async, true}, {info, false}]),
+                    Timer = erlang:send_after(Delay, self(), flush),
+                    State#state{flush_timer = Timer};
                 _ ->
                     State
             end;
-        false ->
-            erlang:send_after(Delay, self(), flush),
-            State#state{to_execute = [flush | ToExecute]}
+        _ ->
+            State
     end.
 
 %%--------------------------------------------------------------------
@@ -790,9 +790,8 @@ check_inactivate(#state{
     keys_times = KeysTimes,
     flush_times = FT,
     link_tokens = LT,
-    to_execute = ToExecute0
+    inactivate_timer = OldTimer
 } = State) ->
-    ToExecute = ToExecute0 -- [inactivate],
     Now = os:timestamp(),
 
     {ToExpire2, ExpireMaxTime} =
@@ -849,14 +848,12 @@ check_inactivate(#state{
         timer:now_diff(Now, Time) =< MaxLinkTimeUS
     end, LT),
 
-    case maps:size(ToExpire2) + maps:size(State2#state.keys_to_inactivate) of
-        0 ->
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2,
-                to_execute = ToExecute};
+    case maps:size(ToExpire2) + maps:size(State2#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of
+        true ->
+            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2};
         _ ->
-            erlang:send_after(ExpireMaxTime3 div 1000, self(), inactivate),
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2,
-                to_execute = [inactivate | ToExecute]}
+            Timer = erlang:send_after(ExpireMaxTime3 div 1000, self(), inactivate),
+            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
     end.
 
 %%--------------------------------------------------------------------
