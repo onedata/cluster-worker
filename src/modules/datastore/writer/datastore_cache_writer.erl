@@ -738,7 +738,7 @@ schedule_flush(State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec schedule_flush(state(), non_neg_integer()) -> state().
-schedule_flush(State = #state{cached_keys_to_flush = #{}}, _Delay) ->
+schedule_flush(State = #state{cached_keys_to_flush = Map}, _Delay) when map_size(Map) == 0 ->
     State;
 schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
     case {OldTimer, Delay} of
