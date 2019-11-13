@@ -31,7 +31,6 @@
     keys_in_flush = #{} :: #{key() => reference()},
     keys_to_inactivate = #{} :: cached_keys(),
     keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
-    keys_times = #{} :: #{key() => erlang:timestamp()},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
     flush_timer :: undefined | reference(),
@@ -345,7 +344,6 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_requests(list(), state()) -> state().
 handle_requests(Requests, State = #state{
     cached_keys_to_flush = CachedKeys,
-    keys_times = KeysTimes,
     master_pid = Pid,
     link_tokens = LT
 }) ->
@@ -358,12 +356,7 @@ handle_requests(Requests, State = #state{
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
 
-    Timestamp = os:timestamp(),
-    Times = maps:map(fun(_K, _V) -> Timestamp end, NewKeys),
-    KeysTimes2 = maps:merge(KeysTimes, Times),
-
-    State#state{cached_keys_to_flush = NewKeys, keys_times = KeysTimes2,
-        link_tokens = LT2}.
+    State#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -787,7 +780,6 @@ check_inactivate(#state{
     cached_keys_to_flush = CachedKeys,
     keys_in_flush = KiF,
     keys_to_expire = ToExpire,
-    keys_times = KeysTimes,
     flush_times = FT,
     link_tokens = LT,
     inactivate_timer = OldTimer
@@ -806,40 +798,13 @@ check_inactivate(#state{
             end
         end, {#{}, 1000000}, ToExpire),
 
-    Max = application:get_env(?CLUSTER_WORKER_APP_NAME, max_key_tp_mem, 100),
     Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF) ++ maps:keys(ToExpire2),
     ToInactivate2 = maps:without(Exclude, ToInactivate),
     ExcludeMap = maps:with(Exclude, ToInactivate),
 
-    {State2, ExpireMaxTime3} = case maps:size(ToInactivate) > Max of
-        true ->
-            datastore_cache:inactivate(ToInactivate2),
-            {State#state{keys_to_inactivate = ExcludeMap,
-                keys_times = maps:with(Exclude, KeysTimes),
-                flush_times = maps:with(Exclude, FT)}, ExpireMaxTime};
-        _ ->
-            MaxTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                tp_active_mem_sek, 5),
-            MaxTimeUS = timer:seconds(MaxTime) * 1000,
-
-            ToInactivate3 = maps:filter(fun(K, _V) ->
-                KeyTime = maps:get(K, KeysTimes, {0,0,0}),
-                timer:now_diff(Now, KeyTime) > MaxTimeUS
-            end, ToInactivate2),
-
-            ExcludeMap2 = maps:without(maps:keys(ToInactivate3), ToInactivate2),
-            ExpireMaxTime2 = case maps:size(ExcludeMap2) of
-                0 -> ExpireMaxTime;
-                _ -> max(ExpireMaxTime, MaxTimeUS)
-            end,
-
-            datastore_cache:inactivate(ToInactivate3),
-            NewToInactivate = maps:merge(ExcludeMap, ExcludeMap2),
-            NewToInactivateKeys = maps:keys(NewToInactivate),
-            {State#state{keys_to_inactivate = NewToInactivate,
-                keys_times = maps:with(NewToInactivateKeys, KeysTimes),
-                flush_times = maps:with(NewToInactivateKeys, FT)}, ExpireMaxTime2}
-    end,
+    datastore_cache:inactivate(ToInactivate2),
+    State2 = State#state{keys_to_inactivate = ExcludeMap,
+        flush_times = maps:with(Exclude, FT)},
 
     MaxLinkTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
         fold_cache_timeout, timer:seconds(30)),
@@ -852,7 +817,7 @@ check_inactivate(#state{
         true ->
             State2#state{link_tokens = LT2, keys_to_expire = ToExpire2};
         _ ->
-            Timer = erlang:send_after(ExpireMaxTime3 div 1000, self(), inactivate),
+            Timer = erlang:send_after(ExpireMaxTime div 1000, self(), inactivate),
             State2#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
     end.
 
