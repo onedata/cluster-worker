@@ -493,12 +493,17 @@ save_memory_copies(#{memory_copies := Num} = Ctx, Key, Doc, PoolType) when is_in
     save_memory_copies(Ctx#{memory_copies => Nodes}, Key, Doc, PoolType);
 save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
     Pool = datastore_multiplier:extend_name(Key, PoolType),
-    lists:foreach(fun(Node) ->
-        case rpc:call(Node, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]) of
-            {ok, _} -> ok;
-            Error -> ?error("Error saving memory copies for key: ~p: ~p~ndoc: ~p", [Key, Error, Doc])
-        end
-    end, Nodes);
+    {Ans, BadNodes} = FullAns = rpc:multicall(Nodes, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]),
+    FilteredAns = lists:filter(fun
+        ({ok, _}) -> false;
+        (_) -> true
+    end, Ans),
+    case {FilteredAns, BadNodes} of
+        {[], []} ->
+            ok;
+        _ ->
+            ?error("Error saving memory copies for key: ~p~ndoc: ~p~nnodes ~p~nrpc ans: ~p", [Key, Doc, Nodes, FullAns])
+    end;
 save_memory_copies(_Ctx, _Key, _Doc, _PoolType) ->
     ok.
 
