@@ -155,7 +155,7 @@
 %% @equiv init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{}).
 %% @end
 %%--------------------------------------------------------------------
--spec init_pool(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
+-spec init_pool(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok | no_return().
 init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
     init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{}).
 
@@ -165,12 +165,16 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
 %% and restarts tasks if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec init_pool(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer(), pool_options()) -> ok.
+-spec init_pool(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer(), pool_options()) -> ok | no_return().
 init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) ->
-    {ok, _} = worker_pool:start_sup_pool(?MASTER_POOL_NAME(PoolName),
-        [{workers, MasterJobsNum}, {queue_type, lifo}]),
-    {ok, _} = worker_pool:start_sup_pool(?SLAVE_POOL_NAME(PoolName),
-        [{workers, SlaveJobsNum}, {queue_type, lifo}]),
+    MasterPool = worker_pool:start_sup_pool(?MASTER_POOL_NAME(PoolName), [{workers, MasterJobsNum}, {queue_type, lifo}]),
+    SlavePool = worker_pool:start_sup_pool(?SLAVE_POOL_NAME(PoolName), [{workers, SlaveJobsNum}, {queue_type, lifo}]),
+    try
+        {{ok, _}, {ok, _}} = {MasterPool, SlavePool}
+    catch
+        error:{badmatch, {{error, {already_started, _}}, {error, {already_started, _}}}} ->
+            throw({error, already_exists})
+    end,
 
     Executor = maps:get(executor, Options, ?DEFAULT_ENVIRONMENT_ID),
     CallbackModules = maps:get(callback_modules, Options, [binary_to_atom(PoolName, utf8)]),
