@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([route/3, process/3]).
@@ -68,6 +69,10 @@ route(Key, Function, Args) ->
     {Node, Args2} = select_node(Key, Args),
     case Module of
         datastore_writer ->
+            case node() of
+                Node -> ok;
+                _ -> ?info("dddd ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
+            end,
             case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result

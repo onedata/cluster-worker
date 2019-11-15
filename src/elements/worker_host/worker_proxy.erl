@@ -180,6 +180,10 @@ cast(WorkerRef, Request, ReplyTo, MsgId) ->
 cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
+            case node() of
+                Node -> ok;
+                _ -> ?info("wwwww ~p", [{WorkerRef, Request, erlang:process_info(self(), current_stacktrace)}])
+            end,
             Args = prepare_args(Name, Request, MsgId, ReplyTo),
             execute(Args, Node, ExecOption, undefined),
             ok;
@@ -210,6 +214,10 @@ cast_and_monitor(WorkerRef, Request, MsgId) ->
 cast_and_monitor(WorkerRef, Request, ReplyTo, MsgId) ->
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
+            case node() of
+                Node -> ok;
+                _ -> ?info("wwwww ~p", [{WorkerRef, Request, erlang:process_info(self(), current_stacktrace)}])
+            end,
             Args = prepare_args(Name, Request, MsgId, ReplyTo),
             execute(Args, Node, spawn, undefined);
         Error ->
@@ -309,6 +317,10 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
     MsgId = make_ref(),
     case choose_node(WorkerRef) of
         {ok, Name, Node} ->
+            case node() of
+                Node -> ok;
+                _ -> ?info("wwwww ~p", [{WorkerRef, Request, erlang:process_info(self(), current_stacktrace)}])
+            end,
             Args = prepare_args(Name, Request, MsgId),
             ExecuteAns = execute(Args, Node, ExecOption, Timeout),
             receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
