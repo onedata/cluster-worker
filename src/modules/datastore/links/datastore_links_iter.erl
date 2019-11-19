@@ -134,6 +134,8 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
     Result = lists:foldl(fun
         (_, {error, Reason}) -> {error, Reason};
         ({error, not_found}, {ok, Acc}) -> {ok, Acc};
+        ({error, {throw, not_found}}, _) -> throw(not_found);
+        ({error, {{throw, not_found}, _Stacktrace}}, _) -> throw(not_found);
         ({error, Reason}, _) -> {error, Reason};
         ({ok, Link}, {ok, Acc}) -> {ok, [Link | Acc]}
     end, {ok, []}, Results),

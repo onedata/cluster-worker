@@ -371,7 +371,7 @@ fetch_missing(FetchNode, Ctx, Key) ->
 fetch_deleted(#{throw_not_found := true} = Ctx, Key, Batch, _) ->
     case datastore_cache:get(Ctx, Key, false) of
         {error, not_found} ->
-            throw(not_found);
+            throw({throw, not_found});
         Result ->
             {Result, Batch}
     end;
