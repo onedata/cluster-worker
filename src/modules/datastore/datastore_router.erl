@@ -69,10 +69,10 @@ route(Key, Function, Args) ->
     {Node, Args2} = select_node(Key, Args),
     case Module of
         datastore_writer ->
-            case node() of
-                Node -> ok;
-                _ -> ?info("dddd ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
-            end,
+%%            case node() of
+%%                Node -> ok;
+%%                _ -> ?info("dddd ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
+%%            end,
             case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result
