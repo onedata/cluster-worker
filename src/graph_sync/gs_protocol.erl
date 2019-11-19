@@ -110,7 +110,7 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | throughHarvester | throughCluster|
+    throughHandleService | throughHandle | throughHarvester | throughCluster |
     asUser | asGroup | asSpace,
     EntityId :: binary()
 }.
@@ -828,20 +828,13 @@ string_to_operation(<<"delete">>) -> delete.
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
 auth_hint_to_json(undefined) -> null;
 auth_hint_to_json(?THROUGH_USER(UserId)) -> <<"throughUser:", UserId/binary>>;
-auth_hint_to_json(?THROUGH_GROUP(GroupId)) ->
-    <<"throughGroup:", GroupId/binary>>;
-auth_hint_to_json(?THROUGH_SPACE(SpaceId)) ->
-    <<"throughSpace:", SpaceId/binary>>;
-auth_hint_to_json(?THROUGH_PROVIDER(ProvId)) ->
-    <<"throughProvider:", ProvId/binary>>;
-auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) ->
-    <<"throughHandleService:", HSId/binary>>;
-auth_hint_to_json(?THROUGH_HANDLE(HandleId)) ->
-    <<"throughHandle:", HandleId/binary>>;
-auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) ->
-    <<"throughHarvester:", HarvesterId/binary>>;
-auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) ->
-    <<"throughCluster:", ClusterId/binary>>;
+auth_hint_to_json(?THROUGH_GROUP(GroupId)) -> <<"throughGroup:", GroupId/binary>>;
+auth_hint_to_json(?THROUGH_SPACE(SpaceId)) -> <<"throughSpace:", SpaceId/binary>>;
+auth_hint_to_json(?THROUGH_PROVIDER(ProvId)) -> <<"throughProvider:", ProvId/binary>>;
+auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) -> <<"throughHandleService:", HSId/binary>>;
+auth_hint_to_json(?THROUGH_HANDLE(HandleId)) -> <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) -> <<"throughHarvester:", HarvesterId/binary>>;
+auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) -> <<"throughCluster:", ClusterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
 auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
 auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>.
@@ -850,20 +843,13 @@ auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>.
 -spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
 json_to_auth_hint(null) -> undefined;
 json_to_auth_hint(<<"throughUser:", UserId/binary>>) -> ?THROUGH_USER(UserId);
-json_to_auth_hint(<<"throughGroup:", GroupId/binary>>) ->
-    ?THROUGH_GROUP(GroupId);
-json_to_auth_hint(<<"throughSpace:", SpaceId/binary>>) ->
-    ?THROUGH_SPACE(SpaceId);
-json_to_auth_hint(<<"throughProvider:", ProvId/binary>>) ->
-    ?THROUGH_PROVIDER(ProvId);
-json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) ->
-    ?THROUGH_HANDLE_SERVICE(HSId);
-json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) ->
-    ?THROUGH_HANDLE(HandleId);
-json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) ->
-    ?THROUGH_HARVESTER(HarvesterId);
-json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) ->
-    ?THROUGH_CLUSTER(ClusterId);
+json_to_auth_hint(<<"throughGroup:", GroupId/binary>>) -> ?THROUGH_GROUP(GroupId);
+json_to_auth_hint(<<"throughSpace:", SpaceId/binary>>) -> ?THROUGH_SPACE(SpaceId);
+json_to_auth_hint(<<"throughProvider:", ProvId/binary>>) -> ?THROUGH_PROVIDER(ProvId);
+json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) -> ?THROUGH_HANDLE_SERVICE(HSId);
+json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) -> ?THROUGH_HANDLE(HandleId);
+json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) -> ?THROUGH_HARVESTER(HarvesterId);
+json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) -> ?THROUGH_CLUSTER(ClusterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
 json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
