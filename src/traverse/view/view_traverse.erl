@@ -36,16 +36,15 @@
     to_string/1
 ]).
 
--optional_callbacks([task_started/1, task_finished/1, task_canceled/1, to_string/1]).
-
 -type task_id() :: traverse:id().
 -type master_job() :: #view_traverse_master{}.
 -type slave_job() :: #view_traverse_slave{}.
 -type job() :: master_job() | slave_job().
--type token() :: #view_token{}.
+-type token() :: #query_view_token{}.
 -type callback_module() :: module().
 -type query_opts() :: #{atom() => term()}.  % opts passed to couchbase_driver:query
 -type info() :: term(). % custom term passed to process_row callback
+-type row() :: proplists:proplist().
 
 % @formatter:off
 -type opts() :: #{
@@ -55,7 +54,7 @@
 }.
 % @formatter:on
 
--export_type([task_id/0, master_job/0, slave_job/0, token/0, callback_module/0, query_opts/0, info/0]).
+-export_type([task_id/0, master_job/0, slave_job/0, token/0, callback_module/0, query_opts/0, info/0, row/0]).
 
 %%%===================================================================
 %%% view_traverse mandatory callbacks definitions
@@ -74,6 +73,8 @@
 -callback task_canceled(task_id()) -> ok.
 
 -callback to_string(job()) -> binary() | atom() | iolist().
+
+-optional_callbacks([task_started/1, task_finished/1, task_canceled/1, to_string/1]).
 
 %%%===================================================================
 %%% API functions
@@ -126,22 +127,22 @@ cancel(CallbackModule, TaskId) ->
 do_master_job(MasterJob = #view_traverse_master{
     view_name = ViewName,
     query_opts = QueryOpts,
-    view_token = ViewToken,
+    query_view_token = Token,
     async_next_batch_job = AsyncNextBatchJob
 }, _Args) ->
-    case query(ViewName, prepare_query_opts(ViewToken, QueryOpts)) of
+    case query(ViewName, prepare_query_opts(Token, QueryOpts)) of
         {ok, {[]}} ->
             {ok, #{}};
         {ok, {Rows}} ->
             {SlaveJobs, NewToken} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn}) ->
                 {<<"key">>, Key} = lists:keyfind(<<"key">>, 1, Row),
                 {<<"id">>, DocId} = lists:keyfind(<<"id">>, 1, Row),
-                {[slave_job(MasterJob, Row) | SlaveJobsIn], TokenIn#view_token{
+                {[slave_job(MasterJob, Row) | SlaveJobsIn], TokenIn#query_view_token{
                     start_key = Key,
                     last_doc_id = DocId
                 }}
-            end, {[], ViewToken}, Rows),
-            NextBatchJob = MasterJob#view_traverse_master{view_token = NewToken},
+            end, {[], Token}, Rows),
+            NextBatchJob = MasterJob#view_traverse_master{query_view_token = NewToken},
             case AsyncNextBatchJob of
                 true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};
                 false -> {ok, #{slave_jobs => SlaveJobs, master_jobs => [NextBatchJob]}}
@@ -252,7 +253,7 @@ ensure_defined_task_id(undefined) ->
 ensure_defined_task_id(TaskId) when is_binary(TaskId) ->
     TaskId.
 
--spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, term()} | {error, term()}.
+-spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, {[row()]}} | {error, term()}.
 query(ViewName, Opts) ->
     DiscCtx = datastore_model_default:get_default_disk_ctx(),
     couchbase_driver:query_view(DiscCtx, ViewName, ViewName, Opts).
@@ -266,9 +267,9 @@ slave_job(#view_traverse_master{callback_module = CallbackModule, info = Info}, 
     }.
 
 -spec prepare_query_opts(token(), query_opts()) -> [couchbase_driver:view_opt()].
-prepare_query_opts(#view_token{last_doc_id = undefined, start_key = undefined}, Opts) ->
+prepare_query_opts(#query_view_token{last_doc_id = undefined, start_key = undefined}, Opts) ->
     maps:to_list(Opts);
-prepare_query_opts(#view_token{
+prepare_query_opts(#query_view_token{
     last_doc_id = LastDocId,
     start_key = LastKey
 }, Opts) ->

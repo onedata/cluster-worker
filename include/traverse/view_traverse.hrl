@@ -17,7 +17,7 @@
 -include("global_definitions.hrl").
 
 % this record is used to define the starting row for a query on the couchbase view
--record(view_token, {
+-record(query_view_token, {
     % doc_id of the last returned row
     % if defined it will be used with start_key to start the query
     % from the previously finished row
@@ -37,17 +37,17 @@
     application:get_env(?CLUSTER_WORKER_APP_NAME, view_traverse_default_parallelism_limit, 5)).
 
 % default run opts
--define(DEFAULT_LIMIT, 1000).
+-define(DEFAULT_QUERY_BATCH, 1000).
 -define(DEFAULT_ASYNC_NEXT_BATCH_JOB, false).
 -define(DEFAULT_QUERY_OPTS, #{
     stale => false,
-    limit => ?DEFAULT_LIMIT
+    limit => ?DEFAULT_QUERY_BATCH
 }).
 
 -record(view_traverse_master, {
     view_name :: couchbase_driver:view(),
     callback_module :: view_traverse:callback_module(),
-    view_token = #view_token{} :: view_traverse:token(),
+    query_view_token = #query_view_token{} :: view_traverse:token(),
     query_opts :: view_traverse:query_opts(),
     async_next_batch_job = ?DEFAULT_ASYNC_NEXT_BATCH_JOB :: boolean(),
     info :: view_traverse:info()
@@ -56,7 +56,7 @@
 -record(view_traverse_slave, {
     callback_module :: view_traverse:callback_module(),
     info :: view_traverse:info(),
-    row :: term() % TODO
+    row :: view_traverse:row()
 }).
 
 

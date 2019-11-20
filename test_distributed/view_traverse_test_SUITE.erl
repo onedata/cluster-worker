@@ -71,7 +71,7 @@ empty_basic_traverse_test(Config) ->
     basic_batch_traverse_test_base(Config, 0).
 
 single_row_basic_traverse_test(Config) ->
-    basic_batch_traverse_test_base(Config, 0).
+    basic_batch_traverse_test_base(Config, 1).
 
 many_rows_single_batch_basic_traverse_test(Config) ->
     basic_batch_traverse_test_base(Config, 1000).

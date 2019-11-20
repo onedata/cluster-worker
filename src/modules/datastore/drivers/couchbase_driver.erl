@@ -314,7 +314,7 @@ save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec query_view(ctx(), design(), view(), [view_opt()]) ->
-    {ok, term()} | {error, term()}.
+    {ok, {[proplists:proplist()]}} | {error, term()}.
 query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
     Mode = maps:get(pool_mode, Ctx, read),
     couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).
