@@ -12,6 +12,8 @@
 -module(traverse_test_pool).
 -author("Michal Wrzeszcz").
 
+-behaviour(traverse_behaviour).
+
 -include("global_definitions.hrl").
 
 %% Pool callbacks

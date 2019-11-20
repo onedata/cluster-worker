@@ -106,12 +106,13 @@
     description => description(),
     finish_callback => job_finish_callback()
 }.
+
 -type master_job_extended_args() :: #{
     task_id => id(),
     master_job_starter_callback => master_job_starter_callback()
 }.
 -type master_job_starter_callback() :: fun(([job()]) -> ok).
--type job_finish_callback() :: fun(() -> ok).
+-type job_finish_callback() :: fun((id(), description()) -> ok).
 % Types used to provide additional information to framework
 -type timestamp() :: non_neg_integer(). % Timestamp used to sort tasks (usually provided by callback function)
 -type sync_info() ::  #{
@@ -135,6 +136,15 @@
 
 -define(DEFAULT_GROUP, <<"main_group">>).
 -define(DEFAULT_ENVIRONMENT_ID, <<"default_executor">>).
+
+%% When to_string/1 function is not implemented by the callback module,
+%% str_utils:format/1 is used to print job in logs (see to_string/1 function).
+%% Unfortunately, an exception is thrown and handled inside this function
+%% and because of that macro ?error_stacktrace prints wrong stacktrace.
+%% This macro is used to bypass the problem.
+-define(log_error_with_stacktrace(Format, Args),
+    log_error_with_stacktrace(erlang:get_stacktrace(), Format, Args)
+).
 
 %%%===================================================================
 %%% API
@@ -375,12 +385,14 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         AsyncMasterJobsList = maps:get(async_master_jobs, MasterAns, []),
         SlaveJobsList = maps:get(slave_jobs, MasterAns, []),
         SequentialSlaveJobsList = maps:get(sequential_slave_jobs, MasterAns, []),
+        SlaveJobsDelegatedNum = length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList)),
 
         Description0 = maps:get(description, MasterAns, #{}),
         Description = Description0#{
-            slave_jobs_delegated => length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList)),
+            slave_jobs_delegated => SlaveJobsDelegatedNum,
             master_jobs_delegated => length(MasterJobsList) + length(AsyncMasterJobsList)
         },
+
         {ok, _, Canceled} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
 
         {_, NewDescription, Canceled2} = case Canceled of
@@ -401,8 +413,6 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 SlaveAnswers = run_on_slave_pool(
                     PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskID, SlaveJobsList),
 
-                Fun = maps:get(finish_callback, MasterAns, fun() -> ok end),
-                Fun(),
                 ok = run_on_master_pool(
                     PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, MasterJobsList),
 
@@ -418,6 +428,13 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_failed => SlavesErrors,
                     master_jobs_done => 1
                 },
+                SlavesDescription = #{
+                    slave_jobs_delegated => SlaveJobsDelegatedNum,
+                    slave_jobs_done => SlavesOk,
+                    slave_jobs_failed => SlavesErrors
+                },
+                Fun = maps:get(finish_callback, MasterAns, fun(_TaskID, _SlavesDescription) -> ok end),
+                Fun(MasterJobExtendedArgs, SlavesDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description2)
         end,
 
@@ -425,12 +442,12 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
             maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, NewDescription, Canceled2)
         catch
             E2:R2 ->
-                ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
+                ?log_error_with_stacktrace("Checking finish of job ~s of task ~p (module ~p) error ~p:~p",
                     [to_string(CallbackModule, Job), TaskID, CallbackModule, E2, R2])
         end
     catch
         E1:R1 ->
-            ?error_stacktrace("Master job ~p of task ~p (module ~p) error ~p:~p",
+            ?log_error_with_stacktrace("Master job ~s of task ~s (module ~p) error ~p:~p",
                 [to_string(CallbackModule, Job), TaskID, CallbackModule, E1, R1]),
             ErrorDescription = #{
                 master_jobs_failed => 1
@@ -445,7 +462,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                 maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, ErrorDescription2, Canceled3)
             catch
                 E3:R3 ->
-                    ?error_stacktrace("Checking finish of job ~p of task ~p (module ~p) error ~p:~p",
+                    ?log_error_with_stacktrace("Checking finish of job ~s of task ~p (module ~p) error ~p:~p",
                         [to_string(CallbackModule, Job), TaskID, CallbackModule, E3, R3])
             end
     end,
@@ -464,12 +481,14 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
                 ok;
             {ok, Description} ->
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
-                ok
+                ok;
+            Error = {error, _} ->
+                error
         end
     catch
-        E1:E2 ->
-            ?error_stacktrace("Slave job ~p of task ~p (module ~p) error ~p:~p",
-                [to_string(CallbackModule, Job), TaskID, CallbackModule, E1, E2]),
+        E:R ->
+            ?log_error_with_stacktrace("Slave job ~s of task ~p (module ~p) error ~p:~p",
+                [to_string(CallbackModule, Job), TaskID, CallbackModule, E, R]),
             error
     end.
 
@@ -672,10 +691,9 @@ task_callback(CallbackModule, Method, TaskID) ->
 to_string(CallbackModule, Job) ->
     case erlang:function_exported(CallbackModule, to_string, 1) of
         true ->
-            {ok, JobDescription} = CallbackModule:to_string(Job),
-            JobDescription;
-        _ ->
-            Job
+            CallbackModule:to_string(Job);
+        _ -> 
+            str_utils:format_bin("~p", [Job])
     end.
 
 -spec repair_ongoing_tasks(pool(), environment_id()) -> [{id(), ctx() | other_node}].
@@ -691,3 +709,7 @@ repair_ongoing_tasks(Pool, Executor) ->
             {error, other_node} -> {ID, other_node}
         end
     end, TaskIDs).
+
+-spec log_error_with_stacktrace(term(), string(), [term()]) -> ok.
+log_error_with_stacktrace(Stacktrace, Format, Args) ->
+    ?error(Format ++ "~nStacktrace:~n~p", Args ++ [Stacktrace]).

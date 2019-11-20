@@ -13,10 +13,8 @@
 -module(traverse_behaviour).
 -author("Michal Wrzeszcz").
 
--optional_callbacks([
-    to_string/1, get_timestamp/0, get_sync_info/1, task_started/1,
-    task_finished/1, task_canceled/1, on_cancel_init/1
-]).
+-optional_callbacks([task_started/1, task_finished/1, task_canceled/1,
+    on_cancel_init/1, get_sync_info/1, get_timestamp/0, to_string/1]).
 
 %%%===================================================================
 %%% Traverse API
@@ -118,4 +116,4 @@
 %% Returns term that will be used to describe job in lagger logs.
 %% @end
 %%--------------------------------------------------------------------
--callback to_string(traverse:job()) -> {ok, term()}.
+-callback to_string(traverse:job()) -> binary() | atom() | iolist().
