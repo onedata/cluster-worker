@@ -93,4 +93,15 @@
     generation :: node_manager:cluster_generation()
 }).
 
+-record(view_traverse_job, {
+    task_id :: traverse:id(),
+    pool :: traverse:pool(),
+    view_name :: couchbase_driver:view(),
+    callback_module :: view_traverse:callback_module(),
+    view_token :: view_traverse:token(),
+    query_opts :: view_traverse:query_opts(),
+    async_next_batch_job :: boolean(),
+    info :: view_traverse:info()
+}).
+
 -endif.

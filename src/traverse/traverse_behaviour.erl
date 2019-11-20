@@ -13,7 +13,7 @@
 -module(traverse_behaviour).
 -author("Michal Wrzeszcz").
 
--optional_callbacks([task_started/1, task_finished/1, task_canceled/1,
+-optional_callbacks([task_started/2, task_finished/2, task_canceled/2,
     on_cancel_init/1, get_sync_info/1, get_timestamp/0, to_string/1]).
 
 %%%===================================================================
@@ -66,21 +66,21 @@
 %% Is executed when whole task is started.
 %% @end
 %%--------------------------------------------------------------------
--callback task_started(traverse:id()) -> ok.
+-callback task_started(traverse:id(), traverse:pool()) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Is executed when whole task is finished.
 %% @end
 %%--------------------------------------------------------------------
--callback task_finished(traverse:id()) -> ok.
+-callback task_finished(traverse:id(), traverse:pool()) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Is executed when last job of canceled task has ended or immediately after cancel if task is scheduled.
 %% @end
 %%--------------------------------------------------------------------
--callback task_canceled(traverse:id()) -> ok.
+-callback task_canceled(traverse:id(), traverse:pool()) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
