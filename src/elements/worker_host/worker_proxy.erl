@@ -439,10 +439,11 @@ choose_node(WorkerRef) ->
         {WName, WNode} ->
             {ok, WName, WNode};
         WName ->
-            case request_dispatcher:get_worker_node(WName) of
-                {ok, WNode} ->
-                    {ok, WName, WNode};
-                {error, Error} ->
-                    {error, Error}
-            end
+            {ok, WName, node()}
+%%            case request_dispatcher:get_worker_node(WName) of
+%%                {ok, WNode} ->
+%%                    {ok, WName, WNode};
+%%                {error, Error} ->
+%%                    {error, Error}
+%%            end
     end.

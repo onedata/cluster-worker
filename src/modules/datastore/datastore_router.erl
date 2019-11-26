@@ -66,9 +66,9 @@ init_report() ->
 -spec route(key(), atom(), list()) -> term().
 route(Key, Function, Args) ->
     Module = select_module(Function),
-    {Node, Args2} = select_node(Key, Args),
-    case Module of
-        datastore_writer ->
+    {Node, Args2, TryLocalRead} = select_node(Key, Args),
+    case {Module, TryLocalRead} of
+        {datastore_writer, _} ->
 %%            case node() of
 %%                Node -> ok;
 %%                _ -> ?info("dddd ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
@@ -77,9 +77,22 @@ route(Key, Function, Args) ->
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result
             end;
-        _ ->
+        {_, true} ->
             try
                 datastore_router:process(Module, Function, [Node | Args2])
+            catch
+                _:Reason2 -> {error, Reason2}
+            end;
+        _ ->
+            try
+                %%            case node() of
+                %%                Node -> ok;
+                %%                _ -> ?info("dddd2 ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
+                %%            end,
+                case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
+                    {badrpc, Reason} -> {error, Reason};
+                    Result -> Result
+                end
             catch
                 _:Reason2 -> {error, Reason2}
             end
@@ -112,15 +125,18 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec select_node(key(), list()) -> {node(), list()}.
+-spec select_node(key(), list()) -> {node(), list(), boolean()}.
 select_node(_Key, [#{routing := local} | _] = Args) ->
-    {node(), Args};
+    {node(), Args, true};
 select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
-    [Node | Nodes] = consistent_hashing:get_nodes(Key, Num),
-    {Node, [Ctx#{memory_copies => Nodes} | ArgsTail]};
+    [Node | Nodes] = AllNodes = consistent_hashing:get_nodes(Key, Num),
+    {Node, [Ctx#{memory_copies => Nodes} | ArgsTail], lists:member(node(), AllNodes)};
+select_node(Key, [#{memory_copies := _} | _] = Args) ->
+    Node = consistent_hashing:get_node(Key),
+    {Node, Args, true};
 select_node(Key, Args) ->
     Node = consistent_hashing:get_node(Key),
-    {Node, Args}.
+    {Node, Args, false}.
 
 %%--------------------------------------------------------------------
 %% @private
