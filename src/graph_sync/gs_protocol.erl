@@ -82,14 +82,15 @@
 -type client_auth() :: undefined | nobody | {token, tokens:serialized()}.
 
 % Used to override the client authorization established on connection level, per
-% request. Can be used for example by providers to authorize a certain request
-% with a user's token, while still using the Graph Sync channel that was opened
-% with provider's auth.
+% request. Can be used by providers to authorize a certain request with a user's
+% token, while still using the Graph Sync channel that was opened with provider's auth.
 % PeerIp is used to indicate the IP address of the client on behalf of whom the
 % channel owner is authorizing.
+% Interface can be passed to indicate the interface of the Oneprovider to which
+% the user has connected.
 % Auth override can only be specified if the owner of the GS channel is
 % an op-worker or op-panel service.
--type auth_override() :: undefined | {client_auth(), PeerIp :: undefined | ip_utils:ip()}.
+-type auth_override() :: undefined | #auth_override{}.
 
 % Possible entity types
 -type entity_type() :: atom().
@@ -470,7 +471,7 @@ encode_response_handshake(ProtocolVersion, #gs_resp_handshake{} = Resp) ->
     #{
         <<"version">> => Version,
         <<"sessionId">> => SessionId,
-        <<"identity">> => case ProtocolVersion >= 5 of
+        <<"identity">> => case ProtocolVersion >= 4 of
             true -> aai:serialize_subject(Identity);
             false -> deprecated_subject_to_json(Identity)
         end,
@@ -658,7 +659,7 @@ decode_response_handshake(ProtocolVersion, DataJSON) ->
     #gs_resp_handshake{
         version = Version,
         session_id = null_to_undefined(SessionId),
-        identity = case ProtocolVersion >= 5 of
+        identity = case ProtocolVersion >= 4 of
             true -> aai:deserialize_subject(Identity);
             false -> deprecated_json_to_subject(Identity)
         end,
@@ -787,27 +788,47 @@ client_auth_to_json({token, Token}) -> #{
 json_to_auth_override(_, null) ->
     undefined;
 json_to_auth_override(3, Data) ->
-    {json_to_client_auth(Data), undefined};
-json_to_auth_override(_, #{<<"auth">> := ClientAuth} = Data) ->
-    PeerIp = case maps:get(<<"peerIp">>, Data, null) of
-        null -> undefined;
-        IpBin -> element(2, {ok, _} = ip_utils:to_ip4_address(IpBin))
-    end,
-    {json_to_client_auth(ClientAuth), PeerIp}.
+    #auth_override{
+        client_auth = json_to_client_auth(Data),
+        peer_ip = undefined,
+        interface = undefined,
+        audience_token = undefined,
+        allow_data_access_caveats = false
+    };
+json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
+    #auth_override{
+        client_auth = json_to_client_auth(ClientAuth),
+        peer_ip = case maps:get(<<"peerIp">>, Data, null) of
+            null -> undefined;
+            IpBin -> element(2, {ok, _} = ip_utils:to_ip4_address(IpBin))
+        end,
+        interface = case maps:get(<<"interface">>, Data, null) of
+            null -> undefined;
+            Interface -> cv_interface:deserialize_interface(Interface)
+        end,
+        audience_token = null_to_undefined(maps:get(<<"audienceToken">>, Data, null)),
+        allow_data_access_caveats = maps:get(<<"allowDataAccessCaveats">>, Data, false)
+    }.
 
 
 -spec auth_override_to_json(protocol_version(), auth_override()) -> null | json_map() | binary().
 auth_override_to_json(_, undefined) ->
     null;
-auth_override_to_json(3, {ClientAuth, _PeerIp}) ->
+auth_override_to_json(3, #auth_override{client_auth = ClientAuth}) ->
     client_auth_to_json(ClientAuth);
-auth_override_to_json(_, {ClientAuth, PeerIp}) ->
+auth_override_to_json(_, #auth_override{} = AuthOverride) ->
     #{
-        <<"auth">> => client_auth_to_json(ClientAuth),
-        <<"peerIp">> => case PeerIp of
+        <<"clientAuth">> => client_auth_to_json(AuthOverride#auth_override.client_auth),
+        <<"peerIp">> => case AuthOverride#auth_override.peer_ip of
             undefined -> null;
-            _ -> element(2, {ok, _} = ip_utils:to_binary(PeerIp))
-        end
+            PeerIp -> element(2, {ok, _} = ip_utils:to_binary(PeerIp))
+        end,
+        <<"interface">> => case AuthOverride#auth_override.interface of
+            undefined -> null;
+            Interface -> cv_interface:serialize_interface(Interface)
+        end,
+        <<"audienceToken">> => undefined_to_null(AuthOverride#auth_override.audience_token),
+        <<"allowDataAccessCaveats">> => AuthOverride#auth_override.allow_data_access_caveats
     }.
 
 
@@ -886,7 +907,7 @@ str_to_data_format(<<"value">>) -> value.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Deprecated - used for backward compatibility with 19.02.* (proto version < 5).
+%% Deprecated - used for backward compatibility with 19.02.* (proto version < 4).
 %% @end
 %%--------------------------------------------------------------------
 -spec deprecated_subject_to_json(aai:subject()) -> json_utils:json_term().
@@ -900,7 +921,7 @@ deprecated_subject_to_json(?SUB(?ONEPROVIDER, PrId)) -> #{<<"provider">> => PrId
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Deprecated - used for backward compatibility with 19.02.* (proto version < 5).
+%% Deprecated - used for backward compatibility with 19.02.* (proto version < 4).
 %% @end
 %%--------------------------------------------------------------------
 -spec deprecated_json_to_subject(json_utils:json_term()) -> aai:subject().

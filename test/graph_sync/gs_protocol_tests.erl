@@ -136,7 +136,7 @@ encode_decode_message_test() ->
         #gs_req{
             id = <<"mess7">>,
             subtype = rpc,
-            auth_override = {{token, <<"third-token">>}, undefined},
+            auth_override = #auth_override{client_auth = {token, <<"third-token">>}},
             request = #gs_req_rpc{
                 function = <<"f6">>,
                 args = #{<<"args6">> => 6}
@@ -457,16 +457,37 @@ encode_decode_message_test() ->
 
     lists:foreach(fun(ProtoVersion) ->
         lists:foreach(fun(Request) ->
-            {ok, Encoded} = gs_protocol:encode(ProtoVersion, Request),
-            true = is_map(Encoded),
-            EncodedJSON = json_utils:encode(Encoded),
-            DecodedJSON = json_utils:decode(EncodedJSON),
-            {ok, Decoded} = gs_protocol:decode(ProtoVersion, DecodedJSON),
-            ?assertEqual(Decoded, Request)
+            check_encode_decode_for_proto_version(ProtoVersion, Request),
+            ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(ProtoVersion, <<"sdfsdviuyasd9fas">>))
         end, RequestsToCheck)
-    end, gs_protocol:supported_versions()),
+    end, gs_protocol:supported_versions()).
 
-    ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(1, <<"sdfsdviuyasd9fas">>)),
-    ?assertMatch(?ERROR_BAD_MESSAGE(_), gs_protocol:decode(2, <<"sdfsdviuyasd9fas">>)).
+
+% In protocol version 4, auth override has been extended with additional fields
+% so it cannot be checked in the encode_decode_message_test.
+encode_decode_auth_override_v4_test() ->
+    Request = #gs_req{
+        id = <<"mess7">>,
+        subtype = rpc,
+        auth_override = #auth_override{client_auth = {token, <<"third-token">>}},
+        request = #gs_req_rpc{
+            function = <<"f6">>,
+            args = #{<<"args6">> => 6}
+        }
+    },
+    VersionsWithNewAuthOverride = [V || V <- gs_protocol:supported_versions(), V > 3],
+    lists:foreach(fun(ProtoVersion) ->
+        check_encode_decode_for_proto_version(ProtoVersion, Request)
+    end, VersionsWithNewAuthOverride).
+
+
+check_encode_decode_for_proto_version(ProtoVersion, Request) ->
+    {ok, Encoded} = gs_protocol:encode(ProtoVersion, Request),
+    true = is_map(Encoded),
+    EncodedJSON = json_utils:encode(Encoded),
+    DecodedJSON = json_utils:decode(EncodedJSON),
+    {ok, Decoded} = gs_protocol:decode(ProtoVersion, DecodedJSON),
+    ?assertEqual(Decoded, Request).
+
 
 -endif.
