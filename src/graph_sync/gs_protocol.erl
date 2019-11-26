@@ -531,7 +531,7 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
     } = Message,
     #{
         <<"gri">> => gri:serialize(GRI),
-        <<"updateType">> => update_type_to_string(UpdateType),
+        <<"updateType">> => update_type_to_str(UpdateType),
         <<"data">> => undefined_to_null(Data)
     }.
 
@@ -544,7 +544,7 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
     #{
         <<"gri">> => gri:serialize(GRI),
         <<"authHint">> => auth_hint_to_json(AuthHint),
-        <<"reason">> => nosub_reason_to_json(Reason)
+        <<"reason">> => nosub_reason_to_str(Reason)
     }.
 
 
@@ -714,7 +714,7 @@ decode_push(ProtocolVersion, ReqJSON) ->
 -spec decode_push_graph(protocol_version(), json_map()) -> graph_push().
 decode_push_graph(_, PayloadJSON) ->
     GRI = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
-    UpdateType = string_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
+    UpdateType = str_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
     Data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
     #gs_push_graph{
         gri = GRI,
@@ -731,7 +731,7 @@ decode_push_nosub(_, PayloadJSON) ->
     #gs_push_nosub{
         gri = gri:deserialize(GRI),
         auth_hint = json_to_auth_hint(AuthHint),
-        reason = json_to_nosub_reason(Reason)
+        reason = str_to_nosub_reason(Reason)
     }.
 
 
@@ -793,7 +793,7 @@ json_to_auth_override(3, Data) ->
         peer_ip = undefined,
         interface = undefined,
         audience_token = undefined,
-        allow_data_access_caveats = false
+        data_access_caveats_policy = disallow_data_access_caveats
     };
 json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
     #auth_override{
@@ -807,7 +807,10 @@ json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
             Interface -> cv_interface:deserialize_interface(Interface)
         end,
         audience_token = null_to_undefined(maps:get(<<"audienceToken">>, Data, null)),
-        allow_data_access_caveats = maps:get(<<"allowDataAccessCaveats">>, Data, false)
+        data_access_caveats_policy = case maps:get(<<"dataAccessCaveatsPolicy">>, Data, null) of
+            null -> disallow_data_access_caveats;
+            Bin -> str_to_data_access_caveats_policy(Bin)
+        end
     }.
 
 
@@ -828,7 +831,9 @@ auth_override_to_json(_, #auth_override{} = AuthOverride) ->
             Interface -> cv_interface:serialize_interface(Interface)
         end,
         <<"audienceToken">> => undefined_to_null(AuthOverride#auth_override.audience_token),
-        <<"allowDataAccessCaveats">> => AuthOverride#auth_override.allow_data_access_caveats
+        <<"allowDataAccessCaveats">> => data_access_caveats_policy_to_str(
+            AuthOverride#auth_override.data_access_caveats_policy
+        )
     }.
 
 
@@ -876,22 +881,22 @@ json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
 json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
 
 
--spec nosub_reason_to_json(nosub_reason()) -> binary().
-nosub_reason_to_json(forbidden) -> <<"forbidden">>.
+-spec nosub_reason_to_str(nosub_reason()) -> binary().
+nosub_reason_to_str(forbidden) -> <<"forbidden">>.
 
 
--spec json_to_nosub_reason(binary()) -> nosub_reason().
-json_to_nosub_reason(<<"forbidden">>) -> forbidden.
+-spec str_to_nosub_reason(binary()) -> nosub_reason().
+str_to_nosub_reason(<<"forbidden">>) -> forbidden.
 
 
--spec update_type_to_string(change_type()) -> binary().
-update_type_to_string(updated) -> <<"updated">>;
-update_type_to_string(deleted) -> <<"deleted">>.
+-spec update_type_to_str(change_type()) -> binary().
+update_type_to_str(updated) -> <<"updated">>;
+update_type_to_str(deleted) -> <<"deleted">>.
 
 
--spec string_to_update_type(binary()) -> change_type().
-string_to_update_type(<<"updated">>) -> updated;
-string_to_update_type(<<"deleted">>) -> deleted.
+-spec str_to_update_type(binary()) -> change_type().
+str_to_update_type(<<"updated">>) -> updated;
+str_to_update_type(<<"deleted">>) -> deleted.
 
 
 -spec data_format_to_str(atom()) -> binary().
@@ -902,6 +907,16 @@ data_format_to_str(value) -> <<"value">>.
 -spec str_to_data_format(binary()) -> atom().
 str_to_data_format(<<"resource">>) -> resource;
 str_to_data_format(<<"value">>) -> value.
+
+
+-spec data_access_caveats_policy_to_str(data_access_caveats:policy()) -> binary().
+data_access_caveats_policy_to_str(disallow_data_access_caveats) -> <<"disallowDataAccessCaveats">>;
+data_access_caveats_policy_to_str(allow_data_access_caveats) -> <<"allowDataAccessCaveats">>.
+
+
+-spec str_to_data_access_caveats_policy(binary) -> data_access_caveats:policy().
+str_to_data_access_caveats_policy(<<"disallowDataAccessCaveats">>) -> disallow_data_access_caveats;
+str_to_data_access_caveats_policy(<<"allowDataAccessCaveats">>) -> allow_data_access_caveats.
 
 
 %%--------------------------------------------------------------------

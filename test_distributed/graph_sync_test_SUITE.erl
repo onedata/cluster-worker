@@ -729,8 +729,7 @@ auth_override_test_base(Config, ProtoVersion) ->
     end)),
 
     % Check if auth override data that is not whitelisted causes an error.
-    % For test purposes, there are defined blacklisted ip, interface and audience token,
-    % plus auth is denied if data_access_caveats are not allowed.
+    % For test purposes, there are defined blacklisted ip, interface and audience token.
     ReqWithOverrideData = fun(PeerIp, Interface, AudienceToken) ->
         GetUserReq#gs_req{
         auth_override = #auth_override{

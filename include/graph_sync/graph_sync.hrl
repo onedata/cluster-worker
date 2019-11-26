@@ -13,7 +13,7 @@
 -ifndef(GRAPH_SYNC_CW_HRL).
 -define(GRAPH_SYNC_CW_HRL, 1).
 
--include_lib("ctool/include/graph_sync/graph_sync.hrl").
+-include_lib("ctool/include/graph_sync/gri.hrl").
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
@@ -105,7 +105,7 @@
     peer_ip :: undefined | ip_utils:ip(),
     interface :: undefined | cv_interface:interface(),
     audience_token :: undefined | tokens:serialized(),
-    allow_data_access_caveats = false :: boolean()
+    data_access_caveats_policy = disallow_data_access_caveats :: data_access_caveats:policy()
 }).
 
 % Possible auth hints

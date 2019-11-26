@@ -466,18 +466,61 @@ encode_decode_message_test() ->
 % In protocol version 4, auth override has been extended with additional fields
 % so it cannot be checked in the encode_decode_message_test.
 encode_decode_auth_override_v4_test() ->
-    Request = #gs_req{
-        id = <<"mess7">>,
-        subtype = rpc,
-        auth_override = #auth_override{client_auth = {token, <<"third-token">>}},
-        request = #gs_req_rpc{
-            function = <<"f6">>,
-            args = #{<<"args6">> => 6}
+    RequestsToCheck = [
+        #gs_req{
+            id = <<"mess1">>,
+            subtype = rpc,
+            auth_override = #auth_override{
+                client_auth = {token, <<"third-token">>},
+                peer_ip = {9, 31, 216, 211},
+                interface = graphsync,
+                audience_token = <<"983947234">>,
+                data_access_caveats_policy = disallow_data_access_caveats
+            },
+            request = #gs_req_rpc{
+                function = <<"f6">>,
+                args = #{<<"args6">> => 6}
+            }
+        },
+        #gs_req{
+            id = <<"mess1">>,
+            subtype = rpc,
+            auth_override = #auth_override{
+                client_auth = nobody,
+                peer_ip = undefined,
+                interface = oneclient,
+                audience_token = undefined,
+                data_access_caveats_policy = allow_data_access_caveats
+            },
+            request = #gs_req_rpc{
+                function = <<"f6">>,
+                args = #{<<"args6">> => 6}
+            }
+        },
+        #gs_req{
+            id = <<"mess2">>,
+            subtype = graph,
+            auth_override = #auth_override{
+                client_auth = {token, <<"fourth-token">>},
+                peer_ip = undefined,
+                interface = rest,
+                audience_token = undefined,
+                data_access_caveats_policy = allow_data_access_caveats
+            },
+            request = #gs_req_graph{
+                gri = #gri{type = od_user, id = <<"id">>, aspect = instance},
+                operation = get,
+                data = undefined,
+                subscribe = true
+            }
         }
-    },
+    ],
     VersionsWithNewAuthOverride = [V || V <- gs_protocol:supported_versions(), V > 3],
+
     lists:foreach(fun(ProtoVersion) ->
-        check_encode_decode_for_proto_version(ProtoVersion, Request)
+        lists:foreach(fun(Request) ->
+            check_encode_decode_for_proto_version(ProtoVersion, Request)
+        end, RequestsToCheck)
     end, VersionsWithNewAuthOverride).
 
 
