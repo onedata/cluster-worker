@@ -914,7 +914,7 @@ data_access_caveats_policy_to_str(disallow_data_access_caveats) -> <<"disallowDa
 data_access_caveats_policy_to_str(allow_data_access_caveats) -> <<"allowDataAccessCaveats">>.
 
 
--spec str_to_data_access_caveats_policy(binary) -> data_access_caveats:policy().
+-spec str_to_data_access_caveats_policy(binary()) -> data_access_caveats:policy().
 str_to_data_access_caveats_policy(<<"disallowDataAccessCaveats">>) -> disallow_data_access_caveats;
 str_to_data_access_caveats_policy(<<"allowDataAccessCaveats">>) -> allow_data_access_caveats.
 
