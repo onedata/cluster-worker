@@ -831,7 +831,7 @@ auth_override_to_json(_, #auth_override{} = AuthOverride) ->
             Interface -> cv_interface:serialize_interface(Interface)
         end,
         <<"audienceToken">> => undefined_to_null(AuthOverride#auth_override.audience_token),
-        <<"allowDataAccessCaveats">> => data_access_caveats_policy_to_str(
+        <<"dataAccessCaveatsPolicy">> => data_access_caveats_policy_to_str(
             AuthOverride#auth_override.data_access_caveats_policy
         )
     }.
