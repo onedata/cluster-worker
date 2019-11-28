@@ -48,10 +48,13 @@
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
-#{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
+    #{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
 
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
+
+-define(DEFAULT_FLUSH_DELAY, timer:seconds(1)).
+-define(FAST_FLUSH_DELAY, 100).
 
 %%%===================================================================
 %%% API
@@ -196,7 +199,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
         flush_times = FT2
-    }, 100))};
+    }, ?FAST_FLUSH_DELAY))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -728,7 +731,7 @@ send_response({Pid, Ref, Responses}, Batch) ->
 -spec schedule_flush(state()) -> state().
 schedule_flush(State) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
-        timer:seconds(1)),
+        ?DEFAULT_FLUSH_DELAY),
     schedule_flush(State, Delay).
 
 %%--------------------------------------------------------------------
@@ -745,7 +748,7 @@ schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
         {undefined, _} ->
             Timer = erlang:send_after(Delay, self(), flush),
             State#state{flush_timer = Timer};
-        {_, 100} ->
+        {_, ?FAST_FLUSH_DELAY} ->
             case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
                 on ->
                     erlang:cancel_timer(OldTimer, [{async, true}, {info, false}]),
