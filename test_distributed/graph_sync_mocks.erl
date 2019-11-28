@@ -90,16 +90,37 @@ verify_handshake_auth(_, _) ->
     ?ERROR_UNAUTHORIZED.
 
 
-verify_auth_override(_Auth, {{token, ?USER_1_TOKEN}, _}) ->
-    {ok, ?USER(?USER_1)};
-verify_auth_override(_Auth, {{token, ?USER_2_TOKEN}, _}) ->
-    {ok, ?USER(?USER_2)};
-verify_auth_override(_Auth, {{token, ?PROVIDER_1_TOKEN}, _}) ->
-    {ok, ?PROVIDER(?PROVIDER_1)};
-verify_auth_override(_Auth, {nobody, _}) ->
-    {ok, ?NOBODY};
-verify_auth_override(_Auth, _) ->
-    ?ERROR_UNAUTHORIZED.
+% Proto version 3 does not support additional auth override options
+% (just the client_auth), so all fields are undefined.
+% Check if none of the fields are blacklisted - this way both versions can be tested.
+verify_auth_override(_Auth, AuthOverride) ->
+    #auth_override{
+        client_auth = ClientAuth,
+        peer_ip = PeerIp,
+        interface = Interface,
+        audience_token = AudienceToken
+    } = AuthOverride,
+
+    CorrectData = (PeerIp /= ?BLACKLISTED_IP) andalso
+        (Interface /= ?BLACKLISTED_INTERFACE) andalso
+        (AudienceToken /= ?BLACKLISTED_AUDIENCE_TOKEN),
+
+    case CorrectData of
+        false ->
+            ?ERROR_UNAUTHORIZED;
+        true ->
+            try
+                {ok, client_auth_to_auth(ClientAuth)}
+            catch _:_ ->
+                ?ERROR_UNAUTHORIZED
+            end
+    end.
+
+
+client_auth_to_auth({token, ?USER_1_TOKEN}) -> ?USER(?USER_1);
+client_auth_to_auth({token, ?USER_2_TOKEN}) -> ?USER(?USER_2);
+client_auth_to_auth({token, ?PROVIDER_1_TOKEN}) -> ?PROVIDER(?PROVIDER_1);
+client_auth_to_auth(nobody) -> ?NOBODY.
 
 
 client_connected(_Auth, _) -> ok.

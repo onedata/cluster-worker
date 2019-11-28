@@ -72,4 +72,12 @@ end).
     <<"scope">> := ScopeBin
 }).
 
+% Used to mock auth_override results
+-define(WHITELISTED_IP, {167, 89, 10, 14}).
+-define(BLACKLISTED_IP, {93, 189, 214, 3}).
+-define(WHITELISTED_INTERFACE, rest).
+-define(BLACKLISTED_INTERFACE, oneclient).
+-define(WHITELISTED_AUDIENCE_TOKEN, <<"ok-aud-token">>).
+-define(BLACKLISTED_AUDIENCE_TOKEN, <<"bad-aud-token">>).
+
 -endif.
