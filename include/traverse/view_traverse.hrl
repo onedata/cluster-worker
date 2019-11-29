@@ -46,7 +46,7 @@
 
 -record(view_traverse_master, {
     view_name :: couchbase_driver:view(),
-    callback_module :: view_traverse:callback_module(),
+    view_processing_module :: view_traverse:view_processing_module(),
     query_view_token = #query_view_token{} :: view_traverse:token(),
     query_opts :: view_traverse:query_opts(),
     async_next_batch_job = ?DEFAULT_ASYNC_NEXT_BATCH_JOB :: boolean(),
@@ -54,7 +54,7 @@
 }).
 
 -record(view_traverse_slave, {
-    callback_module :: view_traverse:callback_module(),
+    view_processing_module :: view_traverse:view_processing_module(),
     info :: view_traverse:info(),
     row :: view_traverse:row()
 }).

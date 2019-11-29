@@ -38,7 +38,7 @@
 get_master_job(#document{value = #view_traverse_job{
     task_id = TaskId,
     pool = Pool,
-    callback_module = CallbackModule,
+    view_processing_module = ViewProcessingModule,
     view_name = ViewName,
     query_view_token = Token,
     query_opts = QueryOpts,
@@ -47,7 +47,7 @@ get_master_job(#document{value = #view_traverse_job{
 }}) ->
     Job = #view_traverse_master{
         view_name = ViewName,
-        callback_module = CallbackModule,
+        view_processing_module = ViewProcessingModule,
         query_view_token = Token,
         query_opts = QueryOpts,
         async_next_batch_job = AsyncNextBatchJob,
@@ -66,7 +66,7 @@ get_master_job(Key) ->
     {ok, key()} | {error, term()}.
 save_master_job(Id, #view_traverse_master{
     view_name = ViewName,
-    callback_module = CallbackModule,
+    view_processing_module = ViewProcessingModule,
     query_view_token = Token,
     query_opts = QueryOpts,
     async_next_batch_job = AsyncNextBatchJob,
@@ -80,7 +80,7 @@ save_master_job(Id, #view_traverse_master{
             task_id = TaskId,
             pool = PoolName,
             view_name = ViewName,
-            callback_module = CallbackModule,
+            view_processing_module = ViewProcessingModule,
             query_view_token = Token,
             query_opts = QueryOpts,
             async_next_batch_job = AsyncNextBatchJob,

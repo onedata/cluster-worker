@@ -278,13 +278,13 @@ on_task_change(Task, Environment) ->
     case traverse_task:on_task_change(Task, Environment) of
         {remote_change, CallbackModule, MainJobID} ->
             case CallbackModule:get_job(MainJobID) of
-                {ok, Job, _, _} ->
+                {ok, Job, PoolName, _} ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
                     case traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment) of
                         ok ->
                             ok;
                         {ok, remote_cancel, TaskID} ->
-                            on_cancel_init(CallbackModule, TaskID),
+                            task_callback(CallbackModule, on_cancel_init, TaskID, PoolName),
                             ok
                     end;
                 {error, not_found} ->
@@ -350,7 +350,7 @@ cancel(PoolName, TaskID, Environment) ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
                     {ok, Info} = traverse_task:cancel(ExtendedCtx, PoolName, CallbackModule, TaskID, Environment),
                     case Info of
-                        local_cancel -> on_cancel_init(CallbackModule, TaskID);
+                        local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskID, PoolName);
                         _ -> ok
                     end;
                 {error, not_found} ->
@@ -678,16 +678,7 @@ get_extended_ctx(CallbackModule, Job) ->
     end,
     maps:merge(traverse_task:get_ctx(), CtxExtension).
 
--spec on_cancel_init(callback_module(), id()) -> ok.
-on_cancel_init(CallbackModule, TaskID) ->
-    case erlang:function_exported(CallbackModule, on_cancel_init, 1) of
-        true ->
-            ok = CallbackModule:on_cancel_init(TaskID);
-        _ ->
-            ok
-    end.
-
--spec task_callback(callback_module(), task_started | task_finished | task_canceled, id(), pool()) -> ok.
+-spec task_callback(callback_module(), task_started | task_finished | task_canceled | on_cancel_init, id(), pool()) -> ok.
 task_callback(CallbackModule, Method, TaskID, PoolName) ->
     case erlang:function_exported(CallbackModule, Method, 2) of
         true ->

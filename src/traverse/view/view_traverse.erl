@@ -41,7 +41,7 @@
 -type slave_job() :: #view_traverse_slave{}.
 -type job() :: master_job() | slave_job().
 -type token() :: #query_view_token{}.
--type callback_module() :: module().
+-type view_processing_module() :: module().
 -type query_opts() :: #{atom() => term()}.  % opts passed to couchbase_driver:query
 -type info() :: term(). % custom term passed to process_row callback
 -type row() :: proplists:proplist().
@@ -54,7 +54,7 @@
 }.
 % @formatter:on
 
--export_type([task_id/0, master_job/0, slave_job/0, token/0, callback_module/0, query_opts/0, info/0, row/0]).
+-export_type([task_id/0, master_job/0, slave_job/0, token/0, view_processing_module/0, query_opts/0, info/0, row/0]).
 
 %%%===================================================================
 %%% view_traverse mandatory callbacks definitions
@@ -80,39 +80,39 @@
 %%% API functions
 %%%===================================================================
 
--spec init(callback_module()) -> ok.
+-spec init(view_processing_module()) -> ok.
 init(CallbackModule) ->
     init(CallbackModule, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT).
 
--spec init(callback_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
-init(CallbackModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) when is_atom(CallbackModule) ->
-    PoolName = callback_module_to_pool_name(CallbackModule),
+-spec init(view_processing_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
+init(CallbackModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
+    PoolName = view_processing_module_to_pool_name(CallbackModule),
     traverse:init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{callback_modules => [?MODULE]}).
 
--spec stop(callback_module()) -> ok.
+-spec stop(view_processing_module()) -> ok.
 stop(CallbackModule) when is_atom(CallbackModule) ->
-    traverse:stop_pool(callback_module_to_pool_name(CallbackModule)).
+    traverse:stop_pool(view_processing_module_to_pool_name(CallbackModule)).
 
--spec run(callback_module(), couchbase_driver:view(), opts()) -> ok.
+-spec run(view_processing_module(), couchbase_driver:view(), opts()) -> ok.
 run(CallbackModule, ViewName, Opts) ->
     run(CallbackModule, ViewName, undefined, Opts).
 
--spec run(callback_module(), couchbase_driver:view(), task_id() | undefined, opts()) -> ok.
-run(CallbackModule, ViewName, TaskId, Opts) ->
+-spec run(view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) -> ok.
+run(ViewProcessingModule, ViewName, TaskId, Opts) ->
     DefinedTaskId = ensure_defined_task_id(TaskId),
     MasterJob = #view_traverse_master{
         view_name = ViewName,
-        callback_module = CallbackModule,
+        view_processing_module = ViewProcessingModule,
         query_opts = maps:merge(maps:get(query_opts, Opts, #{}), ?DEFAULT_QUERY_OPTS),
         async_next_batch_job = maps:get(async_next_batch_job, Opts, ?DEFAULT_ASYNC_NEXT_BATCH_JOB),
         info = maps:get(info, Opts, undefined)
     },
-    PoolName = callback_module_to_pool_name(CallbackModule),
+    PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
     traverse:run(PoolName, DefinedTaskId, MasterJob, #{callback_module => ?MODULE}).
 
--spec cancel(callback_module(), task_id()) -> ok.
+-spec cancel(view_processing_module(), task_id()) -> ok.
 cancel(CallbackModule, TaskId) ->
-    traverse:cancel(callback_module_to_pool_name(CallbackModule), TaskId).
+    traverse:cancel(view_processing_module_to_pool_name(CallbackModule), TaskId).
 
 %%%===================================================================
 %%% traverse_behaviour callbacks implementations
@@ -134,7 +134,7 @@ do_master_job(MasterJob = #view_traverse_master{
         {ok, {[]}} ->
             {ok, #{}};
         {ok, {Rows}} ->
-            {SlaveJobs, NewToken} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn}) ->
+            {RevSlaveJobs, NewToken} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn}) ->
                 {<<"key">>, Key} = lists:keyfind(<<"key">>, 1, Row),
                 {<<"id">>, DocId} = lists:keyfind(<<"id">>, 1, Row),
                 {[slave_job(MasterJob, Row) | SlaveJobsIn], TokenIn#query_view_token{
@@ -142,6 +142,7 @@ do_master_job(MasterJob = #view_traverse_master{
                     last_doc_id = DocId
                 }}
             end, {[], Token}, Rows),
+            SlaveJobs = lists:reverse(RevSlaveJobs),
             NextBatchJob = MasterJob#view_traverse_master{query_view_token = NewToken},
             case AsyncNextBatchJob of
                 true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};
@@ -158,7 +159,7 @@ do_master_job(MasterJob = #view_traverse_master{
 %% @end
 %%--------------------------------------------------------------------
 -spec do_slave_job(slave_job(), traverse:id()) -> ok.
-do_slave_job(#view_traverse_slave{row = Row, callback_module = CallbackModule, info = Info}, _TaskId) ->
+do_slave_job(#view_traverse_slave{row = Row, view_processing_module = CallbackModule, info = Info}, _TaskId) ->
     CallbackModule:process_row(Row, Info),
     ok.
 
@@ -222,28 +223,28 @@ task_canceled(TaskId, PoolName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec to_string(job()) -> binary() | atom() | iolist().
-to_string(Job = #view_traverse_master{callback_module = CallbackModule}) ->
-    CallbackModule:to_string(Job);
-to_string(Job = #view_traverse_slave{callback_module = CallbackModule}) ->
-    CallbackModule:to_string(Job).
+to_string(Job = #view_traverse_master{view_processing_module = ViewProcessingModule}) ->
+    ViewProcessingModule:to_string(Job);
+to_string(Job = #view_traverse_slave{view_processing_module = ViewProcessingModule}) ->
+    ViewProcessingModule:to_string(Job).
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec callback_module_to_pool_name(callback_module()) -> traverse:pool().
-callback_module_to_pool_name(CallbackModule) ->
-    atom_to_binary(CallbackModule, utf8).
+-spec view_processing_module_to_pool_name(view_processing_module()) -> traverse:pool().
+view_processing_module_to_pool_name(ViewProcessingModule) ->
+    atom_to_binary(ViewProcessingModule, utf8).
 
--spec pool_name_to_callback_module(traverse:pool()) -> callback_module().
-pool_name_to_callback_module(PoolName) ->
+-spec pool_name_to_view_processing_module(traverse:pool()) -> view_processing_module().
+pool_name_to_view_processing_module(PoolName) ->
     binary_to_atom(PoolName, utf8).
 
 -spec task_callback(traverse:pool(), atom(), task_id()) -> ok.
 task_callback(PoolName, Function, TaskId) ->
-    CallbackModule = pool_name_to_callback_module(PoolName),
-    case erlang:function_exported(CallbackModule, Function, 1) of
-        true -> CallbackModule:Function(TaskId);
+    ViewProcessingModule = pool_name_to_view_processing_module(PoolName),
+    case erlang:function_exported(ViewProcessingModule, Function, 1) of
+        true -> ViewProcessingModule:Function(TaskId);
         false -> ok
     end.
 
@@ -259,9 +260,9 @@ query(ViewName, Opts) ->
     couchbase_driver:query_view(DiscCtx, ViewName, ViewName, Opts).
 
 -spec slave_job(master_job(), term()) -> slave_job().
-slave_job(#view_traverse_master{callback_module = CallbackModule, info = Info}, Row) ->
+slave_job(#view_traverse_master{view_processing_module = ViewProcessingModule, info = Info}, Row) ->
     #view_traverse_slave{
-        callback_module = CallbackModule,
+        view_processing_module = ViewProcessingModule,
         info = Info,
         row = Row
     }.
