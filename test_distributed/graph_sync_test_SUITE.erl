@@ -668,33 +668,32 @@ auth_override_test_base(Config, ProtoVersion) ->
         <<"revision">> => 1
     },
 
+    GetUserReq = #gs_req{
+        subtype = graph,
+        auth_override = #auth_override{
+            client_auth = {token, ?USER_2_TOKEN},
+            peer_ip = ?WHITELISTED_IP,
+            interface = ?WHITELISTED_INTERFACE,
+            audience_token = ?WHITELISTED_AUDIENCE_TOKEN
+        },
+        request = #gs_req_graph{
+            gri = #gri{type = od_user, id = ?SELF, aspect = instance},
+            operation = get,
+            subscribe = true
+        }
+    },
+
     % Provider should be able to get user's 2 data by possessing his token and
     % using it as auth override during the request.
     ?assertMatch(
         {ok, #gs_resp_graph{data_format = resource, data = User2Data}},
-        gs_client:sync_request(ProviderClient, #gs_req{
-            subtype = graph,
-            auth_override = {{token, ?USER_2_TOKEN}, undefined},
-            request = #gs_req_graph{
-                gri = #gri{type = od_user, id = ?SELF, aspect = instance},
-                operation = get,
-                subscribe = true
-            }
-        })
+        gs_client:sync_request(ProviderClient, GetUserReq)
     ),
 
     % Auth override is allowed only for providers
     ?assertMatch(
         ?ERROR_FORBIDDEN,
-        gs_client:sync_request(UserClient, #gs_req{
-            subtype = graph,
-            auth_override = {{token, ?USER_2_TOKEN}, undefined},
-            request = #gs_req_graph{
-                gri = #gri{type = od_user, id = ?SELF, aspect = instance},
-                operation = get,
-                subscribe = true
-            }
-        })
+        gs_client:sync_request(UserClient, GetUserReq)
     ),
 
     % Subscribing should work too - provider should be receiving future changes of
@@ -707,9 +706,7 @@ auth_override_test_base(Config, ProtoVersion) ->
 
     ?assertMatch(
         {ok, #gs_resp_graph{}},
-        gs_client:sync_request(ProviderClient, #gs_req{
-            subtype = graph,
-            auth_override = {{token, ?USER_2_TOKEN}, ?DUMMY_IP},
+        gs_client:sync_request(ProviderClient, GetUserReq#gs_req{
             request = #gs_req_graph{
                 gri = #gri{type = od_user, id = ?SELF, aspect = instance},
                 operation = update,
@@ -729,7 +726,35 @@ auth_override_test_base(Config, ProtoVersion) ->
             _ ->
                 false
         end
-    end)).
+    end)),
+
+    % Check if auth override data that is not whitelisted causes an error.
+    % For test purposes, there are defined blacklisted ip, interface and audience token.
+    ReqWithOverrideData = fun(PeerIp, Interface, AudienceToken) ->
+        GetUserReq#gs_req{
+        auth_override = #auth_override{
+            client_auth = {token, ?USER_2_TOKEN},
+            peer_ip = PeerIp,
+            interface = Interface,
+            audience_token = AudienceToken
+        }
+    } end,
+
+    % Additional auth override options are supported since version 4
+    case ProtoVersion > 3 of
+        false ->
+            ok;
+        true ->
+            ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
+                ?BLACKLISTED_IP, ?WHITELISTED_INTERFACE, ?WHITELISTED_AUDIENCE_TOKEN
+            ))),
+            ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
+                ?WHITELISTED_IP, ?BLACKLISTED_INTERFACE, ?WHITELISTED_AUDIENCE_TOKEN
+            ))),
+            ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
+                ?WHITELISTED_IP, ?WHITELISTED_INTERFACE, ?BLACKLISTED_AUDIENCE_TOKEN
+            )))
+    end.
 
 
 nobody_auth_override_test(Config) ->
@@ -755,7 +780,12 @@ nobody_auth_override_test_base(Config, ProtoVersion) ->
         {ok, #gs_resp_graph{data_format = resource, data = ?SHARE_DATA_MATCHER(<<"public">>)}},
         gs_client:sync_request(Client1, #gs_req{
             subtype = graph,
-            auth_override = {nobody, undefined},
+            auth_override = #auth_override{
+                client_auth = nobody,
+                peer_ip = ?WHITELISTED_IP,
+                interface = ?WHITELISTED_INTERFACE,
+                audience_token = ?WHITELISTED_AUDIENCE_TOKEN
+            },
             request = #gs_req_graph{
                 gri = #gri{type = od_share, id = ?SHARE, aspect = instance, scope = auto},
                 operation = get
