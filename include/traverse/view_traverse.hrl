@@ -50,13 +50,15 @@
     query_view_token = #query_view_token{} :: view_traverse:token(),
     query_opts :: view_traverse:query_opts(),
     async_next_batch_job = ?DEFAULT_ASYNC_NEXT_BATCH_JOB :: boolean(),
-    info :: view_traverse:info()
+    info :: view_traverse:info(),
+    offset = 0 :: non_neg_integer()
 }).
 
 -record(view_traverse_slave, {
     view_processing_module :: view_traverse:view_processing_module(),
     info :: view_traverse:info(),
-    row :: view_traverse:row()
+    row :: view_traverse:row(),
+    row_number :: non_neg_integer()
 }).
 
 

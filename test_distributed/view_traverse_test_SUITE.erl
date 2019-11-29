@@ -33,24 +33,29 @@
 ]).
 
 %% view_traverse callbacks
--export([process_row/2]).
+-export([process_row/3]).
 
 -define(MODEL, disc_only_model).
 -define(MODEL_BIN, atom_to_binary(?MODEL, utf8)).
 -define(CTX, ?DISC_CTX).
 -define(VALUE(N), ?MODEL_VALUE(?MODEL, N, ?FUNCTION_NAME)).
-
 -define(DOC(N), ?BASE_DOC(?KEY(N), ?VALUE(N))).
+-define(KEYS_AND_DOCS(DocsNum), [{?KEY(N), ?DOC(N)} || N <- lists:seq(0, DocsNum - 1)]).
+
 -define(VIEW_FUNCTION, <<"
     function (doc, meta) {
         if (doc.field3 == \"", (?CASE)/binary, "\") {
-            emit(doc._key, doc._key);
+            emit(doc.field1, doc._key);
         }
     }
 ">>).
 
 -define(CALLBACK_MODULE, ?MODULE).
--define(ATTEMPTS, 10).
+-define(ATTEMPTS, 60).
+-define(PROCESSED_ROW(Ref, Key, Value, RowNum), {processed_row, Ref, Key, Value, RowNum}).
+
+-define(assertAllRowsProcessed(Ref, KeysAndRowNums),
+    ?assertEqual(true, assert_all_rows_processed(Ref, sets:from_list(KeysAndRowNums)), 60)).
 
 all() ->
     ?ALL([
@@ -61,7 +66,6 @@ all() ->
         many_async_batches_basic_traverse_test,
         job_persistence_test
     ]).
-
 
 %%%===================================================================
 %%% Test functions
@@ -89,24 +93,17 @@ job_persistence_test(Config) ->
     % scheduling 2 traverses simultaneously must result in persisting tha latter
     [W | _] = ?config(cluster_worker_nodes, Config),
     save_view_doc(W, ?VIEW, ?VIEW_FUNCTION),
-    RowsNum = 1000,
-    Keys = lists:map(fun(N) ->
-        Key = ?KEY(N),
-        save_doc(W, ?CTX, Key, ?DOC(N)),
-        Key
-    end, lists:seq(1, RowsNum)),
+    DocsNum = 1000,
+    KeysAndDocs = ?KEYS_AND_DOCS(DocsNum),
+    KeysAndRowNums = save_docs(W, KeysAndDocs),
+
     Ref1 = make_ref(),
     Ref2 = make_ref(),
     ok = run_traverse(W, ?VIEW , #{info => #{pid => self(), ref => Ref1}}),
     ok = run_traverse(W, ?VIEW , #{info => #{pid => self(), ref => Ref2}}),
 
-    lists:foreach(fun(K) ->
-        receive {processed_row, Ref1, K} -> ok end
-    end, Keys),
-    lists:foreach(fun(K) ->
-        receive {processed_row, Ref2, K} -> ok end
-    end, Keys),
-
+    ?assertAllRowsProcessed(Ref1, KeysAndRowNums),
+    ?assertAllRowsProcessed(Ref2, KeysAndRowNums),
     ?assertMatch({ok, [_, _], _}, list_ended_tasks(W, ?CALLBACK_MODULE), ?ATTEMPTS).
 
 %%%===================================================================
@@ -119,16 +116,13 @@ basic_batch_traverse_test_base(Config, RowsNum) ->
 basic_batch_traverse_test_base(Config, RowsNum, Opts) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
     save_view_doc(W, ?VIEW, ?VIEW_FUNCTION),
-    Keys = lists:map(fun(N) ->
-        Key = ?KEY(N),
-        save_doc(W, ?CTX, Key, ?DOC(N)),
-        Key
-    end, lists:seq(1, RowsNum)),
+    KeysAndDocs = ?KEYS_AND_DOCS(RowsNum),
+    KeysAndRowNums = save_docs(W, KeysAndDocs),
+
     Ref = make_ref(),
     ok = run_traverse(W, ?VIEW , Opts#{info => #{pid => self(), ref => Ref}}),
-    lists:foreach(fun(K) ->
-        receive {processed_row, Ref, K} -> ok end
-    end, Keys),
+
+    ?assertAllRowsProcessed(Ref, KeysAndRowNums),
     ?assertMatch({ok, [_], _}, list_ended_tasks(W, ?CALLBACK_MODULE), ?ATTEMPTS).
 
 %%%===================================================================
@@ -161,9 +155,10 @@ end_per_testcase(_Case, Config) ->
 %%% view_traverse callbacks
 %%%===================================================================
 
-process_row(Row, #{pid := TestProcess, ref := Ref}) ->
+process_row(Row, #{pid := TestProcess, ref := Ref}, RowNumber) ->
+    EmittedKey = proplists:get_value(<<"key">>, Row),
     EmittedValue = proplists:get_value(<<"value">>, Row),
-    TestProcess ! {processed_row, Ref, EmittedValue},
+    TestProcess ! ?PROCESSED_ROW(Ref, EmittedKey, EmittedValue, RowNumber),
     ok.
 
 %%%===================================================================
@@ -207,3 +202,20 @@ clean_traverse_tasks(Worker) ->
     {ok, TaskIds, _} = list_ended_tasks(Worker, ?CALLBACK_MODULE),
     lists:foreach(fun(T) -> delete_ended_task(Worker, ?CALLBACK_MODULE, T) end, TaskIds),
     ?assertMatch({ok, [], _}, list_ended_tasks(Worker, ?CALLBACK_MODULE)).
+
+save_docs(Worker, KeysAndDocs) ->
+    % returns list in the form [{Key, RowNum}]
+    lists:map(fun({{Key, Doc}, RowNum}) ->
+        {ok, _, _} = save_doc(Worker, ?CTX, Key, Doc),
+        {Key, RowNum}
+    end, lists:zip(KeysAndDocs, lists:seq(0, length(KeysAndDocs) - 1))).
+
+assert_all_rows_processed(Ref, KeysAndRowsSet) ->
+    case sets:size(KeysAndRowsSet) =:= 0 of
+        true ->
+            true;
+        false ->
+            ?PROCESSED_ROW(Ref, RN, K, RN) =
+            ?assertReceivedMatch(?PROCESSED_ROW(Ref, _, _, _), timer:seconds(?ATTEMPTS)),
+            assert_all_rows_processed(Ref, sets:del_element({K, RN}, KeysAndRowsSet))
+    end.

@@ -60,7 +60,7 @@
 %%% view_traverse mandatory callbacks definitions
 %%%===================================================================
 
--callback process_row(Row :: term(), Info :: info()) -> ok.
+-callback process_row(Row :: term(), Info :: info(), RowNumber :: non_neg_integer()) -> ok.
 
 %%%===================================================================
 %%% view_traverse optional callbacks definitions
@@ -128,22 +128,27 @@ do_master_job(MasterJob = #view_traverse_master{
     view_name = ViewName,
     query_opts = QueryOpts,
     query_view_token = Token,
-    async_next_batch_job = AsyncNextBatchJob
+    async_next_batch_job = AsyncNextBatchJob,
+    offset = Offset
 }, _Args) ->
     case query(ViewName, prepare_query_opts(Token, QueryOpts)) of
         {ok, {[]}} ->
             {ok, #{}};
         {ok, {Rows}} ->
-            {RevSlaveJobs, NewToken} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn}) ->
+            {RevSlaveJobs, NewToken, _} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn, RowNumber}) ->
                 {<<"key">>, Key} = lists:keyfind(<<"key">>, 1, Row),
                 {<<"id">>, DocId} = lists:keyfind(<<"id">>, 1, Row),
-                {[slave_job(MasterJob, Row) | SlaveJobsIn], TokenIn#query_view_token{
-                    start_key = Key,
-                    last_doc_id = DocId
-                }}
-            end, {[], Token}, Rows),
+                {
+                    [slave_job(MasterJob, Row, RowNumber) | SlaveJobsIn],
+                    TokenIn#query_view_token{start_key = Key, last_doc_id = DocId},
+                    RowNumber + 1
+                }
+            end, {[], Token, Offset}, Rows),
             SlaveJobs = lists:reverse(RevSlaveJobs),
-            NextBatchJob = MasterJob#view_traverse_master{query_view_token = NewToken},
+            NextBatchJob = MasterJob#view_traverse_master{
+                query_view_token = NewToken,
+                offset = Offset + length(SlaveJobs)
+            },
             case AsyncNextBatchJob of
                 true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};
                 false -> {ok, #{slave_jobs => SlaveJobs, master_jobs => [NextBatchJob]}}
@@ -159,8 +164,8 @@ do_master_job(MasterJob = #view_traverse_master{
 %% @end
 %%--------------------------------------------------------------------
 -spec do_slave_job(slave_job(), traverse:id()) -> ok.
-do_slave_job(#view_traverse_slave{row = Row, view_processing_module = CallbackModule, info = Info}, _TaskId) ->
-    CallbackModule:process_row(Row, Info),
+do_slave_job(#view_traverse_slave{row = Row, view_processing_module = CallbackModule, info = Info, row_number = RowNum}, _TaskId) ->
+    CallbackModule:process_row(Row, Info, RowNum),
     ok.
 
 %%--------------------------------------------------------------------
@@ -259,12 +264,13 @@ query(ViewName, Opts) ->
     DiscCtx = datastore_model_default:get_default_disk_ctx(),
     couchbase_driver:query_view(DiscCtx, ViewName, ViewName, Opts).
 
--spec slave_job(master_job(), term()) -> slave_job().
-slave_job(#view_traverse_master{view_processing_module = ViewProcessingModule, info = Info}, Row) ->
+-spec slave_job(master_job(), term(), non_neg_integer()) -> slave_job().
+slave_job(#view_traverse_master{view_processing_module = ViewProcessingModule, info = Info}, Row, RowNumber) ->
     #view_traverse_slave{
         view_processing_module = ViewProcessingModule,
         info = Info,
-        row = Row
+        row = Row,
+        row_number = RowNumber
     }.
 
 -spec prepare_query_opts(token(), query_opts()) -> [couchbase_driver:view_opt()].
