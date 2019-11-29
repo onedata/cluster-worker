@@ -131,11 +131,18 @@ handle_call(terminate, _From, #state{
     keys_to_expire = #{},
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
-    gen_server:call(Pid, terminate, infinity),
+    catch gen_server:call(Pid, terminate, infinity),
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State};
 handle_call(terminate, _From, State) ->
     {reply, working, State};
+handle_call({terminate, Requests}, _From, State) ->
+    State2 = #state{
+        keys_to_inactivate = ToInactivate,
+        disc_writer_pid = Pid} = handle_requests(Requests, State),
+    catch gen_server:call(Pid, terminate, infinity),
+    datastore_cache:inactivate(ToInactivate),
+    {stop, normal, ok, State2};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
