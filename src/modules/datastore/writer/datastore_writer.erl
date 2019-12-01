@@ -363,7 +363,10 @@ handle_info(Info, State = #state{}) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, State = #state{}) ->
+terminate(Reason, State = #state{
+    requests = Requests, cache_writer_pid = Pid
+}) ->
+    catch gen_server:call(Pid, {terminate, Requests}, infinity),
     tp_router:delete_process_size(self()),
     ?log_terminate(Reason, State).
 

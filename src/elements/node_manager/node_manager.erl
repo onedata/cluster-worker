@@ -31,7 +31,7 @@
     {datastore_worker, [
         {supervisor_flags, datastore_worker:supervisor_flags()},
         {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
-    ]},
+    ], [{terminate_timeout, infinity}]},
     {tp_router, [
         {supervisor_flags, tp_router:main_supervisor_flags()},
         {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
@@ -235,8 +235,8 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
-                        [Module, Args, LoadMemorySize]}, transient, 5000,
-                        worker, [worker_host]}
+                        [Module, Args, LoadMemorySize]}, transient,
+                        proplists:get_value(terminate_timeout, Options, 5000), worker, [worker_host]}
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
@@ -269,8 +269,8 @@ start_worker(Module, Args, Options) ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
-                        [Module, Args, LoadMemorySize]}, transient, 5000,
-                        worker, [worker_host]}
+                        [Module, Args, LoadMemorySize]}, transient,
+                        proplists:get_value(terminate_timeout, Options, 5000), worker, [worker_host]}
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->

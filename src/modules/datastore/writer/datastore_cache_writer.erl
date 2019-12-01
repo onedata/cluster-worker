@@ -53,6 +53,9 @@
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
 
+-define(DEFAULT_FLUSH_DELAY, timer:seconds(1)).
+-define(FAST_FLUSH_DELAY, 100).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -128,11 +131,18 @@ handle_call(terminate, _From, #state{
     keys_to_expire = #{},
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
-    gen_server:call(Pid, terminate, infinity),
+    catch gen_server:call(Pid, terminate, infinity),
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State};
 handle_call(terminate, _From, State) ->
     {reply, working, State};
+handle_call({terminate, Requests}, _From, State) ->
+    State2 = #state{
+        keys_to_inactivate = ToInactivate,
+        disc_writer_pid = Pid} = handle_requests(Requests, State),
+    catch gen_server:call(Pid, terminate, infinity),
+    datastore_cache:inactivate(ToInactivate),
+    {stop, normal, ok, State2};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -196,7 +206,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
         flush_times = FT2
-    }, 100))};
+    }, ?FAST_FLUSH_DELAY))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -221,69 +231,69 @@ handle_info(flush, State = #state{
 }) ->
     {NewCachedKeys, NewKiF, NewFT, State2} =
         case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
-        on ->
-            KiFKeys = maps:keys(KiF),
-            ToFlush0 = maps:without(KiFKeys, CachedKeys),
+            on ->
+                KiFKeys = maps:keys(KiF),
+                ToFlush0 = maps:without(KiFKeys, CachedKeys),
 
-            Cooldown = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                flush_key_cooldown_sek, 3),
-            CooldownUS = timer:seconds(Cooldown) * 1000,
+                Cooldown = application:get_env(?CLUSTER_WORKER_APP_NAME,
+                    flush_key_cooldown_sek, 3),
+                CooldownUS = timer:seconds(Cooldown) * 1000,
 
-            Now = os:timestamp(),
-            ToFlush = maps:filter(fun(K, _V) ->
-                FlushTime = maps:get(K, FT, {0,0,0}),
-                timer:now_diff(Now, FlushTime) > CooldownUS
-            end, ToFlush0),
+                Now = os:timestamp(),
+                ToFlush = maps:filter(fun(K, _V) ->
+                    FlushTime = maps:get(K, FT, {0,0,0}),
+                    timer:now_diff(Now, FlushTime) > CooldownUS
+                end, ToFlush0),
 
-            case {maps:size(ToFlush), maps:size(ToFlush0)} of
-                {0, 0} ->
-                    {CachedKeys, KiF, FT, State#state{flush_timer = undefined}};
-                {0, _} ->
-                    {CachedKeys, KiF, FT, schedule_flush(State#state{flush_timer = undefined})};
-                _ ->
-                    Waiting = maps:without(maps:keys(ToFlush), CachedKeys),
+                case {maps:size(ToFlush), maps:size(ToFlush0)} of
+                    {0, 0} ->
+                        {CachedKeys, KiF, FT, State#state{flush_timer = undefined}};
+                    {0, _} ->
+                        {CachedKeys, KiF, FT, schedule_flush(State#state{flush_timer = undefined})};
+                    _ ->
+                        Waiting = maps:without(maps:keys(ToFlush), CachedKeys),
 
-                    KiF2 = maps:fold(fun(K, Ctx, Acc) ->
-                        maps:put(K, {Ref, Ctx}, Acc)
-                    end, KiF, ToFlush),
+                        KiF2 = maps:fold(fun(K, Ctx, Acc) ->
+                            maps:put(K, {Ref, Ctx}, Acc)
+                        end, KiF, ToFlush),
 
-                    % TODO VFS-4221 - remove datastore_disc_writer
-                    ToFlush2 = maps:map(fun
-                        (_K, #{
-                            disc_driver_ctx := DiscCtx
-                        } = Ctx) ->
-                            maps:put(disc_driver_ctx,
-                                maps:put(answer_to, Pid, DiscCtx), Ctx);
-                        (_K, Ctx) ->
-                            Ctx
-                    end, ToFlush),
+                        % TODO VFS-4221 - remove datastore_disc_writer
+                        ToFlush2 = maps:map(fun
+                            (_K, #{
+                                disc_driver_ctx := DiscCtx
+                            } = Ctx) ->
+                                maps:put(disc_driver_ctx,
+                                    maps:put(answer_to, Pid, DiscCtx), Ctx);
+                            (_K, Ctx) ->
+                                Ctx
+                        end, ToFlush),
 
-                    case maps:size(Waiting) of
-                        0 ->
-                            tp_router:delete_process_size(Pid);
-                        Size ->
-                            tp_router:update_process_size(Pid, Size)
-                    end,
+                        case maps:size(Waiting) of
+                            0 ->
+                                tp_router:delete_process_size(Pid);
+                            Size ->
+                                tp_router:update_process_size(Pid, Size)
+                        end,
 
-                    Futures = datastore_disc_writer:flush_async(ToFlush2),
-                    gen_server:cast(Pid, {wait_flush, Ref, Futures}),
+                        Futures = datastore_disc_writer:flush_async(ToFlush2),
+                        gen_server:cast(Pid, {wait_flush, Ref, Futures}),
 
-                    Timestamp = os:timestamp(),
-                    FT2 = maps:fold(fun(K, _V, Acc) ->
-                        maps:put(K, Timestamp, Acc)
-                    end, FT, ToFlush2),
+                        Timestamp = os:timestamp(),
+                        FT2 = maps:fold(fun(K, _V, Acc) ->
+                            maps:put(K, Timestamp, Acc)
+                        end, FT, ToFlush2),
 
-                    {Waiting, KiF2, FT2, State}
-            end;
-        _ ->
-            tp_router:delete_process_size(Pid),
-            gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
-            KiF2 = maps:fold(fun(K, Ctx, Acc) ->
-                maps:put(K, {Ref, Ctx}, Acc)
-            end, KiF, CachedKeys),
+                        {Waiting, KiF2, FT2, State}
+                end;
+            _ ->
+                tp_router:delete_process_size(Pid),
+                gen_server:call(Pid, {flush, Ref, CachedKeys}, infinity),
+                KiF2 = maps:fold(fun(K, Ctx, Acc) ->
+                    maps:put(K, {Ref, Ctx}, Acc)
+                end, KiF, CachedKeys),
 
-            {#{}, KiF2, #{}, State}
-    end,
+                {#{}, KiF2, #{}, State}
+        end,
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
         on ->
@@ -728,7 +738,7 @@ send_response({Pid, Ref, Responses}, Batch) ->
 -spec schedule_flush(state()) -> state().
 schedule_flush(State) ->
     Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
-        timer:seconds(1)),
+        ?DEFAULT_FLUSH_DELAY),
     schedule_flush(State, Delay).
 
 %%--------------------------------------------------------------------
@@ -745,7 +755,7 @@ schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
         {undefined, _} ->
             Timer = erlang:send_after(Delay, self(), flush),
             State#state{flush_timer = Timer};
-        {_, 100} ->
+        {_, ?FAST_FLUSH_DELAY} ->
             case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
                 on ->
                     erlang:cancel_timer(OldTimer, [{async, true}, {info, false}]),
