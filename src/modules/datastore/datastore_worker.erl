@@ -78,7 +78,7 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
-    ok.
+    check_couchbase().
 
 %%%===================================================================
 %%% API
@@ -161,3 +161,15 @@ init_models() ->
         (_Model, {error, Reason}) ->
             {error, Reason}
     end, ok, Models).
+
+-spec check_couchbase() -> ok.
+check_couchbase() ->
+    check_couchbase(couchbase_config:get_flush_queue_size()).
+
+-spec check_couchbase(non_neg_integer()) -> ok.
+check_couchbase(0) ->
+    ok;
+check_couchbase(Size) ->
+    ?info("Waiting for couchbase to flush documents, current queue size ~p", [Size]),
+    timer:sleep(5000),
+    check_couchbase(couchbase_config:get_flush_queue_size()).
