@@ -178,18 +178,10 @@ cast(WorkerRef, Request, ReplyTo, MsgId) ->
     Request :: term(), ReplyTo :: process_ref(), MsgId :: term() | undefined,
     execute_type()) -> ok | {error, term()}.
 cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
-    case choose_node(WorkerRef) of
-        {ok, Name, Node} ->
-%%            case node() of
-%%                Node -> ok;
-%%                _ -> ?info("wwwww ~p", [{WorkerRef, Request, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
-            Args = prepare_args(Name, Request, MsgId, ReplyTo),
-            execute(Args, Node, ExecOption, undefined),
-            ok;
-        Error ->
-            Error
-    end.
+    {ok, Name, Node} = choose_node(WorkerRef),
+    Args = prepare_args(Name, Request, MsgId, ReplyTo),
+    execute(Args, Node, ExecOption, undefined),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -212,17 +204,9 @@ cast_and_monitor(WorkerRef, Request, MsgId) ->
 -spec cast_and_monitor(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
     ReplyTo :: process_ref(), MsgId :: term() | undefined) -> pid() | {error, term()}.
 cast_and_monitor(WorkerRef, Request, ReplyTo, MsgId) ->
-    case choose_node(WorkerRef) of
-        {ok, Name, Node} ->
-%%            case node() of
-%%                Node -> ok;
-%%                _ -> ?info("wwwww ~p", [{WorkerRef, Request, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
-            Args = prepare_args(Name, Request, MsgId, ReplyTo),
-            execute(Args, Node, spawn, undefined);
-        Error ->
-            Error
-    end.
+    {ok, Name, Node} = choose_node(WorkerRef),
+    Args = prepare_args(Name, Request, MsgId, ReplyTo),
+    execute(Args, Node, spawn, undefined).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -315,18 +299,10 @@ multicast(WorkerName, Request, ReplyTo, MsgId) ->
     Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout, ExecOption) ->
     MsgId = make_ref(),
-    case choose_node(WorkerRef) of
-        {ok, Name, Node} ->
-%%            case node() of
-%%                Node -> ok;
-%%                _ -> ?info("wwwww ~p", [{WorkerRef, Request, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
-            Args = prepare_args(Name, Request, MsgId),
-            ExecuteAns = execute(Args, Node, ExecOption, Timeout),
-            receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
-        Error ->
-            Error
-    end.
+    {ok, Name, Node} = choose_node(WorkerRef),
+    Args = prepare_args(Name, Request, MsgId),
+    ExecuteAns = execute(Args, Node, ExecOption, Timeout),
+    receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -404,7 +380,7 @@ execute(Args, _Node, {pool, cast, PoolName}, _) ->
 %% @equiv prepare_args(Plugin, Request, MsgId, {proc, self()}).
 %% @end
 %%--------------------------------------------------------------------
--spec prepare_args(request_dispatcher:worker_ref(), #worker_request{}, term()) -> list().
+-spec prepare_args(request_dispatcher:worker_ref(), term(), term()) -> list().
 prepare_args(Plugin, Request, MsgId) ->
     prepare_args(Plugin, Request, MsgId, {proc, self()}).
 
@@ -414,7 +390,7 @@ prepare_args(Plugin, Request, MsgId) ->
 %% Prepares list of args for execute/3 function.
 %% @end
 %%--------------------------------------------------------------------
--spec prepare_args(request_dispatcher:worker_ref(), #worker_request{}, term(),
+-spec prepare_args(request_dispatcher:worker_ref(), term(), term(),
     process_ref()) -> list().
 prepare_args(Plugin, Request, MsgId, ReplyTo) ->
     [Plugin, #worker_request{
@@ -430,8 +406,7 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec choose_node(WorkerRef :: request_dispatcher:worker_ref()) ->
-    {ok, WorkerName :: request_dispatcher:worker_name(),
-        WorkerNode :: atom()} | {error, term()}.
+    {ok, WorkerName :: request_dispatcher:worker_name(), WorkerNode :: atom()}.
 choose_node(WorkerRef) ->
     case WorkerRef of
         {id, WName, ID} ->
@@ -440,10 +415,4 @@ choose_node(WorkerRef) ->
             {ok, WName, WNode};
         WName ->
             {ok, WName, node()}
-%%            case request_dispatcher:get_worker_node(WName) of
-%%                {ok, WNode} ->
-%%                    {ok, WName, WNode};
-%%                {error, Error} ->
-%%                    {error, Error}
-%%            end
     end.

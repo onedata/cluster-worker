@@ -25,7 +25,7 @@
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_doc_rev_length, 16)).
 
--define(IS_SINGLE_NODE_CHASH(CHash), is_atom(CHash)).
+%%-define(gen_local_keys, 1).
 
 %%%===================================================================
 %%% API
@@ -37,29 +37,30 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec gen_key() -> key().
+-ifndef(gen_local_keys).
 gen_key() ->
-%%    HashPart = consistent_hashing:gen_hashing_key(),
-%%    gen_key(HashPart).
+    HashPart = consistent_hashing:gen_hashing_key(),
+    gen_key(HashPart).
+-endif.
+-ifdef(gen_local_keys).
+gen_key() ->
     gen_key_node(node()).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Function generating key connected with particular node (for tests only).
+%% @end
+%%--------------------------------------------------------------------
+-spec gen_key_node(node()) -> key().
 gen_key_node(TargetNode) ->
     Key = consistent_hashing:gen_hashing_key(),
-    ChosenNode = case consistent_hashing:get_chash_ring() of
-        undefined ->
-            error(chash_ring_not_initialized);
-        Node when ?IS_SINGLE_NODE_CHASH(Node) ->
-            Node;
-        CHash ->
-            Index = chash:key_of(Key),
-            [{_, BestNode}] = chash:successors(Index, CHash, 1),
-            BestNode
-    end,
-    case ChosenNode of
+    case consistent_hashing:get_node(Key) of
         TargetNode ->
             gen_key(Key);
         _ ->
             gen_key_node(TargetNode)
     end.
+-endif.
 
 %%--------------------------------------------------------------------
 %% @doc

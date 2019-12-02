@@ -69,10 +69,6 @@ route(Key, Function, Args) ->
     {Node, Args2, TryLocalRead} = select_node(Key, Args),
     case {Module, TryLocalRead} of
         {datastore_writer, _} ->
-%%            case node() of
-%%                Node -> ok;
-%%                _ -> ?info("dddd ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
             case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result
@@ -85,10 +81,6 @@ route(Key, Function, Args) ->
             end;
         _ ->
             try
-                %%            case node() of
-                %%                Node -> ok;
-                %%                _ -> ?info("dddd2 ~p", [{Key, Function, Args, erlang:process_info(self(), current_stacktrace)}])
-                %%            end,
                 case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
                     {badrpc, Reason} -> {error, Reason};
                     Result -> Result

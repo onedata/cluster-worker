@@ -19,7 +19,6 @@
 -author("Krzysztof Trzepla").
 
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([create/4, save/4, update/4, update/5]).
@@ -293,10 +292,6 @@ get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
         end, LinkNames)
     catch
         _:_ ->
-%%            case node() of
-%%                FetchNode -> ok;
-%%                _ -> ?info("rrrr3 ~p", [{Key, Ctx, TreeIds, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
             case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames]) of
                 {badrpc, RpcReason} -> {error, RpcReason};
                 RpcResult -> RpcResult
@@ -324,10 +319,6 @@ get_links_trees(FetchNode, Ctx, Key) ->
         end
     catch
         _:_ ->
-%%            case node() of
-%%                FetchNode -> ok;
-%%                _ -> ?info("rrrr2 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
             case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
                 {badrpc, Reason3} -> {error, Reason3};
                 Result -> Result
@@ -348,10 +339,6 @@ get_links_trees(FetchNode, Ctx, Key) ->
 fetch_missing(FetchNode, Ctx, Key) ->
     case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
         true ->
-%%            case node() of
-%%                FetchNode -> ok;
-%%                _ -> ?info("rrrr1 ~p", [{Key, Ctx, erlang:process_info(self(), current_stacktrace)}])
-%%            end,
             case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
                 {badrpc, Reason} -> {error, Reason};
                 Result -> Result

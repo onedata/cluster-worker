@@ -223,6 +223,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Chooses to which worker (on which node) the request should be sent.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
+%% TODO - currently not used - should be integrated with consistent hashing or removed
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker_node(WorkerName :: worker_name()) ->
