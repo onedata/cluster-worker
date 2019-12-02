@@ -31,7 +31,7 @@
     {datastore_worker, [
         {supervisor_flags, datastore_worker:supervisor_flags()},
         {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
-    ], [{terminate_timeout, infinity}]},
+    ], [{terminate_timeout, infinity}, {posthook, check_db_connection}]},
     {tp_router, [
         {supervisor_flags, tp_router:main_supervisor_flags()},
         {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
@@ -889,8 +889,6 @@ check_port(Port) ->
     SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
         LastAnalysisPid :: pid() | undefined}) -> {erlang:timestamp(), pid()}.
 analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
-    ?debug("Monitoring state: ~p", [MonState]),
-
     {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
