@@ -27,6 +27,7 @@
                  routing => local | global,
                  generated_key => boolean(),
                  fold_enabled => boolean(),
+                 local_fold => boolean(),
                  sync_enabled => boolean(),
                  sync_change => boolean(), % should set to 'true' for save
                                            % of remote change

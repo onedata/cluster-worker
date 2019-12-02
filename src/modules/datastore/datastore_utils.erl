@@ -25,6 +25,7 @@
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_doc_rev_length, 16)).
 
+% Test macro - uncomment to generate keys always connected with local node
 %%-define(gen_local_keys, 1).
 
 %%%===================================================================

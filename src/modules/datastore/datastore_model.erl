@@ -214,7 +214,11 @@ fold(Ctx, Fun, Acc) ->
 %%--------------------------------------------------------------------
 -spec fold(ctx(), fold_fun(doc()), fold_fun(key()), boolean(), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold(Ctx = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
+fold(Ctx0 = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
+    Ctx = case Ctx0 of
+        #{local_fold := true} -> Ctx0#{routing => local};
+        _ -> Ctx0
+    end,
     ModelKey = atom_to_binary(Model, utf8),
     LinksAns = fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         KeyFilter(Key, Acc2)
@@ -242,7 +246,11 @@ fold(_Ctx, _Fun, _KeyFilter, _ReverseKeys, _Acc) ->
 %%--------------------------------------------------------------------
 -spec fold_keys(ctx(), fold_fun(key()), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold_keys(Ctx = #{model := Model, fold_enabled := true}, Fun, Acc) ->
+fold_keys(Ctx0 = #{model := Model, fold_enabled := true}, Fun, Acc) ->
+    Ctx = case Ctx0 of
+        #{local_fold := true} -> Ctx0#{routing => local};
+        _ -> Ctx0
+    end,
     ModelKey = atom_to_binary(Model, utf8),
     fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         Fun(Key, Acc2)
@@ -411,7 +419,10 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
 -spec add_fold_link(ctx(), key(), {ok, doc()} | {error, term()}) ->
     {ok, doc()} | {error, term()}.
 add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
-    Ctx2 = Ctx#{sync_enabled => false},
+    Ctx2 = case Ctx of
+        #{local_fold := true} -> Ctx#{sync_enabled => false, routing => local};
+        _ -> Ctx#{sync_enabled => false}
+    end,
     ModelKey = atom_to_binary(Model, utf8),
     case add_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
         [{ok, #link{}}] -> {ok, Doc};
@@ -430,7 +441,10 @@ add_fold_link(_Ctx, _Key, Result) ->
 -spec delete_fold_link(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
 delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
-    Ctx2 = Ctx#{sync_enabled => false},
+    Ctx2 = case Ctx of
+        #{local_fold := true} -> Ctx#{sync_enabled => false, routing => local};
+        _ -> Ctx#{sync_enabled => false}
+    end,
     ModelKey = atom_to_binary(Model, utf8),
     case delete_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
         [ok] -> ok;
