@@ -14,7 +14,7 @@
 -author("Michal Wrzeszcz").
 
 -optional_callbacks([task_started/2, task_finished/2, task_canceled/2,
-    on_cancel_init/1, get_sync_info/1, get_timestamp/0, to_string/1]).
+    on_cancel_init/2, get_sync_info/1, get_timestamp/0, to_string/1]).
 
 %%%===================================================================
 %%% Traverse API
@@ -87,7 +87,7 @@
 %% Is executed to allow user-defined init of cancel procedure (e.g., to send cancel signal to task related processes).
 %% @end
 %%--------------------------------------------------------------------
--callback on_cancel_init(traverse:id()) -> ok.
+-callback on_cancel_init(traverse:id(), traverse:pool()) -> ok.
 
 %%%===================================================================
 %%% Optional job sync and queuing API
