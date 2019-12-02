@@ -889,8 +889,6 @@ check_port(Port) ->
     SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
         LastAnalysisPid :: pid() | undefined}) -> {erlang:timestamp(), pid()}.
 analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
-    ?debug("Monitoring state: ~p", [MonState]),
-
     {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
