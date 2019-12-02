@@ -45,6 +45,11 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec encode(doc() | ejson()) -> ejson() | no_return().
+encode(#document{value = undefined} = Doc) -> % Test document
+    {[
+        {<<"_key">>, Doc#document.key},
+        {<<"_scope">>, Doc#document.scope}
+    ]};
 encode(#document{value = Value, version = Version} = Doc) ->
     Model = element(1, Value),
     case lists:member(Model, datastore_config:get_models()) of
