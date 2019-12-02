@@ -189,7 +189,7 @@ get_job(Id) ->
 update_job_progress(Id, Job, Pool, TaskId, Status)
     when Status =:= waiting
     orelse Status =:= on_pool
-->
+    ->
     view_traverse_job:save_master_job(Id, Job, Pool, TaskId);
 update_job_progress(Id, _Job, _Pool, _TaskId, _Status) ->
     ok = view_traverse_job:delete_master_job(Id),
@@ -228,10 +228,14 @@ task_canceled(TaskId, PoolName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec to_string(job()) -> binary() | atom() | iolist().
-to_string(Job = #view_traverse_master{view_processing_module = ViewProcessingModule}) ->
-    ViewProcessingModule:to_string(Job);
-to_string(Job = #view_traverse_slave{view_processing_module = ViewProcessingModule}) ->
-    ViewProcessingModule:to_string(Job).
+to_string(Job) ->
+    ViewProcessingModule = get_view_processing_module(Job),
+    case erlang:function_exported(ViewProcessingModule, to_string, 1) of
+        true ->
+            ViewProcessingModule:to_string(Job);
+        false ->
+            str_utils:format_bin("~p", [Job])
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -249,8 +253,11 @@ pool_name_to_view_processing_module(PoolName) ->
 task_callback(PoolName, Function, TaskId) ->
     ViewProcessingModule = pool_name_to_view_processing_module(PoolName),
     case erlang:function_exported(ViewProcessingModule, Function, 1) of
-        true -> ViewProcessingModule:Function(TaskId);
-        false -> ok
+        true ->
+            ViewProcessingModule:Function(TaskId),
+            ok;
+        false ->
+            ok
     end.
 
 -spec ensure_defined_task_id(task_id() | undefined) -> task_id().
@@ -285,3 +292,9 @@ prepare_query_opts(#query_view_token{
         startkey_docid => LastDocId,
         skip => 1
     }).
+
+-spec get_view_processing_module(job()) -> view_processing_module().
+get_view_processing_module(#view_traverse_master{view_processing_module = ViewProcessingModule}) ->
+    ViewProcessingModule;
+get_view_processing_module(#view_traverse_slave{view_processing_module = ViewProcessingModule}) ->
+    ViewProcessingModule.
