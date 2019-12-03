@@ -99,16 +99,21 @@ run(CallbackModule, ViewName, Opts) ->
 
 -spec run(view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) -> ok.
 run(ViewProcessingModule, ViewName, TaskId, Opts) ->
-    DefinedTaskId = ensure_defined_task_id(TaskId),
-    MasterJob = #view_traverse_master{
-        view_name = ViewName,
-        view_processing_module = ViewProcessingModule,
-        query_opts = maps:merge(maps:get(query_opts, Opts, #{}), ?DEFAULT_QUERY_OPTS),
-        async_next_batch_job = maps:get(async_next_batch_job, Opts, ?DEFAULT_ASYNC_NEXT_BATCH_JOB),
-        info = maps:get(info, Opts, undefined)
-    },
-    PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
-    traverse:run(PoolName, DefinedTaskId, MasterJob, #{callback_module => ?MODULE}).
+    case view_exists(ViewName) of
+        true ->
+            DefinedTaskId = ensure_defined_task_id(TaskId),
+            MasterJob = #view_traverse_master{
+                view_name = ViewName,
+                view_processing_module = ViewProcessingModule,
+                query_opts = maps:merge(maps:get(query_opts, Opts, #{}), ?DEFAULT_QUERY_OPTS),
+                async_next_batch_job = maps:get(async_next_batch_job, Opts, ?DEFAULT_ASYNC_NEXT_BATCH_JOB),
+                info = maps:get(info, Opts, undefined)
+            },
+            PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
+            traverse:run(PoolName, DefinedTaskId, MasterJob, #{callback_module => ?MODULE});
+        false ->
+            {error, not_found}
+    end.
 
 -spec cancel(view_processing_module(), task_id()) -> ok.
 cancel(CallbackModule, TaskId) ->
@@ -265,6 +270,14 @@ ensure_defined_task_id(undefined) ->
     datastore_utils:gen_key();
 ensure_defined_task_id(TaskId) when is_binary(TaskId) ->
     TaskId.
+
+-spec view_exists(couchbase_driver:view()) -> boolean().
+view_exists(ViewName) ->
+    DiscCtx = datastore_model_default:get_default_disk_ctx(),
+    case couchbase_driver:get_design_doc(DiscCtx, ViewName) of
+        {ok, _} -> true;
+        {error, {<<"not_found">>, _}} -> false
+    end.
 
 -spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, {[row()]}} | {error, term()}.
 query(ViewName, Opts) ->
