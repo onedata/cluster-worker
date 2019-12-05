@@ -24,7 +24,7 @@
 -type seq() :: non_neg_integer() | null.
 -type since() :: seq().
 -type until() :: seq() | infinity.
--type change() :: proplists:proplist().
+-type change() :: json_utils:json_term().
 -type option() :: {since, non_neg_integer()} |
                   {until, non_neg_integer() | infinity} |
                   {except_mutator, datastore_doc:mutator()}.

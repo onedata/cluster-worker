@@ -248,7 +248,7 @@ get_changes(Since, Until, #state{} = State) ->
             ),
 
             case QueryAns of
-                {ok, {Changes}} ->
+                {ok, #{<<"rows">> := Changes}} ->
                     {Changes, State#state{since = Until2}};
                 Error ->
                     ?error("Cannot get changes, error: ~p", [Error]),
@@ -267,12 +267,12 @@ get_changes(Since, Until, #state{} = State) ->
 -spec get_docs([couchbase_changes:change()], state()) -> [datastore:doc()].
 get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
     KeyRevisionsAnsSequences = lists:filtermap(fun(Change) ->
-        {<<"id">>, Key} = lists:keyfind(<<"id">>, 1, Change),
-        {<<"value">>, {Value}} = lists:keyfind(<<"value">>, 1, Change),
-        {<<"key">>,[_, Seq]} = lists:keyfind(<<"key">>, 1, Change),
-        {<<"_rev">>, Rev} = lists:keyfind(<<"_rev">>, 1, Value),
-        case lists:keyfind(<<"_mutator">>, 1, Value) of
-            {<<"_mutator">>, Mutator} -> false;
+        Key = maps:get(<<"id">>, Change),
+        Value = maps:get(<<"value">>, Change),
+        [_, Seq] = maps:get(<<"key">>, Change),
+        Rev = maps:get(<<"_rev">>, Value),
+        case maps:get(<<"_mutator">>, Value) of
+            Mutator -> false;
             _ -> {true, {Key, {Rev, Seq}}}
         end
     end, Changes),
