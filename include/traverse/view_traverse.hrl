@@ -57,7 +57,7 @@
 -record(view_traverse_slave, {
     view_processing_module :: view_traverse:view_processing_module(),
     info :: view_traverse:info(),
-    row :: view_traverse:row(),
+    row :: json_utils:json_term(),
     row_number :: non_neg_integer()
 }).
 

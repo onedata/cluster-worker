@@ -156,8 +156,8 @@ end_per_testcase(_Case, Config) ->
 %%%===================================================================
 
 process_row(Row, #{pid := TestProcess, ref := Ref}, RowNumber) ->
-    EmittedKey = proplists:get_value(<<"key">>, Row),
-    EmittedValue = proplists:get_value(<<"value">>, Row),
+    EmittedKey = maps:get(<<"key">>, Row),
+    EmittedValue = maps:get(<<"value">>, Row),
     TestProcess ! ?PROCESSED_ROW(Ref, EmittedKey, EmittedValue, RowNumber),
     ok.
 

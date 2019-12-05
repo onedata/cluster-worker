@@ -60,7 +60,7 @@
 %%% view_traverse mandatory callbacks definitions
 %%%===================================================================
 
--callback process_row(Row :: term(), Info :: info(), RowNumber :: non_neg_integer()) -> ok.
+-callback process_row(Row :: json_utils:json_term(), Info :: info(), RowNumber :: non_neg_integer()) -> ok.
 
 %%%===================================================================
 %%% view_traverse optional callbacks definitions
@@ -137,12 +137,12 @@ do_master_job(MasterJob = #view_traverse_master{
     offset = Offset
 }, _Args) ->
     case query(ViewName, prepare_query_opts(Token, QueryOpts)) of
-        {ok, {[]}} ->
+        {ok, #{<<"rows">> := []}} ->
             {ok, #{}};
-        {ok, {Rows}} ->
+        {ok, #{<<"rows">> := Rows}} ->
             {RevSlaveJobs, NewToken, _} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn, RowNumber}) ->
-                {<<"key">>, Key} = lists:keyfind(<<"key">>, 1, Row),
-                {<<"id">>, DocId} = lists:keyfind(<<"id">>, 1, Row),
+                Key = maps:get(<<"key">>, Row),
+                DocId = maps:get(<<"id">>, Row),
                 {
                     [slave_job(MasterJob, Row, RowNumber) | SlaveJobsIn],
                     TokenIn#query_view_token{start_key = Key, last_doc_id = DocId},
@@ -279,7 +279,7 @@ view_exists(ViewName) ->
         {error, {<<"not_found">>, _}} -> false
     end.
 
--spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, {[row()]}} | {error, term()}.
+-spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, json_utils:json_term()} | {error, term()}.
 query(ViewName, Opts) ->
     DiscCtx = datastore_model_default:get_default_disk_ctx(),
     couchbase_driver:query_view(DiscCtx, ViewName, ViewName, Opts).
