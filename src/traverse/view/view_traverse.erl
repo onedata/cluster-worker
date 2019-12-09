@@ -140,19 +140,19 @@ do_master_job(MasterJob = #view_traverse_master{
         {ok, #{<<"rows">> := []}} ->
             {ok, #{}};
         {ok, #{<<"rows">> := Rows}} ->
-            {RevSlaveJobs, NewToken, _} = lists:foldl(fun(Row, {SlaveJobsIn, TokenIn, RowNumber}) ->
+            {ReversedSlaveJobs, NewToken, NextBatchOffset} = lists:foldl(fun(Row, {SlaveJobsAcc, TokenAcc, RowNumber}) ->
                 Key = maps:get(<<"key">>, Row),
                 DocId = maps:get(<<"id">>, Row),
                 {
-                    [slave_job(MasterJob, Row, RowNumber) | SlaveJobsIn],
-                    TokenIn#query_view_token{last_start_key = Key, last_doc_id = DocId},
+                    [slave_job(MasterJob, Row, RowNumber) | SlaveJobsAcc],
+                    TokenAcc#query_view_token{last_start_key = Key, last_doc_id = DocId},
                     RowNumber + 1
                 }
             end, {[], Token, Offset}, Rows),
-            SlaveJobs = lists:reverse(RevSlaveJobs),
+            SlaveJobs = lists:reverse(ReversedSlaveJobs),
             NextBatchJob = MasterJob#view_traverse_master{
                 query_view_token = NewToken,
-                offset = Offset + length(SlaveJobs)
+                offset = NextBatchOffset
             },
             case AsyncNextBatchJob of
                 true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};

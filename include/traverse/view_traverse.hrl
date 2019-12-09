@@ -23,7 +23,7 @@
 %  * key - 1st argument passed to emit function
 %  * value - 2nd argument passed to emit function
 %  * id - id of a document for which the view function was called
-% The row IS NOT uniquely identified by pair (key, id) as emit function may be called many times for one document)
+% The row IS NOT uniquely identified by pair (key, id) as emit function may be called many times for one document.
 %
 % The best way to paginate the view
 % (advised in Couchbase documentation: https://docs.couchbase.com/server/4.1/developer-guide/views-querying.html#pagination)
