@@ -262,7 +262,7 @@ run(PoolName, TaskID, Job, Options) ->
         remote ->
             ok;
         _ ->
-            ok = task_callback(CallbackModule, task_started, TaskID),
+            ok = task_callback(CallbackModule, task_started, TaskID, PoolName),
             ok = rpc:call(Node, ?MODULE, run_on_master_pool, [
                 PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
                 CallbackModule, ExtendedCtx, Executor, TaskID, Job, JobID])
@@ -278,13 +278,13 @@ on_task_change(Task, Environment) ->
     case traverse_task:on_task_change(Task, Environment) of
         {remote_change, CallbackModule, MainJobID} ->
             case CallbackModule:get_job(MainJobID) of
-                {ok, Job, _, _} ->
+                {ok, Job, PoolName, _} ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
                     case traverse_task:on_remote_change(ExtendedCtx, Task, CallbackModule, Environment) of
                         ok ->
                             ok;
                         {ok, remote_cancel, TaskID} ->
-                            task_callback(CallbackModule, on_cancel_init, TaskID),
+                            task_callback(CallbackModule, on_cancel_init, TaskID, PoolName),
                             ok
                     end;
                 {error, not_found} ->
@@ -350,7 +350,7 @@ cancel(PoolName, TaskID, Environment) ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
                     {ok, Info} = traverse_task:cancel(ExtendedCtx, PoolName, CallbackModule, TaskID, Environment),
                     case Info of
-                        local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskID);
+                        local_cancel -> task_callback(CallbackModule, on_cancel_init, TaskID, PoolName);
                         _ -> ok
                     end;
                 {error, not_found} ->
@@ -482,7 +482,7 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskID, Job) ->
             {ok, Description} ->
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description),
                 ok;
-            Error = {error, _} ->
+            {error, _} ->
                 error
         end
     catch
@@ -563,8 +563,8 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskID, Executor, #{
         true ->
             % VFS-5532 - can never be equal in case of description saving error
             ok = case Canceled of
-                true -> task_callback(CallbackModule, task_canceled, TaskID);
-                _ -> task_callback(CallbackModule, task_finished, TaskID)
+                true -> task_callback(CallbackModule, task_canceled, TaskID, PoolName);
+                _ -> task_callback(CallbackModule, task_finished, TaskID, PoolName)
             end,
 
             ok = traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskID),
@@ -619,7 +619,7 @@ run_task(PoolName, TaskID, Executor) ->
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
             case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
                 ok ->
-                    ok = task_callback(CallbackModule, task_started, TaskID),
+                    ok = task_callback(CallbackModule, task_started, TaskID, PoolName),
                     ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
                         CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID);
                 {error, start_aborted} ->
@@ -646,7 +646,7 @@ maybe_run_scheduled_task(PoolName, CallbackModule, TaskID, Task, Executor, Job, 
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
             case traverse_task:start(ExtendedCtx, PoolName, CallbackModule, TaskID, #{master_jobs_delegated => 1}) of
                 ok ->
-                    ok = task_callback(CallbackModule, task_started, TaskID),
+                    ok = task_callback(CallbackModule, task_started, TaskID, PoolName),
                     ok = rpc:call(Node, ?MODULE, run_on_master_pool, [PoolName, ?MASTER_POOL_NAME(PoolName),
                         ?SLAVE_POOL_NAME(PoolName), CallbackModule, ExtendedCtx, Executor, TaskID, Job, MainJobID]);
                 {error, start_aborted} ->
@@ -678,11 +678,11 @@ get_extended_ctx(CallbackModule, Job) ->
     end,
     maps:merge(traverse_task:get_ctx(), CtxExtension).
 
--spec task_callback(callback_module(), task_started | task_finished | task_canceled | on_cancel_init, id()) -> ok.
-task_callback(CallbackModule, Method, TaskID) ->
-    case erlang:function_exported(CallbackModule, Method, 1) of
+-spec task_callback(callback_module(), task_started | task_finished | task_canceled | on_cancel_init, id(), pool()) -> ok.
+task_callback(CallbackModule, Method, TaskID, PoolName) ->
+    case erlang:function_exported(CallbackModule, Method, 2) of
         true ->
-            ok = CallbackModule:Method(TaskID);
+            ok = CallbackModule:Method(TaskID, PoolName);
         _ ->
             ok
     end.
