@@ -50,7 +50,7 @@
     }
 ">>).
 
--define(CALLBACK_MODULE, ?MODULE).
+-define(VIEW_PROCESSING_MODULE, ?MODULE).
 -define(ATTEMPTS, 60).
 -define(PROCESSED_ROW(Ref, Key, Value, RowNum), {processed_row, Ref, Key, Value, RowNum}).
 
@@ -104,7 +104,7 @@ job_persistence_test(Config) ->
 
     ?assertAllRowsProcessed(Ref1, KeysAndRowNums),
     ?assertAllRowsProcessed(Ref2, KeysAndRowNums),
-    ?assertMatch({ok, [_, _], _}, list_ended_tasks(W, ?CALLBACK_MODULE), ?ATTEMPTS).
+    ?assertMatch({ok, [_, _], _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
 
 %%%===================================================================
 %%% Base test functions
@@ -123,7 +123,7 @@ basic_batch_traverse_test_base(Config, RowsNum, Opts) ->
     ok = run_traverse(W, ?VIEW , Opts#{info => #{pid => self(), ref => Ref}}),
 
     ?assertAllRowsProcessed(Ref, KeysAndRowNums),
-    ?assertMatch({ok, [_], _}, list_ended_tasks(W, ?CALLBACK_MODULE), ?ATTEMPTS).
+    ?assertMatch({ok, [_], _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
 
 %%%===================================================================
 %%% Init/teardown functions
@@ -198,10 +198,10 @@ list_tasks(Worker, CallbackModule, Type) ->
     rpc:call(Worker, traverse_task_list, list, [Pool, Type]).
 
 clean_traverse_tasks(Worker) ->
-    ?assertMatch({ok, [], _}, list_ongoing_tasks(Worker, ?CALLBACK_MODULE), ?ATTEMPTS),
-    {ok, TaskIds, _} = list_ended_tasks(Worker, ?CALLBACK_MODULE),
-    lists:foreach(fun(T) -> delete_ended_task(Worker, ?CALLBACK_MODULE, T) end, TaskIds),
-    ?assertMatch({ok, [], _}, list_ended_tasks(Worker, ?CALLBACK_MODULE)).
+    ?assertMatch({ok, [], _}, list_ongoing_tasks(Worker, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS),
+    {ok, TaskIds, _} = list_ended_tasks(Worker, ?VIEW_PROCESSING_MODULE),
+    lists:foreach(fun(T) -> delete_ended_task(Worker, ?VIEW_PROCESSING_MODULE, T) end, TaskIds),
+    ?assertMatch({ok, [], _}, list_ended_tasks(Worker, ?VIEW_PROCESSING_MODULE)).
 
 save_docs(Worker, KeysAndDocs) ->
     % returns list in the form [{Key, RowNum}]

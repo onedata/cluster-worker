@@ -81,21 +81,21 @@
 %%%===================================================================
 
 -spec init(view_processing_module()) -> ok.
-init(CallbackModule) ->
-    init(CallbackModule, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT).
+init(ViewProcessingModule) ->
+    init(ViewProcessingModule, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT).
 
 -spec init(view_processing_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
-init(CallbackModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
-    PoolName = view_processing_module_to_pool_name(CallbackModule),
+init(ViewProcessingModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
+    PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
     traverse:init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{callback_modules => [?MODULE]}).
 
 -spec stop(view_processing_module()) -> ok.
-stop(CallbackModule) when is_atom(CallbackModule) ->
-    traverse:stop_pool(view_processing_module_to_pool_name(CallbackModule)).
+stop(ViewProcessingModule) when is_atom(ViewProcessingModule) ->
+    traverse:stop_pool(view_processing_module_to_pool_name(ViewProcessingModule)).
 
 -spec run(view_processing_module(), couchbase_driver:view(), opts()) -> ok.
-run(CallbackModule, ViewName, Opts) ->
-    run(CallbackModule, ViewName, undefined, Opts).
+run(ViewProcessingModule, ViewName, Opts) ->
+    run(ViewProcessingModule, ViewName, undefined, Opts).
 
 -spec run(view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) -> ok.
 run(ViewProcessingModule, ViewName, TaskId, Opts) ->
@@ -116,8 +116,8 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
     end.
 
 -spec cancel(view_processing_module(), task_id()) -> ok.
-cancel(CallbackModule, TaskId) ->
-    traverse:cancel(view_processing_module_to_pool_name(CallbackModule), TaskId).
+cancel(ViewProcessingModule, TaskId) ->
+    traverse:cancel(view_processing_module_to_pool_name(ViewProcessingModule), TaskId).
 
 %%%===================================================================
 %%% traverse_behaviour callbacks implementations
@@ -145,7 +145,7 @@ do_master_job(MasterJob = #view_traverse_master{
                 DocId = maps:get(<<"id">>, Row),
                 {
                     [slave_job(MasterJob, Row, RowNumber) | SlaveJobsIn],
-                    TokenIn#query_view_token{start_key = Key, last_doc_id = DocId},
+                    TokenIn#query_view_token{last_start_key = Key, last_doc_id = DocId},
                     RowNumber + 1
                 }
             end, {[], Token, Offset}, Rows),
@@ -169,8 +169,13 @@ do_master_job(MasterJob = #view_traverse_master{
 %% @end
 %%--------------------------------------------------------------------
 -spec do_slave_job(slave_job(), traverse:id()) -> ok.
-do_slave_job(#view_traverse_slave{row = Row, view_processing_module = CallbackModule, info = Info, row_number = RowNum}, _TaskId) ->
-    CallbackModule:process_row(Row, Info, RowNum),
+do_slave_job(#view_traverse_slave{
+    row = Row,
+    view_processing_module = ViewProcessingModule,
+    info = Info,
+    row_number = RowNum
+}, _TaskId) ->
+    ViewProcessingModule:process_row(Row, Info, RowNum),
     ok.
 
 %%--------------------------------------------------------------------
@@ -294,14 +299,14 @@ slave_job(#view_traverse_master{view_processing_module = ViewProcessingModule, i
     }.
 
 -spec prepare_query_opts(token(), query_opts()) -> [couchbase_driver:view_opt()].
-prepare_query_opts(#query_view_token{last_doc_id = undefined, start_key = undefined}, Opts) ->
+prepare_query_opts(#query_view_token{last_doc_id = undefined, last_start_key = undefined}, Opts) ->
     maps:to_list(Opts);
 prepare_query_opts(#query_view_token{
     last_doc_id = LastDocId,
-    start_key = LastKey
+    last_start_key = LastStartKey
 }, Opts) ->
     maps:to_list(Opts#{
-        startkey => LastKey,
+        startkey => LastStartKey,
         startkey_docid => LastDocId,
         skip => 1
     }).

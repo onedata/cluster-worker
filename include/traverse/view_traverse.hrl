@@ -16,16 +16,26 @@
 
 -include("global_definitions.hrl").
 
-% this record is used to define the starting row for a query on the couchbase view
+% This record is used to define the starting row for a query on the couchbase view.
+% Each row in the view is created by calling the function emit(Key, Value) in a
+% view function that is called for each document in the database.
+% Each row is composed of:
+%  * key - 1st argument passed to emit function
+%  * value - 2nd argument passed to emit function
+%  * id - id of a document for which the view function was called
+% The row IS NOT uniquely identified by pair (key, id) as emit function may be called many times for one document)
+%
+% The best way to paginate the view
+% (advised in Couchbase documentation: https://docs.couchbase.com/server/4.1/developer-guide/views-querying.html#pagination)
+% is to pass to the query the following options:
+%   * startkey_docid - id from last processed row
+%   * startkey - key from last processed row
+%   * skip = 1 - to skip last processed row because startkey_docid and startkey options are inclusive
 -record(query_view_token, {
-    % doc_id of the last returned row
-    % if defined it will be used with start_key to start the query
-    % from the previously finished row
+    % id field extracted from last processed row
     last_doc_id :: undefined | binary(),
-    % start_key, it is updated with the key of the last returned row
-    % it is used (with last_doc_id) to start the query
-    % from the previously finished row
-    start_key :: undefined | term()
+    % key field extracted from last processed row
+    last_start_key :: undefined | term()
 }).
 
 % default pool opts
