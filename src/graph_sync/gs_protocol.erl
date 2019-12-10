@@ -188,7 +188,6 @@ graph_update_result() | graph_delete_result().
     generate_error_response/2,
     generate_error_push_message/1
 ]).
--export([undefined_to_null/1, null_to_undefined/1]).
 
 %%%===================================================================
 %%% API
@@ -329,29 +328,6 @@ generate_error_push_message(Error) ->
         }}.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% If given term is undefined returns null, otherwise returns unchanged term.
-%% @end
-%%--------------------------------------------------------------------
--spec undefined_to_null(undefined | term()) -> null | term().
-undefined_to_null(undefined) ->
-    null;
-undefined_to_null(Other) ->
-    Other.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% If given term is null returns undefined, otherwise returns unchanged term.
-%% @end
-%%--------------------------------------------------------------------
--spec null_to_undefined(null | term()) -> undefined | term().
-null_to_undefined(null) ->
-    undefined;
-null_to_undefined(Other) ->
-    Other.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -389,7 +365,7 @@ encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     #{
         <<"supportedVersions">> => SupportedVersions,
         <<"auth">> => client_auth_to_json(Auth),
-        <<"sessionId">> => undefined_to_null(SessionId)
+        <<"sessionId">> => utils:undefined_to_null(SessionId)
     }.
 
 
@@ -413,7 +389,7 @@ encode_request_graph(_, #gs_req_graph{} = Req) ->
     #{
         <<"gri">> => gri:serialize(GRI),
         <<"operation">> => operation_to_string(Operation),
-        <<"data">> => undefined_to_null(Data),
+        <<"data">> => utils:undefined_to_null(Data),
         <<"subscribe">> => Subscribe,
         <<"authHint">> => auth_hint_to_json(AuthHint)
     }.
@@ -456,7 +432,7 @@ encode_response(ProtocolVersion, #gs_resp{} = GSReq) ->
         <<"payload">> => #{
             <<"success">> => Success,
             <<"error">> => errors:to_json(Error),
-            <<"data">> => undefined_to_null(Data)
+            <<"data">> => utils:undefined_to_null(Data)
         }
     }.
 
@@ -475,7 +451,7 @@ encode_response_handshake(ProtocolVersion, #gs_resp_handshake{} = Resp) ->
             true -> aai:serialize_subject(Identity);
             false -> deprecated_subject_to_json(Identity)
         end,
-        <<"attributes">> => undefined_to_null(Attributes)
+        <<"attributes">> => utils:undefined_to_null(Attributes)
     }.
 
 
@@ -484,7 +460,7 @@ encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
     #gs_resp_rpc{
         result = Result
     } = Resp,
-    undefined_to_null(Result).
+    utils:undefined_to_null(Result).
 
 
 -spec encode_response_graph(protocol_version(), graph_resp()) -> json_map().
@@ -494,7 +470,7 @@ encode_response_graph(_, #gs_resp_graph{data_format = Format, data = Result}) ->
     FormatStr = data_format_to_str(Format),
     #{
         <<"format">> => FormatStr,
-        FormatStr => undefined_to_null(Result)
+        FormatStr => utils:undefined_to_null(Result)
     }.
 
 
@@ -532,7 +508,7 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
     #{
         <<"gri">> => gri:serialize(GRI),
         <<"updateType">> => update_type_to_str(UpdateType),
-        <<"data">> => undefined_to_null(Data)
+        <<"data">> => utils:undefined_to_null(Data)
     }.
 
 
@@ -588,7 +564,7 @@ decode_request_handshake(_, PayloadJSON) ->
     #gs_req_handshake{
         supported_versions = SupportedVersions,
         auth = json_to_client_auth(Auth),
-        session_id = null_to_undefined(SessionId)
+        session_id = utils:null_to_undefined(SessionId)
     }.
 
 
@@ -605,7 +581,7 @@ decode_request_graph(_, PayloadJSON) ->
     #gs_req_graph{
         gri = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
         operation = string_to_operation(maps:get(<<"operation">>, PayloadJSON)),
-        data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
+        data = utils:null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
         subscribe = maps:get(<<"subscribe">>, PayloadJSON, false),
         auth_hint = json_to_auth_hint(maps:get(<<"authHint">>, PayloadJSON, null))
     }.
@@ -658,19 +634,19 @@ decode_response_handshake(ProtocolVersion, DataJSON) ->
     Attributes = maps:get(<<"attributes">>, DataJSON, #{}),
     #gs_resp_handshake{
         version = Version,
-        session_id = null_to_undefined(SessionId),
+        session_id = utils:null_to_undefined(SessionId),
         identity = case ProtocolVersion >= 4 of
             true -> aai:deserialize_subject(Identity);
             false -> deprecated_json_to_subject(Identity)
         end,
-        attributes = null_to_undefined(Attributes)
+        attributes = utils:null_to_undefined(Attributes)
     }.
 
 
 -spec decode_response_rpc(protocol_version(), json_map()) -> rpc_resp().
 decode_response_rpc(_, DataJSON) ->
     #gs_resp_rpc{
-        result = null_to_undefined(DataJSON)
+        result = utils:null_to_undefined(DataJSON)
     }.
 
 
@@ -715,11 +691,11 @@ decode_push(ProtocolVersion, ReqJSON) ->
 decode_push_graph(_, PayloadJSON) ->
     GRI = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
     UpdateType = str_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
-    Data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
+    Data = utils:null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
     #gs_push_graph{
         gri = GRI,
         change_type = UpdateType,
-        data = null_to_undefined(Data)
+        data = utils:null_to_undefined(Data)
     }.
 
 
@@ -806,7 +782,7 @@ json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
             null -> undefined;
             Interface -> cv_interface:deserialize_interface(Interface)
         end,
-        audience_token = null_to_undefined(maps:get(<<"audienceToken">>, Data, null)),
+        audience_token = utils:null_to_undefined(maps:get(<<"audienceToken">>, Data, null)),
         data_access_caveats_policy = case maps:get(<<"dataAccessCaveatsPolicy">>, Data, null) of
             null -> disallow_data_access_caveats;
             Bin -> str_to_data_access_caveats_policy(Bin)
@@ -830,7 +806,7 @@ auth_override_to_json(_, #auth_override{} = AuthOverride) ->
             undefined -> null;
             Interface -> cv_interface:serialize_interface(Interface)
         end,
-        <<"audienceToken">> => undefined_to_null(AuthOverride#auth_override.audience_token),
+        <<"audienceToken">> => utils:undefined_to_null(AuthOverride#auth_override.audience_token),
         <<"dataAccessCaveatsPolicy">> => data_access_caveats_policy_to_str(
             AuthOverride#auth_override.data_access_caveats_policy
         )
