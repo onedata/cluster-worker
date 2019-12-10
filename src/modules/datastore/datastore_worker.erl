@@ -191,7 +191,7 @@ check_db_connection_loop() ->
         Ctx = datastore_model_default:get_default_disk_ctx(),
         TestKey = <<"InitTestKey">>,
         TestDoc = #document{key = TestKey},
-        couchbase_driver:save(Ctx, TestKey, TestDoc)
+        couchbase_driver:save(Ctx#{no_seq => true}, TestKey, TestDoc)
     catch
         E1:E2 ->
             {E1, E2}
