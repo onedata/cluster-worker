@@ -12,6 +12,8 @@
 -module(datastore_utils).
 -author("Krzysztof Trzepla").
 
+-include("global_definitions.hrl").
+
 %% API
 -export([gen_key/0, gen_key/1, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
 -export([set_expiry/2]).
@@ -24,9 +26,6 @@
     application:get_env(cluster_worker, datastore_doc_key_length, 16)).
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_doc_rev_length, 16)).
-
-% Test macro - uncomment to generate keys always connected with local node
-%%-define(gen_local_keys, 1).
 
 %%%===================================================================
 %%% API
