@@ -48,7 +48,8 @@
 encode(#document{value = undefined} = Doc) -> % Test document
     {[
         {<<"_key">>, Doc#document.key},
-        {<<"_scope">>, Doc#document.scope}
+        {<<"_scope">>, Doc#document.scope},
+        {<<"_record">>, <<"test_doc">>}
     ]};
 encode(#document{value = Value, version = Version} = Doc) ->
     Model = element(1, Value),
@@ -82,8 +83,8 @@ decode({Term} = EJson) when is_list(Term) ->
         {_, RecordName} -> decode_term(RecordName, atom);
         false -> undefined
     end,
-    case lists:member(RecordName2, datastore_config:get_models()) of
-        true->
+    case {lists:member(RecordName2, datastore_config:get_models()), RecordName2} of
+        {true, _} ->
             {_, Key} = lists:keyfind(<<"_key">>, 1, Term),
             {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
             {_, Mutators} = lists:keyfind(<<"_mutators">>, 1, Term),
@@ -106,7 +107,15 @@ decode({Term} = EJson) when is_list(Term) ->
                 deleted = Deleted,
                 version = Version2
             };
-        false ->
+        {false, test_doc} ->
+            {_, Key} = lists:keyfind(<<"_key">>, 1, Term),
+            {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
+            #document{
+                key = Key,
+                value = undefined,
+                scope = Scope
+            };
+        {false, _} ->
             EJson
     end;
 decode(EJson) ->
