@@ -13,10 +13,8 @@
 -module(traverse_behaviour).
 -author("Michal Wrzeszcz").
 
--optional_callbacks([
-    to_string/1, get_timestamp/0, get_sync_info/1, task_started/1,
-    task_finished/1, task_canceled/1, on_cancel_init/1
-]).
+-optional_callbacks([task_started/2, task_finished/2, task_canceled/2,
+    on_cancel_init/2, get_sync_info/1, get_timestamp/0, to_string/1]).
 
 %%%===================================================================
 %%% Traverse API
@@ -68,28 +66,28 @@
 %% Is executed when whole task is started.
 %% @end
 %%--------------------------------------------------------------------
--callback task_started(traverse:id()) -> ok.
+-callback task_started(traverse:id(), traverse:pool()) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Is executed when whole task is finished.
 %% @end
 %%--------------------------------------------------------------------
--callback task_finished(traverse:id()) -> ok.
+-callback task_finished(traverse:id(), traverse:pool()) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Is executed when last job of canceled task has ended or immediately after cancel if task is scheduled.
 %% @end
 %%--------------------------------------------------------------------
--callback task_canceled(traverse:id()) -> ok.
+-callback task_canceled(traverse:id(), traverse:pool()) -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Is executed to allow user-defined init of cancel procedure (e.g., to send cancel signal to task related processes).
 %% @end
 %%--------------------------------------------------------------------
--callback on_cancel_init(traverse:id()) -> ok.
+-callback on_cancel_init(traverse:id(), traverse:pool()) -> ok.
 
 %%%===================================================================
 %%% Optional job sync and queuing API
@@ -118,4 +116,4 @@
 %% Returns term that will be used to describe job in lagger logs.
 %% @end
 %%--------------------------------------------------------------------
--callback to_string(traverse:job()) -> {ok, term()}.
+-callback to_string(traverse:job()) -> binary() | atom() | iolist().

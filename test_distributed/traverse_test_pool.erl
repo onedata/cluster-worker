@@ -12,10 +12,12 @@
 -module(traverse_test_pool).
 -author("Michal Wrzeszcz").
 
+-behaviour(traverse_behaviour).
+
 -include("global_definitions.hrl").
 
 %% Pool callbacks
--export([do_master_job/2, do_slave_job/2, task_finished/1, update_job_progress/5, get_job/1]).
+-export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1]).
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0]).
 
@@ -59,7 +61,7 @@ do_slave_job({Master, Num, ID}, _) ->
     Master ! {slave, Num, ID, node()},
     ok.
 
-task_finished(_) ->
+task_finished(_TaskId, _PoolName) ->
     timer:sleep(1000),
     ok.
 

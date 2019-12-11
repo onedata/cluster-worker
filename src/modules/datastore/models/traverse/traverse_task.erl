@@ -18,7 +18,9 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/11, start/5, schedule_for_local_execution/3, finish/4, cancel/5, on_task_change/2, on_remote_change/4]).
+-export([create/11, start/5, schedule_for_local_execution/3, finish/4, cancel/5, on_task_change/2,
+    on_remote_change/4, delete_ended/2]).
+
 %%% Setters and getters API
 -export([update_description/4, update_status/4, fix_description/3,
     get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1,
@@ -360,6 +362,16 @@ on_remote_change(ExtendedCtx, #document{key = DocID, value = #traverse_task{
     end;
 on_remote_change(_ExtendedCtx, _Doc, _CallbackModule, _Environment) ->
     ok. % Task has been modified in parallel - ignore
+
+-spec delete_ended(traverse:pool(), traverse:id()) -> ok.
+delete_ended(Pool, TaskId) ->
+    case get(Pool, TaskId) of
+        {ok, #document{value = #traverse_task{finish_time = Timestamp, executor = Executor}}} ->
+            traverse_task_list:delete_link(?CTX, Pool, ended, Executor, TaskId, Timestamp),
+            datastore_model:delete(?CTX, ?DOC_ID(Pool, TaskId));
+        {error, not_found} ->
+            ok
+    end.
 
 %%%===================================================================
 %%% Setters and getters API

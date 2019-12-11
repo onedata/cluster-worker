@@ -13,13 +13,13 @@
 -ifndef(GRAPH_SYNC_CW_HRL).
 -define(GRAPH_SYNC_CW_HRL, 1).
 
--include_lib("ctool/include/graph_sync/graph_sync.hrl").
+-include_lib("ctool/include/graph_sync/gri.hrl").
 
 % Protocol version used for structures that may not change over time.
 -define(BASIC_PROTOCOL, 0).
 
 % Protocol versions currently supported by this software
--define(SUPPORTED_PROTO_VERSIONS, [3, 4, 5]).
+-define(SUPPORTED_PROTO_VERSIONS, [3, 4]).
 
 -record(gs_req_handshake, {
     supported_versions = [] :: [gs_protocol:protocol_version()],
@@ -98,6 +98,14 @@
 -record(gs_push, {
     subtype :: gs_protocol:message_subtype(),
     message :: gs_protocol:push()
+}).
+
+-record(auth_override, {
+    client_auth :: gs_protocol:client_auth(),
+    peer_ip :: undefined | ip_utils:ip(),
+    interface :: undefined | cv_interface:interface(),
+    audience_token :: undefined | tokens:serialized(),
+    data_access_caveats_policy = disallow_data_access_caveats :: data_access_caveats:policy()
 }).
 
 % Possible auth hints
