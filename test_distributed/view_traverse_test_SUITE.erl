@@ -15,6 +15,7 @@
 -behaviour(view_traverse).
 
 -include("datastore_test_utils.hrl").
+-include("traverse/view_traverse.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
@@ -29,11 +30,11 @@
     many_rows_single_batch_basic_traverse_test/1,
     many_batches_basic_traverse_test/1,
     many_async_batches_basic_traverse_test/1,
-    job_persistence_test/1
-]).
+    job_persistence_test/1,
+    traverse_token_test/1]).
 
 %% view_traverse callbacks
--export([process_row/3]).
+-export([process_row/3, batch_prehook/3]).
 
 -define(MODEL, disc_only_model).
 -define(MODEL_BIN, atom_to_binary(?MODEL, utf8)).
@@ -53,9 +54,18 @@
 -define(VIEW_PROCESSING_MODULE, ?MODULE).
 -define(ATTEMPTS, 60).
 -define(PROCESSED_ROW(Ref, Key, Value, RowNum), {processed_row, Ref, Key, Value, RowNum}).
+-define(BATCH_TO_PROCESS(Ref, Offset, Size), {batch_to_process, Ref, Offset, Size}).
+-define(DEFAULT_BATCH_SIZE, 1000).
 
 -define(assertAllRowsProcessed(Ref, KeysAndRowNums),
     ?assertEqual(true, assert_all_rows_processed(Ref, sets:from_list(KeysAndRowNums)), 60)).
+
+-define(assertNoMoreRowsProcessed(Ref),
+    ?assertNotReceivedMatch(?PROCESSED_ROW(Ref, _, _, _), timer:seconds(10))).
+
+-define(assertBatchPrehooksCalled(Ref, RowsNum, BatchSize, ExpectOrderedBatches),
+    assert_batch_prehooks_called(Ref, RowsNum,  BatchSize, ExpectOrderedBatches)
+).
 
 all() ->
     ?ALL([
@@ -64,7 +74,8 @@ all() ->
         many_rows_single_batch_basic_traverse_test,
         many_batches_basic_traverse_test,
         many_async_batches_basic_traverse_test,
-        job_persistence_test
+        job_persistence_test,
+        traverse_token_test
     ]).
 
 %%%===================================================================
@@ -104,7 +115,35 @@ job_persistence_test(Config) ->
 
     ?assertAllRowsProcessed(Ref1, KeysAndRowNums),
     ?assertAllRowsProcessed(Ref2, KeysAndRowNums),
+    ?assertBatchPrehooksCalled(Ref1, DocsNum, ?DEFAULT_BATCH_SIZE, false),
+    ?assertBatchPrehooksCalled(Ref2, DocsNum, ?DEFAULT_BATCH_SIZE, false),
     ?assertMatch({ok, [_, _], _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
+
+traverse_token_test(Config) ->
+    [W | _] = ?config(cluster_worker_nodes, Config),
+    save_view_doc(W, ?VIEW, ?VIEW_FUNCTION),
+    RowsNum = 1000,
+    StartPoint = 500,
+    KeysAndDocs = ?KEYS_AND_DOCS(RowsNum),
+    KeysAndRowNums = save_docs(W, KeysAndDocs),
+    Ref = make_ref(),
+    ExpectedKeysAndRowNums = lists:sublist(KeysAndRowNums, StartPoint + 1, length(KeysAndRowNums)),
+    {StartKey, RowNum} = lists:nth(StartPoint, KeysAndRowNums),
+
+    Token = #query_view_token{
+        offset = RowNum + 1,
+        last_doc_id = StartKey,
+        last_start_key = RowNum
+    },
+    ct:pal("Token: ~p", [Token]),
+
+    ct:pal("~p", [hd(ExpectedKeysAndRowNums)]),
+
+    ok = run_traverse(W, ?VIEW , #{info => #{pid => self(), ref => Ref}, token => Token}),
+
+    ?assertAllRowsProcessed(Ref, ExpectedKeysAndRowNums),
+    ?assertNoMoreRowsProcessed(Ref),
+    ?assertMatch({ok, [_], _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
 
 %%%===================================================================
 %%% Base test functions
@@ -123,6 +162,8 @@ basic_batch_traverse_test_base(Config, RowsNum, Opts) ->
     ok = run_traverse(W, ?VIEW , Opts#{info => #{pid => self(), ref => Ref}}),
 
     ?assertAllRowsProcessed(Ref, KeysAndRowNums),
+    ExpectOrderedBatches = maps:get(async_next_batch_job, Opts, false),
+    ?assertBatchPrehooksCalled(Ref, RowsNum, ?DEFAULT_BATCH_SIZE, ExpectOrderedBatches),
     ?assertMatch({ok, [_], _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
 
 %%%===================================================================
@@ -159,6 +200,14 @@ process_row(Row, #{pid := TestProcess, ref := Ref}, RowNumber) ->
     EmittedKey = maps:get(<<"key">>, Row),
     EmittedValue = maps:get(<<"value">>, Row),
     TestProcess ! ?PROCESSED_ROW(Ref, EmittedKey, EmittedValue, RowNumber),
+    ok.
+
+batch_prehook([], _Token, _Info) ->
+    ok;
+batch_prehook(Rows, Token, #{pid := TestProcess, ref := Ref}) ->
+    TokenOffset = view_traverse:get_offset(Token),
+    BatchOffset = TokenOffset - length(Rows),
+    TestProcess ! ?BATCH_TO_PROCESS(Ref, BatchOffset, length(Rows)),
     ok.
 
 %%%===================================================================
@@ -216,6 +265,28 @@ assert_all_rows_processed(Ref, KeysAndRowsSet) ->
             true;
         false ->
             ?PROCESSED_ROW(Ref, RN, K, RN) =
-            ?assertReceivedMatch(?PROCESSED_ROW(Ref, _, _, _), timer:seconds(?ATTEMPTS)),
+                ?assertReceivedMatch(?PROCESSED_ROW(Ref, _, _, _), timer:seconds(?ATTEMPTS)),
             assert_all_rows_processed(Ref, sets:del_element({K, RN}, KeysAndRowsSet))
     end.
+
+divide_to_batches(RowsNum, BatchSize) ->
+    BatchesNum = ceil(RowsNum / BatchSize),
+    lists:map(fun(BatchNum) ->
+        Offset = BatchNum * BatchSize,
+        Size = min(Offset + BatchSize, RowsNum) - Offset,
+        {Offset, Size}
+    end, lists:seq(0, BatchesNum - 1)).
+
+assert_batch_prehooks_called(Ref, RowsNum, BatchSize, ExpectOrderedBatches) ->
+    Batches = divide_to_batches(RowsNum, BatchSize),
+    assert_batch_prehooks_called(Ref, Batches, ExpectOrderedBatches).
+
+assert_batch_prehooks_called(_Ref, [], _ExpectOrderedBatches) ->
+    ok;
+assert_batch_prehooks_called(Ref, Batches, false) ->
+    ?BATCH_TO_PROCESS(Ref, Offset, Size) =
+        ?assertReceivedMatch(?BATCH_TO_PROCESS(Ref, _, _), timer:seconds(?ATTEMPTS)),
+    assert_batch_prehooks_called(Ref, Batches -- [{Offset, Size}], false);
+assert_batch_prehooks_called(Ref, [{Offset, Size} | Rest], true) ->
+        ?assertReceivedNextEqual(?BATCH_TO_PROCESS(Ref, Offset, Size), timer:seconds(?ATTEMPTS)),
+    assert_batch_prehooks_called(Ref, Rest, true).

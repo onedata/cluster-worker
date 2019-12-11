@@ -32,6 +32,7 @@
 %   * startkey - key from last processed row
 %   * skip = 1 - to skip last processed row because startkey_docid and startkey options are inclusive
 -record(query_view_token, {
+    offset = 0 :: non_neg_integer(),
     % id field extracted from last processed row
     last_doc_id :: undefined | binary(),
     % key field extracted from last processed row
@@ -60,8 +61,7 @@
     query_view_token = #query_view_token{} :: view_traverse:token(),
     query_opts :: view_traverse:query_opts(),
     async_next_batch_job = ?DEFAULT_ASYNC_NEXT_BATCH_JOB :: boolean(),
-    info :: view_traverse:info(),
-    offset = 0 :: non_neg_integer()
+    info :: view_traverse:info()
 }).
 
 -record(view_traverse_slave, {

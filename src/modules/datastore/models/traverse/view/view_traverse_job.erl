@@ -113,8 +113,9 @@ get_record_struct(1) ->
         {view_name, string},
         {callback_module, atom},
         {query_view_token, {record, [
+            {offset, integer},
             {last_doc_id, string},
-            {start_key, term}
+            {last_start_key, term}
         ]}},
         {query_opts, {custom, json, {json_utils, encode, decode}}},
         {async_next_batch_job, boolean},

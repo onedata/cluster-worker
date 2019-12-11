@@ -25,7 +25,8 @@
 %% API
 -export([
     init/1, init/4, stop/1,
-    run/3, run/4, cancel/2
+    run/3, run/4, cancel/2,
+    get_offset/1
 ]).
 
 %% traverse callbacks
@@ -50,6 +51,7 @@
 -type opts() :: #{
     query_opts => query_opts(),
     async_next_batch_job => boolean(),
+    token => token(),
     info => info()
 }.
 % @formatter:on
@@ -66,6 +68,8 @@
 %%% view_traverse optional callbacks definitions
 %%%===================================================================
 
+-callback batch_prehook(Rows :: [json_utils:json_term()], Token :: token(), Info :: info()) -> ok.
+
 -callback task_started(task_id()) -> ok.
 
 -callback task_finished(task_id()) -> ok.
@@ -74,7 +78,7 @@
 
 -callback to_string(job()) -> binary() | atom() | iolist().
 
--optional_callbacks([task_started/1, task_finished/1, task_canceled/1, to_string/1]).
+-optional_callbacks([batch_prehook/3, task_started/1, task_finished/1, task_canceled/1, to_string/1]).
 
 %%%===================================================================
 %%% API functions
@@ -102,11 +106,13 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
     case view_exists(ViewName) of
         true ->
             DefinedTaskId = ensure_defined_task_id(TaskId),
+            DefaultToken = #query_view_token{},
             MasterJob = #view_traverse_master{
                 view_name = ViewName,
                 view_processing_module = ViewProcessingModule,
                 query_opts = maps:merge(maps:get(query_opts, Opts, #{}), ?DEFAULT_QUERY_OPTS),
                 async_next_batch_job = maps:get(async_next_batch_job, Opts, ?DEFAULT_ASYNC_NEXT_BATCH_JOB),
+                query_view_token = utils:ensure_defined(maps:get(token, Opts, DefaultToken), undefined, DefaultToken),
                 info = maps:get(info, Opts, undefined)
             },
             PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
@@ -119,6 +125,11 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
 cancel(ViewProcessingModule, TaskId) ->
     traverse:cancel(view_processing_module_to_pool_name(ViewProcessingModule), TaskId).
 
+
+-spec get_offset(token()) -> non_neg_integer().
+get_offset(#query_view_token{offset = Offset}) ->
+    Offset.
+
 %%%===================================================================
 %%% traverse_behaviour callbacks implementations
 %%%===================================================================
@@ -130,30 +141,34 @@ cancel(ViewProcessingModule, TaskId) ->
 %%--------------------------------------------------------------------
 -spec do_master_job(master_job(), traverse:master_job_extended_args()) -> {ok, traverse:master_job_map()}.
 do_master_job(MasterJob = #view_traverse_master{
+    view_processing_module = ViewProcessingModule,
     view_name = ViewName,
     query_opts = QueryOpts,
     query_view_token = Token,
     async_next_batch_job = AsyncNextBatchJob,
-    offset = Offset
+    info = Info
 }, _Args) ->
     case query(ViewName, prepare_query_opts(Token, QueryOpts)) of
         {ok, #{<<"rows">> := []}} ->
+            call_batch_prehook(ViewProcessingModule, [], Token, Info),
             {ok, #{}};
         {ok, #{<<"rows">> := Rows}} ->
-            {ReversedSlaveJobs, NewToken, NextBatchOffset} = lists:foldl(fun(Row, {SlaveJobsAcc, TokenAcc, RowNumber}) ->
-                Key = maps:get(<<"key">>, Row),
-                DocId = maps:get(<<"id">>, Row),
-                {
-                    [slave_job(MasterJob, Row, RowNumber) | SlaveJobsAcc],
-                    TokenAcc#query_view_token{last_start_key = Key, last_doc_id = DocId},
-                    RowNumber + 1
-                }
-            end, {[], Token, Offset}, Rows),
+            {ReversedSlaveJobs, NewToken} = lists:foldl(
+                fun(Row, {SlaveJobsAcc, TokenAcc = #query_view_token{offset = RowOffset}}) ->
+                    Key = maps:get(<<"key">>, Row),
+                    DocId = maps:get(<<"id">>, Row),
+                    {
+                        [slave_job(MasterJob, Row, RowOffset) | SlaveJobsAcc],
+                        TokenAcc#query_view_token{
+                            last_start_key = Key,
+                            last_doc_id = DocId,
+                            offset = RowOffset + 1
+                        }
+                    }
+                end, {[], Token}, Rows),
+            call_batch_prehook(ViewProcessingModule, Rows, NewToken, Info),
             SlaveJobs = lists:reverse(ReversedSlaveJobs),
-            NextBatchJob = MasterJob#view_traverse_master{
-                query_view_token = NewToken,
-                offset = NextBatchOffset
-            },
+            NextBatchJob = MasterJob#view_traverse_master{query_view_token = NewToken},
             case AsyncNextBatchJob of
                 true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};
                 false -> {ok, #{slave_jobs => SlaveJobs, master_jobs => [NextBatchJob]}}
@@ -258,6 +273,16 @@ view_processing_module_to_pool_name(ViewProcessingModule) ->
 -spec pool_name_to_view_processing_module(traverse:pool()) -> view_processing_module().
 pool_name_to_view_processing_module(PoolName) ->
     binary_to_atom(PoolName, utf8).
+
+-spec call_batch_prehook(view_processing_module(), [json_utils:json_term()], token(), info()) -> ok.
+call_batch_prehook(ViewProcessingModule, Rows, Token, Info) ->
+    case erlang:function_exported(ViewProcessingModule, batch_prehook, 3) of
+        true ->
+            ViewProcessingModule:batch_prehook(Rows, Token, Info),
+            ok;
+        false ->
+            ok
+    end.
 
 -spec task_callback(traverse:pool(), atom(), task_id()) -> ok.
 task_callback(PoolName, Function, TaskId) ->
