@@ -80,16 +80,15 @@ encode(EJson) ->
 %%--------------------------------------------------------------------
 -spec decode(ejson()) -> ejson() | doc().
 decode({Term} = EJson) when is_list(Term) ->
-    {_, Key} = lists:keyfind(<<"_key">>, 1, Term),
-    case Key of
-        ?TEST_DOC_KEY ->
+    case lists:keyfind(<<"_key">>, 1, Term) of
+        {_, ?TEST_DOC_KEY = Key} ->
             {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
             #document{
                 key = Key,
                 value = undefined,
                 scope = Scope
             };
-        _ ->
+        {_, Key} ->
             RecordName2 = case lists:keyfind(<<"_record">>, 1, Term) of
                 {_, RecordName} -> decode_term(RecordName, atom);
                 false -> undefined
@@ -119,7 +118,9 @@ decode({Term} = EJson) when is_list(Term) ->
                     };
                 false ->
                     EJson
-            end
+            end;
+        _ ->
+            EJson
     end;
 decode(EJson) ->
     EJson.
