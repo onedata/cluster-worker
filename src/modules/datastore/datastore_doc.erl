@@ -355,10 +355,13 @@ fetch_missing(FetchNode, Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec fetch_deleted(ctx(), key(), undefined | batch(), boolean()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
+% This case is used for fetching link documents outside tp process
+% Errors should be thrown to prevent further processing
 fetch_deleted(#{throw_not_found := true} = Ctx, Key, Batch, _) ->
     case datastore_cache:get(Ctx, Key, false) of
         {error, not_found} ->
-            throw({throw, not_found});
+            % Throw tuple to prevent catching by bp_tree
+            throw({fetch_error, not_found});
         Result ->
             {Result, Batch}
     end;

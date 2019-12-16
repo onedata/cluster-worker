@@ -494,11 +494,11 @@ save_memory_copies(#{memory_copies := Num} = Ctx, Key, Doc, PoolType) when is_in
 save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
     Pool = datastore_multiplier:extend_name(Key, PoolType),
     {Ans, BadNodes} = FullAns = rpc:multicall(Nodes, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]),
-    FilteredAns = lists:filter(fun
+    Errors = lists:filter(fun
         ({ok, _}) -> false;
         (_) -> true
     end, Ans),
-    case {FilteredAns, BadNodes} of
+    case {Errors, BadNodes} of
         {[], []} ->
             ok;
         _ ->

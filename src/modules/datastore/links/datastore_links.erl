@@ -142,6 +142,8 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
 
     case Ans of
         {broken_root, Tree} ->
+            % The tree has been broken by abnormal termination of application
+            % Some data could be lost, proceeding with fixed root
             ?error("Broken bp_tree ~p for key ~p and ctx ~p", [TreeId, Key, Ctx]),
             {ok, Tree};
         Other ->

@@ -15,13 +15,13 @@
 
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([route/3, process/3]).
 -export([init_counters/0, init_report/0]).
 
 -type key() :: datastore:key().
+-type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
 -define(EXOMETER_COUNTERS,
     [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
@@ -67,27 +67,23 @@ init_report() ->
 route(Key, Function, Args) ->
     Module = select_module(Function),
     {Node, Args2, TryLocalRead} = select_node(Key, Args),
-    case {Module, TryLocalRead} of
-        {datastore_writer, _} ->
-            case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
-                {badrpc, Reason} -> {error, Reason};
-                Result -> Result
-            end;
-        {_, true} ->
-            try
-                datastore_router:process(Module, Function, [Node | Args2])
-            catch
-                _:Reason2 -> {error, Reason2}
-            end;
-        _ ->
-            try
+    try
+        case {Module, TryLocalRead} of
+            {datastore_writer, _} ->
+                case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
+                    {badrpc, Reason} -> {error, Reason};
+                    Result -> Result
+                end;
+            {_, true} ->
+                datastore_router:process(Module, Function, [Node | Args2]);
+            _ ->
                 case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
                     {badrpc, Reason} -> {error, Reason};
                     Result -> Result
                 end
-            catch
-                _:Reason2 -> {error, Reason2}
-            end
+        end
+    catch
+        _:Reason2 -> {error, Reason2}
     end.
 
 %%--------------------------------------------------------------------
@@ -117,7 +113,7 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec select_node(key(), list()) -> {node(), list(), boolean()}.
+-spec select_node(key(), list()) -> {node(), list(), local_read()}.
 select_node(_Key, [#{routing := local} | _] = Args) ->
     {node(), Args, true};
 select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->

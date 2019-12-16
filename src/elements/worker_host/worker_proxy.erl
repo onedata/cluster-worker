@@ -178,7 +178,7 @@ cast(WorkerRef, Request, ReplyTo, MsgId) ->
     Request :: term(), ReplyTo :: process_ref(), MsgId :: term() | undefined,
     execute_type()) -> ok | {error, term()}.
 cast(WorkerRef, Request, ReplyTo, MsgId, ExecOption) ->
-    {ok, Name, Node} = choose_node(WorkerRef),
+    {Name, Node} = choose_node(WorkerRef),
     Args = prepare_args(Name, Request, MsgId, ReplyTo),
     execute(Args, Node, ExecOption, undefined),
     ok.
@@ -204,7 +204,7 @@ cast_and_monitor(WorkerRef, Request, MsgId) ->
 -spec cast_and_monitor(WorkerRef :: request_dispatcher:worker_ref(), Request :: term(),
     ReplyTo :: process_ref(), MsgId :: term() | undefined) -> pid() | {error, term()}.
 cast_and_monitor(WorkerRef, Request, ReplyTo, MsgId) ->
-    {ok, Name, Node} = choose_node(WorkerRef),
+    {Name, Node} = choose_node(WorkerRef),
     Args = prepare_args(Name, Request, MsgId, ReplyTo),
     execute(Args, Node, spawn, undefined).
 
@@ -299,7 +299,7 @@ multicast(WorkerName, Request, ReplyTo, MsgId) ->
     Result :: term() | {error, term()}.
 call(WorkerRef, Request, Timeout, ExecOption) ->
     MsgId = make_ref(),
-    {ok, Name, Node} = choose_node(WorkerRef),
+    {Name, Node} = choose_node(WorkerRef),
     Args = prepare_args(Name, Request, MsgId),
     ExecuteAns = execute(Args, Node, ExecOption, Timeout),
     receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request).
@@ -406,13 +406,13 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec choose_node(WorkerRef :: request_dispatcher:worker_ref()) ->
-    {ok, WorkerName :: request_dispatcher:worker_name(), WorkerNode :: atom()}.
+    {WorkerName :: request_dispatcher:worker_name(), WorkerNode :: node()}.
 choose_node(WorkerRef) ->
     case WorkerRef of
         {id, WName, ID} ->
-            {ok, WName, consistent_hashing:get_node(ID)};
+            {WName, consistent_hashing:get_node(ID)};
         {WName, WNode} ->
-            {ok, WName, WNode};
+            {WName, WNode};
         WName ->
-            {ok, WName, node()}
+            {WName, node()}
     end.

@@ -46,11 +46,4 @@
 -define(HEALTHCHECK_ERROR_LOG_MSG(_Msg, _Args),
     lists:flatten(io_lib:format("Healthcheck error in ~p on node ~p: " ++ _Msg, [?MODULE, node()] ++ _Args))).
 
-%%%===================================================================
-%%% Compilation macros
-%%%===================================================================
-
-% Test macro - uncomment to generate keys always connected with local node
-%%-define(gen_local_keys, 1).
-
 -endif.

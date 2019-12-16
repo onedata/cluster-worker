@@ -419,12 +419,13 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
 -spec add_fold_link(ctx(), key(), {ok, doc()} | {error, term()}) ->
     {ok, doc()} | {error, term()}.
 add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
-    Ctx2 = case Ctx of
-        #{local_fold := true} -> Ctx#{sync_enabled => false, routing => local};
-        _ -> Ctx#{sync_enabled => false}
+    Ctx2 = Ctx#{sync_enabled => false},
+    Ctx3 = case Ctx of
+        #{local_fold := true} -> Ctx2#{routing => local};
+        _ -> Ctx2
     end,
     ModelKey = atom_to_binary(Model, utf8),
-    case add_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
+    case add_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
         [{ok, #link{}}] -> {ok, Doc};
         [{error, already_exists}] -> {ok, Doc};
         [{error, Reason}] -> {error, Reason}
@@ -441,12 +442,13 @@ add_fold_link(_Ctx, _Key, Result) ->
 -spec delete_fold_link(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
 delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
-    Ctx2 = case Ctx of
-        #{local_fold := true} -> Ctx#{sync_enabled => false, routing => local};
-        _ -> Ctx#{sync_enabled => false}
+    Ctx2 = Ctx#{sync_enabled => false},
+    Ctx3 = case Ctx of
+        #{local_fold := true} -> Ctx2#{routing => local};
+        _ -> Ctx2
     end,
     ModelKey = atom_to_binary(Model, utf8),
-    case delete_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
+    case delete_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
         [ok] -> ok;
         [{error, Reason}] -> {error, Reason}
     end;

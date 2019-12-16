@@ -134,8 +134,10 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
     Result = lists:foldl(fun
         (_, {error, Reason}) -> {error, Reason};
         ({error, not_found}, {ok, Acc}) -> {ok, Acc};
-        ({error, {throw, not_found}}, _) -> throw(not_found);
-        ({error, {{throw, not_found}, _Stacktrace}}, _) -> throw(not_found);
+        % Next 2 error can appear for bp_trees when document cannot be found in memory
+        % Throw error to allow retry in tp process that can read document from db
+        ({error, {fetch_error, not_found}}, _) -> throw(not_found);
+        ({error, {{fetch_error, not_found}, _Stacktrace}}, _) -> throw(not_found);
         ({error, Reason}, _) -> {error, Reason};
         ({ok, Link}, {ok, Acc}) -> {ok, [Link | Acc]}
     end, {ok, []}, Results),

@@ -80,7 +80,7 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
-    check_couchbase().
+    wait_for_database_flush().
 
 %%%===================================================================
 %%% API
@@ -153,7 +153,9 @@ supervisor_children_spec() ->
 %%--------------------------------------------------------------------
 -spec check_db_connection() -> ok.
 check_db_connection() ->
-    check_db_connection_loop().
+    ?info("Waiting for database readiness..."),
+    check_db_connection_loop(),
+    ?info("Database ready").
 
 %%%===================================================================
 %%% Internal functions
@@ -173,25 +175,24 @@ init_models() ->
             {error, Reason}
     end, ok, Models).
 
--spec check_couchbase() -> ok.
-check_couchbase() ->
-    check_couchbase(couchbase_config:get_flush_queue_size()).
+-spec wait_for_database_flush() -> ok.
+wait_for_database_flush() ->
+    wait_for_database_flush(couchbase_config:get_flush_queue_size()).
 
--spec check_couchbase(non_neg_integer()) -> ok.
-check_couchbase(0) ->
+-spec wait_for_database_flush(non_neg_integer()) -> ok.
+wait_for_database_flush(0) ->
     ok;
-check_couchbase(Size) ->
+wait_for_database_flush(Size) ->
     ?info("Waiting for couchbase to flush documents, current queue size ~p", [Size]),
     timer:sleep(5000),
-    check_couchbase(couchbase_config:get_flush_queue_size()).
+    wait_for_database_flush(couchbase_config:get_flush_queue_size()).
 
 -spec check_db_connection_loop() -> ok.
 check_db_connection_loop() ->
     CheckAns = try
         Ctx = datastore_model_default:get_default_disk_ctx(),
-        TestKey = <<"InitTestKey">>,
-        TestDoc = #document{key = TestKey},
-        couchbase_driver:save(Ctx#{no_seq => true}, TestKey, TestDoc)
+        TestDoc = #document{key = ?TEST_DOC_KEY},
+        couchbase_driver:save(Ctx#{no_seq => true}, ?TEST_DOC_KEY, TestDoc)
     catch
         E1:E2 ->
             {E1, E2}
@@ -201,7 +202,7 @@ check_db_connection_loop() ->
         {ok, _, _} ->
             ok;
         Error ->
-            ?warning("Test db save failed with error ~p", [Error]),
+            ?debug("Test db save failed with error ~p", [Error]),
             timer:sleep(?SAVE_CHECK_INTERVAL),
             check_db_connection_loop()
     end.

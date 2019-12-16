@@ -65,6 +65,8 @@
 
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
+-define(DEFAULT_TERMINATE_TIMEOUT, 5000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -236,7 +238,8 @@ start_worker(Module, Args, Options) ->
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
                         [Module, Args, LoadMemorySize]}, transient,
-                        proplists:get_value(terminate_timeout, Options, 5000), worker, [worker_host]}
+                        proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
+                        worker, [worker_host]}
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
@@ -270,7 +273,8 @@ start_worker(Module, Args, Options) ->
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
                         [Module, Args, LoadMemorySize]}, transient,
-                        proplists:get_value(terminate_timeout, Options, 5000), worker, [worker_host]}
+                        proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
+                        worker, [worker_host]}
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->

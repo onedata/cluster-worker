@@ -12,8 +12,6 @@
 -module(datastore_utils).
 -author("Krzysztof Trzepla").
 
--include("global_definitions.hrl").
-
 %% API
 -export([gen_key/0, gen_key/1, gen_key/2, gen_rev/1, parse_rev/1, is_greater_rev/2]).
 -export([set_expiry/2]).
@@ -37,30 +35,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec gen_key() -> key().
--ifndef(gen_local_keys).
 gen_key() ->
     HashPart = consistent_hashing:gen_hashing_key(),
     gen_key(HashPart).
--endif.
--ifdef(gen_local_keys).
-gen_key() ->
-    gen_key_node(node()).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Function generating key connected with particular node (for tests only).
-%% @end
-%%--------------------------------------------------------------------
--spec gen_key_node(node()) -> key().
-gen_key_node(TargetNode) ->
-    Key = consistent_hashing:gen_hashing_key(),
-    case consistent_hashing:get_node(Key) of
-        TargetNode ->
-            gen_key(Key);
-        _ ->
-            gen_key_node(TargetNode)
-    end.
--endif.
 
 %%--------------------------------------------------------------------
 %% @doc

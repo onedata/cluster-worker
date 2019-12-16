@@ -53,8 +53,10 @@
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
 
--define(DEFAULT_FLUSH_DELAY, timer:seconds(1)).
--define(FAST_FLUSH_DELAY, 100).
+-define(DATASTORE_WRITER_FLUSH_DELAY,
+    application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_writer_flush_delay, timer:seconds(1))).
+-define(FLUSH_INTERVAL, 100). % Time in us between consecutive flushes
+-define(FLUSH_COOLDOWN, application:get_env(?CLUSTER_WORKER_APP_NAME, flush_key_cooldown_sec, 3)).
 
 %%%===================================================================
 %%% API
@@ -131,7 +133,7 @@ handle_call(terminate, _From, #state{
     keys_to_expire = #{},
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
-    catch gen_server:call(Pid, terminate, infinity),
+    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State};
 handle_call(terminate, _From, State) ->
@@ -140,7 +142,7 @@ handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
         disc_writer_pid = Pid} = handle_requests(Requests, State),
-    catch gen_server:call(Pid, terminate, infinity),
+    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
 handle_call(Request, _From, State = #state{}) ->
@@ -206,7 +208,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
         flush_times = FT2
-    }, ?FAST_FLUSH_DELAY))};
+    }, ?FLUSH_INTERVAL))};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -234,10 +236,7 @@ handle_info(flush, State = #state{
             on ->
                 KiFKeys = maps:keys(KiF),
                 ToFlush0 = maps:without(KiFKeys, CachedKeys),
-
-                Cooldown = application:get_env(?CLUSTER_WORKER_APP_NAME,
-                    flush_key_cooldown_sek, 3),
-                CooldownUS = timer:seconds(Cooldown) * 1000,
+                CooldownUS = timer:seconds(?FLUSH_COOLDOWN) * 1000,
 
                 Now = os:timestamp(),
                 ToFlush = maps:filter(fun(K, _V) ->
@@ -737,9 +736,7 @@ send_response({Pid, Ref, Responses}, Batch) ->
 %%--------------------------------------------------------------------
 -spec schedule_flush(state()) -> state().
 schedule_flush(State) ->
-    Delay = application:get_env(cluster_worker, datastore_writer_flush_delay,
-        ?DEFAULT_FLUSH_DELAY),
-    schedule_flush(State, Delay).
+    schedule_flush(State, ?DATASTORE_WRITER_FLUSH_DELAY).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -755,7 +752,7 @@ schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
         {undefined, _} ->
             Timer = erlang:send_after(Delay, self(), flush),
             State#state{flush_timer = Timer};
-        {_, ?FAST_FLUSH_DELAY} ->
+        {_, ?FLUSH_INTERVAL} ->
             case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
                 on ->
                     erlang:cancel_timer(OldTimer, [{async, true}, {info, false}]),
