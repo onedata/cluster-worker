@@ -137,7 +137,7 @@
 errors:error().
 -type graph_get_result() :: {ok, {term(), revision()}} |
 {ok, gri:gri(), {term(), revision()}} | {ok, value, term()} | errors:error().
--type graph_delete_result() :: ok | errors:error().
+-type graph_delete_result() :: ok | {ok, value, term()} | errors:error().
 -type graph_update_result() :: ok | errors:error().
 
 -type graph_request_result() :: graph_create_result() | graph_get_result() |
