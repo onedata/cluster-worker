@@ -203,6 +203,7 @@ check_db_connection_loop() ->
             ok;
         Error ->
             ?debug("Test db save failed with error ~p", [Error]),
+            ?info("Database not ready yet..."),
             timer:sleep(?SAVE_CHECK_INTERVAL),
             check_db_connection_loop()
     end.
