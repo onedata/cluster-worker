@@ -218,7 +218,7 @@ init_pool(W) ->
     ok = rpc:call(W, view_traverse, init, [?MODULE]).
 
 init_pool(W, MasterJobsNum, SlaveJobsNum, ParallelTasksNum) ->
-    ok = rpc:call(W, view_traverse, init, [?MODULE, MasterJobsNum, SlaveJobsNum, ParallelTasksNum]).
+    ok = rpc:call(W, view_traverse, init, [?MODULE, MasterJobsNum, SlaveJobsNum, ParallelTasksNum, true]).
 
 stop_pool(W) ->
     ok = rpc:call(W, view_traverse, stop, [?MODULE]).

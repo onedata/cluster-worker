@@ -73,7 +73,8 @@
 -type environment_id() :: traverse_task_list:tree(). % environment (cluster) where task is scheduled or processed
 -type pool_options() :: #{
     executor => environment_id(),
-    callback_modules => [callback_module()]
+    callback_modules => [callback_module()],
+    restart => boolean()
 }.
 % Basic types for tasks management
 -type id() :: datastore:key().
@@ -178,28 +179,33 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
 
     Executor = maps:get(executor, Options, ?DEFAULT_ENVIRONMENT_ID),
     CallbackModules = maps:get(callback_modules, Options, [binary_to_atom(PoolName, utf8)]),
-
+    ShouldRestart = maps:get(restart, Options, true),
     ok = traverse_tasks_scheduler:init(PoolName, ParallelOrdersLimit),
     IdToCtx = repair_ongoing_tasks(PoolName, Executor),
 
-    lists:foreach(fun(CallbackModule) ->
-        {ok, JobIDs} = traverse_task_list:list_local_jobs(PoolName, CallbackModule),
+    case ShouldRestart of
+        true ->
+            lists:foreach(fun(CallbackModule) ->
+                {ok, JobIDs} = traverse_task_list:list_local_jobs(PoolName, CallbackModule),
 
-        lists:foreach(fun(JobID) ->
-            {ok, Job, _, TaskID} = CallbackModule:get_job(JobID),
-            case proplists:get_value(TaskID, IdToCtx, undefined) of
-                undefined ->
-                    ?warning("Job: ~p (id: ~p) of undefined (probably finished) task: ~p", [Job, JobID, TaskID]),
-                    ok;
-                ExtendedCtx ->
-                    {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, #{
-                        master_jobs_delegated => 1
-                    }),
-                    ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                        CallbackModule, ExtendedCtx, Executor, TaskID, Job, JobID)
-            end
-        end, JobIDs)
-    end, CallbackModules).
+                lists:foreach(fun(JobID) ->
+                    {ok, Job, _, TaskID} = CallbackModule:get_job(JobID),
+                    case proplists:get_value(TaskID, IdToCtx, undefined) of
+                        undefined ->
+                            ?warning("Job: ~p (id: ~p) of undefined (probably finished) task: ~p", [Job, JobID, TaskID]),
+                            ok;
+                        ExtendedCtx ->
+                            {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, #{
+                                master_jobs_delegated => 1
+                            }),
+                            ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
+                                CallbackModule, ExtendedCtx, Executor, TaskID, Job, JobID)
+                    end
+                end, JobIDs)
+            end, CallbackModules);
+        false ->
+            ok
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

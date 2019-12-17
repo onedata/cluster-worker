@@ -24,7 +24,7 @@
 
 %% API
 -export([
-    init/1, init/4, stop/1,
+    init/1, init/5, stop/1,
     run/3, run/4, cancel/2,
     get_offset/1
 ]).
@@ -62,13 +62,13 @@
 %%% view_traverse mandatory callbacks definitions
 %%%===================================================================
 
--callback process_row(Row :: json_utils:json_term(), Info :: info(), RowNumber :: non_neg_integer()) -> ok.
+-callback process_row(Row :: json_utils:json_map(), Info :: info(), RowNumber :: non_neg_integer()) -> ok.
 
 %%%===================================================================
 %%% view_traverse optional callbacks definitions
 %%%===================================================================
 
--callback batch_prehook(Rows :: [json_utils:json_term()], Token :: token(), Info :: info()) -> ok.
+-callback batch_prehook(Rows :: [json_utils:json_map()], Token :: token(), Info :: info()) -> ok.
 
 -callback task_started(task_id()) -> ok.
 
@@ -86,12 +86,15 @@
 
 -spec init(view_processing_module()) -> ok.
 init(ViewProcessingModule) ->
-    init(ViewProcessingModule, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT).
+    init(ViewProcessingModule, ?DEFAULT_MASTER_JOBS_LIMIT, ?DEFAULT_SLAVE_JOBS_LIMIT, ?DEFAULT_PARALLELISM_LIMIT, true).
 
--spec init(view_processing_module(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> ok.
-init(ViewProcessingModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
+-spec init(view_processing_module(), non_neg_integer(), non_neg_integer(), non_neg_integer(), boolean()) -> ok.
+init(ViewProcessingModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, ShouldRestart) ->
     PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
-    traverse:init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{callback_modules => [?MODULE]}).
+    traverse:init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, #{
+        callback_modules => [?MODULE],
+        restart => ShouldRestart
+    }).
 
 -spec stop(view_processing_module()) -> ok.
 stop(ViewProcessingModule) when is_atom(ViewProcessingModule) ->
@@ -309,7 +312,7 @@ view_exists(ViewName) ->
         {error, {<<"not_found">>, _}} -> false
     end.
 
--spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, json_utils:json_term()} | {error, term()}.
+-spec query(couchbase_driver:view(), [couchbase_driver:view_opt()]) -> {ok, json_utils:json_map()} | {error, term()}.
 query(ViewName, Opts) ->
     DiscCtx = datastore_model_default:get_default_disk_ctx(),
     couchbase_driver:query_view(DiscCtx, ViewName, ViewName, Opts).
