@@ -16,6 +16,7 @@
 -behaviour(worker_plugin_behaviour).
 
 -include("modules/datastore/datastore.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include("exometer_utils.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -25,6 +26,7 @@
 %% API
 -export([supervisor_flags/0, supervisor_children_spec/0]).
 -export([init_counters/0, init_report/0]).
+-export([check_db_connection/0]).
 
 -define(EXOMETER_COUNTERS,
     [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
@@ -33,7 +35,7 @@
     ]).
 
 -define(EXOMETER_NAME(Param), ?exometer_name(datastore, Param)).
-
+-define(SAVE_CHECK_INTERVAL, timer:seconds(5)).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -78,7 +80,7 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
-    ok.
+    wait_for_database_flush().
 
 %%%===================================================================
 %%% API
@@ -144,6 +146,17 @@ supervisor_children_spec() ->
         }
     ].
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits until db is ready to save documents.
+%% @end
+%%--------------------------------------------------------------------
+-spec check_db_connection() -> ok.
+check_db_connection() ->
+    ?info("Waiting for database readiness..."),
+    check_db_connection_loop(),
+    ?info("Database ready").
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -161,3 +174,36 @@ init_models() ->
         (_Model, {error, Reason}) ->
             {error, Reason}
     end, ok, Models).
+
+-spec wait_for_database_flush() -> ok.
+wait_for_database_flush() ->
+    wait_for_database_flush(couchbase_config:get_flush_queue_size()).
+
+-spec wait_for_database_flush(non_neg_integer()) -> ok.
+wait_for_database_flush(0) ->
+    ok;
+wait_for_database_flush(Size) ->
+    ?info("Waiting for couchbase to flush documents, current queue size ~p", [Size]),
+    timer:sleep(5000),
+    wait_for_database_flush(couchbase_config:get_flush_queue_size()).
+
+-spec check_db_connection_loop() -> ok.
+check_db_connection_loop() ->
+    CheckAns = try
+        Ctx = datastore_model_default:get_default_disk_ctx(),
+        TestDoc = #document{key = ?TEST_DOC_KEY},
+        couchbase_driver:save(Ctx#{no_seq => true}, ?TEST_DOC_KEY, TestDoc)
+    catch
+        E1:E2 ->
+            {E1, E2}
+    end,
+
+    case CheckAns of
+        {ok, _, _} ->
+            ok;
+        Error ->
+            ?debug("Test db save failed with error ~p", [Error]),
+            ?info("Database not ready yet..."),
+            timer:sleep(?SAVE_CHECK_INTERVAL),
+            check_db_connection_loop()
+    end.

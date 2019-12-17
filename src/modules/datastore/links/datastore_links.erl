@@ -45,6 +45,7 @@
 -include("modules/datastore/datastore_models.hrl").
 -include("modules/datastore/datastore_links.hrl").
 -include_lib("bp_tree/include/bp_tree.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get_forest_id/1, get_mask_root_id/1, get_tree_id/1]).
@@ -131,13 +132,23 @@ init_tree(Ctx, Key, TreeId, Batch) ->
 -spec init_tree(ctx(), key(), tree_id(), batch(), boolean()) ->
     {ok, tree()} | {error, term()}.
 init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
-    bp_tree:init([
+    Ans = bp_tree:init([
         {order, application:get_env(?CLUSTER_WORKER_APP_NAME,
             datastore_links_tree_order, 1024)},
         {store_module, links_tree},
         {store_args, [Ctx, Key, TreeId, Batch]},
         {read_only, ReadOnly}
-    ]).
+    ]),
+
+    case Ans of
+        {broken_root, Tree} ->
+            % The tree has been broken by abnormal termination of application
+            % Some data could be lost, proceeding with fixed root
+            ?error("Broken bp_tree ~p for key ~p and ctx ~p", [TreeId, Key, Ctx]),
+            {ok, Tree};
+        Other ->
+            Other
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
