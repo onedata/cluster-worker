@@ -348,7 +348,12 @@ handle_request(Session, #gs_req_graph{} = Req) ->
             {RequestedGRI, AuthHint, #gs_resp_graph{}};
 
         {delete, ok} ->
-            {not_subscribable, AuthHint, #gs_resp_graph{}}
+            {not_subscribable, AuthHint, #gs_resp_graph{}};
+        {delete, {ok, value, Value}} ->
+            {not_subscribable, AuthHint, #gs_resp_graph{
+                data_format = value,
+                data = translate_value(Translator, ProtoVer, RequestedGRI, Auth, Value)
+            }}
     end,
     case {Subscribe, NewAuthHint, NewGRI} of
         {true, _, not_subscribable} ->
