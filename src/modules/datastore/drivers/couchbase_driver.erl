@@ -324,7 +324,7 @@ query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Sets expiry field in context.
-%% Couchbase treats numbers smaller or equal to 2592000 as time to keep document
+%% Couchbase treats numbers smaller or equal to 2592000 as document's time to live
 %% and greater values as timestamp of deletion
 %% Translate expiry time to couchbase format
 %% @end

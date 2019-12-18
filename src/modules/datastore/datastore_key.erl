@@ -138,38 +138,24 @@ build_adjacent(Extension, Original) when is_binary(Extension) andalso is_binary(
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the cluster node responsible for handling given datastore key.
+%% Returns a single node responsible for handling given datastore key.
 %% @end
 %%--------------------------------------------------------------------
 -spec responsible_node(key()) -> node().
 responsible_node(Key) ->
-    CHashSeed = case to_basic_key_and_chash_label(Key) of
-        {BasicKey, undefined} ->
-            % Legacy key - use the whole key for routing
-            BasicKey;
-        {_, CHashLabel} ->
-            % Key with a chash label - use the label for routing
-            CHashLabel
-    end,
+    CHashSeed = get_chash_seed(Key),
     consistent_hashing:get_node(CHashSeed).
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the cluster nodes responsible for handling given datastore key.
+%% Returns a list of nodes of requested length responsible for handling given datastore key.
 %% @end
 %%--------------------------------------------------------------------
 -spec responsible_nodes(key(), non_neg_integer()) -> [node()].
-responsible_nodes(Key, NodesNumber) ->
-    CHashSeed = case to_basic_key_and_chash_label(Key) of
-        {BasicKey, undefined} ->
-            % Legacy key - use the whole key for routing
-            BasicKey;
-        {_, CHashLabel} ->
-            % Key with a chash label - use the label for routing
-            CHashLabel
-    end,
-    consistent_hashing:get_nodes(CHashSeed, NodesNumber).
+responsible_nodes(Key, NodesCount) ->
+    CHashSeed = get_chash_seed(Key),
+    consistent_hashing:get_nodes(CHashSeed, NodesCount).
 
 
 %%--------------------------------------------------------------------
@@ -217,4 +203,16 @@ to_basic_key_and_chash_label(Key) ->
             {BasicKey, CHashLabel};
         _ ->
             {Key, undefined}
+    end.
+
+%% @private
+-spec get_chash_seed(key()) -> key() | chash_label().
+get_chash_seed(Key) ->
+    case to_basic_key_and_chash_label(Key) of
+        {BasicKey, undefined} ->
+            % Legacy key - use the whole key for routing
+            BasicKey;
+        {_, CHashLabel} ->
+            % Key with a chash label - use the label for routing
+            CHashLabel
     end.
