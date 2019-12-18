@@ -99,7 +99,7 @@ set_root_id(NodeId, State = #state{
         value = #links_forest{
             model = maps:get(model, Ctx),
             key = Key,
-            trees = #{TreeId => {NodeId, datastore_utils:gen_rev(1)}}
+            trees = #{TreeId => {NodeId, datastore_rev:new(1)}}
         }
     },
     case datastore_doc:update(Ctx, ForestId, Diff, Default, Batch) of
@@ -313,10 +313,10 @@ get_root_id(TreeId, Trees) ->
 -spec set_root_id(id(), node_id(), trees()) -> trees().
 set_root_id(TreeId, NodeId, Trees) ->
     {Generation, _Hash} = case maps:find(TreeId, Trees) of
-        {ok, {_, Rev}} -> datastore_utils:parse_rev(Rev);
+        {ok, {_, Rev}} -> datastore_rev:parse(Rev);
         error -> {0, <<>>}
     end,
-    maps:put(TreeId, {NodeId, datastore_utils:gen_rev(Generation + 1)}, Trees).
+    maps:put(TreeId, {NodeId, datastore_rev:new(Generation + 1)}, Trees).
 
 %%--------------------------------------------------------------------
 %% @private
