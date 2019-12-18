@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions for handling with document revisions.
+%%% This module provides functions for handling document revisions.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_rev).
@@ -23,6 +23,7 @@
 -export_type([rev/0]).
 
 -define(REV_LENGTH, application:get_env(cluster_worker, datastore_doc_rev_length, 16)).
+-define(SEPARATOR, "-").
 
 %%%===================================================================
 %%% API
@@ -36,7 +37,7 @@
 -spec new(generation()) -> rev().
 new(Generation) ->
     Hash = str_utils:rand_hex(?REV_LENGTH),
-    <<(integer_to_binary(Generation))/binary, "-", Hash/binary>>.
+    <<(integer_to_binary(Generation))/binary, ?SEPARATOR, Hash/binary>>.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -45,7 +46,7 @@ new(Generation) ->
 %%--------------------------------------------------------------------
 -spec parse(rev()) -> {generation(), binary()}.
 parse(Rev) ->
-    [Generation, Hash] = binary:split(Rev, <<"-">>),
+    [Generation, Hash] = binary:split(Rev, <<?SEPARATOR>>),
     {binary_to_integer(Generation), Hash}.
 
 %%--------------------------------------------------------------------

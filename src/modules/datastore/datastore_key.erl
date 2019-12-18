@@ -129,7 +129,7 @@ build_adjacent(Extension, Original) when is_binary(Extension) andalso is_binary(
         {_, undefined} ->
             gen_legacy_key(Extension, Original);
         {BasicKey, CHashLabel} ->
-            % As the extension is usually a constant or has limited pool or
+            % As the extension is usually a constant or has limited pool of
             % values, it is placed in the middle of resulting key to avoid keys
             % with identical prefixes
             concatenate_chash_label(<<BasicKey/binary, Extension/binary>>, CHashLabel)
