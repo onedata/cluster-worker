@@ -31,10 +31,10 @@ test_hashing(Config) ->
 
     % Randomize some labels
     Labels = lists:map(fun
-        (I) when I div 4 == 0 -> str_utils:rand_hex(16);
-        (I) when I div 4 == 1 -> {some, <<"object">>, str_utils:rand_hex(2)};
-        (I) when I div 4 == 2 -> rand:uniform(10000);
-        (I) when I div 4 == 3 -> ["a", b, {c, d}, e, rand:uniform(10000)]
+        (I) when I rem 4 == 0 -> str_utils:rand_hex(16);
+        (I) when I rem 4 == 1 -> {some, <<"object">>, str_utils:rand_hex(2)};
+        (I) when I rem 4 == 2 -> rand:uniform(10000);
+        (I) when I rem 4 == 3 -> ["a", b, {c, d}, e, rand:uniform(10000)]
     end, lists:seq(1, 10000)),
 
     % Check label mapping to a single node
