@@ -170,8 +170,7 @@ get_root_id(State = #state{
 -spec create_node(links_node(), state()) ->
     {{ok, node_id()} | {error, term()}, state()}.
 create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
-    HashPart = consistent_hashing:get_hashing_key(Key),
-    NodeId = datastore_utils:gen_key(HashPart),
+    NodeId = datastore_key:new_adjacent_to(Key),
     Ctx2 = Ctx#{generated_key => true},
     Doc = #document{
         key = NodeId,
@@ -248,7 +247,7 @@ delete_node(NodeId, State = #state{ctx = #{disc_driver := undefined} = Ctx,
     batch = Batch}) ->
     Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
         link_memory_expiry, ?MEMORY_EXPIRY),
-    Ctx2 = datastore_utils:set_expiry(Ctx, Expiry),
+    Ctx2 = couchbase_driver:set_expiry(Ctx, Expiry),
     case datastore_doc:delete(Ctx2, NodeId, Batch) of
         {ok, Batch2} ->
             {ok, State#state{batch = Batch2}};
@@ -260,7 +259,7 @@ delete_node(NodeId, State = #state{ctx = #{disc_driver_ctx := DiscCtx} = Ctx,
     Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
         link_disk_expiry, ?DISK_EXPIRY),
 
-    Ctx2 = Ctx#{disc_driver_ctx => datastore_utils:set_expiry(DiscCtx, Expiry)},
+    Ctx2 = Ctx#{disc_driver_ctx => couchbase_driver:set_expiry(DiscCtx, Expiry)},
     case datastore_doc:delete(Ctx2, NodeId, Batch) of
         {ok, Batch2} ->
             {ok, State#state{batch = Batch2}};

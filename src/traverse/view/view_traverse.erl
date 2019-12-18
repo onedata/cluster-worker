@@ -272,7 +272,7 @@ task_callback(PoolName, Function, TaskId) ->
 
 -spec ensure_defined_task_id(task_id() | undefined) -> task_id().
 ensure_defined_task_id(undefined) ->
-    datastore_utils:gen_key();
+    datastore_key:new();
 ensure_defined_task_id(TaskId) when is_binary(TaskId) ->
     TaskId.
 

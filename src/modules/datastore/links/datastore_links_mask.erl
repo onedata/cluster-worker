@@ -50,8 +50,7 @@
 -spec init(ctx(), key(), tree_id(), batch()) -> {ok | {error, term()}, mask(), boolean()}.
 init(Ctx, Key, TreeId, Batch) ->
     MaskRootId = datastore_links:get_mask_root_id(Key),
-    HashPart = consistent_hashing:get_hashing_key(Key),
-    Head = Tail = datastore_utils:gen_key(HashPart),
+    Head = Tail = datastore_key:new_adjacent_to(Key),
     Mask = #mask{
         ctx = Ctx,
         key = Key,
@@ -157,7 +156,7 @@ mark_deleted(LinkName, LinkRev, Mask = #mask{
             true ->
                 {ok, LinksMask#links_mask{links = [{LinkName, LinkRev} | Links]}};
             false ->
-                {ok, LinksMask#links_mask{next = datastore_utils:gen_key()}}
+                {ok, LinksMask#links_mask{next = datastore_key:new()}}
         end
     end,
     Default = #document{
@@ -206,7 +205,7 @@ load(Ptr, Cache, Mask = #mask{ctx = Ctx, batch = Batch}) ->
         {{ok, #document{deleted = true, value = #links_mask{
             next = <<>>
         }}}, Batch2} ->
-            Head = Tail = datastore_utils:gen_key(),
+            Head = Tail = datastore_key:new(),
             {{ok, Cache}, Mask#mask{head = Head, tail = Tail, batch = Batch2}};
         {{ok, #document{deleted = true, value = #links_mask{
             next = Next

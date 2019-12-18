@@ -410,7 +410,7 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
 choose_node(WorkerRef) ->
     case WorkerRef of
         {id, WName, ID} ->
-            {WName, consistent_hashing:get_node(ID)};
+            {WName, datastore_key:responsible_node(ID)};
         {WName, WNode} ->
             {WName, WNode};
         WName ->

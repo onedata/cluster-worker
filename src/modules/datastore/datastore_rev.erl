@@ -16,7 +16,7 @@
 -export([new/1, parse/1, is_greater/2]).
 
 % a positive integer that increases with every modification made to a document
--type generation() :: binary().
+-type generation() :: pos_integer().
 % concatenation of the document generation and a random hash
 -type rev() :: binary().
 

@@ -57,7 +57,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2]).
--export([responsible_node/1]).
+-export([responsible_node/1, responsible_nodes/2]).
 -export([gen_legacy_key/2]).
 
 %%%===================================================================
@@ -152,6 +152,24 @@ responsible_node(Key) ->
             CHashLabel
     end,
     consistent_hashing:get_node(CHashSeed).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns the cluster nodes responsible for handling given datastore key.
+%% @end
+%%--------------------------------------------------------------------
+-spec responsible_nodes(key(), non_neg_integer()) -> [node()].
+responsible_nodes(Key, NodesNumber) ->
+    CHashSeed = case to_basic_key_and_chash_label(Key) of
+        {BasicKey, undefined} ->
+            % Legacy key - use the whole key for routing
+            BasicKey;
+        {_, CHashLabel} ->
+            % Key with a chash label - use the label for routing
+            CHashLabel
+    end,
+    consistent_hashing:get_nodes(CHashSeed, NodesNumber).
 
 
 %%--------------------------------------------------------------------

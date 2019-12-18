@@ -20,6 +20,7 @@
 -export([save_design_doc/3, get_design_doc/2, delete_design_doc/2]).
 -export([save_view_doc/3, save_view_doc/4, save_view_doc/5,
     save_spatial_view_doc/3, save_spatial_view_doc/4, query_view/4]).
+-export([set_expiry/2]).
 
 -type ctx() :: #{bucket := couchbase_config:bucket(),
                  pool_mode => couchbase_pool:mode(),
@@ -319,6 +320,20 @@ save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
 query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
     Mode = maps:get(pool_mode, Ctx, read),
     couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets expiry field in context.
+%% Couchbase treats numbers smaller or equal to 2592000 as time to keep document
+%% and greater values as timestamp of deletion
+%% Translate expiry time to couchbase format
+%% @end
+%%--------------------------------------------------------------------
+-spec set_expiry(ctx() | datastore:ctx(), non_neg_integer()) -> ctx() | datastore:ctx().
+set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
+    Ctx#{expiry => Expiry};
+set_expiry(Ctx, Expiry) ->
+    Ctx#{expiry => erlang:system_time(second) + Expiry}.
 
 %%%===================================================================
 %%% Internal functions
