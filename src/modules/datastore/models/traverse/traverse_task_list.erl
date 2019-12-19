@@ -167,8 +167,8 @@ list_local_jobs(Pool, CallbackModule) ->
 %%--------------------------------------------------------------------
 -spec add_link(traverse_task:ctx(), traverse:pool(), forest_type(),
     tree(), traverse:id(), traverse:timestamp()) -> ok.
-add_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
-    add_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, ID, Timestamp).
+add_link(Ctx, Pool, Type, Tree, Id, Timestamp) ->
+    add_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, Id, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -177,10 +177,10 @@ add_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 %%--------------------------------------------------------------------
 -spec add_scheduled_link(traverse:pool(), tree(), traverse:id(), traverse:timestamp(), traverse:group(),
     traverse:environment_id()) -> ok.
-add_scheduled_link(Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
+add_scheduled_link(Pool, Tree, Id, Timestamp, GroupID, EnvironmentID) ->
     BasicKey = forest_key(Pool, scheduled),
     add_link_with_timestamp(traverse_task:get_ctx(),
-        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID), Tree, ID, Timestamp).
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID), Tree, Id, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -208,8 +208,8 @@ add_job_link(Pool, CallbackModule, JobID) ->
 %%--------------------------------------------------------------------
 -spec delete_link(traverse_task:ctx(), traverse:pool(), forest_type(),
     tree(), traverse:id(), traverse:timestamp()) -> ok.
-delete_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
-    delete_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, ID, Timestamp).
+delete_link(Ctx, Pool, Type, Tree, Id, Timestamp) ->
+    delete_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, Id, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -218,10 +218,10 @@ delete_link(Ctx, Pool, Type, Tree, ID, Timestamp) ->
 %%--------------------------------------------------------------------
 -spec delete_scheduled_link(traverse:pool(), tree(), traverse:id(), traverse:timestamp(), traverse:group(),
     traverse:environment_id()) -> ok.
-delete_scheduled_link(Pool, Tree, ID, Timestamp, GroupID, EnvironmentID) ->
+delete_scheduled_link(Pool, Tree, Id, Timestamp, GroupID, EnvironmentID) ->
     BasicKey = forest_key(Pool, scheduled),
     delete_link_with_timestamp(traverse_task:get_ctx(),
-        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID), Tree, ID, Timestamp).
+        ?LOAD_BALANCING_FOREST_KEY(BasicKey, GroupID, EnvironmentID), Tree, Id, Timestamp).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -245,24 +245,23 @@ delete_job_link(Pool, CallbackModule, JobID) ->
 
 -spec add_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
-add_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp) ->
+add_link_with_timestamp(Ctx, Key, Tree, Id, Timestamp) ->
     [{ok, _}] = datastore_model:add_links(Ctx,
-        Key, Tree, [{link_key(ID, Timestamp), ID}]),
+        Key, Tree, [{link_key(Id, Timestamp), Id}]),
     ok.
 
 -spec delete_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
-delete_link_with_timestamp(Ctx, Key, Tree, ID, Timestamp) ->
+delete_link_with_timestamp(Ctx, Key, Tree, Id, Timestamp) ->
     [ok] = datastore_model:delete_links(Ctx,
-        Key, Tree, [link_key(ID, Timestamp)]),
+        Key, Tree, [link_key(Id, Timestamp)]),
     ok.
 
 -spec link_key(traverse:id(), traverse:timestamp()) -> link_key().
-link_key(ID0, Timestamp) ->
-    ID = consistent_hashing:get_random_label_part(ID0),
+link_key(Id, Timestamp) ->
     TimestampPart = (integer_to_binary(?EPOCH_INFINITY - Timestamp)),
-    Length = min(byte_size(ID), ?LINK_NAME_ID_PART_LENGTH),
-    IdPart = binary:part(ID, 0, Length),
+    Length = min(byte_size(Id), ?LINK_NAME_ID_PART_LENGTH),
+    IdPart = binary:part(Id, 0, Length),
     <<TimestampPart/binary, IdPart/binary>>.
 
 -spec forest_key(traverse:pool(), forest_type()) -> forest_key().

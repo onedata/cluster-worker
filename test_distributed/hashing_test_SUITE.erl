@@ -27,17 +27,40 @@ all() -> ?ALL([test_hashing]).
 %%%===================================================================
 
 test_hashing(Config) ->
-    Workers = [Worker1 | _] = ?config(cluster_worker_nodes, Config),
+    AllNodes = [FirstNode | _] = ?config(cluster_worker_nodes, Config),
 
-    ?assertEqual(lists:usort(Workers), rpc:call(Worker1, consistent_hashing, get_all_nodes, [])),
-    NodeOfUuid1 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid1">>]),
-    NodeOfUuid2 = rpc:call(Worker1, consistent_hashing, get_node, [<<"uuid3">>]),
-    NodeOfObject = rpc:call(Worker1, consistent_hashing, get_node, [{some, <<"object">>}]),
+    % Randomize some labels
+    Labels = lists:map(fun
+        (I) when I rem 4 == 0 -> str_utils:rand_hex(16);
+        (I) when I rem 4 == 1 -> {some, <<"object">>, str_utils:rand_hex(2)};
+        (I) when I rem 4 == 2 -> rand:uniform(10000);
+        (I) when I rem 4 == 3 -> ["a", b, {c, d}, e, rand:uniform(10000)]
+    end, lists:seq(1, 10000)),
 
-    ?assert(erlang:is_atom(NodeOfUuid1)),
-    ?assert(erlang:is_atom(NodeOfUuid2)),
-    ?assert(erlang:is_atom(NodeOfObject)),
-    ?assert(lists:member(NodeOfUuid1, Workers)),
-    ?assert(lists:member(NodeOfUuid2, Workers)),
-    ?assert(lists:member(NodeOfObject, Workers)),
-    ?assertNotEqual(NodeOfUuid1, NodeOfUuid2).
+    % Check label mapping to a single node
+    NodesChosenForLabels = lists:map(fun(Label) ->
+        Node = rpc:call(FirstNode, consistent_hashing, get_node, [Label]),
+        % The same label should yield the same node
+        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_node, [Label])),
+        ?assert(erlang:is_atom(Node)),
+        ?assert(lists:member(Node, AllNodes)),
+        Node
+    end, Labels),
+
+    % Check label mapping to multiple nodes
+    lists:foreach(fun(Label) ->
+        lists:foreach(fun(NodesCount) ->
+            Nodes = rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount]),
+            % The same label should yield the same nodes
+            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount])),
+            lists:foreach(fun(Node) ->
+                ?assert(erlang:is_atom(Node)),
+                ?assert(lists:member(Node, AllNodes))
+            end, Nodes)
+        end, lists:seq(1, length(AllNodes)))
+    end, Labels),
+
+    % At 10000 different labels, at least one should have landed on each node
+    lists:foreach(fun(Node) ->
+        lists:member(Node, NodesChosenForLabels)
+    end, AllNodes).

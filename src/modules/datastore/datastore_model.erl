@@ -86,7 +86,7 @@ init(Ctx) ->
 % TODO - VFS-3975 - allow routing via generic key without model
 % problem with links application that need such routing key
 get_unique_key(#{model := Model}, Key) ->
-    datastore_utils:gen_key(atom_to_binary(Model, utf8), Key).
+    datastore_key:build_adjacent(atom_to_binary(Model, utf8), Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -108,7 +108,7 @@ create(Ctx, Doc = #document{key = Key}) ->
 -spec save(ctx(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Doc = #document{key = undefined}) ->
     Ctx2 = Ctx#{generated_key => true},
-    Doc2 = Doc#document{key = datastore_utils:gen_key()},
+    Doc2 = Doc#document{key = datastore_key:new()},
     save(Ctx2, Doc2);
 save(Ctx, Doc = #document{key = Key}) ->
     Result = datastore_apply(Ctx, Key, fun datastore:save/3, save, [Doc]),
@@ -179,7 +179,7 @@ delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
 delete(Ctx0, Key, Pred) ->
     Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
         document_expiry, ?EXPIRY),
-    Ctx = datastore_utils:set_expiry(Ctx0, Expiry),
+    Ctx = couchbase_driver:set_expiry(Ctx0, Expiry),
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).

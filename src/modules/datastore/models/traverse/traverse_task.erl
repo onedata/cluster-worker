@@ -552,7 +552,7 @@ resolve_conflict(_Ctx, NewDoc, PrevDoc) ->
         {_, true} ->
             #document{revs = [NewRev | _]} = NewDoc,
             #document{revs = [PrevRev | _]} = PrevDoc,
-            case datastore_utils:is_greater_rev(NewRev, PrevRev) of
+            case datastore_rev:is_greater(NewRev, PrevRev) of
                 true ->
                     {true, NewDoc#document{value = NewValue#traverse_task{canceled = C1 or C2, enqueued = E1 and E2}}};
                 false ->

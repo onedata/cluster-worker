@@ -117,13 +117,13 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 select_node(_Key, [#{routing := local} | _] = Args) ->
     {node(), Args, true};
 select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
-    [Node | Nodes] = AllNodes = consistent_hashing:get_nodes(Key, Num),
+    [Node | Nodes] = AllNodes = datastore_key:responsible_nodes(Key, Num),
     {Node, [Ctx#{memory_copies => Nodes} | ArgsTail], lists:member(node(), AllNodes)};
 select_node(Key, [#{memory_copies := _} | _] = Args) ->
-    Node = consistent_hashing:get_node(Key),
+    Node = datastore_key:responsible_node(Key),
     {Node, Args, true};
 select_node(Key, Args) ->
-    Node = consistent_hashing:get_node(Key),
+    Node = datastore_key:responsible_node(Key),
     {Node, Args, false}.
 
 %%--------------------------------------------------------------------
