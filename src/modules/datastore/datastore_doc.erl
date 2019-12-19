@@ -27,9 +27,9 @@
 -export([get_links/5, get_links_trees/3]).
 
 -type ctx() :: datastore:ctx().
--type key() :: undefined | binary().
+-type key() :: undefined | datastore_key:key().
 -type value() :: term().
--type rev() :: binary().
+-type rev() :: datastore_rev:rev().
 -type seq() :: couchbase_changes:seq().
 -type scope() :: binary().
 -type mutator() :: binary().
@@ -415,7 +415,7 @@ resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
 default_resolve_conflict(RemoteDoc, LocalDoc) ->
     #document{revs = [RemoteRev | _]} = RemoteDoc,
     #document{revs = [LocalRev | _]} = LocalDoc,
-    case datastore_utils:is_greater_rev(RemoteRev, LocalRev) of
+    case datastore_rev:is_greater(RemoteRev, LocalRev) of
         true ->
             {save, RemoteDoc};
         false ->
@@ -514,14 +514,14 @@ set_version(Doc) ->
 %%--------------------------------------------------------------------
 -spec set_rev(ctx(), doc(value()), undefined | rev()) -> doc(value()).
 set_rev(#{sync_enabled := true}, Doc = #document{revs = []}, undefined) ->
-    Doc#document{revs = [datastore_utils:gen_rev(1)]};
+    Doc#document{revs = [datastore_rev:new(1)]};
 set_rev(Ctx, Doc = #document{revs = [Rev | _]}, undefined) ->
     set_rev(Ctx, Doc, Rev);
 set_rev(#{sync_enabled := true}, Doc = #document{revs = Revs}, PrevRev) ->
     Length = application:get_env(cluster_worker,
         datastore_doc_revision_history_length, 1),
-    {Generation, _} = datastore_utils:parse_rev(PrevRev),
-    Rev = datastore_utils:gen_rev(Generation + 1),
+    {Generation, _} = datastore_rev:parse(PrevRev),
+    Rev = datastore_rev:new(Generation + 1),
     Doc#document{revs = lists:sublist([Rev | Revs], Length)};
 set_rev(_Ctx, Doc, _PrevRev) ->
     Doc.

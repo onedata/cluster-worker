@@ -452,7 +452,7 @@ get_key(Key, Type) ->
 -spec get_key_num(datastore:key(), non_neg_integer()) ->
     non_neg_integer().
 get_key_num(Key, SpaceSize) when is_binary(Key) ->
-    ID = binary:decode_unsigned(Key),
-    ID rem SpaceSize + 1;
+    Id = binary:decode_unsigned(Key),
+    Id rem SpaceSize + 1;
 get_key_num(Key, SpaceSize) ->
     get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).

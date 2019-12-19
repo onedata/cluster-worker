@@ -93,8 +93,8 @@ get_name_extensions() ->
 get_num(Key) when is_binary(Key) ->
   MaxNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
     tp_subtrees_number, 10),
-  ID = binary:decode_unsigned(Key),
-  integer_to_list(ID rem MaxNum + 1);
+  Id = binary:decode_unsigned(Key),
+  integer_to_list(Id rem MaxNum + 1);
 get_num(Key) ->
   get_num(crypto:hash(md5, term_to_binary(Key))).
 

@@ -409,8 +409,8 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
     {WorkerName :: request_dispatcher:worker_name(), WorkerNode :: node()}.
 choose_node(WorkerRef) ->
     case WorkerRef of
-        {id, WName, ID} ->
-            {WName, consistent_hashing:get_node(ID)};
+        {id, WName, Id} ->
+            {WName, datastore_key:responsible_node(Id)};
         {WName, WNode} ->
             {WName, WNode};
         WName ->

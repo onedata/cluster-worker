@@ -92,7 +92,7 @@ resolve_conflict(_Ctx,
             {_, undefined} ->
                 {Mutated, maps:put(TreeId, RemoteTreeWithRev, MergedTrees)};
             {{_RemoteTree, RemoteRev}, {_LocalTree, LocalRev}} ->
-                case datastore_utils:is_greater_rev(RemoteRev, LocalRev) of
+                case datastore_rev:is_greater(RemoteRev, LocalRev) of
                     true ->
                         {Mutated, maps:put(TreeId, RemoteTreeWithRev, MergedTrees)};
                     false ->

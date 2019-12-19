@@ -54,7 +54,7 @@
 -define(KEY(N), ?TERM("key", N)).
 -define(UNIQUE_KEY(Model, Key),
     datastore_model:get_unique_key(#{model => Model}, Key)).
--define(RND_KEY, datastore_utils:gen_key()).
+-define(RND_KEY, datastore_key:new()).
 -define(REV, ?REV(1)).
 -define(REV(N), <<(integer_to_binary(N))/binary, "-",
     (str_utils:rand_hex(16))/binary>>).
