@@ -22,10 +22,12 @@
 %%% The chash label is used to route keys - pick a cluster node responsible
 %%% for given key. Presence of the chash label is recommended, but not mandatory
 %%% - in such case legacy key routing applies.
-%%%
 %%% The chash label can be random (if no specific key routing is needed), or
-%%% inherited from another key by creating an *adjacent key*. Such key will be
-%%% always handled on the same cluster node as the original one.
+%%% inherited from another key by creating an *adjacent key*.
+%%%
+%%% ADJACENT KEYS are always handled on the same cluster node thanks to the fact
+%%% that they share the same chash label. It is not possible to create an
+%%% adjacent key to a legacy key.
 %%%
 %%% For backward compatibility and in order to retain the system data from older
 %%% versions, some of the keys are still constructed using the legacy procedure.
@@ -51,12 +53,16 @@
 % Label used for key routing - the same label is guaranteed to be always handled
 % on the same cluster node
 -type chash_label() :: <<_:32>>. % ?CHASH_LABEL_CHARS * 8 bits
+% Terms that will be digested to create a key - the same terms guarantee to
+% yield the same key. A list of binaries is preferred, other terms are first
+% transformed to binaries.
+-type digest_components() :: term() | [binary() | term()].
 
 -export_type([key/0]).
 
 %% API
 -export([new/0, new_from_digest/1]).
--export([new_adjacent_to/1, build_adjacent/2]).
+-export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
 -export([responsible_node/1, responsible_nodes/2]).
 -export([gen_legacy_key/2]).
 
@@ -79,12 +85,10 @@ new() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns the datastore key obtained from digesting arbitrary terms. Binaries
-%% are recommended, other terms are firstly transformed to binary. The digest
-%% procedure is deterministic - guarantees to return the same key for the same
-%% input parameters.
+%% are recommended, other terms are firstly transformed to binary.
 %% @end
 %%--------------------------------------------------------------------
--spec new_from_digest(term() | [binary() | term()]) -> key().
+-spec new_from_digest(digest_components()) -> key().
 new_from_digest(DigestComponents) ->
     BasicKey = digest(DigestComponents),
     % Take the chash label from the middle of the basic key
@@ -95,11 +99,7 @@ new_from_digest(DigestComponents) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates a new, random key that is adjacent to the Original key.
-%% Adjacency means that both keys are handled on the same cluster node
-%% (they have the same chash label).
-%% NOTE: if a legacy Original key is given, the legacy key generation procedure
-%% applies and proper key routing (adjacency) is not supported. This is
-%% necessary for backward compatibility.
+%% NOTE: if a legacy Original key is given, adjacency is not supported.
 %% @end
 %%--------------------------------------------------------------------
 -spec new_adjacent_to(Original :: key()) -> key().
@@ -114,13 +114,9 @@ new_adjacent_to(Original) when is_binary(Original) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Builds a key that is adjacent to the Original key using given Extension.
-%% Adjacency means that both keys are handled on the same cluster node
-%% (they have the same chash label).
-%% NOTE: if a legacy Original key is given, the legacy key generation procedure
-%% applies and proper key routing (adjacency) is not supported. This is
-%% necessary for backward compatibility.
 %% Extension must be a valid datastore key (typically a constant word or
 %% another key) or an empty binary for legacy keys.
+%% NOTE: if a legacy Original key is given, adjacency is not supported.
 %% @end
 %%--------------------------------------------------------------------
 -spec build_adjacent(Extension :: key(), Original :: key()) -> key().
@@ -133,6 +129,22 @@ build_adjacent(Extension, Original) when is_binary(Extension) andalso is_binary(
             % values, it is placed in the middle of resulting key to avoid keys
             % with identical prefixes
             concatenate_chash_label(<<BasicKey/binary, Extension/binary>>, CHashLabel)
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a key from digest that is adjacent to the Original key. Binaries are
+%% recommended for the digest, other terms are firstly transformed to binary.
+%% NOTE: if a legacy Original key is given, adjacency is not supported.
+%% @end
+%%--------------------------------------------------------------------
+-spec adjacent_from_digest(digest_components(), Original :: key()) -> key().
+adjacent_from_digest(DigestComponents, Original) when is_binary(Original) ->
+    BasicKey = digest(DigestComponents),
+    case to_basic_key_and_chash_label(Original) of
+        {_, undefined} -> gen_legacy_key(BasicKey, Original);
+        {_, CHashLabel} -> concatenate_chash_label(BasicKey, CHashLabel)
     end.
 
 
@@ -178,7 +190,7 @@ gen_legacy_key(Seed, Key) ->
 %% ====================================================================
 
 %% @private
--spec digest(term() | [binary() | term()]) -> binary().
+-spec digest(digest_components()) -> binary().
 digest(DigestComponents) when is_list(DigestComponents) ->
     FinalCtx = lists:foldl(fun
         (Bin, Ctx) when is_binary(Bin) -> crypto:hash_update(Ctx, Bin);
@@ -187,6 +199,7 @@ digest(DigestComponents) when is_list(DigestComponents) ->
     hex_utils:hex(crypto:hash_final(FinalCtx));
 digest(Term) ->
     digest([Term]).
+
 
 %% @private
 -spec concatenate_chash_label(key(), chash_label()) -> key().
@@ -204,6 +217,7 @@ to_basic_key_and_chash_label(Key) ->
         _ ->
             {Key, undefined}
     end.
+
 
 %% @private
 -spec get_chash_seed(key()) -> key() | chash_label().

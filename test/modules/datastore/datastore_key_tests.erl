@@ -36,6 +36,9 @@ datastore_key_test_() ->
             {"build key adjacent to a random key", fun build_key_adjacent_to_a_random_key/0},
             {"build key adjacent to a digest key", fun build_key_adjacent_to_a_digest_key/0},
             {"build key adjacent to a legacy key", fun build_key_adjacent_to_a_legacy_key/0},
+            {"key from digest adjacent to a random key", fun key_from_digest_adjacent_to_a_random_key/0},
+            {"key from digest adjacent to a digest key", fun key_from_digest_adjacent_to_a_digest_key/0},
+            {"key from digest adjacent to a legacy key", fun key_from_digest_adjacent_to_a_legacy_key/0},
             {"gen legacy key", fun gen_legacy_key/0}
         ]
     }.
@@ -95,7 +98,7 @@ new_key_adjacent_to_a_random_key(_Repeat) ->
 new_key_adjacent_to_a_digest_key() ->
     lists:foreach(fun new_key_adjacent_to_a_digest_key/1, lists:seq(1, 100)).
 new_key_adjacent_to_a_digest_key(_Repeat) ->
-    DigestKey = datastore_key:new_from_digest([a, b, <<"binary">>]),
+    DigestKey = datastore_key:new_from_digest([a, b, str_utils:rand_hex(10)]),
     new_adjacent_key_base(all_keys_from_the_same_predecessor, DigestKey, adjacent),
     new_adjacent_key_base(each_key_recursively_from_the_previous, DigestKey, adjacent).
 
@@ -138,7 +141,7 @@ build_key_adjacent_to_a_random_key(_Repeat) ->
 build_key_adjacent_to_a_digest_key() ->
     lists:foreach(fun build_key_adjacent_to_a_digest_key/1, lists:seq(1, 100)).
 build_key_adjacent_to_a_digest_key(_Repeat) ->
-    DigestKey = datastore_key:new_from_digest([a, b, <<"binary">>]),
+    DigestKey = datastore_key:new_from_digest([a, b, str_utils:rand_hex(10)]),
     build_adjacent_key_base(all_keys_from_the_same_predecessor, DigestKey, adjacent),
     build_adjacent_key_base(each_key_recursively_from_the_previous, DigestKey, adjacent).
 
@@ -176,6 +179,60 @@ build_adjacent_key_base(KeyCreationPattern, OriginalKey, ExpectedAdjacency) ->
     end, OriginalKey, ExtensionExamples),
     AllKeys = [OriginalKey | NewKeys],
     assert_keys_are_different(AllKeys),
+    case ExpectedAdjacency of
+        adjacent -> assert_keys_are_adjacent(AllKeys);
+        not_adjacent -> ok
+    end.
+
+
+key_from_digest_adjacent_to_a_random_key() ->
+    lists:foreach(fun key_from_digest_adjacent_to_a_random_key/1, lists:seq(1, 100)).
+key_from_digest_adjacent_to_a_random_key(_Repeat) ->
+    RandomKey = datastore_key:new(),
+    adjacent_key_from_digest_base(all_keys_from_the_same_predecessor, RandomKey, adjacent),
+    adjacent_key_from_digest_base(each_key_recursively_from_the_previous, RandomKey, adjacent).
+
+
+key_from_digest_adjacent_to_a_digest_key() ->
+    lists:foreach(fun key_from_digest_adjacent_to_a_digest_key/1, lists:seq(1, 100)).
+key_from_digest_adjacent_to_a_digest_key(_Repeat) ->
+    DigestKey = datastore_key:new_from_digest({def, [a, b, str_utils:rand_hex(10)]}),
+    adjacent_key_from_digest_base(all_keys_from_the_same_predecessor, DigestKey, adjacent),
+    adjacent_key_from_digest_base(each_key_recursively_from_the_previous, DigestKey, adjacent).
+
+
+key_from_digest_adjacent_to_a_legacy_key() ->
+    lists:foreach(fun key_from_digest_adjacent_to_a_legacy_key/1, lists:seq(1, 100)).
+key_from_digest_adjacent_to_a_legacy_key(_Repeat) ->
+    LegacyKey = ?RAND_LEGACY_KEY,
+    % Adjacency (routing to the same node) is not supported for legacy keys,
+    % gut key generation should work anyway
+    adjacent_key_from_digest_base(all_keys_from_the_same_predecessor, LegacyKey, not_adjacent),
+    adjacent_key_from_digest_base(each_key_recursively_from_the_previous, LegacyKey, not_adjacent).
+
+
+adjacent_key_from_digest_base(KeyCreationPattern, OriginalKey, ExpectedAdjacency) ->
+    DigestComponentsExamples = [
+        a,
+        {tuple, value},
+        17,
+        [a, b, c],
+        [<<"binary">>],
+        [<<"list">>, <<"of">>, <<"binaries">>],
+        [a, b, <<"binary">>, {record, val}]
+    ],
+    {NewKeys, _} = lists:mapfoldl(fun(DigestComponents, PreviousKey) ->
+        AdjacentKey = datastore_key:adjacent_from_digest(DigestComponents, PreviousKey),
+        % The same input parameters should always return the same key
+        ?assertEqual(AdjacentKey, datastore_key:adjacent_from_digest(DigestComponents, PreviousKey)),
+        case KeyCreationPattern of
+            all_keys_from_the_same_predecessor -> {AdjacentKey, OriginalKey};
+            each_key_recursively_from_the_previous -> {AdjacentKey, AdjacentKey}
+        end
+    end, OriginalKey, DigestComponentsExamples),
+    AllKeys = [OriginalKey | NewKeys],
+    assert_keys_are_different(AllKeys),
+    assert_keys_are_same_length(AllKeys),
     case ExpectedAdjacency of
         adjacent -> assert_keys_are_adjacent(AllKeys);
         not_adjacent -> ok
