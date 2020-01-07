@@ -85,8 +85,7 @@ new() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns the datastore key obtained from digesting arbitrary terms.
-%% A list of binaries is preferred, are recommended, other terms are
-%% firstly transformed to binary.
+%% A list of binaries is preferred, other terms are first transformed to binary.
 %% @end
 %%--------------------------------------------------------------------
 -spec new_from_digest(digest_components()) -> key().
@@ -115,8 +114,7 @@ new_adjacent_to(Original) when size(Original) > 0 ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Builds a key that is adjacent to the Original key using given Extension.
-%% Extension must be a valid datastore key (typically a constant word or
-%% another key) or an empty binary for legacy keys.
+%% Extension must be a valid key (typically a constant or another key).
 %% NOTE: if a legacy Original key is given, adjacency is not supported.
 %% @end
 %%--------------------------------------------------------------------
@@ -136,8 +134,7 @@ build_adjacent(Extension, Original) when size(Extension) > 0 andalso size(Origin
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates a key from digest that is adjacent to the Original key.
-%% A list of binaries is preferred, are recommended, other terms are
-%% firstly transformed to binary.
+%% A list of binaries is preferred, other terms are first transformed to binary.
 %% NOTE: if a legacy Original key is given, adjacency is not supported.
 %% @end
 %%--------------------------------------------------------------------
@@ -167,7 +164,8 @@ responsible_node(Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns a list of nodes of requested length responsible for handling given datastore key.
+%% Returns a list of nodes of requested length responsible for handling
+%% given datastore key.
 %% @end
 %%--------------------------------------------------------------------
 -spec responsible_nodes(key(), pos_integer()) -> [node()].
