@@ -285,16 +285,27 @@ gen_legacy_key() ->
     lists:foreach(fun({Seed, Key, ExpectedResultKey}) ->
         ?assertEqual(ExpectedResultKey, datastore_key:gen_legacy_key(Seed, Key)),
         % build_adjacent_key should work like gen_legacy_key if a legacy Key is given
-        ?assertEqual(ExpectedResultKey, datastore_key:build_adjacent(Seed, Key))
+        % however, empty binaries are disallowed as Extensions
+        case Seed of
+            <<"">> -> skip;
+            _ -> ?assertEqual(ExpectedResultKey, datastore_key:build_adjacent(Seed, Key))
+        end
     end, legacy_key_specific_examples()).
 
 
 % Examples of keys created using the legacy procedure from previous versions of the system
 legacy_key_specific_examples() -> [
     {<<"">>, <<"myIdP:123456789@idp.com">>, <<"2073dfa18a7e64bee5c492b71e9ee5c1">>},
+    {<<"seed">>, <<"myIdP:123456789@idp.com">>, <<"2298e9f441be7fc5a236271311a52c2d">>},
+
     {<<"">>, <<"sso_org:abcdefghij">>, <<"c85747a0cb9a377891a0505f218d910d">>},
+    {<<"seed">>, <<"sso_org:abcdefghij">>, <<"2415c8ce5ae9d80012044aa0f07bbc98">>},
+
     {<<"">>, <<"vo:my-organization/tm:support-unit">>, <<"115594c131271df8df8510e5ac7d8861">>},
-    {<<"">>, <<"ut:company/tm:users/rl:admins">>, <<"55765121f92ced7a57eefb23caad9e22">>}
+    {<<"seed">>, <<"vo:my-organization/tm:support-unit">>, <<"8699d7c1b769da53dba0dc280b255db6">>},
+
+    {<<"">>, <<"ut:company/tm:users/rl:admins">>, <<"55765121f92ced7a57eefb23caad9e22">>},
+    {<<"seed">>, <<"ut:company/tm:users/rl:admins">>, <<"a6ca3d2fd3565adb19a236198fe83d97">>}
 ].
 
 
