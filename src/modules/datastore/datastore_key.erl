@@ -84,8 +84,9 @@ new() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the datastore key obtained from digesting arbitrary terms. Binaries
-%% are recommended, other terms are firstly transformed to binary.
+%% Returns the datastore key obtained from digesting arbitrary terms.
+%% A list of binaries is preferred, are recommended, other terms are
+%% firstly transformed to binary.
 %% @end
 %%--------------------------------------------------------------------
 -spec new_from_digest(digest_components()) -> key().
@@ -103,7 +104,7 @@ new_from_digest(DigestComponents) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec new_adjacent_to(Original :: key()) -> key().
-new_adjacent_to(Original) when is_binary(Original) ->
+new_adjacent_to(Original) when size(Original) > 0 ->
     BasicKey = str_utils:rand_hex(?KEY_BYTES),
     case to_basic_key_and_chash_label(Original) of
         {_, undefined} -> gen_legacy_key(BasicKey, Original);
@@ -120,7 +121,7 @@ new_adjacent_to(Original) when is_binary(Original) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec build_adjacent(Extension :: key(), Original :: key()) -> key().
-build_adjacent(Extension, Original) when is_binary(Extension) andalso is_binary(Original) ->
+build_adjacent(Extension, Original) when size(Extension) > 0 andalso size(Original) > 0 ->
     case to_basic_key_and_chash_label(Original) of
         {_, undefined} ->
             gen_legacy_key(Extension, Original);
@@ -134,14 +135,19 @@ build_adjacent(Extension, Original) when is_binary(Extension) andalso is_binary(
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates a key from digest that is adjacent to the Original key. Binaries are
-%% recommended for the digest, other terms are firstly transformed to binary.
+%% Creates a key from digest that is adjacent to the Original key.
+%% A list of binaries is preferred, are recommended, other terms are
+%% firstly transformed to binary.
 %% NOTE: if a legacy Original key is given, adjacency is not supported.
 %% @end
 %%--------------------------------------------------------------------
 -spec adjacent_from_digest(digest_components(), Original :: key()) -> key().
-adjacent_from_digest(DigestComponents, Original) when is_binary(Original) ->
-    BasicKey = digest(DigestComponents),
+adjacent_from_digest(DigestComponents, Original) when not is_list(DigestComponents) ->
+    adjacent_from_digest([DigestComponents], Original);
+adjacent_from_digest(DigestComponents, Original) when size(Original) > 0 ->
+    % Original key is included in the digest, otherwise two different Original
+    % keys with the same chash label would yield the same key for same DigestComponents
+    BasicKey = digest([Original | DigestComponents]),
     case to_basic_key_and_chash_label(Original) of
         {_, undefined} -> gen_legacy_key(BasicKey, Original);
         {_, CHashLabel} -> concatenate_chash_label(BasicKey, CHashLabel)
@@ -164,7 +170,7 @@ responsible_node(Key) ->
 %% Returns a list of nodes of requested length responsible for handling given datastore key.
 %% @end
 %%--------------------------------------------------------------------
--spec responsible_nodes(key(), non_neg_integer()) -> [node()].
+-spec responsible_nodes(key(), pos_integer()) -> [node()].
 responsible_nodes(Key, NodesCount) ->
     CHashSeed = get_chash_seed(Key),
     consistent_hashing:get_nodes(CHashSeed, NodesCount).
@@ -191,14 +197,14 @@ gen_legacy_key(Seed, Key) ->
 
 %% @private
 -spec digest(digest_components()) -> binary().
-digest(DigestComponents) when is_list(DigestComponents) ->
+digest(Term) when not is_list(Term) ->
+    digest([Term]);
+digest(DigestComponents) when length(DigestComponents) > 0 ->
     FinalCtx = lists:foldl(fun
         (Bin, Ctx) when is_binary(Bin) -> crypto:hash_update(Ctx, Bin);
         (Term, Ctx) -> crypto:hash_update(Ctx, term_to_binary(Term))
     end, crypto:hash_init(md5), DigestComponents),
-    hex_utils:hex(crypto:hash_final(FinalCtx));
-digest(Term) ->
-    digest([Term]).
+    hex_utils:hex(crypto:hash_final(FinalCtx)).
 
 
 %% @private

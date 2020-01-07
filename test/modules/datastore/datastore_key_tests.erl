@@ -18,6 +18,7 @@
 
 -define(LEGACY_KEY_CHARS, 32).
 -define(RAND_LEGACY_KEY, str_utils:rand_hex(?LEGACY_KEY_CHARS div 2)).
+-define(MOCK_CLUSTER_NODES_COUNT, 100).
 
 %%%===================================================================
 %%% Setup and teardown
@@ -39,16 +40,18 @@ datastore_key_test_() ->
             {"key from digest adjacent to a random key", fun key_from_digest_adjacent_to_a_random_key/0},
             {"key from digest adjacent to a digest key", fun key_from_digest_adjacent_to_a_digest_key/0},
             {"key from digest adjacent to a legacy key", fun key_from_digest_adjacent_to_a_legacy_key/0},
+            {"keys adjacent to keys with the same chash differ", fun keys_adjacent_to_keys_with_the_same_chash_differ/0},
             {"gen legacy key", fun gen_legacy_key/0}
         ]
     }.
 
 setup() ->
     meck:new(consistent_hashing, []),
-    meck:expect(consistent_hashing, get_node, fun(<<First:8, _/binary>> = _Key) ->
-        % Mock consistent hashing by simply returning node with number 0 - 15
-        % depending on the first byte of the Key
-        list_to_atom(str_utils:format("node~B@cluster.example.com", [First rem 16]))
+    meck:expect(consistent_hashing, get_node, fun(Key) ->
+        % Mock consistent hashing by simply returning node with number equal to
+        % modulo of the key's decimal representation
+        KeyInt = list_to_integer(binary_to_list(Key), 16),
+        list_to_atom(str_utils:format("node~B@cluster.example.com", [KeyInt rem ?MOCK_CLUSTER_NODES_COUNT]))
     end).
 
 teardown(_) ->
@@ -158,14 +161,13 @@ build_key_adjacent_to_a_legacy_key(_Repeat) ->
 
 build_adjacent_key_base(KeyCreationPattern, OriginalKey, ExpectedAdjacency) ->
     ExtensionExamples = [
-        <<"">>,
         <<"custom">>,
         datastore_key:new(),
         datastore_key:new_from_digest(["another", key, {1, 2, 3}]),
         ?RAND_LEGACY_KEY,
         datastore_key:new_adjacent_to(datastore_key:new()),
         datastore_key:new_adjacent_to(datastore_key:new_from_digest(["dig", <<"Est">>])),
-        datastore_key:build_adjacent(<<"">>, datastore_key:new()),
+        datastore_key:build_adjacent(<<"a">>, datastore_key:new()),
         datastore_key:build_adjacent(<<"custom">>, datastore_key:new_from_digest(["dig", <<"Est">>]))
     ],
     {NewKeys, _} = lists:mapfoldl(fun(Extension, PreviousKey) ->
@@ -239,6 +241,27 @@ adjacent_key_from_digest_base(KeyCreationPattern, OriginalKey, ExpectedAdjacency
     end.
 
 
+keys_adjacent_to_keys_with_the_same_chash_differ() ->
+    KeyA = datastore_key:new(),
+    KeyB = datastore_key:new_adjacent_to(KeyA),
+    KeyC = datastore_key:new_adjacent_to(KeyA),
+    assert_keys_are_different([KeyA, KeyB, KeyC]),
+    assert_keys_are_adjacent([KeyA, KeyB, KeyC]),
+    % Keys A, B, C have the same chash label, but are different. Make sure that
+    % adjacent keys derived from them are different.
+    NewKeys = [
+        datastore_key:build_adjacent(<<"ext">>, KeyA),
+        datastore_key:build_adjacent(<<"ext">>, KeyB),
+        datastore_key:build_adjacent(<<"ext">>, KeyC),
+
+        datastore_key:adjacent_from_digest(["another", key, {1, 2, 3}], KeyA),
+        datastore_key:adjacent_from_digest(["another", key, {1, 2, 3}], KeyB),
+        datastore_key:adjacent_from_digest(["another", key, {1, 2, 3}], KeyC)
+    ],
+    assert_keys_are_different(NewKeys),
+    assert_keys_are_adjacent(NewKeys).
+
+
 gen_legacy_key() ->
     InputExamples = [
         {<<"">>, <<"123">>},
@@ -246,7 +269,7 @@ gen_legacy_key() ->
         {<<"user">>, datastore_key:new_from_digest(["another", key, {1, 2, 3}])},
         {?RAND_LEGACY_KEY, ?RAND_LEGACY_KEY},
         {datastore_key:new(), datastore_key:new_adjacent_to(datastore_key:new())},
-        {datastore_key:build_adjacent(<<"">>, datastore_key:new()), ?RAND_LEGACY_KEY}
+        {datastore_key:build_adjacent(<<"a">>, datastore_key:new()), ?RAND_LEGACY_KEY}
     ],
     Keys = lists:map(fun({Seed, Key}) ->
         LegacyKey = datastore_key:gen_legacy_key(Seed, Key),
@@ -280,26 +303,32 @@ legacy_key_specific_examples() -> [
 %%%===================================================================
 
 assert_keys_are_different(Keys) ->
-    lists:foreach(fun({KeyAlpha, KeyBeta}) ->
+    foreach_pair(fun(KeyAlpha, KeyBeta) ->
         ?assertNotEqual(KeyAlpha, KeyBeta)
-    end, all_pairs(Keys)).
+    end, Keys).
 
 
 assert_keys_are_same_length(Keys) ->
-    lists:foreach(fun({KeyAlpha, KeyBeta}) ->
+    foreach_pair(fun(KeyAlpha, KeyBeta) ->
         ?assertEqual(byte_size(KeyAlpha), byte_size(KeyBeta))
-    end, all_pairs(Keys)).
+    end, Keys).
 
 
 % adjacent <-> are routed to the same node
 assert_keys_are_adjacent(Keys) ->
-    lists:foreach(fun({KeyAlpha, KeyBeta}) ->
+    foreach_pair(fun(KeyAlpha, KeyBeta) ->
         ?assertEqual(datastore_key:responsible_node(KeyAlpha), datastore_key:responsible_node(KeyBeta))
-    end, all_pairs(Keys)).
+    end, Keys).
 
 
-all_pairs(Keys) ->
-    [{A, B} || A <- Keys, B <- Keys, A /= B].
+foreach_pair(Fun, Elements) ->
+    lists:foldl(fun(Current, Unpaired) ->
+        UnpairedWithoutCurrent = lists:delete(Current, Unpaired),
+        lists:foreach(fun(Other) ->
+            Fun(Current, Other)
+        end, UnpairedWithoutCurrent),
+        UnpairedWithoutCurrent
+    end, Elements, Elements).
 
 
 -endif.
