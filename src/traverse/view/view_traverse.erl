@@ -41,7 +41,7 @@
 -type master_job() :: #view_traverse_master{}.
 -type slave_job() :: #view_traverse_slave{}.
 -type job() :: master_job() | slave_job().
--type token() :: #query_view_token{}.
+-type token() :: #view_traverse_token{}.
 -type view_processing_module() :: module().
 -type query_opts() :: #{atom() => term()}.  % opts passed to couchbase_driver:query
 -type info() :: term(). % custom term passed to process_row callback
@@ -109,13 +109,13 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
     case view_exists(ViewName) of
         true ->
             DefinedTaskId = ensure_defined_task_id(TaskId),
-            DefaultToken = #query_view_token{},
+            DefaultToken = #view_traverse_token{},
             MasterJob = #view_traverse_master{
                 view_name = ViewName,
                 view_processing_module = ViewProcessingModule,
                 query_opts = maps:merge(maps:get(query_opts, Opts, #{}), ?DEFAULT_QUERY_OPTS),
                 async_next_batch_job = maps:get(async_next_batch_job, Opts, ?DEFAULT_ASYNC_NEXT_BATCH_JOB),
-                query_view_token = utils:ensure_defined(maps:get(token, Opts, DefaultToken), undefined, DefaultToken),
+                token = utils:ensure_defined(maps:get(token, Opts, DefaultToken), undefined, DefaultToken),
                 info = maps:get(info, Opts, undefined)
             },
             PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
@@ -130,7 +130,7 @@ cancel(ViewProcessingModule, TaskId) ->
 
 
 -spec get_offset(token()) -> non_neg_integer().
-get_offset(#query_view_token{offset = Offset}) ->
+get_offset(#view_traverse_token{offset = Offset}) ->
     Offset.
 
 %%%===================================================================
@@ -147,7 +147,7 @@ do_master_job(MasterJob = #view_traverse_master{
     view_processing_module = ViewProcessingModule,
     view_name = ViewName,
     query_opts = QueryOpts,
-    query_view_token = Token,
+    token = Token,
     async_next_batch_job = AsyncNextBatchJob,
     info = Info
 }, _Args) ->
@@ -157,12 +157,12 @@ do_master_job(MasterJob = #view_traverse_master{
             {ok, #{}};
         {ok, #{<<"rows">> := Rows}} ->
             {ReversedSlaveJobs, NewToken} = lists:foldl(
-                fun(Row, {SlaveJobsAcc, TokenAcc = #query_view_token{offset = RowOffset}}) ->
+                fun(Row, {SlaveJobsAcc, TokenAcc = #view_traverse_token{offset = RowOffset}}) ->
                     Key = maps:get(<<"key">>, Row),
                     DocId = maps:get(<<"id">>, Row),
                     {
                         [slave_job(MasterJob, Row, RowOffset) | SlaveJobsAcc],
-                        TokenAcc#query_view_token{
+                        TokenAcc#view_traverse_token{
                             last_start_key = Key,
                             last_doc_id = DocId,
                             offset = RowOffset + 1
@@ -171,7 +171,7 @@ do_master_job(MasterJob = #view_traverse_master{
                 end, {[], Token}, Rows),
             call_batch_prehook(ViewProcessingModule, Rows, NewToken, Info),
             SlaveJobs = lists:reverse(ReversedSlaveJobs),
-            NextBatchJob = MasterJob#view_traverse_master{query_view_token = NewToken},
+            NextBatchJob = MasterJob#view_traverse_master{token = NewToken},
             case AsyncNextBatchJob of
                 true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};
                 false -> {ok, #{slave_jobs => SlaveJobs, master_jobs => [NextBatchJob]}}
@@ -327,9 +327,9 @@ slave_job(#view_traverse_master{view_processing_module = ViewProcessingModule, i
     }.
 
 -spec prepare_query_opts(token(), query_opts()) -> [couchbase_driver:view_opt()].
-prepare_query_opts(#query_view_token{last_doc_id = undefined, last_start_key = undefined}, Opts) ->
+prepare_query_opts(#view_traverse_token{last_doc_id = undefined, last_start_key = undefined}, Opts) ->
     maps:to_list(Opts);
-prepare_query_opts(#query_view_token{
+prepare_query_opts(#view_traverse_token{
     last_doc_id = LastDocId,
     last_start_key = LastStartKey
 }, Opts) ->

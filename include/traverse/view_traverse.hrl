@@ -31,7 +31,7 @@
 %   * startkey_docid - id from last processed row
 %   * startkey - key from last processed row
 %   * skip = 1 - to skip last processed row because startkey_docid and startkey options are inclusive
--record(query_view_token, {
+-record(view_traverse_token, {
     offset = 0 :: non_neg_integer(),
     % id field extracted from last processed row
     last_doc_id :: undefined | binary(),
@@ -58,7 +58,7 @@
 -record(view_traverse_master, {
     view_name :: couchbase_driver:view(),
     view_processing_module :: view_traverse:view_processing_module(),
-    query_view_token = #query_view_token{} :: view_traverse:token(),
+    token = #view_traverse_token{} :: view_traverse:token(),
     query_opts :: view_traverse:query_opts(),
     async_next_batch_job = ?DEFAULT_ASYNC_NEXT_BATCH_JOB :: boolean(),
     info :: view_traverse:info()

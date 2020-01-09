@@ -130,14 +130,11 @@ traverse_token_test(Config) ->
     ExpectedKeysAndRowNums = lists:sublist(KeysAndRowNums, StartPoint + 1, length(KeysAndRowNums)),
     {StartKey, RowNum} = lists:nth(StartPoint, KeysAndRowNums),
 
-    Token = #query_view_token{
+    Token = #view_traverse_token{
         offset = RowNum + 1,
         last_doc_id = StartKey,
         last_start_key = RowNum
     },
-    ct:pal("Token: ~p", [Token]),
-
-    ct:pal("~p", [hd(ExpectedKeysAndRowNums)]),
 
     ok = run_traverse(W, ?VIEW , #{info => #{pid => self(), ref => Ref}, token => Token}),
 
