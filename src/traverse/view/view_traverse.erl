@@ -113,7 +113,7 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
             MasterJob = #view_traverse_master{
                 view_name = ViewName,
                 view_processing_module = ViewProcessingModule,
-                query_opts = maps:merge(maps:get(query_opts, Opts, #{}), ?DEFAULT_QUERY_OPTS),
+                query_opts = maps:merge(?DEFAULT_QUERY_OPTS, maps:get(query_opts, Opts, #{})),
                 async_next_batch_job = maps:get(async_next_batch_job, Opts, ?DEFAULT_ASYNC_NEXT_BATCH_JOB),
                 token = utils:ensure_defined(maps:get(token, Opts, DefaultToken), undefined, DefaultToken),
                 info = maps:get(info, Opts, undefined)
