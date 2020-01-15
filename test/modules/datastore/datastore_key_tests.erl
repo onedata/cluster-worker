@@ -18,6 +18,7 @@
 
 -define(LEGACY_KEY_CHARS, 32).
 -define(RAND_LEGACY_KEY, str_utils:rand_hex(?LEGACY_KEY_CHARS div 2)).
+-define(EMPTY_LEGACY_KEY, <<>>).
 -define(MOCK_CLUSTER_NODES_COUNT, 100).
 
 %%%===================================================================
@@ -37,6 +38,7 @@ datastore_key_test_() ->
             {"build key adjacent to a random key", fun build_key_adjacent_to_a_random_key/0},
             {"build key adjacent to a digest key", fun build_key_adjacent_to_a_digest_key/0},
             {"build key adjacent to a legacy key", fun build_key_adjacent_to_a_legacy_key/0},
+            {"build key adjacent to an empty key", fun build_key_adjacent_to_an_empty_key/0},
             {"key from digest adjacent to a random key", fun key_from_digest_adjacent_to_a_random_key/0},
             {"key from digest adjacent to a digest key", fun key_from_digest_adjacent_to_a_digest_key/0},
             {"key from digest adjacent to a legacy key", fun key_from_digest_adjacent_to_a_legacy_key/0},
@@ -153,6 +155,16 @@ build_key_adjacent_to_a_legacy_key() ->
     lists:foreach(fun build_key_adjacent_to_a_legacy_key/1, lists:seq(1, 100)).
 build_key_adjacent_to_a_legacy_key(_Repeat) ->
     LegacyKey = ?RAND_LEGACY_KEY,
+    % Adjacency (routing to the same node) is not supported for legacy keys,
+    % gut key generation should work anyway
+    build_adjacent_key_base(all_keys_from_the_same_predecessor, LegacyKey, not_adjacent),
+    build_adjacent_key_base(each_key_recursively_from_the_previous, LegacyKey, not_adjacent).
+
+
+build_key_adjacent_to_an_empty_key() ->
+    lists:foreach(fun build_key_adjacent_to_an_empty_key/1, lists:seq(1, 100)).
+build_key_adjacent_to_an_empty_key(_Repeat) ->
+    LegacyKey = ?EMPTY_LEGACY_KEY,
     % Adjacency (routing to the same node) is not supported for legacy keys,
     % gut key generation should work anyway
     build_adjacent_key_base(all_keys_from_the_same_predecessor, LegacyKey, not_adjacent),
