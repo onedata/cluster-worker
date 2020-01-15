@@ -119,7 +119,7 @@ new_adjacent_to(Original) when size(Original) > 0 ->
 %% @end
 %%--------------------------------------------------------------------
 -spec build_adjacent(Extension :: key(), Original :: key()) -> key().
-build_adjacent(Extension, Original) when size(Extension) > 0 andalso size(Original) > 0 ->
+build_adjacent(Extension, Original) when size(Extension) > 0 ->
     case to_basic_key_and_chash_label(Original) of
         {_, undefined} ->
             gen_legacy_key(Extension, Original);
