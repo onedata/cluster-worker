@@ -17,10 +17,9 @@
 -include("exometer_utils.hrl").
 
 %% API
--export([route/3, process/3]).
+-export([route/2, process/3]).
 -export([init_counters/0, init_report/0]).
 
--type key() :: datastore:key().
 -type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
 -define(EXOMETER_COUNTERS,
@@ -63,12 +62,10 @@ init_report() ->
 %% Redirects datastore call to designated node and module.
 %% @end
 %%--------------------------------------------------------------------
--spec route(ctx(), key(), atom(), list()) -> term().
-route(Key, Function, Args) ->
-    RoutingKey = maps:get(routing_key, Ctx, Key),
-    Node = select_node(Ctx, RoutingKey),
+-spec route(atom(), list()) -> term().
+route(Function, Args) ->
     Module = select_module(Function),
-    {Node, Args2, TryLocalRead} = select_node(Key, Args),
+    {Node, Args2, TryLocalRead} = select_node(Args),
     try
         case {Module, TryLocalRead} of
             {datastore_writer, _} ->
@@ -115,16 +112,16 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec select_node(key(), list()) -> {node(), list(), local_read()}.
-select_node(_Key, [#{routing := local} | _] = Args) ->
+-spec select_node(list()) -> {node(), list(), local_read()}.
+select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
-select_node(Key, [#{memory_copies := Num} = Ctx | ArgsTail]) when is_integer(Num) ->
+select_node([#{memory_copies := Num, routing_key := Key} = Ctx | ArgsTail]) when is_integer(Num) ->
     [Node | Nodes] = AllNodes = datastore_key:responsible_nodes(Key, Num),
     {Node, [Ctx#{memory_copies => Nodes} | ArgsTail], lists:member(node(), AllNodes)};
-select_node(Key, [#{memory_copies := _} | _] = Args) ->
+select_node([#{memory_copies := _, routing_key := Key} | _] = Args) ->
     Node = datastore_key:responsible_node(Key),
     {Node, Args, true};
-select_node(Key, Args) ->
+select_node([#{routing_key := Key} | _] = Args) ->
     Node = datastore_key:responsible_node(Key),
     {Node, Args, false}.
 
