@@ -65,7 +65,8 @@ init_report() ->
 %%--------------------------------------------------------------------
 -spec route(ctx(), key(), atom(), list()) -> term().
 route(Ctx, Key, Function, Args) ->
-    Node = select_node(Ctx, Key),
+    RoutingKey = maps:get(routing_key, Ctx, Key),
+    Node = select_node(Ctx, RoutingKey),
     Module = select_module(Function),
     Args2 = [Module, Function, Args],
     case rpc:call(Node, datastore_router, process, Args2) of
