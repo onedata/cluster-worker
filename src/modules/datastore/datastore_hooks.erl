@@ -14,9 +14,10 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([wrap/4]).
+-export([wrap/5]).
 
 -type ctx() :: datastore:ctx().
+-type key() :: datastore:key().
 -type wrapped() :: fun((Function :: atom(), Args :: list()) -> term()).
 -type prehook() :: fun((Function :: atom(), Args :: list()) ->
                        ok | {error, term()}).
@@ -34,8 +35,10 @@
 %% Runs custom model hooks before and after datastore calls.
 %% @end
 %%--------------------------------------------------------------------
--spec wrap(ctx(), atom(), list(), wrapped()) -> term().
-wrap(Ctx, Function, Args, Fun) ->
+-spec wrap(ctx(), key(), atom(), list(), wrapped()) -> term().
+wrap(Ctx0, Key, Function, Args0, Fun) ->
+    Ctx = Ctx0#{routing_key => Key},
+    Args = [Ctx, Key | Args0],
     Result = case run_prehooks(Ctx, Function, Args) of
         ok -> Fun(Function, Args);
         {error, Reason} -> {error, Reason}
