@@ -66,7 +66,8 @@ init_report() ->
 -spec route(key(), atom(), list()) -> term().
 route(Key, Function, Args) ->
     Module = select_module(Function),
-    {Node, Args2, TryLocalRead} = select_node(Key, Args),
+    RoutingKey = maps:get(routing_key, Ctx, Key),
+    {Node, Args2, TryLocalRead} = select_node(RoutingKey, Args),
     try
         case {Module, TryLocalRead} of
             {datastore_writer, _} ->

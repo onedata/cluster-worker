@@ -26,6 +26,7 @@
                  scope => datastore_doc:scope(),
                  routing => local | global,
                  generated_key => boolean(),
+                 routing_key => key(), % key used to route request to tp process and to choose node
                  fold_enabled => boolean(),
                  local_fold => boolean(), % Fold links are added using local routing
                  sync_enabled => boolean(),
