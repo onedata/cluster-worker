@@ -70,7 +70,7 @@
 %%--------------------------------------------------------------------
 -spec create(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 create(Ctx, Key, Doc = #document{}) ->
-    call(Ctx, get_key(Key, doc), create, [Key, Doc]).
+    call(Ctx, get_key(Ctx, Key, doc), create, [Key, Doc]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -79,7 +79,7 @@ create(Ctx, Key, Doc = #document{}) ->
 %%--------------------------------------------------------------------
 -spec save(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Key, Doc = #document{}) ->
-    call(Ctx, get_key(Key, doc), save, [Key, Doc]).
+    call(Ctx, get_key(Ctx, Key, doc), save, [Key, Doc]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -88,7 +88,7 @@ save(Ctx, Key, Doc = #document{}) ->
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff) ->
-    call(Ctx, get_key(Key, doc), update, [Key, Diff]).
+    call(Ctx, get_key(Ctx, Key, doc), update, [Key, Diff]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -97,7 +97,7 @@ update(Ctx, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff(), doc()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff, Default) ->
-    call(Ctx, get_key(Key, doc), update, [Key, Diff, Default]).
+    call(Ctx, get_key(Ctx, Key, doc), update, [Key, Diff, Default]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -106,7 +106,7 @@ update(Ctx, Key, Diff, Default) ->
 %%--------------------------------------------------------------------
 -spec fetch(ctx(), key()) -> {ok, doc()} | {error, term()}.
 fetch(Ctx, Key) ->
-    call(Ctx, get_key(Key, doc), fetch, [Key]).
+    call(Ctx, get_key(Ctx, Key, doc), fetch, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -115,7 +115,7 @@ fetch(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), pred()) -> ok | {error, term()}.
 delete(Ctx, Key, Pred) ->
-    call(Ctx, get_key(Key, doc), delete, [Key, Pred]).
+    call(Ctx, get_key(Ctx, Key, doc), delete, [Key, Pred]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -126,7 +126,7 @@ delete(Ctx, Key, Pred) ->
     [{ok, link()} | {error, term()}].
 add_links(Ctx, Key, TreeId, Links) ->
     Size = length(Links),
-    multi_call(Ctx, get_key(Key, links), add_links, [Key, TreeId, Links], Size).
+    multi_call(Ctx, get_key(Ctx, Key, links), add_links, [Key, TreeId, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -137,7 +137,7 @@ add_links(Ctx, Key, TreeId, Links) ->
     [{ok, link()} | {error, term()}].
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
     Size = length(Links),
-    multi_call(Ctx, get_key(Key, links), check_and_add_links, [Key, TreeId, CheckTrees, Links], Size).
+    multi_call(Ctx, get_key(Ctx, Key, links), check_and_add_links, [Key, TreeId, CheckTrees, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -148,7 +148,7 @@ check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
     [{ok, [link()]} | {error, term()}].
 fetch_links(Ctx, Key, TreeIds, LinkNames) ->
     Size = length(LinkNames),
-    multi_call(Ctx, get_key(Key, links), fetch_links, [Key, TreeIds, LinkNames], Size).
+    multi_call(Ctx, get_key(Ctx, Key, links), fetch_links, [Key, TreeIds, LinkNames], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -159,7 +159,7 @@ fetch_links(Ctx, Key, TreeIds, LinkNames) ->
     [ok | {error, term()}].
 delete_links(Ctx, Key, TreeId, Links) ->
     Size = length(Links),
-    multi_call(Ctx, get_key(Key, links), delete_links, [Key, TreeId, Links], Size).
+    multi_call(Ctx, get_key(Ctx, Key, links), delete_links, [Key, TreeId, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -171,7 +171,7 @@ delete_links(Ctx, Key, TreeId, Links) ->
     [ok | {error, term()}].
 mark_links_deleted(Ctx, Key, TreeId, Links) ->
     Size = length(Links),
-    multi_call(Ctx, get_key(Key, links), mark_links_deleted, [Key, TreeId, Links], Size).
+    multi_call(Ctx, get_key(Ctx, Key, links), mark_links_deleted, [Key, TreeId, Links], Size).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -182,7 +182,7 @@ mark_links_deleted(Ctx, Key, TreeId, Links) ->
     fold_opts()) -> {ok, fold_acc()} |
     {{ok, fold_acc()}, datastore_links_iter:token()} | {error, term()}.
 fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
-    call(Ctx, get_key(Key, links), fold_links, [Key, TreeIds, Fun, Acc, Opts]).
+    call(Ctx, get_key(Ctx, Key, links), fold_links, [Key, TreeIds, Fun, Acc, Opts]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -192,7 +192,7 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 %%--------------------------------------------------------------------
 -spec fetch_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 fetch_links_trees(Ctx, Key) ->
-    call(Ctx, get_key(Key, links), fetch_links_trees, [Key]).
+    call(Ctx, get_key(Ctx, Key, links), fetch_links_trees, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -428,19 +428,20 @@ schedule_terminate(State = #state{terminate_timer_ref = Ref}) ->
 %% Gets tp routing key.
 %% @end
 %%--------------------------------------------------------------------
--spec get_key(datastore:key(), atom()) -> tp_key().
-get_key(Key, Type) ->
+-spec get_key(datastore:ctx(), datastore:key(), atom()) -> tp_key().
+get_key(Ctx, Key, Type) ->
+    RoutingKey = maps:get(routing_key, Ctx, Key),
     case application:get_env(?CLUSTER_WORKER_APP_NAME, aggregate_tp, false) of
         true ->
             case application:get_env(?CLUSTER_WORKER_APP_NAME,
                 tp_space_size, 0) of
                 0 ->
-                    Key;
+                    RoutingKey;
                 Size ->
-                    get_key_num(Key, Size)
+                    get_key_num(RoutingKey, Size)
             end;
         _ ->
-            {Type, Key}
+            {Type, RoutingKey}
     end.
 
 %%--------------------------------------------------------------------
