@@ -116,10 +116,12 @@ new_adjacent_to(Original) when size(Original) > 0 ->
 %% Builds a key that is adjacent to the Original key using given Extension.
 %% Extension must be a valid key (typically a constant or another key).
 %% NOTE: if a legacy Original key is given, adjacency is not supported.
+%% NOTE: Empty Original key is not recommended, but accepted as it occurs in legacy keys.
+%% In such case, the legacy key generation procedure applies.
 %% @end
 %%--------------------------------------------------------------------
 -spec build_adjacent(Extension :: key(), Original :: key()) -> key().
-build_adjacent(Extension, Original) when size(Extension) > 0 andalso size(Original) > 0 ->
+build_adjacent(Extension, Original) when size(Extension) > 0 andalso is_binary(Original) ->
     case to_basic_key_and_chash_label(Original) of
         {_, undefined} ->
             gen_legacy_key(Extension, Original);
