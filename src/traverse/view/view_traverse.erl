@@ -177,7 +177,7 @@ do_master_job(MasterJob = #view_traverse_master{
             SlaveJobs = lists:reverse(ReversedSlaveJobs),
             NextBatchJob = MasterJob#view_traverse_master{token = NewToken},
             CancelCallback = fun(_ExtendedArgs, CancelDescription) ->
-                SlaveJobsCancelled = maps:get(slave_jobs_delegated, CancelDescription, 0),
+                SlaveJobsCancelled = -1 * maps:get(slave_jobs_delegated, CancelDescription, 0),
                 call_on_batch_canceled_callback(ViewProcessingModule, BatchOffset, SlaveJobsCancelled, NewToken, Info)
             end,
             MasterJobsKey = case AsyncNextBatchJob of

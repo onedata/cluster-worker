@@ -411,7 +411,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList))),
                     master_jobs_delegated => -1 * (length(MasterJobsList) + length(AsyncMasterJobsList)) - 1
                 },
-                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Args) -> ok end),
+                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Args, _Description) -> ok end),
                 CancelCallback(MasterJobExtendedArgs, CancelDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
             _ ->
