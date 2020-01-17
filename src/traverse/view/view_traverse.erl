@@ -25,8 +25,7 @@
 %% API
 -export([
     init/1, init/5, stop/1,
-    run/3, run/4, cancel/2,
-    get_offset/1
+    run/3, run/4, cancel/2
 ]).
 
 %% traverse callbacks
@@ -68,7 +67,14 @@
 %%% view_traverse optional callbacks definitions
 %%%===================================================================
 
--callback batch_prehook(Rows :: [json_utils:json_map()], Token :: token(), Info :: info()) -> ok.
+-callback batch_prehook(
+    BatchOffset :: non_neg_integer(),
+    Rows :: [json_utils:json_map()],
+    Token :: token(),
+    Info :: info()
+) -> ok.
+
+-callback on_batch_canceled(BatchSize :: non_neg_integer(), Token :: token(), Info :: info()) -> ok.
 
 -callback task_started(task_id()) -> ok.
 
@@ -78,7 +84,7 @@
 
 -callback to_string(job()) -> binary() | atom() | iolist().
 
--optional_callbacks([batch_prehook/3, task_started/1, task_finished/1, task_canceled/1, to_string/1]).
+-optional_callbacks([batch_prehook/4, on_batch_canceled/3, task_started/1, task_finished/1, task_canceled/1, to_string/1]).
 
 %%%===================================================================
 %%% API functions
@@ -100,11 +106,13 @@ init(ViewProcessingModule, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Sho
 stop(ViewProcessingModule) when is_atom(ViewProcessingModule) ->
     traverse:stop_pool(view_processing_module_to_pool_name(ViewProcessingModule)).
 
--spec run(view_processing_module(), couchbase_driver:view(), opts()) -> ok.
+-spec run(view_processing_module(), couchbase_driver:view(), opts()) ->
+    {ok, task_id()} | {error, term()}.
 run(ViewProcessingModule, ViewName, Opts) ->
     run(ViewProcessingModule, ViewName, undefined, Opts).
 
--spec run(view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) -> ok.
+-spec run(view_processing_module(), couchbase_driver:view(), task_id() | undefined, opts()) ->
+    {ok, task_id()} | {error, term()}.
 run(ViewProcessingModule, ViewName, TaskId, Opts) ->
     case view_exists(ViewName) of
         true ->
@@ -119,7 +127,8 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
                 info = maps:get(info, Opts, undefined)
             },
             PoolName = view_processing_module_to_pool_name(ViewProcessingModule),
-            traverse:run(PoolName, DefinedTaskId, MasterJob, #{callback_module => ?MODULE});
+            traverse:run(PoolName, DefinedTaskId, MasterJob, #{callback_module => ?MODULE}),
+            {ok, DefinedTaskId};
         false ->
             {error, not_found}
     end.
@@ -127,11 +136,6 @@ run(ViewProcessingModule, ViewName, TaskId, Opts) ->
 -spec cancel(view_processing_module(), task_id()) -> ok.
 cancel(ViewProcessingModule, TaskId) ->
     traverse:cancel(view_processing_module_to_pool_name(ViewProcessingModule), TaskId).
-
-
--spec get_offset(token()) -> non_neg_integer().
-get_offset(#view_traverse_token{offset = Offset}) ->
-    Offset.
 
 %%%===================================================================
 %%% traverse_behaviour callbacks implementations
@@ -147,13 +151,13 @@ do_master_job(MasterJob = #view_traverse_master{
     view_processing_module = ViewProcessingModule,
     view_name = ViewName,
     query_opts = QueryOpts,
-    token = Token,
+    token = Token = #view_traverse_token{offset = BatchOffset},
     async_next_batch_job = AsyncNextBatchJob,
     info = Info
 }, _Args) ->
     case query(ViewName, prepare_query_opts(Token, QueryOpts)) of
         {ok, #{<<"rows">> := []}} ->
-            call_batch_prehook(ViewProcessingModule, [], Token, Info),
+            call_batch_prehook(ViewProcessingModule, BatchOffset, [], Token, Info),
             {ok, #{}};
         {ok, #{<<"rows">> := Rows}} ->
             {ReversedSlaveJobs, NewToken} = lists:foldl(
@@ -169,13 +173,22 @@ do_master_job(MasterJob = #view_traverse_master{
                         }
                     }
                 end, {[], Token}, Rows),
-            call_batch_prehook(ViewProcessingModule, Rows, NewToken, Info),
+            call_batch_prehook(ViewProcessingModule, BatchOffset, Rows, NewToken, Info),
             SlaveJobs = lists:reverse(ReversedSlaveJobs),
             NextBatchJob = MasterJob#view_traverse_master{token = NewToken},
-            case AsyncNextBatchJob of
-                true -> {ok, #{slave_jobs => SlaveJobs, async_master_jobs => [NextBatchJob]}};
-                false -> {ok, #{slave_jobs => SlaveJobs, master_jobs => [NextBatchJob]}}
-            end;
+            CancelCallback = fun(_ExtendedArgs, CancelDescription) ->
+                SlaveJobsCancelled = maps:get(slave_jobs_delegated, CancelDescription, 0),
+                call_on_batch_canceled_callback(ViewProcessingModule, BatchOffset, SlaveJobsCancelled, NewToken, Info)
+            end,
+            MasterJobsKey = case AsyncNextBatchJob of
+                true -> async_master_jobs;
+                false -> master_jobs
+            end,
+            {ok, #{
+                slave_jobs => SlaveJobs,
+                MasterJobsKey => [NextBatchJob],
+                cancel_callback => CancelCallback
+            }};
         {error, Reason} ->
             ?error("view_traverse mechanism received error ~p when querying view ~p", [Reason, ViewName]),
             {ok, #{}}
@@ -277,11 +290,22 @@ view_processing_module_to_pool_name(ViewProcessingModule) ->
 pool_name_to_view_processing_module(PoolName) ->
     binary_to_atom(PoolName, utf8).
 
--spec call_batch_prehook(view_processing_module(), [json_utils:json_term()], token(), info()) -> ok.
-call_batch_prehook(ViewProcessingModule, Rows, Token, Info) ->
-    case erlang:function_exported(ViewProcessingModule, batch_prehook, 3) of
+-spec call_batch_prehook(view_processing_module(), non_neg_integer(), [json_utils:json_term()], token(), info()) -> ok.
+call_batch_prehook(ViewProcessingModule, BatchOffset, Rows, Token, Info) ->
+    case erlang:function_exported(ViewProcessingModule, batch_prehook, 4) of
         true ->
-            ViewProcessingModule:batch_prehook(Rows, Token, Info),
+            ViewProcessingModule:batch_prehook(BatchOffset, Rows, Token, Info),
+            ok;
+        false ->
+            ok
+    end.
+
+-spec call_on_batch_canceled_callback(view_processing_module(), non_neg_integer(), non_neg_integer(), token(), info())
+        -> ok.
+call_on_batch_canceled_callback(ViewProcessingModule, BatchOffset, RowJobsCancelled, Token, Info) ->
+    case erlang:function_exported(ViewProcessingModule, on_batch_canceled, 4) of
+        true ->
+            ViewProcessingModule:on_batch_canceled(BatchOffset, RowJobsCancelled, Token, Info),
             ok;
         false ->
             ok

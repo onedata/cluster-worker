@@ -105,6 +105,7 @@
     master_jobs => [job()],
     async_master_jobs => [job()],
     description => description(),
+    cancel_callback => job_cancel_callback(),
     finish_callback => job_finish_callback()
 }.
 
@@ -113,7 +114,8 @@
     master_job_starter_callback => master_job_starter_callback()
 }.
 -type master_job_starter_callback() :: fun(([job()]) -> ok).
--type job_finish_callback() :: fun((id(), description()) -> ok).
+-type job_cancel_callback() :: fun((master_job_extended_args(), description()) -> ok).
+-type job_finish_callback() :: fun((master_job_extended_args(), description()) -> ok).
 % Types used to provide additional information to framework
 -type timestamp() :: non_neg_integer(). % Timestamp used to sort tasks (usually provided by callback function)
 -type sync_info() ::  #{
@@ -409,8 +411,12 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList))),
                     master_jobs_delegated => -1 * (length(MasterJobsList) + length(AsyncMasterJobsList)) - 1
                 },
+                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Args) -> ok end),
+                CancelCallback(MasterJobExtendedArgs, CancelDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, CancelDescription);
             _ ->
+%%                CancelCallback = maps:get(init_callback, MasterAns, fun(_Args) -> ok end),
+%%                CancelCallback(MasterJobExtendedArgs),
                 ok = run_on_master_pool(
                     PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskID, AsyncMasterJobsList),
 
@@ -439,8 +445,8 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_done => SlavesOk,
                     slave_jobs_failed => SlavesErrors
                 },
-                Fun = maps:get(finish_callback, MasterAns, fun(_TaskID, _SlavesDescription) -> ok end),
-                Fun(MasterJobExtendedArgs, SlavesDescription),
+                FinishCallback = maps:get(finish_callback, MasterAns, fun(_Args, _SlavesDescription) -> ok end),
+                FinishCallback(MasterJobExtendedArgs, SlavesDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskID, Description2)
         end,
 
