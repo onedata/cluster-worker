@@ -139,7 +139,8 @@ after_init([]) ->
 %% This callback is executed only on one cluster node.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_cluster(integer()) -> {ok, integer()}.
+-spec upgrade_cluster(node_manager:cluster_generation()) ->
+    {ok, node_manager:cluster_generation()}.
 upgrade_cluster(CurrentGeneration) ->
     {ok, CurrentGeneration + 1}.
 

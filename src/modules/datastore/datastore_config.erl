@@ -29,7 +29,8 @@
     gs_session,
     gs_subscription,
     traverse_task,
-    traverse_tasks_scheduler
+    traverse_tasks_scheduler,
+    view_traverse_job
 ]).
 
 -define(PLUGIN, datastore_config_plugin).
