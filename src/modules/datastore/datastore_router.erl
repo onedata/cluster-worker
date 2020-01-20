@@ -63,8 +63,10 @@ init_report() ->
 %% Redirects datastore call to designated node and module.
 %% @end
 %%--------------------------------------------------------------------
--spec route(key(), atom(), list()) -> term().
+-spec route(ctx(), key(), atom(), list()) -> term().
 route(Key, Function, Args) ->
+    RoutingKey = maps:get(routing_key, Ctx, Key),
+    Node = select_node(Ctx, RoutingKey),
     Module = select_module(Function),
     {Node, Args2, TryLocalRead} = select_node(Key, Args),
     try
