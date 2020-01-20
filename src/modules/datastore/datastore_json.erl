@@ -12,6 +12,7 @@
 -module(datastore_json).
 -author("Krzysztof Trzepla").
 
+-include("modules/datastore/datastore.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
@@ -48,7 +49,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec encode(doc() | ejson()) -> ejson() | no_return().
-encode(#document{value = undefined} = Doc) -> % Test document
+encode(#document{key = ?TEST_DOC_KEY} = Doc) -> % Test document
     {[
         {<<"_key">>, Doc#document.key},
         {<<"_scope">>, Doc#document.scope},
@@ -82,43 +83,46 @@ encode(EJson) ->
 %%--------------------------------------------------------------------
 -spec decode(ejson()) -> ejson() | doc().
 decode({Term} = EJson) when is_list(Term) ->
-    RecordName2 = case lists:keyfind(<<"_record">>, 1, Term) of
-        {_, RecordName} -> decode_term(RecordName, atom);
-        false -> undefined
-    end,
-    case {lists:member(RecordName2, datastore_config:get_models()), RecordName2} of
-        {true, _} ->
-            {_, Key} = lists:keyfind(<<"_key">>, 1, Term),
-            {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
-            {_, Mutators} = lists:keyfind(<<"_mutators">>, 1, Term),
-            {_, Revs} = lists:keyfind(<<"_revs">>, 1, Term),
-            {_, Seq} = lists:keyfind(<<"_seq">>, 1, Term),
-            {_, Deleted} = lists:keyfind(<<"_deleted">>, 1, Term),
-            {_, Version} = lists:keyfind(<<"_version">>, 1, Term),
-            Model = datastore_versions:rename_record(Version, RecordName2),
-            Record = decode_term(EJson, Model:get_record_struct(Version)),
-            {Version2, Record2} = datastore_versions:upgrade_record(
-                Version, Model, Record
-            ),
-            #document{
-                key = Key,
-                value = Record2,
-                scope = Scope,
-                mutators = Mutators,
-                revs = Revs,
-                seq = Seq,
-                deleted = Deleted,
-                version = Version2
-            };
-        {false, test_doc} ->
-            {_, Key} = lists:keyfind(<<"_key">>, 1, Term),
+    case lists:keyfind(<<"_key">>, 1, Term) of
+        {_, ?TEST_DOC_KEY = Key} ->
             {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
             #document{
                 key = Key,
                 value = undefined,
                 scope = Scope
             };
-        {false, _} ->
+        {_, Key} ->
+            RecordName2 = case lists:keyfind(<<"_record">>, 1, Term) of
+                {_, RecordName} -> decode_term(RecordName, atom);
+                false -> undefined
+            end,
+            case lists:member(RecordName2, datastore_config:get_models()) of
+                true ->
+                    {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
+                    {_, Mutators} = lists:keyfind(<<"_mutators">>, 1, Term),
+                    {_, Revs} = lists:keyfind(<<"_revs">>, 1, Term),
+                    {_, Seq} = lists:keyfind(<<"_seq">>, 1, Term),
+                    {_, Deleted} = lists:keyfind(<<"_deleted">>, 1, Term),
+                    {_, Version} = lists:keyfind(<<"_version">>, 1, Term),
+                    Model = datastore_versions:rename_record(Version, RecordName2),
+                    Record = decode_term(EJson, Model:get_record_struct(Version)),
+                    {Version2, Record2} = datastore_versions:upgrade_record(
+                        Version, Model, Record
+                    ),
+                    #document{
+                        key = Key,
+                        value = Record2,
+                        scope = Scope,
+                        mutators = Mutators,
+                        revs = Revs,
+                        seq = Seq,
+                        deleted = Deleted,
+                        version = Version2
+                    };
+                false ->
+                    EJson
+            end;
+        _ ->
             EJson
     end;
 decode(EJson) ->

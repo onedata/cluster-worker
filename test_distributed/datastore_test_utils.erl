@@ -13,6 +13,7 @@
 -author("Krzysztof Trzepla").
 
 -include("datastore_test_utils.hrl").
+-include("global_definitions.hrl").
 
 %% API
 -export([init_suite/1, init_suite/2, init_suite/3]).
@@ -169,7 +170,9 @@ get_disc_driver_ctx(Model) ->
     end.
 
 get_ctx(Model) ->
-    #{
+    Base = application:get_env(?CLUSTER_WORKER_APP_NAME, test_ctx_base, #{}),
+
+    Base#{
         model => Model,
         fold_enabled => true,
         memory_driver => get_memory_driver(Model),

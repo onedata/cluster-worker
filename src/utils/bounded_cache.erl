@@ -30,7 +30,7 @@
     calculate_and_cache/4, calculate_and_cache/5,
     invalidate/1, get_timestamp/0]).
 %% Cache management API
--export([init_group_manager/0, init_cache/2, init_group/2, terminate_cache/1, check_cache_size/1]).
+-export([init_group_manager/0, init_cache/2, init_group/2, cache_exists/1, terminate_cache/1, check_cache_size/1]).
 
 -type cache() :: atom().
 -type group() :: binary().
@@ -46,16 +46,21 @@
     size := non_neg_integer(),
     check_frequency := non_neg_integer(),
     group => group()
+} | #{
+    group => group(),
+    worker := boolean()
 }.
 -type group_options() :: #{
     size := non_neg_integer(),
-    check_frequency := non_neg_integer()
+    check_frequency := non_neg_integer(),
+    worker := boolean()
 }.
 -type check_options() :: #{
     size := non_neg_integer(),
     name := cache() | group(),
     check_frequency := non_neg_integer(),
-    group => boolean()
+    group => boolean(),
+    worker := boolean()
 }.
 -type in_critical_section() :: boolean().
 
@@ -266,6 +271,15 @@ init_group(Group, Options) ->
     catch
         _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks if cache exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec cache_exists(cache()) -> boolean().
+cache_exists(Cache) ->
+    ets:info(Cache) =/= undefined.
 
 %%--------------------------------------------------------------------
 %% @doc

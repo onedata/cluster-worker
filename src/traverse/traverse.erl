@@ -584,12 +584,12 @@ to_string(CallbackModule, Job) ->
 repair_ongoing_tasks(Pool, Executor) ->
     {ok, TaskIDs, _} = traverse_task_list:list(Pool, ongoing, #{tree_id => Executor}),
 
-    lists:map(fun(ID) ->
-        {ok, CallbackModule, Executor, MainJobID} = traverse_task:get_execution_info(Pool, ID),
+    lists:map(fun(Id) ->
+        {ok, CallbackModule, Executor, MainJobID} = traverse_task:get_execution_info(Pool, Id),
         {ok, Job, _, _} = CallbackModule:get_job(MainJobID),
         ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-        case traverse_task:fix_description(ExtendedCtx, Pool, ID) of
-            {ok, _} -> {ID, ExtendedCtx};
-            {error, other_node} -> {ID, other_node}
+        case traverse_task:fix_description(ExtendedCtx, Pool, Id) of
+            {ok, _} -> {Id, ExtendedCtx};
+            {error, other_node} -> {Id, other_node}
         end
     end, TaskIDs).

@@ -27,7 +27,8 @@
 
 % Types used in request routing.
 -type worker_name() :: atom().
--type worker_ref() :: worker_name() | {WorkerName :: worker_name(), Node :: node()}.
+-type worker_ref() :: worker_name() | {WorkerName :: worker_name(), Node :: node()} |
+    {id, WorkerName :: worker_name(), Id :: datastore_key:key()}.
 -export_type([worker_name/0, worker_ref/0]).
 
 %% This record is used by requests_dispatcher (it contains its state).
@@ -222,6 +223,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Chooses to which worker (on which node) the request should be sent.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
+%% TODO 5983 - currently not used - should be integrated with consistent hashing or removed
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker_node(WorkerName :: worker_name()) ->

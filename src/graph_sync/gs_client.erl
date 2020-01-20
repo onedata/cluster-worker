@@ -183,7 +183,7 @@ websocket_handle(Msg, _, State) ->
     {reply, websocket_req:frame(), state()} |
     {close, Reply :: binary(), state()}.
 websocket_info({init, CallerPid, SupportedVersions, HandshakeAuth, PushCallback}, _, State) ->
-    Id = datastore_utils:gen_key(),
+    Id = datastore_key:new(),
     HandshakeRequest = #gs_req{
         id = Id, subtype = handshake, request = #gs_req_handshake{
             supported_versions = SupportedVersions,
@@ -354,7 +354,7 @@ sync_request(ClientRef, Request) ->
 -spec async_request(client_ref(), gs_protocol:req_wrapper()) ->
     gs_protocol:message_id().
 async_request(ClientRef, #gs_req{id = undefined} = Request) ->
-    async_request(ClientRef, Request#gs_req{id = datastore_utils:gen_key()});
+    async_request(ClientRef, Request#gs_req{id = datastore_key:new()});
 async_request(ClientRef, #gs_req{id = Id} = Request) ->
     ClientRef ! {queue_request, Request, self()},
     Id.

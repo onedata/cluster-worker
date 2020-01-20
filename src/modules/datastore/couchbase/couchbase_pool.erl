@@ -282,7 +282,7 @@ get_workers(Bucket, Mode) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns worker ID to be used by next operation.
+%% Returns worker Id to be used by next operation.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker(couchbase_config:bucket(), mode()) ->
@@ -297,7 +297,7 @@ get_worker(Bucket, write = Mode) ->
         _ ->
             Key = {next_worker_id, Bucket, Mode},
             Id = case ets:lookup(couchbase_pool_stats, Key) of
-                [{Key, ID}] -> ID;
+                [{Key, FoundId}] -> FoundId;
                 _ -> 1
             end,
 
@@ -342,7 +342,7 @@ get_worker(Bucket, Mode) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns next worker ID.
+%% Returns next worker Id.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_next_worker_id(couchbase_config:bucket(), mode(), non_neg_integer()) ->

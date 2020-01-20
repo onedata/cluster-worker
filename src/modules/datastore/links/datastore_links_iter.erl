@@ -134,6 +134,10 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
     Result = lists:foldl(fun
         (_, {error, Reason}) -> {error, Reason};
         ({error, not_found}, {ok, Acc}) -> {ok, Acc};
+        % Next 2 error can appear for bp_trees when document cannot be found in memory
+        % Throw error to allow retry in tp process that can read document from db
+        ({error, {fetch_error, not_found}}, _) -> throw(not_found);
+        ({error, {{fetch_error, not_found}, _Stacktrace}}, _) -> throw(not_found);
         ({error, Reason}, _) -> {error, Reason};
         ({ok, Link}, {ok, Acc}) -> {ok, [Link | Acc]}
     end, {ok, []}, Results),
@@ -230,9 +234,9 @@ fold(Ctx, Key, TreeId, Fun, Acc, Opts, InitBatch) ->
     {ok | {error, term()}, forest_it()}.
 init_tree_mask(Ctx, Key, TreeId, Batch, ForestIt) ->
     case datastore_links_mask:init(Ctx, Key, TreeId, Batch) of
-        {ok, Mask} ->
-            init_tree_mask_cache(TreeId, Mask, ForestIt);
-        {{error, Reason}, Mask} ->
+        {ok, Mask, Empty} ->
+            init_tree_mask_cache(TreeId, Mask, ForestIt, Empty);
+        {{error, Reason}, Mask, _} ->
             {_, Batch} = datastore_links_mask:terminate_read_only_mask(Mask),
             {{error, Reason}, ForestIt#forest_it{batch = Batch}}
     end.
@@ -243,12 +247,12 @@ init_tree_mask(Ctx, Key, TreeId, Batch, ForestIt) ->
 %% Initializes links tree mask cache.
 %% @end
 %%--------------------------------------------------------------------
--spec init_tree_mask_cache(tree_id(), mask(), forest_it()) ->
+-spec init_tree_mask_cache(tree_id(), mask(), forest_it(), boolean()) ->
     {ok | {error, term()}, forest_it()}.
 init_tree_mask_cache(TreeId, Mask, ForestIt = #forest_it{
     masks_cache = MasksCache
-}) ->
-    case datastore_links_mask:load(Mask) of
+}, Empty) ->
+    case datastore_links_mask:load(Mask, Empty) of
         {{ok, Cache}, Mask2} ->
             {ok, Batch} = datastore_links_mask:terminate_read_only_mask(Mask2),
             {ok, ForestIt#forest_it{

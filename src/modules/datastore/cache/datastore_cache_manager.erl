@@ -24,7 +24,7 @@
 
 %% API
 -export([init/0, reset/2, get_size/1]).
--export([mark_active/3, mark_inactive/2]).
+-export([mark_active/3, mark_inactive/2, mark_inactive/3]).
 
 -record(entry, {
     key :: key() | '_',
@@ -42,10 +42,11 @@
 
 -type ctx() :: datastore_cache:ctx().
 -type key() :: datastore:key().
--type pool() :: memory | disc.
+-type pool() :: atom().
+-type pool_type() :: memory | disc.
 -type entry() :: #entry{}.
 
--export_type([pool/0]).
+-export_type([pool/0, pool_type/0]).
 
 %%%===================================================================
 %%% API

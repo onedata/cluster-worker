@@ -87,7 +87,7 @@
 %%--------------------------------------------------------------------
 -spec get_forest_id(key()) -> forest_id().
 get_forest_id(Key) ->
-    datastore_utils:gen_key(<<"links_forest">>, Key).
+    datastore_key:build_adjacent(<<"links_forest">>, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -96,7 +96,7 @@ get_forest_id(Key) ->
 %%--------------------------------------------------------------------
 -spec get_mask_root_id(key()) -> key().
 get_mask_root_id(Key) ->
-    datastore_utils:gen_key(<<"links_mask">>, Key).
+    datastore_key:build_adjacent(<<"links_mask">>, Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -142,6 +142,8 @@ init_tree(Ctx, Key, TreeId, Batch, ReadOnly) ->
 
     case Ans of
         {broken_root, Tree} ->
+            % The tree has been broken by abnormal termination of application
+            % Some data could be lost, proceeding with fixed root
             ?error("Broken bp_tree ~p for key ~p and ctx ~p", [TreeId, Key, Ctx]),
             {ok, Tree};
         Other ->

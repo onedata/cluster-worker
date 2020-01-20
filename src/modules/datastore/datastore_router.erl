@@ -17,11 +17,10 @@
 -include("exometer_utils.hrl").
 
 %% API
--export([route/4, process/3]).
+-export([route/2, process/3]).
 -export([init_counters/0, init_report/0]).
 
--type ctx() :: datastore:ctx().
--type key() :: datastore:key().
+-type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
 -define(EXOMETER_COUNTERS,
     [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
@@ -63,15 +62,27 @@ init_report() ->
 %% Redirects datastore call to designated node and module.
 %% @end
 %%--------------------------------------------------------------------
--spec route(ctx(), key(), atom(), list()) -> term().
-route(Ctx, Key, Function, Args) ->
-    RoutingKey = maps:get(routing_key, Ctx, Key),
-    Node = select_node(Ctx, RoutingKey),
+-spec route(atom(), list()) -> term().
+route(Function, Args) ->
     Module = select_module(Function),
-    Args2 = [Module, Function, Args],
-    case rpc:call(Node, datastore_router, process, Args2) of
-        {badrpc, Reason} -> {error, Reason};
-        Result -> Result
+    {Node, Args2, TryLocalRead} = select_node(Args),
+    try
+        case {Module, TryLocalRead} of
+            {datastore_writer, _} ->
+                case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
+                    {badrpc, Reason} -> {error, Reason};
+                    Result -> Result
+                end;
+            {_, true} ->
+                datastore_router:process(Module, Function, [Node | Args2]);
+            _ ->
+                case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
+                    {badrpc, Reason} -> {error, Reason};
+                    Result -> Result
+                end
+        end
+    catch
+        _:Reason2 -> {error, Reason2}
     end.
 
 %%--------------------------------------------------------------------
@@ -98,13 +109,21 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %% @private
 %% @doc
 %% Returns node responsible for handling datastore call.
+%% Extends context with information about memory_copies nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec select_node(ctx(), key()) -> node().
-select_node(#{routing := local}, _Key) ->
-    node();
-select_node(_Ctx, Key) ->
-    consistent_hashing:get_node(Key).
+-spec select_node(list()) -> {node(), list(), local_read()}.
+select_node([#{routing := local} | _] = Args) ->
+    {node(), Args, true};
+select_node([#{memory_copies := Num, routing_key := Key} = Ctx | ArgsTail]) when is_integer(Num) ->
+    [Node | Nodes] = AllNodes = datastore_key:responsible_nodes(Key, Num),
+    {Node, [Ctx#{memory_copies => Nodes} | ArgsTail], lists:member(node(), AllNodes)};
+select_node([#{memory_copies := _, routing_key := Key} | _] = Args) ->
+    Node = datastore_key:responsible_node(Key),
+    {Node, Args, true};
+select_node([#{routing_key := Key} | _] = Args) ->
+    Node = datastore_key:responsible_node(Key),
+    {Node, Args, false}.
 
 %%--------------------------------------------------------------------
 %% @private

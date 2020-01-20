@@ -64,6 +64,8 @@
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
 
+-define(DEFAULT_TERMINATE_TIMEOUT, 5000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -104,7 +106,6 @@ init_report() ->
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
-
 %% @doc
 %% List of loaded modules.
 %% @end
@@ -236,7 +237,8 @@ start_worker(Module, Args, Options) ->
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
                         [Module, Args, LoadMemorySize]}, transient,
-                        proplists:get_value(terminate_timeout, Options, 5000), worker, [worker_host]}
+                        proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
+                        worker, [worker_host]}
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->
@@ -270,7 +272,8 @@ start_worker(Module, Args, Options) ->
                     ?MAIN_WORKER_SUPERVISOR_NAME,
                     {Module, {worker_host, start_link,
                         [Module, Args, LoadMemorySize]}, transient,
-                        proplists:get_value(terminate_timeout, Options, 5000), worker, [worker_host]}
+                        proplists:get_value(terminate_timeout, Options, ?DEFAULT_TERMINATE_TIMEOUT),
+                        worker, [worker_host]}
                 ) of
                     {ok, _} -> ok;
                     {error, {already_started, _}} ->

@@ -86,7 +86,7 @@ init(Ctx) ->
 % TODO - VFS-3975 - allow routing via generic key without model
 % problem with links application that need such routing key
 get_unique_key(#{model := Model}, Key) ->
-    datastore_utils:gen_key(atom_to_binary(Model, utf8), Key).
+    datastore_key:build_adjacent(atom_to_binary(Model, utf8), Key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -108,7 +108,7 @@ create(Ctx, Doc = #document{key = Key}) ->
 -spec save(ctx(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Doc = #document{key = undefined}) ->
     Ctx2 = Ctx#{generated_key => true},
-    Doc2 = Doc#document{key = datastore_utils:gen_key()},
+    Doc2 = Doc#document{key = datastore_key:new()},
     save(Ctx2, Doc2);
 save(Ctx, Doc = #document{key = Key}) ->
     Result = datastore_apply(Ctx, Key, fun datastore:save/3, save, [Doc]),
@@ -179,7 +179,7 @@ delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
 delete(Ctx0, Key, Pred) ->
     Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
         document_expiry, ?EXPIRY),
-    Ctx = datastore_utils:set_expiry(Ctx0, Expiry),
+    Ctx = couchbase_driver:set_expiry(Ctx0, Expiry),
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).
@@ -193,7 +193,9 @@ delete(Ctx0, Key, Pred) ->
 %%--------------------------------------------------------------------
 -spec delete_all(ctx()) -> ok | {error, term()}.
 delete_all(Ctx) ->
-    datastore_apply_all(Ctx, <<>>, fun datastore:delete_all/2, delete_all, []).
+    % The Key is used for request routing, but the request does not concern any
+    % specific Key - hence a constant <<"delete_all">> is used
+    datastore_apply_all(Ctx, <<"delete_all">>, fun datastore:delete_all/2, delete_all, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -214,7 +216,11 @@ fold(Ctx, Fun, Acc) ->
 %%--------------------------------------------------------------------
 -spec fold(ctx(), fold_fun(doc()), fold_fun(key()), boolean(), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold(Ctx = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
+fold(Ctx0 = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
+    Ctx = case Ctx0 of
+        #{local_fold := true} -> Ctx0#{routing => local};
+        _ -> Ctx0
+    end,
     ModelKey = atom_to_binary(Model, utf8),
     LinksAns = fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         KeyFilter(Key, Acc2)
@@ -242,7 +248,11 @@ fold(_Ctx, _Fun, _KeyFilter, _ReverseKeys, _Acc) ->
 %%--------------------------------------------------------------------
 -spec fold_keys(ctx(), fold_fun(key()), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold_keys(Ctx = #{model := Model, fold_enabled := true}, Fun, Acc) ->
+fold_keys(Ctx0 = #{model := Model, fold_enabled := true}, Fun, Acc) ->
+    Ctx = case Ctx0 of
+        #{local_fold := true} -> Ctx0#{routing => local};
+        _ -> Ctx0
+    end,
     ModelKey = atom_to_binary(Model, utf8),
     fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         Fun(Key, Acc2)
@@ -412,8 +422,12 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
     {ok, doc()} | {error, term()}.
 add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
     Ctx2 = Ctx#{sync_enabled => false},
+    Ctx3 = case Ctx of
+        #{local_fold := true} -> Ctx2#{routing => local};
+        _ -> Ctx2
+    end,
     ModelKey = atom_to_binary(Model, utf8),
-    case add_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
+    case add_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
         [{ok, #link{}}] -> {ok, Doc};
         [{error, already_exists}] -> {ok, Doc};
         [{error, Reason}] -> {error, Reason}
@@ -431,8 +445,12 @@ add_fold_link(_Ctx, _Key, Result) ->
     ok | {error, term()}.
 delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
     Ctx2 = Ctx#{sync_enabled => false},
+    Ctx3 = case Ctx of
+        #{local_fold := true} -> Ctx2#{routing => local};
+        _ -> Ctx2
+    end,
     ModelKey = atom_to_binary(Model, utf8),
-    case delete_links(Ctx2, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
+    case delete_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
         [ok] -> ok;
         [{error, Reason}] -> {error, Reason}
     end;

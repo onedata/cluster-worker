@@ -135,7 +135,7 @@ datastore_writer_should_retry_cache_flush(Config) ->
     ]),
 
     {ok, Cooldown} = test_utils:get_env(Worker, ?CLUSTER_WORKER_APP_NAME,
-        flush_key_cooldown_sek),
+        flush_key_cooldown_sec),
 
     ?assertReceivedEqual({not_flushed, 1}, 2 * FlushDelay),
     ?assertReceivedEqual({not_flushed, 1}, 2 * FlushDelay + timer:seconds(Cooldown)),

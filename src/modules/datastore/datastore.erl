@@ -28,6 +28,7 @@
                  generated_key => boolean(),
                  routing_key => key(), % key used to route request to tp process and to choose node
                  fold_enabled => boolean(),
+                 local_fold => boolean(), % Fold links are added using local routing
                  sync_enabled => boolean(),
                  sync_change => boolean(), % should set to 'true' for save
                                            % of remote change
@@ -37,12 +38,13 @@
                  mutator_pid => pid(),
                  memory_driver => memory_driver(),
                  memory_driver_ctx => memory_driver_ctx(),
+                 memory_copies => [node()] | non_neg_integer() | all,
                  disc_driver => disc_driver(),
                  disc_driver_ctx => disc_driver_ctx(),
                  remote_driver => remote_driver(),
                  remote_driver_ctx => remote_driver_ctx(),
                  include_deleted => boolean(),
-                 expiry => cberl:expiry()  
+                 expiry => cberl:expiry(),
                         % Specify the expiration time. For disc/cached models
                         % This is either an absolute Unix timestamp or
                         % a relative offset from now, in seconds.
@@ -50,6 +52,7 @@
                         % the value of thirty days in seconds, 
                         % then it is a Unix timestamp. For memory models
                         % it is always a relative offset from now.
+                 throw_not_found => boolean()
 }.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
@@ -99,8 +102,8 @@
 %%--------------------------------------------------------------------
 -spec create(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 create(Ctx, Key, Doc = #document{}) ->
-    datastore_hooks:wrap(Ctx, create, [Ctx, Key, Doc], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, create, [Doc], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -110,8 +113,8 @@ create(Ctx, Key, Doc = #document{}) ->
 %%--------------------------------------------------------------------
 -spec save(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Key, Doc = #document{}) ->
-    datastore_hooks:wrap(Ctx, save, [Ctx, Key, Doc], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, save, [Doc], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -121,8 +124,8 @@ save(Ctx, Key, Doc = #document{}) ->
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff) ->
-    datastore_hooks:wrap(Ctx, update, [Ctx, Key, Diff], fun(Function, Args) ->
-        datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, update, [Diff], fun(Function, Args) ->
+        datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -132,8 +135,8 @@ update(Ctx, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff(), doc()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff, Default) ->
-    datastore_hooks:wrap(Ctx, update, [Ctx, Key, Diff, Default], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, update, [Diff, Default], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -143,8 +146,8 @@ update(Ctx, Key, Diff, Default) ->
 %%--------------------------------------------------------------------
 -spec get(ctx(), key()) -> {ok, doc()} | {error, term()}.
 get(Ctx, Key) ->
-    datastore_hooks:wrap(Ctx, get, [Ctx, Key], fun(Function, Args) ->
-        datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, get, [], fun(Function, Args) ->
+        datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -154,8 +157,8 @@ get(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec exists(ctx(), key()) -> {ok, boolean()} | {error, term()}.
 exists(Ctx, Key) ->
-    datastore_hooks:wrap(Ctx, exists, [Ctx, Key], fun(Function, Args) ->
-        datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, exists, [], fun(Function, Args) ->
+        datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -165,8 +168,8 @@ exists(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), pred()) -> ok | {error, term()}.
 delete(Ctx, Key, Pred) ->
-    datastore_hooks:wrap(Ctx, delete, [Ctx, Key, Pred], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, delete, [Pred], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -181,7 +184,7 @@ delete_all(#{
   memory_driver := ets_driver,
   memory_driver_ctx := MemoryCtx
 } = Ctx, Key) ->
-  datastore_hooks:wrap(Ctx, delete_all, [Ctx, Key], fun
+  datastore_hooks:wrap(Ctx, Key, delete_all, [], fun
     (_Function, _Args) -> ets_driver:delete_all(MemoryCtx)
   end);
 delete_all(_, _) ->
@@ -195,8 +198,8 @@ delete_all(_, _) ->
 -spec add_links(ctx(), key(), tree_id(), [{link_name(), link_target()}]) ->
     [{ok, link()} | {error, term()}].
 add_links(Ctx, Key, TreeId, Links) ->
-    datastore_hooks:wrap(Ctx, add_links, [Ctx, Key, TreeId, Links], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, add_links, [TreeId, Links], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -207,8 +210,8 @@ add_links(Ctx, Key, TreeId, Links) ->
 -spec check_and_add_links(ctx(), key(), tree_id(), tree_ids(), [{link_name(), link_target()}]) ->
     [{ok, link()} | {error, term()}].
 check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
-    datastore_hooks:wrap(Ctx, check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, check_and_add_links, [TreeId, CheckTrees, Links], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -219,8 +222,8 @@ check_and_add_links(Ctx, Key, TreeId, CheckTrees, Links) ->
 -spec get_links(ctx(), key(), tree_ids(), [link_name()]) ->
     [{ok, [link()]} | {error, term()}].
 get_links(Ctx, Key, TreeIds, LinkNames) ->
-    datastore_hooks:wrap(Ctx, get_links, [Ctx, Key, TreeIds, LinkNames], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, get_links, [TreeIds, LinkNames], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -235,8 +238,8 @@ delete_links(Ctx, Key, TreeId, Links) ->
         ({LinkName, LinkRev}) -> {LinkName, LinkRev};
         (LinkName) -> {LinkName, undefined}
     end, Links),
-    datastore_hooks:wrap(Ctx, delete_links, [Ctx, Key, TreeId, Links2], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, delete_links, [TreeId, Links2], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -251,8 +254,8 @@ mark_links_deleted(Ctx, Key, TreeId, Links) ->
         ({LinkName, LinkRev}) -> {LinkName, LinkRev};
         (LinkName) -> {LinkName, undefined}
     end, Links),
-    datastore_hooks:wrap(Ctx, mark_links_deleted, [Ctx, Key, TreeId, Links2], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, mark_links_deleted, [TreeId, Links2], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
@@ -264,9 +267,9 @@ mark_links_deleted(Ctx, Key, TreeId, Links) ->
     fold_opts()) -> {ok, fold_acc()} |
     {{ok, fold_acc()}, datastore_links_iter:token()} | {error, term()}.
 fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
-    datastore_hooks:wrap(Ctx, fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts],
+    datastore_hooks:wrap(Ctx, Key, fold_links, [TreeIds, Fun, Acc, Opts],
         fun(Function, Args) ->
-            datastore_router:route(Ctx, Key, Function, Args)
+            datastore_router:route(Function, Args)
         end
     ).
 
@@ -277,6 +280,6 @@ fold_links(Ctx, Key, TreeIds, Fun, Acc, Opts) ->
 %%--------------------------------------------------------------------
 -spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
 get_links_trees(Ctx, Key) ->
-    datastore_hooks:wrap(Ctx, get_links_trees, [Ctx, Key], fun
-        (Function, Args) -> datastore_router:route(Ctx, Key, Function, Args)
+    datastore_hooks:wrap(Ctx, Key, get_links_trees, [], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
     end).

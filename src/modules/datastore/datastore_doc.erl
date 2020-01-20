@@ -22,14 +22,14 @@
 
 %% API
 -export([create/4, save/4, update/4, update/5]).
--export([get/2, fetch/3, fetch/4, fetch_deleted/3, exists/2]).
+-export([get/3, fetch/3, fetch/4, fetch_deleted/3, exists/3]).
 -export([delete/3, delete/4]).
--export([get_links/4, get_links_trees/2]).
+-export([get_links/5, get_links_trees/3]).
 
 -type ctx() :: datastore:ctx().
--type key() :: undefined | binary().
+-type key() :: undefined | datastore_key:key().
 -type value() :: term().
--type rev() :: binary().
+-type rev() :: datastore_rev:rev().
 -type seq() :: couchbase_changes:seq().
 -type scope() :: binary().
 -type mutator() :: binary().
@@ -47,7 +47,7 @@
 -export_type([diff/1, pred/1]).
 
 %%%===================================================================
-%%% API
+%%% Batch API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
@@ -153,41 +153,6 @@ update(Ctx, Key, Diff, Default, Batch) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns datastore document first using memory only store and fallbacking
-%% to persistent store if missing.
-%% @end
-%%--------------------------------------------------------------------
--spec get(ctx(), key()) -> {ok, doc(value())} | {error, term()}.
-get(#{include_deleted := true} = Ctx, Key) ->
-    case datastore_cache:get(Ctx, Key) of
-        {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
-        {ok, Doc} -> {ok, Doc};
-        {error, not_found} -> datastore_writer:fetch(Ctx, Key);
-        {error, Reason} -> {error, Reason}
-    end;
-get(Ctx, Key) ->
-    case datastore_cache:get(Ctx, Key) of
-        {ok, #document{deleted = true}} -> {error, not_found};
-        {ok, Doc} -> {ok, Doc};
-        {error, not_found} -> datastore_writer:fetch(Ctx, Key);
-        {error, Reason} -> {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Checks whether datastore document exists.
-%% @end
-%%--------------------------------------------------------------------
--spec exists(ctx(), key()) -> {ok, boolean()} | {error, term()}.
-exists(Ctx, Key) ->
-    case get(Ctx, Key) of
-        {ok, _Doc} -> {ok, true};
-        {error, not_found} -> {ok, false};
-        {error, Reason} -> {error, Reason}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% @equiv fetch(Ctx, Key, Batch, false)
 %% @end
 %%--------------------------------------------------------------------
@@ -268,36 +233,70 @@ delete(Ctx, Key, Pred, Batch) ->
             {{error, Reason}, Batch2}
     end.
 
+%%%===================================================================
+%%% Direct access API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns datastore document first using memory only store and fallbacking
+%% to persistent store if missing.
+%% @end
+%%--------------------------------------------------------------------
+-spec get(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
+    case datastore_cache:get(Ctx, Key) of
+        {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
+        {ok, Doc} -> {ok, Doc};
+        {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
+        {error, Reason2} -> {error, Reason2}
+    end;
+get(FetchNode, Ctx, Key) ->
+    case datastore_cache:get(Ctx, Key) of
+        {ok, #document{deleted = true}} -> {error, not_found};
+        {ok, Doc} -> {ok, Doc};
+        {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
+        {error, Reason2} -> {error, Reason2}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Checks whether datastore document exists.
+%% @end
+%%--------------------------------------------------------------------
+-spec exists(node(), ctx(), key()) -> {ok, boolean()} | {error, term()}.
+exists(FetchNode, Ctx, Key) ->
+    case get(FetchNode, Ctx, Key) of
+        {ok, _Doc} -> {ok, true};
+        {error, not_found} -> {ok, false};
+        {error, Reason} -> {error, Reason}
+    end.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns datastore document links.
 %% @end
 %%--------------------------------------------------------------------
--spec get_links(ctx(), key(), tree_id(), [link_name()]) ->
+-spec get_links(node(), ctx(), key(), tree_id(), [link_name()]) ->
     [{ok, link()} | {error, term()}].
-get_links(Ctx, Key, TreeIds, LinkNames) ->
-    {ok, ForestIt} = datastore_links_iter:init(Ctx, Key, TreeIds),
-    Links = lists:map(fun(LinkName) ->
-        {Result, _} = datastore_links:get(LinkName, ForestIt),
-        {LinkName, Result}
-    end, LinkNames),
-    NotFoundLinkNames = lists:filtermap(fun
-        ({LinkName, {error, not_found}}) -> {true, LinkName};
-        (_) -> false
-    end, Links),
-    FetchedLinks = datastore_writer:fetch_links(
-        Ctx, Key, TreeIds, NotFoundLinkNames
-    ),
-    FetchedLinks2 = lists:zip(NotFoundLinkNames, FetchedLinks),
-    lists:map(fun
-        ({_, {ok, MemoryLinks}}) ->
-            {ok, MemoryLinks};
-        ({LinkName, {error, not_found}}) ->
-            {LinkName, Result} = lists:keyfind(LinkName, 1, FetchedLinks2),
-            Result;
-        ({_, {error, Reason}}) ->
-            {error, Reason}
-    end, Links).
+get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
+    try
+        MemoryCtx = case {Ctx, node()} of
+            {#{disc_driver := undefined}, FetchNode} -> Ctx;
+            _ -> Ctx#{disc_driver => undefined, remote_driver => undefined, throw_not_found => true}
+        end,
+        {ok, ForestIt} = datastore_links_iter:init(MemoryCtx, Key, TreeIds),
+        lists:map(fun(LinkName) ->
+            {Result, _} = datastore_links:get(LinkName, ForestIt),
+            Result
+        end, LinkNames)
+    catch
+        _:_ ->
+            case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames]) of
+                {badrpc, RpcReason} -> {error, RpcReason};
+                RpcResult -> RpcResult
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -305,15 +304,25 @@ get_links(Ctx, Key, TreeIds, LinkNames) ->
 %% forest.
 %% @end
 %%--------------------------------------------------------------------
--spec get_links_trees(ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
-get_links_trees(Ctx, Key) ->
-    case datastore_links:get_links_trees(Ctx, Key, undefined) of
-        {{ok, TreeIds}, _} ->
-            {ok, TreeIds};
-        {{error, not_found}, _} ->
-            datastore_writer:fetch_links_trees(Ctx, Key);
-        {{error, Reason}, _} ->
-            {error, Reason}
+-spec get_links_trees(node(), ctx(), key()) -> {ok, [tree_id()]} | {error, term()}.
+get_links_trees(FetchNode, Ctx, Key) ->
+    try
+        MemoryCtx = case {Ctx, node()} of
+            {#{disc_driver := undefined}, FetchNode} -> Ctx;
+            _ -> Ctx#{disc_driver => undefined, remote_driver => undefined, throw_not_found => true}
+        end,
+        case datastore_links:get_links_trees(MemoryCtx, Key, undefined) of
+            {{ok, TreeIds}, _} ->
+                {ok, TreeIds};
+            {{error, Reason}, _} ->
+                {error, Reason}
+        end
+    catch
+        _:_ ->
+            case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
+                {badrpc, Reason3} -> {error, Reason3};
+                Result -> Result
+            end
     end.
 
 %%%===================================================================
@@ -323,11 +332,39 @@ get_links_trees(Ctx, Key) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
+%% Tries to fetch missing document via tp process if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec fetch_missing(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+fetch_missing(FetchNode, Ctx, Key) ->
+    case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
+        true ->
+            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
+                {badrpc, Reason} -> {error, Reason};
+                Result -> Result
+            end;
+        _ ->
+            {error, not_found}
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Returns datastore document even if it is marked as deleted.
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_deleted(ctx(), key(), undefined | batch(), boolean()) ->
     {{ok, doc(value())} | {error, term()}, batch()}.
+% This case is used for fetching link documents outside tp process
+% Errors should be thrown to prevent further processing
+fetch_deleted(#{throw_not_found := true} = Ctx, Key, Batch, _) ->
+    case datastore_cache:get(Ctx, Key, false) of
+        {error, not_found} ->
+            % Throw tuple to prevent catching by bp_tree
+            throw({fetch_error, not_found});
+        Result ->
+            {Result, Batch}
+    end;
 fetch_deleted(Ctx, Key, Batch = undefined, false) ->
     {datastore_cache:get(Ctx, Key, true), Batch};
 fetch_deleted(Ctx, Key, Batch = undefined, true) ->
@@ -378,7 +415,7 @@ resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
 default_resolve_conflict(RemoteDoc, LocalDoc) ->
     #document{revs = [RemoteRev | _]} = RemoteDoc,
     #document{revs = [LocalRev | _]} = LocalDoc,
-    case datastore_utils:is_greater_rev(RemoteRev, LocalRev) of
+    case datastore_rev:is_greater(RemoteRev, LocalRev) of
         true ->
             {save, RemoteDoc};
         false ->
@@ -477,14 +514,14 @@ set_version(Doc) ->
 %%--------------------------------------------------------------------
 -spec set_rev(ctx(), doc(value()), undefined | rev()) -> doc(value()).
 set_rev(#{sync_enabled := true}, Doc = #document{revs = []}, undefined) ->
-    Doc#document{revs = [datastore_utils:gen_rev(1)]};
+    Doc#document{revs = [datastore_rev:new(1)]};
 set_rev(Ctx, Doc = #document{revs = [Rev | _]}, undefined) ->
     set_rev(Ctx, Doc, Rev);
 set_rev(#{sync_enabled := true}, Doc = #document{revs = Revs}, PrevRev) ->
     Length = application:get_env(cluster_worker,
         datastore_doc_revision_history_length, 1),
-    {Generation, _} = datastore_utils:parse_rev(PrevRev),
-    Rev = datastore_utils:gen_rev(Generation + 1),
+    {Generation, _} = datastore_rev:parse(PrevRev),
+    Rev = datastore_rev:new(Generation + 1),
     Doc#document{revs = lists:sublist([Rev | Revs], Length)};
 set_rev(_Ctx, Doc, _PrevRev) ->
     Doc.
