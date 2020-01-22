@@ -32,6 +32,9 @@
 %   * startkey - key from last processed row
 %   * skip = 1 - to skip last processed row because startkey_docid and startkey options are inclusive
 -record(view_traverse_token, {
+    % offset field is not used internally to query couchbase
+    % it is only used to keep track of offset of processed rows in the view
+    % and to pass row's number to callbacks defined in modules using view_traverse mechanism
     offset = 0 :: non_neg_integer(),
     % id field extracted from last processed row
     last_doc_id :: undefined | binary(),
