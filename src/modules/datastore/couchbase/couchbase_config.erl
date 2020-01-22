@@ -50,7 +50,7 @@ get_buckets() ->
         {ok, Buckets} ->
             Buckets;
         _ ->
-            DbHost = utils:random_element(get_hosts()),
+            DbHost = lists_utils:random_element(get_hosts()),
             Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
             {ok, 200, _, Body} = http_client:get(Url),
             Ans = lists:map(fun(BucketMap) ->
@@ -68,7 +68,7 @@ get_buckets() ->
 %%--------------------------------------------------------------------
 -spec get_flush_queue_size() -> non_neg_integer().
 get_flush_queue_size() ->
-    DbHost = utils:random_element(get_hosts()),
+    DbHost = lists_utils:random_element(get_hosts()),
     Buckets = get_buckets(),
 
     lists:foldl(fun(Bucket, Max) ->

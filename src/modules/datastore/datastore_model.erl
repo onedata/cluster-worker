@@ -193,7 +193,9 @@ delete(Ctx0, Key, Pred) ->
 %%--------------------------------------------------------------------
 -spec delete_all(ctx()) -> ok | {error, term()}.
 delete_all(Ctx) ->
-    datastore_apply_all(Ctx, <<>>, fun datastore:delete_all/2, delete_all, []).
+    % The Key is used for request routing, but the request does not concern any
+    % specific Key - hence a constant <<"delete_all">> is used
+    datastore_apply_all(Ctx, <<"delete_all">>, fun datastore:delete_all/2, delete_all, []).
 
 %%--------------------------------------------------------------------
 %% @doc
