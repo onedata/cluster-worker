@@ -762,7 +762,6 @@ do_heartbeat(#state{cm_con_status = connected, monitoring_state = MonState, last
     NewMonState = monitoring:update(MonState),
     NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
-    ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     {NewMonState, NewLSA};
 

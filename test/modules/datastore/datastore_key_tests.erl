@@ -275,19 +275,21 @@ keys_adjacent_to_keys_with_the_same_chash_differ() ->
     assert_keys_are_adjacent(NewKeys).
 
 
+% datastore_key:build_adjacent/2 should fall back to gen_legacy_key if the
+% Original key (the second argument) is a legacy key (does not include a chash label).
 gen_legacy_key() ->
     InputExamples = [
         {<<"">>, <<"123">>},
-        {<<"">>, datastore_key:new()},
-        {<<"user">>, datastore_key:new_from_digest(["another", key, {1, 2, 3}])},
+        {<<"">>, ?RAND_LEGACY_KEY},
+        {<<"user">>, ?RAND_LEGACY_KEY},
         {?RAND_LEGACY_KEY, ?RAND_LEGACY_KEY},
-        {datastore_key:new(), datastore_key:new_adjacent_to(datastore_key:new())},
+        {datastore_key:new(), ?RAND_LEGACY_KEY},
         {datastore_key:build_adjacent(<<"a">>, datastore_key:new()), ?RAND_LEGACY_KEY}
     ],
     Keys = lists:map(fun({Seed, Key}) ->
-        LegacyKey = datastore_key:gen_legacy_key(Seed, Key),
+        LegacyKey = datastore_key:build_adjacent(Seed, Key),
         % The same input parameters should always return the same key
-        ?assertEqual(LegacyKey, datastore_key:gen_legacy_key(Seed, Key)),
+        ?assertEqual(LegacyKey, datastore_key:build_adjacent(Seed, Key)),
         LegacyKey
     end, InputExamples),
     assert_keys_are_different(Keys),
@@ -296,13 +298,7 @@ gen_legacy_key() ->
 
     % Make sure legacy key the mappings are retained
     lists:foreach(fun({Seed, Key, ExpectedResultKey}) ->
-        ?assertEqual(ExpectedResultKey, datastore_key:gen_legacy_key(Seed, Key)),
-        % build_adjacent_key should work like gen_legacy_key if a legacy Key is given
-        % however, empty binaries are disallowed as Extensions
-        case Seed of
-            <<"">> -> skip;
-            _ -> ?assertEqual(ExpectedResultKey, datastore_key:build_adjacent(Seed, Key))
-        end
+        ?assertEqual(ExpectedResultKey, datastore_key:build_adjacent(Seed, Key))
     end, legacy_key_specific_examples()).
 
 
