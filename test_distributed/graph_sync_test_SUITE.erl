@@ -674,7 +674,7 @@ auth_override_test_base(Config, ProtoVersion) ->
             client_auth = {token, ?USER_2_TOKEN},
             peer_ip = ?WHITELISTED_IP,
             interface = ?WHITELISTED_INTERFACE,
-            audience_token = ?WHITELISTED_AUDIENCE_TOKEN
+            consumer_token = ?WHITELISTED_CONSUMER_TOKEN
         },
         request = #gs_req_graph{
             gri = #gri{type = od_user, id = ?SELF, aspect = instance},
@@ -729,14 +729,14 @@ auth_override_test_base(Config, ProtoVersion) ->
     end)),
 
     % Check if auth override data that is not whitelisted causes an error.
-    % For test purposes, there are defined blacklisted ip, interface and audience token.
-    ReqWithOverrideData = fun(PeerIp, Interface, AudienceToken) ->
+    % For test purposes, there are defined blacklisted ip, interface and consumer token.
+    ReqWithOverrideData = fun(PeerIp, Interface, ConsumerToken) ->
         GetUserReq#gs_req{
         auth_override = #auth_override{
             client_auth = {token, ?USER_2_TOKEN},
             peer_ip = PeerIp,
             interface = Interface,
-            audience_token = AudienceToken
+            consumer_token = ConsumerToken
         }
     } end,
 
@@ -746,13 +746,13 @@ auth_override_test_base(Config, ProtoVersion) ->
             ok;
         true ->
             ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
-                ?BLACKLISTED_IP, ?WHITELISTED_INTERFACE, ?WHITELISTED_AUDIENCE_TOKEN
+                ?BLACKLISTED_IP, ?WHITELISTED_INTERFACE, ?WHITELISTED_CONSUMER_TOKEN
             ))),
             ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
-                ?WHITELISTED_IP, ?BLACKLISTED_INTERFACE, ?WHITELISTED_AUDIENCE_TOKEN
+                ?WHITELISTED_IP, ?BLACKLISTED_INTERFACE, ?WHITELISTED_CONSUMER_TOKEN
             ))),
             ?assertMatch(?ERROR_UNAUTHORIZED, gs_client:sync_request(ProviderClient, ReqWithOverrideData(
-                ?WHITELISTED_IP, ?WHITELISTED_INTERFACE, ?BLACKLISTED_AUDIENCE_TOKEN
+                ?WHITELISTED_IP, ?WHITELISTED_INTERFACE, ?BLACKLISTED_CONSUMER_TOKEN
             )))
     end.
 
@@ -784,7 +784,7 @@ nobody_auth_override_test_base(Config, ProtoVersion) ->
                 client_auth = nobody,
                 peer_ip = ?WHITELISTED_IP,
                 interface = ?WHITELISTED_INTERFACE,
-                audience_token = ?WHITELISTED_AUDIENCE_TOKEN
+                consumer_token = ?WHITELISTED_CONSUMER_TOKEN
             },
             request = #gs_req_graph{
                 gri = #gri{type = od_share, id = ?SHARE, aspect = instance, scope = auto},

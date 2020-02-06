@@ -98,12 +98,12 @@ verify_auth_override(_Auth, AuthOverride) ->
         client_auth = ClientAuth,
         peer_ip = PeerIp,
         interface = Interface,
-        audience_token = AudienceToken
+        consumer_token = ConsumerToken
     } = AuthOverride,
 
     CorrectData = (PeerIp /= ?BLACKLISTED_IP) andalso
         (Interface /= ?BLACKLISTED_INTERFACE) andalso
-        (AudienceToken /= ?BLACKLISTED_AUDIENCE_TOKEN),
+        (ConsumerToken /= ?BLACKLISTED_CONSUMER_TOKEN),
 
     case CorrectData of
         false ->
