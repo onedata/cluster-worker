@@ -694,7 +694,7 @@ encode_decode_error() ->
         ?ERROR_TEMPORARY_FAILURE,
         ?ERROR_BAD_GUI_PACKAGE,
         ?ERROR_GUI_PACKAGE_TOO_LARGE,
-        ?ERROR_GUI_PACKAGE_UNVERIFIED,
+        ?ERROR_GUI_PACKAGE_UNVERIFIED(<<"efff1f3e912dac2dce88ccf02352e32b906d30b78fb47b89b0d8b2744cd81b29">>),
         ?ERROR_ALREADY_EXISTS,
         ?ERROR_POSIX(eacess),
         ?ERROR_BAD_VALUE_AMBIGUOUS_ID(<<"viewName">>),
