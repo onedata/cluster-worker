@@ -445,9 +445,12 @@ error_to_json(_, ?ERROR_GUI_PACKAGE_TOO_LARGE) ->
         <<"id">> => <<"guiPackageTooLarge">>
     };
 
-error_to_json(_, ?ERROR_GUI_PACKAGE_UNVERIFIED) ->
+error_to_json(_, ?ERROR_GUI_PACKAGE_UNVERIFIED(ShaSum)) ->
     #{
-        <<"id">> => <<"guiPackageUnverified">>
+        <<"id">> => <<"guiPackageUnverified">>,
+        <<"details">> => #{
+            <<"shaSum">> => ShaSum
+        }
     }.
 
 
@@ -718,8 +721,8 @@ json_to_error(_, #{<<"id">> := <<"badGuiPackage">>}) ->
 json_to_error(_, #{<<"id">> := <<"guiPackageTooLarge">>}) ->
     ?ERROR_GUI_PACKAGE_TOO_LARGE;
 
-json_to_error(_, #{<<"id">> := <<"guiPackageUnverified">>}) ->
-    ?ERROR_GUI_PACKAGE_UNVERIFIED;
+json_to_error(_, #{<<"id">> := <<"guiPackageUnverified">>, <<"details">> := #{<<"shaSum">> := ShaSum}}) ->
+    ?ERROR_GUI_PACKAGE_UNVERIFIED(ShaSum);
 
 json_to_error(_, ErrorObject) ->
     ?ERROR_UNKNOWN_ERROR(ErrorObject).
