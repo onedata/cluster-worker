@@ -768,7 +768,7 @@ json_to_auth_override(3, Data) ->
         client_auth = json_to_client_auth(Data),
         peer_ip = undefined,
         interface = undefined,
-        audience_token = undefined,
+        consumer_token = undefined,
         data_access_caveats_policy = disallow_data_access_caveats
     };
 json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
@@ -782,7 +782,7 @@ json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
             null -> undefined;
             Interface -> cv_interface:deserialize_interface(Interface)
         end,
-        audience_token = utils:null_to_undefined(maps:get(<<"audienceToken">>, Data, null)),
+        consumer_token = utils:null_to_undefined(maps:get(<<"consumerToken">>, Data, null)),
         data_access_caveats_policy = case maps:get(<<"dataAccessCaveatsPolicy">>, Data, null) of
             null -> disallow_data_access_caveats;
             Bin -> str_to_data_access_caveats_policy(Bin)
@@ -806,7 +806,7 @@ auth_override_to_json(_, #auth_override{} = AuthOverride) ->
             undefined -> null;
             Interface -> cv_interface:serialize_interface(Interface)
         end,
-        <<"audienceToken">> => utils:undefined_to_null(AuthOverride#auth_override.audience_token),
+        <<"consumerToken">> => utils:undefined_to_null(AuthOverride#auth_override.consumer_token),
         <<"dataAccessCaveatsPolicy">> => data_access_caveats_policy_to_str(
             AuthOverride#auth_override.data_access_caveats_policy
         )
