@@ -77,7 +77,7 @@ end).
 -define(BLACKLISTED_IP, {93, 189, 214, 3}).
 -define(WHITELISTED_INTERFACE, rest).
 -define(BLACKLISTED_INTERFACE, oneclient).
--define(WHITELISTED_AUDIENCE_TOKEN, <<"ok-aud-token">>).
--define(BLACKLISTED_AUDIENCE_TOKEN, <<"bad-aud-token">>).
+-define(WHITELISTED_CONSUMER_TOKEN, <<"ok-consumer-token">>).
+-define(BLACKLISTED_CONSUMER_TOKEN, <<"bad-consumer-token">>).
 
 -endif.

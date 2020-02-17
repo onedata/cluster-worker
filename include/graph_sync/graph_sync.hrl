@@ -104,7 +104,7 @@
     client_auth :: gs_protocol:client_auth(),
     peer_ip :: undefined | ip_utils:ip(),
     interface :: undefined | cv_interface:interface(),
-    audience_token :: undefined | tokens:serialized(),
+    consumer_token :: undefined | tokens:serialized(),
     data_access_caveats_policy = disallow_data_access_caveats :: data_access_caveats:policy()
 }).
 

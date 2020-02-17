@@ -474,7 +474,7 @@ encode_decode_auth_override_v4_test() ->
                 client_auth = {token, <<"third-token">>},
                 peer_ip = {9, 31, 216, 211},
                 interface = graphsync,
-                audience_token = <<"983947234">>,
+                consumer_token = <<"983947234">>,
                 data_access_caveats_policy = disallow_data_access_caveats
             },
             request = #gs_req_rpc{
@@ -489,7 +489,7 @@ encode_decode_auth_override_v4_test() ->
                 client_auth = nobody,
                 peer_ip = undefined,
                 interface = oneclient,
-                audience_token = undefined,
+                consumer_token = undefined,
                 data_access_caveats_policy = allow_data_access_caveats
             },
             request = #gs_req_rpc{
@@ -504,7 +504,7 @@ encode_decode_auth_override_v4_test() ->
                 client_auth = {token, <<"fourth-token">>},
                 peer_ip = undefined,
                 interface = rest,
-                audience_token = undefined,
+                consumer_token = undefined,
                 data_access_caveats_policy = allow_data_access_caveats
             },
             request = #gs_req_graph{
