@@ -485,7 +485,7 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
 -spec save_memory_copies(ctx(), key(), doc(),datastore_cache_manager:pool_type()) -> ok.
 save_memory_copies(#{routing := local}, _Key, _Doc, _PoolType) ->
     ok;
-save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
+save_memory_copies(#{memory_copies_nodes := Nodes} = Ctx, Key, Doc, PoolType) ->
     Pool = datastore_multiplier:extend_name(Key, PoolType),
     {Ans, BadNodes} = FullAns = rpc:multicall(Nodes, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]),
     Errors = lists:filter(fun

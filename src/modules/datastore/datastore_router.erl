@@ -115,17 +115,11 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 -spec select_node(list()) -> {node(), list(), local_read()}.
 select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
-select_node([#{memory_copies := all, routing_key := Key} = Ctx | ArgsTail]) ->
-    Node = datastore_key:responsible_node(Key),
-    AllNodes = consistent_hashing:get_all_nodes(),
-    CopyNodes = AllNodes -- [Node],
-    {Node, [Ctx#{memory_copies => CopyNodes} | ArgsTail], lists:member(node(), AllNodes)};
-select_node([#{memory_copies := Num, routing_key := Key} = Ctx | ArgsTail]) when is_integer(Num) ->
-    [Node | Nodes] = AllNodes = datastore_key:responsible_nodes(Key, Num),
-    {Node, [Ctx#{memory_copies => Nodes} | ArgsTail], lists:member(node(), AllNodes)};
-select_node([#{memory_copies := _, routing_key := Key} | _] = Args) ->
-    Node = datastore_key:responsible_node(Key),
-    {Node, Args, true};
+select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
+    {[Node | KeyConnectedNodesTail] = KeyConnectedNodes, OtherRequestedNodes, BrokenNodes} =
+        datastore_key:responsible_nodes(Key, MemCopies),
+    {Node, [Ctx#{key_connecyed_nodes => KeyConnectedNodesTail, memory_copies_nodes => OtherRequestedNodes,
+        broken_nodes => BrokenNodes} | ArgsTail], lists:member(node(), KeyConnectedNodes)};
 select_node([#{routing_key := Key} | _] = Args) ->
     Node = datastore_key:responsible_node(Key),
     {Node, Args, false}.

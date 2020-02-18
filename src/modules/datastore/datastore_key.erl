@@ -64,7 +64,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
--export([responsible_node/1, responsible_nodes/2, alive_and_broken_responsible_nodes/2]).
+-export([responsible_node/1, responsible_nodes/2]).
 
 %%%===================================================================
 %%% API
@@ -166,25 +166,15 @@ responsible_node(Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns a list of nodes of requested length responsible for handling
-%% given datastore key.
-%% @end
-%%--------------------------------------------------------------------
--spec responsible_nodes(key(), pos_integer()) -> [node()].
-responsible_nodes(Key, NodesCount) ->
-    CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_nodes(CHashSeed, NodesCount).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Returns nodes responsible for handling given datastore key. Returns two lists:
 %% alvie and broken nodes. Sum of lists' length is equal to requested nodes' count.
 %% @end
 %%--------------------------------------------------------------------
--spec alive_and_broken_responsible_nodes(key(), pos_integer()) -> {AliveNodes :: [node()], BrokenNodes :: [node()]}.
-alive_and_broken_responsible_nodes(Key, NodesCount) ->
+-spec responsible_nodes(key(), non_neg_integer() | all) ->
+    {KeyConnectedNodes :: [node()], OtherRequestedNodes :: [node()], BrokenNodes :: [node()]}.
+responsible_nodes(Key, MinBackupNodesNum) ->
     CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_alive_and_broken_nodes(CHashSeed, NodesCount).
+    consistent_hashing:get_nodes(CHashSeed, MinBackupNodesNum).
 
 %% ====================================================================
 %% Internal functions

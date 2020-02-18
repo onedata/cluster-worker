@@ -38,7 +38,10 @@
                  mutator_pid => pid(),
                  memory_driver => memory_driver(),
                  memory_driver_ctx => memory_driver_ctx(),
-                 memory_copies => [node()] | non_neg_integer() | all,
+                 memory_copies => non_neg_integer() | all, % number of nodes used for memory copies
+                 memory_copies_nodes => [node()], % nodes to be used for memory copies (set by datastore_router)
+                 key_connecyed_nodes => [node()], % nodes connected to key (set by datastore_router)
+                 broken_nodes => [node()], % broken nodes connected to key (set by datastore_router)
                  disc_driver => disc_driver(),
                  disc_driver_ctx => disc_driver_ctx(),
                  remote_driver => remote_driver(),
