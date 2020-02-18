@@ -115,6 +115,11 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 -spec select_node(list()) -> {node(), list(), local_read()}.
 select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
+select_node([#{memory_copies := all, routing_key := Key} = Ctx | ArgsTail]) ->
+    Node = datastore_key:responsible_node(Key),
+    AllNodes = consistent_hashing:get_all_nodes(),
+    CopyNodes = AllNodes -- [Node],
+    {Node, [Ctx#{memory_copies => CopyNodes} | ArgsTail], lists:member(node(), AllNodes)};
 select_node([#{memory_copies := Num, routing_key := Key} = Ctx | ArgsTail]) when is_integer(Num) ->
     [Node | Nodes] = AllNodes = datastore_key:responsible_nodes(Key, Num),
     {Node, [Ctx#{memory_copies => Nodes} | ArgsTail], lists:member(node(), AllNodes)};

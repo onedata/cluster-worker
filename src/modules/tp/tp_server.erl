@@ -64,10 +64,12 @@ start_link(Module, Args, Key) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Module, Args, Key]) ->
-    case tp_router:create(Key, self()) of
+    Self = self(),
+    case tp_router:create(Key, Self) of
         ok ->
             process_flag(trap_exit, true),
             {ok, State} = Module:init(Args),
+            tp_router:report_process_initialized(Key, Self),
             {ok, #state{module = Module, key = Key, state = State}};
         {error, already_exists} ->
             ignore;

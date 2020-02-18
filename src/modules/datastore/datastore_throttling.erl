@@ -124,6 +124,7 @@ get_idle_timeout() ->
         {ok, IdleTimeout} ->
             IdleTimeout;
         _ ->
+            % Sprawdzic na ile jest ustawiony default
             application:get_env(?CLUSTER_WORKER_APP_NAME,
                 datastore_writer_idle_timeout, timer:seconds(30))
     end.
