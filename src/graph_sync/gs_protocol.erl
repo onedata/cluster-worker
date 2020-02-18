@@ -112,7 +112,7 @@
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
     throughHandleService | throughHandle | throughHarvester | throughCluster |
-    asUser | asGroup | asSpace,
+    asUser | asGroup | asSpace | asHarvester,
     EntityId :: binary()
 }.
 % Generic term representing an entity in the system. If prefetched, it can be
@@ -839,7 +839,8 @@ auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) -> <<"throughHarvester:", Har
 auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) -> <<"throughCluster:", ClusterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
 auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
-auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>.
+auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>;
+auth_hint_to_json(?AS_HARVESTER(HarvesterId)) -> <<"asHarvester:", HarvesterId/binary>>.
 
 
 -spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
@@ -854,7 +855,8 @@ json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) -> ?THROUGH_HARVE
 json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) -> ?THROUGH_CLUSTER(ClusterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
-json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
+json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId);
+json_to_auth_hint(<<"asHarvester:", HarvesterId/binary>>) -> ?AS_HARVESTER(HarvesterId).
 
 
 -spec nosub_reason_to_str(nosub_reason()) -> binary().

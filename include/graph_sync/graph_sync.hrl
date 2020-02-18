@@ -122,5 +122,6 @@
 -define(AS_USER(UserId), {asUser, UserId}).
 -define(AS_GROUP(GroupId), {asGroup, GroupId}).
 -define(AS_SPACE(SpaceId), {asSpace, SpaceId}).
+-define(AS_HARVESTER(HarvesterId), {asHarvester, HarvesterId}).
 
 -endif.
