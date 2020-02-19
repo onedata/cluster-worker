@@ -18,7 +18,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/1, save_master_pid/1, get_master_pid/0]).
+-export([start_link/4, save_master_pid/1, get_master_pid/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -28,14 +28,17 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    keys_in_flush = #{} :: #{key() => reference()},
+    keys_in_flush = #{} :: #{key() => {reference() | undefined, ctx() | undefined}}, % Undefined values for keys
+                                                                                     % in flush on ha slave node
     keys_to_inactivate = #{} :: cached_keys(),
     keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
     flush_timer :: undefined | reference(),
     inactivate_timer :: undefined | reference(),
-    link_tokens = #{} :: cached_token_map()
+    link_tokens = #{} :: cached_token_map(),
+    ha_master_data :: ha_master:ha_master_data(),
+    emergency_calls_data :: ha_slave:emergency_calls_data()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -48,7 +51,8 @@
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
-    #{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
+    #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
+-type request_type() :: regular | emergency_call. % Emergency calls appear when master node is down.
 
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
@@ -67,9 +71,9 @@
 %% Starts and links datastore cache writer process to the caller.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid()) -> {ok, pid()} | {error, term()}.
-start_link(MasterPid) ->
-    gen_server:start_link(?MODULE, [MasterPid], []).
+-spec start_link(pid(), key(), [node()], [key()]) -> {ok, pid()} | {error, term()}.
+start_link(MasterPid, InitKey, BackupNodes, KeysInSlaveFlush) ->
+    gen_server:start_link(?MODULE, [MasterPid, InitKey, BackupNodes, KeysInSlaveFlush], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -103,10 +107,14 @@ get_master_pid() ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([MasterPid]) ->
+init([MasterPid, InitKey, BackupNodes, KeysInSlaveFlush]) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     save_master_pid(MasterPid),
-    {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid}}.
+
+    KiF = lists:map(fun(Key) -> {Key, {slave_flush, undefined}} end, KeysInSlaveFlush),
+    {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid, keys_in_flush = maps:from_list(KiF),
+        ha_master_data = ha_master:init_data(InitKey, BackupNodes),
+        emergency_calls_data = ha_slave:new_emergency_calls_data()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -124,7 +132,7 @@ init([MasterPid]) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
     gen_server:reply(From, ok),
-    State2 = handle_requests(Requests, State#state{requests_ref = Ref}),
+    State2 = handle_requests(Requests, regular, State#state{requests_ref = Ref}),
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State2)};
 handle_call(terminate, _From, #state{
@@ -141,7 +149,7 @@ handle_call(terminate, _From, State) ->
 handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, State),
+        disc_writer_pid = Pid} = handle_requests(Requests, regular, State),
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
@@ -350,22 +358,24 @@ code_change(_OldVsn, State, _Extra) ->
 %% Handles requests.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_requests(list(), state()) -> state().
-handle_requests(Requests, State = #state{
+-spec handle_requests(list(), request_type(), state()) -> state().
+handle_requests(Requests, RequestType, State = #state{
     cached_keys_to_flush = CachedKeys,
     master_pid = Pid,
     link_tokens = LT
 }) ->
     Batch = datastore_doc_batch:init(),
     {Responses, Batch2, LT2} = batch_requests(Requests, [], Batch, LT),
-    Batch3 = datastore_doc_batch:apply(Batch2),
+    CacheRequests = datastore_doc_batch:create_cache_requests(Batch2),
+    Batch3 = datastore_doc_batch:apply_cache_requests(Batch2, CacheRequests),
     Batch4 = send_responses(Responses, Batch3),
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
+    State2 = handle_ha_requests(CachedKeys2, CacheRequests, RequestType, State),
 
-    State#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
+    State2#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -810,7 +820,8 @@ check_inactivate(#state{
     ExcludeMap = maps:with(Exclude, ToInactivate),
 
     datastore_cache:inactivate(ToInactivate2),
-    State2 = State#state{keys_to_inactivate = ExcludeMap,
+    State2 = handle_ha_inactivate(ToInactivate2, State),
+    State3 = State2#state{keys_to_inactivate = ExcludeMap,
         flush_times = maps:with(Exclude, FT)},
 
     MaxLinkTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -820,12 +831,12 @@ check_inactivate(#state{
         timer:now_diff(Now, Time) =< MaxLinkTimeUS
     end, LT),
 
-    case maps:size(ToExpire2) + maps:size(State2#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of
+    case maps:size(ToExpire2) + maps:size(State3#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of
         true ->
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2};
+            State3#state{link_tokens = LT2, keys_to_expire = ToExpire2};
         _ ->
             Timer = erlang:send_after(ExpireMaxTime div 1000, self(), inactivate),
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
+            State3#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
     end.
 
 %%--------------------------------------------------------------------
@@ -877,3 +888,19 @@ generate_error_ans(0, _Error) ->
     [];
 generate_error_ans(N, Error) ->
     [{make_ref(), Error} | generate_error_ans(N - 1, Error)].
+
+-spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], request_type(), state()) -> state().
+handle_ha_requests(CachedKeys, CacheRequests, regular, #state{ha_master_data = HAData} = State) ->
+    HAData2 = ha_master:broadcast_request_handled(CachedKeys, CacheRequests, HAData),
+    State#state{ha_master_data = HAData2};
+handle_ha_requests(CachedKeys, CacheRequests, emergency_call,
+    #state{master_pid = MasterPid, emergency_calls_data = EmergencyData} = State) ->
+    EmergencyData2 = ha_slave:report_emergency_request_handled(MasterPid, CachedKeys, CacheRequests, EmergencyData),
+    State#state{emergency_calls_data = EmergencyData2}.
+
+-spec handle_ha_inactivate(cached_keys(), state()) -> state().
+handle_ha_inactivate(Inactivated,
+    #state{master_pid = MasterPid, ha_master_data = HAData, emergency_calls_data = EmergencyData} = State) ->
+    ha_master:broadcast_inactivation(Inactivated, HAData),
+    EmergencyData2 = ha_slave:report_emergency_keys_inactivated(MasterPid, Inactivated, EmergencyData),
+    State#state{emergency_calls_data = EmergencyData2}.

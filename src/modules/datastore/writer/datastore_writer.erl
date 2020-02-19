@@ -225,17 +225,26 @@ multi_call(Ctx, Key, Function, Args, Size) ->
 %% Performs asynchronous call to a datastore writer process associated
 %% with a key and returns response reference, which may be passed to
 %% {@link wait/1} to collect result.
+%% @equiv custom_call(Key, {handle, {Function, [Ctx | Args]}})
 %% @end
 %%--------------------------------------------------------------------
 -spec call_async(ctx(), tp_key(), atom(), list()) ->
     {{ok, reference()}, pid()} | {error, term()}.
 call_async(Ctx, Key, Function, Args) ->
+    custom_call(Key, {handle, {Function, [Ctx | Args]}}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Performs custom call to datastore writer process. Returns answer and pid.
+%% @end
+%%--------------------------------------------------------------------
+-spec custom_call(tp_key(), term()) -> {term(), pid()} | {error, term()}.
+custom_call(Key, Request) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         datastore_writer_request_queueing_timeout, timer:minutes(1)),
     Attempts = application:get_env(?CLUSTER_WORKER_APP_NAME,
         datastore_writer_request_queueing_attempts, 3),
-    Request = {handle, {Function, [Ctx | Args]}},
-    tp:call(?MODULE, [], Key, Request, Timeout, Attempts).
+    tp:call(?MODULE, [Key], Key, Request, Timeout, Attempts).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -271,8 +280,8 @@ wait(Ref, Pid) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init(_Args) ->
-    {ok, Pid} = datastore_cache_writer:start_link(self()),
+init([Key]) ->
+    {ok, Pid} = datastore_cache_writer:start_link(self(), Key, [], []),
     {ok, schedule_terminate(#state{cache_writer_pid = Pid})}.
 
 %%--------------------------------------------------------------------
