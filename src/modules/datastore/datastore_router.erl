@@ -64,25 +64,12 @@ init_report() ->
 %%--------------------------------------------------------------------
 -spec route(atom(), list()) -> term().
 route(Function, Args) ->
-    Module = select_module(Function),
-    {Node, Args2, TryLocalRead} = select_node(Args),
-    try
-        case {Module, TryLocalRead} of
-            {datastore_writer, _} ->
-                case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
-                    {badrpc, Reason} -> {error, Reason};
-                    Result -> Result
-                end;
-            {_, true} ->
-                datastore_router:process(Module, Function, [Node | Args2]);
-            _ ->
-                case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
-                    {badrpc, Reason} -> {error, Reason};
-                    Result -> Result
-                end
-        end
-    catch
-        _:Reason2 -> {error, Reason2}
+    case route_internal(Function, Args) of
+        {error, nodedown} ->
+            Attempts = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_count, 5),
+            Sleep = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_sleep_base, 100),
+            retry_route(Function, Args, Sleep, Attempts);
+        Ans -> Ans
     end.
 
 %%--------------------------------------------------------------------
@@ -105,6 +92,41 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 %%% Internal functions
 %%%===================================================================
 
+%% @private
+-spec route_internal(atom(), list()) -> term().
+route_internal(Function, Args) ->
+    Module = select_module(Function),
+    {Node, Args2, TryLocalRead} = select_node(Args),
+    try
+        case {Module, TryLocalRead} of
+            {datastore_writer, _} ->
+                case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
+                    {badrpc, Reason} -> {error, Reason};
+                    Result -> Result
+                end;
+            {_, true} ->
+                datastore_router:process(Module, Function, [Node | Args2]);
+            _ ->
+                case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
+                    {badrpc, Reason} -> {error, Reason};
+                    Result -> Result
+                end
+        end
+    catch
+        _:Reason2 -> {error, Reason2}
+    end.
+
+%% @private
+-spec retry_route(atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
+retry_route(_Function, _Args, _Sleep, 0) ->
+    {error, nodedown};
+retry_route(Function, Args, Sleep, Attempts) ->
+    timer:sleep(Sleep),
+    case route_internal(Function, Args) of
+        {error, nodedown} -> retry_route(Function, Args, 2 * Sleep, Attempts - 1);
+        Ans -> Ans
+    end.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -118,11 +140,11 @@ select_node([#{routing := local} | _] = Args) ->
 select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
     {[Node | KeyConnectedNodesTail] = KeyConnectedNodes, OtherRequestedNodes, BrokenNodes} =
         datastore_key:responsible_nodes(Key, MemCopies),
+    TryLocalRead = lists:member(node(), KeyConnectedNodes) orelse lists:member(node(), OtherRequestedNodes),
     {Node, [Ctx#{key_connecyed_nodes => KeyConnectedNodesTail, memory_copies_nodes => OtherRequestedNodes,
-        broken_nodes => BrokenNodes} | ArgsTail], lists:member(node(), KeyConnectedNodes)};
-select_node([#{routing_key := Key} | _] = Args) ->
-    Node = datastore_key:responsible_node(Key),
-    {Node, Args, false}.
+        broken_nodes => BrokenNodes} | ArgsTail], TryLocalRead};
+select_node([Ctx | Args]) ->
+    select_node([Ctx#{memory_copies => 1} | Args]).
 
 %%--------------------------------------------------------------------
 %% @private

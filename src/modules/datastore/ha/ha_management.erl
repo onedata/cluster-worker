@@ -50,8 +50,7 @@ get_propagation_method() ->
 %%--------------------------------------------------------------------
 -spec get_backup_nodes() -> [node()].
 get_backup_nodes() ->
-    % TODO - dodac getter w consistent_hashing
-    case ctool:get_env(key_connected_nodes, 1) of
+    case consistent_hashing:get_key_connected_nodes() of
         1 ->
             [];
         BackupNodesNum ->

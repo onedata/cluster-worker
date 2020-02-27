@@ -14,7 +14,7 @@
 -define(HA_HRL, 1).
 
 %%%=============================================================================================================
-%%% Generic messages templates
+%%% Generic messages' templates
 %%%=============================================================================================================
 
 -define(MASTER_MSG(BODY), {ha_master_msg, BODY}). % Message sent from master to slave

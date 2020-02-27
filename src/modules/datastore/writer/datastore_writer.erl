@@ -403,11 +403,19 @@ handle_cast(Request, State = #state{}) ->
 handle_info({terminate, MsgRef}, State = #state{
     requests = [], cache_writer_state = idle, disc_writer_state = idle,
     terminate_msg_ref = MsgRef,
-    cache_writer_pid = Pid
+    cache_writer_pid = Pid,
+    ha_slave_data = SlaveData
 }) ->
-    case gen_server:call(Pid, terminate, infinity) of
-        ok -> {stop, normal, State};
-        _ -> {noreply, schedule_terminate(State)}
+    case ha_slave:terminate_slave(SlaveData) of
+        {terminate, SlaveData2} ->
+            case gen_server:call(Pid, terminate, infinity) of
+                ok -> {stop, normal, State#state{ha_slave_data = SlaveData2}};
+                _ -> {noreply, schedule_terminate(State#state{ha_slave_data = SlaveData2})}
+            end;
+        {retry, SlaveData2} ->
+            {noreply, schedule_terminate(State#state{ha_slave_data = SlaveData2}, 0)};
+        {schedule, SlaveData2} ->
+            {noreply, schedule_terminate(State#state{ha_slave_data = SlaveData2})}
     end;
 handle_info({terminate, MsgRef}, State = #state{terminate_msg_ref = MsgRef}) ->
     {noreply, schedule_terminate(State)};
@@ -478,18 +486,22 @@ handle_requests(State = #state{
     }.
 
 -spec schedule_terminate(state()) -> state().
-schedule_terminate(State = #state{terminate_timer_ref = undefined}) ->
+schedule_terminate(State) ->
     % Moze pamietac zeby nie pobierac za kazdym razem?
     Timeout = datastore_throttling:get_idle_timeout(),
+    schedule_terminate(State, Timeout).
+
+-spec schedule_terminate(state(), non_neg_integer()) -> state().
+schedule_terminate(State = #state{terminate_timer_ref = undefined}, Timeout) ->
     MsgRef = make_ref(),
     Msg = {terminate, MsgRef},
     State#state{
         terminate_msg_ref = MsgRef,
         terminate_timer_ref = erlang:send_after(Timeout, self(), Msg)
     };
-schedule_terminate(State = #state{terminate_timer_ref = Ref}) ->
+schedule_terminate(State = #state{terminate_timer_ref = Ref}, Timeout) ->
     erlang:cancel_timer(Ref),
-    schedule_terminate(State#state{terminate_timer_ref = undefined}).
+    schedule_terminate(State#state{terminate_timer_ref = undefined}, Timeout).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -527,6 +539,7 @@ get_key_num(Key, SpaceSize) when is_binary(Key) ->
 get_key_num(Key, SpaceSize) ->
     get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).
 
+%% @private
 -spec handle_ha_slave_message(ha_master:proxy_request() | ha_master:slave_emergency_request(), state()) ->
     {reply, ok, state()} | {noreply, state()}.
 handle_ha_slave_message(Msg, #state{requests = Requests, cache_writer_pid = Pid} = State) ->

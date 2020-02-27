@@ -166,15 +166,16 @@ responsible_node(Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns nodes responsible for handling given datastore key. Returns two lists:
-%% alvie and broken nodes. Sum of lists' length is equal to requested nodes' count.
+%% Returns nodes responsible for handling given datastore key. Returns three lists:
+%% alvie connected nodes, other alive nodes and broken nodes.
+%% Sum of lists' length is equal to requested nodes' count.
 %% @end
 %%--------------------------------------------------------------------
 -spec responsible_nodes(key(), non_neg_integer() | all) ->
     {KeyConnectedNodes :: [node()], OtherRequestedNodes :: [node()], BrokenNodes :: [node()]}.
-responsible_nodes(Key, MinBackupNodesNum) ->
+responsible_nodes(Key, RequestedNodesNum) ->
     CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_nodes(CHashSeed, MinBackupNodesNum).
+    consistent_hashing:get_nodes(CHashSeed, RequestedNodesNum).
 
 %% ====================================================================
 %% Internal functions

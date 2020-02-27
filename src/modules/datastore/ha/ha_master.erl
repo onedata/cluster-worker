@@ -162,7 +162,6 @@ handle_slave_message(?SLAVE_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)), P
 handle_config_msg(?CONFIG_CHANGED, Pid) ->
     gen_server:call(Pid, ?CONFIGURE_BACKUP, infinity).
 
-
 %%%===================================================================
 %%% API - messages handling by datastore_cache_writer
 %%%===================================================================

@@ -51,7 +51,7 @@
 -type batch() :: datastore_doc_batch:batch().
 -type cached_keys() :: datastore_doc_batch:cached_keys().
 -type keys_in_flush() :: #{key() => {reference() | slave_flush, ctx() | undefined}}. % Undefined values for keys
-                                                                                   % in flush on ha slave node
+                                                                                     % in flush on ha slave node
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
@@ -173,7 +173,7 @@ handle_call(terminate, _From, State) ->
 handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, regular, State),
+        disc_writer_pid = Pid} = handle_requests(Requests, regular, State), % TODO - przeanalizowac i obsluzyc tez backupowe requesty (te proxy raczej wywalic bo mozna sie zakleszczyc jak drugi node bedzie padal)
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};

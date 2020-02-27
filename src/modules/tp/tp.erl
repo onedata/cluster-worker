@@ -93,7 +93,6 @@ call(Module, Args, Key, Request, Timeout, Attempts) ->
                     tp_router:delete(Key, Pid),
                     call(Module, Args, Key, Request, Timeout);
                 _:{timeout, _} ->
-                    % (obsluzyc powtorzzenie na inny node i blad nodedown)
                     call(Module, Args, Key, Request, Timeout, Attempts - 1);
                 _:Reason ->
                     {error, {Reason, erlang:get_stacktrace()}}

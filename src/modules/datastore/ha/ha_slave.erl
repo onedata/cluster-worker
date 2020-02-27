@@ -18,7 +18,7 @@
 -include("modules/datastore/ha.hrl").
 
 %% API
--export([analyse_requests/3, get_mode/1]).
+-export([analyse_requests/3, get_mode/1, terminate_slave/1]).
 -export([new_emergency_calls_data/0, report_emergency_request_handled/4, report_emergency_keys_inactivated/3]).
 -export([init_data/0, handle_master_message/3, handle_slave_internal_message/2]).
 -export([set_emergency_status/2, report_cache_writer_idle/1]).
@@ -125,6 +125,7 @@ analyse_requests(Requests, Mode, Key) ->
         {undefined, _} ->
             {regular, RegularReversed};
         {_, backup} ->
+            % TODO - a co jesli poleci blad - obsluzyc
             rpc:call(ProxyNode, datastore_writer, call_async, [Key, ?PROXY_REQUESTS(lists:reverse(EmergencyReversed))]),
             {regular, RegularReversed};
         _ ->
@@ -168,6 +169,26 @@ report_cache_writer_idle(Data) ->
 -spec get_mode(ha_slave_data()) -> ha_management:slave_mode().
 get_mode(#slave_data{slave_mode = Mode}) ->
     Mode.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns information about slave mode.
+%% @end
+%%--------------------------------------------------------------------
+-spec terminate_slave(ha_slave_data()) -> {terminate | retry | schedule, ha_slave_data()}.
+terminate_slave(#slave_data{is_linked = false, keys_to_protect = Keys} = Data) ->
+    case maps:size(Keys) of
+        0 -> {terminate, Data};
+        _ -> {schedule, Data}
+    end;
+terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = Data) ->
+    case maps:size(Keys) of
+        0 ->
+            catch gen_server:call(Pid, ?REQUEST_UNLINK, infinity),
+            {retry, Data#slave_data{is_linked = false}};
+        _ ->
+            {schedule, Data}
+    end.
 
 %%%===================================================================
 %%% API - messages handling by datastore_writer
@@ -242,10 +263,12 @@ handle_config_msg(?MASTER_UP, Data, _Pid) ->
 %%% Internal functions
 %%%===================================================================
 
+%% @private
 -spec clasify_requests(datastore_writer:requests_internal()) -> {LocalReversed :: datastore_writer:requests_internal(),
     RemoteReversed :: datastore_writer:requests_internal(), MasterNodeToBeUsed :: node() | undefined}.
 clasify_requests(Requests) ->
     % TODO - nie filtrowac jak nie ma zmienne backup_enabled (pobierac ja do stanu na poczatku)
+    % Tylko najpierw ogarnac jak sie zachowywac kiedy zmieniamy ustawienia ze wqspierania lub nie wspierania HA
     MyNode = node(),
     {LocalReversed, RemoteReversed, FinalMaster} = lists:foldl(fun
         ({_Pid, _Ref, {_Function, [#{broken_nodes := [Master | _]} | _Args]}} = Request, {Local, Remote, _}) when Master =/= MyNode ->
