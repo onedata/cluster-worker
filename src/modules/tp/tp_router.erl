@@ -28,6 +28,7 @@
 -export([supervisor_flags/0, supervisor_children_spec/0,
     main_supervisor_flags/0, main_supervisor_children_spec/0,
     init_supervisors/0]).
+-export([send_to_each/1]).
 
 % TP process states
 -define(INITIALIZING, initializing).
@@ -294,6 +295,15 @@ get_process_size_sum() ->
         List = ets:tab2list(Name),
         lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
     end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
+
+send_to_each(Msg) ->
+    lists:foreach(fun(Name) ->
+        List = ets:tab2list(Name),
+        lists:foreach(fun
+            ({_, Pid, _}) -> ok = gen_server:call(Pid, Msg);
+            (_) -> ok
+        end, List)
+    end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
 
 %%%===================================================================
 %%% Internal functions

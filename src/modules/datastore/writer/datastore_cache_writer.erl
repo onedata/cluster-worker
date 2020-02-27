@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_links.hrl").
+-include("modules/datastore/ha.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -25,6 +26,7 @@
     code_change/3]).
 
 -record(state, {
+    process_key :: datastore:key(),
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
@@ -37,8 +39,9 @@
     flush_timer :: undefined | reference(),
     inactivate_timer :: undefined | reference(),
     link_tokens = #{} :: cached_token_map(),
+
     ha_master_data :: ha_master:ha_master_data(),
-    emergency_calls_data :: ha_slave:emergency_calls_data()
+    ha_slave_emergency_calls_data :: ha_slave:ha_slave_emergency_calls_data()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -72,8 +75,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(pid(), key(), [node()], [key()]) -> {ok, pid()} | {error, term()}.
-start_link(MasterPid, InitKey, BackupNodes, KeysInSlaveFlush) ->
-    gen_server:start_link(?MODULE, [MasterPid, InitKey, BackupNodes, KeysInSlaveFlush], []).
+start_link(MasterPid, Key, BackupNodes, KeysInSlaveFlush) ->
+    gen_server:start_link(?MODULE, [MasterPid, Key, BackupNodes, KeysInSlaveFlush], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -107,14 +110,15 @@ get_master_pid() ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([MasterPid, InitKey, BackupNodes, KeysInSlaveFlush]) ->
+init([MasterPid, Key, BackupNodes, KeysInSlaveFlush]) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     save_master_pid(MasterPid),
 
-    KiF = lists:map(fun(Key) -> {Key, {slave_flush, undefined}} end, KeysInSlaveFlush),
-    {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid, keys_in_flush = maps:from_list(KiF),
-        ha_master_data = ha_master:init_data(InitKey, BackupNodes),
-        emergency_calls_data = ha_slave:new_emergency_calls_data()}}.
+    KiF = lists:map(fun(KeyInFlush) -> {KeyInFlush, {slave_flush, undefined}} end, KeysInSlaveFlush),
+    {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
+        keys_in_flush = maps:from_list(KiF),
+        ha_master_data = ha_master:init_data(BackupNodes),
+        ha_slave_emergency_calls_data = ha_slave:new_emergency_calls_data()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -130,10 +134,26 @@ init([MasterPid, InitKey, BackupNodes, KeysInSlaveFlush]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
-    gen_server:reply(From, ok),
-    State2 = handle_requests(Requests, regular, State#state{requests_ref = Ref}),
+handle_call({handle, Ref, Requests, Mode}, From, State = #state{process_key = ProcessKey, master_pid = Pid}) ->
+    State3 = case ha_slave:analyse_requests(Requests, Mode, ProcessKey) of
+        {regular, Regular} ->
+            gen_server:reply(From, regular),
+            handle_requests(Regular, regular, State#state{requests_ref = Ref});
+        {emergency_call, Regular, Emergency} ->
+            gen_server:reply(From, emergency_call),
+            State2 = handle_requests(Regular, regular, State#state{requests_ref = Ref}),
+            handle_requests(Emergency, emergency_call, State2)
+    end,
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
+    {noreply, schedule_flush(State3)};
+handle_call(?MASTER_DOWN(Keys), From, State = #state{
+    cached_keys_to_flush = CachedKeys,
+    master_pid = Pid
+}) ->
+    gen_server:reply(From, ok),
+    NewKeys = maps:merge(CachedKeys, Keys),
+    tp_router:update_process_size(Pid, maps:size(NewKeys)),
+    State2 = State#state{cached_keys_to_flush = NewKeys},
     {noreply, schedule_flush(State2)};
 handle_call(terminate, _From, #state{
     requests_ref = undefined,
@@ -153,6 +173,12 @@ handle_call({terminate, Requests}, _From, State) ->
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
+handle_call(?SLAVE_MSG(_) = Msg, _From, #state{ha_master_data = Data} = State) ->
+    Data2 = ha_master:handle_slave_lifecycle_message(Msg, Data),
+    {reply, ok, State#state{ha_master_data = Data2}};
+handle_call(?MASTER_INTERNAL_MSG(_) = Msg, _From, #state{ha_master_data = Data} = State) ->
+    Data2 = ha_master:handle_internal_message(Msg, Data),
+    {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -217,6 +243,9 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         keys_to_expire = ToExpire2,
         flush_times = FT2
     }, ?FLUSH_INTERVAL))};
+handle_cast(?MASTER_INTERNAL_MSG(_) = Msg, #state{keys_in_flush = KiF} = State) ->
+    NewKiF = ha_master:handle_internal_message(Msg, KiF),
+    {reply, ok, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -359,6 +388,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_requests(list(), request_type(), state()) -> state().
+handle_requests([], _RequestType, State) ->
+    State;
 handle_requests(Requests, RequestType, State = #state{
     cached_keys_to_flush = CachedKeys,
     master_pid = Pid,
@@ -890,17 +921,17 @@ generate_error_ans(N, Error) ->
     [{make_ref(), Error} | generate_error_ans(N - 1, Error)].
 
 -spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], request_type(), state()) -> state().
-handle_ha_requests(CachedKeys, CacheRequests, regular, #state{ha_master_data = HAData} = State) ->
-    HAData2 = ha_master:broadcast_request_handled(CachedKeys, CacheRequests, HAData),
+handle_ha_requests(CachedKeys, CacheRequests, regular, #state{process_key = ProcessKey, ha_master_data = HAData} = State) ->
+    HAData2 = ha_master:broadcast_request_handled(ProcessKey, CachedKeys, CacheRequests, HAData),
     State#state{ha_master_data = HAData2};
 handle_ha_requests(CachedKeys, CacheRequests, emergency_call,
-    #state{master_pid = MasterPid, emergency_calls_data = EmergencyData} = State) ->
+    #state{master_pid = MasterPid, ha_slave_emergency_calls_data = EmergencyData} = State) ->
     EmergencyData2 = ha_slave:report_emergency_request_handled(MasterPid, CachedKeys, CacheRequests, EmergencyData),
-    State#state{emergency_calls_data = EmergencyData2}.
+    State#state{ha_slave_emergency_calls_data = EmergencyData2}.
 
 -spec handle_ha_inactivate(cached_keys(), state()) -> state().
 handle_ha_inactivate(Inactivated,
-    #state{master_pid = MasterPid, ha_master_data = HAData, emergency_calls_data = EmergencyData} = State) ->
+    #state{master_pid = MasterPid, ha_master_data = HAData, ha_slave_emergency_calls_data = EmergencyData} = State) ->
     ha_master:broadcast_inactivation(Inactivated, HAData),
     EmergencyData2 = ha_slave:report_emergency_keys_inactivated(MasterPid, Inactivated, EmergencyData),
-    State#state{emergency_calls_data = EmergencyData2}.
+    State#state{ha_slave_emergency_calls_data = EmergencyData2}.
