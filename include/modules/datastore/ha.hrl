@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 %%% @doc
-
+%%% Definition of messages used by ha master and slave.
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 
@@ -64,7 +64,7 @@
 
 %%%=============================================================================================================
 %%% Messages connected with emergency calls (handling request by slave because master is/was down)
-%%% Handling emergency message is started on slave's datastore_cache_writer using message ...
+%%% Handling emergency message is started on slave's datastore_cache_writer when any emergency request appears.
 %%% After handling EMERGENCY_REQUEST_HANDLED message is sent by slave internally from datastore_cache_writer to
 %%% datastore_writer and than further to master that sends it internally from datastore_writer to its
 %%% datastore_cache_writer. After keys connected with emergency request inactivation EMERGENCY_KEYS_INACTIVATED

@@ -296,6 +296,12 @@ get_process_size_sum() ->
         lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
     end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Sends message to all tp processes.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_to_each(term()) -> ok.
 send_to_each(Msg) ->
     lists:foreach(fun(Name) ->
         List = ets:tab2list(Name),

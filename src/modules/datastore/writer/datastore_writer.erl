@@ -34,7 +34,7 @@
     code_change/3]).
 
 -record(state, {
-    requests = [] :: list(),
+    requests = [] :: requests_internal(),
     cache_writer_pid :: pid(),
     cache_writer_state = idle :: idle | {active, reference()},
     disc_writer_state = idle :: idle | {active, reference()},
@@ -44,6 +44,7 @@
     ha_slave_data :: ha_slave:ha_slave_data()
 }).
 
+-type requests_internal() :: [{pid(), reference(), term()}].
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
 -type value() :: datastore_doc:value().
@@ -62,6 +63,8 @@
 -type state() :: #state{}.
 -type tp_key() :: datastore:key() | non_neg_integer()
     | {doc | links, datastore:key()}.
+
+-export_type([requests_internal/0]).
 
 %%%===================================================================
 %%% API
@@ -301,15 +304,18 @@ init([Key]) ->
     BackupNodes = ha_management:get_backup_nodes(),
     {ActiveRequests, KeysInSlaveFlush} = ha_master:check_slave(Key, BackupNodes),
 
-    State0 = case ActiveRequests of
+    {Requests, CacheWriterState} = case ActiveRequests of
         false ->
-            #state{};
+            {[], idle};
         {true, RequestsToHandle} ->
-            #state{cache_writer_state = {active, backup}, requests = RequestsToHandle}
+            {RequestsToHandle, {active, backup}}
     end,
 
     {ok, Pid} = datastore_cache_writer:start_link(self(), Key, BackupNodes, KeysInSlaveFlush),
-    {ok, schedule_terminate(State0#state{cache_writer_pid = Pid, ha_slave_data = ha_slave:init_data()})}.
+
+    State = #state{cache_writer_pid = Pid, ha_slave_data = ha_slave:init_data(),
+        cache_writer_state = CacheWriterState, requests = Requests},
+    {ok, schedule_terminate(State)}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -521,6 +527,8 @@ get_key_num(Key, SpaceSize) when is_binary(Key) ->
 get_key_num(Key, SpaceSize) ->
     get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).
 
+-spec handle_ha_slave_message(ha_master:proxy_request() | ha_master:slave_emergency_request(), state()) ->
+    {reply, ok, state()} | {noreply, state()}.
 handle_ha_slave_message(Msg, #state{requests = Requests, cache_writer_pid = Pid} = State) ->
     case ha_master:handle_slave_message(Msg, Pid) of
         {schedule, NewRequests} ->

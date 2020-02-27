@@ -30,8 +30,7 @@
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    keys_in_flush = #{} :: #{key() => {reference() | undefined, ctx() | undefined}}, % Undefined values for keys
-                                                                                     % in flush on ha slave node
+    keys_in_flush = #{} :: keys_in_flush(),
     keys_to_inactivate = #{} :: cached_keys(),
     keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
     flush_times = #{} :: #{key() => erlang:timestamp()},
@@ -51,11 +50,15 @@
 -type mask() :: datastore_links_mask:mask().
 -type batch() :: datastore_doc_batch:batch().
 -type cached_keys() :: datastore_doc_batch:cached_keys().
+-type keys_in_flush() :: #{key() => {reference() | slave_flush, ctx() | undefined}}. % Undefined values for keys
+                                                                                   % in flush on ha slave node
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
     #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
 -type request_type() :: regular | emergency_call. % Emergency calls appear when master node is down.
+
+-export_type([keys_in_flush/0]).
 
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
@@ -114,6 +117,7 @@ init([MasterPid, Key, BackupNodes, KeysInSlaveFlush]) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     save_master_pid(MasterPid),
 
+    % TODO - moze przeniesc generowanie kluczy do ha_master
     KiF = lists:map(fun(KeyInFlush) -> {KeyInFlush, {slave_flush, undefined}} end, KeysInSlaveFlush),
     {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
         keys_in_flush = maps:from_list(KiF),
