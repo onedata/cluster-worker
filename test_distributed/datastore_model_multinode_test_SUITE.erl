@@ -14,6 +14,7 @@
 
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
+-include("datastore_performance_tests_base.hrl").
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2,
@@ -29,7 +30,16 @@
     calls_should_change_node_cast_ha_test/1,
     calls_should_change_node_call_ha_test/1,
     saves_should_use_repaired_node_cast_ha_test/1,
-    saves_should_use_repaired_node_call_ha_test/1
+    saves_should_use_repaired_node_call_ha_test/1,
+
+    stress_performance_test/1,
+    stress_performance_test_base/1,
+    memory_only_stress_performance_test/1,
+    memory_only_stress_performance_test_base/1,
+    stress_with_check_test/1,
+    stress_with_check_test_base/1,
+    memory_only_stress_with_check_test/1,
+    memory_only_stress_with_check_test_base/1
 ]).
 
 all() ->
@@ -42,13 +52,26 @@ all() ->
         calls_should_change_node_cast_ha_test,
         calls_should_change_node_call_ha_test,
         saves_should_use_repaired_node_cast_ha_test,
-        saves_should_use_repaired_node_call_ha_test
+        saves_should_use_repaired_node_call_ha_test,
+
+        memory_only_stress_with_check_test,
+        stress_with_check_test,
+        memory_only_stress_performance_test,
+        stress_performance_test
+    ], [
+        memory_only_stress_with_check_test,
+        stress_with_check_test,
+        memory_only_stress_performance_test,
+        stress_performance_test
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
 -define(DOC(Key, Model), ?BASE_DOC(Key, ?MODEL_VALUE(Model))).
 
 -define(ATTEMPTS, 30).
+
+-define(REPEATS, 5).
+-define(SUCCESS_RATE, 100).
 
 %%%===================================================================
 %%% Test functions
@@ -199,11 +222,44 @@ mock_node_up(CallNode, ExecuteNode, BrokenNode) ->
     set_ha(ExecuteNode, master_up, []).
 
 %%%===================================================================
+%%% HA stress tests
+%%%===================================================================
+
+memory_only_stress_performance_test(Config) ->
+    ?PERFORMANCE(Config, [
+        ?MULTINODE_TEST(true, 1)
+    ]).
+memory_only_stress_performance_test_base(Config) ->
+    datastore_performance_tests_base:stress_performance_test_base(Config).
+
+stress_performance_test(Config) ->
+    ?PERFORMANCE(Config, [
+        ?MULTINODE_TEST(false, ?REPEATS)
+    ]).
+stress_performance_test_base(Config) ->
+    datastore_performance_tests_base:stress_performance_test_base(Config).
+
+memory_only_stress_with_check_test(Config) ->
+    ?PERFORMANCE(Config, [
+        ?MULTINODE_WITH_CHECK_TEST(true, 1)
+    ]).
+memory_only_stress_with_check_test_base(Config) ->
+    datastore_performance_tests_base:stress_performance_test_base(Config).
+
+stress_with_check_test(Config) ->
+    ?PERFORMANCE(Config, [
+        ?MULTINODE_WITH_CHECK_TEST(false, 1)
+    ]).
+stress_with_check_test_base(Config) ->
+    datastore_performance_tests_base:stress_performance_test_base(Config).
+
+%%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
 
 init_per_suite(Config) ->
-    datastore_test_utils:init_suite(Config).
+    datastore_test_utils:init_suite(?TEST_MODELS, Config,
+        fun(Config2) -> Config2 end, [datastore_test_utils, datastore_performance_tests_base]).
 
 init_per_testcase(ha_test, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
