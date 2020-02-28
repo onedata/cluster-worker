@@ -31,6 +31,10 @@
     calls_should_change_node_call_ha_test/1,
     saves_should_use_repaired_node_cast_ha_test/1,
     saves_should_use_repaired_node_call_ha_test/1,
+    saves_should_change_node_dynamic_cast_ha_test/1,
+    saves_should_change_node_dynamic_call_ha_test/1,
+    node_transition_test_cast_ha_test/1,
+    node_transition_test_call_ha_test/1,
 
     stress_performance_test/1,
     stress_performance_test_base/1,
@@ -53,6 +57,10 @@ all() ->
         calls_should_change_node_call_ha_test,
         saves_should_use_repaired_node_cast_ha_test,
         saves_should_use_repaired_node_call_ha_test,
+        saves_should_change_node_dynamic_cast_ha_test,
+        saves_should_change_node_dynamic_call_ha_test,
+        node_transition_test_cast_ha_test,
+        node_transition_test_call_ha_test,
 
         memory_only_stress_with_check_test,
         stress_with_check_test,
@@ -139,6 +147,18 @@ saves_should_use_repaired_node_cast_ha_test(Config) ->
 saves_should_use_repaired_node_call_ha_test(Config) ->
     saves_should_use_repaired_node(Config, call).
 
+saves_should_change_node_dynamic_cast_ha_test(Config) ->
+    saves_should_change_node_dynamic(Config, cast).
+
+saves_should_change_node_dynamic_call_ha_test(Config) ->
+    saves_should_change_node_dynamic(Config, call).
+
+node_transition_test_cast_ha_test(Config) ->
+    node_transition_test(Config, cast).
+
+node_transition_test_call_ha_test(Config) ->
+    node_transition_test(Config, call).
+
 %%%===================================================================
 %%% HA tests skeletons and helper functions
 %%%===================================================================
@@ -197,6 +217,67 @@ saves_should_use_repaired_node(Config, Method) ->
         ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]))
     end, ?TEST_MODELS).
 
+saves_should_change_node_dynamic(Config, Method) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+    Workers = ?config(cluster_worker_nodes, Config),
+    ok = test_utils:mock_new(Workers, ha_master),
+    set_ha(Config, change_config, [2, Method]),
+
+    lists:foreach(fun(Model) ->
+        UniqueKey = ?UNIQUE_KEY(Model, Key),
+        ok = test_utils:mock_expect(Workers, ha_master, broadcast_request_handled,
+            fun(ProcessKey, Keys, CacheRequests, Data) ->
+                Ans = meck:passthrough([ProcessKey, Keys, CacheRequests, Data]),
+                case maps:is_key(UniqueKey, Keys) andalso node() =:= KeyNode of
+                    true ->
+                        tp_router:delete(ProcessKey),
+                        throw(test_error);
+                    _ ->
+                        Ans
+                end
+            end),
+
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
+        assert_in_memory(KeyNode, Model, Key),
+        assert_in_memory(KeyNode2, Model, Key),
+        timer:sleep(10000), % Time for disk flush
+        assert_not_on_disc(TestWorker, Model, Key),
+
+        set_ha(KeyNode2, master_down, []),
+        assert_on_disc(TestWorker, Model, Key),
+        set_ha(KeyNode2, master_up, [])
+    end, ?TEST_MODELS -- [disc_only_model]).
+
+node_transition_test(Config, Method) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+    MasterPid = self(),
+
+    set_ha(Config, change_config, [2, Method]),
+    lists:foreach(fun(Model) ->
+        mock_node_down(TestWorker, KeyNode2, KeyNode),
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
+        assert_in_memory(KeyNode2, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
+        assert_not_in_memory(KeyNode, Model, Key),
+
+        UpdateFun = fun({M, F1, F2, F3}) ->
+            MasterPid ! {update, F1, node()},
+            {ok, {M, F1 + 1, F2, F3}}
+        end,
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
+
+        mock_node_up(TestWorker, KeyNode2, KeyNode), % TODO - przetestowac bez zmiany chash_ring (samo master_up)
+
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
+
+        check_update(KeyNode2, 1),
+        check_update(KeyNode, 2),
+
+        assert_value_in_memory(KeyNode2, Model, Key, 3),
+        timer:sleep(10000), % Wait for race on flush
+        assert_value_on_disc(TestWorker, Model, Key, 3)
+    end, ?TEST_MODELS).
+
 prepare_ha_test(Config) ->
     [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
     Key = datastore_key:new(),
@@ -220,6 +301,14 @@ mock_node_down(CallNode, ExecuteNode, BrokenNode) ->
 mock_node_up(CallNode, ExecuteNode, BrokenNode) ->
     ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, set_fixed_node, [BrokenNode])),
     set_ha(ExecuteNode, master_up, []).
+
+check_update(Node, Value) ->
+    Rec = receive
+        {update, _, _} = Message -> Message
+    after
+        5000 -> timeout
+    end,
+    ?assertEqual({update, Value, Node}, Rec).
 
 %%%===================================================================
 %%% HA stress tests
@@ -286,7 +375,8 @@ end_per_testcase(ha_test, Config) ->
         ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_fixed_node, [FixedWorker]))
     end, Workers),
     set_ha(Config, master_up, []),
-    set_ha(Config, change_config, [1, cast]);
+    set_ha(Config, change_config, [1, cast]),
+    test_utils:mock_unload(Workers, [ha_master]);
 end_per_testcase(Case, Config) ->
     case lists:suffix("ha_test", atom_to_list(Case)) of
         true ->
@@ -321,6 +411,20 @@ assert_in_memory(Worker, Model, Key, Deleted) ->
             )
     end.
 
+assert_value_in_memory(Worker, Model, Key, Value) ->
+    case ?MEM_DRV(Model) of
+        undefined ->
+            ok;
+        Driver ->
+            Ctx = datastore_multiplier:extend_name(?UNIQUE_KEY(Model, Key),
+                ?MEM_CTX(Model)),
+            ?assertMatch({ok, #document{deleted = false, value = {_, Value, _, _}}},
+                rpc:call(Worker, Driver, get, [
+                    Ctx, ?UNIQUE_KEY(Model, Key)
+                ]), 5
+            )
+    end.
+
 assert_not_in_memory(Worker, Model, Key) ->
     case ?MEM_DRV(Model) of
         undefined ->
@@ -347,6 +451,33 @@ assert_key_on_disc(Worker, Model, Key, Deleted) ->
             ok;
         Driver ->
             ?assertMatch({ok, _, #document{deleted = Deleted}},
+                rpc:call(Worker, Driver, get, [
+                    ?DISC_CTX, Key
+                ]), ?ATTEMPTS
+            )
+    end.
+
+assert_value_on_disc(Worker, Model, Key, Value) ->
+    case ?DISC_DRV(Model) of
+        undefined ->
+            ok;
+        Driver ->
+            ?assertMatch({ok, _, #document{deleted = false, value = {_, Value, _, _}}},
+                rpc:call(Worker, Driver, get, [
+                    ?DISC_CTX, ?UNIQUE_KEY(Model, Key)
+                ]), ?ATTEMPTS
+            )
+    end.
+
+assert_not_on_disc(Worker, Model, Key) ->
+    assert_key_not_on_disc(Worker, Model, ?UNIQUE_KEY(Model, Key)).
+
+assert_key_not_on_disc(Worker, Model, Key) ->
+    case ?DISC_DRV(Model) of
+        undefined ->
+            ok;
+        Driver ->
+            ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
                     ?DISC_CTX, Key
                 ]), ?ATTEMPTS
