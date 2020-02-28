@@ -338,12 +338,9 @@ handle_call({handle, Request}, {Pid, _Tag}, State = #state{
     State2 = State#state{requests = [{Pid, Ref, Request} | Requests]},
     {reply, {ok, Ref}, schedule_terminate(handle_requests(State2))};
 handle_call(?MASTER_MSG(_) = Msg, _From, State = #state{ha_slave_data = Data, requests = WaitingRequests}) ->
-    {Result, Data2, WaitingRequests2} = ha_slave:handle_master_message(Msg, Data, WaitingRequests),
+    {Ans, Data2, WaitingRequests2} = ha_slave:handle_master_message(Msg, Data, WaitingRequests),
     State2 = State#state{ha_slave_data = Data2, requests = WaitingRequests2},
-    case Result of
-        ok -> {noreply, State2};
-        {reply, Ans} -> {reply, Ans, State2}
-    end;
+    {reply, Ans, State2};
 handle_call(?SLAVE_MSG(_) = Msg, _From, State = #state{}) ->
     handle_ha_slave_message(Msg, State);
 handle_call(?CONFIG_CHANGED = Msg, _From, State = #state{cache_writer_pid = Pid}) ->

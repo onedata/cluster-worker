@@ -201,7 +201,7 @@ terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = D
 %%--------------------------------------------------------------------
 -spec handle_master_message(backup_message() | check_status_request(), ha_slave_data(),
     datastore_writer:requests_internal()) ->
-    {ok | {reply, slave_status()}, ha_slave_data(), datastore_writer:requests_internal()}.
+    {ok | slave_status(), ha_slave_data(), datastore_writer:requests_internal()}.
 % Calls connecting with backup creation/deletion
 handle_master_message(?BACKUP_REQUEST(Keys, CacheRequests), #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:save(CacheRequests),
@@ -219,10 +219,10 @@ handle_master_message(?CHECK_SLAVE_STATUS(Pid), #slave_data{emergency_requests_s
     case {Status, sets:size(Keys)} of
         {handling, _} ->
             {LocalReversed, RemoteReversed, _ProxyNode} = clasify_requests(WaitingRequests),
-            {{reply, {wait_cache, CacheRequests, lists:reverse(RemoteReversed)}},
+            {{wait_cache, CacheRequests, lists:reverse(RemoteReversed)},
                 SlaveData#slave_data{recovered_master_pid = Pid}, lists:reverse(LocalReversed)};
-        {_, 0} -> {{reply, ok}, SlaveData, WaitingRequests};
-        _ -> {{reply, {wait_disc, CacheRequests, Keys}}, SlaveData#slave_data{recovered_master_pid = Pid}, WaitingRequests}
+        {_, 0} -> {ok, SlaveData, WaitingRequests};
+        _ -> {{wait_disc, CacheRequests, Keys}, SlaveData#slave_data{recovered_master_pid = Pid}, WaitingRequests}
     end.
 
 %%--------------------------------------------------------------------

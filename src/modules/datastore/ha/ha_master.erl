@@ -70,7 +70,9 @@ init_data(BackupNodes) -> #data{backup_nodes = BackupNodes, propagation_method =
 check_slave(Key, BackupNodes) ->
     case BackupNodes of
         [Node | _] ->
-            case rpc:call(Node, datastore_writer, custom_call, [Key, ?CHECK_SLAVE_STATUS(self())]) of
+            case rpc:call(Node, datastore_writer, call_if_alive, [Key, ?CHECK_SLAVE_STATUS(self())]) of
+                {error,not_alive} ->
+                    {false, []};
                 ok ->
                     {false, []};
                 {wait_cache, CacheRequests, RequestsToHandle} ->
@@ -126,8 +128,10 @@ broadcast_request_handled(_ProcessKey, Keys, CacheRequests, #data{slave_status =
 %% @end
 %%--------------------------------------------------------------------
 -spec broadcast_inactivation(datastore_doc_batch:cached_keys(), ha_master_data()) -> ok.
+broadcast_inactivation(_, #data{backup_nodes = []}) ->
+    ok;
 broadcast_inactivation(_, #data{slave_status = {_, undefined}}) ->
-    ?error("Inactivation request without slave defined"),
+    ?warning("Inactivation request without slave defined"),
     ok;
 broadcast_inactivation(Inactivated, #data{slave_status = {_, Pid}}) ->
     gen_server:cast(Pid, ?KEYS_INACTIVATED(Inactivated)).
