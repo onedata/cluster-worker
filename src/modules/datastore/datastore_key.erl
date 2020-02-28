@@ -172,7 +172,7 @@ responsible_node(Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec responsible_nodes(key(), non_neg_integer() | all) ->
-    {KeyConnectedNodes :: [node()], OtherRequestedNodes :: [node()], BrokenNodes :: [node()]}.
+    {KeyConnectedNodes :: [node()], OtherRequestedNodes :: [node()], BrokenNodes :: [node()], BrokenMaster :: boolean()}.
 responsible_nodes(Key, RequestedNodesNum) ->
     CHashSeed = get_chash_seed(Key),
     consistent_hashing:get_nodes(CHashSeed, RequestedNodesNum).

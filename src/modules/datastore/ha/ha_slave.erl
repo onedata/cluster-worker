@@ -18,7 +18,7 @@
 -include("modules/datastore/ha.hrl").
 
 %% API
--export([analyse_requests/3, get_mode/1, terminate_slave/1]).
+-export([analyse_requests/2, get_mode/1, terminate_slave/1]).
 -export([new_emergency_calls_data/0, report_emergency_request_handled/4, report_emergency_keys_inactivated/3]).
 -export([init_data/0, handle_master_message/3, handle_slave_internal_message/2]).
 -export([set_emergency_status/2, report_cache_writer_idle/1]).
@@ -114,20 +114,20 @@ report_emergency_keys_inactivated(Pid, Inactivated, #emergency_calls_data{keys =
 %% Analyses requests and provides information about expected fruher acstions.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_requests(datastore_writer:requests_internal(), slave_mode, datastore:key()) ->
+-spec analyse_requests(datastore_writer:requests_internal(), slave_mode) ->
     {regular, RegularReversed :: datastore_writer:requests_internal()} |
     {emergency_call, RegularReversed :: datastore_writer:requests_internal(),
-        EmergencyReversed :: datastore_writer:requests_internal()}.
-analyse_requests(Requests, Mode, Key) ->
+        EmergencyReversed :: datastore_writer:requests_internal()} |
+    {proxy_call, RegularReversed :: datastore_writer:requests_internal(),
+        EmergencyReversed :: datastore_writer:requests_internal(), node()}.
+analyse_requests(Requests, Mode) ->
     {RegularReversed, EmergencyReversed, ProxyNode} = clasify_requests(Requests),
 
     case {ProxyNode, Mode} of
         {undefined, _} ->
             {regular, RegularReversed};
         {_, backup} ->
-            % TODO - a co jesli poleci blad - obsluzyc
-            rpc:call(ProxyNode, datastore_writer, call_async, [Key, ?PROXY_REQUESTS(lists:reverse(EmergencyReversed))]),
-            {regular, RegularReversed};
+            {proxy_call, RegularReversed, EmergencyReversed, ProxyNode};
         _ ->
             {emergency_call, RegularReversed, EmergencyReversed}
     end.
@@ -270,8 +270,12 @@ clasify_requests(Requests) ->
     % TODO - nie filtrowac jak nie ma zmienne backup_enabled (pobierac ja do stanu na poczatku)
     % Tylko najpierw ogarnac jak sie zachowywac kiedy zmieniamy ustawienia ze wqspierania lub nie wspierania HA
     MyNode = node(),
+
+    % TODO - a co jesli slave jest tym walnietym node'm?
+    % TODO - analiza broken_nodes chyba nie potrzebna?
     {LocalReversed, RemoteReversed, FinalMaster} = lists:foldl(fun
-        ({_Pid, _Ref, {_Function, [#{broken_nodes := [Master | _]} | _Args]}} = Request, {Local, Remote, _}) when Master =/= MyNode ->
+        ({_Pid, _Ref, {_Function, [#{broken_master := true, broken_nodes := [Master | _]} | _Args]}} =
+            Request, {Local, Remote, _}) when Master =/= MyNode ->
             {Local, [Request | Remote], Master};
         (Request, {Local, Remote, Master}) ->
             {[Request | Local], Remote, Master}

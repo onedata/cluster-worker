@@ -14,6 +14,7 @@
 
 -include("modules/datastore/ha.hrl").
 -include("global_definitions.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
@@ -78,6 +79,7 @@ get_slave_mode() ->
 %%--------------------------------------------------------------------
 -spec master_down() -> ok.
 master_down() ->
+    ?info("Set and broadcast master_down"),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, processing),
     tp_router:send_to_each(?MASTER_DOWN).
 
@@ -88,6 +90,7 @@ master_down() ->
 %%--------------------------------------------------------------------
 -spec master_up() -> ok.
 master_up() ->
+    ?info("Set and broadcast master_up"),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, backup),
     tp_router:send_to_each(?MASTER_UP).
 
@@ -98,6 +101,7 @@ master_up() ->
 %%--------------------------------------------------------------------
 -spec change_config(non_neg_integer(), propagation_method()) -> ok.
 change_config(NodesNumber, PropagationMethod) ->
+    ?info("Set and broadcast new ha config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
     consistent_hashing:set_key_connected_nodes(NodesNumber),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, PropagationMethod),
     tp_router:send_to_each(?CONFIG_CHANGED).

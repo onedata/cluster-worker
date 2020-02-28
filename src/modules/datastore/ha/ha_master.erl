@@ -97,6 +97,8 @@ check_slave(Key, BackupNodes) ->
 %%--------------------------------------------------------------------
 -spec broadcast_request_handled(datastore:key(), datastore_doc_batch:cached_keys(),
     [datastore_cache:cache_save_request()], ha_master_data()) -> ha_master_data().
+broadcast_request_handled(_ProcessKey, [], _CacheRequests, Data) ->
+    Data;
 broadcast_request_handled(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes = []} = Data) ->
     Data;
 broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_method = call,
@@ -128,6 +130,8 @@ broadcast_request_handled(_ProcessKey, Keys, CacheRequests, #data{slave_status =
 %% @end
 %%--------------------------------------------------------------------
 -spec broadcast_inactivation(datastore_doc_batch:cached_keys(), ha_master_data()) -> ok.
+broadcast_inactivation([], _) ->
+    ok;
 broadcast_inactivation(_, #data{backup_nodes = []}) ->
     ok;
 broadcast_inactivation(_, #data{slave_status = {_, undefined}}) ->

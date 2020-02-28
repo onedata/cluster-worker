@@ -278,6 +278,7 @@ wait(Ref, Pid) ->
     receive
         {Ref, Response} -> Response
     after
+        % TODO - a co jesli poszlo na proxy node i tam proces padl?
         Timeout ->
             case erlang:is_process_alive(Pid) of
                 true ->

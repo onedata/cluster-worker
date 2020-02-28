@@ -24,8 +24,12 @@
     save_should_succeed/1,
     disk_fetch_should_succeed/1,
 
-    saves_should_propagate_to_backup_node/1,
-    calls_should_change_node/1
+    saves_should_propagate_to_backup_node_cast_ha_test/1,
+    saves_should_propagate_to_backup_node_call_ha_test/1,
+    calls_should_change_node_cast_ha_test/1,
+    calls_should_change_node_call_ha_test/1,
+    saves_should_use_repaired_node_cast_ha_test/1,
+    saves_should_use_repaired_node_call_ha_test/1
 ]).
 
 all() ->
@@ -33,8 +37,12 @@ all() ->
         save_should_succeed,
         disk_fetch_should_succeed,
 
-        saves_should_propagate_to_backup_node,
-        calls_should_change_node
+        saves_should_propagate_to_backup_node_cast_ha_test,
+        saves_should_propagate_to_backup_node_call_ha_test,
+        calls_should_change_node_cast_ha_test,
+        calls_should_change_node_call_ha_test,
+        saves_should_use_repaired_node_cast_ha_test,
+        saves_should_use_repaired_node_call_ha_test
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
@@ -87,53 +95,92 @@ disk_fetch_should_succeed(Config) ->
     end, ?TEST_CACHED_MODELS).
 
 %%%===================================================================
-%%% HA tests skeletons
+%%% HA tests
 %%%===================================================================
 
-saves_should_propagate_to_backup_node(Config) ->
-    [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
-    Key = datastore_key:new(),
-    {[KeyNode], [KeyNode2], _} = rpc:call(Worker0, datastore_key, responsible_nodes, [Key, 2]),
-    [Worker | _] = Workers -- [KeyNode, KeyNode2],
-    set_ha(Config, change_config, [2, cast]),
+saves_should_propagate_to_backup_node_cast_ha_test(Config) ->
+    saves_should_propagate_to_backup_node(Config, cast).
 
-    % TODO - puscic dla cast i call
+saves_should_propagate_to_backup_node_call_ha_test(Config) ->
+    saves_should_propagate_to_backup_node(Config, call).
+
+calls_should_change_node_cast_ha_test(Config) ->
+    calls_should_change_node(Config, cast).
+
+calls_should_change_node_call_ha_test(Config) ->
+    calls_should_change_node(Config, call).
+
+saves_should_use_repaired_node_cast_ha_test(Config) ->
+    saves_should_use_repaired_node(Config, cast).
+
+saves_should_use_repaired_node_call_ha_test(Config) ->
+    saves_should_use_repaired_node(Config, call).
+
+%%%===================================================================
+%%% HA tests skeletons and helper functions
+%%%===================================================================
+
+saves_should_propagate_to_backup_node(Config, Method) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+    set_ha(Config, change_config, [2, Method]),
+
     lists:foreach(fun(Model) ->
-        {ok, _} = ?assertMatch({ok, #document{}}, rpc:call(Worker, Model, save, [?DOC(Key, Model)])),
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
 
         assert_in_memory(KeyNode, Model, Key),
-        assert_on_disc(Worker, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
         assert_in_memory(KeyNode2, Model, Key)
     end, ?TEST_MODELS).
 
-calls_should_change_node(Config) ->
-    [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
-    Key = datastore_key:new(),
-    {[KeyNode], [KeyNode2], _} = rpc:call(Worker0, datastore_key, responsible_nodes, [Key, 2]),
-    [Worker | _] = Workers -- [KeyNode, KeyNode2],
+calls_should_change_node(Config, Method) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
 
-    % TODO - puscic dla cast i call
     lists:foreach(fun(Model) ->
-        {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(Worker, Model, save, [?DOC(Key, Model)])),
+        {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
+
         assert_in_memory(KeyNode, Model, Key),
-        assert_on_disc(Worker, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
         assert_not_in_memory(KeyNode2, Model, Key),
 
-        set_ha(Config, change_config, [2, cast]),
-        set_ha(KeyNode2, master_down, []),
-        ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_broken_node, [KeyNode])),
+        set_ha(Config, change_config, [2, Method]),
+        mock_node_down(TestWorker, KeyNode2, KeyNode),
 
-        ?assertMatch({ok, #document{}}, rpc:call(Worker, Model, save, [Doc2])),
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
         assert_in_memory(KeyNode2, Model, Key),
 
-        ?assertMatch(ok, rpc:call(Worker, Model, delete, [Key])),
-        assert_not_in_memory(KeyNode2, Model, Key),
-        assert_not_on_disc(Worker, Model, Key),
+        ?assertMatch(ok, rpc:call(TestWorker, Model, delete, [Key])),
+        assert_in_memory(KeyNode2, Model, Key, true),
+        assert_on_disc(TestWorker, Model, Key, true),
 
-        ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_fixed_node, [KeyNode])),
-        set_ha(KeyNode2, master_up, []),
+        mock_node_up(TestWorker, KeyNode2, KeyNode),
         set_ha(Config, change_config, [1, cast])
     end, ?TEST_MODELS).
+
+saves_should_use_repaired_node(Config, Method) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+    set_ha(Config, change_config, [2, Method]),
+
+    lists:foreach(fun(Model) ->
+        mock_node_down(TestWorker, KeyNode2, KeyNode),
+        {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
+
+        assert_in_memory(KeyNode2, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
+        assert_not_in_memory(KeyNode, Model, Key),
+
+        set_ha(KeyNode2, master_up, []),
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
+        assert_in_memory(KeyNode, Model, Key),
+        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]))
+    end, ?TEST_MODELS).
+
+prepare_ha_test(Config) ->
+    [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Key = datastore_key:new(),
+    {[KeyNode], [KeyNode2], _, _} = rpc:call(Worker0, datastore_key, responsible_nodes, [Key, 2]),
+    [TestWorker | _] = Workers -- [KeyNode, KeyNode2],
+
+    {Key, KeyNode, KeyNode2, TestWorker}.
 
 set_ha(Worker, Fun, Args) when is_atom(Worker) ->
     ?assertEqual(ok, rpc:call(Worker, ha_management, Fun, Args));
@@ -143,6 +190,14 @@ set_ha(Config, Fun, Args) ->
         set_ha(Worker, Fun, Args)
     end, Workers).
 
+mock_node_down(CallNode, ExecuteNode, BrokenNode) ->
+    set_ha(ExecuteNode, master_down, []),
+    ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, set_broken_node, [BrokenNode])).
+
+mock_node_up(CallNode, ExecuteNode, BrokenNode) ->
+    ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, set_fixed_node, [BrokenNode])),
+    set_ha(ExecuteNode, master_up, []).
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -150,33 +205,41 @@ set_ha(Config, Fun, Args) ->
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(Config).
 
-init_per_testcase(Case, Config) when Case =:= saves_should_propagate_to_backup_node orelse
-    Case =:= calls_should_change_node ->
+init_per_testcase(ha_test, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
     {ok, SubtreesNum} = test_utils:get_env(Worker, cluster_worker, tp_subtrees_number),
     application:set_env(cluster_worker, tp_subtrees_number, SubtreesNum),
     Config;
-init_per_testcase(_, Config) ->
-    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
-    application:load(cluster_worker),
-    {ok, SubtreesNum} = test_utils:get_env(Worker, cluster_worker, tp_subtrees_number),
-    application:set_env(cluster_worker, tp_subtrees_number, SubtreesNum),
-    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{memory_copies => all}),
-    Config.
+init_per_testcase(Case, Config) ->
+    case lists:suffix("ha_test", atom_to_list(Case)) of
+        true ->
+            init_per_testcase(ha_test, Config);
+        _ ->
+            [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+            application:load(cluster_worker),
+            {ok, SubtreesNum} = test_utils:get_env(Worker, cluster_worker, tp_subtrees_number),
+            application:set_env(cluster_worker, tp_subtrees_number, SubtreesNum),
+            test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{memory_copies => all}),
+            Config
+    end.
 
-end_per_testcase(Case, Config) when Case =:= saves_should_propagate_to_backup_node orelse
-    Case =:= calls_should_change_node ->
+end_per_testcase(ha_test, Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(FixedWorker) ->
         ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_fixed_node, [FixedWorker]))
     end, Workers),
     set_ha(Config, master_up, []),
     set_ha(Config, change_config, [1, cast]);
-end_per_testcase(_Case, Config) ->
-    Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
-    ok.
+end_per_testcase(Case, Config) ->
+    case lists:suffix("ha_test", atom_to_list(Case)) of
+        true ->
+            end_per_testcase(ha_test, Config);
+        _ ->
+            Workers = ?config(cluster_worker_nodes, Config),
+            test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
+            ok
+    end.
 
 end_per_suite(_Config) ->
     ok.
@@ -228,21 +291,6 @@ assert_key_on_disc(Worker, Model, Key, Deleted) ->
             ok;
         Driver ->
             ?assertMatch({ok, _, #document{deleted = Deleted}},
-                rpc:call(Worker, Driver, get, [
-                    ?DISC_CTX, Key
-                ]), ?ATTEMPTS
-            )
-    end.
-
-assert_not_on_disc(Worker, Model, Key) ->
-    assert_key_not_on_disc(Worker, Model, ?UNIQUE_KEY(Model, Key)).
-
-assert_key_not_on_disc(Worker, Model, Key) ->
-    case ?DISC_DRV(Model) of
-        undefined ->
-            ok;
-        Driver ->
-            ?assertMatch({error, not_found},
                 rpc:call(Worker, Driver, get, [
                     ?DISC_CTX, Key
                 ]), ?ATTEMPTS

@@ -139,14 +139,23 @@ init([MasterPid, Key, BackupNodes, KeysInSlaveFlush]) ->
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
 handle_call({handle, Ref, Requests, Mode}, From, State = #state{process_key = ProcessKey, master_pid = Pid}) ->
-    State3 = case ha_slave:analyse_requests(Requests, Mode, ProcessKey) of
+    State3 = case ha_slave:analyse_requests(Requests, Mode) of
         {regular, Regular} ->
             gen_server:reply(From, regular),
             handle_requests(Regular, regular, State#state{requests_ref = Ref});
         {emergency_call, Regular, Emergency} ->
             gen_server:reply(From, emergency_call),
             State2 = handle_requests(Regular, regular, State#state{requests_ref = Ref}),
-            handle_requests(Emergency, emergency_call, State2)
+            handle_requests(Emergency, emergency_call, State2);
+        {proxy_call, Regular, Emergency, ProxyNode} ->
+            gen_server:reply(From, regular),
+            % TODO - a co jesli poleci blad - obsluzyc
+            case rpc:call(ProxyNode, datastore_writer, custom_call,
+                [ProcessKey, ?PROXY_REQUESTS(lists:reverse(Emergency))]) of
+                {ok, _} -> ok;
+                Error -> ?error("Proxy call error ~p for requests ~p", [Error, lists:reverse(Emergency)])
+            end,
+            handle_requests(Regular, regular, State#state{requests_ref = Ref})
     end,
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State3)};
