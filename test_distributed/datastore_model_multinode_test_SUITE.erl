@@ -35,6 +35,12 @@
     saves_should_change_node_dynamic_call_ha_test/1,
     node_transition_test_cast_ha_test/1,
     node_transition_test_call_ha_test/1,
+    node_transition_with_sleep_test_cast_ha_test/1,
+    node_transition_with_sleep_test_call_ha_test/1,
+    node_transition_delayed_ring_repair_test_cast_ha_test/1,
+    node_transition_delayed_ring_repair_test_call_ha_test/1,
+    node_transition_sleep_and_delayed_ring_repair_test_cast_ha_test/1,
+    node_transition_sleep_and_delayed_ring_repair_test_call_ha_test/1,
 
     stress_performance_test/1,
     stress_performance_test_base/1,
@@ -61,8 +67,15 @@ all() ->
         saves_should_change_node_dynamic_call_ha_test,
         node_transition_test_cast_ha_test,
         node_transition_test_call_ha_test,
+        node_transition_with_sleep_test_cast_ha_test,
+        node_transition_with_sleep_test_call_ha_test,
+        node_transition_delayed_ring_repair_test_cast_ha_test,
+        node_transition_delayed_ring_repair_test_call_ha_test,
+        node_transition_sleep_and_delayed_ring_repair_test_cast_ha_test,
+        node_transition_sleep_and_delayed_ring_repair_test_call_ha_test,
 
-        memory_only_stress_with_check_test,
+
+    memory_only_stress_with_check_test,
         stress_with_check_test,
         memory_only_stress_performance_test,
         stress_performance_test
@@ -154,10 +167,28 @@ saves_should_change_node_dynamic_call_ha_test(Config) ->
     saves_should_change_node_dynamic(Config, call).
 
 node_transition_test_cast_ha_test(Config) ->
-    node_transition_test(Config, cast).
+    node_transition_test(Config, cast, false, false).
 
 node_transition_test_call_ha_test(Config) ->
-    node_transition_test(Config, call).
+    node_transition_test(Config, call, false, false).
+
+node_transition_with_sleep_test_cast_ha_test(Config) ->
+    node_transition_test(Config, cast, true, false).
+
+node_transition_with_sleep_test_call_ha_test(Config) ->
+    node_transition_test(Config, call, true, false).
+
+node_transition_delayed_ring_repair_test_cast_ha_test(Config) ->
+    node_transition_test(Config, cast, false, true).
+
+node_transition_delayed_ring_repair_test_call_ha_test(Config) ->
+    node_transition_test(Config, call, false, true).
+
+node_transition_sleep_and_delayed_ring_repair_test_cast_ha_test(Config) ->
+    node_transition_test(Config, cast, true, true).
+
+node_transition_sleep_and_delayed_ring_repair_test_call_ha_test(Config) ->
+    node_transition_test(Config, call, true, true).
 
 %%%===================================================================
 %%% HA tests skeletons and helper functions
@@ -248,7 +279,7 @@ saves_should_change_node_dynamic(Config, Method) ->
         set_ha(KeyNode2, master_up, [])
     end, ?TEST_MODELS -- [disc_only_model]).
 
-node_transition_test(Config, Method) ->
+node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
     MasterPid = self(),
 
@@ -261,12 +292,29 @@ node_transition_test(Config, Method) ->
         assert_not_in_memory(KeyNode, Model, Key),
 
         UpdateFun = fun({M, F1, F2, F3}) ->
+            case SpawnAndSleep of
+                true -> timer:sleep(1000);
+                _ -> ok
+            end,
             MasterPid ! {update, F1, node()},
             {ok, {M, F1 + 1, F2, F3}}
         end,
-        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
-        mock_node_up(TestWorker, KeyNode2, KeyNode), % TODO - przetestowac bez zmiany chash_ring (samo master_up)
+        case SpawnAndSleep of
+            true ->
+                spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
+                timer:sleep(100);
+            _ ->
+                ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
+        end,
+
+        case DelayRingRepair of
+            true ->
+                ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]));
+            _ ->
+                ok
+        end,
+        set_ha(KeyNode2, master_up, []),
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
@@ -275,7 +323,9 @@ node_transition_test(Config, Method) ->
 
         assert_value_in_memory(KeyNode2, Model, Key, 3),
         timer:sleep(10000), % Wait for race on flush
-        assert_value_on_disc(TestWorker, Model, Key, 3)
+        assert_value_on_disc(TestWorker, Model, Key, 3),
+
+        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]))
     end, ?TEST_MODELS).
 
 prepare_ha_test(Config) ->
