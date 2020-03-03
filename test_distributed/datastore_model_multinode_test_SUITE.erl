@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @author Michał Wrzeszcz
+%%% @author Michal Wrzeszcz
 %%% @copyright (C) 2019 ACK CYFRONET AGH
 %%% This software is released under the MIT license
 %%% cited in 'LICENSE.txt'.
@@ -10,7 +10,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_model_multinode_test_SUITE).
--author("Michał Wrzeszcz").
+-author("Michal Wrzeszcz").
 
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").

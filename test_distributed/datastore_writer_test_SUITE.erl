@@ -222,6 +222,12 @@ init_per_testcase(_Case, Config) ->
     test_utils:mock_expect(Workers, ?DOC_BATCH, apply, fun(Batch) ->
         Batch
     end),
+    test_utils:mock_expect(Workers, ?DOC_BATCH, create_cache_requests, fun(_Batch) ->
+        []
+    end),
+    test_utils:mock_expect(Workers, ?DOC_BATCH, apply_cache_requests, fun(Batch, _) ->
+        Batch
+    end),
     test_utils:mock_expect(Workers, ?DOC_BATCH, terminate, fun
         (#{responses := Responses}) ->
             lists:foldl(fun(Response, Map) ->
@@ -253,8 +259,11 @@ init_per_testcase(_Case, Config) ->
 end_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
-        lists:foreach(fun({_Key, Pid}) ->
-            stop_datastore_writer(Worker, Pid)
+        lists:foreach(fun
+            ({_Key, Pid, _}) ->
+                stop_datastore_writer(Worker, Pid);
+            (_) ->
+                ok
         end, rpc:call(Worker, ets, tab2list, [?TP_ROUTING_TABLE])),
         rpc:call(Worker, ets, delete_all_objects, [?TP_ROUTING_TABLE])
     end, Workers),

@@ -50,13 +50,13 @@ test_hashing(Config) ->
     % Check label mapping to multiple nodes
     lists:foreach(fun(Label) ->
         lists:foreach(fun(NodesCount) ->
-            Nodes = rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount]),
+            {Alive1, Alive2, Broken, _} = Nodes = rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount]),
             % The same label should yield the same nodes
             ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount])),
             lists:foreach(fun(Node) ->
                 ?assert(erlang:is_atom(Node)),
                 ?assert(lists:member(Node, AllNodes))
-            end, Nodes)
+            end, Alive1 ++ Alive2 ++ Broken)
         end, lists:seq(1, length(AllNodes)))
     end, Labels),
 
