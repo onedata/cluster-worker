@@ -73,8 +73,7 @@
 
 % Information that emergency request has been handled by slave
 % Can be sent between master and slave or by master/slave internally so should be wrapped in generic message
--define(EMERGENCY_REQUEST_HANDLED(KEYS, CACHE_REQUESTS), {emergency_request_handled, KEYS, CACHE_REQUESTS}).
--define(EMERGENCY_REQUEST_HANDLED(KEYS), {emergency_request_handled, KEYS}).
+-define(EMERGENCY_REQUEST_HANDLED(CACHE_REQUESTS), {emergency_request_handled, CACHE_REQUESTS}).
 % Information that keys connected with emergency request have been flushed
 % Can be sent between master and slave or by master/slave internally so should be wrapped in generic message
 -define(EMERGENCY_KEYS_INACTIVATED(KEYS), {emergency_keys_inactivated, KEYS}).

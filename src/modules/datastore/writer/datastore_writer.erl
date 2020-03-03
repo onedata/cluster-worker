@@ -303,19 +303,19 @@ wait(Ref, Pid) ->
     {stop, Reason :: term()} | ignore.
 init([Key]) ->
     BackupNodes = ha_management:get_backup_nodes(),
-    {ActiveRequests, KeysInSlaveFlush} = ha_master:check_slave(Key, BackupNodes),
+    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_master:check_slave(Key, BackupNodes),
 
-    {Requests, CacheWriterState} = case ActiveRequests of
+    CacheWriterState = case ActiveRequests of
         false ->
-            {[], idle};
-        {true, RequestsToHandle} ->
-            {RequestsToHandle, {active, backup}}
+            idle;
+        true ->
+            {active, backup}
     end,
 
     {ok, Pid} = datastore_cache_writer:start_link(self(), Key, BackupNodes, KeysInSlaveFlush),
 
     State = #state{cache_writer_pid = Pid, ha_slave_data = ha_slave:init_data(),
-        cache_writer_state = CacheWriterState, requests = Requests},
+        cache_writer_state = CacheWriterState, requests = RequestsToHandle},
     {ok, schedule_terminate(State)}.
 
 %%--------------------------------------------------------------------
@@ -350,6 +350,9 @@ handle_call(?CONFIG_CHANGED = Msg, _From, State = #state{cache_writer_pid = Pid}
 handle_call(?MANAGEMENT_MSG(_) = Msg, _From, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
     Data2 = ha_slave:handle_config_msg(Msg, Data, Pid),
     {reply, ok, State#state{ha_slave_data = Data2}};
+% Call used during the test (do not use - test only method)
+handle_call(force_terminate, _From, State = #state{}) ->
+    {stop, normal, ok,  State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.

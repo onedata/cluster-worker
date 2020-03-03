@@ -186,6 +186,10 @@ handle_call({terminate, Requests}, _From, State) ->
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
+% Call used during the test (do not use - test only method)
+handle_call(force_terminate, _From, #state{disc_writer_pid = Pid} = State) ->
+    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
+    {stop, normal, ok, State};
 handle_call(?SLAVE_MSG(_) = Msg, _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_master:handle_slave_lifecycle_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
@@ -258,7 +262,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     }, ?FLUSH_INTERVAL))};
 handle_cast(?MASTER_INTERNAL_MSG(_) = Msg, #state{keys_in_flush = KiF} = State) ->
     NewKiF = ha_master:handle_internal_message(Msg, KiF),
-    {reply, ok, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
+    {noreply, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.

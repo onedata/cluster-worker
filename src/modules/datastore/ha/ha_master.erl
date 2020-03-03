@@ -38,11 +38,10 @@
 
 % Used messages types:
 -type proxy_request() :: ?PROXY_REQUESTS(datastore_writer:requests_internal()).
--type slave_emergency_request() :: ?SLAVE_MSG(
-    ?EMERGENCY_REQUEST_HANDLED(ha_slave:emergency_keys(), [datastore_cache:cache_save_request()]) |
-    ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys())).
+-type slave_emergency_request() :: ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(ha_slave:emergency_requests_map()) |
+    ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys_list())).
 -type emergency_internal_request() :: ?MASTER_INTERNAL_MSG(
-    ?EMERGENCY_REQUEST_HANDLED(ha_slave:emergency_keys()) | ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys())).
+    ?EMERGENCY_REQUEST_HANDLED(ha_slave:emergency_requests_map()) | ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys_list())).
 -type config_changed_message() :: ?CONFIG_CHANGED.
 -type configure_backup_message() :: ?CONFIGURE_BACKUP.
 -type unlink_message() :: ?REQUEST_UNLINK.
@@ -66,24 +65,21 @@ init_data(BackupNodes) -> #data{backup_nodes = BackupNodes, propagation_method =
 %% Verifies slave state during start of process that works as master.
 %% @end
 %%--------------------------------------------------------------------
--spec check_slave(datastore:key(), [node()]) -> {ActiveRequests :: {true, list()} | false, [datastore:key()]}.
+-spec check_slave(datastore:key(), [node()]) ->
+    {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
 check_slave(Key, BackupNodes) ->
     case BackupNodes of
         [Node | _] ->
             case rpc:call(Node, datastore_writer, call_if_alive, [Key, ?CHECK_SLAVE_STATUS(self())]) of
-                {error,not_alive} ->
-                    {false, []};
-                ok ->
-                    {false, []};
-                {wait_cache, CacheRequests, RequestsToHandle} ->
-                    datastore_cache:save(CacheRequests),
-                    {{true, RequestsToHandle}, []};
-                {wait_disc, CacheRequests, Keys} ->
-                    datastore_cache:save(CacheRequests),
-                    {false, sets:to_list(Keys)}
+                {error, not_alive} ->
+                    {false, [], []};
+                {ActiveRequests, CacheRequestsMap, MemoryRequests, RequestsToHandle} ->
+                    datastore_cache:save(maps:values(CacheRequestsMap)),
+                    datastore_cache:save(MemoryRequests),
+                    {ActiveRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
             end;
         _ ->
-            {false, []}
+            {false, [], []}
     end.
 
 %%%===================================================================
@@ -103,7 +99,8 @@ broadcast_request_handled(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes
     Data;
 broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_method = call,
     backup_nodes = [Node | _]} = Data) ->
-    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST(Keys, CacheRequests)]) of
+    CacheRequests2 = lists:filtermap(fun({_, Key, _}) -> maps:is_key(Key, Keys) end, CacheRequests),
+    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST(Keys, CacheRequests2)]) of
         {ok, Pid} ->
             Data#data{slave_status = {not_linked, Pid}};
         Error ->
@@ -112,7 +109,8 @@ broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_met
     end;
 broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{slave_status = {not_linked, _},
     backup_nodes = [Node | _]} = Data) ->
-    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST_AND_LINK(Keys, CacheRequests, self())]) of
+    CacheRequests2 = lists:filtermap(fun({_, Key, _}) -> maps:is_key(Key, Keys) end, CacheRequests),
+    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST_AND_LINK(Keys, CacheRequests2, self())]) of
         {ok, Pid} ->
             Data#data{slave_status = {linked, Pid}};
         Error ->
@@ -120,7 +118,8 @@ broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{slave_status = 
             Data
     end;
 broadcast_request_handled(_ProcessKey, Keys, CacheRequests, #data{slave_status = {linked, Pid}} = Data) ->
-    gen_server:cast(Pid, ?BACKUP_REQUEST(Keys, CacheRequests)),
+    CacheRequests2 = lists:filtermap(fun({_, Key, _}) -> maps:is_key(Key, Keys) end, CacheRequests),
+    gen_server:cast(Pid, ?BACKUP_REQUEST(Keys, CacheRequests2)),
     Data.
 
 %%--------------------------------------------------------------------
@@ -153,9 +152,9 @@ broadcast_inactivation(Inactivated, #data{slave_status = {_, Pid}}) ->
     {schedule, NewRequests :: datastore_writer:requests_internal()} | idle | ignore.
 handle_slave_message(?PROXY_REQUESTS(NewRequests), _Pid) ->
     {schedule, NewRequests};
-handle_slave_message(?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(Keys, CacheRequests)), Pid) ->
-    datastore_cache:save(CacheRequests),
-    gen_server:cast(Pid, ?MASTER_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(Keys))),
+handle_slave_message(?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests)), Pid) ->
+    datastore_cache:save(maps:values(CacheRequests)),
+    gen_server:cast(Pid, ?MASTER_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests))),
     idle;
 handle_slave_message(?SLAVE_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)), Pid) ->
     gen_server:cast(Pid, ?MASTER_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys))),
@@ -187,8 +186,8 @@ handle_internal_message(?CONFIGURE_BACKUP, Data) ->
     PropagationMethod = ha_management:get_propagation_method(),
     Data#data{backup_nodes = BackupNodes, propagation_method = PropagationMethod};
 
-handle_internal_message(?MASTER_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(Keys)), KiF) ->
-    NewKiF = lists:map(fun(Key) -> {Key, {slave_flush, undefined}} end, Keys),
+handle_internal_message(?MASTER_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests)), KiF) ->
+    NewKiF = lists:map(fun(Key) -> {Key, {slave_flush, undefined}} end, maps:keys(CacheRequests)),
     maps:merge(maps:from_list(NewKiF), KiF);
 
 handle_internal_message(?MASTER_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)), KiF) ->

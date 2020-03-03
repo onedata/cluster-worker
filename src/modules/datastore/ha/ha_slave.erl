@@ -39,28 +39,27 @@
 
     % Emergency calls related fields (used when master is down)
     emergency_requests_status = waiting :: waiting | handling, % Status of processing emergency calls
-    emergency_keys = sets:new(),
-    emergency_cache_requests = []
+    emergency_cache_requests = #{} :: emergency_requests_map(),
+    emergency_inactivated_memory_cache_requests = #{} :: emergency_requests_map()
 }).
 
 -type ha_slave_emergency_calls_data() :: #emergency_calls_data{}.
 -type ha_slave_data() :: #slave_data{}.
 -type emergency_keys() :: sets:set(datastore:key()).
-% Status of slave: ok, waiting for memory operation to be finished or waiting for flush.
--type slave_status() :: ok |
-    {wait_cache, datastore_cache:cache_save_request(), RemoteRequests :: datastore_writer:requests_internal()} |
-    {wait_disc, datastore_cache:cache_save_request(), RemoteRequests :: datastore_writer:requests_internal()}.
+-type emergency_keys_list() :: datastore:key().
+-type emergency_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
+-type slave_status() :: {ActiveRequests :: boolean(), CacheRequestsMap :: emergency_requests_map(),
+    MemoryRequests :: [datastore_cache:cache_save_request()], RequestsToHandle :: datastore_writer:requests_internal()}.
 
--export_type([ha_slave_emergency_calls_data/0, ha_slave_data/0, emergency_keys/0]).
+-export_type([ha_slave_emergency_calls_data/0, ha_slave_data/0, emergency_keys_list/0, emergency_requests_map/0]).
 
 % Used messages types:
 -type backup_message() :: ?BACKUP_REQUEST(datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()]) |
     ?BACKUP_REQUEST_AND_LINK(datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()], pid()) |
     ?KEYS_INACTIVATED(datastore_doc_batch:cached_keys()).
 -type check_status_request() :: ?CHECK_SLAVE_STATUS(pid()).
--type slave_emergency_internal_request() :: ?SLAVE_INTERNAL_MSG(
-    ?EMERGENCY_REQUEST_HANDLED(emergency_keys(), [datastore_cache:cache_save_request()]) |
-    ?EMERGENCY_KEYS_INACTIVATED(emergency_keys())).
+-type slave_emergency_internal_request() :: ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(emergency_requests_map()) |
+    ?EMERGENCY_KEYS_INACTIVATED(emergency_keys_list())).
 -type master_status_message() :: ?MASTER_DOWN | ?MASTER_UP.
 
 %%%===================================================================
@@ -83,9 +82,15 @@ new_emergency_calls_data() ->
 %%--------------------------------------------------------------------
 -spec report_emergency_request_handled(pid(), datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()],
     ha_slave_emergency_calls_data()) -> ha_slave_emergency_calls_data().
-report_emergency_request_handled(Pid, Keys, CacheRequests, #emergency_calls_data{keys = DataKeys} = Data) ->
-    DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(Keys))),
-    gen_server:cast(Pid, ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(DataKeys2, CacheRequests))),
+report_emergency_request_handled(Pid, CachedKeys, CacheRequests, #emergency_calls_data{keys = DataKeys} = Data) ->
+    DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
+    CacheRequests2 = lists:filtermap(fun({_, Key, _} = Request) ->
+        case maps:is_key(Key, CachedKeys) of
+            true -> {true, {Key, Request}};
+            false -> false
+        end
+    end, CacheRequests),
+    gen_server:cast(Pid, ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(maps:from_list(CacheRequests2)))),
     Data#emergency_calls_data{keys = DataKeys2}.
 
 %%--------------------------------------------------------------------
@@ -214,16 +219,13 @@ handle_master_message(?KEYS_INACTIVATED(Inactivated), #slave_data{keys_to_protec
     {ok, SlaveData#slave_data{keys_to_protect = maps:without(maps:keys(Inactivated), DataKeys)}, WaitingRequests};
 
 % Checking slave status
-handle_master_message(?CHECK_SLAVE_STATUS(Pid), #slave_data{emergency_requests_status = Status, emergency_keys = Keys,
-    emergency_cache_requests = CacheRequests} = SlaveData, WaitingRequests) ->
-    case {Status, sets:size(Keys)} of
-        {handling, _} ->
-            {LocalReversed, RemoteReversed, _ProxyNode} = clasify_requests(WaitingRequests),
-            {{wait_cache, CacheRequests, lists:reverse(RemoteReversed)},
-                SlaveData#slave_data{recovered_master_pid = Pid}, lists:reverse(LocalReversed)};
-        {_, 0} -> {ok, SlaveData, WaitingRequests};
-        _ -> {{wait_disc, CacheRequests, Keys}, SlaveData#slave_data{recovered_master_pid = Pid}, WaitingRequests}
-    end.
+handle_master_message(?CHECK_SLAVE_STATUS(Pid), #slave_data{emergency_requests_status = Status,
+    emergency_cache_requests = CacheRequests, emergency_inactivated_memory_cache_requests = MemoryRequests} = SlaveData,
+    WaitingRequests) ->
+    {LocalReversed, RemoteReversed, _ProxyNode} = clasify_requests(WaitingRequests),
+    {{Status =:= handling, CacheRequests, maps:values(MemoryRequests), lists:reverse(RemoteReversed)},
+        SlaveData#slave_data{recovered_master_pid = Pid, emergency_inactivated_memory_cache_requests = #{}},
+        lists:reverse(LocalReversed)}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -231,21 +233,34 @@ handle_master_message(?CHECK_SLAVE_STATUS(Pid), #slave_data{emergency_requests_s
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_slave_internal_message(slave_emergency_internal_request(), ha_slave_data()) -> ha_slave_data().
-handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(Keys, CacheRequests)), #slave_data{emergency_keys = Keys0,
+handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests)), #slave_data{
     recovered_master_pid = Pid, emergency_cache_requests = CR}  = SlaveData) ->
+    SlaveData2 = SlaveData#slave_data{emergency_cache_requests = maps:merge(CR, CacheRequests)},
     case Pid of
         undefined ->
-            SlaveData#slave_data{emergency_keys = sets:union(Keys0, Keys),
-                emergency_cache_requests = CR ++ CacheRequests}; % TODO filtrowac takie same klucze
+            SlaveData2;
         _ ->
-            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(Keys, CacheRequests))),
-            SlaveData#slave_data{emergency_keys = sets:union(Keys0, Keys)}
+            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests))), SlaveData2
     end;
-handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)), #slave_data{emergency_keys = Keys,
-    emergency_cache_requests = CR, recovered_master_pid = Pid} = SlaveData) ->
-    gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_KEYS_INACTIVATED(sets:to_list(CrashedNodeKeys)))),
-    CR2 = lists:filter(fun({_, Key, _}) -> not sets:is_element(Key, CrashedNodeKeys) end, CR),
-    SlaveData#slave_data{emergency_keys = sets:subtract(Keys, CrashedNodeKeys), emergency_cache_requests = CR2}.
+handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)),
+    #slave_data{emergency_cache_requests = CR, emergency_inactivated_memory_cache_requests = ICR,
+        recovered_master_pid = Pid} = SlaveData) ->
+    CrashedNodeKeysList = sets:to_list(CrashedNodeKeys),
+    CR2 = maps:without(CrashedNodeKeysList, CR),
+    SlaveData2 = SlaveData#slave_data{emergency_cache_requests = CR2},
+
+    case Pid of
+        undefined ->
+            Finished = maps:with(CrashedNodeKeysList, CR),
+            FinishedMemory = maps:filter(fun
+                (_, {#{disc_driver := DD}, _, _}) -> DD =:= undefined;
+                (_, _) -> true
+            end, Finished),
+            SlaveData2#slave_data{emergency_inactivated_memory_cache_requests = maps:merge(ICR, FinishedMemory)};
+        _ ->
+            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeysList))),
+            SlaveData2
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

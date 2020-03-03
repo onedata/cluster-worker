@@ -33,6 +33,7 @@
     saves_should_use_repaired_node_call_ha_test/1,
     saves_should_change_node_dynamic_cast_ha_test/1,
     saves_should_change_node_dynamic_call_ha_test/1,
+
     node_transition_test_cast_ha_test/1,
     node_transition_test_call_ha_test/1,
     node_transition_with_sleep_test_cast_ha_test/1,
@@ -65,6 +66,7 @@ all() ->
         saves_should_use_repaired_node_call_ha_test,
         saves_should_change_node_dynamic_cast_ha_test,
         saves_should_change_node_dynamic_call_ha_test,
+
         node_transition_test_cast_ha_test,
         node_transition_test_call_ha_test,
         node_transition_with_sleep_test_cast_ha_test,
@@ -74,8 +76,7 @@ all() ->
         node_transition_sleep_and_delayed_ring_repair_test_cast_ha_test,
         node_transition_sleep_and_delayed_ring_repair_test_call_ha_test,
 
-
-    memory_only_stress_with_check_test,
+        memory_only_stress_with_check_test,
         stress_with_check_test,
         memory_only_stress_performance_test,
         stress_performance_test
@@ -293,7 +294,7 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
 
         UpdateFun = fun({M, F1, F2, F3}) ->
             case SpawnAndSleep of
-                true -> timer:sleep(1000);
+                true -> timer:sleep(2000);
                 _ -> ok
             end,
             MasterPid ! {update, F1, node()},
@@ -302,8 +303,10 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
 
         case SpawnAndSleep of
             true ->
+                % Spawn update that will start update function before calling master up but will end it after
+                % next update is called (due to sleep in update fun)
                 spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
-                timer:sleep(100);
+                timer:sleep(500);
             _ ->
                 ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
         end,
@@ -325,7 +328,8 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
         timer:sleep(10000), % Wait for race on flush
         assert_value_on_disc(TestWorker, Model, Key, 3),
 
-        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]))
+        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode])),
+        terminate_processes(Config)
     end, ?TEST_MODELS).
 
 prepare_ha_test(Config) ->
@@ -356,9 +360,15 @@ check_update(Node, Value) ->
     Rec = receive
         {update, _, _} = Message -> Message
     after
-        5000 -> timeout
+        10000 -> timeout
     end,
     ?assertEqual({update, Value, Node}, Rec).
+
+terminate_processes(Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Worker) ->
+        rpc:call(Worker, tp_router, send_to_each, [force_terminate])
+    end, Workers).
 
 %%%===================================================================
 %%% HA stress tests
@@ -420,10 +430,13 @@ init_per_testcase(Case, Config) ->
     end.
 
 end_per_testcase(ha_test, Config) ->
-    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
-    lists:foreach(fun(FixedWorker) ->
-        ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_fixed_node, [FixedWorker]))
+    Workers = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Worker) ->
+        lists:foreach(fun(FixedWorker) ->
+            ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_fixed_node, [FixedWorker]))
+        end, Workers)
     end, Workers),
+    terminate_processes(Config),
     set_ha(Config, master_up, []),
     set_ha(Config, change_config, [1, cast]),
     test_utils:mock_unload(Workers, [ha_master]);
