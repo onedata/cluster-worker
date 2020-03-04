@@ -225,8 +225,8 @@ init_per_testcase(_Case, Config) ->
     test_utils:mock_expect(Workers, ?DOC_BATCH, create_cache_requests, fun(_Batch) ->
         []
     end),
-    test_utils:mock_expect(Workers, ?DOC_BATCH, apply_cache_requests, fun(Batch, _) ->
-        Batch
+    test_utils:mock_expect(Workers, ?DOC_BATCH, apply_cache_requests, fun(Batch, Requests) ->
+        {Batch, Requests}
     end),
     test_utils:mock_expect(Workers, ?DOC_BATCH, terminate, fun
         (#{responses := Responses}) ->

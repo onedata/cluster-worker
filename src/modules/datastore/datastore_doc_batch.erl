@@ -95,9 +95,9 @@ create_cache_requests(#batch{cache = Cache, cache_mod_keys = CMK,
 %% Applies requests on a datastore cache and updates batch (marks changes as applied).
 %% @end
 %%--------------------------------------------------------------------
--spec apply_cache_requests(batch(), Requests :: [datastore_cache:cache_save_request()]) -> batch().
+-spec apply_cache_requests(batch(), Requests :: [datastore_cache:cache_save_request()]) ->
+    {batch(), CachedRequests :: [datastore_cache:cache_save_request()]}.
 apply_cache_requests(Batch, Requests) ->
-    {_, Keys, _} = lists:unzip3(Requests),
     Responses = datastore_cache:save(Requests),
     Statuses = lists:map(fun
         ({ok, memory, _}) -> cached;
@@ -105,12 +105,16 @@ apply_cache_requests(Batch, Requests) ->
         ({error, Reason}) -> {error, Reason}
     end, Responses),
     Batch2 = Batch#batch{cache_mod_keys = [], cache_added_keys = []},
-    lists:foldl(fun({Key, Status}, Batch3 = #batch{cache = Cache2}) ->
+    lists:foldl(fun({{_, Key, _} = Request, Status}, {Batch3 = #batch{cache = Cache2}, CachedRequests}) ->
         Entry = maps:get(Key, Cache2),
-        Batch3#batch{
+        Batch4 = Batch3#batch{
             cache = maps:put(Key, Entry#entry{status = Status}, Cache2)
-        }
-    end, Batch2, lists:zip(Keys, Statuses)).
+        },
+        case Status of
+            cached -> {Batch4, [Request | CachedRequests]};
+            _ -> {Batch4, CachedRequests}
+        end
+    end, {Batch2, []}, lists:zip(Requests, Statuses)).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -120,7 +124,8 @@ apply_cache_requests(Batch, Requests) ->
 -spec apply(batch()) -> batch().
 apply(Batch) ->
     Requests = create_cache_requests(Batch),
-    apply_cache_requests(Batch, Requests).
+    {Batch2, _} = apply_cache_requests(Batch, Requests),
+    Batch2.
 
 %%--------------------------------------------------------------------
 %% @doc

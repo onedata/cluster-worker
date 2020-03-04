@@ -99,8 +99,7 @@ broadcast_request_handled(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes
     Data;
 broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_method = call,
     backup_nodes = [Node | _]} = Data) ->
-    CacheRequests2 = lists:filtermap(fun({_, Key, _}) -> maps:is_key(Key, Keys) end, CacheRequests),
-    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST(Keys, CacheRequests2)]) of
+    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST(Keys, CacheRequests)]) of
         {ok, Pid} ->
             Data#data{slave_status = {not_linked, Pid}};
         Error ->
@@ -109,8 +108,7 @@ broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_met
     end;
 broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{slave_status = {not_linked, _},
     backup_nodes = [Node | _]} = Data) ->
-    CacheRequests2 = lists:filtermap(fun({_, Key, _}) -> maps:is_key(Key, Keys) end, CacheRequests),
-    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST_AND_LINK(Keys, CacheRequests2, self())]) of
+    case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST_AND_LINK(Keys, CacheRequests, self())]) of
         {ok, Pid} ->
             Data#data{slave_status = {linked, Pid}};
         Error ->
@@ -118,8 +116,7 @@ broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{slave_status = 
             Data
     end;
 broadcast_request_handled(_ProcessKey, Keys, CacheRequests, #data{slave_status = {linked, Pid}} = Data) ->
-    CacheRequests2 = lists:filtermap(fun({_, Key, _}) -> maps:is_key(Key, Keys) end, CacheRequests),
-    gen_server:cast(Pid, ?BACKUP_REQUEST(Keys, CacheRequests2)),
+    gen_server:cast(Pid, ?BACKUP_REQUEST(Keys, CacheRequests)),
     Data.
 
 %%--------------------------------------------------------------------
@@ -137,7 +134,7 @@ broadcast_inactivation(_, #data{slave_status = {_, undefined}}) ->
     ?warning("Inactivation request without slave defined"),
     ok;
 broadcast_inactivation(Inactivated, #data{slave_status = {_, Pid}}) ->
-    gen_server:cast(Pid, ?KEYS_INACTIVATED(Inactivated)).
+    gen_server:cast(Pid, ?KEYS_INACTIVATED(#{})).
 
 %%%===================================================================
 %%% API - messages handling by datastore_writer

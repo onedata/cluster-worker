@@ -415,13 +415,13 @@ handle_requests(Requests, RequestType, State = #state{
     Batch = datastore_doc_batch:init(),
     {Responses, Batch2, LT2} = batch_requests(Requests, [], Batch, LT),
     CacheRequests = datastore_doc_batch:create_cache_requests(Batch2),
-    Batch3 = datastore_doc_batch:apply_cache_requests(Batch2, CacheRequests),
+    {Batch3, SuccessfulCacheRequests} = datastore_doc_batch:apply_cache_requests(Batch2, CacheRequests),
     Batch4 = send_responses(Responses, Batch3),
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
-    State2 = handle_ha_requests(CachedKeys2, CacheRequests, RequestType, State),
+    State2 = handle_ha_requests(CachedKeys2, SuccessfulCacheRequests, RequestType, State),
 
     State2#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
 
