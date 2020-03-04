@@ -143,9 +143,9 @@ call_if_alive(Key, Request, Timeout, Attempts) ->
                 gen_server:call(Pid, Request, Timeout)
             catch
                 _:{noproc, _} ->
-                    ok;
+                    {error, not_alive};
                 exit:{normal, _} ->
-                    ok;
+                    {error, not_alive};
                 _:{timeout, _} ->
                     call_if_alive(Key, Request, Timeout, Attempts - 1);
                 _:Reason ->

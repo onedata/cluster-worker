@@ -351,7 +351,8 @@ handle_call(?MANAGEMENT_MSG(_) = Msg, _From, State = #state{ha_slave_data = Data
     Data2 = ha_slave:handle_config_msg(Msg, Data, Pid),
     {reply, ok, State#state{ha_slave_data = Data2}};
 % Call used during the test (do not use - test only method)
-handle_call(force_terminate, _From, State = #state{}) ->
+handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
+    gen_server:call(Pid, force_terminate, infinity),
     {stop, normal, ok,  State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -470,7 +471,7 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle, ha_slave_data = SlaveData
 }) ->
     Ref = make_ref(),
-    HandlingType = gen_server:call(Pid, {handle, Ref, lists:reverse(Requests), ha_slave:get_mode(SlaveData)}, infinity),
+    HandlingType = gen_server:call(Pid, {handle, Ref, Requests, ha_slave:get_mode(SlaveData)}, infinity),
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
         on ->
