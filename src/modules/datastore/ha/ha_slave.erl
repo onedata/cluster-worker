@@ -6,10 +6,9 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions used by datastore writer and cache writer when ha is enabled and processes
-%%% work as slaves (requests are processed on other node and slave is used to provide ha or when master is down).
-%%% Handles two types of activities: emergency calls (handling requests by slave when master is down) and 
-%%% backup calls (calls used to cache information from master used in case of failure).
+%%% This module provides functions used by datastore_writer and datastore_cache_writer when ha is enabled and process
+%%% works as slaves. Handles two types of activities: emergency calls (handling requests by slave when master is down)
+%%% and backup calls (calls used to cache information from master used in case of failure).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_slave).
@@ -24,10 +23,12 @@
 -export([set_emergency_status/2, report_cache_writer_idle/1]).
 -export([handle_config_msg/3]).
 
+% record used by datastore_cache_writer to store information about emergency requests handling (when master is down)
 -record(emergency_calls_data, {
     keys = sets:new() :: emergency_keys()
 }).
 
+% record user by datastore_writer to store information about data backups and handling of emergency calls
 -record(slave_data, {
     % Fields used for gathering backup data
     keys_to_protect = #{} :: datastore_doc_batch:cached_keys(),
@@ -63,7 +64,7 @@
 -type master_status_message() :: ?MASTER_DOWN | ?MASTER_UP.
 
 %%%===================================================================
-%%% API - Emergency calls
+%%% API - Reporting emergency calls
 %%%===================================================================
 
 %%--------------------------------------------------------------------
@@ -116,29 +117,6 @@ report_emergency_keys_inactivated(Pid, Inactivated, #emergency_calls_data{keys =
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Analyses requests and provides information about expected fruher acstions.
-%% @end
-%%--------------------------------------------------------------------
--spec analyse_requests(datastore_writer:requests_internal(), slave_mode) ->
-    {regular, RegularReversed :: datastore_writer:requests_internal()} |
-    {emergency_call, RegularReversed :: datastore_writer:requests_internal(),
-        EmergencyReversed :: datastore_writer:requests_internal()} |
-    {proxy_call, RegularReversed :: datastore_writer:requests_internal(),
-        EmergencyReversed :: datastore_writer:requests_internal(), node()}.
-analyse_requests(Requests, Mode) ->
-    {RegularReversed, EmergencyReversed, ProxyNode} = clasify_requests(Requests),
-
-    case {ProxyNode, Mode} of
-        {undefined, _} ->
-            {regular, RegularReversed};
-        {_, backup} ->
-            {proxy_call, RegularReversed, EmergencyReversed, ProxyNode};
-        _ ->
-            {emergency_call, RegularReversed, EmergencyReversed}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Initializes data structure used by functions in this module.
 %% @end
 %%--------------------------------------------------------------------
@@ -148,18 +126,19 @@ init_data() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates emergency status.
+%% Updates emergency status - marks that emergency request is being handled now in case of emergency call.
 %% @end
 %%--------------------------------------------------------------------
 -spec set_emergency_status(ha_slave_data(), regular | emergency_call) -> ha_slave_data().
 set_emergency_status(Data, emergency_call) ->
     Data#slave_data{emergency_requests_status = handling};
 set_emergency_status(Data, _HandlingType) ->
-    Data.
+    Data. % standard request - do nothing
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Updates emergency status when datastore_cache_writer becomes idle.
+%% Updates emergency status when datastore_cache_writer becomes idle
+%% (if it was processing emergency request, it has finished).
 %% @end
 %%--------------------------------------------------------------------
 -spec report_cache_writer_idle(ha_slave_data()) -> ha_slave_data().
@@ -177,7 +156,8 @@ get_mode(#slave_data{slave_mode = Mode}) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns information about slave mode.
+%% Checks if slave can be terminated (no keys to protect and no links with master) and blocks termination if needed.
+%% If there are no keys to protect and process is linked to master sends unlink request.
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate_slave(ha_slave_data()) -> {terminate | retry | schedule, ha_slave_data()}.
@@ -201,7 +181,30 @@ terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = D
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Handles masters for datastore_writer.
+%% Analyses requests and provides information about expected further actions.
+%% @end
+%%--------------------------------------------------------------------
+-spec analyse_requests(datastore_writer:requests_internal(), slave_mode) ->
+    {regular, RegularReversed :: datastore_writer:requests_internal()} |
+    {emergency_call, RegularReversed :: datastore_writer:requests_internal(),
+        EmergencyReversed :: datastore_writer:requests_internal()} |
+    {proxy_call, RegularReversed :: datastore_writer:requests_internal(),
+        EmergencyReversed :: datastore_writer:requests_internal(), node()}.
+analyse_requests(Requests, Mode) ->
+    {RegularReversed, EmergencyReversed, ProxyNode} = clasify_requests(Requests),
+
+    case {ProxyNode, Mode} of
+        {undefined, _} ->
+            {regular, RegularReversed};
+        {_, backup} ->
+            {proxy_call, RegularReversed, EmergencyReversed, ProxyNode};
+        _ ->
+            {emergency_call, RegularReversed, EmergencyReversed}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Handles master messages for datastore_writer.
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_master_message(backup_message() | check_status_request(), ha_slave_data(),
@@ -240,7 +243,8 @@ handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(Cac
         undefined ->
             SlaveData2;
         _ ->
-            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests))), SlaveData2
+            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests))),
+            SlaveData2
     end;
 handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)),
     #slave_data{emergency_cache_requests = CR, emergency_inactivated_memory_cache_requests = ICR,
@@ -269,7 +273,7 @@ handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(Cr
 %%--------------------------------------------------------------------
 -spec handle_config_msg(master_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
 handle_config_msg(?MASTER_DOWN, #slave_data{keys_to_protect = Keys} = Data, Pid) ->
-    gen_server:call(Pid, ?MASTER_DOWN(Keys), infinity), % TODO - trzeba zaznaczyc ze flushujemy na wypadek powrotu node;a
+    gen_server:call(Pid, ?MASTER_DOWN(Keys), infinity), % VFS-6169 - mark flushed keys in case of fast master restart
     Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = processing};
 handle_config_msg(?MASTER_UP, Data, _Pid) ->
     Data#slave_data{slave_mode = backup}.
@@ -282,12 +286,10 @@ handle_config_msg(?MASTER_UP, Data, _Pid) ->
 -spec clasify_requests(datastore_writer:requests_internal()) -> {LocalReversed :: datastore_writer:requests_internal(),
     RemoteReversed :: datastore_writer:requests_internal(), MasterNodeToBeUsed :: node() | undefined}.
 clasify_requests(Requests) ->
-    % TODO - nie filtrowac jak nie ma zmienne backup_enabled (pobierac ja do stanu na poczatku)
-    % Tylko najpierw ogarnac jak sie zachowywac kiedy zmieniamy ustawienia ze wqspierania lub nie wspierania HA
+    % TODO - VFS-6168 - maybe do not execute when HA is off
+    % TODO - VFS-6169 - what if local node is broken node according to Ctx
     MyNode = node(),
 
-    % TODO - a co jesli slave jest tym walnietym node'm?
-    % TODO - analiza broken_nodes chyba nie potrzebna?
     {LocalReversed, RemoteReversed, FinalMaster} = lists:foldl(fun
         ({_Pid, _Ref, {_Function, [#{broken_master := true, broken_nodes := [Master | _]} | _Args]}} =
             Request, {Local, Remote, _}) when Master =/= MyNode ->

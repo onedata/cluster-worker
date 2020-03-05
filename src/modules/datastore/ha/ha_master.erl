@@ -6,8 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions used by datastorewriter and datastore_cache_writer when ha is enabled and processes
-%%% work as master (processing requests).
+%%% This module provides functions used by datastore_writer and datastore_cache_writer when ha is enabled and process
+%%% works as master (processing requests).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_master).
@@ -16,13 +16,13 @@
 -include("modules/datastore/ha.hrl").
 -include_lib("ctool/include/logging.hrl").
 
-% API - Processes init
+% API - process init
 -export([init_data/1]).
 % API - broadcasting actions to slave
 -export([broadcast_request_handled/4, broadcast_inactivation/2]).
-% API - messages handling by datastore_writer
+% API - messages' handling by datastore_writer
 -export([check_slave/2, handle_slave_message/2, handle_config_msg/2]).
-% API - messages handling by datastore_cache_writer
+% API - messages' handling by datastore_cache_writer
 -export([handle_internal_message/2, handle_slave_lifecycle_message/2]).
 
 -record(data, {
@@ -36,7 +36,7 @@
 
 -export_type([ha_master_data/0]).
 
-% Used messages types:
+% Used messages' types:
 -type proxy_request() :: ?PROXY_REQUESTS(datastore_writer:requests_internal()).
 -type slave_emergency_request() :: ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(ha_slave:emergency_requests_map()) |
     ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys_list())).
@@ -49,7 +49,7 @@
 -export_type([proxy_request/0, slave_emergency_request/0]).
 
 %%%===================================================================
-%%% API - Processes init
+%%% API - Process init
 %%%===================================================================
 
 %%--------------------------------------------------------------------
@@ -134,7 +134,7 @@ broadcast_inactivation(_, #data{slave_status = {_, undefined}}) ->
     ?warning("Inactivation request without slave defined"),
     ok;
 broadcast_inactivation(Inactivated, #data{slave_status = {_, Pid}}) ->
-    gen_server:cast(Pid, ?KEYS_INACTIVATED(#{})).
+    gen_server:cast(Pid, ?KEYS_INACTIVATED(Inactivated)).
 
 %%%===================================================================
 %%% API - messages handling by datastore_writer
@@ -143,6 +143,7 @@ broadcast_inactivation(Inactivated, #data{slave_status = {_, Pid}}) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Handles slave message and translates it to action by datastore_writer if needed.
+%% Messages concern proxy requests or emergency requests (both sent in case of previous master failure)
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_slave_message(proxy_request() | slave_emergency_request(), pid()) ->
@@ -172,7 +173,8 @@ handle_config_msg(?CONFIG_CHANGED, Pid) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Handles internal message and returns new backup data or new keys to flush depending on message type.
+%% Handles internal message and returns new backup data in case or reconfiguration or new keys to flush in case of
+%% messages concerning emergency requests.
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_internal_message(configure_backup_message() | emergency_internal_request(),

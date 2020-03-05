@@ -74,7 +74,7 @@ route(Function, Args) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Throttles datastore request if necessary.
+%% Processes call and throttles datastore request if necessary.
 %% @end
 %%--------------------------------------------------------------------
 -spec process(module(), atom(), list()) -> term().
@@ -137,7 +137,6 @@ retry_route(Function, Args, Sleep, Attempts) ->
 -spec select_node(list()) -> {node(), list(), local_read()}.
 select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
-% TODO - co zrobic z memory copies po padzie node'a jesli padnie siec?
 select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
     {[Node | KeyConnectedNodesTail] = KeyConnectedNodes, OtherRequestedNodes, BrokenNodes, BrokenMaster} =
         datastore_key:responsible_nodes(Key, MemCopies),

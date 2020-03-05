@@ -39,7 +39,6 @@
 wrap(Ctx0, Key, Function, Args0, Fun) ->
     Ctx = Ctx0#{routing_key => Key},
     Args = [Ctx, Key | Args0],
-    % TODO - dlaczego to wyzwala rooting?
     Result = case run_prehooks(Ctx, Function, Args) of
         ok -> Fun(Function, Args);
         {error, Reason} -> {error, Reason}

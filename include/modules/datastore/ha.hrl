@@ -33,10 +33,10 @@
 
 % Request slave to store data until it is flushed to couchbase
 -define(BACKUP_REQUEST(KEYS, CACHE_REQUESTS), ?MASTER_MSG({backup_request, KEYS, CACHE_REQUESTS})).
-% Equal BACKUP_REQUEST with additional request to link slave to master (to use gen_server casts instead of calls)
+% Equal to BACKUP_REQUEST with additional request to link slave to master (to use gen_server casts instead of calls)
 -define(BACKUP_REQUEST_AND_LINK(KEYS, CACHE_REQUESTS, PID),
     ?MASTER_MSG({{backup_request_and_link, KEYS, CACHE_REQUESTS, PID}})).
-% Inform slave that data is saved to couchbase and it can forget backup data
+% Inform slave that data is flushed and it can forget backup data
 -define(KEYS_INACTIVATED(KEYS), ?MASTER_MSG({keys_inactivated, KEYS})).
 
 %%%=============================================================================================================
@@ -63,11 +63,11 @@
 -define(MASTER_UP, ?MANAGEMENT_MSG(master_up)).
 
 %%%=============================================================================================================
-%%% Messages connected with emergency calls (handling request by slave because master is/was down)
+%%% Messages connected with emergency calls (calls handled by slave because master is/was down)
 %%% Handling emergency message is started on slave's datastore_cache_writer when any emergency request appears.
-%%% After handling EMERGENCY_REQUEST_HANDLED message is sent by slave internally from datastore_cache_writer to
+%%% After message is handled, EMERGENCY_REQUEST_HANDLED message is sent by slave internally from datastore_cache_writer
 %%% datastore_writer and than further to master that sends it internally from datastore_writer to its
-%%% datastore_cache_writer. After keys connected with emergency request inactivation EMERGENCY_KEYS_INACTIVATED
+%%% to datastore_cache_writer. After keys connected with emergency request inactivation EMERGENCY_KEYS_INACTIVATED
 %%% message is sent similarly to EMERGENCY_REQUEST_HANDLED.
 %%%=============================================================================================================
 

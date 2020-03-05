@@ -50,7 +50,7 @@
 -type mask() :: datastore_links_mask:mask().
 -type batch() :: datastore_doc_batch:batch().
 -type cached_keys() :: datastore_doc_batch:cached_keys().
--type keys_in_flush() :: #{key() => {reference() | slave_flush, ctx() | undefined}}. % Undefined values for keys
+-type keys_in_flush() :: #{key() => {reference() | slave_flush, ctx() | undefined}}. % Undefined ctx value for keys
                                                                                      % in flush on ha slave node
 -type request() :: term().
 -type state() :: #state{}.
@@ -117,7 +117,6 @@ init([MasterPid, Key, BackupNodes, KeysInSlaveFlush]) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     save_master_pid(MasterPid),
 
-    % TODO - moze przeniesc generowanie kluczy do ha_master
     KiF = lists:map(fun(KeyInFlush) -> {KeyInFlush, {slave_flush, undefined}} end, KeysInSlaveFlush),
     {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
         keys_in_flush = maps:from_list(KiF),
@@ -149,7 +148,7 @@ handle_call({handle, Ref, Requests, Mode}, From, State = #state{process_key = Pr
             handle_requests(Emergency, emergency_call, State2);
         {proxy_call, Regular, Emergency, ProxyNode} ->
             gen_server:reply(From, regular),
-            % TODO - a co jesli poleci blad - obsluzyc
+            % TODO - VFS-6171 - reply to caller
             case rpc:call(ProxyNode, datastore_writer, custom_call,
                 [ProcessKey, ?PROXY_REQUESTS(lists:reverse(Emergency))]) of
                 {ok, _} -> ok;
@@ -182,11 +181,11 @@ handle_call(terminate, _From, State) ->
 handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, regular, State), % TODO - przeanalizowac i obsluzyc tez backupowe requesty (te proxy raczej wywalic bo mozna sie zakleszczyc jak drugi node bedzie padal)
+        disc_writer_pid = Pid} = handle_requests(Requests, regular, State), % TODO - VFS-6169 Handle emergance and proxy requests
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
-% Call used during the test (do not use - test only method)
+% Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, #state{disc_writer_pid = Pid} = State) ->
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     {stop, normal, ok, State};

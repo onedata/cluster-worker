@@ -93,6 +93,7 @@ create_cache_requests(#batch{cache = Cache, cache_mod_keys = CMK,
 %%--------------------------------------------------------------------
 %% @doc
 %% Applies requests on a datastore cache and updates batch (marks changes as applied).
+%% Returns also list of successfully applied requests.
 %% @end
 %%--------------------------------------------------------------------
 -spec apply_cache_requests(batch(), Requests :: [datastore_cache:cache_save_request()]) ->

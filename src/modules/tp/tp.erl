@@ -186,7 +186,6 @@ send(Module, Args, Key, Info) ->
 %%--------------------------------------------------------------------
 -spec get_processes_limit() -> Limit :: non_neg_integer().
 get_processes_limit() ->
-    % TODO - po co to sprawdzac za kazdym razem?
     {ok, Limit} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         ?TP_PROCESSES_LIMIT),
     Limit.

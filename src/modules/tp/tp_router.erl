@@ -306,7 +306,7 @@ send_to_each(Msg) ->
     lists:foreach(fun(Name) ->
         List = ets:tab2list(Name),
         lists:foreach(fun
-            ({_, Pid, _}) -> catch gen_server:call(Pid, Msg); % Catch in case of precess termination
+            ({_, Pid, _}) -> catch gen_server:call(Pid, Msg); % Catch in case of process termination
             (_) -> ok
         end, List)
     end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).

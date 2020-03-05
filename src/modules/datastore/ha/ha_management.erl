@@ -7,6 +7,10 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides functions used to configure ha.
+%%% NOTE: Functions in this module works node-wide as failures concern whole nodes.
+%%% Execute config functions on all nodes during reconfiguration.
+%%% TODO - VFS-6166 - Verify HA Cast
+%%% TODO - VFS-6167 - Datastore HA supports. nodes adding and deleting
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_management).
@@ -21,7 +25,7 @@
 -export([master_down/0, master_up/0, change_config/2]).
 
 -type propagation_method() :: call | cast.
--type slave_mode() :: backup | processing. % Does slave processes only backup data or process requests when master is down
+-type slave_mode() :: backup | processing. % Does slave process only backup data or process also requests when master is down
 
 -export_type([propagation_method/0, slave_mode/0]).
 
@@ -40,8 +44,6 @@
 %%--------------------------------------------------------------------
 -spec get_propagation_method() -> propagation_method().
 get_propagation_method() ->
-    % TODO - kazdy proces ustawia numer sekwencji ha w ets taki ets jak mapowania kluczy na pidy to mapowanie kluczy na seq)
-    % slave tez ustawia numer sekwencji mastera - mozemy w kazdej chwili przeczytac
     application:get_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, cast).
 
 %%--------------------------------------------------------------------
@@ -61,7 +63,7 @@ get_backup_nodes() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns working mode for all slaves.
+%% Returns working mode for all slaves on this node.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_slave_mode() -> slave_mode().
@@ -74,7 +76,7 @@ get_slave_mode() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Sets information about master failure and sends it to all tp processes.
+%% Sets information about master failure and sends it to all tp processes on this node.
 %% @end
 %%--------------------------------------------------------------------
 -spec master_down() -> ok.
@@ -85,7 +87,7 @@ master_down() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Sets information that master is up and sends it to all tp processes.
+%% Sets information that master is up and sends it to all tp processes on this node.
 %% @end
 %%--------------------------------------------------------------------
 -spec master_up() -> ok.
@@ -96,7 +98,7 @@ master_up() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Sets ha configs and sends information to all tp processes.
+%% Sets ha configs and sends information to all tp processes on this node.
 %% @end
 %%--------------------------------------------------------------------
 -spec change_config(non_neg_integer(), propagation_method()) -> ok.
@@ -105,18 +107,6 @@ change_config(NodesNumber, PropagationMethod) ->
     consistent_hashing:set_key_connected_nodes(NodesNumber),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, PropagationMethod),
     tp_router:send_to_each(?CONFIG_CHANGED).
-
-%%add_node() ->
-%%    % Przesylamy do procesow zajmujacych sie przenoszonymi kluczami ze staja sie slave'ami dla tych kluczy co sie przenosza
-%%    % (wszelkie calle maja traktowac jak proxy - pytanie przez jaki czas bo moze nas to zabolec wydajnosciowo)
-%%    % nastepnie dopiero dodajemy nowy node do ukladanki
-%%    ok.
-%%
-%%delete_node() ->
-%%    % zaznaczamy wszystkim wygaszzanym procesom ze maja proxowac na node slave'a jedoczenie zanczajac swoja aktywnosc (wchodzac w specjalny stan)
-%%    % procesy czekaja tylko na flushe, a slave wie ze flushy nie moze robic dopuki glowny proces nie skonczy
-%%    % UWAGA - ha jest obnizone w czasie dodawania/usuwania node'a o jeden poziom (tak jakby byl ustawiony jeden backup node mniej)
-%%    ok.
 
 %%%===================================================================
 %%% Internal functions

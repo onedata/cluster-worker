@@ -1,18 +1,25 @@
 %%%-------------------------------------------------------------------
-%%% @author michal
-%%% @copyright (C) 2020, <COMPANY>
-%%% @doc
-%%%
+%%% @author Michal Wrzeszcz
+%%% @copyright (C) 2020 ACK CYFRONET AGH
+%%% This software is released under the MIT license
+%%% cited in 'LICENSE.txt'.
 %%% @end
-%%% Created : 12. Feb 2020 00:28
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% This file contains datastore base of datastore stress performance tests.
+%%% @end
 %%%-------------------------------------------------------------------
 -module(datastore_performance_tests_base).
--author("michal").
+-author("Michal Wrzeszcz").
 
 -include("datastore_test_utils.hrl").
 
 %% API
 -export([stress_performance_test_base/1]).
+
+%%%===================================================================
+%%% API
+%%%===================================================================
 
 stress_performance_test_base(Config) ->
     ct:timetrap({hours, 3}),
@@ -40,6 +47,10 @@ stress_performance_test_base(Config) ->
     ct:print("Test: repeats ~p, procs ~p, many keys ~p, HA ~p, HA mode ~p, result ~p",
         [Repeats, ProcNum, ManyKeys, HA, HaMode, lists:sum(Ans) / Repeats / ProcNum]),
     ok.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 run_stress_procs(_, _, _, _, 0) ->
     [];

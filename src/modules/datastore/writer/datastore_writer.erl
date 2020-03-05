@@ -278,7 +278,7 @@ wait(Ref, Pid) ->
     receive
         {Ref, Response} -> Response
     after
-        % TODO - a co jesli poszlo na proxy node i tam proces padl?
+        % TODO VFS-6171 - handle proxy requests
         Timeout ->
             case erlang:is_process_alive(Pid) of
                 true ->
@@ -306,10 +306,8 @@ init([Key]) ->
     {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_master:check_slave(Key, BackupNodes),
 
     CacheWriterState = case ActiveRequests of
-        false ->
-            idle;
-        true ->
-            {active, backup}
+        false -> idle;
+        true -> {active, backup}
     end,
 
     {ok, Pid} = datastore_cache_writer:start_link(self(), Key, BackupNodes, KeysInSlaveFlush),
@@ -350,7 +348,7 @@ handle_call(?CONFIG_CHANGED = Msg, _From, State = #state{cache_writer_pid = Pid}
 handle_call(?MANAGEMENT_MSG(_) = Msg, _From, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
     Data2 = ha_slave:handle_config_msg(Msg, Data, Pid),
     {reply, ok, State#state{ha_slave_data = Data2}};
-% Call used during the test (do not use - test only method)
+% Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
     gen_server:call(Pid, force_terminate, infinity),
     {stop, normal, ok,  State};
@@ -489,7 +487,6 @@ handle_requests(State = #state{
 
 -spec schedule_terminate(state()) -> state().
 schedule_terminate(State) ->
-    % Moze pamietac zeby nie pobierac za kazdym razem?
     Timeout = datastore_throttling:get_idle_timeout(),
     schedule_terminate(State, Timeout).
 
