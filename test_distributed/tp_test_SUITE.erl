@@ -301,10 +301,8 @@ end_per_testcase(_Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
         lists:foreach(fun
-            ({_Key, Pid, _}) ->
-                stop_tp_server(Worker, Pid);
-            (_) ->
-                ok
+            ({_Key, Pid, _}) -> stop_tp_server(Worker, Pid);
+            (_) -> ok
         end, rpc:call(Worker, ets, tab2list, [?TP_ROUTING_TABLE])),
         rpc:call(Worker, ets, delete_all_objects, [?TP_ROUTING_TABLE])
     end, Workers),

@@ -151,8 +151,14 @@ handle_call({handle, Ref, Requests, Mode}, From, State = #state{process_key = Pr
             % TODO - VFS-6171 - reply to caller
             case rpc:call(ProxyNode, datastore_writer, custom_call,
                 [ProcessKey, ?PROXY_REQUESTS(lists:reverse(Emergency))]) of
-                {ok, _} -> ok;
-                Error -> ?error("Proxy call error ~p for requests ~p", [Error, lists:reverse(Emergency)])
+                {ok, ProxyPid} ->
+                    send_proxy_info(Emergency, {request_delegated, ProxyPid});
+                {badrpc, Reason} ->
+                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, lists:reverse(Emergency)]),
+                    send_proxy_info(Emergency, {error, Reason});
+                Error ->
+                    ?error("Proxy call error ~p for requests ~p", [Error, lists:reverse(Emergency)]),
+                    send_proxy_info(Emergency, Error)
             end,
             handle_requests(Regular, regular, State#state{requests_ref = Ref})
     end,
@@ -784,6 +790,19 @@ send_response({Pid, Ref, Responses}, Batch) ->
             end
     end, lists:reverse(Responses)),
     Pid ! {Ref, Responses2}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends information about proxy delegation.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_proxy_info(list(), term()) -> ok.
+send_proxy_info([], _Info) ->
+    ok;
+send_proxy_info([{Pid, Ref, _Request} | Requests], Info) ->
+    Pid ! {Ref, Info},
+    send_proxy_info(Requests, Info).
 
 %%--------------------------------------------------------------------
 %% @private

@@ -274,17 +274,16 @@ call_if_alive(Key, Request) ->
 -spec wait(reference(), pid()) -> term() | {error, timeout}.
 wait(Ref, Pid) ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_handling_timeout, timer:minutes(10)),
+        datastore_writer_request_handling_timeout, timer:seconds(30)),
     receive
+        {Ref, {request_delegated, ProxyPid}} -> wait(Ref, ProxyPid);
         {Ref, Response} -> Response
     after
-        % TODO VFS-6171 - handle proxy requests
         Timeout ->
-            case erlang:is_process_alive(Pid) of
-                true ->
-                    wait(Ref, Pid);
-                _ ->
-                    {error, timeout}
+            case rpc:call(node(Pid), erlang, is_process_alive, [Pid]) of
+                true -> wait(Ref, Pid);
+                {badrpc, Reason} -> {error, Reason};
+                _ -> {error, timeout}
             end
     end.
 
