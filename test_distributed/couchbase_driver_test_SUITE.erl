@@ -330,6 +330,7 @@ cberl_test_base(Config) ->
     end, [], maps:to_list(FinalAns)).
 
 save_should_return_doc(Config) ->
+    Timestamp = datastore_config:get_timestamp(),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, #document{}},
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC])
@@ -338,6 +339,8 @@ save_should_return_doc(Config) ->
     ?assertEqual(?VALUE, Doc#document.value),
     ?assertEqual(?SCOPE, Doc#document.scope),
     ?assertEqual(1, Doc#document.seq),
+    ?assert(is_integer(Doc#document.timestamp)),
+    ?assert(Doc#document.timestamp >= Timestamp),
     ?assertEqual(false, Doc#document.deleted),
     ?assertEqual(1, Doc#document.version).
 
@@ -354,6 +357,7 @@ save_should_not_increment_seq_counter(Config) ->
         save, [?CTX#{no_seq => true}, ?KEY, ?DOC]
     )),
     ?assertEqual(null, Doc#document.seq),
+    ?assertEqual(null, Doc#document.timestamp),
     ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver,
         get_counter, [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
