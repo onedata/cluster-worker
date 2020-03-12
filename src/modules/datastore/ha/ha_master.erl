@@ -6,7 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions used by datastore_writer and datastore_cache_writer when ha is enabled and process
+%%% This module provides functions used by datastore_writer and
+%%% datastore_cache_writer when ha is enabled and process
 %%% works as master (processing requests).
 %%% @end
 %%%-------------------------------------------------------------------
@@ -97,7 +98,7 @@ broadcast_request_handled(_ProcessKey, [], _CacheRequests, Data) ->
     Data;
 broadcast_request_handled(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes = []} = Data) ->
     Data;
-broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_method = call,
+broadcast_request_handled(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_CALL_PROPAGATION,
     backup_nodes = [Node | _]} = Data) ->
     case rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?BACKUP_REQUEST(Keys, CacheRequests)]) of
         {ok, Pid} ->

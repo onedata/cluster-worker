@@ -141,7 +141,7 @@ select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]
     {[Node | KeyConnectedNodesTail] = KeyConnectedNodes, OtherRequestedNodes, BrokenNodes, BrokenMaster} =
         datastore_key:responsible_nodes(Key, MemCopies),
     TryLocalRead = lists:member(node(), KeyConnectedNodes) orelse lists:member(node(), OtherRequestedNodes),
-    {Node, [Ctx#{key_connecyed_nodes => KeyConnectedNodesTail, memory_copies_nodes => OtherRequestedNodes,
+    {Node, [Ctx#{key_connected_nodes => KeyConnectedNodesTail, memory_copies_nodes => OtherRequestedNodes,
         broken_nodes => BrokenNodes, broken_master => BrokenMaster} | ArgsTail], TryLocalRead};
 select_node([Ctx | Args]) ->
     select_node([Ctx#{memory_copies => 1} | Args]).

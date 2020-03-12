@@ -6,9 +6,12 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions used by datastore_writer and datastore_cache_writer when ha is enabled and process
-%%% works as slaves. Handles two types of activities: emergency calls (handling requests by slave when master is down)
-%%% and backup calls (calls used to cache information from master used in case of failure).
+%%% This module provides functions used by datastore_writer and
+%%% datastore_cache_writer when ha is enabled and process
+%%% works as slaves. Handles two types of activities:
+%%% emergency calls (handling requests by slave when master is down)
+%%% and backup calls (calls used to cache information from master
+%%% used in case of failure).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_slave).
@@ -32,7 +35,7 @@
 -record(slave_data, {
     % Fields used for gathering backup data
     keys_to_protect = #{} :: datastore_doc_batch:cached_keys(),
-    is_linked = false :: {true, pid()} | false, % TODO - dodac wysylanie unlinka w terminate
+    is_linked = false :: {true, pid()} | false, % TODO VFS-6197 - unlink HA slave during forced termination
 
     % Fields used to indicate working mode and help with transition between modes
     slave_mode :: ha_management:slave_mode(),
@@ -85,12 +88,7 @@ new_emergency_calls_data() ->
     ha_slave_emergency_calls_data()) -> ha_slave_emergency_calls_data().
 report_emergency_request_handled(Pid, CachedKeys, CacheRequests, #emergency_calls_data{keys = DataKeys} = Data) ->
     DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
-    CacheRequests2 = lists:filtermap(fun({_, Key, _} = Request) ->
-        case maps:is_key(Key, CachedKeys) of
-            true -> {true, {Key, Request}};
-            false -> false
-        end
-    end, CacheRequests),
+    CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, CacheRequests),
     gen_server:cast(Pid, ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(maps:from_list(CacheRequests2)))),
     Data#emergency_calls_data{keys = DataKeys2}.
 
@@ -184,7 +182,7 @@ terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = D
 %% Analyses requests and provides information about expected further actions.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_requests(datastore_writer:requests_internal(), slave_mode) ->
+-spec analyse_requests(datastore_writer:requests_internal(), ha_management:slave_mode()) ->
     {regular, RegularReversed :: datastore_writer:requests_internal()} |
     {emergency_call, RegularReversed :: datastore_writer:requests_internal(),
         EmergencyReversed :: datastore_writer:requests_internal()} |
@@ -196,7 +194,7 @@ analyse_requests(Requests, Mode) ->
     case {ProxyNode, Mode} of
         {undefined, _} ->
             {regular, RegularReversed};
-        {_, backup} ->
+        {_, ?BACKUP_SLAVE_MODE} ->
             {proxy_call, RegularReversed, EmergencyReversed, ProxyNode};
         _ ->
             {emergency_call, RegularReversed, EmergencyReversed}
@@ -274,9 +272,9 @@ handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(Cr
 -spec handle_config_msg(master_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
 handle_config_msg(?MASTER_DOWN, #slave_data{keys_to_protect = Keys} = Data, Pid) ->
     gen_server:call(Pid, ?MASTER_DOWN(Keys), infinity), % VFS-6169 - mark flushed keys in case of fast master restart
-    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = processing};
+    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = ?PROCESSING_SLAVE_MODE};
 handle_config_msg(?MASTER_UP, Data, _Pid) ->
-    Data#slave_data{slave_mode = backup}.
+    Data#slave_data{slave_mode = ?BACKUP_SLAVE_MODE}.
 
 %%%===================================================================
 %%% Internal functions

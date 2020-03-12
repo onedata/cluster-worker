@@ -7,10 +7,10 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides functions used to configure ha.
-%%% NOTE: Functions in this module works node-wide as failures concern whole nodes.
-%%% Execute config functions on all nodes during reconfiguration.
+%%% NOTE: Functions in this module work node-wide as failures concern whole nodes.
+%%% NOTE: Config functions should be executed on all nodes during cluster reconfiguration.
 %%% TODO - VFS-6166 - Verify HA Cast
-%%% TODO - VFS-6167 - Datastore HA supports. nodes adding and deleting
+%%% TODO - VFS-6167 - Datastore HA supports nodes adding and deleting
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_management).
@@ -24,8 +24,9 @@
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([master_down/0, master_up/0, change_config/2]).
 
--type propagation_method() :: call | cast.
--type slave_mode() :: backup | processing. % Does slave process only backup data or process also requests when master is down
+-type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
+% Mode determines whether slave process only backups data or process also handles requests when master is down
+-type slave_mode() :: ?BACKUP_SLAVE_MODE | ?PROCESSING_SLAVE_MODE.
 
 -export_type([propagation_method/0, slave_mode/0]).
 
@@ -44,7 +45,7 @@
 %%--------------------------------------------------------------------
 -spec get_propagation_method() -> propagation_method().
 get_propagation_method() ->
-    application:get_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, cast).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, ?HA_CAST_PROPAGATION).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,7 +69,7 @@ get_backup_nodes() ->
 %%--------------------------------------------------------------------
 -spec get_slave_mode() -> slave_mode().
 get_slave_mode() ->
-    application:get_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, backup).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?BACKUP_SLAVE_MODE).
 
 %%%===================================================================
 %%% API to configure processes
@@ -82,7 +83,7 @@ get_slave_mode() ->
 -spec master_down() -> ok.
 master_down() ->
     ?info("Set and broadcast master_down"),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, processing),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?PROCESSING_SLAVE_MODE),
     tp_router:send_to_each(?MASTER_DOWN).
 
 %%--------------------------------------------------------------------
@@ -93,7 +94,7 @@ master_down() ->
 -spec master_up() -> ok.
 master_up() ->
     ?info("Set and broadcast master_up"),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, backup),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?BACKUP_SLAVE_MODE),
     tp_router:send_to_each(?MASTER_UP).
 
 %%--------------------------------------------------------------------

@@ -6,7 +6,18 @@
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 %%% @doc
-%%% Definition of messages used by ha master and slave.
+%%% Definition of messages and macros used by HA master and slave.
+%%% HA master and slave are TP processes. Single TP process can
+%%% act as a master for some keys and as a slave for other set of keys.
+%%% TP process is composed of datastore_writer, datastore_cache_writer
+%%% and datastore_disc_writer. First two elements are important for HA.
+%%% As datastore_writer typically caches requests and manages TP lifecycle, it is
+%%% mainly used for HA lifecycle management and storing backup data (data
+%%% used by slave to finish documents' flushing to couchbase when master is down).
+%%% Datastore_cache_writer is typically responsible for handling requests and saving
+%%% changed documents to memory. Thus, it is mainly responsible for broadcasting
+%%% backup information (role of HA master) and handling of emergency requests
+%%% (handling of requests by HA slave when master is down).
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 
@@ -23,7 +34,7 @@
                                                                   % datastore_cache_writer and datastore_writer
 -define(MASTER_INTERNAL_MSG(BODY), {ha_master_internal_msg, BODY}). % Message sent between master's
                                                                     % datastore_writer and datastore_cache_writer
--define(MANAGEMENT_MSG(BODY), {ha_config_msg, BODY}). % Message sent to datastore_writer to configure it
+-define(MANAGEMENT_MSG(BODY), {ha_management_msg, BODY}). % Message sent to datastore_writer to configure it
 
 %%%=============================================================================================================
 %%% Messages used to propagate information about documents that should be protected by slave
@@ -66,8 +77,8 @@
 %%% Messages connected with emergency calls (calls handled by slave because master is/was down)
 %%% Handling emergency message is started on slave's datastore_cache_writer when any emergency request appears.
 %%% After message is handled, EMERGENCY_REQUEST_HANDLED message is sent by slave internally from datastore_cache_writer
-%%% datastore_writer and than further to master that sends it internally from datastore_writer to its
-%%% to datastore_cache_writer. After keys connected with emergency request inactivation EMERGENCY_KEYS_INACTIVATED
+%%% to datastore_writer and than further to master that sends it internally from datastore_writer to its
+%%% datastore_cache_writer. After keys connected with emergency request inactivation EMERGENCY_KEYS_INACTIVATED
 %%% message is sent similarly to EMERGENCY_REQUEST_HANDLED.
 %%%=============================================================================================================
 
@@ -86,5 +97,16 @@
 -define(CONFIG_CHANGED, ?MANAGEMENT_MSG(config_changed)).
 % Request sent to datastore_cache_writer by datastore_writer to request reconfiguration
 -define(CONFIGURE_BACKUP, ?MASTER_INTERNAL_MSG(configure_backup)).
+
+%%%=============================================================================================================
+%%% Propagation method and slave mode names - see ha_management.erl
+%%%=============================================================================================================
+
+% Propagation methods
+-define(HA_CALL_PROPAGATION, call).
+-define(HA_CAST_PROPAGATION, cast).
+% Slave modes
+-define(BACKUP_SLAVE_MODE, backup).
+-define(PROCESSING_SLAVE_MODE, processing).
 
 -endif.
