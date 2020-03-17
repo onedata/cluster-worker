@@ -108,9 +108,10 @@ decode({Term} = EJson) when is_list(Term) ->
                         Version, Model, Record
                     ),
 
-                    Timestamp = case lists:keyfind(<<"_timestamp">>, 1, Term) of
-                        false -> null;
-                        {_, Value} -> Value
+                    Timestamp = case {lists:keyfind(<<"_timestamp">>, 1, Term), Seq} of
+                        {false, null} -> null; %  Old local document
+                        {false, _} -> 0; % Old synchronized document
+                        {{_, Value}, _} -> Value % Document has timestamp
                     end,
 
                     #document{

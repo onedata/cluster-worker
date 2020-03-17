@@ -69,14 +69,14 @@ get_throttled_models() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns timestamp to be used to tag document's sequence.
+%% Returns timestamp to be used to tag document.
 %% @end
 %%--------------------------------------------------------------------
--spec get_timestamp() -> non_neg_integer().
+-spec get_timestamp() -> datastore_doc:timestamp().
 get_timestamp() ->
     case erlang:function_exported(?PLUGIN, get_timestamp, 0) of
         true -> erlang:apply(?PLUGIN, get_timestamp, []);
-        false -> time_utils:system_time_millis()
+        false -> time_utils:system_time_seconds()
     end.
 
 %%%===================================================================
