@@ -63,6 +63,7 @@ encode(#document{value = Value, version = Version} = Doc) ->
                 {<<"_mutators">>, Doc#document.mutators},
                 {<<"_revs">>, Doc#document.revs},
                 {<<"_seq">>, Doc#document.seq},
+                {<<"_timestamp">>, Doc#document.timestamp},
                 {<<"_deleted">>, Doc#document.deleted},
                 {<<"_version">>, Version} |
                 Props
@@ -106,6 +107,13 @@ decode({Term} = EJson) when is_list(Term) ->
                     {Version2, Record2} = datastore_versions:upgrade_record(
                         Version, Model, Record
                     ),
+
+                    Timestamp = case {lists:keyfind(<<"_timestamp">>, 1, Term), Seq} of
+                        {false, null} -> null; %  Old local document
+                        {false, _} -> 0; % Old synchronized document
+                        {{_, Value}, _} -> Value % Document has timestamp
+                    end,
+
                     #document{
                         key = Key,
                         value = Record2,
@@ -113,6 +121,7 @@ decode({Term} = EJson) when is_list(Term) ->
                         mutators = Mutators,
                         revs = Revs,
                         seq = Seq,
+                        timestamp = Timestamp,
                         deleted = Deleted,
                         version = Version2
                     };

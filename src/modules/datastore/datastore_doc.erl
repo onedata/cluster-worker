@@ -31,6 +31,7 @@
 -type value() :: term().
 -type rev() :: datastore_rev:rev().
 -type seq() :: couchbase_changes:seq().
+-type timestamp() :: couchbase_changes:timestamp().
 -type scope() :: binary().
 -type mutator() :: binary().
 -type version() :: datastore_versions:record_version().
@@ -43,7 +44,7 @@
 -type batch() :: datastore_doc_batch:batch().
 
 -export_type([doc/1]).
--export_type([key/0, value/0, rev/0, seq/0, scope/0, mutator/0, version/0, batch/0]).
+-export_type([key/0, value/0, rev/0, seq/0, timestamp/0, scope/0, mutator/0, version/0, batch/0]).
 -export_type([diff/1, pred/1]).
 
 %%%===================================================================
