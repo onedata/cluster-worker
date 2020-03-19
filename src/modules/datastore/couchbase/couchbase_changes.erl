@@ -22,6 +22,7 @@
 -type callback() :: fun(({ok, [datastore:doc()] | end_of_stream}
                     | {error, since(), Reason :: term()}) -> any()).
 -type seq() :: non_neg_integer() | null.
+-type timestamp() :: non_neg_integer() | null.
 -type since() :: seq().
 -type until() :: seq() | infinity.
 -type change() :: json_utils:json_term().
@@ -29,7 +30,7 @@
                   {until, non_neg_integer() | infinity} |
                   {except_mutator, datastore_doc:mutator()}.
 
--export_type([callback/0, seq/0, since/0, until/0, change/0, option/0]).
+-export_type([callback/0, seq/0, timestamp/0, since/0, until/0, change/0, option/0]).
 
 %%%===================================================================
 %%% API

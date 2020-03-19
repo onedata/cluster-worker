@@ -26,6 +26,7 @@
     mutators = [] :: [datastore_doc:mutator()],
     revs = [] :: [datastore_doc:rev()],
     seq = null :: datastore_doc:seq(),
+    timestamp = null :: datastore_doc:timestamp(),
     deleted = false :: boolean(),
     version = 1 :: datastore_doc:version()
 }).
