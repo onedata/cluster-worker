@@ -66,10 +66,10 @@
 % Request used when any process sends datastore requests to slave when master is already alive.
 % Sends such request from slave to master
 -define(PROXY_REQUESTS(REQUESTS), ?SLAVE_MSG({proxy_requests, REQUESTS})).
-% Informs slave's datastore_cache_writer that master node is down and should flush protected keys
--define(MASTER_DOWN(KEYS), ?SLAVE_INTERNAL_MSG({master_down, KEYS})).
 % Informs slave's datastore_writer that master node is down
 -define(MASTER_DOWN, ?MANAGEMENT_MSG(master_down)).
+% Informs slave's datastore_cache_writer that master node is down and should flush protected keys
+-define(MASTER_DOWN(KEYS), ?SLAVE_INTERNAL_MSG({master_down, KEYS})).
 % Informs slave's datastore_writer that master node is up
 -define(MASTER_UP, ?MANAGEMENT_MSG(master_up)).
 
@@ -93,10 +93,8 @@
 %%% Configuration messages
 %%%=============================================================================================================
 
-% Message sent to datastore_writer to inform it that configuration has changed
--define(CONFIG_CHANGED, ?MANAGEMENT_MSG(config_changed)).
-% Request sent to datastore_cache_writer by datastore_writer to request reconfiguration
--define(CONFIGURE_BACKUP, ?MASTER_INTERNAL_MSG(configure_backup)).
+% Message sent to inform it that configuration has changed
+-define(CONFIG_CHANGED, config_changed).
 
 %%%=============================================================================================================
 %%% Propagation method and slave mode names - see ha_management.erl
@@ -106,7 +104,7 @@
 -define(HA_CALL_PROPAGATION, call).
 -define(HA_CAST_PROPAGATION, cast).
 % Slave modes
--define(BACKUP_SLAVE_MODE, backup).
--define(PROCESSING_SLAVE_MODE, processing).
+-define(STANDBY_SLAVE_MODE, standby).
+-define(TAKEOVER_SLAVE_MODE, takeover).
 
 -endif.

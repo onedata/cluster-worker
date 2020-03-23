@@ -9,6 +9,7 @@
 %%% This module provides functions used by datastore_writer and
 %%% datastore_cache_writer when ha is enabled and process
 %%% works as master (processing requests).
+%%% For more information see ha.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_master).
@@ -22,7 +23,7 @@
 % API - broadcasting actions to slave
 -export([broadcast_request_handled/4, broadcast_inactivation/2]).
 % API - messages' handling by datastore_writer
--export([check_slave/2, handle_slave_message/2, handle_config_msg/2]).
+-export([check_slave/2, handle_slave_message/2, handle_config_msg/1]).
 % API - messages' handling by datastore_cache_writer
 -export([handle_internal_message/2, handle_slave_lifecycle_message/2]).
 
@@ -43,8 +44,7 @@
     ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys_list())).
 -type emergency_internal_request() :: ?MASTER_INTERNAL_MSG(
     ?EMERGENCY_REQUEST_HANDLED(ha_slave:emergency_requests_map()) | ?EMERGENCY_KEYS_INACTIVATED(ha_slave:emergency_keys_list())).
--type config_changed_message() :: ?CONFIG_CHANGED.
--type configure_backup_message() :: ?CONFIGURE_BACKUP.
+-type config_changed_internal_message() :: ?MASTER_INTERNAL_MSG(?CONFIG_CHANGED).
 -type unlink_message() :: ?REQUEST_UNLINK.
 
 -export_type([proxy_request/0, slave_emergency_request/0]).
@@ -53,13 +53,9 @@
 %%% API - Process init
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Initializes data structure used by functions in this module.
-%% @end
-%%--------------------------------------------------------------------
 -spec init_data([node()]) -> ha_master_data().
-init_data(BackupNodes) -> #data{backup_nodes = BackupNodes, propagation_method = ha_management:get_propagation_method()}.
+init_data(BackupNodes) ->
+    #data{backup_nodes = BackupNodes, propagation_method = ha_management:get_propagation_method()}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -159,14 +155,9 @@ handle_slave_message(?SLAVE_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)), P
     gen_server:cast(Pid, ?MASTER_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys))),
     ignore.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles configuration messages.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_config_msg(config_changed_message(), pid()) -> ok.
-handle_config_msg(?CONFIG_CHANGED, Pid) ->
-    gen_server:call(Pid, ?CONFIGURE_BACKUP, infinity).
+-spec handle_config_msg(pid()) -> ok.
+handle_config_msg(Pid) ->
+    gen_server:call(Pid, ?MASTER_INTERNAL_MSG(?CONFIG_CHANGED), infinity).
 
 %%%===================================================================
 %%% API - messages handling by datastore_cache_writer
@@ -178,10 +169,10 @@ handle_config_msg(?CONFIG_CHANGED, Pid) ->
 %% messages concerning emergency requests.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_internal_message(configure_backup_message() | emergency_internal_request(),
+-spec handle_internal_message(config_changed_internal_message() | emergency_internal_request(),
     ha_master_data() | datastore_cache_writer:keys_in_flush()) ->
     ha_master_data() | datastore_cache_writer:keys_in_flush().
-handle_internal_message(?CONFIGURE_BACKUP, Data) ->
+handle_internal_message(?MASTER_INTERNAL_MSG(?CONFIG_CHANGED), Data) ->
     BackupNodes = ha_management:get_backup_nodes(),
     PropagationMethod = ha_management:get_propagation_method(),
     Data#data{backup_nodes = BackupNodes, propagation_method = PropagationMethod};
@@ -193,11 +184,6 @@ handle_internal_message(?MASTER_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(CacheReq
 handle_internal_message(?MASTER_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)), KiF) ->
     maps:without(CrashedNodeKeys, KiF).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles messages connected with slave lifecycle.
-%% @end
-%%--------------------------------------------------------------------
 -spec handle_slave_lifecycle_message(unlink_message(), ha_master_data()) -> ha_master_data().
 handle_slave_lifecycle_message(?REQUEST_UNLINK, #data{slave_status = {_, Pid}} = Data) ->
     Data#data{slave_status = {not_linked, Pid}}.

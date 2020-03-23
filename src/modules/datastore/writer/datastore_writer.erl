@@ -66,6 +66,14 @@
 
 -export_type([requests_internal/0]).
 
+% Macros used to set tp call and waiting parameters
+-define(TP_CALL_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
+    datastore_writer_request_queueing_timeout, timer:minutes(1))).
+-define(TP_CALL_ATTEMPTS, application:get_env(?CLUSTER_WORKER_APP_NAME,
+    datastore_writer_request_queueing_attempts, 3)).
+-define(WAIT_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
+    datastore_writer_request_handling_timeout, timer:seconds(30))).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -247,11 +255,7 @@ call_async(Ctx, Key, Function, Args) ->
 %%--------------------------------------------------------------------
 -spec custom_call(tp_key(), term()) -> {term(), pid()} | {error, term()}.
 custom_call(Key, Request) ->
-    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_queueing_timeout, timer:minutes(1)),
-    Attempts = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_queueing_attempts, 3),
-    tp:call(?MODULE, [Key], Key, Request, Timeout, Attempts).
+    tp:call(?MODULE, [Key], Key, Request, ?TP_CALL_TIMEOUT, ?TP_CALL_ATTEMPTS).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -260,11 +264,7 @@ custom_call(Key, Request) ->
 %%--------------------------------------------------------------------
 -spec call_if_alive(tp_key(), term()) -> {term(), pid()} | {error, term()}.
 call_if_alive(Key, Request) ->
-    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_queueing_timeout, timer:minutes(1)),
-    Attempts = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_queueing_attempts, 3),
-    tp:call_if_alive(Key, Request, Timeout, Attempts).
+    tp:call_if_alive(Key, Request, ?TP_CALL_TIMEOUT, ?TP_CALL_ATTEMPTS).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -273,8 +273,7 @@ call_if_alive(Key, Request) ->
 %%--------------------------------------------------------------------
 -spec wait(reference(), pid()) -> term() | {error, timeout}.
 wait(Ref, Pid) ->
-    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        datastore_writer_request_handling_timeout, timer:seconds(30)),
+    Timeout = ?WAIT_TIMEOUT,
     receive
         {Ref, {request_delegated, ProxyPid}} -> wait(Ref, ProxyPid);
         {Ref, Response} -> Response
@@ -341,11 +340,11 @@ handle_call(?MASTER_MSG(_) = Msg, _From, State = #state{ha_slave_data = Data, re
     {reply, Ans, State2};
 handle_call(?SLAVE_MSG(_) = Msg, _From, State = #state{}) ->
     handle_ha_slave_message(Msg, State);
-handle_call(?CONFIG_CHANGED = Msg, _From, State = #state{cache_writer_pid = Pid}) ->
-    ha_master:handle_config_msg(Msg, Pid),
+handle_call(?MANAGEMENT_MSG(?CONFIG_CHANGED), _From, State = #state{cache_writer_pid = Pid}) ->
+    ha_master:handle_config_msg(Pid),
     {reply, ok, State};
 handle_call(?MANAGEMENT_MSG(_) = Msg, _From, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
-    Data2 = ha_slave:handle_config_msg(Msg, Data, Pid),
+    Data2 = ha_slave:handle_management_msg(Msg, Data, Pid),
     {reply, ok, State#state{ha_slave_data = Data2}};
 % Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->

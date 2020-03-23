@@ -26,7 +26,8 @@
     code_change/3]).
 
 -record(state, {
-    process_key :: datastore:key(),
+    process_key :: datastore:key(), % Key used by tp_router to unambiguously identify tp process
+                                    % NOTE: many datastore keys are mapped to single tp_router key
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
@@ -79,7 +80,7 @@
 %%--------------------------------------------------------------------
 -spec start_link(pid(), key(), [node()], [key()]) -> {ok, pid()} | {error, term()}.
 start_link(MasterPid, Key, BackupNodes, KeysInSlaveFlush) ->
-    gen_server:start_link(?MODULE, [MasterPid, Key, BackupNodes, KeysInSlaveFlush], []).
+    gen_server:start_link(?MODULE, {MasterPid, Key, BackupNodes, KeysInSlaveFlush}, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -110,10 +111,10 @@ get_master_pid() ->
 %% Initializes datastore cache writer process.
 %% @end
 %%--------------------------------------------------------------------
--spec init(Args :: term()) ->
+-spec init({MasterPid :: pid(), Key :: key(), BackupNodes :: [node()], KeysInSlaveFlush :: [key()]}) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([MasterPid, Key, BackupNodes, KeysInSlaveFlush]) ->
+init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     save_master_pid(MasterPid),
 
@@ -187,7 +188,7 @@ handle_call(terminate, _From, State) ->
 handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, regular, State), % TODO - VFS-6169 Handle emergance and proxy requests
+        disc_writer_pid = Pid} = handle_requests(Requests, regular, State), % TODO - VFS-6169 Handle emergency and proxy requests
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};

@@ -29,8 +29,8 @@
     saves_should_propagate_to_backup_node_call_ha_test/1,
     calls_should_change_node_cast_ha_test/1,
     calls_should_change_node_call_ha_test/1,
-    saves_should_use_repaired_node_cast_ha_test/1,
-    saves_should_use_repaired_node_call_ha_test/1,
+    saves_should_use_recovered_node_cast_ha_test/1,
+    saves_should_use_recovered_node_call_ha_test/1,
     saves_should_change_node_dynamic_cast_ha_test/1,
     saves_should_change_node_dynamic_call_ha_test/1,
 
@@ -62,8 +62,8 @@ all() ->
         saves_should_propagate_to_backup_node_call_ha_test,
         calls_should_change_node_cast_ha_test,
         calls_should_change_node_call_ha_test,
-        saves_should_use_repaired_node_cast_ha_test,
-        saves_should_use_repaired_node_call_ha_test,
+        saves_should_use_recovered_node_cast_ha_test,
+        saves_should_use_recovered_node_call_ha_test,
         saves_should_change_node_dynamic_cast_ha_test,
         saves_should_change_node_dynamic_call_ha_test,
 
@@ -155,11 +155,11 @@ calls_should_change_node_cast_ha_test(Config) ->
 calls_should_change_node_call_ha_test(Config) ->
     calls_should_change_node(Config, call).
 
-saves_should_use_repaired_node_cast_ha_test(Config) ->
-    saves_should_use_repaired_node(Config, cast).
+saves_should_use_recovered_node_cast_ha_test(Config) ->
+    saves_should_use_recovered_node(Config, cast).
 
-saves_should_use_repaired_node_call_ha_test(Config) ->
-    saves_should_use_repaired_node(Config, call).
+saves_should_use_recovered_node_call_ha_test(Config) ->
+    saves_should_use_recovered_node(Config, call).
 
 saves_should_change_node_dynamic_cast_ha_test(Config) ->
     saves_should_change_node_dynamic(Config, cast).
@@ -231,7 +231,7 @@ calls_should_change_node(Config, Method) ->
         set_ha(Config, change_config, [1, cast])
     end, ?TEST_MODELS).
 
-saves_should_use_repaired_node(Config, Method) ->
+saves_should_use_recovered_node(Config, Method) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
     set_ha(Config, change_config, [2, Method]),
 

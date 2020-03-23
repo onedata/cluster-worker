@@ -7,11 +7,12 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides functions used by datastore_writer and
-%%% datastore_cache_writer when ha is enabled and process
-%%% works as slaves. Handles two types of activities:
+%%% datastore_cache_writer when ha is enabled and tp process
+%%% works as slave. Handles two types of activities:
 %%% emergency calls (handling requests by slave when master is down)
 %%% and backup calls (calls used to cache information from master
 %%% used in case of failure).
+%%% For more information see ha.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_slave).
@@ -24,14 +25,14 @@
 -export([new_emergency_calls_data/0, report_emergency_request_handled/4, report_emergency_keys_inactivated/3]).
 -export([init_data/0, handle_master_message/3, handle_slave_internal_message/2]).
 -export([set_emergency_status/2, report_cache_writer_idle/1]).
--export([handle_config_msg/3]).
+-export([handle_management_msg/3]).
 
 % record used by datastore_cache_writer to store information about emergency requests handling (when master is down)
 -record(emergency_calls_data, {
     keys = sets:new() :: emergency_keys()
 }).
 
-% record user by datastore_writer to store information about data backups and handling of emergency calls
+% record used by datastore_writer to store information about data backups and handling of emergency calls
 -record(slave_data, {
     % Fields used for gathering backup data
     keys_to_protect = #{} :: datastore_doc_batch:cached_keys(),
@@ -50,9 +51,9 @@
 -type ha_slave_emergency_calls_data() :: #emergency_calls_data{}.
 -type ha_slave_data() :: #slave_data{}.
 -type emergency_keys() :: sets:set(datastore:key()).
--type emergency_keys_list() :: datastore:key().
+-type emergency_keys_list() :: [datastore:key()].
 -type emergency_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
--type slave_status() :: {ActiveRequests :: boolean(), CacheRequestsMap :: emergency_requests_map(),
+-type slave_status() :: {ActiveRequests :: boolean(), RequestsMap :: emergency_requests_map(),
     MemoryRequests :: [datastore_cache:cache_save_request()], RequestsToHandle :: datastore_writer:requests_internal()}.
 
 -export_type([ha_slave_emergency_calls_data/0, ha_slave_data/0, emergency_keys_list/0, emergency_requests_map/0]).
@@ -70,20 +71,11 @@
 %%% API - Reporting emergency calls
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Initializes data structure used by functions handling emergency calls.
-%% @end
-%%--------------------------------------------------------------------
 -spec new_emergency_calls_data() -> ha_slave_emergency_calls_data().
 new_emergency_calls_data() ->
     #emergency_calls_data{}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Reports to datastore_worker that emergency request was handled. 
-%% @end
-%%--------------------------------------------------------------------
+
 -spec report_emergency_request_handled(pid(), datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()],
     ha_slave_emergency_calls_data()) -> ha_slave_emergency_calls_data().
 report_emergency_request_handled(Pid, CachedKeys, CacheRequests, #emergency_calls_data{keys = DataKeys} = Data) ->
@@ -92,11 +84,7 @@ report_emergency_request_handled(Pid, CachedKeys, CacheRequests, #emergency_call
     gen_server:cast(Pid, ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(maps:from_list(CacheRequests2)))),
     Data#emergency_calls_data{keys = DataKeys2}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Reports to datastore_worker that keys connected with emergency request were inactivated.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec report_emergency_keys_inactivated(pid(), datastore_doc_batch:cached_keys(), ha_slave_emergency_calls_data()) ->
     ha_slave_emergency_calls_data().
 report_emergency_keys_inactivated(Pid, Inactivated, #emergency_calls_data{keys = DataKeys} = Data) ->
@@ -113,11 +101,6 @@ report_emergency_keys_inactivated(Pid, Inactivated, #emergency_calls_data{keys =
 %%% API - Helper functions to use ha_data and provide ha functionality
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Initializes data structure used by functions in this module.
-%% @end
-%%--------------------------------------------------------------------
 -spec init_data() -> ha_slave_data().
 init_data() ->
     #slave_data{slave_mode = ha_management:get_slave_mode()}.
@@ -143,11 +126,7 @@ set_emergency_status(Data, _HandlingType) ->
 report_cache_writer_idle(Data) ->
     Data#slave_data{emergency_requests_status = waiting}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns information about slave mode.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec get_mode(ha_slave_data()) -> ha_management:slave_mode().
 get_mode(#slave_data{slave_mode = Mode}) ->
     Mode.
@@ -189,26 +168,22 @@ terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = D
     {proxy_call, RegularReversed :: datastore_writer:requests_internal(),
         EmergencyReversed :: datastore_writer:requests_internal(), node()}.
 analyse_requests(Requests, Mode) ->
-    {RegularReversed, EmergencyReversed, ProxyNode} = clasify_requests(Requests),
+    {RegularReversed, EmergencyReversed, ProxyNode} = classify_requests(Requests),
 
     case {ProxyNode, Mode} of
         {undefined, _} ->
             {regular, RegularReversed};
-        {_, ?BACKUP_SLAVE_MODE} ->
+        {_, ?STANDBY_SLAVE_MODE} ->
             {proxy_call, RegularReversed, EmergencyReversed, ProxyNode};
         _ ->
             {emergency_call, RegularReversed, EmergencyReversed}
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles master messages for datastore_writer.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec handle_master_message(backup_message() | check_status_request(), ha_slave_data(),
     datastore_writer:requests_internal()) ->
     {ok | slave_status(), ha_slave_data(), datastore_writer:requests_internal()}.
-% Calls connecting with backup creation/deletion
+% Calls associated with backup creation/deletion
 handle_master_message(?BACKUP_REQUEST(Keys, CacheRequests), #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:save(CacheRequests),
     {ok, SlaveData#slave_data{keys_to_protect = maps:merge(DataKeys, Keys)}, WaitingRequests};
@@ -223,16 +198,12 @@ handle_master_message(?KEYS_INACTIVATED(Inactivated), #slave_data{keys_to_protec
 handle_master_message(?CHECK_SLAVE_STATUS(Pid), #slave_data{emergency_requests_status = Status,
     emergency_cache_requests = CacheRequests, emergency_inactivated_memory_cache_requests = MemoryRequests} = SlaveData,
     WaitingRequests) ->
-    {LocalReversed, RemoteReversed, _ProxyNode} = clasify_requests(WaitingRequests),
+    {LocalReversed, RemoteReversed, _ProxyNode} = classify_requests(WaitingRequests),
     {{Status =:= handling, CacheRequests, maps:values(MemoryRequests), lists:reverse(RemoteReversed)},
         SlaveData#slave_data{recovered_master_pid = Pid, emergency_inactivated_memory_cache_requests = #{}},
         lists:reverse(LocalReversed)}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles internal requests from datastore_cache_writer (by datastore_writer).
-%% @end
-%%--------------------------------------------------------------------
+
 -spec handle_slave_internal_message(slave_emergency_internal_request(), ha_slave_data()) -> ha_slave_data().
 handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests)), #slave_data{
     recovered_master_pid = Pid, emergency_cache_requests = CR}  = SlaveData) ->
@@ -264,26 +235,21 @@ handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(Cr
             SlaveData2
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles configuration messages (changes of master status).
-%% @end
-%%--------------------------------------------------------------------
--spec handle_config_msg(master_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
-handle_config_msg(?MASTER_DOWN, #slave_data{keys_to_protect = Keys} = Data, Pid) ->
+-spec handle_management_msg(master_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
+handle_management_msg(?MASTER_DOWN, #slave_data{keys_to_protect = Keys} = Data, Pid) ->
     gen_server:call(Pid, ?MASTER_DOWN(Keys), infinity), % VFS-6169 - mark flushed keys in case of fast master restart
-    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = ?PROCESSING_SLAVE_MODE};
-handle_config_msg(?MASTER_UP, Data, _Pid) ->
-    Data#slave_data{slave_mode = ?BACKUP_SLAVE_MODE}.
+    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = ?TAKEOVER_SLAVE_MODE};
+handle_management_msg(?MASTER_UP, Data, _Pid) ->
+    Data#slave_data{slave_mode = ?STANDBY_SLAVE_MODE}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
 %% @private
--spec clasify_requests(datastore_writer:requests_internal()) -> {LocalReversed :: datastore_writer:requests_internal(),
+-spec classify_requests(datastore_writer:requests_internal()) -> {LocalReversed :: datastore_writer:requests_internal(),
     RemoteReversed :: datastore_writer:requests_internal(), MasterNodeToBeUsed :: node() | undefined}.
-clasify_requests(Requests) ->
+classify_requests(Requests) ->
     % TODO - VFS-6168 - maybe do not execute when HA is off
     % TODO - VFS-6169 - what if local node is broken node according to Ctx
     MyNode = node(),

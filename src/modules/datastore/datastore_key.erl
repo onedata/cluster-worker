@@ -167,7 +167,7 @@ responsible_node(Key) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns nodes responsible for handling given datastore key. Returns three lists:
-%% alvie connected nodes, other alive nodes and broken nodes.
+%% alive connected nodes, other alive nodes and broken nodes.
 %% Sum of lists' length is equal to requested nodes' count.
 %% @end
 %%--------------------------------------------------------------------

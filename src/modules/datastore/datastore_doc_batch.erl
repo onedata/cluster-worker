@@ -77,7 +77,7 @@ init() ->
 %% Create requests to be applied on a datastore cache to save changes connected to batch.
 %% @end
 %%--------------------------------------------------------------------
--spec create_cache_requests(batch()) -> Requests :: [datastore_cache:cache_save_request()].
+-spec create_cache_requests(batch()) -> [datastore_cache:cache_save_request()].
 create_cache_requests(#batch{cache = Cache, cache_mod_keys = CMK,
     cache_added_keys = CAK}) ->
     KeysOrder = (CMK -- CAK) ++ CAK,
@@ -96,7 +96,7 @@ create_cache_requests(#batch{cache = Cache, cache_mod_keys = CMK,
 %% Returns also list of successfully applied requests.
 %% @end
 %%--------------------------------------------------------------------
--spec apply_cache_requests(batch(), Requests :: [datastore_cache:cache_save_request()]) ->
+-spec apply_cache_requests(batch(), [datastore_cache:cache_save_request()]) ->
     {batch(), CachedRequests :: [datastore_cache:cache_save_request()]}.
 apply_cache_requests(Batch, Requests) ->
     Responses = datastore_cache:save(Requests),

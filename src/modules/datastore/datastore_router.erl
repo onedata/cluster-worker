@@ -29,6 +29,10 @@
     ]).
 -define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(?MODULE, Param)).
 
+% Macros used when node is down and request is routed again
+-define(RETRY_COUNT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_count, 5)).
+-define(RETRY_SLEEP_BASE, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_sleep_base, 100)).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -65,10 +69,7 @@ init_report() ->
 -spec route(atom(), list()) -> term().
 route(Function, Args) ->
     case route_internal(Function, Args) of
-        {error, nodedown} ->
-            Attempts = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_count, 5),
-            Sleep = application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_sleep_base, 100),
-            retry_route(Function, Args, Sleep, Attempts);
+        {error, nodedown} -> retry_route(Function, Args, ?RETRY_SLEEP_BASE, ?RETRY_COUNT);
         Ans -> Ans
     end.
 

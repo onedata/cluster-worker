@@ -11,6 +11,7 @@
 %%% NOTE: Config functions should be executed on all nodes during cluster reconfiguration.
 %%% TODO - VFS-6166 - Verify HA Cast
 %%% TODO - VFS-6167 - Datastore HA supports nodes adding and deleting
+%%% For more information see ha.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_management).
@@ -26,7 +27,7 @@
 
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
 % Mode determines whether slave process only backups data or process also handles requests when master is down
--type slave_mode() :: ?BACKUP_SLAVE_MODE | ?PROCESSING_SLAVE_MODE.
+-type slave_mode() :: ?STANDBY_SLAVE_MODE | ?TAKEOVER_SLAVE_MODE.
 
 -export_type([propagation_method/0, slave_mode/0]).
 
@@ -38,20 +39,12 @@
 %%% API getters
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns propagation method used by datastore_cache_writer when working as ha master.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec get_propagation_method() -> propagation_method().
 get_propagation_method() ->
     application:get_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, ?HA_CAST_PROPAGATION).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of nodes to be used for backup.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec get_backup_nodes() -> [node()].
 get_backup_nodes() ->
     case consistent_hashing:get_key_connected_nodes() of
@@ -59,55 +52,40 @@ get_backup_nodes() ->
             [];
         BackupNodesNum ->
             Nodes = get_backup_nodes(node(), consistent_hashing:get_all_nodes()),
-            lists:sublist(Nodes, min(BackupNodesNum, length(Nodes)))
+            lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)))
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns working mode for all slaves on this node.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec get_slave_mode() -> slave_mode().
 get_slave_mode() ->
-    application:get_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?BACKUP_SLAVE_MODE).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?STANDBY_SLAVE_MODE).
 
 %%%===================================================================
-%%% API to configure processes
+%%% API to configure processes - sets information in environment variables
+%%% and sends it to all tp processes on this node (to inform them about
+%%% the change - processes usually read environment variables only during initialization).
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sets information about master failure and sends it to all tp processes on this node.
-%% @end
-%%--------------------------------------------------------------------
 -spec master_down() -> ok.
 master_down() ->
     ?info("Set and broadcast master_down"),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?PROCESSING_SLAVE_MODE),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?TAKEOVER_SLAVE_MODE),
     tp_router:send_to_each(?MASTER_DOWN).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sets information that master is up and sends it to all tp processes on this node.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec master_up() -> ok.
 master_up() ->
     ?info("Set and broadcast master_up"),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?BACKUP_SLAVE_MODE),
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?STANDBY_SLAVE_MODE),
     tp_router:send_to_each(?MASTER_UP).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sets ha configs and sends information to all tp processes on this node.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec change_config(non_neg_integer(), propagation_method()) -> ok.
 change_config(NodesNumber, PropagationMethod) ->
     ?info("Set and broadcast new ha config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
     consistent_hashing:set_key_connected_nodes(NodesNumber),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, PropagationMethod),
-    tp_router:send_to_each(?CONFIG_CHANGED).
+    tp_router:send_to_each(?MANAGEMENT_MSG(?CONFIG_CHANGED)).
 
 %%%===================================================================
 %%% Internal functions
