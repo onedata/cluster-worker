@@ -9,92 +9,92 @@
 %%% This module provides functions used by datastore_writer and
 %%% datastore_cache_writer when ha is enabled and tp process
 %%% works as slave. Handles two types of activities:
-%%% emergency calls (handling requests by slave when master is down)
-%%% and backup calls (calls used to cache information from master
+%%% working in failover mode (handling requests by slave when master is down)
+%%% and handling ackup calls (calls used to cache information from master
 %%% used in case of failure).
-%%% For more information see ha.hrl.
+%%% For more information see ha_datastore.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_slave).
 -author("Michał Wrzeszcz").
 
--include("modules/datastore/ha.hrl").
+-include("modules/datastore/ha_datastore.hrl").
+-include("modules/datastore/datastore_protocol.hrl").
 
 %% API
 -export([analyse_requests/2, get_mode/1, terminate_slave/1]).
--export([new_emergency_calls_data/0, report_emergency_request_handled/4, report_emergency_keys_inactivated/3]).
+-export([new_failover_requests_data/0, report_failover_request_handled/4, report_keys_flushed/3]).
 -export([init_data/0, handle_master_message/3, handle_slave_internal_message/2]).
--export([set_emergency_status/2, report_cache_writer_idle/1]).
+-export([set_failover_request_handling/2]).
 -export([handle_management_msg/3]).
 
-% record used by datastore_cache_writer to store information about emergency requests handling (when master is down)
--record(emergency_calls_data, {
-    keys = sets:new() :: emergency_keys()
+% record used by datastore_cache_writer to store information working in failover mode (when master is down)
+-record(failover_requests_data, {
+    keys = sets:new() :: keys_set()
 }).
 
-% record used by datastore_writer to store information about data backups and handling of emergency calls
+% record used by datastore_writer to store information about data backups and
+% working in failover mode (when master is down)
 -record(slave_data, {
     % Fields used for gathering backup data
     keys_to_protect = #{} :: datastore_doc_batch:cached_keys(),
-    is_linked = false :: {true, pid()} | false, % TODO VFS-6197 - unlink HA slave during forced termination
+    processes_link = false :: processes_link(), % TODO VFS-6197 - unlink HA slave during forced termination
 
     % Fields used to indicate working mode and help with transition between modes
-    slave_mode :: ha_management:slave_mode(),
+    slave_mode :: ha_datastore_utils:slave_mode(),
     recovered_master_pid :: pid() | undefined,
 
-    % Emergency calls related fields (used when master is down)
-    emergency_requests_status = waiting :: waiting | handling, % Status of processing emergency calls
-    emergency_cache_requests = #{} :: emergency_requests_map(),
-    emergency_inactivated_memory_cache_requests = #{} :: emergency_requests_map()
+    % Fields related with work in failover mode (master is down)
+    failover_request_handling = false :: boolean(), % true if failover request is currently being handled
+    failover_pending_cache_requests = #{} :: cache_requests_map(),
+    failover_finished_memory_cache_requests = #{} :: cache_requests_map()
 }).
 
--type ha_slave_emergency_calls_data() :: #emergency_calls_data{}.
+-type ha_failover_requests_data() :: #failover_requests_data{}.
 -type ha_slave_data() :: #slave_data{}.
--type emergency_keys() :: sets:set(datastore:key()).
--type emergency_keys_list() :: [datastore:key()].
--type emergency_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
--type slave_status() :: {ActiveRequests :: boolean(), RequestsMap :: emergency_requests_map(),
-    MemoryRequests :: [datastore_cache:cache_save_request()], RequestsToHandle :: datastore_writer:requests_internal()}.
+-type processes_link() :: {true, pid()} | false. % status of link between master and slave (see ha_datastore.hrl)
+-type keys_set() :: sets:set(datastore:key()).
+-type cache_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
+-type slave_status() :: #slave_status{}.
 
--export_type([ha_slave_emergency_calls_data/0, ha_slave_data/0, emergency_keys_list/0, emergency_requests_map/0]).
+-export_type([ha_failover_requests_data/0, ha_slave_data/0, processes_link/0, keys_set/0, cache_requests_map/0]).
 
 % Used messages types:
--type backup_message() :: ?BACKUP_REQUEST(datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()]) |
-    ?BACKUP_REQUEST_AND_LINK(datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()], pid()) |
-    ?KEYS_INACTIVATED(datastore_doc_batch:cached_keys()).
--type check_status_request() :: ?CHECK_SLAVE_STATUS(pid()).
--type slave_emergency_internal_request() :: ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(emergency_requests_map()) |
-    ?EMERGENCY_KEYS_INACTIVATED(emergency_keys_list())).
+-type backup_message() :: #request_backup{} | #forget_backup{}.
+-type get_slave_status() :: #get_slave_status{}.
 -type master_status_message() :: ?MASTER_DOWN | ?MASTER_UP.
 
+-export_type([backup_message/0, get_slave_status/0, master_status_message/0]).
+
 %%%===================================================================
-%%% API - Reporting emergency calls
+%%% API - Working in failover mode
 %%%===================================================================
 
--spec new_emergency_calls_data() -> ha_slave_emergency_calls_data().
-new_emergency_calls_data() ->
-    #emergency_calls_data{}.
+-spec new_failover_requests_data() -> ha_failover_requests_data().
+new_failover_requests_data() ->
+    #failover_requests_data{}.
 
 
--spec report_emergency_request_handled(pid(), datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()],
-    ha_slave_emergency_calls_data()) -> ha_slave_emergency_calls_data().
-report_emergency_request_handled(Pid, CachedKeys, CacheRequests, #emergency_calls_data{keys = DataKeys} = Data) ->
+-spec report_failover_request_handled(pid(), datastore_doc_batch:cached_keys(), [datastore_cache:cache_save_request()],
+    ha_failover_requests_data()) -> ha_failover_requests_data().
+report_failover_request_handled(Pid, CachedKeys, CacheRequests, #failover_requests_data{keys = DataKeys} = Data) ->
     DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
     CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, CacheRequests),
-    gen_server:cast(Pid, ?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(maps:from_list(CacheRequests2)))),
-    Data#emergency_calls_data{keys = DataKeys2}.
+    ha_datastore_utils:send_internall_message(Pid,
+        #failover_request_data_processed{request_handled = true, cache_requests_saved = maps:from_list(CacheRequests2)}, true),
+    Data#failover_requests_data{keys = DataKeys2}.
 
 
--spec report_emergency_keys_inactivated(pid(), datastore_doc_batch:cached_keys(), ha_slave_emergency_calls_data()) ->
-    ha_slave_emergency_calls_data().
-report_emergency_keys_inactivated(Pid, Inactivated, #emergency_calls_data{keys = DataKeys} = Data) ->
+-spec report_keys_flushed(pid(), datastore_doc_batch:cached_keys(), ha_failover_requests_data()) ->
+    ha_failover_requests_data().
+report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} = Data) ->
     KeysToReport = sets:intersection(DataKeys, sets:from_list(maps:keys(Inactivated))),
     case sets:size(KeysToReport) of
         0 ->
             Data;
         _ ->
-            gen_server:cast(Pid, ?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(KeysToReport))),
-            Data#emergency_calls_data{keys = sets:subtract(DataKeys, KeysToReport)}
+            ha_datastore_utils:send_internall_message(Pid, #failover_request_data_processed{keys_flushed = KeysToReport}, true),
+            Data#failover_requests_data{keys = sets:subtract(DataKeys, KeysToReport)}
     end.
 
 %%%===================================================================
@@ -103,31 +103,13 @@ report_emergency_keys_inactivated(Pid, Inactivated, #emergency_calls_data{keys =
 
 -spec init_data() -> ha_slave_data().
 init_data() ->
-    #slave_data{slave_mode = ha_management:get_slave_mode()}.
+    #slave_data{slave_mode = ha_datastore_utils:get_slave_mode()}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Updates emergency status - marks that emergency request is being handled now in case of emergency call.
-%% @end
-%%--------------------------------------------------------------------
--spec set_emergency_status(ha_slave_data(), regular | emergency_call) -> ha_slave_data().
-set_emergency_status(Data, emergency_call) ->
-    Data#slave_data{emergency_requests_status = handling};
-set_emergency_status(Data, _HandlingType) ->
-    Data. % standard request - do nothing
+-spec set_failover_request_handling(ha_slave_data(), boolean()) -> ha_slave_data().
+set_failover_request_handling(Data, FailoverRequestHandling) ->
+    Data#slave_data{failover_request_handling = FailoverRequestHandling}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Updates emergency status when datastore_cache_writer becomes idle
-%% (if it was processing emergency request, it has finished).
-%% @end
-%%--------------------------------------------------------------------
--spec report_cache_writer_idle(ha_slave_data()) -> ha_slave_data().
-report_cache_writer_idle(Data) ->
-    Data#slave_data{emergency_requests_status = waiting}.
-
-
--spec get_mode(ha_slave_data()) -> ha_management:slave_mode().
+-spec get_mode(ha_slave_data()) -> ha_datastore_utils:slave_mode().
 get_mode(#slave_data{slave_mode = Mode}) ->
     Mode.
 
@@ -138,16 +120,16 @@ get_mode(#slave_data{slave_mode = Mode}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate_slave(ha_slave_data()) -> {terminate | retry | schedule, ha_slave_data()}.
-terminate_slave(#slave_data{is_linked = false, keys_to_protect = Keys} = Data) ->
+terminate_slave(#slave_data{processes_link = false, keys_to_protect = Keys} = Data) ->
     case maps:size(Keys) of
         0 -> {terminate, Data};
         _ -> {schedule, Data}
     end;
-terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = Data) ->
+terminate_slave(#slave_data{processes_link = {true, Pid}, keys_to_protect = Keys} = Data) ->
     case maps:size(Keys) of
         0 ->
-            catch gen_server:call(Pid, ?REQUEST_UNLINK, infinity),
-            {retry, Data#slave_data{is_linked = false}};
+            catch ha_datastore_utils:send_sync_slave_message(Pid, ?REQUEST_UNLINK),
+            {retry, Data#slave_data{processes_link = false}};
         _ ->
             {schedule, Data}
     end.
@@ -161,84 +143,81 @@ terminate_slave(#slave_data{is_linked = {true, Pid}, keys_to_protect = Keys} = D
 %% Analyses requests and provides information about expected further actions.
 %% @end
 %%--------------------------------------------------------------------
--spec analyse_requests(datastore_writer:requests_internal(), ha_management:slave_mode()) ->
+-spec analyse_requests(datastore_writer:requests_internal(), ha_datastore_utils:slave_mode()) ->
     {regular, RegularReversed :: datastore_writer:requests_internal()} |
-    {emergency_call, RegularReversed :: datastore_writer:requests_internal(),
-        EmergencyReversed :: datastore_writer:requests_internal()} |
+    {failover_call, RegularReversed :: datastore_writer:requests_internal(),
+        FailoverReversed :: datastore_writer:requests_internal()} |
     {proxy_call, RegularReversed :: datastore_writer:requests_internal(),
-        EmergencyReversed :: datastore_writer:requests_internal(), node()}.
+        FailoverReversed :: datastore_writer:requests_internal(), node()}.
 analyse_requests(Requests, Mode) ->
-    {RegularReversed, EmergencyReversed, ProxyNode} = classify_requests(Requests),
+    {RegularReversed, FailoverReversed, ProxyNode} = classify_requests(Requests),
 
     case {ProxyNode, Mode} of
         {undefined, _} ->
             {regular, RegularReversed};
         {_, ?STANDBY_SLAVE_MODE} ->
-            {proxy_call, RegularReversed, EmergencyReversed, ProxyNode};
+            {proxy_call, RegularReversed, FailoverReversed, ProxyNode};
         _ ->
-            {emergency_call, RegularReversed, EmergencyReversed}
+            {failover_call, RegularReversed, FailoverReversed}
     end.
 
 
--spec handle_master_message(backup_message() | check_status_request(), ha_slave_data(),
+-spec handle_master_message(backup_message() | get_slave_status(), ha_slave_data(),
     datastore_writer:requests_internal()) ->
     {ok | slave_status(), ha_slave_data(), datastore_writer:requests_internal()}.
 % Calls associated with backup creation/deletion
-handle_master_message(?BACKUP_REQUEST(Keys, CacheRequests), #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
+handle_master_message(#request_backup{keys = Keys, cache_requests = CacheRequests, link = Link}, #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:save(CacheRequests),
-    {ok, SlaveData#slave_data{keys_to_protect = maps:merge(DataKeys, Keys)}, WaitingRequests};
-handle_master_message(?BACKUP_REQUEST_AND_LINK(Keys, CacheRequests, Pid), #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
-    datastore_cache:save(CacheRequests),
-    {ok, SlaveData#slave_data{keys_to_protect = maps:merge(DataKeys, Keys), is_linked = {true, Pid}}, WaitingRequests};
-handle_master_message(?KEYS_INACTIVATED(Inactivated), #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
+    SlaveData2 = case Link of
+        {true, _} -> SlaveData#slave_data{processes_link = Link};
+        _ -> SlaveData
+    end,
+    {ok, SlaveData2#slave_data{keys_to_protect = maps:merge(DataKeys, Keys)}, WaitingRequests};
+handle_master_message(#forget_backup{keys = Inactivated}, #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:inactivate(Inactivated),
     {ok, SlaveData#slave_data{keys_to_protect = maps:without(maps:keys(Inactivated), DataKeys)}, WaitingRequests};
 
 % Checking slave status
-handle_master_message(?CHECK_SLAVE_STATUS(Pid), #slave_data{emergency_requests_status = Status,
-    emergency_cache_requests = CacheRequests, emergency_inactivated_memory_cache_requests = MemoryRequests} = SlaveData,
+handle_master_message(#get_slave_status{answer_to = Pid}, #slave_data{failover_request_handling = Status,
+    failover_pending_cache_requests = CacheRequests, failover_finished_memory_cache_requests = MemoryRequests} = SlaveData,
     WaitingRequests) ->
     {LocalReversed, RemoteReversed, _ProxyNode} = classify_requests(WaitingRequests),
-    {{Status =:= handling, CacheRequests, maps:values(MemoryRequests), lists:reverse(RemoteReversed)},
-        SlaveData#slave_data{recovered_master_pid = Pid, emergency_inactivated_memory_cache_requests = #{}},
+    {#slave_status{failover_request_handling = Status, failover_pending_cache_requests = CacheRequests,
+        failover_finished_memory_cache_requests = maps:values(MemoryRequests),
+        failover_requests_to_handle = lists:reverse(RemoteReversed)},
+        SlaveData#slave_data{recovered_master_pid = Pid, failover_finished_memory_cache_requests = #{}},
         lists:reverse(LocalReversed)}.
 
 
--spec handle_slave_internal_message(slave_emergency_internal_request(), ha_slave_data()) -> ha_slave_data().
-handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests)), #slave_data{
-    recovered_master_pid = Pid, emergency_cache_requests = CR}  = SlaveData) ->
-    SlaveData2 = SlaveData#slave_data{emergency_cache_requests = maps:merge(CR, CacheRequests)},
+-spec handle_slave_internal_message(ha_master:failover_request_data_processed_message(), ha_slave_data()) -> ha_slave_data().
+handle_slave_internal_message(#failover_request_data_processed{cache_requests_saved = CacheRequests,
+    keys_flushed = FlushedKeys} = Msg, #slave_data{recovered_master_pid = Pid, failover_pending_cache_requests = CR,
+    failover_finished_memory_cache_requests = ICR}  = SlaveData) ->
+    FlushedKeysList = sets:to_list(FlushedKeys),
+    CR2 = maps:without(FlushedKeysList, maps:merge(CR, CacheRequests)),
+    SlaveData2 = SlaveData#slave_data{failover_pending_cache_requests = CR2},
     case Pid of
         undefined ->
-            SlaveData2;
-        _ ->
-            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_REQUEST_HANDLED(CacheRequests))),
-            SlaveData2
-    end;
-handle_slave_internal_message(?SLAVE_INTERNAL_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeys)),
-    #slave_data{emergency_cache_requests = CR, emergency_inactivated_memory_cache_requests = ICR,
-        recovered_master_pid = Pid} = SlaveData) ->
-    CrashedNodeKeysList = sets:to_list(CrashedNodeKeys),
-    CR2 = maps:without(CrashedNodeKeysList, CR),
-    SlaveData2 = SlaveData#slave_data{emergency_cache_requests = CR2},
-
-    case Pid of
-        undefined ->
-            Finished = maps:with(CrashedNodeKeysList, CR),
+            Finished = maps:with(FlushedKeysList, CR),
             FinishedMemory = maps:filter(fun
                 (_, {#{disc_driver := DD}, _, _}) -> DD =:= undefined;
                 (_, _) -> true
             end, Finished),
-            SlaveData2#slave_data{emergency_inactivated_memory_cache_requests = maps:merge(ICR, FinishedMemory)};
+            SlaveData2#slave_data{failover_finished_memory_cache_requests = maps:merge(ICR, FinishedMemory)};
         _ ->
-            gen_server:cast(Pid, ?SLAVE_MSG(?EMERGENCY_KEYS_INACTIVATED(CrashedNodeKeysList))),
+            ha_datastore_utils:send_async_slave_message(Pid, Msg),
             SlaveData2
     end.
 
 -spec handle_management_msg(master_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
+handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
+    % TODO - tu mozna zawiesic sie na dluzej - wydajnosc!
+    % TODO - napisac w dokumentacji, ze slave obsluguje management messages bo glownie jego dotycza (musi przejac lub oddac obowiazki mastera)
+    ha_datastore_utils:send_internall_message(Pid, ?CONFIG_CHANGED, false),
+    Data;
 handle_management_msg(?MASTER_DOWN, #slave_data{keys_to_protect = Keys} = Data, Pid) ->
-    gen_server:call(Pid, ?MASTER_DOWN(Keys), infinity), % VFS-6169 - mark flushed keys in case of fast master restart
-    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = ?TAKEOVER_SLAVE_MODE};
+    datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart
+    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE};
 handle_management_msg(?MASTER_UP, Data, _Pid) ->
     Data#slave_data{slave_mode = ?STANDBY_SLAVE_MODE}.
 
@@ -255,7 +234,7 @@ classify_requests(Requests) ->
     MyNode = node(),
 
     {LocalReversed, RemoteReversed, FinalMaster} = lists:foldl(fun
-        ({_Pid, _Ref, {_Function, [#{broken_master := true, broken_nodes := [Master | _]} | _Args]}} =
+        (#datastre_internal_request{request = #datastore_request{ctx = #{broken_master := true, broken_nodes := [Master | _]}}} =
             Request, {Local, Remote, _}) when Master =/= MyNode ->
             {Local, [Request | Remote], Master};
         (Request, {Local, Remote, Master}) ->

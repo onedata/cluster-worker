@@ -14,12 +14,13 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include("modules/datastore/datastore_protocol.hrl").
 -include("modules/datastore/datastore_links.hrl").
--include("modules/datastore/ha.hrl").
+-include("modules/datastore/ha_datastore.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/4, save_master_pid/1, get_master_pid/0]).
+-export([start_link/4, call/2, save_master_pid/1, get_master_pid/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -41,7 +42,7 @@
     link_tokens = #{} :: cached_token_map(),
 
     ha_master_data :: ha_master:ha_master_data(),
-    ha_slave_emergency_calls_data :: ha_slave:ha_slave_emergency_calls_data()
+    ha_failover_requests_data :: ha_slave:ha_failover_requests_data()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -57,7 +58,7 @@
 -type state() :: #state{}.
 -type cached_token_map() ::
     #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
--type request_type() :: regular | emergency_call. % Emergency calls appear when master node is down.
+-type is_failover_request() :: boolean(). % see ha_datastore.hrl for failover requests description
 
 -export_type([keys_in_flush/0]).
 
@@ -81,6 +82,10 @@
 -spec start_link(pid(), key(), [node()], [key()]) -> {ok, pid()} | {error, term()}.
 start_link(MasterPid, Key, BackupNodes, KeysInSlaveFlush) ->
     gen_server:start_link(?MODULE, {MasterPid, Key, BackupNodes, KeysInSlaveFlush}, []).
+
+-spec call(pid(), term()) -> term().
+call(Pid, Msg) ->
+    gen_server:call(Pid, Msg, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -122,7 +127,7 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
         keys_in_flush = maps:from_list(KiF),
         ha_master_data = ha_master:init_data(BackupNodes),
-        ha_slave_emergency_calls_data = ha_slave:new_emergency_calls_data()}}.
+        ha_failover_requests_data = ha_slave:new_failover_requests_data()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -138,34 +143,35 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call({handle, Ref, Requests, Mode}, From, State = #state{process_key = ProcessKey, master_pid = Pid}) ->
+handle_call(#datastre_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
+    State = #state{process_key = ProcessKey, master_pid = Pid}) ->
     State3 = case ha_slave:analyse_requests(Requests, Mode) of
         {regular, Regular} ->
-            gen_server:reply(From, regular),
-            handle_requests(Regular, regular, State#state{requests_ref = Ref});
-        {emergency_call, Regular, Emergency} ->
-            gen_server:reply(From, emergency_call),
-            State2 = handle_requests(Regular, regular, State#state{requests_ref = Ref}),
-            handle_requests(Emergency, emergency_call, State2);
-        {proxy_call, Regular, Emergency, ProxyNode} ->
-            gen_server:reply(From, regular),
+            gen_server:reply(From, false),
+            handle_requests(Regular, false, State#state{requests_ref = Ref});
+        {failover_call, Regular, Failover} ->
+            gen_server:reply(From, true),
+            State2 = handle_requests(Regular, false, State#state{requests_ref = Ref}),
+            handle_requests(Failover, true, State2);
+        {proxy_call, Regular, Failover, ProxyNode} ->
+            gen_server:reply(From, false),
             % TODO - VFS-6171 - reply to caller
-            case rpc:call(ProxyNode, datastore_writer, custom_call,
-                [ProcessKey, ?PROXY_REQUESTS(lists:reverse(Emergency))]) of
+            case rpc:call(ProxyNode, datastore_writer, custom_call, [ProcessKey,
+                RequestsBatch#datastre_internal_requests_batch{requests = lists:reverse(Failover)}]) of
                 {ok, ProxyPid} ->
-                    send_proxy_info(Emergency, {request_delegated, ProxyPid});
+                    send_proxy_info(Failover, {request_delegated, ProxyPid});
                 {badrpc, Reason} ->
-                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, lists:reverse(Emergency)]),
-                    send_proxy_info(Emergency, {error, Reason});
+                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, lists:reverse(Failover)]),
+                    send_proxy_info(Failover, {error, Reason});
                 Error ->
-                    ?error("Proxy call error ~p for requests ~p", [Error, lists:reverse(Emergency)]),
-                    send_proxy_info(Emergency, Error)
+                    ?error("Proxy call error ~p for requests ~p", [Error, lists:reverse(Failover)]),
+                    send_proxy_info(Failover, Error)
             end,
-            handle_requests(Regular, regular, State#state{requests_ref = Ref})
+            handle_requests(Regular, false, State#state{requests_ref = Ref})
     end,
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State3)};
-handle_call(?MASTER_DOWN(Keys), From, State = #state{
+handle_call(#datastore_flush_request{keys = Keys}, From, State = #state{
     cached_keys_to_flush = CachedKeys,
     master_pid = Pid
 }) ->
@@ -188,7 +194,7 @@ handle_call(terminate, _From, State) ->
 handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, regular, State), % TODO - VFS-6169 Handle emergency and proxy requests
+        disc_writer_pid = Pid} = handle_requests(Requests, false, State), % TODO - VFS-6169 Handle failover and proxy requests
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
@@ -196,10 +202,10 @@ handle_call({terminate, Requests}, _From, State) ->
 handle_call(force_terminate, _From, #state{disc_writer_pid = Pid} = State) ->
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     {stop, normal, ok, State};
-handle_call(?SLAVE_MSG(_) = Msg, _From, #state{ha_master_data = Data} = State) ->
+handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_master:handle_slave_lifecycle_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
-handle_call(?MASTER_INTERNAL_MSG(_) = Msg, _From, #state{ha_master_data = Data} = State) ->
+handle_call(?INTERNAL_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_master:handle_internal_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(Request, _From, State = #state{}) ->
@@ -266,7 +272,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         keys_to_expire = ToExpire2,
         flush_times = FT2
     }, ?FLUSH_INTERVAL))};
-handle_cast(?MASTER_INTERNAL_MSG(_) = Msg, #state{keys_in_flush = KiF} = State) ->
+handle_cast(?INTERNAL_MSG(Msg), #state{keys_in_flush = KiF} = State) ->
     NewKiF = ha_master:handle_internal_message(Msg, KiF),
     {noreply, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
 handle_cast(Request, #state{} = State) ->
@@ -410,10 +416,10 @@ code_change(_OldVsn, State, _Extra) ->
 %% Handles requests.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_requests(list(), request_type(), state()) -> state().
-handle_requests([], _RequestType, State) ->
+-spec handle_requests(datastore_writer:requests_internal(), is_failover_request(), state()) -> state().
+handle_requests([], _IsFailoverRequest, State) ->
     State;
-handle_requests(Requests, RequestType, State = #state{
+handle_requests(Requests, IsFailoverRequest, State = #state{
     cached_keys_to_flush = CachedKeys,
     master_pid = Pid,
     link_tokens = LT
@@ -427,7 +433,7 @@ handle_requests(Requests, RequestType, State = #state{
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
-    State2 = handle_ha_requests(CachedKeys2, SuccessfulCacheRequests, RequestType, State),
+    State2 = handle_ha_requests(CachedKeys2, SuccessfulCacheRequests, IsFailoverRequest, State),
 
     State2#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
 
@@ -437,11 +443,12 @@ handle_requests(Requests, RequestType, State = #state{
 %% Batches requests.
 %% @end
 %%--------------------------------------------------------------------
--spec batch_requests(list(), list(), batch(), cached_token_map()) ->
+-spec batch_requests(datastore_writer:requests_internal(), list(), batch(), cached_token_map()) ->
     {list(), batch(), cached_token_map()}.
 batch_requests([], Responses, Batch, LinkTokens) ->
     {lists:reverse(Responses), Batch, LinkTokens};
-batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch, LinkTokens) ->
+batch_requests([#datastre_internal_request{pid = Pid, ref = Ref, request = Request} | Requests],
+    Responses, Batch, LinkTokens) ->
     case batch_request(Request, Batch, LinkTokens) of
         {Response, Batch2, LinkTokens2} ->
             batch_requests(Requests, [{Pid, Ref, Response} | Responses],
@@ -460,6 +467,8 @@ batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch, LinkTokens) -
 %%--------------------------------------------------------------------
 -spec batch_request(term(), batch(), cached_token_map()) ->
     {term(), batch()} | {term(), batch(), cached_token_map()}.
+batch_request(#datastore_request{function = Fun, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
+    batch_request({Fun, [Ctx | Args]}, Batch, _LinkTokens); % TODO - refactor datastore request handling
 batch_request({create, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:create(set_mutator_pid(Ctx), Key, Doc, Batch2)
@@ -798,10 +807,10 @@ send_response({Pid, Ref, Responses}, Batch) ->
 %% Sends information about proxy delegation.
 %% @end
 %%--------------------------------------------------------------------
--spec send_proxy_info(list(), term()) -> ok.
+-spec send_proxy_info(datastore_writer:requests_internal(), term()) -> ok.
 send_proxy_info([], _Info) ->
     ok;
-send_proxy_info([{Pid, Ref, _Request} | Requests], Info) ->
+send_proxy_info([#datastre_internal_request{pid = Pid, ref = Ref} | Requests], Info) ->
     Pid ! {Ref, Info},
     send_proxy_info(Requests, Info).
 
@@ -956,18 +965,18 @@ generate_error_ans(0, _Error) ->
 generate_error_ans(N, Error) ->
     [{make_ref(), Error} | generate_error_ans(N - 1, Error)].
 
--spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], request_type(), state()) -> state().
-handle_ha_requests(CachedKeys, CacheRequests, regular, #state{process_key = ProcessKey, ha_master_data = HAData} = State) ->
-    HAData2 = ha_master:broadcast_request_handled(ProcessKey, CachedKeys, CacheRequests, HAData),
+-spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], is_failover_request(), state()) -> state().
+handle_ha_requests(CachedKeys, CacheRequests, false, #state{process_key = ProcessKey, ha_master_data = HAData} = State) ->
+    HAData2 = ha_master:request_backup(ProcessKey, CachedKeys, CacheRequests, HAData),
     State#state{ha_master_data = HAData2};
-handle_ha_requests(CachedKeys, CacheRequests, emergency_call,
-    #state{master_pid = MasterPid, ha_slave_emergency_calls_data = EmergencyData} = State) ->
-    EmergencyData2 = ha_slave:report_emergency_request_handled(MasterPid, CachedKeys, CacheRequests, EmergencyData),
-    State#state{ha_slave_emergency_calls_data = EmergencyData2}.
+handle_ha_requests(CachedKeys, CacheRequests, true,
+    #state{master_pid = MasterPid, ha_failover_requests_data = FailoverData} = State) ->
+    FailoverData2 = ha_slave:report_failover_request_handled(MasterPid, CachedKeys, CacheRequests, FailoverData),
+    State#state{ha_failover_requests_data = FailoverData2}.
 
 -spec handle_ha_inactivate(cached_keys(), state()) -> state().
 handle_ha_inactivate(Inactivated,
-    #state{master_pid = MasterPid, ha_master_data = HAData, ha_slave_emergency_calls_data = EmergencyData} = State) ->
-    ha_master:broadcast_inactivation(Inactivated, HAData),
-    EmergencyData2 = ha_slave:report_emergency_keys_inactivated(MasterPid, Inactivated, EmergencyData),
-    State#state{ha_slave_emergency_calls_data = EmergencyData2}.
+    #state{master_pid = MasterPid, ha_master_data = HAData, ha_failover_requests_data = FailoverData} = State) ->
+    ha_master:forget_backup(Inactivated, HAData),
+    FailoverData2 = ha_slave:report_keys_flushed(MasterPid, Inactivated, FailoverData),
+    State#state{ha_failover_requests_data = FailoverData2}.

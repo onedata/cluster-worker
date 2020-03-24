@@ -11,34 +11,80 @@
 %%% NOTE: Config functions should be executed on all nodes during cluster reconfiguration.
 %%% TODO - VFS-6166 - Verify HA Cast
 %%% TODO - VFS-6167 - Datastore HA supports nodes adding and deleting
-%%% For more information see ha.hrl.
+%%% For more information see ha_datastore.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
--module(ha_management).
+-module(ha_datastore_utils).
 -author("Michał Wrzeszcz").
 
--include("modules/datastore/ha.hrl").
+-include("modules/datastore/ha_datastore.hrl").
+-include("modules/datastore/datastore_protocol.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
+%% Message sending API
+-export([send_internall_message/3, send_async_slave_message/2, send_sync_slave_message/2, send_async_master_message/2, send_sync_master_message/4,
+    broadcast_management_message/1]).
 %% API
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([master_down/0, master_up/0, change_config/2]).
 
+% Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
-% Mode determines whether slave process only backups data or process also handles requests when master is down
--type slave_mode() :: ?STANDBY_SLAVE_MODE | ?TAKEOVER_SLAVE_MODE.
+% Slave working mode -  see ha_datastore.hrl
+-type slave_mode() :: ?STANDBY_SLAVE_MODE | ?FAILOVER_SLAVE_MODE.
 
 -export_type([propagation_method/0, slave_mode/0]).
+
+% HA messages' types (see ha_datastore.hrl)
+-type ha_message_type() :: master | slave | internal | management.
+-type ha_message() :: ha_slave:backup_message() | ha_master:unlink_request() |
+    ha_master:failover_request_data_processed_message() | ha_slave:get_slave_status() |
+    ha_slave:master_status_message() | ha_master:config_changed_message().
+
+-export_type([ha_message_type/0, ha_message/0]).
 
 % Envs used to configure ha
 -define(HA_PROPAGATION_METHOD, ha_propagation_method).
 -define(SLAVE_MODE, slave_mode).
 
 %%%===================================================================
-%%% API getters
+%%% Message sending API
 %%%===================================================================
 
+-spec send_internall_message(pid(), ha_master:failover_request_data_processed_message() | ha_slave:master_status_message() |
+    ha_master:config_changed_message(), Async :: boolean()) -> ok.
+send_internall_message(Pid, Msg, true) ->
+    gen_server:cast(Pid, ?INTERNAL_MSG(Msg));
+send_internall_message(Pid, Msg, _Async) ->
+    gen_server:call(Pid, ?INTERNAL_MSG(Msg), infinity).
+
+-spec send_async_slave_message(pid(), ha_master:failover_request_data_processed_message()) -> ok.
+send_async_slave_message(Pid, Msg) ->
+    gen_server:cast(Pid, ?SLAVE_MSG(Msg)).
+
+-spec send_sync_slave_message(pid(), ha_master:unlink_request()) -> term().
+send_sync_slave_message(Ref, Msg) ->
+    gen_server:call(Ref, ?SLAVE_MSG(Msg), infinity).
+
+-spec send_async_master_message(pid(), ha_slave:backup_message()) -> ok.
+send_async_master_message(Ref, Msg) ->
+    gen_server:cast(Ref, ?MASTER_MSG(Msg)).
+
+-spec send_sync_master_message(node(), datastore:key(), ha_slave:backup_message() | ha_slave:get_slave_status() |
+    #datastre_internal_requests_batch{}, StartIfNotAlive :: boolean()) -> term().
+send_sync_master_message(Node, ProcessKey, Msg, true) ->
+    rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?MASTER_MSG(Msg)]);
+send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
+    rpc:call(Node, datastore_writer, call_if_alive, [ProcessKey, ?MASTER_MSG(Msg)]).
+
+-spec broadcast_management_message(ha_slave:master_status_message() | ha_master:config_changed_message()) -> ok.
+broadcast_management_message(Msg) ->
+    tp_router:send_to_each(?MANAGEMENT_MSG(Msg)).
+
+%%%===================================================================
+%%% API getters
+%%%===================================================================
 
 -spec get_propagation_method() -> propagation_method().
 get_propagation_method() ->
@@ -69,15 +115,15 @@ get_slave_mode() ->
 -spec master_down() -> ok.
 master_down() ->
     ?info("Set and broadcast master_down"),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?TAKEOVER_SLAVE_MODE),
-    tp_router:send_to_each(?MASTER_DOWN).
+    application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?FAILOVER_SLAVE_MODE),
+    broadcast_management_message(?MASTER_DOWN).
 
 
 -spec master_up() -> ok.
 master_up() ->
     ?info("Set and broadcast master_up"),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?SLAVE_MODE, ?STANDBY_SLAVE_MODE),
-    tp_router:send_to_each(?MASTER_UP).
+    broadcast_management_message(?MASTER_UP).
 
 
 -spec change_config(non_neg_integer(), propagation_method()) -> ok.
@@ -85,7 +131,7 @@ change_config(NodesNumber, PropagationMethod) ->
     ?info("Set and broadcast new ha config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
     consistent_hashing:set_key_connected_nodes(NodesNumber),
     application:set_env(?CLUSTER_WORKER_APP_NAME, ?HA_PROPAGATION_METHOD, PropagationMethod),
-    tp_router:send_to_each(?MANAGEMENT_MSG(?CONFIG_CHANGED)).
+    broadcast_management_message(?CONFIG_CHANGED).
 
 %%%===================================================================
 %%% Internal functions

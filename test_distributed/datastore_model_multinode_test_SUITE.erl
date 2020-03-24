@@ -257,7 +257,7 @@ saves_should_change_node_dynamic(Config, Method) ->
 
     lists:foreach(fun(Model) ->
         UniqueKey = ?UNIQUE_KEY(Model, Key),
-        ok = test_utils:mock_expect(Workers, ha_master, broadcast_request_handled,
+        ok = test_utils:mock_expect(Workers, ha_master, request_backup,
             fun(ProcessKey, Keys, CacheRequests, Data) ->
                 Ans = meck:passthrough([ProcessKey, Keys, CacheRequests, Data]),
                 case maps:is_key(UniqueKey, Keys) andalso node() =:= KeyNode of
@@ -341,7 +341,7 @@ prepare_ha_test(Config) ->
     {Key, KeyNode, KeyNode2, TestWorker}.
 
 set_ha(Worker, Fun, Args) when is_atom(Worker) ->
-    ?assertEqual(ok, rpc:call(Worker, ha_management, Fun, Args));
+    ?assertEqual(ok, rpc:call(Worker, ha_datastore_utils, Fun, Args));
 set_ha(Config, Fun, Args) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
