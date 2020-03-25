@@ -40,12 +40,11 @@
                  memory_driver_ctx => memory_driver_ctx(),
 
                  % Memory copies external API (to be set by model)
-                 memory_copies => non_neg_integer() | all, % number of nodes used for memory copies
+                 memory_copies => all | none, % number of nodes used for memory copies
                  % Memory copies internal API (to be set by datastore modules)
                  memory_copies_nodes => [node()], % nodes to be used for memory copies (set by datastore_router)
-                 key_connected_nodes => [node()], % nodes connected to key (set by datastore_router)
-                 broken_nodes => [node()], % broken nodes connected to particular request (set by datastore_router)
-                 broken_master => boolean(), % is master for request broken (set by datastore_router)
+                 failed_nodes => [node()], % failed nodes connected to particular request (set by datastore_router)
+                 failed_master => boolean(), % is master for request down (set by datastore_router)
 
                  disc_driver => disc_driver(),
                  disc_driver_ctx => disc_driver_ctx(),

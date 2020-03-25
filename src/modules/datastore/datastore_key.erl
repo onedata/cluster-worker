@@ -64,7 +64,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
--export([responsible_node/1, responsible_nodes/2]).
+-export([responsible_node/1, get_chash_seed/1]).
 
 %%%===================================================================
 %%% API
@@ -164,18 +164,16 @@ responsible_node(Key) ->
     consistent_hashing:get_node(CHashSeed).
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns nodes responsible for handling given datastore key. Returns three lists:
-%% alive connected nodes, other alive nodes and broken nodes.
-%% Sum of lists' length is equal to requested nodes' count.
-%% @end
-%%--------------------------------------------------------------------
--spec responsible_nodes(key(), non_neg_integer() | all) ->
-    {KeyConnectedNodes :: [node()], OtherRequestedNodes :: [node()], BrokenNodes :: [node()], BrokenMaster :: boolean()}.
-responsible_nodes(Key, RequestedNodesNum) ->
-    CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_nodes(CHashSeed, RequestedNodesNum).
+-spec get_chash_seed(key()) -> key() | chash_label().
+get_chash_seed(Key) ->
+    case to_basic_key_and_chash_label(Key) of
+        {BasicKey, undefined} ->
+            % Legacy key - use the whole key for routing
+            BasicKey;
+        {_, CHashLabel} ->
+            % Key with a chash label - use the label for routing
+            CHashLabel
+    end.
 
 %% ====================================================================
 %% Internal functions
@@ -225,17 +223,4 @@ to_basic_key_and_chash_label(Key) ->
             {BasicKey, CHashLabel};
         _ ->
             {Key, undefined}
-    end.
-
-
-%% @private
--spec get_chash_seed(key()) -> key() | chash_label().
-get_chash_seed(Key) ->
-    case to_basic_key_and_chash_label(Key) of
-        {BasicKey, undefined} ->
-            % Legacy key - use the whole key for routing
-            BasicKey;
-        {_, CHashLabel} ->
-            % Key with a chash label - use the label for routing
-            CHashLabel
     end.

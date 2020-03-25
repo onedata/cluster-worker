@@ -40,8 +40,7 @@ stress_performance_test_base(Config) ->
         ?assertEqual(ok, rpc:call(W, ha_datastore_utils, change_config, [HANodes, HaMode]))
     end, Workers),
 
-    Ring = rpc:call(Worker, consistent_hashing, get_chash_ring, []),
-    consistent_hashing:set_chash_ring(Ring),
+    ?assertEqual(ok, rpc:call(Worker, consistent_hashing, replicate_ring_to_nodes, [[node()]])),
 
     Ans = run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, ProcNum),
     ct:print("Test: repeats ~p, procs ~p, many keys ~p, HA ~p, HA mode ~p, result ~p",

@@ -97,8 +97,8 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
 -spec route_internal(atom(), list()) -> term().
 route_internal(Function, Args) ->
     Module = select_module(Function),
-    {Node, Args2, TryLocalRead} = select_node(Args),
     try
+        {Node, Args2, TryLocalRead} = select_node(Args),
         case {Module, TryLocalRead} of
             {datastore_writer, _} ->
                 case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
@@ -139,13 +139,25 @@ retry_route(Function, Args, Sleep, Attempts) ->
 select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
 select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
-    {[Node | KeyConnectedNodesTail] = KeyConnectedNodes, OtherRequestedNodes, BrokenNodes, BrokenMaster} =
-        datastore_key:responsible_nodes(Key, MemCopies),
-    TryLocalRead = lists:member(node(), KeyConnectedNodes) orelse lists:member(node(), OtherRequestedNodes),
-    {Node, [Ctx#{key_connected_nodes => KeyConnectedNodesTail, memory_copies_nodes => OtherRequestedNodes,
-        broken_nodes => BrokenNodes, broken_master => BrokenMaster} | ArgsTail], TryLocalRead};
+    Seed = datastore_key:get_chash_seed(Key),
+    {[MasterNode | _] = Nodes, FailedNodes, AllNodes} = consistent_hashing:get_full_node_info(Seed),
+    case Nodes -- FailedNodes of
+        [Node | _] ->
+            Ctx2 = Ctx#{failed_nodes => FailedNodes, failed_master => lists:member(MasterNode, FailedNodes)},
+            {Ctx3, TryLocalRead} = case MemCopies of
+                all ->
+                    MemCopiesNodes = AllNodes -- Nodes -- FailedNodes,
+                    % TODO VFS-6168 - Try local reads from HA slaves
+                    {Ctx2#{memory_copies_nodes => MemCopiesNodes}, lists:member(node(), MemCopiesNodes)};
+                none ->
+                    {Ctx2, false}
+            end,
+            {Node, [Ctx3 | ArgsTail], TryLocalRead};
+        [] ->
+            throw(all_responsible_nodes_failed)
+    end;
 select_node([Ctx | Args]) ->
-    select_node([Ctx#{memory_copies => 1} | Args]).
+    select_node([Ctx#{memory_copies => none} | Args]).
 
 %%--------------------------------------------------------------------
 %% @private

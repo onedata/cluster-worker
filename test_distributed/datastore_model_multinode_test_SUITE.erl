@@ -209,6 +209,7 @@ saves_should_propagate_to_backup_node(Config, Method) ->
 
 calls_should_change_node(Config, Method) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+    set_ha(Config, change_config, [1, cast]),
 
     lists:foreach(fun(Model) ->
         {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
@@ -243,10 +244,10 @@ saves_should_use_recovered_node(Config, Method) ->
         assert_on_disc(TestWorker, Model, Key),
         assert_not_in_memory(KeyNode, Model, Key),
 
-        set_ha(KeyNode2, master_up, []),
-        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
-        assert_in_memory(KeyNode, Model, Key),
-        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]))
+%%        set_ha(KeyNode2, master_up, []),
+%%        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
+%%        assert_in_memory(KeyNode, Model, Key),
+        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, report_node_recovery, [KeyNode]))
     end, ?TEST_MODELS).
 
 saves_should_change_node_dynamic(Config, Method) ->
@@ -283,8 +284,8 @@ saves_should_change_node_dynamic(Config, Method) ->
 node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
     MasterPid = self(),
-
     set_ha(Config, change_config, [2, Method]),
+
     lists:foreach(fun(Model) ->
         mock_node_down(TestWorker, KeyNode2, KeyNode),
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
@@ -313,7 +314,7 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
 
         case DelayRingRepair of
             true ->
-                ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode]));
+                ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, report_node_recovery, [KeyNode]));
             _ ->
                 ok
         end,
@@ -328,15 +329,17 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
         timer:sleep(10000), % Wait for race on flush
         assert_value_on_disc(TestWorker, Model, Key, 3),
 
-        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, set_fixed_node, [KeyNode])),
+        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, report_node_recovery, [KeyNode])),
         terminate_processes(Config)
     end, ?TEST_MODELS).
 
 prepare_ha_test(Config) ->
     [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    set_ha(Config, change_config, [2, cast]),
     Key = datastore_key:new(),
-    {[KeyNode], [KeyNode2], _, _} = rpc:call(Worker0, datastore_key, responsible_nodes, [Key, 2]),
-    [TestWorker | _] = Workers -- [KeyNode, KeyNode2],
+    Seed = rpc:call(Worker0, datastore_key, get_chash_seed, [Key]),
+    {[KeyNode, KeyNode2] = KeyNodes, _, _} = rpc:call(Worker0, consistent_hashing, get_full_node_info, [Seed]),
+    [TestWorker | _] = Workers -- KeyNodes,
 
     {Key, KeyNode, KeyNode2, TestWorker}.
 
@@ -350,10 +353,10 @@ set_ha(Config, Fun, Args) ->
 
 mock_node_down(CallNode, ExecuteNode, BrokenNode) ->
     set_ha(ExecuteNode, master_down, []),
-    ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, set_broken_node, [BrokenNode])).
+    ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, report_node_failure, [BrokenNode])).
 
 mock_node_up(CallNode, ExecuteNode, BrokenNode) ->
-    ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, set_fixed_node, [BrokenNode])),
+    ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, report_node_recovery, [BrokenNode])),
     set_ha(ExecuteNode, master_up, []).
 
 check_update(Node, Value) ->
@@ -433,7 +436,7 @@ end_per_testcase(ha_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
         lists:foreach(fun(FixedWorker) ->
-            ?assertEqual(ok, rpc:call(Worker, consistent_hashing, set_fixed_node, [FixedWorker]))
+            ?assertEqual(ok, rpc:call(Worker, consistent_hashing, report_node_recovery, [FixedWorker]))
         end, Workers)
     end, Workers),
     terminate_processes(Config),

@@ -112,7 +112,7 @@ get_backup_nodes() ->
             Env;
         undefined ->
             critical_section:run(?MODULE, fun() ->
-                Ans = case consistent_hashing:get_key_connected_nodes() of
+                Ans = case consistent_hashing:get_label_associated_nodes_count() of
                     1 ->
                         [];
                     BackupNodesNum ->
@@ -154,7 +154,7 @@ master_up() ->
 -spec change_config(non_neg_integer(), propagation_method()) -> ok.
 change_config(NodesNumber, PropagationMethod) ->
     ?info("Set and broadcast new ha config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
-    consistent_hashing:set_key_connected_nodes(NodesNumber),
+    consistent_hashing:set_label_associated_nodes_count(NodesNumber),
     clean_backup_nodes_cache(),
     set_propagation_method(PropagationMethod),
     broadcast_management_message(?CONFIG_CHANGED).

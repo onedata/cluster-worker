@@ -126,7 +126,7 @@ classify_and_reverse_requests(Requests, Mode) ->
     MyNode = node(),
 
     {LocalList, RemoteList, RemoteNode} = lists:foldl(fun
-        (#datastre_internal_request{request = #datastore_request{ctx = #{broken_master := true, broken_nodes := [Master | _]}}} =
+        (#datastre_internal_request{request = #datastore_request{ctx = #{failed_master := true, failed_nodes := [Master | _]}}} =
             Request, {Local, Remote, _}) when Master =/= MyNode ->
             {Local, [Request | Remote], Master};
         (Request, {Local, Remote, Node}) ->
