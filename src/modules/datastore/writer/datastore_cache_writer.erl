@@ -145,29 +145,28 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_call(#datastre_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
     State = #state{process_key = ProcessKey, master_pid = Pid}) ->
-    State3 = case ha_slave:analyse_requests(Requests, Mode) of
-        {regular, Regular} ->
-            gen_server:reply(From, false),
-            handle_requests(Regular, false, State#state{requests_ref = Ref});
-        {failover_call, Regular, Failover} ->
-            gen_server:reply(From, true),
-            State2 = handle_requests(Regular, false, State#state{requests_ref = Ref}),
-            handle_requests(Failover, true, State2);
-        {proxy_call, Regular, Failover, ProxyNode} ->
-            gen_server:reply(From, false),
+    #classified_datastore_requests{local = LocalRequests, remote = RemoteRequests, remote_node = RemoteNode,
+        remote_processing_mode = RemoteProcessingMode} = ha_slave:classify_and_reverse_requests(Requests, Mode),
+    gen_server:reply(From, RemoteProcessingMode =:= handle_locally),
+    State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
+    State3 = case RemoteProcessingMode of
+        delegate ->
             % TODO - VFS-6171 - reply to caller
-            case rpc:call(ProxyNode, datastore_writer, custom_call, [ProcessKey,
-                RequestsBatch#datastre_internal_requests_batch{requests = lists:reverse(Failover)}]) of
+            RemoteRequestsReversed = lists:reverse(RemoteRequests), % requests are stored and sent in reversed list
+            case rpc:call(RemoteNode, datastore_writer, custom_call, [ProcessKey,
+                RequestsBatch#datastre_internal_requests_batch{requests = RemoteRequestsReversed}]) of
                 {ok, ProxyPid} ->
-                    send_proxy_info(Failover, {request_delegated, ProxyPid});
+                    send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid});
                 {badrpc, Reason} ->
-                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, lists:reverse(Failover)]),
-                    send_proxy_info(Failover, {error, Reason});
+                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, RemoteRequestsReversed]),
+                    send_proxy_info(RemoteRequestsReversed, {error, Reason});
                 Error ->
-                    ?error("Proxy call error ~p for requests ~p", [Error, lists:reverse(Failover)]),
-                    send_proxy_info(Failover, Error)
+                    ?error("Proxy call error ~p for requests ~p", [Error, RemoteRequestsReversed]),
+                    send_proxy_info(RemoteRequestsReversed, Error)
             end,
-            handle_requests(Regular, false, State#state{requests_ref = Ref})
+            State2;
+        _ ->
+            handle_requests(RemoteRequests, true, State2)
     end,
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
     {noreply, schedule_flush(State3)};
@@ -206,7 +205,7 @@ handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_master:handle_slave_lifecycle_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(?INTERNAL_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
-    Data2 = ha_master:handle_internal_message(Msg, Data),
+    Data2 = ha_master:handle_internal_call(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -273,7 +272,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         flush_times = FT2
     }, ?FLUSH_INTERVAL))};
 handle_cast(?INTERNAL_MSG(Msg), #state{keys_in_flush = KiF} = State) ->
-    NewKiF = ha_master:handle_internal_message(Msg, KiF),
+    NewKiF = ha_master:handle_internal_cast(Msg, KiF),
     {noreply, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
@@ -467,33 +466,31 @@ batch_requests([#datastre_internal_request{pid = Pid, ref = Ref, request = Reque
 %%--------------------------------------------------------------------
 -spec batch_request(term(), batch(), cached_token_map()) ->
     {term(), batch()} | {term(), batch(), cached_token_map()}.
-batch_request(#datastore_request{function = Fun, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
-    batch_request({Fun, [Ctx | Args]}, Batch, _LinkTokens); % TODO - refactor datastore request handling
-batch_request({create, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = create, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:create(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
-batch_request({save, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = save, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:save(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
-batch_request({update, [Ctx, Key, Diff]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = update, ctx = Ctx, args = [Key, Diff]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Batch2)
     end);
-batch_request({update, [Ctx, Key, Diff, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = update, ctx = Ctx, args = [Key, Diff, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Doc, Batch2)
     end);
-batch_request({fetch, [Ctx, Key]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = fetch, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:fetch(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request({delete, [Ctx, Key, Pred]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = delete, ctx = Ctx, args = [Key, Pred]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:delete(set_mutator_pid(Ctx), Key, Pred, Batch2)
     end);
-batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = add_links, ctx = Ctx, args = [Key, TreeId, Links]}, Batch, _LinkTokens) ->
     Items = case maps:get(sync_enabled, Ctx, false) of
         true ->
             lists:map(fun({LinkName, LinkTarget}) ->
@@ -509,7 +506,8 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
         add_links(Items, Tree, TreeId, [], [])
     end);
-batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = check_and_add_links, ctx = Ctx, args = [Key, TreeId, CheckTrees, Links]},
+    Batch, _LinkTokens) ->
     TreesToFetch = case CheckTrees of
         all ->
             datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch);
@@ -523,22 +521,25 @@ batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batc
     case TreesToFetch of
         {{ok, TreeIds}, Batch2} ->
             % do not fetch tree where links are added - links will be checked during add_links execution
-            {FetchResult, Batch3} = batch_request({fetch_links, [Ctx, Key, TreeIds -- [TreeId],
-                lists:map(fun({Name, _}) -> Name end, Links)]}, Batch2, _LinkTokens),
+            {FetchResult, Batch3} = batch_request(#datastore_request{function = fetch_links, ctx = Ctx,
+                args = [Key, TreeIds -- [TreeId], lists:map(fun({Name, _}) -> Name end, Links)]}, Batch2, _LinkTokens),
 
             ToAdd = lists:filtermap(fun
                 ({{_, {error, not_found}}, Link}) -> {true, Link};
                 (_) -> false
             end, lists:zip(lists:reverse(FetchResult), Links)),
-            {AddResult, Batch4} = batch_request({add_links, [Ctx, Key, TreeId, ToAdd]}, Batch3, _LinkTokens),
+            {AddResult, Batch4} = batch_request(#datastore_request{function = add_links, ctx = Ctx,
+                args = [Key, TreeId, ToAdd]}, Batch3, _LinkTokens),
 
             {prepare_check_and_add_ans(FetchResult, AddResult), Batch4};
         {{error, not_found}, Batch2} ->
-            batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch2, _LinkTokens);
+            batch_request(#datastore_request{function = add_links, ctx = Ctx, args = [Key, TreeId, Links]},
+                Batch2, _LinkTokens);
         Other ->
             {generate_error_ans(length(Links), Other), Batch}
     end;
-batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = fetch_links, ctx = Ctx, args = [Key, TreeIds, LinkNames]},
+    Batch, _LinkTokens) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             Ctx2 = set_mutator_pid(Ctx),
@@ -552,7 +553,7 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
-batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = delete_links, ctx = Ctx, args = [Key, TreeId, Links]}, Batch, _LinkTokens) ->
     Items = lists:map(fun({LinkName, LinkRev}) ->
         Pred = fun
             ({_, Rev}) when LinkRev =/= undefined -> Rev =:= LinkRev;
@@ -563,7 +564,8 @@ batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
         delete_links(Items, Tree, [], [])
     end);
-batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = mark_links_deleted, ctx = Ctx, args = [Key, TreeId, Links]},
+    Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             links_mask_apply(Ctx, Key, TreeId, Batch3, fun(Mask) ->
@@ -572,7 +574,8 @@ batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkToken
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, Links);
-batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch, LinkTokens) ->
+batch_request(#datastore_request{function = fold_links, ctx = Ctx, args = [Key, TreeIds, Fun, Acc, Opts]},
+    Batch, LinkTokens) ->
     Ref = make_ref(),
     Batch2 = datastore_doc_batch:init_request(Ref, Batch),
 
@@ -611,12 +614,12 @@ batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch, LinkToke
         _ ->
             {{Ref, Result}, Batch3, LinkTokens}
     end;
-batch_request({fetch_links_trees, [Ctx, Key]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = fetch_links_trees, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request({Function, Args}, Batch, _LinkTokens) ->
-    apply(datastore_doc_batch, Function, Args ++ [Batch]).
+batch_request(#datastore_request{function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
+    apply(datastore_doc_batch, Function, [Ctx | Args] ++ [Batch]).
 
 %%--------------------------------------------------------------------
 %% @private

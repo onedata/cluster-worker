@@ -25,17 +25,16 @@
 % API - messages' handling by datastore_writer
 -export([check_slave/2, handle_slave_message/2]).
 % API - messages' handling by datastore_cache_writer
--export([handle_internal_message/2, handle_slave_lifecycle_message/2]).
+-export([handle_internal_call/2, handle_internal_cast/2, handle_slave_lifecycle_message/2]).
 
 -record(data, {
     backup_nodes = [] :: [node()], % currently only single backup node is supported
-    slave_status = {not_linked, undefined} :: slave_status(),
+    link_status = not_linked :: linked | not_linked, % status of link between master and slave (see ha_datastore.hrl)
+    slave_pid = undefined :: undefined | pid(),
     propagation_method :: ha_datastore_utils:propagation_method()
 }).
 
 -type ha_master_data() :: #data{}.
--type slave_status() :: {linked | not_linked, undefined | pid()}.
-
 -export_type([ha_master_data/0]).
 
 % Used messages' types:
@@ -63,6 +62,7 @@ init_data(BackupNodes) ->
 check_slave(Key, BackupNodes) ->
     case BackupNodes of
         [Node | _] ->
+            % TODO VFS-6168 - do not check when master wasn't down for a long time.
             case ha_datastore_utils:send_sync_master_message(Node, Key, #get_slave_status{answer_to = self()}, false) of
                 {error, not_alive} ->
                     {false, [], []};
@@ -98,28 +98,28 @@ request_backup(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_C
     case ha_datastore_utils:send_sync_master_message(Node, ProcessKey,
         #request_backup{keys = Keys, cache_requests = CacheRequests}, true) of
         {ok, Pid} ->
-            Data#data{slave_status = {not_linked, Pid}};
+            Data#data{slave_pid = Pid};
         Error ->
             ?warning("Cannot broadcast ha data because of error: ~p", [Error]),
             Data
     end;
-request_backup(ProcessKey, Keys, CacheRequests, #data{slave_status = {not_linked, _},
+request_backup(ProcessKey, Keys, CacheRequests, #data{link_status = not_linked,
     backup_nodes = [Node | _]} = Data) ->
     case ha_datastore_utils:send_sync_master_message(Node, ProcessKey,
         #request_backup{keys = Keys, cache_requests = CacheRequests, link = {true, self()}}, true) of
         {ok, Pid} ->
-            Data#data{slave_status = {linked, Pid}};
+            Data#data{link_status = linked, slave_pid = Pid};
         Error ->
             ?warning("Cannot broadcast ha data because of error: ~p", [Error]),
             Data
     end;
-request_backup(_ProcessKey, Keys, CacheRequests, #data{slave_status = {linked, Pid}} = Data) ->
+request_backup(_ProcessKey, Keys, CacheRequests, #data{slave_pid = Pid} = Data) ->
     ha_datastore_utils:send_async_master_message(Pid, #request_backup{keys = Keys, cache_requests = CacheRequests}),
     Data.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Sends information about keys inactivation to backup nodes
+%% Sends information to backup nodes that keys do not have to be protected anymore
 %% (to delete data that is not needed for HA as keys are already flushed).
 %% @end
 %%--------------------------------------------------------------------
@@ -128,53 +128,41 @@ forget_backup([], _) ->
     ok;
 forget_backup(_, #data{backup_nodes = []}) ->
     ok;
-forget_backup(_, #data{slave_status = {_, undefined}}) ->
+forget_backup(_, #data{slave_pid = undefined}) ->
     ?warning("Inactivation request without slave defined"),
     ok;
-forget_backup(Inactivated, #data{slave_status = {_, Pid}}) ->
+forget_backup(Inactivated, #data{slave_pid = Pid}) ->
     ha_datastore_utils:send_async_master_message(Pid, #forget_backup{keys = Inactivated}).
 
 %%%===================================================================
 %%% API - messages handling by datastore_writer
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles slave message and translates it to action by datastore_writer if needed.
-%% Messages concern proxy requests or emergency requests (both sent in case of previous master failure)
-%% @end
-%%--------------------------------------------------------------------
 -spec handle_slave_message(failover_request_data_processed_message(), pid()) -> boolean().
 handle_slave_message(#failover_request_data_processed{request_handled = HandlingFinished,
     cache_requests_saved = CacheRequests} = Msg, Pid) ->
     datastore_cache:save(maps:values(CacheRequests)),
-    ha_datastore_utils:send_internall_message(Pid, Msg, true),
+    ha_datastore_utils:send_async_internall_message(Pid, Msg),
     HandlingFinished.
 
 %%%===================================================================
 %%% API - messages handling by datastore_cache_writer
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Handles internal message and returns new backup data in case or reconfiguration or new keys to flush in case of
-%% messages concerning emergency requests.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_internal_message(config_changed_message() | failover_request_data_processed_message(),
-    ha_master_data() | datastore_cache_writer:keys_in_flush()) ->
-    ha_master_data() | datastore_cache_writer:keys_in_flush().
-handle_internal_message(?CONFIG_CHANGED, Data) ->
+-spec handle_internal_call(config_changed_message(), ha_master_data()) -> ha_master_data().
+handle_internal_call(?CONFIG_CHANGED, Data) ->
     BackupNodes = ha_datastore_utils:get_backup_nodes(),
     PropagationMethod = ha_datastore_utils:get_propagation_method(),
-    Data#data{backup_nodes = BackupNodes, propagation_method = PropagationMethod};
+    Data#data{backup_nodes = BackupNodes, propagation_method = PropagationMethod}.
 
-handle_internal_message(#failover_request_data_processed{
+-spec handle_internal_cast(failover_request_data_processed_message(), datastore_cache_writer:keys_in_flush()) ->
+    datastore_cache_writer:keys_in_flush().
+handle_internal_cast(#failover_request_data_processed{
     cache_requests_saved = CacheRequestsSaved, keys_flushed = KeysFlushed}, KiF) ->
     NewKiF = lists:map(fun(Key) -> {Key, {slave_flush, undefined}} end, maps:keys(CacheRequestsSaved)),
     KiF2 = maps:merge(maps:from_list(NewKiF), KiF),
     maps:without(sets:to_list(KeysFlushed), KiF2).
 
 -spec handle_slave_lifecycle_message(unlink_request(), ha_master_data()) -> ha_master_data().
-handle_slave_lifecycle_message(?REQUEST_UNLINK, #data{slave_status = {_, Pid}} = Data) ->
-    Data#data{slave_status = {not_linked, Pid}}.
+handle_slave_lifecycle_message(?REQUEST_UNLINK, Data) ->
+    Data#data{link_status = not_linked}.

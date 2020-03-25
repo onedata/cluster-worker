@@ -41,4 +41,12 @@
     keys :: datastore_doc_batch:cached_keys()
 }).
 
+% Record describing classification of requests that indicates where requests should be processed
+-record(classified_datastore_requests, {
+    local :: datastore_writer:requests_internal(),
+    remote :: datastore_writer:requests_internal(),
+    remote_node :: undefined | node(),
+    remote_processing_mode :: ignore | handle_locally | delegate
+}).
+
 -endif.

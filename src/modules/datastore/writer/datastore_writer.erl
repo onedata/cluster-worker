@@ -45,7 +45,8 @@
     ha_slave_data :: ha_slave:ha_slave_data()
 }).
 
--type requests_internal() :: [#datastre_internal_request{}].
+-type requests_internal() :: [#datastre_internal_request{}]. % Datastore internal representation of requests
+                                                             % (internal for datastore not only datastore_writer)
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
 -type value() :: datastore_doc:value().
@@ -386,7 +387,7 @@ handle_cast(?SLAVE_MSG(Msg), State = #state{cache_writer_pid = Pid}) ->
         _ -> {noreply, State}
     end;
 handle_cast(?INTERNAL_MSG(Msg), State = #state{ha_slave_data = Data}) ->
-    Data2 = ha_slave:handle_slave_internal_message(Msg, Data),
+    Data2 = ha_slave:handle_internal_message(Msg, Data),
     {noreply, State#state{ha_slave_data = Data2}};
 handle_cast(Request, State = #state{}) ->
     ?log_bad_request(Request),
@@ -408,7 +409,7 @@ handle_info({terminate, MsgRef}, State = #state{
     cache_writer_pid = Pid,
     ha_slave_data = SlaveData
 }) ->
-    case ha_slave:terminate_slave(SlaveData) of
+    case ha_slave:verify_terminate(SlaveData) of
         {terminate, SlaveData2} ->
             case gen_server:call(Pid, terminate, infinity) of
                 ok -> {stop, normal, State#state{ha_slave_data = SlaveData2}};
