@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides functions used by datastore_writer and
-%%% datastore_cache_writer when ha is enabled and tp process
+%%% datastore_cache_writer when HA is enabled and tp process
 %%% works as slave. Handles two types of activities:
 %%% working in failover mode (handling requests by slave when master is down)
 %%% and handling backup calls (calls used to cache information from master
@@ -23,7 +23,7 @@
 
 %% API
 -export([classify_and_reverse_requests/2, get_mode/1, verify_terminate/1]).
--export([new_failover_requests_data/0, report_failover_request_handled/4, report_keys_flushed/3]).
+-export([init_failover_requests_data/0, report_failover_request_handled/4, report_keys_flushed/3]).
 -export([init_data/0, handle_master_message/3, handle_internal_message/2]).
 -export([set_failover_request_handling/2]).
 -export([handle_management_msg/3]).
@@ -37,7 +37,7 @@
 % working in failover mode (when master is down)
 -record(slave_data, {
     % Fields used for gathering backup data
-    keys_to_protect = #{} :: datastore_doc_batch:cached_keys(),
+    backup_keys = #{} :: datastore_doc_batch:cached_keys(),
     link_to_master = false :: link_to_master(), % TODO VFS-6197 - unlink HA slave during forced termination
 
     % Fields used to indicate working mode and help with transition between modes
@@ -53,6 +53,7 @@
 -type ha_failover_requests_data() :: #failover_requests_data{}.
 -type ha_slave_data() :: #slave_data{}.
 -type link_to_master() :: {true, pid()} | false. % status of link between master and slave (see ha_datastore.hrl)
+                                                 % if processes are linked, the pid of master is part of status
 -type keys_set() :: sets:set(datastore:key()).
 -type cache_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
 -type slave_status() :: #slave_status{}.
@@ -70,8 +71,8 @@
 %%% API - Working in failover mode
 %%%===================================================================
 
--spec new_failover_requests_data() -> ha_failover_requests_data().
-new_failover_requests_data() ->
+-spec init_failover_requests_data() -> ha_failover_requests_data().
+init_failover_requests_data() ->
     #failover_requests_data{}.
 
 
@@ -98,7 +99,7 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
     end.
 
 %%%===================================================================
-%%% API - Helper functions to use ha_data and provide ha functionality
+%%% API - Helper functions to use ha_data and provide HA functionality
 %%%===================================================================
 
 -spec init_data() -> ha_slave_data().
@@ -149,12 +150,12 @@ classify_and_reverse_requests(Requests, Mode) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec verify_terminate(ha_slave_data()) -> {terminate | retry | schedule, ha_slave_data()}.
-verify_terminate(#slave_data{link_to_master = false, keys_to_protect = Keys} = Data) ->
+verify_terminate(#slave_data{link_to_master = false, backup_keys = Keys} = Data) ->
     case maps:size(Keys) of
         0 -> {terminate, Data};
         _ -> {schedule, Data}
     end;
-verify_terminate(#slave_data{link_to_master = {true, Pid}, keys_to_protect = Keys} = Data) ->
+verify_terminate(#slave_data{link_to_master = {true, Pid}, backup_keys = Keys} = Data) ->
     case maps:size(Keys) of
         0 ->
             catch ha_datastore_utils:send_sync_slave_message(Pid, ?REQUEST_UNLINK),
@@ -171,16 +172,16 @@ verify_terminate(#slave_data{link_to_master = {true, Pid}, keys_to_protect = Key
     datastore_writer:requests_internal()) ->
     {ok | slave_status(), ha_slave_data(), datastore_writer:requests_internal()}.
 % Calls associated with backup creation/deletion
-handle_master_message(#request_backup{keys = Keys, cache_requests = CacheRequests, link = Link}, #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
+handle_master_message(#request_backup{keys = Keys, cache_requests = CacheRequests, link = Link}, #slave_data{backup_keys = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:save(CacheRequests),
     SlaveData2 = case Link of
         {true, _} -> SlaveData#slave_data{link_to_master = Link};
         _ -> SlaveData
     end,
-    {ok, SlaveData2#slave_data{keys_to_protect = maps:merge(DataKeys, Keys)}, WaitingRequests};
-handle_master_message(#forget_backup{keys = Inactivated}, #slave_data{keys_to_protect = DataKeys} = SlaveData, WaitingRequests) ->
+    {ok, SlaveData2#slave_data{backup_keys = maps:merge(DataKeys, Keys)}, WaitingRequests};
+handle_master_message(#forget_backup{keys = Inactivated}, #slave_data{backup_keys = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:inactivate(Inactivated),
-    {ok, SlaveData#slave_data{keys_to_protect = maps:without(maps:keys(Inactivated), DataKeys)}, WaitingRequests};
+    {ok, SlaveData#slave_data{backup_keys = maps:without(maps:keys(Inactivated), DataKeys)}, WaitingRequests};
 
 % Checking slave status
 handle_master_message(#get_slave_status{answer_to = Pid}, #slave_data{failover_request_handling = Status,
@@ -220,8 +221,8 @@ handle_internal_message(#failover_request_data_processed{cache_requests_saved = 
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
     ha_datastore_utils:send_sync_internall_message(Pid, ?CONFIG_CHANGED),
     Data;
-handle_management_msg(?MASTER_DOWN, #slave_data{keys_to_protect = Keys} = Data, Pid) ->
+handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid) ->
     datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart
-    Data#slave_data{keys_to_protect = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE};
+    Data#slave_data{backup_keys = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE};
 handle_management_msg(?MASTER_UP, Data, _Pid) ->
     Data#slave_data{slave_mode = ?STANDBY_SLAVE_MODE}.

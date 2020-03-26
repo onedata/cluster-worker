@@ -47,16 +47,20 @@ test_hashing(Config) ->
         Node
     end, Labels),
 
-    % Check label mapping to multiple nodes
+    % Check label mapping to with get_full_node_info
     lists:foreach(fun(Label) ->
         lists:foreach(fun(NodesCount) ->
-            {Alive1, Alive2, Broken, _} = Nodes = rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount]),
+            rpc:call(FirstNode, consistent_hashing, set_label_associated_nodes_count, [NodesCount]),
+            {Associated, Failed, All} = Nodes = rpc:call(FirstNode, consistent_hashing, get_full_node_info, [Label]),
             % The same label should yield the same nodes
-            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount])),
+            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_full_node_info, [Label])),
+            % TODO - uncomment after VFS-6209
+%%            ?assertEqual(NodesCount, length(Associated)),
+            ?assertEqual(lists:sort(AllNodes), All),
             lists:foreach(fun(Node) ->
                 ?assert(erlang:is_atom(Node)),
                 ?assert(lists:member(Node, AllNodes))
-            end, Alive1 ++ Alive2 ++ Broken)
+            end, Associated ++ Failed)
         end, lists:seq(1, length(AllNodes)))
     end, Labels),
 

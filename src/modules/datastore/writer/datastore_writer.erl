@@ -37,7 +37,7 @@
 -record(state, {
     requests = [] :: requests_internal(),
     cache_writer_pid :: pid(),
-    cache_writer_state = idle :: idle | {active, reference()},
+    cache_writer_state = idle :: idle | {active, reference() | backup}, % backup if process is waiting for slave action
     disc_writer_state = idle :: idle | {active, reference()},
     terminate_msg_ref :: undefined | reference(),
     terminate_timer_ref :: undefined | reference(),
@@ -303,7 +303,7 @@ wait(Ref, Pid) ->
     {stop, Reason :: term()} | ignore.
 init([Key]) ->
     BackupNodes = ha_datastore_utils:get_backup_nodes(),
-    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_master:check_slave(Key, BackupNodes),
+    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_master:verify_slave_activity(Key, BackupNodes),
 
     CacheWriterState = case ActiveRequests of
         false -> idle;

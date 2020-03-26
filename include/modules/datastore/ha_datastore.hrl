@@ -11,11 +11,11 @@
 %%% sends backup information to slave process. Slave process is responsible for management of backup information as
 %%% long as it is needed (when document is stored to couchbase no backup data is required) and handling requests if
 %%% node of master fails. Single TP process can act as a master for some keys and as a slave for other set of keys.
-%%% TP process is composed of datastore_writer, datastore_cache_writer
-%%% and datastore_disc_writer. First two elements are important for HA.
-%%% As datastore_writer typically caches requests and manages TP lifecycle, it is
-%%% mainly used for HA lifecycle management and storing backup data (data
-%%% used by slave to finish documents' flushing to couchbase when master is down).
+%%% TP process is composed of datastore_writer, datastore_cache_writer and datastore_disc_writer.
+%%% First two elements are important for HA. As datastore_writer typically caches requests and manages TP lifecycle,
+%%% it is mainly used for HA lifecycle management and storing backup data (data used by slave to finish documents'
+%%% flushing to couchbase when master is down). Backup data is deleted when master sends message to slave that informs
+%%% that document has been inactivated (flushed to couchbase in case of cached documents).
 %%% Datastore_cache_writer is typically responsible for handling requests and saving
 %%% changed documents to memory. Thus, it is mainly responsible for broadcasting
 %%% backup information (role of HA master) and handling requests as slave when master is down.

@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module provides functions used by datastore_writer and
-%%% datastore_cache_writer when ha is enabled and process
+%%% datastore_cache_writer when HA is enabled and process
 %%% works as master (processing requests).
 %%% For more information see ha_datastore.hrl.
 %%% @end
@@ -23,7 +23,7 @@
 % API - broadcasting actions to slave
 -export([request_backup/4, forget_backup/2]).
 % API - messages' handling by datastore_writer
--export([check_slave/2, handle_slave_message/2]).
+-export([verify_slave_activity/2, handle_slave_message/2]).
 % API - messages' handling by datastore_cache_writer
 -export([handle_internal_call/2, handle_internal_cast/2, handle_slave_lifecycle_message/2]).
 
@@ -54,12 +54,13 @@ init_data(BackupNodes) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Verifies slave state during start of process that works as master.
+%% Verifies slave activity to check if slave processes any requests connected to master's keys. In such a case master
+%% will wait with processing for slave's processing finish. Executed during start of process that works as master.
 %% @end
 %%--------------------------------------------------------------------
--spec check_slave(datastore:key(), [node()]) ->
+-spec verify_slave_activity(datastore:key(), [node()]) ->
     {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
-check_slave(Key, BackupNodes) ->
+verify_slave_activity(Key, BackupNodes) ->
     case BackupNodes of
         [Node | _] ->
             % TODO VFS-6168 - do not check when master wasn't down for a long time.
@@ -82,11 +83,6 @@ check_slave(Key, BackupNodes) ->
 %%% API - broadcasting actions to slave
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sends information about request handling to backup nodes (to be used in case of failure).
-%% @end
-%%--------------------------------------------------------------------
 -spec request_backup(datastore:key(), datastore_doc_batch:cached_keys(),
     [datastore_cache:cache_save_request()], ha_master_data()) -> ha_master_data().
 request_backup(_ProcessKey, [], _CacheRequests, Data) ->
@@ -100,7 +96,7 @@ request_backup(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_C
         {ok, Pid} ->
             Data#data{slave_pid = Pid};
         Error ->
-            ?warning("Cannot broadcast ha data because of error: ~p", [Error]),
+            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
             Data
     end;
 request_backup(ProcessKey, Keys, CacheRequests, #data{link_status = not_linked,
@@ -110,19 +106,13 @@ request_backup(ProcessKey, Keys, CacheRequests, #data{link_status = not_linked,
         {ok, Pid} ->
             Data#data{link_status = linked, slave_pid = Pid};
         Error ->
-            ?warning("Cannot broadcast ha data because of error: ~p", [Error]),
+            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
             Data
     end;
 request_backup(_ProcessKey, Keys, CacheRequests, #data{slave_pid = Pid} = Data) ->
     ha_datastore_utils:send_async_master_message(Pid, #request_backup{keys = Keys, cache_requests = CacheRequests}),
     Data.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sends information to backup nodes that keys do not have to be protected anymore
-%% (to delete data that is not needed for HA as keys are already flushed).
-%% @end
-%%--------------------------------------------------------------------
 -spec forget_backup(datastore_doc_batch:cached_keys(), ha_master_data()) -> ok.
 forget_backup([], _) ->
     ok;

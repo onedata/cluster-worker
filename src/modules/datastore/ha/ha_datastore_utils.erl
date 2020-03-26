@@ -6,7 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions used to configure ha.
+%%% This module provides functions used to configure HA.
 %%% NOTE: Functions in this module work node-wide as failures concern whole nodes.
 %%% NOTE: Config functions should be executed on all nodes during cluster reconfiguration.
 %%% TODO - VFS-6166 - Verify HA Cast
@@ -29,7 +29,8 @@
     broadcast_management_message/1]).
 %% API
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
--export([master_down/0, master_up/0, change_config/2]).
+-export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
+    change_config/2]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -45,6 +46,9 @@
     ha_slave:master_node_status_message() | ha_master:config_changed_message().
 
 -export_type([ha_message_type/0, ha_message/0]).
+
+% Internal module types
+-type key_associated_nodes_count() :: pos_integer().
 
 %%%===================================================================
 %%% Message sending API
@@ -116,7 +120,7 @@ get_backup_nodes() ->
                     1 ->
                         [];
                     BackupNodesNum ->
-                        Nodes = get_backup_nodes(node(), consistent_hashing:get_all_nodes()),
+                        Nodes = arrange_nodes(node(), consistent_hashing:get_all_nodes()),
                         lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)))
                 end,
                 application:set_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes, Ans),
@@ -137,23 +141,23 @@ clean_backup_nodes_cache() ->
 %%% the change - processes usually read environment variables only during initialization).
 %%%===================================================================
 
--spec master_down() -> ok.
-master_down() ->
-    ?info("Set and broadcast master_down"),
+-spec set_failover_mode_and_broadcast_master_down_message() -> ok.
+set_failover_mode_and_broadcast_master_down_message() ->
+    ?info("Set failover mode and broadcast master_down"),
     set_slave_mode(?FAILOVER_SLAVE_MODE),
     broadcast_management_message(?MASTER_DOWN).
 
 
--spec master_up() -> ok.
-master_up() ->
-    ?info("Set and broadcast master_up"),
+-spec set_standby_mode_and_broadcast_master_up_message() -> ok.
+set_standby_mode_and_broadcast_master_up_message() ->
+    ?info("Set standby mode and broadcast master_up"),
     set_slave_mode(?STANDBY_SLAVE_MODE),
     broadcast_management_message(?MASTER_UP).
 
 
--spec change_config(non_neg_integer(), propagation_method()) -> ok.
+-spec change_config(key_associated_nodes_count(), propagation_method()) -> ok.
 change_config(NodesNumber, PropagationMethod) ->
-    ?info("Set and broadcast new ha config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
+    ?info("Set and broadcast new HA config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
     consistent_hashing:set_label_associated_nodes_count(NodesNumber),
     clean_backup_nodes_cache(),
     set_propagation_method(PropagationMethod),
@@ -163,8 +167,14 @@ change_config(NodesNumber, PropagationMethod) ->
 %%% Internal functions
 %%%===================================================================
 
--spec get_backup_nodes(MyNode :: node(), AllNodes :: [node()]) -> BackupNodes :: [node()].
-get_backup_nodes(MyNode, [MyNode | Nodes]) ->
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns nodes' list without local node, starting from the node that is next after local node at the original list.
+%% @end
+%%--------------------------------------------------------------------
+-spec arrange_nodes(MyNode :: node(), AllNodes :: [node()]) -> BackupNodes :: [node()].
+arrange_nodes(MyNode, [MyNode | Nodes]) ->
     Nodes;
-get_backup_nodes(MyNode, [Node | Nodes]) ->
-    get_backup_nodes(MyNode, Nodes ++ [Node]).
+arrange_nodes(MyNode, [Node | Nodes]) ->
+    arrange_nodes(MyNode, Nodes ++ [Node]).

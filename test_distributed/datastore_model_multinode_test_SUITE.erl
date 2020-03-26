@@ -276,9 +276,9 @@ saves_should_change_node_dynamic(Config, Method) ->
         timer:sleep(10000), % Time for disk flush
         assert_not_on_disc(TestWorker, Model, Key),
 
-        set_ha(KeyNode2, master_down, []),
+        set_ha(KeyNode2, set_failover_mode_and_broadcast_master_down_message, []),
         assert_on_disc(TestWorker, Model, Key),
-        set_ha(KeyNode2, master_up, [])
+        set_ha(KeyNode2, set_standby_mode_and_broadcast_master_up_message, [])
     end, ?TEST_MODELS -- [disc_only_model]).
 
 node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
@@ -318,7 +318,7 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
             _ ->
                 ok
         end,
-        set_ha(KeyNode2, master_up, []),
+        set_ha(KeyNode2, set_standby_mode_and_broadcast_master_up_message, []),
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
@@ -352,12 +352,12 @@ set_ha(Config, Fun, Args) ->
     end, Workers).
 
 mock_node_down(CallNode, ExecuteNode, BrokenNode) ->
-    set_ha(ExecuteNode, master_down, []),
+    set_ha(ExecuteNode, set_failover_mode_and_broadcast_master_down_message, []),
     ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, report_node_failure, [BrokenNode])).
 
 mock_node_up(CallNode, ExecuteNode, BrokenNode) ->
     ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, report_node_recovery, [BrokenNode])),
-    set_ha(ExecuteNode, master_up, []).
+    set_ha(ExecuteNode, set_standby_mode_and_broadcast_master_up_message, []).
 
 check_update(Node, Value) ->
     Rec = receive
@@ -440,7 +440,7 @@ end_per_testcase(ha_test, Config) ->
         end, Workers)
     end, Workers),
     terminate_processes(Config),
-    set_ha(Config, master_up, []),
+    set_ha(Config, set_standby_mode_and_broadcast_master_up_message, []),
     set_ha(Config, change_config, [1, cast]),
     test_utils:mock_unload(Workers, [ha_master]);
 end_per_testcase(Case, Config) ->

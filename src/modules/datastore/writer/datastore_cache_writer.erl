@@ -53,7 +53,7 @@
 -type batch() :: datastore_doc_batch:batch().
 -type cached_keys() :: datastore_doc_batch:cached_keys().
 -type keys_in_flush() :: #{key() => {reference() | slave_flush, ctx() | undefined}}. % Undefined ctx value for keys
-                                                                                     % in flush on ha slave node
+                                                                                     % in flush on HA slave node
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
@@ -127,7 +127,7 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
         keys_in_flush = maps:from_list(KiF),
         ha_master_data = ha_master:init_data(BackupNodes),
-        ha_failover_requests_data = ha_slave:new_failover_requests_data()}}.
+        ha_failover_requests_data = ha_slave:init_failover_requests_data()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -765,12 +765,7 @@ links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
             {{error, Reason}, Batch2}
     end.
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sends responses.
-%% @end
-%%--------------------------------------------------------------------
 -spec send_responses(list(), batch()) -> batch().
 send_responses([], Batch) ->
     Batch;
@@ -778,12 +773,7 @@ send_responses([Response | Responses], Batch) ->
     send_response(Response, Batch),
     send_responses(Responses, Batch).
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sends response.
-%% @end
-%%--------------------------------------------------------------------
 -spec send_response(request() | [request()], batch()) -> any().
 send_response({Pid, Ref, {_ReqRef, {error, Reason}}}, _Batch) ->
     Pid ! {Ref, {error, Reason}};
@@ -804,12 +794,7 @@ send_response({Pid, Ref, Responses}, Batch) ->
     end, lists:reverse(Responses)),
     Pid ! {Ref, Responses2}.
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sends information about proxy delegation.
-%% @end
-%%--------------------------------------------------------------------
 -spec send_proxy_info(datastore_writer:requests_internal(), term()) -> ok.
 send_proxy_info([], _Info) ->
     ok;
@@ -817,22 +802,12 @@ send_proxy_info([#datastre_internal_request{pid = Pid, ref = Ref} | Requests], I
     Pid ! {Ref, Info},
     send_proxy_info(Requests, Info).
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Schedules flush.
-%% @end
-%%--------------------------------------------------------------------
 -spec schedule_flush(state()) -> state().
 schedule_flush(State) ->
     schedule_flush(State, ?DATASTORE_WRITER_FLUSH_DELAY).
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Schedules flush.
-%% @end
-%%--------------------------------------------------------------------
 -spec schedule_flush(state(), non_neg_integer()) -> state().
 schedule_flush(State = #state{cached_keys_to_flush = Map}, _Delay) when map_size(Map) == 0 ->
     State;
@@ -854,12 +829,7 @@ schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
             State
     end.
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sets mutator pid.
-%% @end
-%%--------------------------------------------------------------------
 -spec set_mutator_pid(ctx()) -> ctx().
 set_mutator_pid(Ctx) ->
     Ctx#{mutator_pid => self()}.
