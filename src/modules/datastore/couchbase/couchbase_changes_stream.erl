@@ -282,6 +282,9 @@ get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
         ({{ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) ->
             {true, Doc};
         ({{ok, _, #document{}}, _Rev}) ->
+            false;
+        ({{error, not_found}, Rev}) ->
+            ?debug("Document not found in changes stream in revision ~p", [Rev]),
             false
     end, lists:zip(couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
 
