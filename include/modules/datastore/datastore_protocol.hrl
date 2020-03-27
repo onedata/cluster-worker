@@ -21,17 +21,17 @@
 }).
 
 % Internal representation of request by datastore_writer (when request is waiting in queue to be processed)
--record(datastre_internal_request, {
-    pid :: pid(),
-    ref :: reference(),
+-record(datastore_internal_request, {
+    pid :: pid(), % Pid of calling process
+    ref :: reference(), % Reference used by calling process to identify answer
     request :: #datastore_request{}
 }).
 
 % Batch of requests to be processed by datastore_cache_writer
 % Can be sent between tp processes in case of node failures (see ha_datastore.hrl)
--record(datastre_internal_requests_batch, {
+-record(datastore_internal_requests_batch, {
     ref :: reference(),
-    requests :: [#datastre_internal_request{}],
+    requests :: [#datastore_internal_request{}],
     mode :: ha_datastore_utils:slave_mode()
 }).
 
@@ -41,12 +41,17 @@
     keys :: datastore_doc_batch:cached_keys()
 }).
 
+% Remote documents processing modes
+-define(HANDLE_LOCALLY, handle_locally). % Remote node is down - handle locally
+-define(DELEGATE, delegate). % Delegate to remote node
+-define(IGNORE, ignore). % No action is needed
+
 % Record describing classification of requests that indicates where requests should be processed
 -record(classified_datastore_requests, {
     local :: datastore_writer:requests_internal(),
     remote :: datastore_writer:requests_internal(),
     remote_node :: undefined | node(),
-    remote_processing_mode :: ignore | handle_locally | delegate
+    remote_processing_mode :: datastore_cache_writer:remote_processing_mode()
 }).
 
 -endif.

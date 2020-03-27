@@ -81,7 +81,7 @@ init_failover_requests_data() ->
 report_failover_request_handled(Pid, CachedKeys, CacheRequests, #failover_requests_data{keys = DataKeys} = Data) ->
     DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
     CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, CacheRequests),
-    ha_datastore_utils:send_async_internall_message(Pid,
+    ha_datastore_utils:send_async_internal_message(Pid,
         #failover_request_data_processed{request_handled = true, cache_requests_saved = maps:from_list(CacheRequests2)}),
     Data#failover_requests_data{keys = DataKeys2}.
 
@@ -94,7 +94,8 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
         0 ->
             Data;
         _ ->
-            ha_datastore_utils:send_async_internall_message(Pid, #failover_request_data_processed{keys_flushed = KeysToReport}),
+            ha_datastore_utils:send_async_internal_message(Pid,
+                #failover_request_data_processed{keys_flushed = KeysToReport}),
             Data#failover_requests_data{keys = sets:subtract(DataKeys, KeysToReport)}
     end.
 
@@ -116,7 +117,8 @@ get_mode(#slave_data{slave_mode = Mode}) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Splits requests into local and remote requests groups. Also reverses requests as requests are stored in revered list.
+%% Splits requests into local and remote requests groups.
+%% Also reverses requests as requests are stored in revered list.
 %% @end
 %%--------------------------------------------------------------------
 -spec classify_and_reverse_requests(datastore_writer:requests_internal(), ha_datastore_utils:slave_mode()) ->
@@ -127,7 +129,8 @@ classify_and_reverse_requests(Requests, Mode) ->
     MyNode = node(),
 
     {LocalList, RemoteList, RemoteNode} = lists:foldl(fun
-        (#datastre_internal_request{request = #datastore_request{ctx = #{failed_master := true, failed_nodes := [Master | _]}}} =
+        (#datastore_internal_request{request = #datastore_request{
+            ctx = #{failed_master := true, failed_nodes := [Master | _]}}} =
             Request, {Local, Remote, _}) when Master =/= MyNode ->
             {Local, [Request | Remote], Master};
         (Request, {Local, Remote, Node}) ->
@@ -135,9 +138,9 @@ classify_and_reverse_requests(Requests, Mode) ->
     end, {[], [], undefined}, Requests),
 
     RemoteMode = case {RemoteList, Mode} of
-        {[], _} -> ignore;
-        {_, ?STANDBY_SLAVE_MODE} -> delegate;
-        {_, ?FAILOVER_SLAVE_MODE} -> handle_locally
+        {[], _} -> ?IGNORE;
+        {_, ?STANDBY_SLAVE_MODE} -> ?DELEGATE;
+        {_, ?FAILOVER_SLAVE_MODE} -> ?HANDLE_LOCALLY
     end,
 
     #classified_datastore_requests{local = LocalList, remote = RemoteList, remote_node = RemoteNode,
@@ -172,7 +175,8 @@ verify_terminate(#slave_data{link_to_master = {true, Pid}, backup_keys = Keys} =
     datastore_writer:requests_internal()) ->
     {ok | slave_status(), ha_slave_data(), datastore_writer:requests_internal()}.
 % Calls associated with backup creation/deletion
-handle_master_message(#request_backup{keys = Keys, cache_requests = CacheRequests, link = Link}, #slave_data{backup_keys = DataKeys} = SlaveData, WaitingRequests) ->
+handle_master_message(#request_backup{keys = Keys, cache_requests = CacheRequests, link = Link},
+    #slave_data{backup_keys = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:save(CacheRequests),
     SlaveData2 = case Link of
         {true, _} -> SlaveData#slave_data{link_to_master = Link};
@@ -219,7 +223,7 @@ handle_internal_message(#failover_request_data_processed{cache_requests_saved = 
 
 -spec handle_management_msg(master_node_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
-    ha_datastore_utils:send_sync_internall_message(Pid, ?CONFIG_CHANGED),
+    ha_datastore_utils:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
     Data;
 handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid) ->
     datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart

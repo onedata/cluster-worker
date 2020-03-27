@@ -28,15 +28,12 @@
 %%% The requests connected with single datastore key can be processed only by one process at one time - master or slave.
 %%% Slave processes requests if master is down. If master recovers during request processing by slave, it withholds
 %%% processing until processing of current request is finished by slave. Similar behaviour can be observed with
-%%% documents flushing - master is not flushing changes until flush of slave is finished.
+%%% documents flushing - master is not flushing changes until flushing by slave is finished.
 %%%
 %%% After master recovery it is possible that some requests that should be processed by master are sent to slave (delay
 %%% in propagation of information that master is working again). In such a case, slave process redirects request to
-%%% master that will handle it and answer directly to calling process. For such redirection, datastre_internal_request
+%%% master that will handle it and answer directly to calling process. For such redirection, datastore_internal_request
 %%% is used - no new message in HA protocol is needed.
-
-% Napisac ze proxy to datastre_internal_request
-% poprawic analyse requests i typ requests_internal (wcale nie takie internal)
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 
@@ -87,7 +84,7 @@
 
 %%%=============================================================================================================
 %%% Message connected with recovering of master node. After master failure, slave works in failover state.
-%%% When master node recovers, slave can still processing requests. In such a case slave sends
+%%% When master node recovers, slave can be still processing requests. In such a case slave sends
 %%% failover_request_data_processed messages to master to inform it when handling is over
 %%% (to allow master processing of requests - see main doc of this hrl).
 %%% If any request is sent to slave after master recovery (client is using old routing information and does not know

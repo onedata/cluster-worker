@@ -26,7 +26,7 @@
 -export([create/3, save/3, update/3, update/4, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
--export([custom_call/2, call_if_alive/2]).
+-export([generic_call/2, call_if_alive/2]).
 %% For ct tests
 -export([call/4, call_async/4, wait/2]).
 
@@ -45,7 +45,7 @@
     ha_slave_data :: ha_slave:ha_slave_data()
 }).
 
--type requests_internal() :: [#datastre_internal_request{}]. % Datastore internal representation of requests
+-type requests_internal() :: [#datastore_internal_request{}]. % Datastore internal representation of requests
                                                              % (internal for datastore not only datastore_writer)
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
@@ -242,21 +242,21 @@ multi_call(Ctx, Key, Function, Args, Size) ->
 %% Performs asynchronous call to a datastore writer process associated
 %% with a key and returns response reference, which may be passed to
 %% {@link wait/1} to collect result.
-%% @equiv custom_call(Key, #datastore_request{function = Function, ctx = Ctx, args = Args})
+%% @equiv generic_call(Key, #datastore_request{function = Function, ctx = Ctx, args = Args})
 %% @end
 %%--------------------------------------------------------------------
 -spec call_async(ctx(), tp_key(), atom(), list()) ->
     {{ok, reference()}, pid()} | {error, term()}.
 call_async(Ctx, Key, Function, Args) ->
-    custom_call(Key, #datastore_request{function = Function, ctx = Ctx, args = Args}).
+    generic_call(Key, #datastore_request{function = Function, ctx = Ctx, args = Args}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Performs custom call to datastore writer process. Returns answer and pid.
 %% @end
 %%--------------------------------------------------------------------
--spec custom_call(tp_key(), term()) -> {term(), pid()} | {error, term()}.
-custom_call(Key, Request) ->
+-spec generic_call(tp_key(), term()) -> {term(), pid()} | {error, term()}.
+generic_call(Key, Request) ->
     tp:call(?MODULE, [Key], Key, Request, ?TP_CALL_TIMEOUT, ?TP_CALL_ATTEMPTS).
 
 %%--------------------------------------------------------------------
@@ -334,9 +334,9 @@ handle_call(#datastore_request{} = Request, {Pid, _Tag}, State = #state{
     requests = Requests
 }) ->
     Ref = make_ref(),
-    State2 = State#state{requests = [#datastre_internal_request{pid = Pid, ref = Ref, request = Request} | Requests]},
+    State2 = State#state{requests = [#datastore_internal_request{pid = Pid, ref = Ref, request = Request} | Requests]},
     {reply, {ok, Ref}, schedule_terminate(handle_requests(State2))};
-handle_call(#datastre_internal_requests_batch{requests = NewRequests}, _From, State = #state{
+handle_call(#datastore_internal_requests_batch{requests = NewRequests}, _From, State = #state{
     requests = Requests
 }) ->
     {reply, ok, schedule_terminate(handle_requests(State#state{requests = NewRequests ++ Requests}))};
@@ -472,7 +472,7 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle, ha_slave_data = SlaveData
 }) ->
     Ref = make_ref(),
-    HandlingFailoverRequest = gen_server:call(Pid, #datastre_internal_requests_batch{
+    HandlingFailoverRequest = gen_server:call(Pid, #datastore_internal_requests_batch{
         ref = Ref, requests = Requests, mode = ha_slave:get_mode(SlaveData)}, infinity),
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of

@@ -59,8 +59,10 @@
 -type cached_token_map() ::
     #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
 -type is_failover_request() :: boolean(). % see ha_datastore.hrl for failover requests description
+-type remote_processing_mode() :: ?HANDLE_LOCALLY | ?DELEGATE | ?IGNORE. % remote documents processing modes
+                                                                         % (see datastore_protocol.hrl)
 
--export_type([keys_in_flush/0]).
+-export_type([keys_in_flush/0, remote_processing_mode/0]).
 
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
@@ -143,18 +145,18 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call(#datastre_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
+handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
     State = #state{process_key = ProcessKey, master_pid = Pid}) ->
     #classified_datastore_requests{local = LocalRequests, remote = RemoteRequests, remote_node = RemoteNode,
         remote_processing_mode = RemoteProcessingMode} = ha_slave:classify_and_reverse_requests(Requests, Mode),
-    gen_server:reply(From, RemoteProcessingMode =:= handle_locally),
+    gen_server:reply(From, RemoteProcessingMode =:= ?HANDLE_LOCALLY),
     State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
     State3 = case RemoteProcessingMode of
-        delegate ->
+        ?DELEGATE ->
             % TODO - VFS-6171 - reply to caller
             RemoteRequestsReversed = lists:reverse(RemoteRequests), % requests are stored and sent in reversed list
-            case rpc:call(RemoteNode, datastore_writer, custom_call, [ProcessKey,
-                RequestsBatch#datastre_internal_requests_batch{requests = RemoteRequestsReversed}]) of
+            case rpc:call(RemoteNode, datastore_writer, generic_call, [ProcessKey,
+                RequestsBatch#datastore_internal_requests_batch{requests = RemoteRequestsReversed}]) of
                 {ok, ProxyPid} ->
                     send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid});
                 {badrpc, Reason} ->
@@ -446,7 +448,7 @@ handle_requests(Requests, IsFailoverRequest, State = #state{
     {list(), batch(), cached_token_map()}.
 batch_requests([], Responses, Batch, LinkTokens) ->
     {lists:reverse(Responses), Batch, LinkTokens};
-batch_requests([#datastre_internal_request{pid = Pid, ref = Ref, request = Request} | Requests],
+batch_requests([#datastore_internal_request{pid = Pid, ref = Ref, request = Request} | Requests],
     Responses, Batch, LinkTokens) ->
     case batch_request(Request, Batch, LinkTokens) of
         {Response, Batch2, LinkTokens2} ->
@@ -798,7 +800,7 @@ send_response({Pid, Ref, Responses}, Batch) ->
 -spec send_proxy_info(datastore_writer:requests_internal(), term()) -> ok.
 send_proxy_info([], _Info) ->
     ok;
-send_proxy_info([#datastre_internal_request{pid = Pid, ref = Ref} | Requests], Info) ->
+send_proxy_info([#datastore_internal_request{pid = Pid, ref = Ref} | Requests], Info) ->
     Pid ! {Ref, Info},
     send_proxy_info(Requests, Info).
 

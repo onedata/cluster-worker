@@ -23,7 +23,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% Message sending API
--export([send_async_internall_message/2, send_sync_internall_message/2,
+-export([send_async_internal_message/2, send_sync_internal_message/2,
     send_async_slave_message/2, send_sync_slave_message/2,
     send_async_master_message/2, send_sync_master_message/4,
     broadcast_management_message/1]).
@@ -54,14 +54,14 @@
 %%% Message sending API
 %%%===================================================================
 
--spec send_async_internall_message(pid(), ha_master:failover_request_data_processed_message() | ha_slave:master_node_status_message() |
-    ha_master:config_changed_message()) -> ok.
-send_async_internall_message(Pid, Msg) ->
+-spec send_async_internal_message(pid(), ha_master:failover_request_data_processed_message() |
+    ha_slave:master_node_status_message() | ha_master:config_changed_message()) -> ok.
+send_async_internal_message(Pid, Msg) ->
     gen_server:cast(Pid, ?INTERNAL_MSG(Msg)).
 
--spec send_sync_internall_message(pid(), ha_master:failover_request_data_processed_message() | ha_slave:master_node_status_message() |
-ha_master:config_changed_message()) -> ok.
-send_sync_internall_message(Pid, Msg) ->
+-spec send_sync_internal_message(pid(), ha_master:failover_request_data_processed_message() |
+    ha_slave:master_node_status_message() | ha_master:config_changed_message()) -> ok.
+send_sync_internal_message(Pid, Msg) ->
     gen_server:call(Pid, ?INTERNAL_MSG(Msg), infinity).
 
 -spec send_async_slave_message(pid(), ha_master:failover_request_data_processed_message()) -> ok.
@@ -77,9 +77,9 @@ send_async_master_message(Ref, Msg) ->
     gen_server:cast(Ref, ?MASTER_MSG(Msg)).
 
 -spec send_sync_master_message(node(), datastore:key(), ha_slave:backup_message() | ha_slave:get_slave_status() |
-    #datastre_internal_requests_batch{}, StartIfNotAlive :: boolean()) -> term().
+    #datastore_internal_requests_batch{}, StartIfNotAlive :: boolean()) -> term().
 send_sync_master_message(Node, ProcessKey, Msg, true) ->
-    rpc:call(Node, datastore_writer, custom_call, [ProcessKey, ?MASTER_MSG(Msg)]);
+    rpc:call(Node, datastore_writer, generic_call, [ProcessKey, ?MASTER_MSG(Msg)]);
 send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
     rpc:call(Node, datastore_writer, call_if_alive, [ProcessKey, ?MASTER_MSG(Msg)]).
 

@@ -244,9 +244,9 @@ saves_should_use_recovered_node(Config, Method) ->
         assert_on_disc(TestWorker, Model, Key),
         assert_not_in_memory(KeyNode, Model, Key),
 
-%%        set_ha(KeyNode2, master_up, []),
-%%        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
-%%        assert_in_memory(KeyNode, Model, Key),
+        set_ha(KeyNode2, set_standby_mode_and_broadcast_master_up_message, []),
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
+        assert_in_memory(KeyNode, Model, Key),
         ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, report_node_recovery, [KeyNode]))
     end, ?TEST_MODELS).
 

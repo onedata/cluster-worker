@@ -27,9 +27,14 @@
 % API - messages' handling by datastore_cache_writer
 -export([handle_internal_call/2, handle_internal_cast/2, handle_slave_lifecycle_message/2]).
 
+% status of link between master and slave (see ha_datastore.hrl)
+-define(SLAVE_LINKED, linked).
+-define(SLAVE_NOT_LINKED, not_linked).
+-type link_status() :: ?SLAVE_LINKED | ?SLAVE_NOT_LINKED.
+
 -record(data, {
     backup_nodes = [] :: [node()], % currently only single backup node is supported
-    link_status = not_linked :: linked | not_linked, % status of link between master and slave (see ha_datastore.hrl)
+    link_status = ?SLAVE_NOT_LINKED :: link_status(),
     slave_pid = undefined :: undefined | pid(),
     propagation_method :: ha_datastore_utils:propagation_method()
 }).
@@ -54,8 +59,10 @@ init_data(BackupNodes) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Verifies slave activity to check if slave processes any requests connected to master's keys. In such a case master
-%% will wait with processing for slave's processing finish. Executed during start of process that works as master.
+%% Verifies slave activity to check if slave processes any
+%% requests connected to master's keys. In such a case master
+%% will wait with processing for slave's processing finish.
+%% Executed during start of process that works as master.
 %% @end
 %%--------------------------------------------------------------------
 -spec verify_slave_activity(datastore:key(), [node()]) ->
@@ -70,7 +77,8 @@ verify_slave_activity(Key, BackupNodes) ->
                 #slave_status{failover_request_handling = ActiveRequests,
                     failover_pending_cache_requests = CacheRequestsMap,
                     failover_finished_memory_cache_requests = MemoryRequests,
-                    failover_requests_to_handle = RequestsToHandle} ->
+                    failover_requests_to_handle = RequestsToHandle
+                } ->
                     datastore_cache:save(maps:values(CacheRequestsMap)),
                     datastore_cache:save(MemoryRequests),
                     {ActiveRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
@@ -99,12 +107,12 @@ request_backup(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_C
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
             Data
     end;
-request_backup(ProcessKey, Keys, CacheRequests, #data{link_status = not_linked,
+request_backup(ProcessKey, Keys, CacheRequests, #data{link_status = ?SLAVE_NOT_LINKED,
     backup_nodes = [Node | _]} = Data) ->
     case ha_datastore_utils:send_sync_master_message(Node, ProcessKey,
         #request_backup{keys = Keys, cache_requests = CacheRequests, link = {true, self()}}, true) of
         {ok, Pid} ->
-            Data#data{link_status = linked, slave_pid = Pid};
+            Data#data{link_status = ?SLAVE_LINKED, slave_pid = Pid};
         Error ->
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
             Data
@@ -132,7 +140,7 @@ forget_backup(Inactivated, #data{slave_pid = Pid}) ->
 handle_slave_message(#failover_request_data_processed{request_handled = HandlingFinished,
     cache_requests_saved = CacheRequests} = Msg, Pid) ->
     datastore_cache:save(maps:values(CacheRequests)),
-    ha_datastore_utils:send_async_internall_message(Pid, Msg),
+    ha_datastore_utils:send_async_internal_message(Pid, Msg),
     HandlingFinished.
 
 %%%===================================================================
@@ -155,4 +163,4 @@ handle_internal_cast(#failover_request_data_processed{
 
 -spec handle_slave_lifecycle_message(unlink_request(), ha_master_data()) -> ha_master_data().
 handle_slave_lifecycle_message(?REQUEST_UNLINK, Data) ->
-    Data#data{link_status = not_linked}.
+    Data#data{link_status = ?SLAVE_NOT_LINKED}.
