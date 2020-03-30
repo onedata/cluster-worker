@@ -40,7 +40,7 @@ get_master_job(#document{value = #view_traverse_job{
     pool = Pool,
     view_processing_module = ViewProcessingModule,
     view_name = ViewName,
-    query_view_token = Token,
+    token = Token,
     query_opts = QueryOpts,
     async_next_batch_job = AsyncNextBatchJob,
     info = Info
@@ -48,7 +48,7 @@ get_master_job(#document{value = #view_traverse_job{
     Job = #view_traverse_master{
         view_name = ViewName,
         view_processing_module = ViewProcessingModule,
-        query_view_token = Token,
+        token = Token,
         query_opts = QueryOpts,
         async_next_batch_job = AsyncNextBatchJob,
         info = Info
@@ -67,7 +67,7 @@ get_master_job(Key) ->
 save_master_job(Id, #view_traverse_master{
     view_name = ViewName,
     view_processing_module = ViewProcessingModule,
-    query_view_token = Token,
+    token = Token,
     query_opts = QueryOpts,
     async_next_batch_job = AsyncNextBatchJob,
     info = Info
@@ -81,7 +81,7 @@ save_master_job(Id, #view_traverse_master{
             pool = PoolName,
             view_name = ViewName,
             view_processing_module = ViewProcessingModule,
-            query_view_token = Token,
+            token = Token,
             query_opts = QueryOpts,
             async_next_batch_job = AsyncNextBatchJob,
             info = Info
@@ -112,9 +112,10 @@ get_record_struct(1) ->
         {pool, string},
         {view_name, string},
         {callback_module, atom},
-        {query_view_token, {record, [
+        {token, {record, [
+            {offset, integer},
             {last_doc_id, string},
-            {start_key, term}
+            {last_start_key, term}
         ]}},
         {query_opts, {custom, json, {json_utils, encode, decode}}},
         {async_next_batch_job, boolean},

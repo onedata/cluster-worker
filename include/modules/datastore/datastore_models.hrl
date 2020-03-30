@@ -26,6 +26,7 @@
     mutators = [] :: [datastore_doc:mutator()],
     revs = [] :: [datastore_doc:rev()],
     seq = null :: datastore_doc:seq(),
+    timestamp = null :: datastore_doc:timestamp(),
     deleted = false :: boolean(),
     version = 1 :: datastore_doc:version()
 }).
@@ -98,7 +99,7 @@
     pool :: traverse:pool(),
     view_name :: couchbase_driver:view(),
     view_processing_module :: view_traverse:view_processing_module(),
-    query_view_token :: view_traverse:token(),
+    token :: view_traverse:token(),
     query_opts :: view_traverse:query_opts(),
     async_next_batch_job :: boolean(),
     info :: view_traverse:info()

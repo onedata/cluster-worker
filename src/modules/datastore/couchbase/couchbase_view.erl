@@ -82,7 +82,7 @@ delete_design_doc(Connection, DesignName) ->
 %%--------------------------------------------------------------------
 -spec query(cberl:connection(), couchbase_driver:design(),
     couchbase_driver:view(), [couchbase_driver:view_opt()]) ->
-    {ok, json_utils:json_term()} | {error, term()}.
+    {ok, json_utils:json_map()} | {error, term()}.
 query(Connection, DesignName, ViewName, Opts) ->
     Type = case proplists:get_value(spatial, Opts, false) of
         true -> <<"_spatial">>;

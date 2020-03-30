@@ -99,7 +99,7 @@ init_report() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% List of modules provided by cluster-worker.
-%% Use in plugins when specifying modules_with_args.
+%% Use in plugins when specifying custom_workers.
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
@@ -114,7 +114,7 @@ cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 -spec modules() -> Models :: [atom()].
 modules() ->
     DefaultWorkers = cluster_worker_modules(),
-    CustomWorkers = ?CALL_PLUGIN(modules_with_args, []),
+    CustomWorkers = ?CALL_PLUGIN(custom_workers, []),
     lists:map(fun
         ({Module, _}) -> Module;
         ({singleton, Module, _}) -> Module;
@@ -649,11 +649,11 @@ cluster_init_step(start_default_workers) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(start_custom_workers) ->
-    ?info("Starting custom workers..."),
-    Workers = ?CALL_PLUGIN(modules_with_args, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
+cluster_init_step(start_upgrade_essential_workers) ->
+    ?info("Starting workers essential for upgrade..."),
+    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
+    init_workers(WorkersToStart),
+    ?info("Workers essential for upgrade started successfully"),
     ok;
 cluster_init_step(upgrade_cluster) ->
     case node() == consistent_hashing:get_associated_node(upgrade_cluster) of
@@ -663,6 +663,12 @@ cluster_init_step(upgrade_cluster) ->
         false ->
             ok
     end;
+cluster_init_step(start_custom_workers) ->
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+    ok;
 cluster_init_step(start_listeners) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
@@ -819,7 +825,7 @@ init_net_connection([Node | Nodes]) ->
 -spec init_workers() -> ok.
 init_workers() ->
     DefaultWorkers = cluster_worker_modules(),
-    CustomWorkers = ?CALL_PLUGIN(modules_with_args, []),
+    CustomWorkers = ?CALL_PLUGIN(custom_workers, []),
     init_workers(DefaultWorkers ++ CustomWorkers).
 
 
