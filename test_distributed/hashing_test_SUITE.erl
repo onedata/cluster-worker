@@ -15,6 +15,7 @@
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% export for ct
 -export([all/0]).
@@ -39,21 +40,22 @@ test_hashing(Config) ->
 
     % Check label mapping to a single node
     NodesChosenForLabels = lists:map(fun(Label) ->
-        Node = rpc:call(FirstNode, consistent_hashing, get_node, [Label]),
+        Node = rpc:call(FirstNode, consistent_hashing, get_associated_node, [Label]),
         % The same label should yield the same node
-        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_node, [Label])),
+        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_associated_node, [Label])),
         ?assert(erlang:is_atom(Node)),
         ?assert(lists:member(Node, AllNodes)),
         Node
     end, Labels),
 
-    % Check label mapping to with get_full_node_info
+    % Check label mapping to with get_routing_info
     lists:foreach(fun(Label) ->
         lists:foreach(fun(NodesCount) ->
             rpc:call(FirstNode, consistent_hashing, set_label_associated_nodes_count, [NodesCount]),
-            {Associated, Failed, All} = Nodes = rpc:call(FirstNode, consistent_hashing, get_full_node_info, [Label]),
+            #node_routing_info{label_associated_nodes = Associated, failed_nodes = Failed, all_nodes = All} = Nodes =
+                rpc:call(FirstNode, consistent_hashing, get_routing_info, [Label]),
             % The same label should yield the same nodes
-            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_full_node_info, [Label])),
+            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_routing_info, [Label])),
             % TODO - uncomment after VFS-6209
 %%            ?assertEqual(NodesCount, length(Associated)),
             ?assertEqual(lists:sort(AllNodes), All),
