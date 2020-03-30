@@ -15,6 +15,7 @@
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
 -include("datastore_performance_tests_base.hrl").
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2,
@@ -338,7 +339,8 @@ prepare_ha_test(Config) ->
     set_ha(Config, change_config, [2, cast]),
     Key = datastore_key:new(),
     Seed = rpc:call(Worker0, datastore_key, get_chash_seed, [Key]),
-    {[KeyNode, KeyNode2] = KeyNodes, _, _} = rpc:call(Worker0, consistent_hashing, get_full_node_info, [Seed]),
+    #node_routing_info{label_associated_nodes = [KeyNode, KeyNode2] = KeyNodes} =
+        rpc:call(Worker0, consistent_hashing, get_routing_info, [Seed]),
     [TestWorker | _] = Workers -- KeyNodes,
 
     {Key, KeyNode, KeyNode2, TestWorker}.
