@@ -22,7 +22,7 @@
 -include("modules/datastore/datastore_protocol.hrl").
 
 %% API
--export([classify_and_reverse_requests/2, get_mode/1, verify_terminate/1]).
+-export([qualify_and_reverse_requests/2, get_mode/1, can_be_terminated/1]).
 -export([init_failover_requests_data/0, report_failover_request_handled/4, report_keys_flushed/3]).
 -export([init_data/0, handle_master_message/3, handle_internal_message/2]).
 -export([set_failover_request_handling/2]).
@@ -41,7 +41,7 @@
     link_to_master = false :: link_to_master(), % TODO VFS-6197 - unlink HA slave during forced termination
 
     % Fields used to indicate working mode and help with transition between modes
-    slave_mode :: ha_datastore_utils:slave_mode(),
+    slave_mode :: ha_datastore:slave_mode(),
     recovered_master_pid :: pid() | undefined,
 
     % Fields related with work in failover mode (master is down)
@@ -56,16 +56,16 @@
                                                  % if processes are linked, the pid of master is part of status
 -type keys_set() :: sets:set(datastore:key()).
 -type cache_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
--type slave_status() :: #slave_status{}.
+-type slave_failover_status() :: #slave_failover_status{}.
 
 -export_type([ha_failover_requests_data/0, ha_slave_data/0, link_to_master/0, keys_set/0, cache_requests_map/0]).
 
 % Used messages types:
--type backup_message() :: #request_backup{} | #forget_backup{}.
--type get_slave_status() :: #get_slave_status{}.
+-type backup_message() :: #store_backup{} | #forget_backup{}.
+-type get_slave_failover_status() :: #get_slave_failover_status{}.
 -type master_node_status_message() :: ?MASTER_DOWN | ?MASTER_UP.
 
--export_type([backup_message/0, get_slave_status/0, master_node_status_message/0]).
+-export_type([backup_message/0, get_slave_failover_status/0, master_node_status_message/0]).
 
 %%%===================================================================
 %%% API - Working in failover mode
@@ -81,7 +81,7 @@ init_failover_requests_data() ->
 report_failover_request_handled(Pid, CachedKeys, CacheRequests, #failover_requests_data{keys = DataKeys} = Data) ->
     DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
     CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, CacheRequests),
-    ha_datastore_utils:send_async_internal_message(Pid,
+    ha_datastore:send_async_internal_message(Pid,
         #failover_request_data_processed{request_handled = true, cache_requests_saved = maps:from_list(CacheRequests2)}),
     Data#failover_requests_data{keys = DataKeys2}.
 
@@ -94,7 +94,7 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
         0 ->
             Data;
         _ ->
-            ha_datastore_utils:send_async_internal_message(Pid,
+            ha_datastore:send_async_internal_message(Pid,
                 #failover_request_data_processed{keys_flushed = KeysToReport}),
             Data#failover_requests_data{keys = sets:subtract(DataKeys, KeysToReport)}
     end.
@@ -105,13 +105,13 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
 
 -spec init_data() -> ha_slave_data().
 init_data() ->
-    #slave_data{slave_mode = ha_datastore_utils:get_slave_mode()}.
+    #slave_data{slave_mode = ha_datastore:get_slave_mode()}.
 
 -spec set_failover_request_handling(ha_slave_data(), boolean()) -> ha_slave_data().
 set_failover_request_handling(Data, FailoverRequestHandling) ->
     Data#slave_data{failover_request_handling = FailoverRequestHandling}.
 
--spec get_mode(ha_slave_data()) -> ha_datastore_utils:slave_mode().
+-spec get_mode(ha_slave_data()) -> ha_datastore:slave_mode().
 get_mode(#slave_data{slave_mode = Mode}) ->
     Mode.
 
@@ -121,9 +121,9 @@ get_mode(#slave_data{slave_mode = Mode}) ->
 %% Also reverses requests as requests are stored in revered list.
 %% @end
 %%--------------------------------------------------------------------
--spec classify_and_reverse_requests(datastore_writer:requests_internal(), ha_datastore_utils:slave_mode()) ->
-    #classified_datastore_requests{}.
-classify_and_reverse_requests(Requests, Mode) ->
+-spec qualify_and_reverse_requests(datastore_writer:requests_internal(), ha_datastore:slave_mode()) ->
+    #qualified_datastore_requests{}.
+qualify_and_reverse_requests(Requests, Mode) ->
     % TODO - VFS-6168 - maybe do not execute when HA is off
     % TODO - VFS-6169 - what if local node is broken node according to Ctx
     MyNode = node(),
@@ -143,7 +143,7 @@ classify_and_reverse_requests(Requests, Mode) ->
         {_, ?FAILOVER_SLAVE_MODE} -> ?HANDLE_LOCALLY
     end,
 
-    #classified_datastore_requests{local = LocalList, remote = RemoteList, remote_node = RemoteNode,
+    #qualified_datastore_requests{local_requests = LocalList, remote_requests = RemoteList, remote_node = RemoteNode,
         remote_processing_mode = RemoteMode}.
 
 %%--------------------------------------------------------------------
@@ -152,30 +152,30 @@ classify_and_reverse_requests(Requests, Mode) ->
 %% If there are no keys to protect and process is linked to master sends unlink request.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_terminate(ha_slave_data()) -> {terminate | retry | schedule, ha_slave_data()}.
-verify_terminate(#slave_data{link_to_master = false, backup_keys = Keys} = Data) ->
+-spec can_be_terminated(ha_slave_data()) -> {terminate | retry | delay_termination, ha_slave_data()}.
+can_be_terminated(#slave_data{link_to_master = false, backup_keys = Keys} = Data) ->
     case maps:size(Keys) of
         0 -> {terminate, Data};
-        _ -> {schedule, Data}
+        _ -> {delay_termination, Data}
     end;
-verify_terminate(#slave_data{link_to_master = {true, Pid}, backup_keys = Keys} = Data) ->
+can_be_terminated(#slave_data{link_to_master = {true, Pid}, backup_keys = Keys} = Data) ->
     case maps:size(Keys) of
         0 ->
-            catch ha_datastore_utils:send_sync_slave_message(Pid, ?REQUEST_UNLINK),
+            catch ha_datastore:send_sync_slave_message(Pid, ?REQUEST_UNLINK),
             {retry, Data#slave_data{link_to_master = false}};
         _ ->
-            {schedule, Data}
+            {delay_termination, Data}
     end.
 
 %%%===================================================================
 %%% API - messages handling by datastore_writer
 %%%===================================================================
 
--spec handle_master_message(backup_message() | get_slave_status(), ha_slave_data(),
+-spec handle_master_message(backup_message() | get_slave_failover_status(), ha_slave_data(),
     datastore_writer:requests_internal()) ->
-    {ok | slave_status(), ha_slave_data(), datastore_writer:requests_internal()}.
+    {ok | slave_failover_status(), ha_slave_data(), datastore_writer:requests_internal()}.
 % Calls associated with backup creation/deletion
-handle_master_message(#request_backup{keys = Keys, cache_requests = CacheRequests, link = Link},
+handle_master_message(#store_backup{keys = Keys, cache_requests = CacheRequests, link = Link},
     #slave_data{backup_keys = DataKeys} = SlaveData, WaitingRequests) ->
     datastore_cache:save(CacheRequests),
     SlaveData2 = case Link of
@@ -188,15 +188,15 @@ handle_master_message(#forget_backup{keys = Inactivated}, #slave_data{backup_key
     {ok, SlaveData#slave_data{backup_keys = maps:without(maps:keys(Inactivated), DataKeys)}, WaitingRequests};
 
 % Checking slave status
-handle_master_message(#get_slave_status{answer_to = Pid}, #slave_data{failover_request_handling = Status,
+handle_master_message(#get_slave_failover_status{answer_to = Pid}, #slave_data{failover_request_handling = Status,
     failover_pending_cache_requests = CacheRequests, failover_finished_memory_cache_requests = MemoryRequests,
     slave_mode = Mode} = SlaveData,
     WaitingRequests) ->
-    #classified_datastore_requests{local = LocalReversed, remote = RemoteReversed} =
-        classify_and_reverse_requests(WaitingRequests, Mode),
-    {#slave_status{failover_request_handling = Status, failover_pending_cache_requests = CacheRequests,
-        failover_finished_memory_cache_requests = maps:values(MemoryRequests),
-        failover_requests_to_handle = lists:reverse(RemoteReversed)},
+    #qualified_datastore_requests{local_requests = LocalReversed, remote_requests = RemoteReversed} =
+        qualify_and_reverse_requests(WaitingRequests, Mode),
+    {#slave_failover_status{is_handling_requests = Status, ending_cache_requests = CacheRequests,
+        finished_memory_cache_requests = maps:values(MemoryRequests),
+        requests_to_handle = lists:reverse(RemoteReversed)},
         SlaveData#slave_data{recovered_master_pid = Pid, failover_finished_memory_cache_requests = #{}},
         lists:reverse(LocalReversed)}.
 
@@ -217,13 +217,13 @@ handle_internal_message(#failover_request_data_processed{cache_requests_saved = 
             end, Finished),
             SlaveData2#slave_data{failover_finished_memory_cache_requests = maps:merge(ICR, FinishedMemory)};
         _ ->
-            ha_datastore_utils:send_async_slave_message(Pid, Msg),
+            ha_datastore:send_async_slave_message(Pid, Msg),
             SlaveData2
     end.
 
 -spec handle_management_msg(master_node_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
-    ha_datastore_utils:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
+    ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
     Data;
 handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid) ->
     datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart

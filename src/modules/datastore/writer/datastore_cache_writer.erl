@@ -147,8 +147,9 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {stop, Reason :: term(), NewState :: state()}.
 handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
     State = #state{process_key = ProcessKey, master_pid = Pid}) ->
-    #classified_datastore_requests{local = LocalRequests, remote = RemoteRequests, remote_node = RemoteNode,
-        remote_processing_mode = RemoteProcessingMode} = ha_slave:classify_and_reverse_requests(Requests, Mode),
+    #qualified_datastore_requests{local_requests = LocalRequests, remote_requests = RemoteRequests,
+        remote_node = RemoteNode, remote_processing_mode = RemoteProcessingMode} =
+        ha_slave:qualify_and_reverse_requests(Requests, Mode),
     gen_server:reply(From, RemoteProcessingMode =:= ?HANDLE_LOCALLY),
     State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
     State3 = case RemoteProcessingMode of
@@ -942,7 +943,7 @@ generate_error_ans(N, Error) ->
 
 -spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], is_failover_request(), state()) -> state().
 handle_ha_requests(CachedKeys, CacheRequests, false, #state{process_key = ProcessKey, ha_master_data = HAData} = State) ->
-    HAData2 = ha_master:request_backup(ProcessKey, CachedKeys, CacheRequests, HAData),
+    HAData2 = ha_master:store_backup(ProcessKey, CachedKeys, CacheRequests, HAData),
     State#state{ha_master_data = HAData2};
 handle_ha_requests(CachedKeys, CacheRequests, true,
     #state{master_pid = MasterPid, ha_failover_requests_data = FailoverData} = State) ->

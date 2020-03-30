@@ -302,7 +302,7 @@ wait(Ref, Pid) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
 init([Key]) ->
-    BackupNodes = ha_datastore_utils:get_backup_nodes(),
+    BackupNodes = ha_datastore:get_backup_nodes(),
     {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_master:verify_slave_activity(Key, BackupNodes),
 
     CacheWriterState = case ActiveRequests of
@@ -409,7 +409,7 @@ handle_info({terminate, MsgRef}, State = #state{
     cache_writer_pid = Pid,
     ha_slave_data = SlaveData
 }) ->
-    case ha_slave:verify_terminate(SlaveData) of
+    case ha_slave:can_be_terminated(SlaveData) of
         {terminate, SlaveData2} ->
             case gen_server:call(Pid, terminate, infinity) of
                 ok -> {stop, normal, State#state{ha_slave_data = SlaveData2}};
@@ -417,7 +417,7 @@ handle_info({terminate, MsgRef}, State = #state{
             end;
         {retry, SlaveData2} ->
             {noreply, schedule_terminate(State#state{ha_slave_data = SlaveData2}, 0)};
-        {schedule, SlaveData2} ->
+        {delay_termination, SlaveData2} ->
             {noreply, schedule_terminate(State#state{ha_slave_data = SlaveData2})}
     end;
 handle_info({terminate, MsgRef}, State = #state{terminate_msg_ref = MsgRef}) ->

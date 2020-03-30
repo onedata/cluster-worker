@@ -656,7 +656,7 @@ cluster_init_step(start_custom_workers) ->
     ?info("Custom workers started successfully"),
     ok;
 cluster_init_step(upgrade_cluster) ->
-    case node() == consistent_hashing:get_node(upgrade_cluster) of
+    case node() == consistent_hashing:get_associated_node(upgrade_cluster) of
         true ->
             upgrade_cluster(),
             ok;

@@ -7,10 +7,10 @@
 %%%-------------------------------------------------------------------------------------------------------------
 %%% @doc
 %%% Definition of messages and macros used by HA master and slave.
-%%% HA master and slave are TP processes. Master process handles requests (standard role of tp process) and
-%%% sends backup information to slave process. Slave process is responsible for management of backup information as
-%%% long as it is needed (when document is stored to couchbase no backup data is required) and handling requests if
-%%% node of master fails. Single TP process can act as a master for some keys and as a slave for other set of keys.
+%%% HA master and slave are TP processes. Master process handles requests (standard role of tp process) and sends
+%%% backup information to slave process. Slave process is responsible for management of backup information as long as
+%%% it is needed (backup data is deleted after saving document to couchbase or deleting document) and handling requests
+%%% if node of master fails. Single TP process can act as a master for some keys and as a slave for other set of keys.
 %%% TP process is composed of datastore_writer, datastore_cache_writer and datastore_disc_writer.
 %%% First two elements are important for HA. As datastore_writer typically caches requests and manages TP lifecycle,
 %%% it is mainly used for HA lifecycle management and storing backup data (data used by slave to finish documents'
@@ -45,8 +45,8 @@
 %%%=============================================================================================================
 
 -record(ha_msg, {
-    type :: ha_datastore_utils:ha_message_type(),
-    body :: ha_datastore_utils:ha_message()
+    type :: ha_datastore:ha_message_type(),
+    body :: ha_datastore:ha_message()
 }).
 
 % Convenience macros used to build ha_msg
@@ -60,15 +60,15 @@
 
 %%%=============================================================================================================
 %%% Messages used to propagate information about documents that should be protected by slave.
-%%% Backup is requested by master when handling datastore request.
-%%% After flush of keys by master, they can be forgotten by slave.
-%%% Master and slave can be linked using request_backup (see main doc of this hrl). In such a case,
+%%% Backup is requested by master when handling datastore request (master sends forget_backup message).
+%%% After flush of keys by master, backup can be forgotten by slave (master sends store_backup message).
+%%% Master and slave can be linked using store_backup (see main doc of this hrl). In such a case,
 %%% REQUEST_UNLINK is used by slave before termination.
 %%%=============================================================================================================
 
 % Request slave to store data until it is flushed to couchbase
 % Can also request linking slave to master (see main doc of this hrl)
--record(request_backup, {
+-record(store_backup, {
     keys :: datastore_doc_batch:cached_keys(),
     cache_requests :: [datastore_cache:cache_save_request()],
     link = false :: ha_slave:link_to_master()
@@ -105,7 +105,7 @@
 
 %%%=============================================================================================================
 %%% Messages connected with processes lifecycle and processes configuration.
-%%% Each master checks slave status with get_slave_status on startup.
+%%% Each master checks slave status with get_slave_failover_status on startup.
 %%% MASTER_DOWN/UP appear when master node fails / is recovered.
 %%% Management messages (CONFIG_CHANGED, MASTER_DOWN/UP) concern whole tp processes that act as master and slave for
 %%% different keys at the same time. However, they are handled by ha_slave as they affect slave role more
@@ -113,16 +113,16 @@
 %%%=============================================================================================================
 
 % Request used by master to check if slave is handling any master's keys (because master node was down)
--record(get_slave_status, {
+-record(get_slave_failover_status, {
     answer_to :: pid()
 }).
 
-% Slave status is used to inform master if it is handling any master's keys
--record(slave_status, {
-    failover_request_handling :: boolean(),
-    failover_pending_cache_requests :: ha_slave:cache_requests_map(),
-    failover_finished_memory_cache_requests :: [datastore_cache:cache_save_request()],
-    failover_requests_to_handle :: datastore_writer:requests_internal()
+% Slave failover status is used to inform master if it is handling any master's keys
+-record(slave_failover_status, {
+    is_handling_requests :: boolean(),
+    ending_cache_requests :: ha_slave:cache_requests_map(),
+    finished_memory_cache_requests :: [datastore_cache:cache_save_request()],
+    requests_to_handle :: datastore_writer:requests_internal()
 }).
 
 % Informs slave that master node is down

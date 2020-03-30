@@ -15,6 +15,7 @@
 
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% API
 -export([route/2, process/3]).
@@ -140,7 +141,8 @@ select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
 select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
     Seed = datastore_key:get_chash_seed(Key),
-    {[MasterNode | _] = Nodes, FailedNodes, AllNodes} = consistent_hashing:get_full_node_info(Seed),
+    #node_routing_info{label_associated_nodes = [MasterNode | _] = Nodes,
+        failed_nodes = FailedNodes, all_nodes = AllNodes} = consistent_hashing:get_routing_info(Seed),
     case Nodes -- FailedNodes of
         [Node | _] ->
             Ctx2 = Ctx#{failed_nodes => FailedNodes, failed_master => lists:member(MasterNode, FailedNodes)},

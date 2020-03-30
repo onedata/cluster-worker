@@ -161,7 +161,7 @@ adjacent_from_digest(DigestComponents, Original) when size(Original) > 0 ->
 -spec responsible_node(key()) -> node().
 responsible_node(Key) ->
     CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_node(CHashSeed).
+    consistent_hashing:get_associated_node(CHashSeed).
 
 
 -spec get_chash_seed(key()) -> key() | chash_label().

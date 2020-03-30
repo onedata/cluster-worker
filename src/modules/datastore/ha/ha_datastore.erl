@@ -14,7 +14,7 @@
 %%% For more information see ha_datastore.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
--module(ha_datastore_utils).
+-module(ha_datastore).
 -author("Michał Wrzeszcz").
 
 -include("modules/datastore/ha_datastore.hrl").
@@ -42,7 +42,7 @@
 % HA messages' types (see ha_datastore.hrl)
 -type ha_message_type() :: master | slave | internal | management.
 -type ha_message() :: ha_slave:backup_message() | ha_master:unlink_request() |
-    ha_master:failover_request_data_processed_message() | ha_slave:get_slave_status() |
+    ha_master:failover_request_data_processed_message() | ha_slave:get_slave_failover_status() |
     ha_slave:master_node_status_message() | ha_master:config_changed_message().
 
 -export_type([ha_message_type/0, ha_message/0]).
@@ -69,15 +69,16 @@ send_async_slave_message(Pid, Msg) ->
     gen_server:cast(Pid, ?SLAVE_MSG(Msg)).
 
 -spec send_sync_slave_message(pid(), ha_master:unlink_request()) -> term().
-send_sync_slave_message(Ref, Msg) ->
-    gen_server:call(Ref, ?SLAVE_MSG(Msg), infinity).
+send_sync_slave_message(Pid, Msg) ->
+    gen_server:call(Pid, ?SLAVE_MSG(Msg), infinity).
 
 -spec send_async_master_message(pid(), ha_slave:backup_message()) -> ok.
-send_async_master_message(Ref, Msg) ->
-    gen_server:cast(Ref, ?MASTER_MSG(Msg)).
+send_async_master_message(Pid, Msg) ->
+    gen_server:cast(Pid, ?MASTER_MSG(Msg)).
 
--spec send_sync_master_message(node(), datastore:key(), ha_slave:backup_message() | ha_slave:get_slave_status() |
-    #datastore_internal_requests_batch{}, StartIfNotAlive :: boolean()) -> term().
+-spec send_sync_master_message(node(), datastore:key(), ha_slave:backup_message() |
+    ha_slave:get_slave_failover_status() | #datastore_internal_requests_batch{}, StartIfNotAlive :: boolean()) ->
+    term().
 send_sync_master_message(Node, ProcessKey, Msg, true) ->
     rpc:call(Node, datastore_writer, generic_call, [ProcessKey, ?MASTER_MSG(Msg)]);
 send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
@@ -143,21 +144,22 @@ clean_backup_nodes_cache() ->
 
 -spec set_failover_mode_and_broadcast_master_down_message() -> ok.
 set_failover_mode_and_broadcast_master_down_message() ->
-    ?info("Set failover mode and broadcast master_down"),
+    ?notice("Master node down: setting failover mode and broadcasting information to tp processes"),
     set_slave_mode(?FAILOVER_SLAVE_MODE),
     broadcast_management_message(?MASTER_DOWN).
 
 
 -spec set_standby_mode_and_broadcast_master_up_message() -> ok.
 set_standby_mode_and_broadcast_master_up_message() ->
-    ?info("Set standby mode and broadcast master_up"),
+    ?notice("Master node up: seting standby mode and broadcasting information to tp processes"),
     set_slave_mode(?STANDBY_SLAVE_MODE),
     broadcast_management_message(?MASTER_UP).
 
 
 -spec change_config(key_associated_nodes_count(), propagation_method()) -> ok.
 change_config(NodesNumber, PropagationMethod) ->
-    ?info("Set and broadcast new HA config: nodes number: ~p, propagation method: ~p", [NodesNumber, PropagationMethod]),
+    ?notice("New HA configuration: nodes number: ~p, propagation method: ~p - setting environment variables"
+        " and broadcasting information to tp processes~n", [NodesNumber, PropagationMethod]),
     consistent_hashing:set_label_associated_nodes_count(NodesNumber),
     clean_backup_nodes_cache(),
     set_propagation_method(PropagationMethod),
@@ -170,10 +172,11 @@ change_config(NodesNumber, PropagationMethod) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns nodes' list without local node, starting from the node that is next after local node at the original list.
+%% Returns nodes' list without local node, starting from the node that is next after local node at the original list
+%% (function wraps list if needed).
 %% @end
 %%--------------------------------------------------------------------
--spec arrange_nodes(MyNode :: node(), AllNodes :: [node()]) -> BackupNodes :: [node()].
+-spec arrange_nodes(MyNode :: node(), AllNodes :: [node()]) -> ArrangedNodes :: [node()].
 arrange_nodes(MyNode, [MyNode | Nodes]) ->
     Nodes;
 arrange_nodes(MyNode, [Node | Nodes]) ->

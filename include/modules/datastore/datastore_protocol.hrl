@@ -32,7 +32,7 @@
 -record(datastore_internal_requests_batch, {
     ref :: reference(),
     requests :: [#datastore_internal_request{}],
-    mode :: ha_datastore_utils:slave_mode()
+    mode :: ha_datastore:slave_mode()
 }).
 
 % Request sent to datastore_cache_writer to initiate flushing of keys not resulting from standard message handling
@@ -47,9 +47,9 @@
 -define(IGNORE, ignore). % No action is needed
 
 % Record describing classification of requests that indicates where requests should be processed
--record(classified_datastore_requests, {
-    local :: datastore_writer:requests_internal(),
-    remote :: datastore_writer:requests_internal(),
+-record(qualified_datastore_requests, {
+    local_requests :: datastore_writer:requests_internal(),
+    remote_requests :: datastore_writer:requests_internal(),
     remote_node :: undefined | node(),
     remote_processing_mode :: datastore_cache_writer:remote_processing_mode()
 }).

@@ -37,7 +37,7 @@ stress_performance_test_base(Config) ->
         true -> 2
     end,
     lists:foreach(fun(W) ->
-        ?assertEqual(ok, rpc:call(W, ha_datastore_utils, change_config, [HANodes, HaMode]))
+        ?assertEqual(ok, rpc:call(W, ha_datastore, change_config, [HANodes, HaMode]))
     end, Workers),
 
     ?assertEqual(ok, rpc:call(Worker, consistent_hashing, replicate_ring_to_nodes, [[node()]])),
