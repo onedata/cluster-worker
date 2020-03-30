@@ -18,8 +18,9 @@
 -export([installed_cluster_generation/0]).
 -export([oldest_known_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
--export([renamed_models/0, listeners/0, modules_with_args/0]).
+-export([renamed_models/0, listeners/0]).
 -export([before_init/1, after_init/1]).
+-export([upgrade_essential_workers/0, custom_workers/0]).
 -export([upgrade_cluster/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
@@ -101,12 +102,21 @@ listeners() -> [
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of modules with configs to be loaded by node_manager.
+%% List of workers modules with configs that should be started before upgrade.
 %% @end
 %%--------------------------------------------------------------------
--spec modules_with_args() -> [{module(), list()}
+-spec upgrade_essential_workers() -> [{module(), list()}
+| {module(), list(), [atom()]} | {singleton, module(), list()}].
+upgrade_essential_workers() -> [].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of workers modules with configs to be loaded by node_manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec custom_workers() -> [{module(), list()}
     | {module(), list(), [atom()]} | {singleton, module(), list()}].
-modules_with_args() -> [].
+custom_workers() -> [].
 
 %%--------------------------------------------------------------------
 %% @doc
