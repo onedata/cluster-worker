@@ -19,7 +19,7 @@
 
 %% API
 -export([init/1, get_unique_key/2]).
--export([create/2, save/2, update/3, update/4]).
+-export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
 -export([fold/3, fold/5, fold_keys/3]).
@@ -119,6 +119,17 @@ save(Ctx, Doc = #document{key = undefined}) ->
 save(Ctx, Doc = #document{key = Key}) ->
     Result = datastore_apply(Ctx, Key, fun datastore:save/3, save, [Doc]),
     add_fold_link(Ctx, Key, Result).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves model document with given routing key in a datastore.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_with_routing_key(ctx(), doc()) -> {ok, doc()} | {error, term()}.
+save_with_routing_key(#{routing_key := RoutingKey} = Ctx, Doc = #document{key = Key}) ->
+    Ctx1 = datastore_model_default:set_defaults(Ctx),
+    Ctx2 = datastore_multiplier:extend_name(RoutingKey, Ctx1),
+    datastore_router:route(save, [Ctx2, Key, Doc]).
 
 %%--------------------------------------------------------------------
 %% @doc
