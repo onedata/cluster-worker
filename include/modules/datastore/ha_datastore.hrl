@@ -135,6 +135,9 @@
 % (processes get configuration during initialization and cache it)
 -define(CONFIG_CHANGED, config_changed).
 
+% Message sent to inform process that cluster reconfiguration (node adding/deleting) has started
+-define(CLUSTER_RECONFIGURATION, cluster_reconfiguration).
+
 %%%=============================================================================================================
 %%% Propagation method and slave mode names.
 %%% Propagation method determines whether backup data is sent using gen_server call or cast.
@@ -148,5 +151,7 @@
 % Slave modes
 -define(STANDBY_SLAVE_MODE, standby). % process only backup data
 -define(FAILOVER_SLAVE_MODE, failover). % handle requests that should be handled by master (master is down)
+-define(CLUSTER_RECONFIGURATION_SLAVE_MODE, cluster_reconfiguration). % special requests handling mode to prepare
+                                                                      % permanent new master migration to other node
 
 -endif.

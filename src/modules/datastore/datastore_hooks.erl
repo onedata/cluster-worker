@@ -36,8 +36,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec wrap(ctx(), key(), atom(), list(), wrapped()) -> term().
-wrap(Ctx0, Key, Function, Args0, Fun) ->
-    Ctx = Ctx0#{routing_key => Key},
+wrap(Ctx, Key, Function, Args0, Fun) ->
     Args = [Ctx, Key | Args0],
     Result = case run_prehooks(Ctx, Function, Args) of
         ok -> Fun(Function, Args);

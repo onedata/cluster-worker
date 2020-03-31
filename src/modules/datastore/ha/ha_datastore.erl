@@ -20,22 +20,24 @@
 -include("modules/datastore/ha_datastore.hrl").
 -include("modules/datastore/datastore_protocol.hrl").
 -include("global_definitions.hrl").
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% Message sending API
 -export([send_async_internal_message/2, send_sync_internal_message/2,
     send_async_slave_message/2, send_sync_slave_message/2,
     send_async_master_message/2, send_sync_master_message/4,
-    broadcast_management_message/1]).
+    broadcast_async_management_message/1]).
 %% API
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
+-export([reconfigure_cluster/0, finish_reconfiguration/0, check_migration/1]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
 % Slave working mode -  see ha_datastore.hrl
--type slave_mode() :: ?STANDBY_SLAVE_MODE | ?FAILOVER_SLAVE_MODE.
+-type slave_mode() :: ?STANDBY_SLAVE_MODE | ?FAILOVER_SLAVE_MODE | ?CLUSTER_RECONFIGURATION_SLAVE_MODE.
 
 -export_type([propagation_method/0, slave_mode/0]).
 
@@ -43,12 +45,14 @@
 -type ha_message_type() :: master | slave | internal | management.
 -type ha_message() :: ha_slave:backup_message() | ha_master:unlink_request() |
     ha_master:failover_request_data_processed_message() | ha_slave:get_slave_failover_status() |
-    ha_slave:master_node_status_message() | ha_master:config_changed_message().
+    ha_slave:master_node_status_message() | ha_master:config_changed_message() | ha_slave:reconfiguration_message().
 
 -export_type([ha_message_type/0, ha_message/0]).
 
 % Internal module types
 -type key_associated_nodes_count() :: pos_integer().
+
+-define(MEMORY_COPY_BATCH_SIZE, 200).
 
 %%%===================================================================
 %%% Message sending API
@@ -84,9 +88,14 @@ send_sync_master_message(Node, ProcessKey, Msg, true) ->
 send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
     rpc:call(Node, datastore_writer, call_if_alive, [ProcessKey, ?MASTER_MSG(Msg)]).
 
--spec broadcast_management_message(ha_slave:master_node_status_message() | ha_master:config_changed_message()) -> ok.
-broadcast_management_message(Msg) ->
+-spec broadcast_async_management_message(ha_slave:master_node_status_message() | ha_master:config_changed_message()) ->
+    ok.
+broadcast_async_management_message(Msg) ->
     tp_router:send_to_each(?MANAGEMENT_MSG(Msg)).
+
+-spec broadcast_sync_management_message(ha_slave:reconfiguration_message()) -> ok | {error, term()}.
+broadcast_sync_management_message(Msg) ->
+    tp_router:send_to_each_and_wait_for_ans(?MANAGEMENT_MSG(Msg)).
 
 %%%===================================================================
 %%% Getters / setters
@@ -146,14 +155,14 @@ clean_backup_nodes_cache() ->
 set_failover_mode_and_broadcast_master_down_message() ->
     ?notice("Master node down: setting failover mode and broadcasting information to tp processes"),
     set_slave_mode(?FAILOVER_SLAVE_MODE),
-    broadcast_management_message(?MASTER_DOWN).
+    broadcast_async_management_message(?MASTER_DOWN).
 
 
 -spec set_standby_mode_and_broadcast_master_up_message() -> ok.
 set_standby_mode_and_broadcast_master_up_message() ->
     ?notice("Master node up: seting standby mode and broadcasting information to tp processes"),
     set_slave_mode(?STANDBY_SLAVE_MODE),
-    broadcast_management_message(?MASTER_UP).
+    broadcast_async_management_message(?MASTER_UP).
 
 
 -spec change_config(key_associated_nodes_count(), propagation_method()) -> ok.
@@ -163,7 +172,58 @@ change_config(NodesNumber, PropagationMethod) ->
     consistent_hashing:set_label_associated_nodes_count(NodesNumber),
     clean_backup_nodes_cache(),
     set_propagation_method(PropagationMethod),
-    broadcast_management_message(?CONFIG_CHANGED).
+    broadcast_async_management_message(?CONFIG_CHANGED).
+
+%%%===================================================================
+%%% API to reconfigure cluster
+%%%===================================================================
+
+-spec reconfigure_cluster() -> ok | no_return().
+reconfigure_cluster() ->
+    set_slave_mode(?CLUSTER_RECONFIGURATION_SLAVE_MODE),
+    ok = broadcast_sync_management_message(?CLUSTER_RECONFIGURATION),
+
+    Mutator = self(),
+    ok = datastore_model:foreach_memory_key(fun
+        (_, end_of_memory, _Doc, Acc) ->
+            {ok, copy_memory(Acc)};
+        (Model, Key, Doc, Acc) ->
+            RoutingKey = datastore_router:get_routing_key(Doc),
+            {Acc2, CopyNow} = case check_migration(RoutingKey) of
+                {migrate_to_new_master, Node} ->
+                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
+                    Ctx2 = Ctx#{mutator_pid => Mutator},
+                    NodeAcc = maps:get(Node, Acc, []),
+                    NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
+                    NewAcc = maps:put(Node, NewNodeAcc, Acc),
+                    {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE};
+                _ ->
+                    {Acc, false}
+            end,
+            case CopyNow of
+                true ->
+                    case copy_memory(Acc2) of
+                        ok -> {ok, #{}};
+                        Other -> {stop, Other}
+                    end;
+                _ ->
+                    {ok, Acc2}
+            end
+    end, #{}).
+
+-spec finish_reconfiguration() -> ok.
+finish_reconfiguration() ->
+    set_slave_mode(?STANDBY_SLAVE_MODE).
+
+-spec check_migration(datastore:key()) -> local_key | {migrate_to_new_master, node()}.
+check_migration(Key) ->
+    LocalNode = node(),
+    Seed = datastore_key:get_chash_seed(Key),
+    #node_routing_info{label_associated_nodes = [NewNode | _]} = consistent_hashing:get_reconfigured_routing_info(Seed),
+    case NewNode of
+        LocalNode -> local_key;
+        _ -> {migrate_to_new_master, NewNode}
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -181,3 +241,29 @@ arrange_nodes(MyNode, [MyNode | Nodes]) ->
     Nodes;
 arrange_nodes(MyNode, [Node | Nodes]) ->
     arrange_nodes(MyNode, Nodes ++ [Node]).
+
+-spec copy_memory(#{node() => [datastore_cache:cache_save_request()]}) -> ok | {error, term()}.
+copy_memory(ItemsMap) ->
+    maps:fold(fun
+        (Node, Items, ok) -> copy_memory(Node, Items);
+        (_Node, _Items, Acc) -> Acc
+    end, ok, ItemsMap).
+
+
+-spec copy_memory(node(), [datastore_cache:cache_save_request()]) -> ok | {error, term()}.
+copy_memory(Node, Items) ->
+    Ans = rpc:call(Node, datastore_cache, save, [Items]),
+    case Ans of
+        {badrpc, Reason} ->
+            {error, Reason};
+        _ ->
+            % TODO - moze trzeba wyczyscic klucze zestarego node'a?
+            FoldlAns = lists:foldl(fun
+                (_, {error, _} = Error) -> Error;
+                (ItemAns, _) -> ItemAns
+            end, {ok, ok, ok}, Ans),
+            case FoldlAns of
+                {ok, _, _} -> ok;
+                Other -> Other
+            end
+    end.

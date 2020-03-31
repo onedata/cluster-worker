@@ -273,20 +273,10 @@ call_if_alive(Key, Request) ->
 %% Waits for a completion of asynchronous call to datastore writer.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(reference(), pid()) -> term() | {error, timeout}.
+-spec wait(reference(), pid()) -> term() | {error, term()}.
 wait(Ref, Pid) ->
     Timeout = ?WAIT_TIMEOUT,
-    receive
-        {Ref, {request_delegated, ProxyPid}} -> wait(Ref, ProxyPid);
-        {Ref, Response} -> Response
-    after
-        Timeout ->
-            case rpc:call(node(Pid), erlang, is_process_alive, [Pid]) of
-                true -> wait(Ref, Pid);
-                {badrpc, Reason} -> {error, Reason};
-                _ -> {error, timeout}
-            end
-    end.
+    wait(Ref, Pid, Timeout, true).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -541,3 +531,19 @@ get_key_num(Key, SpaceSize) when is_binary(Key) ->
     Id rem SpaceSize + 1;
 get_key_num(Key, SpaceSize) ->
     get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).
+
+%% @private
+-spec wait(reference(), pid(), non_neg_integer(), boolean()) -> term() | {error, term()}.
+wait(Ref, Pid, Timeout, CheckAndRetry) ->
+    receive
+        {Ref, {request_delegated, ProxyPid}} -> wait(Ref, ProxyPid);
+        {Ref, Response} -> Response
+    after
+        Timeout ->
+            case {CheckAndRetry, rpc:call(node(Pid), erlang, is_process_alive, [Pid])} of
+                {true, true} -> wait(Ref, Pid, Timeout, CheckAndRetry);
+                {true, _} -> wait(Ref, Pid, Timeout, false);
+                {_, {badrpc, Reason}} -> {error, Reason};
+                _ -> {error, timeout}
+            end
+    end.

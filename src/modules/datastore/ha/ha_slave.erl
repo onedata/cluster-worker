@@ -64,8 +64,9 @@
 -type backup_message() :: #store_backup{} | #forget_backup{}.
 -type get_slave_failover_status() :: #get_slave_failover_status{}.
 -type master_node_status_message() :: ?MASTER_DOWN | ?MASTER_UP.
+-type reconfiguration_message() :: ?CLUSTER_RECONFIGURATION.
 
--export_type([backup_message/0, get_slave_failover_status/0, master_node_status_message/0]).
+-export_type([backup_message/0, get_slave_failover_status/0, master_node_status_message/0, reconfiguration_message/0]).
 
 %%%===================================================================
 %%% API - Working in failover mode
@@ -221,7 +222,8 @@ handle_internal_message(#failover_request_data_processed{cache_requests_saved = 
             SlaveData2
     end.
 
--spec handle_management_msg(master_node_status_message(), ha_slave_data(), pid()) -> ha_slave_data().
+-spec handle_management_msg(master_node_status_message() | ha_master:config_changed_message(),
+    ha_slave_data(), pid()) -> ha_slave_data().
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
     ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
     Data;

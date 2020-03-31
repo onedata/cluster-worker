@@ -17,6 +17,7 @@
 %% API
 -export([init/2]).
 -export([save/3, get/2, delete/2, delete_all/1]).
+-export([fold/3]).
 
 -type table() :: atom().
 -type ctx() :: #{table => table()}.
@@ -94,3 +95,10 @@ delete(#{table := Table}, Key) ->
 delete_all(#{table := Table}) ->
     ets:delete_all_objects(Table),
     ok.
+
+-spec fold(ctx(), datastore_model:driver_fold_fun(), term()) -> {ok | stop, term()}.
+fold(#{table := Table}, Fun, Acc0) ->
+    ets:foldl(fun
+        ({Key, Doc}, {ok, Acc}) -> Fun(Key, Doc, Acc);
+        (_, {stop, Acc}) -> {stop, Acc}
+    end, {ok, Acc0}, Table).
