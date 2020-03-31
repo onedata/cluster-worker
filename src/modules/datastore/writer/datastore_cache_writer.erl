@@ -41,8 +41,8 @@
     inactivate_timer :: undefined | reference(),
     link_tokens = #{} :: cached_token_map(),
 
-    ha_master_data :: ha_master:ha_master_data(),
-    ha_failover_requests_data :: ha_slave:ha_failover_requests_data()
+    ha_master_data :: ha_datastore_master:ha_master_data(),
+    ha_failover_requests_data :: ha_datastore_slave:ha_failover_requests_data()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -128,8 +128,8 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     KiF = lists:map(fun(KeyInFlush) -> {KeyInFlush, {slave_flush, undefined}} end, KeysInSlaveFlush),
     {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
         keys_in_flush = maps:from_list(KiF),
-        ha_master_data = ha_master:init_data(BackupNodes),
-        ha_failover_requests_data = ha_slave:init_failover_requests_data()}}.
+        ha_master_data = ha_datastore_master:init_data(BackupNodes),
+        ha_failover_requests_data = ha_datastore_slave:init_failover_requests_data()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -149,7 +149,7 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
     State = #state{process_key = ProcessKey, master_pid = Pid}) ->
     #qualified_datastore_requests{local_requests = LocalRequests, remote_requests = RemoteRequests,
         remote_node = RemoteNode, remote_processing_mode = RemoteProcessingMode} =
-        ha_slave:qualify_and_reverse_requests(Requests, Mode),
+        ha_datastore_slave:qualify_and_reverse_requests(Requests, Mode),
     gen_server:reply(From, RemoteProcessingMode =:= ?HANDLE_LOCALLY),
     State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
     State3 = case RemoteProcessingMode of
@@ -200,15 +200,11 @@ handle_call({terminate, Requests}, _From, State) ->
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
-% Call used during the test (do not use - test-only method)
-handle_call(force_terminate, _From, #state{disc_writer_pid = Pid} = State) ->
-    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
-    {stop, normal, ok, State};
 handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
-    Data2 = ha_master:handle_slave_lifecycle_message(Msg, Data),
+    Data2 = ha_datastore_master:handle_slave_lifecycle_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(?INTERNAL_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
-    Data2 = ha_master:handle_internal_call(Msg, Data),
+    Data2 = ha_datastore_master:handle_internal_call(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -275,7 +271,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         flush_times = FT2
     }, ?FLUSH_INTERVAL))};
 handle_cast(?INTERNAL_MSG(Msg), #state{keys_in_flush = KiF} = State) ->
-    NewKiF = ha_master:handle_internal_cast(Msg, KiF),
+    NewKiF = ha_datastore_master:handle_internal_cast(Msg, KiF),
     {noreply, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
@@ -943,16 +939,16 @@ generate_error_ans(N, Error) ->
 
 -spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], is_failover_request(), state()) -> state().
 handle_ha_requests(CachedKeys, CacheRequests, false, #state{process_key = ProcessKey, ha_master_data = HAData} = State) ->
-    HAData2 = ha_master:store_backup(ProcessKey, CachedKeys, CacheRequests, HAData),
+    HAData2 = ha_datastore_master:store_backup(ProcessKey, CachedKeys, CacheRequests, HAData),
     State#state{ha_master_data = HAData2};
 handle_ha_requests(CachedKeys, CacheRequests, true,
     #state{master_pid = MasterPid, ha_failover_requests_data = FailoverData} = State) ->
-    FailoverData2 = ha_slave:report_failover_request_handled(MasterPid, CachedKeys, CacheRequests, FailoverData),
+    FailoverData2 = ha_datastore_slave:report_failover_request_handled(MasterPid, CachedKeys, CacheRequests, FailoverData),
     State#state{ha_failover_requests_data = FailoverData2}.
 
 -spec handle_ha_inactivate(cached_keys(), state()) -> state().
 handle_ha_inactivate(Inactivated,
     #state{master_pid = MasterPid, ha_master_data = HAData, ha_failover_requests_data = FailoverData} = State) ->
-    ha_master:forget_backup(Inactivated, HAData),
-    FailoverData2 = ha_slave:report_keys_flushed(MasterPid, Inactivated, FailoverData),
+    ha_datastore_master:forget_backup(Inactivated, HAData),
+    FailoverData2 = ha_datastore_slave:report_keys_flushed(MasterPid, Inactivated, FailoverData),
     State#state{ha_failover_requests_data = FailoverData2}.

@@ -656,7 +656,7 @@ cluster_init_step(start_upgrade_essential_workers) ->
     ?info("Workers essential for upgrade started successfully"),
     ok;
 cluster_init_step(upgrade_cluster) ->
-    case node() == consistent_hashing:get_associated_node(upgrade_cluster) of
+    case node() == consistent_hashing:get_assigned_node(upgrade_cluster) of
         true ->
             upgrade_cluster(),
             ok;

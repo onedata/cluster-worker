@@ -40,9 +40,9 @@ test_hashing(Config) ->
 
     % Check label mapping to a single node
     NodesChosenForLabels = lists:map(fun(Label) ->
-        Node = rpc:call(FirstNode, consistent_hashing, get_associated_node, [Label]),
+        Node = rpc:call(FirstNode, consistent_hashing, get_assigned_node, [Label]),
         % The same label should yield the same node
-        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_associated_node, [Label])),
+        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_assigned_node, [Label])),
         ?assert(erlang:is_atom(Node)),
         ?assert(lists:member(Node, AllNodes)),
         Node
@@ -51,8 +51,8 @@ test_hashing(Config) ->
     % Check label mapping to with get_routing_info
     lists:foreach(fun(Label) ->
         lists:foreach(fun(NodesCount) ->
-            rpc:call(FirstNode, consistent_hashing, set_label_associated_nodes_count, [NodesCount]),
-            #node_routing_info{label_associated_nodes = Associated, failed_nodes = Failed, all_nodes = All} = Nodes =
+            rpc:call(FirstNode, consistent_hashing, set_nodes_assigned_per_label, [NodesCount]),
+            #node_routing_info{assigned_nodes = AssignedNodes, failed_nodes = Failed, all_nodes = All} = Nodes =
                 rpc:call(FirstNode, consistent_hashing, get_routing_info, [Label]),
             % The same label should yield the same nodes
             ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_routing_info, [Label])),
@@ -62,7 +62,7 @@ test_hashing(Config) ->
             lists:foreach(fun(Node) ->
                 ?assert(erlang:is_atom(Node)),
                 ?assert(lists:member(Node, AllNodes))
-            end, Associated ++ Failed)
+            end, AssignedNodes ++ Failed)
         end, lists:seq(1, length(AllNodes)))
     end, Labels),
 

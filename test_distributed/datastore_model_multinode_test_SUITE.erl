@@ -254,12 +254,12 @@ saves_should_use_recovered_node(Config, Method) ->
 saves_should_change_node_dynamic(Config, Method) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
     Workers = ?config(cluster_worker_nodes, Config),
-    ok = test_utils:mock_new(Workers, ha_master),
+    ok = test_utils:mock_new(Workers, ha_datastore_master),
     set_ha(Config, change_config, [2, Method]),
 
     lists:foreach(fun(Model) ->
         UniqueKey = ?UNIQUE_KEY(Model, Key),
-        ok = test_utils:mock_expect(Workers, ha_master, store_backup,
+        ok = test_utils:mock_expect(Workers, ha_datastore_master, store_backup,
             fun(ProcessKey, Keys, CacheRequests, Data) ->
                 Ans = meck:passthrough([ProcessKey, Keys, CacheRequests, Data]),
                 case maps:is_key(UniqueKey, Keys) andalso node() =:= KeyNode of
@@ -339,7 +339,7 @@ prepare_ha_test(Config) ->
     set_ha(Config, change_config, [2, cast]),
     Key = datastore_key:new(),
     Seed = rpc:call(Worker0, datastore_key, get_chash_seed, [Key]),
-    #node_routing_info{label_associated_nodes = [KeyNode, KeyNode2] = KeyNodes} =
+    #node_routing_info{assigned_nodes = [KeyNode, KeyNode2] = KeyNodes} =
         rpc:call(Worker0, consistent_hashing, get_routing_info, [Seed]),
     [TestWorker | _] = Workers -- KeyNodes,
 
@@ -444,7 +444,7 @@ end_per_testcase(ha_test, Config) ->
     terminate_processes(Config),
     set_ha(Config, set_standby_mode_and_broadcast_master_up_message, []),
     set_ha(Config, change_config, [1, cast]),
-    test_utils:mock_unload(Workers, [ha_master]);
+    test_utils:mock_unload(Workers, [ha_datastore_master]);
 end_per_testcase(Case, Config) ->
     case lists:suffix("ha_test", atom_to_list(Case)) of
         true ->

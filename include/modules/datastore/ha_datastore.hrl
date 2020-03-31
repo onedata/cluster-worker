@@ -27,8 +27,8 @@
 %%%
 %%% The requests connected with single datastore key can be processed only by one process at one time - master or slave.
 %%% Slave processes requests if master is down. If master recovers during request processing by slave, it withholds
-%%% processing until processing of current request is finished by slave. Similar behaviour can be observed with
-%%% documents flushing - master is not flushing changes until flushing by slave is finished.
+%%% processing until processing of current request is finished by slave. The same behaviour applies to documents'
+%%% flushing - master is not flushing changes until flushing by slave is finished.
 %%%
 %%% After master recovery it is possible that some requests that should be processed by master are sent to slave (delay
 %%% in propagation of information that master is working again). In such a case, slave process redirects request to
@@ -50,7 +50,6 @@
 }).
 
 % Convenience macros used to build ha_msg
-% Include explanation of messages types
 -define(MASTER_MSG(Body), #ha_msg{type = master, body = Body}). % Message sent from master to slave
 -define(SLAVE_MSG(Body), #ha_msg{type = slave, body = Body}). % Message sent from slave to master
 -define(INTERNAL_MSG(Body), #ha_msg{type = internal, body = Body}). % HA related message sent between datastore_writer
@@ -71,7 +70,7 @@
 -record(store_backup, {
     keys :: datastore_doc_batch:cached_keys(),
     cache_requests :: [datastore_cache:cache_save_request()],
-    link = false :: ha_slave:link_to_master()
+    link = false :: ha_datastore_slave:link_to_master()
 }).
 
 % Inform slave that data is flushed and it can forget backup data
@@ -98,9 +97,9 @@
 % Information that data connected with failover request has been processed by slave
 % (cache requests have been created or keys have been flushed)
 -record(failover_request_data_processed, {
-    request_handled = false :: boolean(),
-    cache_requests_saved = #{}:: ha_slave:cache_requests_map(),
-    keys_flushed = sets:new() :: ha_slave:keys_set()
+    finished_action = ha_datastore_master:failover_action(),
+    cache_requests_saved = #{}:: ha_datastore_slave:cache_requests_map(),
+    keys_flushed = sets:new() :: ha_datastore_slave:keys_set()
 }).
 
 %%%=============================================================================================================
@@ -120,7 +119,7 @@
 % Slave failover status is used to inform master if it is handling any master's keys
 -record(slave_failover_status, {
     is_handling_requests :: boolean(),
-    ending_cache_requests :: ha_slave:cache_requests_map(),
+    ending_cache_requests :: ha_datastore_slave:cache_requests_map(),
     finished_memory_cache_requests :: [datastore_cache:cache_save_request()],
     requests_to_handle :: datastore_writer:requests_internal()
 }).

@@ -141,7 +141,7 @@ select_node([#{routing := local} | _] = Args) ->
     {node(), Args, true};
 select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]) ->
     Seed = datastore_key:get_chash_seed(Key),
-    #node_routing_info{label_associated_nodes = [MasterNode | _] = Nodes,
+    #node_routing_info{assigned_nodes = [MasterNode | _] = Nodes,
         failed_nodes = FailedNodes, all_nodes = AllNodes} = consistent_hashing:get_routing_info(Seed),
     case Nodes -- FailedNodes of
         [Node | _] ->

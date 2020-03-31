@@ -15,7 +15,7 @@
 %%% For more information see ha_datastore.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
--module(ha_slave).
+-module(ha_datastore_slave).
 -author("Michał Wrzeszcz").
 
 -include("modules/datastore/ha_datastore.hrl").
@@ -82,7 +82,7 @@ report_failover_request_handled(Pid, CachedKeys, CacheRequests, #failover_reques
     DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
     CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, CacheRequests),
     ha_datastore:send_async_internal_message(Pid,
-        #failover_request_data_processed{request_handled = true, cache_requests_saved = maps:from_list(CacheRequests2)}),
+        #failover_request_data_processed{finished_action = request_handling, cache_requests_saved = maps:from_list(CacheRequests2)}),
     Data#failover_requests_data{keys = DataKeys2}.
 
 
@@ -95,7 +95,7 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
             Data;
         _ ->
             ha_datastore:send_async_internal_message(Pid,
-                #failover_request_data_processed{keys_flushed = KeysToReport}),
+                #failover_request_data_processed{finished_action = keys_flushing, keys_flushed = KeysToReport}),
             Data#failover_requests_data{keys = sets:subtract(DataKeys, KeysToReport)}
     end.
 
@@ -201,7 +201,7 @@ handle_master_message(#get_slave_failover_status{answer_to = Pid}, #slave_data{f
         lists:reverse(LocalReversed)}.
 
 
--spec handle_internal_message(ha_master:failover_request_data_processed_message(), ha_slave_data()) -> ha_slave_data().
+-spec handle_internal_message(ha_datastore_master:failover_request_data_processed_message(), ha_slave_data()) -> ha_slave_data().
 handle_internal_message(#failover_request_data_processed{cache_requests_saved = CacheRequests,
     keys_flushed = FlushedKeys} = Msg, #slave_data{recovered_master_pid = Pid, failover_pending_cache_requests = CR,
     failover_finished_memory_cache_requests = ICR}  = SlaveData) ->
