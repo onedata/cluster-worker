@@ -46,7 +46,7 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_nodes/0, get_cluster_ips/0]).
+-export([get_cluster_status/0, get_cluster_status/1, get_cluster_nodes/0, get_cluster_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -678,9 +678,9 @@ cluster_init_step(start_listeners) ->
     ?info("All listeners started"),
     ok;
 cluster_init_step(ready) ->
-    ?info("All nodes initialized. Running 'after_init' procedures."),
+    ?info("All nodes initialized. Running 'on_cluster_ready' procedures."),
     spawn(fun() ->
-        ok = ?CALL_PLUGIN(after_init, [[]]),
+        ok = ?CALL_PLUGIN(on_cluster_ready, []),
         gen_server2:cast(?NODE_MANAGER_NAME, node_initialized)
     end),
     ok.
@@ -1191,6 +1191,23 @@ get_ip_address() ->
         undefined -> {127, 0, 0, 1}; % should be overriden by onepanel during deployment
         _ -> {127, 0, 0, 1}
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Fetches cluster status from cluster manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_status() ->
+    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
+get_cluster_status() ->
+    get_cluster_status(infinity).
+
+
+-spec get_cluster_status(Timeout :: non_neg_integer() | infinity) ->
+    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
+get_cluster_status(Timeout) ->
+    gen_server2:call({global, ?CLUSTER_MANAGER}, cluster_status, Timeout).
 
 
 %%--------------------------------------------------------------------
