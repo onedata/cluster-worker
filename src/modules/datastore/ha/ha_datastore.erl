@@ -43,14 +43,15 @@
 
 % HA messages' types (see ha_datastore.hrl)
 -type ha_message_type() :: master | slave | internal | management.
--type ha_message() :: ha_slave:backup_message() | ha_master:unlink_request() |
-    ha_master:failover_request_data_processed_message() | ha_slave:get_slave_failover_status() |
-    ha_slave:master_node_status_message() | ha_master:config_changed_message() | ha_slave:reconfiguration_message().
+-type ha_message() :: ha_datastore_slave:backup_message() | ha_datastore_master:unlink_request() |
+    ha_datastore_master:failover_request_data_processed_message() | ha_datastore_slave:get_slave_failover_status() |
+    ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message() |
+    ha_datastore_slave:reconfiguration_message().
 
 -export_type([ha_message_type/0, ha_message/0]).
 
 % Internal module types
--type key_associated_nodes_count() :: pos_integer().
+-type nodes_assigned_per_key() :: pos_integer().
 
 -define(MEMORY_COPY_BATCH_SIZE, 200).
 
@@ -58,42 +59,42 @@
 %%% Message sending API
 %%%===================================================================
 
--spec send_async_internal_message(pid(), ha_master:failover_request_data_processed_message() |
-    ha_slave:master_node_status_message() | ha_master:config_changed_message()) -> ok.
+-spec send_async_internal_message(pid(), ha_datastore_master:failover_request_data_processed_message() |
+    ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message()) -> ok.
 send_async_internal_message(Pid, Msg) ->
     gen_server:cast(Pid, ?INTERNAL_MSG(Msg)).
 
--spec send_sync_internal_message(pid(), ha_master:failover_request_data_processed_message() |
-    ha_slave:master_node_status_message() | ha_master:config_changed_message()) -> ok.
+-spec send_sync_internal_message(pid(), ha_datastore_master:failover_request_data_processed_message() |
+    ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message()) -> ok.
 send_sync_internal_message(Pid, Msg) ->
     gen_server:call(Pid, ?INTERNAL_MSG(Msg), infinity).
 
--spec send_async_slave_message(pid(), ha_master:failover_request_data_processed_message()) -> ok.
+-spec send_async_slave_message(pid(), ha_datastore_master:failover_request_data_processed_message()) -> ok.
 send_async_slave_message(Pid, Msg) ->
     gen_server:cast(Pid, ?SLAVE_MSG(Msg)).
 
--spec send_sync_slave_message(pid(), ha_master:unlink_request()) -> term().
+-spec send_sync_slave_message(pid(), ha_datastore_master:unlink_request()) -> term().
 send_sync_slave_message(Pid, Msg) ->
     gen_server:call(Pid, ?SLAVE_MSG(Msg), infinity).
 
--spec send_async_master_message(pid(), ha_slave:backup_message()) -> ok.
+-spec send_async_master_message(pid(), ha_datastore_slave:backup_message()) -> ok.
 send_async_master_message(Pid, Msg) ->
     gen_server:cast(Pid, ?MASTER_MSG(Msg)).
 
--spec send_sync_master_message(node(), datastore:key(), ha_slave:backup_message() |
-    ha_slave:get_slave_failover_status() | #datastore_internal_requests_batch{}, StartIfNotAlive :: boolean()) ->
+-spec send_sync_master_message(node(), datastore:key(), ha_datastore_slave:backup_message() |
+    ha_datastore_slave:get_slave_failover_status() | #datastore_internal_requests_batch{}, StartIfNotAlive :: boolean()) ->
     term().
 send_sync_master_message(Node, ProcessKey, Msg, true) ->
     rpc:call(Node, datastore_writer, generic_call, [ProcessKey, ?MASTER_MSG(Msg)]);
 send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
     rpc:call(Node, datastore_writer, call_if_alive, [ProcessKey, ?MASTER_MSG(Msg)]).
 
--spec broadcast_async_management_message(ha_slave:master_node_status_message() | ha_master:config_changed_message()) ->
-    ok.
+-spec broadcast_async_management_message(ha_datastore_slave:master_node_status_message() |
+    ha_datastore_master:config_changed_message()) -> ok.
 broadcast_async_management_message(Msg) ->
     tp_router:send_to_each(?MANAGEMENT_MSG(Msg)).
 
--spec broadcast_sync_management_message(ha_slave:reconfiguration_message()) -> ok | {error, term()}.
+-spec broadcast_sync_management_message(ha_datastore_slave:reconfiguration_message()) -> ok | {error, term()}.
 broadcast_sync_management_message(Msg) ->
     tp_router:send_to_each_and_wait_for_ans(?MANAGEMENT_MSG(Msg)).
 
@@ -126,7 +127,7 @@ get_backup_nodes() ->
             Env;
         undefined ->
             critical_section:run(?MODULE, fun() ->
-                Ans = case consistent_hashing:get_label_associated_nodes_count() of
+                Ans = case consistent_hashing:get_nodes_assigned_per_label() of
                     1 ->
                         [];
                     BackupNodesNum ->
@@ -165,11 +166,11 @@ set_standby_mode_and_broadcast_master_up_message() ->
     broadcast_async_management_message(?MASTER_UP).
 
 
--spec change_config(key_associated_nodes_count(), propagation_method()) -> ok.
+-spec change_config(nodes_assigned_per_key(), propagation_method()) -> ok.
 change_config(NodesNumber, PropagationMethod) ->
     ?notice("New HA configuration: nodes number: ~p, propagation method: ~p - setting environment variables"
         " and broadcasting information to tp processes~n", [NodesNumber, PropagationMethod]),
-    consistent_hashing:set_label_associated_nodes_count(NodesNumber),
+    consistent_hashing:set_nodes_assigned_per_label(NodesNumber),
     clean_backup_nodes_cache(),
     set_propagation_method(PropagationMethod),
     broadcast_async_management_message(?CONFIG_CHANGED).

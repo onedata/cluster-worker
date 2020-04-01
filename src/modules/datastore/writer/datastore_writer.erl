@@ -42,7 +42,7 @@
     terminate_msg_ref :: undefined | reference(),
     terminate_timer_ref :: undefined | reference(),
 
-    ha_slave_data :: ha_slave:ha_slave_data()
+    ha_slave_data :: ha_datastore_slave:ha_slave_data()
 }).
 
 -type requests_internal() :: [#datastore_internal_request{}]. % Datastore internal representation of requests
@@ -293,7 +293,7 @@ wait(Ref, Pid) ->
     {stop, Reason :: term()} | ignore.
 init([Key]) ->
     BackupNodes = ha_datastore:get_backup_nodes(),
-    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_master:verify_slave_activity(Key, BackupNodes),
+    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_datastore_master:verify_slave_activity(Key, BackupNodes),
 
     CacheWriterState = case ActiveRequests of
         false -> idle;
@@ -302,7 +302,7 @@ init([Key]) ->
 
     {ok, Pid} = datastore_cache_writer:start_link(self(), Key, BackupNodes, KeysInSlaveFlush),
 
-    State = #state{cache_writer_pid = Pid, ha_slave_data = ha_slave:init_data(),
+    State = #state{cache_writer_pid = Pid, ha_slave_data = ha_datastore_slave:init_data(),
         cache_writer_state = CacheWriterState, requests = RequestsToHandle},
     {ok, schedule_terminate(State)}.
 
@@ -331,15 +331,15 @@ handle_call(#datastore_internal_requests_batch{requests = NewRequests}, _From, S
 }) ->
     {reply, ok, schedule_terminate(handle_requests(State#state{requests = NewRequests ++ Requests}))};
 handle_call(?MASTER_MSG(Msg), _From, State = #state{ha_slave_data = Data, requests = WaitingRequests}) ->
-    {Ans, Data2, WaitingRequests2} = ha_slave:handle_master_message(Msg, Data, WaitingRequests),
+    {Ans, Data2, WaitingRequests2} = ha_datastore_slave:handle_master_message(Msg, Data, WaitingRequests),
     State2 = State#state{ha_slave_data = Data2, requests = WaitingRequests2},
     {reply, Ans, State2};
 handle_call(?MANAGEMENT_MSG(Msg), _From, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
-    Data2 = ha_slave:handle_management_msg(Msg, Data, Pid),
+    Data2 = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
     {reply, ok, State#state{ha_slave_data = Data2}};
 % Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
-    gen_server:call(Pid, force_terminate, infinity),
+    gen_server:call(Pid, {terminate, []}, infinity),
     {stop, normal, ok,  State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -360,7 +360,7 @@ handle_cast({mark_cache_writer_idle, Ref}, State = #state{
     ha_slave_data = SlaveData
 }) ->
     State2 = State#state{cache_writer_state = idle,
-        ha_slave_data = ha_slave:set_failover_request_handling(SlaveData, false)},
+        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, false)},
     {noreply, handle_requests(State2)};
 handle_cast({mark_disc_writer_idle, Ref}, State = #state{
     disc_writer_state = {active, Ref}
@@ -369,15 +369,15 @@ handle_cast({mark_disc_writer_idle, Ref}, State = #state{
 handle_cast({mark_disc_writer_idle, _}, State = #state{}) ->
     {noreply, State};
 handle_cast(?MASTER_MSG(Msg), State = #state{ha_slave_data = Data, requests = WaitingRequests}) ->
-    {_, Data2, WaitingRequests2} = ha_slave:handle_master_message(Msg, Data, WaitingRequests),
+    {_, Data2, WaitingRequests2} = ha_datastore_slave:handle_master_message(Msg, Data, WaitingRequests),
     {noreply, State#state{ha_slave_data = Data2, requests = WaitingRequests2}};
 handle_cast(?SLAVE_MSG(Msg), State = #state{cache_writer_pid = Pid}) ->
-    case ha_master:handle_slave_message(Msg, Pid) of
+    case ha_datastore_master:handle_slave_message(Msg, Pid) of
         true -> {noreply, schedule_terminate(handle_requests(State#state{cache_writer_state = idle}))};
         _ -> {noreply, State}
     end;
 handle_cast(?INTERNAL_MSG(Msg), State = #state{ha_slave_data = Data}) ->
-    Data2 = ha_slave:handle_internal_message(Msg, Data),
+    Data2 = ha_datastore_slave:handle_internal_message(Msg, Data),
     {noreply, State#state{ha_slave_data = Data2}};
 handle_cast(Request, State = #state{}) ->
     ?log_bad_request(Request),
@@ -399,7 +399,7 @@ handle_info({terminate, MsgRef}, State = #state{
     cache_writer_pid = Pid,
     ha_slave_data = SlaveData
 }) ->
-    case ha_slave:can_be_terminated(SlaveData) of
+    case ha_datastore_slave:can_be_terminated(SlaveData) of
         {terminate, SlaveData2} ->
             case gen_server:call(Pid, terminate, infinity) of
                 ok -> {stop, normal, State#state{ha_slave_data = SlaveData2}};
@@ -463,7 +463,7 @@ handle_requests(State = #state{
 }) ->
     Ref = make_ref(),
     HandlingFailoverRequest = gen_server:call(Pid, #datastore_internal_requests_batch{
-        ref = Ref, requests = Requests, mode = ha_slave:get_mode(SlaveData)}, infinity),
+        ref = Ref, requests = Requests, mode = ha_datastore_slave:get_mode(SlaveData)}, infinity),
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
         on ->
@@ -476,7 +476,7 @@ handle_requests(State = #state{
         requests = [],
         cache_writer_state = {active, Ref},
         disc_writer_state = {active, Ref},
-        ha_slave_data = ha_slave:set_failover_request_handling(SlaveData, HandlingFailoverRequest)
+        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, HandlingFailoverRequest)
     }.
 
 -spec schedule_terminate(state()) -> state().

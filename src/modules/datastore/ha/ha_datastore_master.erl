@@ -12,7 +12,7 @@
 %%% For more information see ha_datastore.hrl.
 %%% @end
 %%%-------------------------------------------------------------------
--module(ha_master).
+-module(ha_datastore_master).
 -author("Michał Wrzeszcz").
 
 -include("modules/datastore/ha_datastore.hrl").
@@ -40,7 +40,8 @@
 }).
 
 -type ha_master_data() :: #data{}.
--export_type([ha_master_data/0]).
+-type failover_action() :: request_handling | keys_flushing.
+-export_type([ha_master_data/0, failover_action/0]).
 
 % Used messages' types:
 -type failover_request_data_processed_message() :: #failover_request_data_processed{}.
@@ -137,11 +138,11 @@ forget_backup(Inactivated, #data{slave_pid = Pid}) ->
 %%%===================================================================
 
 -spec handle_slave_message(failover_request_data_processed_message(), pid()) -> boolean().
-handle_slave_message(#failover_request_data_processed{request_handled = HandlingFinished,
+handle_slave_message(#failover_request_data_processed{finished_action = FinishedAction,
     cache_requests_saved = CacheRequests} = Msg, Pid) ->
     datastore_cache:save(maps:values(CacheRequests)),
     ha_datastore:send_async_internal_message(Pid, Msg),
-    HandlingFinished.
+    FinishedAction =:= request_handling.
 
 %%%===================================================================
 %%% API - messages handling by datastore_cache_writer
