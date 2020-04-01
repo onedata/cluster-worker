@@ -36,6 +36,7 @@
 
 -record(state, {
     requests = [] :: requests_internal(),
+    management_request :: ha_datastore:cluster_reconfiguration_request() | undefined,
     cache_writer_pid :: pid(),
     cache_writer_state = idle :: idle | {active, reference() | backup}, % backup if process is waiting for slave action
     disc_writer_state = idle :: idle | {active, reference()},
@@ -293,7 +294,10 @@ wait(Ref, Pid) ->
     {stop, Reason :: term()} | ignore.
 init([Key]) ->
     BackupNodes = ha_datastore:get_backup_nodes(),
-    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_datastore_master:verify_slave_activity(Key, BackupNodes),
+    SlaveData = ha_datastore_slave:init_data(),
+    Mode = ha_datastore_slave:get_mode(SlaveData),
+    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} =
+        ha_datastore_master:verify_slave_activity(Key, BackupNodes, Mode),
 
     CacheWriterState = case ActiveRequests of
         false -> idle;
@@ -302,7 +306,7 @@ init([Key]) ->
 
     {ok, Pid} = datastore_cache_writer:start_link(self(), Key, BackupNodes, KeysInSlaveFlush),
 
-    State = #state{cache_writer_pid = Pid, ha_slave_data = ha_datastore_slave:init_data(),
+    State = #state{cache_writer_pid = Pid, ha_slave_data = SlaveData,
         cache_writer_state = CacheWriterState, requests = RequestsToHandle},
     {ok, schedule_terminate(State)}.
 
@@ -334,9 +338,13 @@ handle_call(?MASTER_MSG(Msg), _From, State = #state{ha_slave_data = Data, reques
     {Ans, Data2, WaitingRequests2} = ha_datastore_slave:handle_master_message(Msg, Data, WaitingRequests),
     State2 = State#state{ha_slave_data = Data2, requests = WaitingRequests2},
     {reply, Ans, State2};
-handle_call(?MANAGEMENT_MSG(Msg), _From, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
-    Data2 = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
-    {reply, ok, State#state{ha_slave_data = Data2}};
+handle_call(?MANAGEMENT_MSG(Msg), {Caller, _Tag}, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
+    {Reply, Data2} = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
+    State2 = case Reply of
+        {ok, Ref} -> State#state{management_request = #cluster_reconfiguration{ref = Ref, pid = Caller}};
+        _ -> State
+    end,
+    {reply, Reply, State2#state{ha_slave_data = Data2}};
 % Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
     gen_server:call(Pid, {terminate, []}, infinity),
@@ -454,6 +462,10 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 -spec handle_requests(state()) -> state().
+handle_requests(State = #state{management_request = #cluster_reconfiguration{ref = Ref} = Request,
+    cache_writer_pid = Pid}) ->
+    ok = gen_server:call(Pid, Request, infinity),
+    State#state{management_request = undefined, cache_writer_state = {active, Ref}};
 handle_requests(State = #state{requests = []}) ->
     State;
 handle_requests(State = #state{cache_writer_state = {active, _}}) ->

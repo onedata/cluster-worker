@@ -23,7 +23,7 @@
 % API - broadcasting actions to slave
 -export([store_backup/4, forget_backup/2]).
 % API - messages' handling by datastore_writer
--export([verify_slave_activity/2, handle_slave_message/2]).
+-export([verify_slave_activity/3, handle_slave_message/2]).
 % API - messages' handling by datastore_cache_writer
 -export([handle_internal_call/2, handle_internal_cast/2, handle_slave_lifecycle_message/2]).
 
@@ -40,7 +40,7 @@
 }).
 
 -type ha_master_data() :: #data{}.
--type failover_action() :: request_handling | keys_flushing.
+-type failover_action() :: ?REQUEST_HANDLING_ACTION | ?KEY_FLUSHING_ACTION | #preparing_reconfiguration{}.
 -export_type([ha_master_data/0, failover_action/0]).
 
 % Used messages' types:
@@ -60,32 +60,30 @@ init_data(BackupNodes) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Verifies slave activity to check if slave processes any
-%% requests connected to master's keys. In such a case master
-%% will wait with processing for slave's processing finish.
-%% Executed during start of process that works as master.
+%% Executes verify_slave_activity(Key, Node) on selected nodes depending on mode.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_slave_activity(datastore:key(), [node()]) ->
+-spec verify_slave_activity(datastore:key(), [node()], ha_datastore:slave_mode()) ->
     {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
-verify_slave_activity(Key, BackupNodes) ->
-    case BackupNodes of
-        [Node | _] ->
-            % TODO VFS-6168 - do not check when master wasn't down for a long time.
-            case ha_datastore:send_sync_master_message(Node, Key, #get_slave_failover_status{answer_to = self()}, false) of
-                {error, not_alive} ->
-                    {false, [], []};
-                #slave_failover_status{is_handling_requests = ActiveRequests,
-                    ending_cache_requests = CacheRequestsMap,
-                    finished_memory_cache_requests = MemoryRequests,
-                    requests_to_handle = RequestsToHandle
-                } ->
-                    datastore_cache:save(maps:values(CacheRequestsMap)),
-                    datastore_cache:save(MemoryRequests),
-                    {ActiveRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
-            end;
+verify_slave_activity(Key, BackupNodes, Mode) ->
+    case Mode of
+        ?CLUSTER_RECONFIGURATION_SLAVE_MODE ->
+            % Slave could work on one of these node depending on reconfiguration process
+            ToCheck = ha_datastore:reconfiguration_nodes_to_check(),
+
+            lists:foldl(fun(NodeToCheck, {ActiveRequests1, KeysInSlaveFlush1, RequestsToHandle1}) ->
+                {ActiveRequests2, KeysInSlaveFlush2, RequestsToHandle2} = verify_slave_activity(Key, NodeToCheck),
+                {ActiveRequests1 or ActiveRequests2, KeysInSlaveFlush1 ++ KeysInSlaveFlush2,
+                        RequestsToHandle1 ++ RequestsToHandle2}
+            end, {false, [], []}, ToCheck);
         _ ->
-            {false, [], []}
+            case BackupNodes of
+                [Node | _] ->
+                    % TODO VFS-6168 - do not check when master wasn't down for a long time
+                    verify_slave_activity(Key, Node);
+                _ ->
+                    {false, [], []}
+            end
     end.
 
 %%%===================================================================
@@ -142,7 +140,7 @@ handle_slave_message(#failover_request_data_processed{finished_action = Finished
     cache_requests_saved = CacheRequests} = Msg, Pid) ->
     datastore_cache:save(maps:values(CacheRequests)),
     ha_datastore:send_async_internal_message(Pid, Msg),
-    FinishedAction =:= request_handling.
+    FinishedAction =:= ?REQUEST_HANDLING_ACTION.
 
 %%%===================================================================
 %%% API - messages handling by datastore_cache_writer
@@ -165,3 +163,32 @@ handle_internal_cast(#failover_request_data_processed{
 -spec handle_slave_lifecycle_message(unlink_request(), ha_master_data()) -> ha_master_data().
 handle_slave_lifecycle_message(?REQUEST_UNLINK, Data) ->
     Data#data{link_status = ?SLAVE_NOT_LINKED}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Verifies slave activity to check if slave processes any
+%% requests connected to master's keys. In such a case master
+%% will wait with processing for slave's processing finish.
+%% Executed during start of process that works as master.
+%% @end
+%%--------------------------------------------------------------------
+-spec verify_slave_activity(datastore:key(), node()) ->
+    {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
+verify_slave_activity(Key, Node) ->
+    case ha_datastore:send_sync_master_message(Node, Key, #get_slave_failover_status{answer_to = self()}, false) of
+        {error, not_alive} ->
+            {false, [], []};
+        #slave_failover_status{is_handling_requests = ActiveRequests,
+            ending_cache_requests = CacheRequestsMap,
+            finished_memory_cache_requests = MemoryRequests,
+            requests_to_handle = RequestsToHandle
+        } ->
+            datastore_cache:save(maps:values(CacheRequestsMap)),
+            datastore_cache:save(MemoryRequests),
+            {ActiveRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
+    end.

@@ -32,7 +32,7 @@
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
--export([reconfigure_cluster/0, finish_reconfiguration/0, check_migration/1]).
+-export([reconfigure_cluster/0, finish_reconfiguration/0, check_migration/1, reconfiguration_nodes_to_check/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -48,7 +48,9 @@
     ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message() |
     ha_datastore_slave:reconfiguration_message().
 
--export_type([ha_message_type/0, ha_message/0]).
+-type cluster_reconfiguration_request() :: #cluster_reconfiguration{}.
+
+-export_type([ha_message_type/0, ha_message/0, cluster_reconfiguration_request/0]).
 
 % Internal module types
 -type nodes_assigned_per_key() :: pos_integer().
@@ -220,11 +222,18 @@ finish_reconfiguration() ->
 check_migration(Key) ->
     LocalNode = node(),
     Seed = datastore_key:get_chash_seed(Key),
-    #node_routing_info{label_associated_nodes = [NewNode | _]} = consistent_hashing:get_reconfigured_routing_info(Seed),
+    #node_routing_info{assigned_nodes = [NewNode | _]} = consistent_hashing:get_reconfigured_routing_info(Seed),
     case NewNode of
         LocalNode -> local_key;
         _ -> {migrate_to_new_master, NewNode}
     end.
+
+-spec reconfiguration_nodes_to_check() -> [node()].
+reconfiguration_nodes_to_check() ->
+    Node = node(),
+    CurrentNodes = consistent_hashing:get_all_nodes(),
+    ReconfigurationNodes = consistent_hashing:get_reconfiguration_nodes(),
+    lists:usort(get_neighbors(Node, CurrentNodes) ++ get_neighbors(Node, ReconfigurationNodes)).
 
 %%%===================================================================
 %%% Internal functions
@@ -242,6 +251,17 @@ arrange_nodes(MyNode, [MyNode | Nodes]) ->
     Nodes;
 arrange_nodes(MyNode, [Node | Nodes]) ->
     arrange_nodes(MyNode, Nodes ++ [Node]).
+
+-spec get_neighbors(node(), [node()]) -> [node()].
+get_neighbors(Node, AllNodes) ->
+    case lists:member(Node, AllNodes) of
+        true ->
+            [N1 | _] = arrange_nodes(Node, AllNodes),
+            [N2 | _] = arrange_nodes(Node, lists:reverse(AllNodes)),
+            [N1, N2];
+        _ ->
+            []
+    end.
 
 -spec copy_memory(#{node() => [datastore_cache:cache_save_request()]}) -> ok | {error, term()}.
 copy_memory(ItemsMap) ->

@@ -23,7 +23,8 @@
 
 %% API
 -export([qualify_and_reverse_requests/2, get_mode/1, can_be_terminated/1]).
--export([init_failover_requests_data/0, report_failover_request_handled/4, report_keys_flushed/3]).
+-export([init_failover_requests_data/0, report_failover_request_handled/4, report_keys_flushed/3,
+    prepare_and_send_reconfiguration_failover_requests/3]).
 -export([init_data/0, handle_master_message/3, handle_internal_message/2]).
 -export([set_failover_request_handling/2]).
 -export([handle_management_msg/3]).
@@ -46,6 +47,7 @@
 
     % Fields related with work in failover mode (master is down)
     failover_request_handling = false :: boolean(), % true if failover request is currently being handled
+    last_failover_request_node :: node() | undefined,
     failover_pending_cache_requests = #{} :: cache_requests_map(),
     failover_finished_memory_cache_requests = #{} :: cache_requests_map()
 }).
@@ -57,6 +59,8 @@
 -type keys_set() :: sets:set(datastore:key()).
 -type cache_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
 -type slave_failover_status() :: #slave_failover_status{}.
+-type reconfiguration_request_ans() :: {ok, reference()} | {error, refonfiguration_in_progress}.
+-type failover_request_handling_status() ::  {true, FailedNode:: node()} | false.
 
 -export_type([ha_failover_requests_data/0, ha_slave_data/0, link_to_master/0, keys_set/0, cache_requests_map/0]).
 
@@ -83,7 +87,8 @@ report_failover_request_handled(Pid, CachedKeys, CacheRequests, #failover_reques
     DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(CachedKeys))),
     CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, CacheRequests),
     ha_datastore:send_async_internal_message(Pid,
-        #failover_request_data_processed{finished_action = request_handling, cache_requests_saved = maps:from_list(CacheRequests2)}),
+        #failover_request_data_processed{finished_action = ?REQUEST_HANDLING_ACTION,
+            cache_requests_saved = maps:from_list(CacheRequests2)}),
     Data#failover_requests_data{keys = DataKeys2}.
 
 
@@ -96,8 +101,34 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
             Data;
         _ ->
             ha_datastore:send_async_internal_message(Pid,
-                #failover_request_data_processed{finished_action = keys_flushing, keys_flushed = KeysToReport}),
+                #failover_request_data_processed{finished_action = ?KEY_FLUSHING_ACTION, keys_flushed = KeysToReport}),
             Data#failover_requests_data{keys = sets:subtract(DataKeys, KeysToReport)}
+    end.
+
+-spec prepare_and_send_reconfiguration_failover_requests(
+    #{datastore:key() => datastore:ctx() | {reference() | slave_flush, datastore:ctx() | undefined}}, pid(),
+    ha_failover_requests_data()) -> ha_failover_requests_data().
+prepare_and_send_reconfiguration_failover_requests(UsedKeys, Pid, #failover_requests_data{keys = DataKeys} = Data) ->
+    {Master, Requests} = lists:foldl(fun
+        ({_Key, {slave_flush, undefined}}, Acc) ->
+            Acc;
+        ({Key, Value}, {_Node, List} = Acc) ->
+            case prepare_reconfiguration_failover_request(Key, Value) of
+                {true, NewMaster, Request} -> {NewMaster, [Request | List]};
+                _ -> Acc
+            end
+    end, {undefined, []}, maps:to_list(UsedKeys)),
+
+    case Master of
+        undefined ->
+            Data;
+        _ ->
+            DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(UsedKeys))),
+            CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, Requests),
+            ha_datastore:send_async_internal_message(Pid,
+                #failover_request_data_processed{finished_action = #preparing_reconfiguration{node = Master},
+                    cache_requests_saved = maps:from_list(CacheRequests2)}),
+            Data#failover_requests_data{keys = DataKeys2}
     end.
 
 %%%===================================================================
@@ -108,7 +139,9 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
 init_data() ->
     #slave_data{slave_mode = ha_datastore:get_slave_mode()}.
 
--spec set_failover_request_handling(ha_slave_data(), boolean()) -> ha_slave_data().
+-spec set_failover_request_handling(ha_slave_data(), failover_request_handling_status()) -> ha_slave_data().
+set_failover_request_handling(Data, {true, FailedNode}) ->
+    Data#slave_data{failover_request_handling = true, last_failover_request_node = FailedNode};
 set_failover_request_handling(Data, FailoverRequestHandling) ->
     Data#slave_data{failover_request_handling = FailoverRequestHandling}.
 
@@ -134,6 +167,12 @@ qualify_and_reverse_requests(Requests, Mode) ->
             ctx = #{failed_master := true, failed_nodes := [Master | _]}}} =
             Request, {Local, Remote, _}) when Master =/= MyNode ->
             {Local, [Request | Remote], Master};
+        (#datastore_internal_request{request = #datastore_request{ctx = #{routing_key := Key}}} =
+            Request, {Local, Remote, Node}) when Mode =:= ?CLUSTER_RECONFIGURATION_SLAVE_MODE ->
+            case ha_datastore:check_migration(Key) of
+                {migrate_to_new_master, Master} -> {Local, [Request | Remote], Master};
+                _ -> {[Request | Local], Remote, Node}
+            end;
         (Request, {Local, Remote, Node}) ->
             {[Request | Local], Remote, Node}
     end, {[], [], undefined}, Requests),
@@ -191,44 +230,81 @@ handle_master_message(#forget_backup{keys = Inactivated}, #slave_data{backup_key
 % Checking slave status
 handle_master_message(#get_slave_failover_status{answer_to = Pid}, #slave_data{failover_request_handling = Status,
     failover_pending_cache_requests = CacheRequests, failover_finished_memory_cache_requests = MemoryRequests,
-    slave_mode = Mode} = SlaveData,
+    last_failover_request_node = Node, slave_mode = Mode} = SlaveData,
     WaitingRequests) ->
-    #qualified_datastore_requests{local_requests = LocalReversed, remote_requests = RemoteReversed} =
-        qualify_and_reverse_requests(WaitingRequests, Mode),
-    {#slave_failover_status{is_handling_requests = Status, ending_cache_requests = CacheRequests,
-        finished_memory_cache_requests = maps:values(MemoryRequests),
-        requests_to_handle = lists:reverse(RemoteReversed)},
-        SlaveData#slave_data{recovered_master_pid = Pid, failover_finished_memory_cache_requests = #{}},
-        lists:reverse(LocalReversed)}.
+    case node(Pid) of
+        Node ->
+            #qualified_datastore_requests{local_requests = LocalReversed, remote_requests = RemoteReversed} =
+                qualify_and_reverse_requests(WaitingRequests, Mode),
+            {#slave_failover_status{is_handling_requests = Status, ending_cache_requests = CacheRequests,
+                finished_memory_cache_requests = maps:values(MemoryRequests),
+                requests_to_handle = lists:reverse(RemoteReversed)},
+                SlaveData#slave_data{recovered_master_pid = Pid, failover_finished_memory_cache_requests = #{}},
+                lists:reverse(LocalReversed)};
+        _ ->
+            {#slave_failover_status{is_handling_requests = false, ending_cache_requests = #{},
+                finished_memory_cache_requests = [], requests_to_handle = []}, SlaveData, WaitingRequests}
+    end.
 
 
 -spec handle_internal_message(ha_datastore_master:failover_request_data_processed_message(), ha_slave_data()) -> ha_slave_data().
-handle_internal_message(#failover_request_data_processed{cache_requests_saved = CacheRequests,
+handle_internal_message(#failover_request_data_processed{finished_action = Action, cache_requests_saved = CacheRequests,
     keys_flushed = FlushedKeys} = Msg, #slave_data{recovered_master_pid = Pid, failover_pending_cache_requests = CR,
     failover_finished_memory_cache_requests = ICR}  = SlaveData) ->
     FlushedKeysList = sets:to_list(FlushedKeys),
     CR2 = maps:without(FlushedKeysList, maps:merge(CR, CacheRequests)),
     SlaveData2 = SlaveData#slave_data{failover_pending_cache_requests = CR2},
-    case Pid of
-        undefined ->
+
+    {Reconfiguration, SlaveData3} = case Action of
+        #preparing_reconfiguration{node = Node} -> {true, SlaveData2#slave_data{last_failover_request_node = Node}};
+        _ -> {false, SlaveData2}
+    end,
+
+    case Pid =:= undefined orelse Reconfiguration of
+        true ->
             Finished = maps:with(FlushedKeysList, CR),
             FinishedMemory = maps:filter(fun
                 (_, {#{disc_driver := DD}, _, _}) -> DD =:= undefined;
                 (_, _) -> true
             end, Finished),
-            SlaveData2#slave_data{failover_finished_memory_cache_requests = maps:merge(ICR, FinishedMemory)};
+            SlaveData3#slave_data{failover_finished_memory_cache_requests = maps:merge(ICR, FinishedMemory)};
         _ ->
             ha_datastore:send_async_slave_message(Pid, Msg),
-            SlaveData2
+            SlaveData3
     end.
 
--spec handle_management_msg(master_node_status_message() | ha_master:config_changed_message(),
-    ha_slave_data(), pid()) -> ha_slave_data().
+-spec handle_management_msg(master_node_status_message() | ha_datastore_master:config_changed_message(),
+    ha_slave_data(), pid()) -> {ok | reconfiguration_request_ans(), ha_slave_data()}.
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
     ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
-    Data;
+    {ok, Data};
 handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid) ->
     datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart
-    Data#slave_data{backup_keys = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE};
+    {ok, Data#slave_data{backup_keys = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE}};
 handle_management_msg(?MASTER_UP, Data, _Pid) ->
-    Data#slave_data{slave_mode = ?STANDBY_SLAVE_MODE}.
+    {ok, Data#slave_data{slave_mode = ?STANDBY_SLAVE_MODE}};
+handle_management_msg(?CLUSTER_RECONFIGURATION, #slave_data{slave_mode = ?CLUSTER_RECONFIGURATION_SLAVE_MODE} = Data, _Pid) ->
+    {{error, refonfiguration_in_progress}, Data};
+handle_management_msg(?CLUSTER_RECONFIGURATION, Data, _Pid) ->
+    Ref = make_ref(),
+    {{ok, Ref}, Data#slave_data{slave_mode = ?CLUSTER_RECONFIGURATION_SLAVE_MODE}}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%% @private
+-spec prepare_reconfiguration_failover_request(datastore:key(), datastore:ctx() | {reference(), datastore:ctx()}) ->
+    {true, node(), datastore_cache:cache_save_request()} | false.
+prepare_reconfiguration_failover_request(Key, {_Ref, Ctx}) ->
+    prepare_reconfiguration_failover_request(Key, Ctx);
+prepare_reconfiguration_failover_request(Key, #{disc_driver := DD} = Ctx) when DD =/= undefined ->
+    case ha_datastore:check_migration(Key) of
+        {migrate_to_new_master, NewMaster} ->
+            {ok, Doc} = datastore_cache:get(Ctx, Key),
+            {true, NewMaster, {Ctx, Key, Doc}};
+        _ ->
+            false
+    end;
+prepare_reconfiguration_failover_request(_, _) ->
+    false.

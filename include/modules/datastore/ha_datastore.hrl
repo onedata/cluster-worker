@@ -99,7 +99,8 @@
 -record(failover_request_data_processed, {
     finished_action = ha_datastore_master:failover_action(),
     cache_requests_saved = #{}:: ha_datastore_slave:cache_requests_map(),
-    keys_flushed = sets:new() :: ha_datastore_slave:keys_set()
+    keys_flushed = sets:new() :: ha_datastore_slave:keys_set(),
+    failed_node :: node() | undefined
 }).
 
 %%%=============================================================================================================
@@ -136,12 +137,18 @@
 
 % Message sent to inform process that cluster reconfiguration (node adding/deleting) has started
 -define(CLUSTER_RECONFIGURATION, cluster_reconfiguration).
+% Internal datastore message for reconfiguration handling
+-record(cluster_reconfiguration, {
+    pid :: pid(),
+    ref :: reference()
+}).
 
 %%%=============================================================================================================
-%%% Propagation method and slave mode names.
+%%% Propagation methods, slave mode and failover actions names.
 %%% Propagation method determines whether backup data is sent using gen_server call or cast.
 %%% Mode determines whether slave process only backups data (stores backup data until it is flushed to couchbase or
 %%% deleted) or handles requests when master is down.
+%%% Failover actions determine action that  triggered failover message sending.
 %%%=============================================================================================================
 
 % Propagation methods
@@ -152,5 +159,11 @@
 -define(FAILOVER_SLAVE_MODE, failover). % handle requests that should be handled by master (master is down)
 -define(CLUSTER_RECONFIGURATION_SLAVE_MODE, cluster_reconfiguration). % special requests handling mode to prepare
                                                                       % permanent new master migration to other node
+% Failover actions
+-define(REQUEST_HANDLING_ACTION, request_handling).
+-define(KEY_FLUSHING_ACTION, keys_flushing).
+-record(preparing_reconfiguration, {
+    node :: node()
+}).
 
 -endif.
