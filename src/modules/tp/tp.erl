@@ -18,7 +18,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([call/4, call/5, call/6, cast/4, send/4]).
+-export([call/4, call/5, call/6, call_if_alive/4, cast/4, send/4]).
 -export([get_processes_limit/0, set_processes_limit/1, get_processes_number/0]).
 
 -type key() :: term().
@@ -125,6 +125,35 @@ call(Module, Args, Key, Request, Timeout, Attempts) ->
             {error, Reason}
     end.
 -endif.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sends synchronous request to transaction process and awaits response.
+%% Does not start process if it is not alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec call_if_alive(key(), request(), timeout(), non_neg_integer()) ->
+    {response(), pid()} | {error, not_alive}.
+call_if_alive(_Key, _Request, _Timeout, 0) ->
+    {error, timeout};
+call_if_alive(Key, Request, Timeout, Attempts) ->
+    case tp_router:get_initialized(Key) of
+        {ok, Pid} ->
+            try
+                gen_server:call(Pid, Request, Timeout)
+            catch
+                _:{noproc, _} ->
+                    {error, not_alive};
+                exit:{normal, _} ->
+                    {error, not_alive};
+                _:{timeout, _} ->
+                    call_if_alive(Key, Request, Timeout, Attempts - 1);
+                _:Reason ->
+                    {error, {Reason, erlang:get_stacktrace()}}
+            end;
+        {error, not_found} ->
+            {error, not_alive}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

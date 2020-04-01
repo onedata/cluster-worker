@@ -23,11 +23,16 @@
 -export([init/1, handle/1, cleanup/0]).
 
 %% API
--export([create/2, get/1, delete/1, delete/2, size/0]).
+-export([create/2, report_process_initialized/2, get/1, get_initialized/1, delete/1, delete/2, size/0]).
 -export([update_process_size/2, delete_process_size/1, get_process_size_sum/0]).
 -export([supervisor_flags/0, supervisor_children_spec/0,
     main_supervisor_flags/0, main_supervisor_children_spec/0,
     init_supervisors/0]).
+-export([send_to_each/1]).
+
+% TP process states
+-define(INITIALIZING, initializing).
+-define(INITIALIZED, initialized).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -130,13 +135,24 @@ create(Key, Pid) ->
             update_size(Table, -1),
             {error, limit_exceeded};
         false ->
-            case ets:insert_new(Table, {Key, Pid}) of
+            case ets:insert_new(Table, {Key, Pid, ?INITIALIZING}) of
                 true -> ok;
                 false ->
                     update_size(Table, -1),
                     {error, already_exists}
             end
     end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Adds information that transaction process server is initialized.
+%% @end
+%%--------------------------------------------------------------------
+-spec report_process_initialized(tp:key(), tp:server()) -> ok.
+report_process_initialized(Key, Pid) ->
+    Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
+    ets:insert(Table, {Key, Pid, ?INITIALIZED}),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -148,7 +164,21 @@ get(Key) ->
     Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
     case ets:lookup(Table, Key) of
         [] -> {error, not_found};
-        [{Key, Pid}] -> {ok, Pid}
+        [{Key, Pid, _}] -> {ok, Pid}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns pid of a transaction process server associated with provided key.
+%% If process is not initialized returns not_found.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_initialized(tp:key()) -> {ok, tp:server()} | {error, not_found}.
+get_initialized(Key) ->
+    Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
+    case ets:lookup(Table, Key) of
+        [{Key, Pid, ?INITIALIZED}] -> {ok, Pid};
+        _ -> {error, not_found}
     end.
 
 %%--------------------------------------------------------------------
@@ -171,7 +201,7 @@ delete(Key) ->
 -spec delete(tp:key(), tp:server()) -> ok.
 delete(Key, Pid) ->
     Table = datastore_multiplier:extend_name(Key, ?TP_ROUTING_TABLE),
-    case ets:select_delete(Table, [{{Key, Pid}, [], [true]}]) of
+    case ets:select_delete(Table, [{{Key, Pid, '_'}, [], [true]}]) of
         0 -> ok;
         1 -> update_size(Table, -1)
     end,
@@ -265,6 +295,21 @@ get_process_size_sum() ->
         List = ets:tab2list(Name),
         lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
     end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sends message to all tp processes.
+%% @end
+%%--------------------------------------------------------------------
+-spec send_to_each(term()) -> ok.
+send_to_each(Msg) ->
+    lists:foreach(fun(Name) ->
+        List = ets:tab2list(Name),
+        lists:foreach(fun
+            ({_, Pid, _}) -> catch gen_server:call(Pid, Msg); % Catch in case of process termination
+            (_) -> ok
+        end, List)
+    end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
 
 %%%===================================================================
 %%% Internal functions

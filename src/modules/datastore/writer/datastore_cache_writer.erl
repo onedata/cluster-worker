@@ -14,28 +14,35 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include("modules/datastore/datastore_protocol.hrl").
 -include("modules/datastore/datastore_links.hrl").
+-include("modules/datastore/ha_datastore.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/1, save_master_pid/1, get_master_pid/0]).
+-export([start_link/4, call/2, save_master_pid/1, get_master_pid/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
 -record(state, {
+    process_key :: datastore:key(), % Key used by tp_router to unambiguously identify tp process
+                                    % NOTE: many datastore keys are mapped to single tp_router key
     master_pid :: pid(),
     disc_writer_pid :: pid(),
     cached_keys_to_flush = #{} :: cached_keys(),
-    keys_in_flush = #{} :: #{key() => reference()},
+    keys_in_flush = #{} :: keys_in_flush(),
     keys_to_inactivate = #{} :: cached_keys(),
     keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
     flush_times = #{} :: #{key() => erlang:timestamp()},
     requests_ref = undefined :: undefined | reference(),
     flush_timer :: undefined | reference(),
     inactivate_timer :: undefined | reference(),
-    link_tokens = #{} :: cached_token_map()
+    link_tokens = #{} :: cached_token_map(),
+
+    ha_master_data :: ha_datastore_master:ha_master_data(),
+    ha_failover_requests_data :: ha_datastore_slave:ha_failover_requests_data()
 }).
 
 -type ctx() :: datastore:ctx().
@@ -45,10 +52,17 @@
 -type mask() :: datastore_links_mask:mask().
 -type batch() :: datastore_doc_batch:batch().
 -type cached_keys() :: datastore_doc_batch:cached_keys().
+-type keys_in_flush() :: #{key() => {reference() | slave_flush, ctx() | undefined}}. % Undefined ctx value for keys
+                                                                                     % in flush on HA slave node
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
-    #{reference() =>{datastore_links_iter:token(), erlang:timestamp()}}.
+    #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
+-type is_failover_request() :: boolean(). % see ha_datastore.hrl for failover requests description
+-type remote_processing_mode() :: ?HANDLE_LOCALLY | ?DELEGATE | ?IGNORE. % remote documents processing modes
+                                                                         % (see datastore_protocol.hrl)
+
+-export_type([keys_in_flush/0, remote_processing_mode/0]).
 
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
@@ -67,9 +81,13 @@
 %% Starts and links datastore cache writer process to the caller.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid()) -> {ok, pid()} | {error, term()}.
-start_link(MasterPid) ->
-    gen_server:start_link(?MODULE, [MasterPid], []).
+-spec start_link(pid(), key(), [node()], [key()]) -> {ok, pid()} | {error, term()}.
+start_link(MasterPid, Key, BackupNodes, KeysInSlaveFlush) ->
+    gen_server:start_link(?MODULE, {MasterPid, Key, BackupNodes, KeysInSlaveFlush}, []).
+
+-spec call(pid(), term()) -> term().
+call(Pid, Msg) ->
+    gen_server:call(Pid, Msg, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -100,13 +118,18 @@ get_master_pid() ->
 %% Initializes datastore cache writer process.
 %% @end
 %%--------------------------------------------------------------------
--spec init(Args :: term()) ->
+-spec init({MasterPid :: pid(), Key :: key(), BackupNodes :: [node()], KeysInSlaveFlush :: [key()]}) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([MasterPid]) ->
+init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
     {ok, DiscWriterPid} = datastore_disc_writer:start_link(MasterPid, self()),
     save_master_pid(MasterPid),
-    {ok, #state{master_pid = MasterPid, disc_writer_pid = DiscWriterPid}}.
+
+    KiF = lists:map(fun(KeyInFlush) -> {KeyInFlush, {slave_flush, undefined}} end, KeysInSlaveFlush),
+    {ok, #state{process_key = Key, master_pid = MasterPid, disc_writer_pid = DiscWriterPid,
+        keys_in_flush = maps:from_list(KiF),
+        ha_master_data = ha_datastore_master:init_data(BackupNodes),
+        ha_failover_requests_data = ha_datastore_slave:init_failover_requests_data()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -122,10 +145,42 @@ init([MasterPid]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_call({handle, Ref, Requests}, From, State = #state{master_pid = Pid}) ->
-    gen_server:reply(From, ok),
-    State2 = handle_requests(Requests, State#state{requests_ref = Ref}),
+handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
+    State = #state{process_key = ProcessKey, master_pid = Pid}) ->
+    #qualified_datastore_requests{local_requests = LocalRequests, remote_requests = RemoteRequests,
+        remote_node = RemoteNode, remote_processing_mode = RemoteProcessingMode} =
+        ha_datastore_slave:qualify_and_reverse_requests(Requests, Mode),
+    gen_server:reply(From, RemoteProcessingMode =:= ?HANDLE_LOCALLY),
+    State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
+    State3 = case RemoteProcessingMode of
+        ?DELEGATE ->
+            % TODO - VFS-6171 - reply to caller
+            RemoteRequestsReversed = lists:reverse(RemoteRequests), % requests are stored and sent in reversed list
+            case rpc:call(RemoteNode, datastore_writer, generic_call, [ProcessKey,
+                RequestsBatch#datastore_internal_requests_batch{requests = RemoteRequestsReversed}]) of
+                {ok, ProxyPid} ->
+                    send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid});
+                {badrpc, Reason} ->
+                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, RemoteRequestsReversed]),
+                    send_proxy_info(RemoteRequestsReversed, {error, Reason});
+                Error ->
+                    ?error("Proxy call error ~p for requests ~p", [Error, RemoteRequestsReversed]),
+                    send_proxy_info(RemoteRequestsReversed, Error)
+            end,
+            State2;
+        _ ->
+            handle_requests(RemoteRequests, true, State2)
+    end,
     gen_server:cast(Pid, {mark_cache_writer_idle, Ref}),
+    {noreply, schedule_flush(State3)};
+handle_call(#datastore_flush_request{keys = Keys}, From, State = #state{
+    cached_keys_to_flush = CachedKeys,
+    master_pid = Pid
+}) ->
+    gen_server:reply(From, ok),
+    NewKeys = maps:merge(CachedKeys, Keys),
+    tp_router:update_process_size(Pid, maps:size(NewKeys)),
+    State2 = State#state{cached_keys_to_flush = NewKeys},
     {noreply, schedule_flush(State2)};
 handle_call(terminate, _From, #state{
     requests_ref = undefined,
@@ -141,10 +196,16 @@ handle_call(terminate, _From, State) ->
 handle_call({terminate, Requests}, _From, State) ->
     State2 = #state{
         keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, State),
+        disc_writer_pid = Pid} = handle_requests(Requests, false, State), % TODO - VFS-6169 Handle failover and proxy requests
     catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
     datastore_cache:inactivate(ToInactivate),
     {stop, normal, ok, State2};
+handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
+    Data2 = ha_datastore_master:handle_slave_lifecycle_message(Msg, Data),
+    {reply, ok, State#state{ha_master_data = Data2}};
+handle_call(?INTERNAL_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
+    Data2 = ha_datastore_master:handle_internal_call(Msg, Data),
+    {reply, ok, State#state{ha_master_data = Data2}};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -209,6 +270,9 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         keys_to_expire = ToExpire2,
         flush_times = FT2
     }, ?FLUSH_INTERVAL))};
+handle_cast(?INTERNAL_MSG(Msg), #state{keys_in_flush = KiF} = State) ->
+    NewKiF = ha_datastore_master:handle_internal_cast(Msg, KiF),
+    {noreply, schedule_flush(State#state{keys_in_flush = NewKiF}, ?FLUSH_INTERVAL)};
 handle_cast(Request, #state{} = State) ->
     ?log_bad_request(Request),
     {noreply, State}.
@@ -350,22 +414,26 @@ code_change(_OldVsn, State, _Extra) ->
 %% Handles requests.
 %% @end
 %%--------------------------------------------------------------------
--spec handle_requests(list(), state()) -> state().
-handle_requests(Requests, State = #state{
+-spec handle_requests(datastore_writer:requests_internal(), is_failover_request(), state()) -> state().
+handle_requests([], _IsFailoverRequest, State) ->
+    State;
+handle_requests(Requests, IsFailoverRequest, State = #state{
     cached_keys_to_flush = CachedKeys,
     master_pid = Pid,
     link_tokens = LT
 }) ->
     Batch = datastore_doc_batch:init(),
     {Responses, Batch2, LT2} = batch_requests(Requests, [], Batch, LT),
-    Batch3 = datastore_doc_batch:apply(Batch2),
+    CacheRequests = datastore_doc_batch:create_cache_requests(Batch2),
+    {Batch3, SuccessfulCacheRequests} = datastore_doc_batch:apply_cache_requests(Batch2, CacheRequests),
     Batch4 = send_responses(Responses, Batch3),
     CachedKeys2 = datastore_doc_batch:terminate(Batch4),
 
     NewKeys = maps:merge(CachedKeys, CachedKeys2),
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
+    State2 = handle_ha_requests(CachedKeys2, SuccessfulCacheRequests, IsFailoverRequest, State),
 
-    State#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
+    State2#state{cached_keys_to_flush = NewKeys, link_tokens = LT2}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -373,11 +441,12 @@ handle_requests(Requests, State = #state{
 %% Batches requests.
 %% @end
 %%--------------------------------------------------------------------
--spec batch_requests(list(), list(), batch(), cached_token_map()) ->
+-spec batch_requests(datastore_writer:requests_internal(), list(), batch(), cached_token_map()) ->
     {list(), batch(), cached_token_map()}.
 batch_requests([], Responses, Batch, LinkTokens) ->
     {lists:reverse(Responses), Batch, LinkTokens};
-batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch, LinkTokens) ->
+batch_requests([#datastore_internal_request{pid = Pid, ref = Ref, request = Request} | Requests],
+    Responses, Batch, LinkTokens) ->
     case batch_request(Request, Batch, LinkTokens) of
         {Response, Batch2, LinkTokens2} ->
             batch_requests(Requests, [{Pid, Ref, Response} | Responses],
@@ -396,31 +465,31 @@ batch_requests([{Pid, Ref, Request} | Requests], Responses, Batch, LinkTokens) -
 %%--------------------------------------------------------------------
 -spec batch_request(term(), batch(), cached_token_map()) ->
     {term(), batch()} | {term(), batch(), cached_token_map()}.
-batch_request({create, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = create, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:create(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
-batch_request({save, [Ctx, Key, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = save, ctx = Ctx, args = [Key, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:save(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
-batch_request({update, [Ctx, Key, Diff]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = update, ctx = Ctx, args = [Key, Diff]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Batch2)
     end);
-batch_request({update, [Ctx, Key, Diff, Doc]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = update, ctx = Ctx, args = [Key, Diff, Doc]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Doc, Batch2)
     end);
-batch_request({fetch, [Ctx, Key]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = fetch, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:fetch(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request({delete, [Ctx, Key, Pred]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = delete, ctx = Ctx, args = [Key, Pred]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:delete(set_mutator_pid(Ctx), Key, Pred, Batch2)
     end);
-batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = add_links, ctx = Ctx, args = [Key, TreeId, Links]}, Batch, _LinkTokens) ->
     Items = case maps:get(sync_enabled, Ctx, false) of
         true ->
             lists:map(fun({LinkName, LinkTarget}) ->
@@ -436,7 +505,8 @@ batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
         add_links(Items, Tree, TreeId, [], [])
     end);
-batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = check_and_add_links, ctx = Ctx, args = [Key, TreeId, CheckTrees, Links]},
+    Batch, _LinkTokens) ->
     TreesToFetch = case CheckTrees of
         all ->
             datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch);
@@ -450,22 +520,25 @@ batch_request({check_and_add_links, [Ctx, Key, TreeId, CheckTrees, Links]}, Batc
     case TreesToFetch of
         {{ok, TreeIds}, Batch2} ->
             % do not fetch tree where links are added - links will be checked during add_links execution
-            {FetchResult, Batch3} = batch_request({fetch_links, [Ctx, Key, TreeIds -- [TreeId],
-                lists:map(fun({Name, _}) -> Name end, Links)]}, Batch2, _LinkTokens),
+            {FetchResult, Batch3} = batch_request(#datastore_request{function = fetch_links, ctx = Ctx,
+                args = [Key, TreeIds -- [TreeId], lists:map(fun({Name, _}) -> Name end, Links)]}, Batch2, _LinkTokens),
 
             ToAdd = lists:filtermap(fun
                 ({{_, {error, not_found}}, Link}) -> {true, Link};
                 (_) -> false
             end, lists:zip(lists:reverse(FetchResult), Links)),
-            {AddResult, Batch4} = batch_request({add_links, [Ctx, Key, TreeId, ToAdd]}, Batch3, _LinkTokens),
+            {AddResult, Batch4} = batch_request(#datastore_request{function = add_links, ctx = Ctx,
+                args = [Key, TreeId, ToAdd]}, Batch3, _LinkTokens),
 
             {prepare_check_and_add_ans(FetchResult, AddResult), Batch4};
         {{error, not_found}, Batch2} ->
-            batch_request({add_links, [Ctx, Key, TreeId, Links]}, Batch2, _LinkTokens);
+            batch_request(#datastore_request{function = add_links, ctx = Ctx, args = [Key, TreeId, Links]},
+                Batch2, _LinkTokens);
         Other ->
             {generate_error_ans(length(Links), Other), Batch}
     end;
-batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = fetch_links, ctx = Ctx, args = [Key, TreeIds, LinkNames]},
+    Batch, _LinkTokens) ->
     lists:foldl(fun(LinkName, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             Ctx2 = set_mutator_pid(Ctx),
@@ -479,7 +552,7 @@ batch_request({fetch_links, [Ctx, Key, TreeIds, LinkNames]}, Batch, _LinkTokens)
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, LinkNames);
-batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = delete_links, ctx = Ctx, args = [Key, TreeId, Links]}, Batch, _LinkTokens) ->
     Items = lists:map(fun({LinkName, LinkRev}) ->
         Pred = fun
             ({_, Rev}) when LinkRev =/= undefined -> Rev =:= LinkRev;
@@ -490,7 +563,8 @@ batch_request({delete_links, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
     links_tree_apply(Ctx, Key, TreeId, Batch, fun(Tree) ->
         delete_links(Items, Tree, [], [])
     end);
-batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = mark_links_deleted, ctx = Ctx, args = [Key, TreeId, Links]},
+    Batch, _LinkTokens) ->
     lists:foldl(fun({LinkName, LinkRev}, {Responses, Batch2}) ->
         {Response, Batch4} = batch_apply(Batch2, fun(Batch3) ->
             links_mask_apply(Ctx, Key, TreeId, Batch3, fun(Mask) ->
@@ -499,7 +573,8 @@ batch_request({mark_links_deleted, [Ctx, Key, TreeId, Links]}, Batch, _LinkToken
         end),
         {[Response | Responses], Batch4}
     end, {[], Batch}, Links);
-batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch, LinkTokens) ->
+batch_request(#datastore_request{function = fold_links, ctx = Ctx, args = [Key, TreeIds, Fun, Acc, Opts]},
+    Batch, LinkTokens) ->
     Ref = make_ref(),
     Batch2 = datastore_doc_batch:init_request(Ref, Batch),
 
@@ -538,12 +613,12 @@ batch_request({fold_links, [Ctx, Key, TreeIds, Fun, Acc, Opts]}, Batch, LinkToke
         _ ->
             {{Ref, Result}, Batch3, LinkTokens}
     end;
-batch_request({fetch_links_trees, [Ctx, Key]}, Batch, _LinkTokens) ->
+batch_request(#datastore_request{function = fetch_links_trees, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_links:get_links_trees(set_mutator_pid(Ctx), Key, Batch2)
     end);
-batch_request({Function, Args}, Batch, _LinkTokens) ->
-    apply(datastore_doc_batch, Function, Args ++ [Batch]).
+batch_request(#datastore_request{function = Function, ctx = Ctx, args = Args}, Batch, _LinkTokens) ->
+    apply(datastore_doc_batch, Function, [Ctx | Args] ++ [Batch]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -689,12 +764,7 @@ links_mask_apply(Ctx, Key, TreeId, Batch, Fun) ->
             {{error, Reason}, Batch2}
     end.
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sends responses.
-%% @end
-%%--------------------------------------------------------------------
 -spec send_responses(list(), batch()) -> batch().
 send_responses([], Batch) ->
     Batch;
@@ -702,12 +772,7 @@ send_responses([Response | Responses], Batch) ->
     send_response(Response, Batch),
     send_responses(Responses, Batch).
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sends response.
-%% @end
-%%--------------------------------------------------------------------
 -spec send_response(request() | [request()], batch()) -> any().
 send_response({Pid, Ref, {_ReqRef, {error, Reason}}}, _Batch) ->
     Pid ! {Ref, {error, Reason}};
@@ -728,22 +793,20 @@ send_response({Pid, Ref, Responses}, Batch) ->
     end, lists:reverse(Responses)),
     Pid ! {Ref, Responses2}.
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Schedules flush.
-%% @end
-%%--------------------------------------------------------------------
+-spec send_proxy_info(datastore_writer:requests_internal(), term()) -> ok.
+send_proxy_info([], _Info) ->
+    ok;
+send_proxy_info([#datastore_internal_request{pid = Pid, ref = Ref} | Requests], Info) ->
+    Pid ! {Ref, Info},
+    send_proxy_info(Requests, Info).
+
+%% @private
 -spec schedule_flush(state()) -> state().
 schedule_flush(State) ->
     schedule_flush(State, ?DATASTORE_WRITER_FLUSH_DELAY).
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Schedules flush.
-%% @end
-%%--------------------------------------------------------------------
 -spec schedule_flush(state(), non_neg_integer()) -> state().
 schedule_flush(State = #state{cached_keys_to_flush = Map}, _Delay) when map_size(Map) == 0 ->
     State;
@@ -765,12 +828,7 @@ schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
             State
     end.
 
-%%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sets mutator pid.
-%% @end
-%%--------------------------------------------------------------------
 -spec set_mutator_pid(ctx()) -> ctx().
 set_mutator_pid(Ctx) ->
     Ctx#{mutator_pid => self()}.
@@ -810,7 +868,8 @@ check_inactivate(#state{
     ExcludeMap = maps:with(Exclude, ToInactivate),
 
     datastore_cache:inactivate(ToInactivate2),
-    State2 = State#state{keys_to_inactivate = ExcludeMap,
+    State2 = handle_ha_inactivate(ToInactivate2, State),
+    State3 = State2#state{keys_to_inactivate = ExcludeMap,
         flush_times = maps:with(Exclude, FT)},
 
     MaxLinkTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
@@ -820,12 +879,12 @@ check_inactivate(#state{
         timer:now_diff(Now, Time) =< MaxLinkTimeUS
     end, LT),
 
-    case maps:size(ToExpire2) + maps:size(State2#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of
+    case maps:size(ToExpire2) + maps:size(State3#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of
         true ->
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2};
+            State3#state{link_tokens = LT2, keys_to_expire = ToExpire2};
         _ ->
             Timer = erlang:send_after(ExpireMaxTime div 1000, self(), inactivate),
-            State2#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
+            State3#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
     end.
 
 %%--------------------------------------------------------------------
@@ -877,3 +936,19 @@ generate_error_ans(0, _Error) ->
     [];
 generate_error_ans(N, Error) ->
     [{make_ref(), Error} | generate_error_ans(N - 1, Error)].
+
+-spec handle_ha_requests(cached_keys(), [datastore_cache:cache_save_request()], is_failover_request(), state()) -> state().
+handle_ha_requests(CachedKeys, CacheRequests, false, #state{process_key = ProcessKey, ha_master_data = HAData} = State) ->
+    HAData2 = ha_datastore_master:store_backup(ProcessKey, CachedKeys, CacheRequests, HAData),
+    State#state{ha_master_data = HAData2};
+handle_ha_requests(CachedKeys, CacheRequests, true,
+    #state{master_pid = MasterPid, ha_failover_requests_data = FailoverData} = State) ->
+    FailoverData2 = ha_datastore_slave:report_failover_request_handled(MasterPid, CachedKeys, CacheRequests, FailoverData),
+    State#state{ha_failover_requests_data = FailoverData2}.
+
+-spec handle_ha_inactivate(cached_keys(), state()) -> state().
+handle_ha_inactivate(Inactivated,
+    #state{master_pid = MasterPid, ha_master_data = HAData, ha_failover_requests_data = FailoverData} = State) ->
+    ha_datastore_master:forget_backup(Inactivated, HAData),
+    FailoverData2 = ha_datastore_slave:report_keys_flushed(MasterPid, Inactivated, FailoverData),
+    State#state{ha_failover_requests_data = FailoverData2}.

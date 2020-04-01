@@ -49,7 +49,7 @@ datastore_key_test_() ->
 
 setup() ->
     meck:new(consistent_hashing, []),
-    meck:expect(consistent_hashing, get_node, fun(Key) ->
+    meck:expect(consistent_hashing, get_assigned_node, fun(Key) ->
         % Mock consistent hashing by simply returning node with number equal to
         % modulo of the key's decimal representation
         KeyInt = list_to_integer(binary_to_list(Key), 16),

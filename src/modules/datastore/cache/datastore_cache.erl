@@ -45,8 +45,9 @@
 -type doc() :: datastore_doc:doc(value()).
 -type durability() :: memory | disc | remote.
 -type future() :: #future{}.
+-type cache_save_request() :: {ctx(), key(), doc()}.
 
--export_type([durability/0, future/0, ctx/0]).
+-export_type([durability/0, future/0, ctx/0, cache_save_request/0]).
 
 -define(FUTURE(Value), ?FUTURE(undefined, Value)).
 -define(FUTURE(Durability, Value), ?FUTURE(Durability, undefined, Value)).
@@ -162,8 +163,7 @@ get_remote(Ctx, Key) ->
 %% Stores values in memory or if cache is full on disc.
 %% @end
 %%--------------------------------------------------------------------
--spec save([{ctx(), key(), doc()}]) ->
-    [{ok, durability(), doc()} | {error, term()}].
+-spec save([cache_save_request()]) -> [{ok, durability(), doc()} | {error, term()}].
 save(Items) when is_list(Items) ->
     ?update_datastore_counter(?EXOMETER_NAME(cache_save), length(Items)),
     lists:map(fun
@@ -485,13 +485,7 @@ save_async(Ctx, Key, Doc, DiscFallback, Inactivate) ->
 -spec save_memory_copies(ctx(), key(), doc(),datastore_cache_manager:pool_type()) -> ok.
 save_memory_copies(#{routing := local}, _Key, _Doc, _PoolType) ->
     ok;
-save_memory_copies(#{memory_copies := all} = Ctx, Key, Doc, PoolType) ->
-    Nodes = consistent_hashing:get_all_nodes(),
-    save_memory_copies(Ctx#{memory_copies => Nodes -- [node()]}, Key, Doc, PoolType);
-save_memory_copies(#{memory_copies := Num} = Ctx, Key, Doc, PoolType) when is_integer(Num) ->
-    [_ | Nodes] = datastore_key:responsible_nodes(Key, Num),
-    save_memory_copies(Ctx#{memory_copies => Nodes}, Key, Doc, PoolType);
-save_memory_copies(#{memory_copies := Nodes} = Ctx, Key, Doc, PoolType) ->
+save_memory_copies(#{memory_copies_nodes := Nodes} = Ctx, Key, Doc, PoolType) ->
     Pool = datastore_multiplier:extend_name(Key, PoolType),
     {Ans, BadNodes} = FullAns = rpc:multicall(Nodes, ?MODULE, save_memory_copy, [Ctx, Key, Doc, Pool]),
     Errors = lists:filter(fun

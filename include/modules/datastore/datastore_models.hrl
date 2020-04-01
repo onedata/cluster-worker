@@ -105,4 +105,9 @@
     info :: view_traverse:info()
 }).
 
+% Model used for performance testing (mocked models cannot be used as they affect performance)
+-record(performance_test_record, {
+    value :: binary()
+}).
+
 -endif.

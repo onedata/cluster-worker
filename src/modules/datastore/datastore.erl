@@ -38,7 +38,14 @@
                  mutator_pid => pid(),
                  memory_driver => memory_driver(),
                  memory_driver_ctx => memory_driver_ctx(),
-                 memory_copies => [node()] | non_neg_integer() | all,
+
+                 % Memory copies external API (to be set by model)
+                 memory_copies => all | none, % number of nodes used for memory copies
+                 % Memory copies internal API (to be set by datastore modules)
+                 memory_copies_nodes => [node()], % nodes to be used for memory copies (set by datastore_router)
+                 failed_nodes => [node()], % failed nodes connected to particular request (set by datastore_router)
+                 failed_master => boolean(), % is master for request down (set by datastore_router)
+
                  disc_driver => disc_driver(),
                  disc_driver_ctx => disc_driver_ctx(),
                  remote_driver => remote_driver(),
