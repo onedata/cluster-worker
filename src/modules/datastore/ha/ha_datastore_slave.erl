@@ -114,7 +114,7 @@ prepare_and_send_reconfiguration_failover_requests(UsedKeys, Pid, #failover_requ
             Acc;
         ({Key, Value}, {_Node, List} = Acc) ->
             case prepare_reconfiguration_failover_request(Key, Value) of
-                {true, NewMaster, Request} -> {NewMaster, [Request | List]};
+                {request, NewMaster, Request} -> {NewMaster, [Request | List]};
                 _ -> Acc
             end
     end, {undefined, []}, maps:to_list(UsedKeys)),
@@ -296,16 +296,16 @@ handle_management_msg(?CLUSTER_RECONFIGURATION, Data, _Pid) ->
 
 %% @private
 -spec prepare_reconfiguration_failover_request(datastore:key(), datastore:ctx() | {reference(), datastore:ctx()}) ->
-    {true, node(), datastore_cache:cache_save_request()} | false.
+    {request, node(), datastore_cache:cache_save_request()} | ignore.
 prepare_reconfiguration_failover_request(Key, {_Ref, Ctx}) ->
     prepare_reconfiguration_failover_request(Key, Ctx);
 prepare_reconfiguration_failover_request(Key, #{disc_driver := DD} = Ctx) when DD =/= undefined ->
     case ha_datastore:check_migration(Key) of
         {migrate_to_new_master, NewMaster} ->
             {ok, Doc} = datastore_cache:get(Ctx, Key),
-            {true, NewMaster, {Ctx, Key, Doc}};
+            {request, NewMaster, {Ctx, Key, Doc}};
         _ ->
-            false
+            ignore
     end;
 prepare_reconfiguration_failover_request(_, _) ->
-    false.
+    ignore.

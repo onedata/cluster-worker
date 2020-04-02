@@ -53,8 +53,9 @@ get_ctx(Model) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec get_ctx(model(), key()) -> ctx().
-get_ctx(Model, UniqueKey) ->
+get_ctx(Model, Key) ->
     Ctx = model_apply(Model, {get_ctx, []}, fun() -> #{model => Model} end),
+    UniqueKey = datastore_model:get_unique_key(Ctx, Key),
     datastore_model_default:set_defaults(UniqueKey, Ctx).
 
 %%--------------------------------------------------------------------

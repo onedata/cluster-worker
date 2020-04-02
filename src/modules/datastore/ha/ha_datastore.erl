@@ -216,7 +216,7 @@ reconfigure_cluster() ->
 
 -spec finish_reconfiguration() -> ok.
 finish_reconfiguration() ->
-    set_slave_mode(?STANDBY_SLAVE_MODE).
+    set_slave_mode(?STANDBY_SLAVE_MODE). % TODO - wyczyscic memory_only klucze przeniesione
 
 -spec check_migration(datastore:key()) -> local_key | {migrate_to_new_master, node()}.
 check_migration(Key) ->
