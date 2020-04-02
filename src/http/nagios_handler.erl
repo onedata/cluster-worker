@@ -33,7 +33,7 @@
 %%--------------------------------------------------------------------
 -spec init(cowboy_req:req(), term()) -> {ok, cowboy_req:req(), term()}.
 init(#{method := <<"GET">>} = Req, State) ->
-    NewReq = case get_cluster_status(?NAGIOS_HEALTHCHECK_TIMEOUT) of
+    NewReq = case node_manager:get_cluster_status(?NAGIOS_HEALTHCHECK_TIMEOUT) of
         {error, _} ->
             cowboy_req:reply(500, Req);
         {ok, {AppStatus, NodeStatuses}} ->
@@ -51,12 +51,6 @@ init(Req, State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-%% @private
--spec get_cluster_status(Timeout :: integer()) ->
-    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
-get_cluster_status(Timeout) ->
-    gen_server2:call({global, ?CLUSTER_MANAGER}, cluster_status, Timeout).
 
 
 %% @private
