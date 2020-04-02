@@ -344,7 +344,7 @@ handle_call(?MANAGEMENT_MSG(Msg), {Caller, _Tag}, State = #state{ha_slave_data =
         {ok, Ref} -> State#state{management_request = #cluster_reconfiguration{ref = Ref, pid = Caller}};
         _ -> State
     end,
-    {reply, Reply, State2#state{ha_slave_data = Data2}};
+    {reply, Reply, handle_requests(State2#state{ha_slave_data = Data2})};
 % Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
     gen_server:call(Pid, {terminate, []}, infinity),

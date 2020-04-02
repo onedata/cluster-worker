@@ -180,7 +180,8 @@ qualify_and_reverse_requests(Requests, Mode) ->
     RemoteMode = case {RemoteList, Mode} of
         {[], _} -> ?IGNORE;
         {_, ?STANDBY_SLAVE_MODE} -> ?DELEGATE;
-        {_, ?FAILOVER_SLAVE_MODE} -> ?HANDLE_LOCALLY
+        {_, ?FAILOVER_SLAVE_MODE} -> ?HANDLE_LOCALLY;
+        {_, ?CLUSTER_RECONFIGURATION_SLAVE_MODE} -> ?HANDLE_LOCALLY
     end,
 
     #qualified_datastore_requests{local_requests = LocalList, remote_requests = RemoteList, remote_node = RemoteNode,
