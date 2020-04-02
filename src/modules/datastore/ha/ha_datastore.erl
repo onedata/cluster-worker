@@ -69,7 +69,7 @@ send_async_internal_message(Pid, Msg) ->
 -spec send_sync_internal_message(pid(), ha_datastore_master:failover_request_data_processed_message() |
     ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message()) -> ok.
 send_sync_internal_message(Pid, Msg) ->
-    gen_server:call(Pid, ?INTERNAL_MSG(Msg), infinity).
+    gen_server:call(Pid, ?INTERNAL_MSG(Msg), 5000). % TODO VFS-6169 - use infinity timeout
 
 -spec send_async_slave_message(pid(), ha_datastore_master:failover_request_data_processed_message()) -> ok.
 send_async_slave_message(Pid, Msg) ->
@@ -216,7 +216,8 @@ reconfigure_cluster() ->
 
 -spec finish_reconfiguration() -> ok.
 finish_reconfiguration() ->
-    set_slave_mode(?STANDBY_SLAVE_MODE). % TODO - wyczyscic memory_only klucze przeniesione
+    % TODO VFS-6169 - inactivate all memory cells migrated to new node
+    set_slave_mode(?STANDBY_SLAVE_MODE).
 
 -spec check_migration(datastore:key()) -> local_key | {migrate_to_new_master, node()}.
 check_migration(Key) ->
@@ -231,9 +232,8 @@ check_migration(Key) ->
 -spec reconfiguration_nodes_to_check() -> [node()].
 reconfiguration_nodes_to_check() ->
     Node = node(),
-    CurrentNodes = consistent_hashing:get_all_nodes(),
-    ReconfigurationNodes = consistent_hashing:get_reconfiguration_nodes(),
-    lists:usort(get_neighbors(Node, CurrentNodes) ++ get_neighbors(Node, ReconfigurationNodes)).
+    Neighbors = lists:map(fun(Nodes) -> get_neighbors(Node, Nodes) end, consistent_hashing:get_all_ring_nodes()),
+    lists:usort(lists:flatten(Neighbors)).
 
 %%%===================================================================
 %%% Internal functions

@@ -277,7 +277,7 @@ handle_internal_message(#failover_request_data_processed{finished_action = Actio
 -spec handle_management_msg(master_node_status_message() | ha_datastore_master:config_changed_message(),
     ha_slave_data(), pid()) -> {ok | reconfiguration_request_ans(), ha_slave_data()}.
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
-    ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
+    catch ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED), % TODO VFS-6169 - allow infinity timeout and not catch
     {ok, Data};
 handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid) ->
     datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart

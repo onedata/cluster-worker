@@ -46,23 +46,31 @@
 
     node_adding_cast_ha_test/1,
     node_adding_call_ha_test/1,
-    node_adding_with_sleep_cast_ha_test/1,
-    node_adding_with_sleep_call_ha_test/1,
+    node_adding_with_spawn_cast_ha_test/1,
+    node_adding_with_spawn_call_ha_test/1,
+    node_adding_without_sleep_cast_ha_test/1,
+    node_adding_without_sleep_call_ha_test/1,
 
     node_adding_multikey_cast_ha_test/1,
     node_adding_multikey_call_ha_test/1,
-    node_adding_with_sleep_multikey_cast_ha_test/1,
-    node_adding_with_sleep_multikey_call_ha_test/1,
+    node_adding_with_spawn_multikey_cast_ha_test/1,
+    node_adding_with_spawn_multikey_call_ha_test/1,
+    node_adding_without_sleep_multikey_cast_ha_test/1,
+    node_adding_without_sleep_multikey_call_ha_test/1,
 
     node_deletion_cast_ha_test/1,
     node_deletion_call_ha_test/1,
-    node_deletion_with_sleep_cast_ha_test/1,
-    node_deletion_with_sleep_call_ha_test/1,
+    node_deletion_with_spawn_cast_ha_test/1,
+    node_deletion_with_spawn_call_ha_test/1,
+    node_deletion_without_sleep_cast_ha_test/1,
+    node_deletion_without_sleep_call_ha_test/1,
 
     node_deletion_multikey_cast_ha_test/1,
     node_deletion_multikey_call_ha_test/1,
-    node_deletion_with_sleep_multikey_cast_ha_test/1,
-    node_deletion_with_sleep_multikey_call_ha_test/1,
+    node_deletion_with_spawn_multikey_cast_ha_test/1,
+    node_deletion_with_spawn_multikey_call_ha_test/1,
+    node_deletion_without_sleep_multikey_cast_ha_test/1,
+    node_deletion_without_sleep_multikey_call_ha_test/1,
 
     stress_performance_test/1,
     stress_performance_test_base/1,
@@ -99,23 +107,31 @@ all() ->
 
         node_adding_cast_ha_test,
         node_adding_call_ha_test,
-        node_adding_with_sleep_cast_ha_test,
-        node_adding_with_sleep_call_ha_test,
+        node_adding_with_spawn_cast_ha_test,
+        node_adding_with_spawn_call_ha_test,
+        node_adding_without_sleep_cast_ha_test,
+        node_adding_without_sleep_call_ha_test,
 
         node_adding_multikey_cast_ha_test,
         node_adding_multikey_call_ha_test,
-        node_adding_with_sleep_multikey_cast_ha_test,
-        node_adding_with_sleep_multikey_call_ha_test,
+        node_adding_with_spawn_multikey_cast_ha_test,
+        node_adding_with_spawn_multikey_call_ha_test,
+        node_adding_without_sleep_multikey_cast_ha_test,
+        node_adding_without_sleep_multikey_call_ha_test,
 
         node_deletion_cast_ha_test,
         node_deletion_call_ha_test,
-        node_deletion_with_sleep_cast_ha_test,
-        node_deletion_with_sleep_call_ha_test,
+        node_deletion_with_spawn_cast_ha_test,
+        node_deletion_with_spawn_call_ha_test,
+        node_deletion_without_sleep_cast_ha_test,
+        node_deletion_without_sleep_call_ha_test,
 
         node_deletion_multikey_cast_ha_test,
         node_deletion_multikey_call_ha_test,
-        node_deletion_with_sleep_multikey_cast_ha_test,
-        node_deletion_with_sleep_multikey_call_ha_test,
+        node_deletion_with_spawn_multikey_cast_ha_test,
+        node_deletion_with_spawn_multikey_call_ha_test,
+        node_deletion_without_sleep_multikey_cast_ha_test,
+        node_deletion_without_sleep_multikey_call_ha_test,
 
         memory_only_stress_with_check_test,
         stress_with_check_test,
@@ -237,58 +253,82 @@ node_transition_sleep_and_delayed_ring_repair_call_ha_test(Config) ->
 
 
 node_adding_cast_ha_test(Config) ->
-    node_adding_test(Config, cast, false).
+    node_adding_test(Config, cast, false, true).
 
 node_adding_call_ha_test(Config) ->
-    node_adding_test(Config, call, false).
+    node_adding_test(Config, call, false, true).
 
-node_adding_with_sleep_cast_ha_test(Config) ->
-    node_adding_test(Config, cast, true).
+node_adding_with_spawn_cast_ha_test(Config) ->
+    node_adding_test(Config, cast, true, true).
 
-node_adding_with_sleep_call_ha_test(Config) ->
-    node_adding_test(Config, call, true).
+node_adding_with_spawn_call_ha_test(Config) ->
+    node_adding_test(Config, call, true, true).
+
+node_adding_without_sleep_cast_ha_test(Config) ->
+    node_adding_test(Config, cast, false, false).
+
+node_adding_without_sleep_call_ha_test(Config) ->
+    node_adding_test(Config, call, false, false).
 
 
 
 node_adding_multikey_cast_ha_test(Config) ->
-    node_adding_multikey_test(Config, cast, false).
+    node_adding_multikey_test(Config, cast, false, true).
 
 node_adding_multikey_call_ha_test(Config) ->
-    node_adding_multikey_test(Config, call, false).
+    node_adding_multikey_test(Config, call, false, true).
 
-node_adding_with_sleep_multikey_cast_ha_test(Config) ->
-    node_adding_multikey_test(Config, cast, true).
+node_adding_with_spawn_multikey_cast_ha_test(Config) ->
+    node_adding_multikey_test(Config, cast, true, true).
 
-node_adding_with_sleep_multikey_call_ha_test(Config) ->
-    node_adding_multikey_test(Config, call, true).
+node_adding_with_spawn_multikey_call_ha_test(Config) ->
+    node_adding_multikey_test(Config, call, true, true).
+
+node_adding_without_sleep_multikey_cast_ha_test(Config) ->
+    node_adding_multikey_test(Config, cast, false, false).
+
+node_adding_without_sleep_multikey_call_ha_test(Config) ->
+    node_adding_multikey_test(Config, call, false, false).
 
 
 
 node_deletion_cast_ha_test(Config) ->
-    node_deletion_test(Config, cast, false).
+    node_deletion_test(Config, cast, false, true).
 
 node_deletion_call_ha_test(Config) ->
-    node_deletion_test(Config, call, false).
+    node_deletion_test(Config, call, false, true).
 
-node_deletion_with_sleep_cast_ha_test(Config) ->
-    node_deletion_test(Config, cast, true).
+node_deletion_with_spawn_cast_ha_test(Config) ->
+    node_deletion_test(Config, cast, true, true).
 
-node_deletion_with_sleep_call_ha_test(Config) ->
-    node_deletion_test(Config, call, true).
+node_deletion_with_spawn_call_ha_test(Config) ->
+    node_deletion_test(Config, call, true, true).
+
+node_deletion_without_sleep_cast_ha_test(Config) ->
+    node_deletion_test(Config, cast, false, false).
+
+node_deletion_without_sleep_call_ha_test(Config) ->
+    node_deletion_test(Config, call, false, false).
 
 
 
 node_deletion_multikey_cast_ha_test(Config) ->
-    node_deletion_multikey_test(Config, cast, false).
+    node_deletion_multikey_test(Config, cast, false, true).
 
 node_deletion_multikey_call_ha_test(Config) ->
-    node_deletion_multikey_test(Config, call, false).
+    node_deletion_multikey_test(Config, call, false, true).
 
-node_deletion_with_sleep_multikey_cast_ha_test(Config) ->
-    node_deletion_multikey_test(Config, cast, true).
+node_deletion_with_spawn_multikey_cast_ha_test(Config) ->
+    node_deletion_multikey_test(Config, cast, true, true).
 
-node_deletion_with_sleep_multikey_call_ha_test(Config) ->
-    node_deletion_multikey_test(Config, call, true).
+node_deletion_with_spawn_multikey_call_ha_test(Config) ->
+    node_deletion_multikey_test(Config, call, true, true).
+
+node_deletion_without_sleep_multikey_cast_ha_test(Config) ->
+    node_deletion_multikey_test(Config, cast, false, false).
+
+node_deletion_without_sleep_multikey_call_ha_test(Config) ->
+    node_deletion_multikey_test(Config, call, false, false).
 
 %%%===================================================================
 %%% HA tests skeletons and helper functions
@@ -433,18 +473,18 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
         terminate_processes(Config)
     end, ?TEST_MODELS).
 
-node_adding_test(Config, Method, SpawnAndSleep) ->
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, add, prev),
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, add, next).
+node_adding_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
+    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add, prev),
+    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add, next).
 
-node_deletion_test(Config, Method, SpawnAndSleep) ->
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, delete, prev),
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, delete, next).
+node_deletion_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
+    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, prev),
+    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, next).
 
-cluster_reconfiguration_test(Config, Method, SpawnAndSleep, ReconfigurationType, NodeType) ->
+cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReconfigurationType, NodeType) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
 
-    {Key, KeyNode, KeyNode2, TestWorker, NewWorkers, Ring1, Ring2} =
+    {Key, KeyNode, KeyNode2, TestWorker, NewWorkers, _Ring1, Ring2} =
         prepare_cluster_reconfiguration_data(Config, ReconfigurationType, NodeType),
     MasterPid = self(),
 
@@ -481,12 +521,11 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, ReconfigurationType,
         end,
 
         ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_reconfiguration, [NewWorkers])),
-
         lists:foreach(fun(Worker) ->
             ?assertEqual(ok, rpc:call(Worker, ha_datastore, reconfigure_cluster, []))
         end, Workers),
         set_ha(Config, change_config, [2, Method]),
-        set_ring(Config, Ring1),
+        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finish_cluster_reconfiguration, [])),
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
@@ -499,27 +538,39 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, ReconfigurationType,
             _ -> ok
         end,
 
-        timer:sleep(10000), % Wait for race on flush
-        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finish_cluster_reconfiguration, [])), % TODO - testowac przed i po sleep
+        case SleepBeforeLastUpdate of
+            true -> timer:sleep(10000); % Wait for race on flush
+            false -> ok
+        end,
+
+        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
+        check_update(KeyNode, 3),
+        assert_value_in_memory(KeyNode, Model, Key, 4),
+
+        case SleepBeforeLastUpdate of
+            true -> ok;
+            false -> timer:sleep(10000) % Wait for race on flush
+        end,
+
         lists:foreach(fun(Worker) ->
             ?assertEqual(ok, rpc:call(Worker, ha_datastore, finish_reconfiguration, []))
         end, Workers),
-        assert_value_on_disc(TestWorker, Model, Key, 3),
+        assert_value_on_disc(TestWorker, Model, Key, 4),
 
         terminate_processes(Config)
     end, ?TEST_MODELS).
 
-node_adding_multikey_test(Config, Method, SpawnAndSleep) ->
-    cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, add).
+node_adding_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
+    cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add).
 
-node_deletion_multikey_test(Config, Method, SpawnAndSleep) ->
-    cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, delete).
+node_deletion_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
+    cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete).
 
-cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, ReconfigurationType) ->
-    KeysNum = 5000,
+cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReconfigurationType) ->
+    KeysNum = 1, % VFS-6169 - set to 5000
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
 
-    {_Key, _Node, _Node2, TestWorker, NewWorkers, Ring1, Ring2} =
+    {_Key, _Node, _Node2, TestWorker, NewWorkers, _Ring1, Ring2} =
         prepare_cluster_reconfiguration_data(Config, ReconfigurationType, prev),
     MasterPid = self(),
 
@@ -556,22 +607,35 @@ cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, Reconfigura
             ?assertEqual(ok, rpc:call(Worker, ha_datastore, reconfigure_cluster, []))
         end, Workers),
         set_ha(Config, change_config, [2, Method]),
-        set_ring(Config, Ring1),
-
+        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finish_cluster_reconfiguration, [])),
         spawn_foreach_key(Keys, MasterPid, fun(Key) ->
             ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
             ?assertMatch({ok, #document{deleted = false, value = {_, 3, _, _}}},
                 rpc:call(TestWorker, Model, get, [Key]), 3)
         end),
 
-        timer:sleep(10000), % Wait for race on flush
-        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finish_cluster_reconfiguration, [])), % TODO - testowac przed i po sleep
+        case SleepBeforeLastUpdate of
+            true -> timer:sleep(10000); % Wait for race on flush
+            false -> ok
+        end,
+
+        spawn_foreach_key(Keys, MasterPid, fun(Key) ->
+            ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
+            ?assertMatch({ok, #document{deleted = false, value = {_, 4, _, _}}},
+                rpc:call(TestWorker, Model, get, [Key]))
+        end),
+
         lists:foreach(fun(Worker) ->
             ?assertEqual(ok, rpc:call(Worker, ha_datastore, finish_reconfiguration, []))
         end, Workers),
 
+
+        case SleepBeforeLastUpdate of
+            true -> ok;
+            false -> timer:sleep(10000) % Wait for race on flush
+        end,
         spawn_foreach_key(Keys, MasterPid, fun(Key) ->
-            assert_value_on_disc(TestWorker, Model, Key, 3)
+            assert_value_on_disc(TestWorker, Model, Key, 4)
         end),
 
         terminate_processes(Config)
