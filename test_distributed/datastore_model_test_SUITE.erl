@@ -40,6 +40,7 @@
     add_links_should_succeed/1,
     check_and_add_links_test/1,
     get_links_should_succeed/1,
+    get_links_after_expiration_time_should_succeed/1,
     disk_fetch_links_should_succeed/1,
     get_links_should_return_missing_error/1,
     delete_links_should_succeed/1,
@@ -65,6 +66,7 @@
 
 all() ->
     ?ALL([
+        get_links_after_expiration_time_should_succeed,
         create_should_succeed,
         delete_all_should_succeed,
         create_should_return_already_exists_error,
@@ -395,6 +397,84 @@ get_links_should_succeed(Config) ->
             ?assertEqual(undefined, Link#link.rev)
         end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
+
+get_links_after_expiration_time_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = disc_only_model,
+
+    LinksNum = 1000,
+    LinkNames = lists:sort(lists:map(fun(N) ->
+        ?LINK_NAME(N)
+    end, lists:seq(1, LinksNum))),
+    Links = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum))),
+
+
+
+    % Check links deletion
+    {LinksNames, _} = lists:unzip(Links),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+
+    timer:sleep(5000), % Allow documents expire
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        ?KEY, ?LINK_TREE_ID, LinkNames
+    ])),
+
+    timer:sleep(5000), % Allow documents expire
+    Results = rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ]),
+    lists:foreach(fun({Result, _}) ->
+        ?assertMatch({error, not_found}, Result)
+    end, lists:zip(Results, Links)),
+
+    ?assertEqual({ok, []}, rpc:call(Worker, Model, fold_links,
+        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+    )),
+
+
+
+    % Check links adding after deletion
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+
+    timer:sleep(5000), % Allow documents expire
+    Results2 = rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ]),
+    lists:foreach(fun({Result, {LinkName, LinkTarget}}) ->
+        {ok, [Link]} = ?assertMatch({ok, [#link{}]}, Result),
+        ?assertEqual(?LINK_TREE_ID, Link#link.tree_id),
+        ?assertEqual(LinkName, Link#link.name),
+        ?assertEqual(LinkTarget, Link#link.target),
+        ?assertEqual(undefined, Link#link.rev)
+    end, lists:zip(Results2, Links)),
+
+    {ok, Results3} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
+        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
+    )),
+    ?assertEqual(LinksNum, length(Results3)),
+
+
+
+    % Test fold links
+    ?assertMatch({ok, #document{}},
+        rpc:call(Worker, Model, save, [?DOC(?KEY(2), Model)])
+    ),
+
+    ?assertMatch({ok, #document{}},
+        rpc:call(Worker, Model, save, [?DOC(?KEY(3), Model)])
+    ),
+
+    timer:sleep(5000), % Allow documents expire
+    ?assertEqual(ok, rpc:call(Worker, Model, delete, [?KEY(2)])),
+
+    timer:sleep(5000), % Allow documents expire
+    ?assertMatch({ok, [_]}, rpc:call(Worker, Model, fold, [fun(Doc, Acc) -> {ok, [Doc | Acc]} end, []])).
 
 disk_fetch_links_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -1061,6 +1141,13 @@ init_per_testcase(disk_fetch_links_should_succeed = Case, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:mock_new(Workers, links_tree),
     init_per_testcase(?DEFAULT_CASE(Case), Config);
+init_per_testcase(get_links_after_expiration_time_should_succeed = Case, Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    {ok, DocExpiry} = test_utils:get_env(Worker, cluster_worker, document_expiry),
+    {ok, LinkExpiry} = test_utils:get_env(Worker, cluster_worker, link_disk_expiry),
+    test_utils:set_env(Workers, cluster_worker, document_expiry, 1),
+    test_utils:set_env(Workers, cluster_worker, link_disk_expiry, 1),
+    [{doc_expiry, DocExpiry}, {link_expiry, LinkExpiry} | init_per_testcase(?DEFAULT_CASE(Case), Config)];
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1084,6 +1171,12 @@ end_per_testcase(link_del_should_delay_inactivate, Config) ->
 end_per_testcase(disk_fetch_links_should_succeed, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:mock_unload(Workers, [links_tree]);
+end_per_testcase(get_links_after_expiration_time_should_succeed, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    DocExpiry = ?config(doc_expiry, Config),
+    LinkExpiry = ?config(link_expiry, Config),
+    test_utils:set_env(Workers, cluster_worker, document_expiry, DocExpiry),
+    test_utils:set_env(Workers, cluster_worker, link_disk_expiry, LinkExpiry);
 end_per_testcase(_Case, _Config) ->
     ok.
 
