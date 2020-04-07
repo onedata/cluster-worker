@@ -426,7 +426,7 @@ handle_cast({cluster_init_step, Step}, State) ->
         report_step_finished(Step)
     catch
         Error:Reason ->
-            ?error("Error during cluster initialization in step ~p: ~p:~p",
+            ?error_stacktrace("Error during cluster initialization in step ~p: ~p:~p",
                 [Step, Error, Reason]),
             report_step_finished(cluster_init_step_failure)
     end,
@@ -504,8 +504,9 @@ handle_cast({update_lb_advices, Advices}, State) ->
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
-handle_cast(force_stop, State) ->
-    ?critical("Cluster could not be initialized - force stopping application"),
+handle_cast({force_stop, ReasonMsg}, State) ->
+    ?critical("Received stop signal from cluster manager: ~s", [ReasonMsg]),
+    ?critical("Force stopping application..."),
     init:stop(),
     {stop, normal, State};
 

@@ -79,10 +79,8 @@ handshake(HttpAuth, ConnRef, Translator, #gs_req{request = #gs_req_handshake{} =
                 _ -> HttpAuth
             end,
             case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth) of
-                ?ERROR_UNAUTHORIZED ->
-                    {error, gs_protocol:generate_error_response(
-                        Req, ?ERROR_UNAUTHORIZED)
-                    };
+                {error, _} = Error ->
+                    {error, gs_protocol:generate_error_response(Req, Error)};
                 {ok, Auth} ->
                     {ok, SessionId} = gs_persistence:create_session(#gs_session{
                         auth = Auth,
