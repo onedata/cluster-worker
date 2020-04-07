@@ -181,8 +181,8 @@ delete(Ctx0, Key, Pred) ->
         document_expiry, ?EXPIRY),
     Ctx = couchbase_driver:set_expiry(Ctx0, Expiry),
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
-    delete_all_links(Ctx, Key, Result),
-    delete_fold_link(Ctx, Key, Result).
+    delete_all_links(Ctx0, Key, Result),
+    delete_fold_link(Ctx0, Key, Result).
 
 %%--------------------------------------------------------------------
 %% @doc
