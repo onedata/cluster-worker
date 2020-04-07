@@ -66,6 +66,7 @@
 
 all() ->
     ?ALL([
+        get_links_after_expiration_time_should_succeed,
         create_should_succeed,
         delete_all_should_succeed,
         create_should_return_already_exists_error,
@@ -85,7 +86,6 @@ all() ->
         add_links_should_succeed,
         check_and_add_links_test,
         get_links_should_succeed,
-        get_links_after_expiration_time_should_succeed,
         disk_fetch_links_should_succeed,
         get_links_should_return_missing_error,
         delete_links_should_succeed,
