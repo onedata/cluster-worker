@@ -398,32 +398,36 @@ get_links_should_succeed(Config) ->
         end, lists:zip(Results, Links))
     end, ?TEST_MODELS).
 
+% Test if documents' expiration does not result in links' trees/forests inconsistency.
+% If everything works properly, only deleted documents (parts of links' trees) should expire.
+% However, in case of a bug in expiration parameters setting, necessary documents may be deleted from
+% couchbase. As a result link operations executed after time longer than expiration time will fail.
+% The test performs link operations waiting longer than expiration time between operations
+% to find possible expiration parameters setting bugs.
 get_links_after_expiration_time_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Model = disc_only_model,
 
     LinksNum = 1000,
-    LinkNames = lists:sort(lists:map(fun(N) ->
-        ?LINK_NAME(N)
-    end, lists:seq(1, LinksNum))),
     Links = lists:sort(lists:map(fun(N) ->
         {?LINK_NAME(N), ?LINK_TARGET(N)}
     end, lists:seq(1, LinksNum))),
+    {LinksNames, _} = lists:unzip(Links),
 
 
 
     % Check links deletion
-    {LinksNames, _} = lists:unzip(Links),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         ?KEY, ?LINK_TREE_ID, Links
     ])),
 
-    timer:sleep(5000), % Allow documents expire
+    timer:sleep(timer:seconds(5)), % Allow documents expire
+    % delete_links will fail if any link document expired
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-        ?KEY, ?LINK_TREE_ID, LinkNames
+        ?KEY, ?LINK_TREE_ID, LinksNames
     ])),
 
-    timer:sleep(5000), % Allow documents expire
+    timer:sleep(timer:seconds(5)), % Allow documents expire
     Results = rpc:call(Worker, Model, get_links, [
         ?KEY, ?LINK_TREE_ID, LinksNames
     ]),
@@ -442,7 +446,7 @@ get_links_after_expiration_time_should_succeed(Config) ->
         ?KEY, ?LINK_TREE_ID, Links
     ])),
 
-    timer:sleep(5000), % Allow documents expire
+    timer:sleep(timer:seconds(5)), % Allow documents expire
     Results2 = rpc:call(Worker, Model, get_links, [
         ?KEY, ?LINK_TREE_ID, LinksNames
     ]),
@@ -470,10 +474,12 @@ get_links_after_expiration_time_should_succeed(Config) ->
         rpc:call(Worker, Model, save, [?DOC(?KEY(3), Model)])
     ),
 
-    timer:sleep(5000), % Allow documents expire
+    timer:sleep(timer:seconds(5)), % Allow documents expire
+    ?assertMatch({ok, [_, _]}, rpc:call(Worker, Model, fold, [fun(Doc, Acc) -> {ok, [Doc | Acc]} end, []])),
+
     ?assertEqual(ok, rpc:call(Worker, Model, delete, [?KEY(2)])),
 
-    timer:sleep(5000), % Allow documents expire
+    timer:sleep(timer:seconds(5)), % Allow documents expire
     ?assertMatch({ok, [_]}, rpc:call(Worker, Model, fold, [fun(Doc, Acc) -> {ok, [Doc | Acc]} end, []])).
 
 disk_fetch_links_should_succeed(Config) ->
