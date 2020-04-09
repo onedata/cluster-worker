@@ -34,6 +34,11 @@
 %%% in propagation of information that master is working again). In such a case, slave process redirects request to
 %%% master that will handle it and answer directly to calling process. For such redirection, datastore_internal_request
 %%% is used - no new message in HA protocol is needed.
+%%%
+%%% HA is used during cluster reorganization (permanent node adding/deleting). In such a case reconfiguration status
+%%% is set and keys migration is initialized. All tp processes remember operations on keys that will belong to other
+%%% nodes after reorganization and new masters for such keys use failover mechanism (mechanism used when any node fails)
+%%% to takeover such keys. Standby mode is restored after migration.
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 
@@ -148,7 +153,7 @@
 %%% Propagation method determines whether backup data is sent using gen_server call or cast.
 %%% Mode determines whether slave process only backups data (stores backup data until it is flushed to couchbase or
 %%% deleted) or handles requests when master is down.
-%%% Failover actions determine action that  triggered failover message sending.
+%%% Failover actions determine action that triggered failover message sending.
 %%%=============================================================================================================
 
 % Propagation methods
@@ -160,6 +165,8 @@
 -define(CLUSTER_RECONFIGURATION_SLAVE_MODE, cluster_reconfiguration). % special requests handling mode to prepare
                                                                       % permanent new master migration to other node
 % Failover actions
+% Note: Reconfiguration uses failover handling methods as node deletion/adding handling by tp process
+% is similar to node failure/recovery handling by this process
 -define(REQUEST_HANDLING_ACTION, request_handling).
 -define(KEY_FLUSHING_ACTION, keys_flushing).
 -record(preparing_reconfiguration, {

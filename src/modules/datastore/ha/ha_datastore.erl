@@ -32,7 +32,7 @@
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
--export([reconfigure_cluster/0, finish_reconfiguration/0, check_migration/1, reconfiguration_nodes_to_check/0]).
+-export([reconfigure_cluster/0, finish_reconfiguration/0, verify_key_node/2, reconfiguration_nodes_to_check/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -192,8 +192,8 @@ reconfigure_cluster() ->
             {ok, copy_memory(Acc)};
         (Model, Key, Doc, Acc) ->
             RoutingKey = datastore_router:get_routing_key(Doc),
-            {Acc2, CopyNow} = case check_migration(RoutingKey) of
-                {migrate_to_new_master, Node} ->
+            {Acc2, CopyNow} = case verify_key_node(RoutingKey, ?FUTURE_RING) of
+                {remote_key, Node} ->
                     Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
                     Ctx2 = Ctx#{mutator_pid => Mutator},
                     NodeAcc = maps:get(Node, Acc, []),
@@ -219,20 +219,21 @@ finish_reconfiguration() ->
     % TODO VFS-6169 - inactivate all memory cells migrated to new node
     set_slave_mode(?STANDBY_SLAVE_MODE).
 
--spec check_migration(datastore:key()) -> local_key | {migrate_to_new_master, node()}.
-check_migration(Key) ->
+-spec verify_key_node(datastore:key(), consistent_hashing:ring_generation()) -> local_key | {remote_key, node()}.
+verify_key_node(Key, Generation) ->
     LocalNode = node(),
     Seed = datastore_key:get_chash_seed(Key),
-    #node_routing_info{assigned_nodes = [NewNode | _]} = consistent_hashing:get_reconfigured_routing_info(Seed),
+    #node_routing_info{assigned_nodes = [NewNode | _]} = consistent_hashing:get_routing_info(Generation, Seed),
     case NewNode of
         LocalNode -> local_key;
-        _ -> {migrate_to_new_master, NewNode}
+        _ -> {remote_key, NewNode}
     end.
 
 -spec reconfiguration_nodes_to_check() -> [node()].
 reconfiguration_nodes_to_check() ->
     Node = node(),
-    Neighbors = lists:map(fun(Nodes) -> get_neighbors(Node, Nodes) end, consistent_hashing:get_all_ring_nodes()),
+    NodeListsToCheck = get_nodes_from_rings([?CURRENT_RING, ?PREVIOUS_RING]),
+    Neighbors = lists:map(fun(Nodes) -> get_neighbors(Node, Nodes) end, NodeListsToCheck),
     lists:usort(lists:flatten(Neighbors)).
 
 %%%===================================================================
@@ -278,7 +279,7 @@ copy_memory(Node, Items) ->
         {badrpc, Reason} ->
             {error, Reason};
         _ ->
-            % TODO - moze trzeba wyczyscic klucze zestarego node'a?
+            % TODO VFS-6271 - delete keys from old node
             FoldlAns = lists:foldl(fun
                 (_, {error, _} = Error) -> Error;
                 (ItemAns, _) -> ItemAns
@@ -287,4 +288,14 @@ copy_memory(Node, Items) ->
                 {ok, _, _} -> ok;
                 Other -> Other
             end
+    end.
+
+-spec get_nodes_from_rings([consistent_hashing:ring_generation()]) -> [[node()]].
+get_nodes_from_rings([]) ->
+    [];
+get_nodes_from_rings([RingGeneration | Tail]) ->
+    try
+        [consistent_hashing:get_all_nodes(RingGeneration) | get_nodes_from_rings(Tail)]
+    catch
+        _:chash_ring_not_initialized  -> get_nodes_from_rings(Tail)
     end.

@@ -298,11 +298,6 @@ get_process_size_sum() ->
         lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
     end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sends message to all tp processes.
-%% @end
-%%--------------------------------------------------------------------
 -spec send_to_each(term()) -> ok.
 send_to_each(Msg) ->
     lists:foreach(fun(Name) ->
@@ -316,8 +311,7 @@ send_to_each(Msg) ->
 -spec send_to_each_and_wait_for_ans(term()) -> ok | {error, term()}.
 send_to_each_and_wait_for_ans(Msg) ->
     WaitList = lists:foldl(fun(Name, Acc) ->
-        List = ets:tab2list(Name),
-        lists:foldl(fun
+        ets:foldl(fun
             ({_, Pid, _}, Acc2) ->
                 try
                     {ok, Ref} = gen_server:call(Pid, Msg, infinity),
@@ -327,21 +321,10 @@ send_to_each_and_wait_for_ans(Msg) ->
                 end;
             (_, Acc2) ->
                 Acc2
-        end, Acc, List)
+        end, Acc, Name)
     end, [], datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
 
-    lists:foldl(fun
-        ({Ref, Pid}, ok) ->
-            case wait(Ref, Pid) of
-                ok ->
-                    ok;
-                Error ->
-                    ?error("Error waiting for tp proocess ~p ans: ~p", [Pid, Error]),
-                    Error
-            end;
-        (_, Acc) ->
-            Acc
-    end, ok, WaitList).
+    wait_and_check(WaitList).
 
 %%%===================================================================
 %%% Internal functions
@@ -358,10 +341,17 @@ update_size(Table, Diff) ->
     ets:update_counter(Table, ?TP_ROUTING_TABLE_SIZE,
         {2, Diff}, {?TP_ROUTING_TABLE_SIZE, 0}).
 
--spec wait(reference(), pid()) -> term() | {error, term()}.
-wait(Ref, Pid) ->
-    Timeout = ?WAIT_TIMEOUT,
-    wait(Ref, Pid, Timeout, true).
+-spec wait_and_check([{reference(), pid()}]) -> ok | {error, term()}.
+wait_and_check([]) ->
+    ok;
+wait_and_check([{Ref, Pid} | Tail]) ->
+    case wait(Ref, Pid, ?WAIT_TIMEOUT, true) of
+        ok ->
+            wait_and_check(Tail);
+        Error ->
+            ?error("Error waiting for tp proocess ~p ans: ~p", [Pid, Error]),
+            Error
+    end.
 
 %% @private
 -spec wait(reference(), pid(), non_neg_integer(), boolean()) -> term() | {error, term()}.
@@ -372,7 +362,8 @@ wait(Ref, Pid, Timeout, CheckAndRetry) ->
         Timeout ->
             case {CheckAndRetry, rpc:call(node(Pid), erlang, is_process_alive, [Pid])} of
                 {true, true} -> wait(Ref, Pid, Timeout, CheckAndRetry);
-                {true, _} -> wait(Ref, Pid, Timeout, false);
+                {true, _} -> wait(Ref, Pid, Timeout, false); % retry last time to prevent race between
+                                                             % answer sending / process terminating
                 {_, {badrpc, Reason}} -> {error, Reason};
                 _ -> {error, timeout}
             end

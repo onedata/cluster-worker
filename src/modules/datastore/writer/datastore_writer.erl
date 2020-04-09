@@ -554,7 +554,8 @@ wait(Ref, Pid, Timeout, CheckAndRetry) ->
         Timeout ->
             case {CheckAndRetry, rpc:call(node(Pid), erlang, is_process_alive, [Pid])} of
                 {true, true} -> wait(Ref, Pid, Timeout, CheckAndRetry);
-                {true, _} -> wait(Ref, Pid, Timeout, false);
+                {true, _} -> wait(Ref, Pid, Timeout, false); % retry last time to prevent race between
+                                                             % answer sending / process terminating
                 {_, {badrpc, Reason}} -> {error, Reason};
                 _ -> {error, timeout}
             end

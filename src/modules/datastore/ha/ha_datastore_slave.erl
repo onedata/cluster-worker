@@ -20,6 +20,7 @@
 
 -include("modules/datastore/ha_datastore.hrl").
 -include("modules/datastore/datastore_protocol.hrl").
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% API
 -export([qualify_and_reverse_requests/2, get_mode/1, can_be_terminated/1]).
@@ -169,8 +170,8 @@ qualify_and_reverse_requests(Requests, Mode) ->
             {Local, [Request | Remote], Master};
         (#datastore_internal_request{request = #datastore_request{ctx = #{routing_key := Key}}} =
             Request, {Local, Remote, Node}) when Mode =:= ?CLUSTER_RECONFIGURATION_SLAVE_MODE ->
-            case ha_datastore:check_migration(Key) of
-                {migrate_to_new_master, Master} -> {Local, [Request | Remote], Master};
+            case ha_datastore:verify_key_node(Key, ?CURRENT_RING) of
+                {remote_key, Master} -> {Local, [Request | Remote], Master};
                 _ -> {[Request | Local], Remote, Node}
             end;
         (Request, {Local, Remote, Node}) ->
@@ -300,8 +301,8 @@ handle_management_msg(?CLUSTER_RECONFIGURATION, Data, _Pid) ->
 prepare_reconfiguration_failover_request(Key, {_Ref, Ctx}) ->
     prepare_reconfiguration_failover_request(Key, Ctx);
 prepare_reconfiguration_failover_request(Key, #{disc_driver := DD} = Ctx) when DD =/= undefined ->
-    case ha_datastore:check_migration(Key) of
-        {migrate_to_new_master, NewMaster} ->
+    case ha_datastore:verify_key_node(Key, ?FUTURE_RING) of
+        {remote_key, NewMaster} ->
             {ok, Doc} = datastore_cache:get(Ctx, Key),
             {request, NewMaster, {Ctx, Key, Doc}};
         _ ->

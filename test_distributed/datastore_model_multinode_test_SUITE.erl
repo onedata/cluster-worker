@@ -520,12 +520,12 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdat
                 ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
         end,
 
-        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_reconfiguration, [NewWorkers])),
+        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_resizing, [NewWorkers])),
         lists:foreach(fun(Worker) ->
             ?assertEqual(ok, rpc:call(Worker, ha_datastore, reconfigure_cluster, []))
         end, Workers),
         set_ha(Config, change_config, [2, Method]),
-        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finish_cluster_reconfiguration, [])),
+        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finalize_cluster_resizing, [])),
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
@@ -602,13 +602,13 @@ cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBefore
             end
         end),
 
-        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_reconfiguration, [NewWorkers])),
+        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_resizing, [NewWorkers])),
 
         lists:foreach(fun(Worker) ->
             ?assertEqual(ok, rpc:call(Worker, ha_datastore, reconfigure_cluster, []))
         end, Workers),
         set_ha(Config, change_config, [2, Method]),
-        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finish_cluster_reconfiguration, [])),
+        ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finalize_cluster_resizing, [])),
         spawn_foreach_key(Keys, MasterPid, fun(Key) ->
             ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
             ?assertMatch({ok, #document{deleted = false, value = {_, 3, _, _}}},
@@ -686,7 +686,7 @@ terminate_processes(Config) ->
 prepare_ring(Config, RestrictedWorkers) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Ring = consistent_hashing:init_ring(lists:usort(Workers -- RestrictedWorkers), 2),
-    consistent_hashing:set_ring(consistent_hashing_ring, Ring),
+    consistent_hashing:set_ring(?CURRENT_RING, Ring),
     Ring.
 
 prepare_cluster_reconfiguration_data(Config, add, NewNodeType) ->
@@ -716,7 +716,7 @@ prepare_cluster_reconfiguration_data(Config, delete, NewNodeType) ->
 
 set_ring(Config, Ring) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    consistent_hashing:replicate_ring_to_nodes(Workers, consistent_hashing_ring, Ring).
+    consistent_hashing:replicate_ring_to_nodes(Workers, ?CURRENT_RING, Ring).
 
 spawn_foreach_key(Keys, MasterPid, Fun) ->
     lists:foreach(fun(Key) -> spawn(fun() ->
