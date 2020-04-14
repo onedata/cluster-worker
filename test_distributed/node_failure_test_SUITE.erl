@@ -31,6 +31,9 @@ all() ->
         failure_test
     ]).
 
+-define(DOC(Key, Model), ?BASE_DOC(Key, ?MODEL_VALUE(Model))).
+-define(ATTEMPTS, 30).
+
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
@@ -39,20 +42,29 @@ failure_test(Config) ->
     [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
     set_ha(Config, change_config, [2, call]),
 
-    HashingBase = <<"test">>,
+    Model = ets_cached_model,
+    Key = datastore_key:new(),
+    Seed = rpc:call(Worker0, datastore_key, get_chash_seed, [Key]),
     ServiceName = test_service,
     MasterProc = self(),
     #node_routing_info{assigned_nodes = [Node1, Node2] = AssignedNodes} =
-        rpc:call(Worker0, consistent_hashing, get_routing_info, [HashingBase]),
+        rpc:call(Worker0, consistent_hashing, get_routing_info, [Seed]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
     StartTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
-        [ha_test_utils, start_service, stop_service, [ServiceName, MasterProc], HashingBase])),
+        [ha_test_utils, start_service, stop_service, [ServiceName, MasterProc], Seed])),
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
+
+    {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(CallWorker, Model, save, [?DOC(Key, Model)])),
 
     rpc:call(Node1, erlang, halt, []),
     StopTimestamp = os:timestamp(),
+
+    ?assertEqual({ok, Doc2}, rpc:call(CallWorker, Model, get, [Key])),
+    ?assertMatch({ok, _, #document{}},
+        rpc:call(CallWorker, couchbase_driver, get, [?DISC_CTX, ?UNIQUE_KEY(Model, Key)]), ?ATTEMPTS),
+
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
 
     ok.

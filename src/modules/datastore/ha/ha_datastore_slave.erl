@@ -225,7 +225,6 @@ handle_internal_message(#failover_request_data_processed{cache_requests_saved = 
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
     ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED),
     Data;
-% TODO - a co jak wiadomosc nie zdarzy dojsc?! Obsluzyc blad proxy
 handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid) ->
     datastore_cache_writer:call(Pid, #datastore_flush_request{keys = Keys}), % VFS-6169 - mark flushed keys in case of fast master restart
     Data#slave_data{backup_keys = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE};

@@ -506,14 +506,14 @@ handle_cast({update_lb_advices, Advices}, State) ->
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
-handle_cast(force_stop, State) ->
-    ?critical("Cluster could not be initialized - force stopping application"),
-    init:stop(),
-    {stop, normal, State};
-
 handle_cast({node_down, Node}, State) ->
     ?warning("Node ~p down", [Node]),
     ha_management:node_down(Node),
+    {noreply, State};
+
+handle_cast(force_stop, State) ->
+    ?critical("Cluster could not be initialized - force stopping application"),
+    init:stop(),
     {stop, normal, State};
 
 handle_cast(stop, State) ->

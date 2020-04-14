@@ -159,15 +159,22 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
             case rpc:call(RemoteNode, datastore_writer, generic_call, [ProcessKey,
                 RequestsBatch#datastore_internal_requests_batch{requests = RemoteRequestsReversed}]) of
                 {ok, ProxyPid} ->
-                    send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid});
+                    send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid}),
+                    State2;
+                {badrpc, nodedown} ->
+                    ?error("Proxy call to failed node ~p for requests ~p", [RemoteNode, RemoteRequestsReversed]),
+                    handle_requests(RemoteRequests, true, State2);
                 {badrpc, Reason} ->
-                    ?error("Proxy call badrpc ~p for requests ~p", [Reason, RemoteRequestsReversed]),
-                    send_proxy_info(RemoteRequestsReversed, {error, Reason});
+                    ?error("Proxy call to node ~p badrpc ~p for requests ~p",
+                        [RemoteNode, Reason, RemoteRequestsReversed]),
+                    send_proxy_info(RemoteRequestsReversed, {error, Reason}),
+                    State2;
                 Error ->
-                    ?error("Proxy call error ~p for requests ~p", [Error, RemoteRequestsReversed]),
-                    send_proxy_info(RemoteRequestsReversed, Error)
-            end,
-            State2;
+                    ?error("Proxy call to node ~p error ~p for requests ~p",
+                        [RemoteNode, Error, RemoteRequestsReversed]),
+                    send_proxy_info(RemoteRequestsReversed, Error),
+                    State2
+            end;
         _ ->
             handle_requests(RemoteRequests, true, State2)
     end,
