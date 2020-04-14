@@ -46,7 +46,7 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_status/0, get_cluster_status/1, get_cluster_nodes/0, get_cluster_ips/0]).
+-export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -1217,25 +1217,14 @@ get_cluster_status(Timeout) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Fetches cluster nodes from cluster manager.
-%% @end
-%%--------------------------------------------------------------------
--spec get_cluster_nodes() -> {ok, [node()]} | {error, cluster_not_ready}.
-get_cluster_nodes() ->
-    gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Get up to date information about IPs in the cluster.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_cluster_ips() -> [inet:ip4_address()] | no_return().
 get_cluster_ips() ->
-    {ok, Nodes} = get_cluster_nodes(),
-
     lists:map(fun(Node) ->
         {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
-    end, Nodes).
+    end, consistent_hashing:get_all_nodes()).
 
 
 %%--------------------------------------------------------------------
