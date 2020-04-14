@@ -511,6 +511,11 @@ handle_cast(force_stop, State) ->
     init:stop(),
     {stop, normal, State};
 
+handle_cast({node_down, Node}, State) ->
+    ?warning("Node ~p down", [Node]),
+    ha_management:node_down(Node),
+    {stop, normal, State};
+
 handle_cast(stop, State) ->
     {stop, normal, State};
 
