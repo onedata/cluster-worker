@@ -324,7 +324,7 @@ send_to_each_and_wait_for_ans(Msg) ->
         end, Acc, Name)
     end, [], datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
 
-    wait_and_check(WaitList).
+    wait_and_check(lists:reverse(WaitList)).
 
 %%%===================================================================
 %%% Internal functions

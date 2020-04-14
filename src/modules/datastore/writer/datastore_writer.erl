@@ -36,7 +36,7 @@
 
 -record(state, {
     requests = [] :: requests_internal(),
-    management_request :: ha_datastore:cluster_reconfiguration_request() | undefined,
+    management_request :: ha_datastore:cluster_reorganization_request() | undefined,
     cache_writer_pid :: pid(),
     cache_writer_state = idle :: idle | {active, reference() | backup}, % backup if process is waiting for slave action
     disc_writer_state = idle :: idle | {active, reference()},
@@ -341,7 +341,7 @@ handle_call(?MASTER_MSG(Msg), _From, State = #state{ha_slave_data = Data, reques
 handle_call(?MANAGEMENT_MSG(Msg), {Caller, _Tag}, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
     {Reply, Data2} = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
     State2 = case Reply of
-        {ok, Ref} -> State#state{management_request = #cluster_reconfiguration{ref = Ref, pid = Caller}};
+        {ok, Ref} -> State#state{management_request = #cluster_reorganization{ref = Ref, pid = Caller}};
         _ -> State
     end,
     {reply, Reply, handle_requests(State2#state{ha_slave_data = Data2})};
@@ -462,7 +462,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 -spec handle_requests(state()) -> state().
-handle_requests(State = #state{management_request = #cluster_reconfiguration{ref = Ref} = Request,
+handle_requests(State = #state{management_request = #cluster_reorganization{ref = Ref} = Request,
     cache_writer_pid = Pid}) ->
     ok = gen_server:call(Pid, Request, infinity),
     State#state{management_request = undefined, cache_writer_state = {active, Ref}};

@@ -35,7 +35,7 @@
 %%% master that will handle it and answer directly to calling process. For such redirection, datastore_internal_request
 %%% is used - no new message in HA protocol is needed.
 %%%
-%%% HA is used during cluster reorganization (permanent node adding/deleting). In such a case reconfiguration status
+%%% HA is used during cluster reorganization (permanent node adding/deleting). In such a case reorganization status
 %%% is set and keys migration is initialized. All tp processes remember operations on keys that will belong to other
 %%% nodes after reorganization and new masters for such keys use failover mechanism (mechanism used when any node fails)
 %%% to takeover such keys. Standby mode is restored after migration.
@@ -140,10 +140,10 @@
 % (processes get configuration during initialization and cache it)
 -define(CONFIG_CHANGED, config_changed).
 
-% Message sent to inform process that cluster reconfiguration (node adding/deleting) has started
--define(CLUSTER_RECONFIGURATION, cluster_reconfiguration).
-% Internal datastore message for reconfiguration handling
--record(cluster_reconfiguration, {
+% Message sent to inform process that cluster reorganization (node adding/deleting) has started
+-define(CLUSTER_REORGANIZATION, cluster_reorganization).
+% Internal datastore message for reorganization handling
+-record(cluster_reorganization, {
     pid :: pid(),
     ref :: reference()
 }).
@@ -162,14 +162,14 @@
 % Slave modes
 -define(STANDBY_SLAVE_MODE, standby). % process only backup data
 -define(FAILOVER_SLAVE_MODE, failover). % handle requests that should be handled by master (master is down)
--define(CLUSTER_RECONFIGURATION_SLAVE_MODE, cluster_reconfiguration). % special requests handling mode to prepare
-                                                                      % permanent new master migration to other node
+-define(CLUSTER_REORGANIZATION_SLAVE_MODE, cluster_reorganization). % special requests handling mode to prepare
+                                                                    % permanent new master migration to other node
 % Failover actions
-% Note: Reconfiguration uses failover handling methods as node deletion/adding handling by tp process
+% Note: Reorganization uses failover handling methods as node deletion/adding handling by tp process
 % is similar to node failure/recovery handling by this process
 -define(REQUEST_HANDLING_ACTION, request_handling).
 -define(KEY_FLUSHING_ACTION, keys_flushing).
--record(preparing_reconfiguration, {
+-record(preparing_reorganization, {
     node :: node()
 }).
 

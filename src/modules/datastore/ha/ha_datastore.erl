@@ -8,7 +8,7 @@
 %%% @doc
 %%% This module provides functions used to configure HA.
 %%% NOTE: Functions in this module work node-wide as failures concern whole nodes.
-%%% NOTE: Config functions should be executed on all nodes during cluster reconfiguration.
+%%% NOTE: Config functions should be executed on all nodes during cluster reorganization.
 %%% TODO - VFS-6166 - Verify HA Cast
 %%% TODO - VFS-6167 - Datastore HA supports nodes adding and deleting
 %%% For more information see ha_datastore.hrl.
@@ -32,12 +32,12 @@
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
--export([reconfigure_cluster/0, finish_reconfiguration/0, verify_key_node/2, reconfiguration_nodes_to_check/0]).
+-export([reorganize_cluster/0, finish_reorganization/0, verify_key_node/2, reorganization_nodes_to_check/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
 % Slave working mode -  see ha_datastore.hrl
--type slave_mode() :: ?STANDBY_SLAVE_MODE | ?FAILOVER_SLAVE_MODE | ?CLUSTER_RECONFIGURATION_SLAVE_MODE.
+-type slave_mode() :: ?STANDBY_SLAVE_MODE | ?FAILOVER_SLAVE_MODE | ?CLUSTER_REORGANIZATION_SLAVE_MODE.
 
 -export_type([propagation_method/0, slave_mode/0]).
 
@@ -46,11 +46,11 @@
 -type ha_message() :: ha_datastore_slave:backup_message() | ha_datastore_master:unlink_request() |
     ha_datastore_master:failover_request_data_processed_message() | ha_datastore_slave:get_slave_failover_status() |
     ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message() |
-    ha_datastore_slave:reconfiguration_message().
+    ha_datastore_slave:reorganization_message().
 
--type cluster_reconfiguration_request() :: #cluster_reconfiguration{}.
+-type cluster_reorganization_request() :: #cluster_reorganization{}.
 
--export_type([ha_message_type/0, ha_message/0, cluster_reconfiguration_request/0]).
+-export_type([ha_message_type/0, ha_message/0, cluster_reorganization_request/0]).
 
 % Internal module types
 -type nodes_assigned_per_key() :: pos_integer().
@@ -96,7 +96,7 @@ send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
 broadcast_async_management_message(Msg) ->
     tp_router:send_to_each(?MANAGEMENT_MSG(Msg)).
 
--spec broadcast_sync_management_message(ha_datastore_slave:reconfiguration_message()) -> ok | {error, term()}.
+-spec broadcast_sync_management_message(ha_datastore_slave:reorganization_message()) -> ok | {error, term()}.
 broadcast_sync_management_message(Msg) ->
     tp_router:send_to_each_and_wait_for_ans(?MANAGEMENT_MSG(Msg)).
 
@@ -178,13 +178,13 @@ change_config(NodesNumber, PropagationMethod) ->
     broadcast_async_management_message(?CONFIG_CHANGED).
 
 %%%===================================================================
-%%% API to reconfigure cluster
+%%% API to reorganize cluster
 %%%===================================================================
 
--spec reconfigure_cluster() -> ok | no_return().
-reconfigure_cluster() ->
-    set_slave_mode(?CLUSTER_RECONFIGURATION_SLAVE_MODE),
-    ok = broadcast_sync_management_message(?CLUSTER_RECONFIGURATION),
+-spec reorganize_cluster() -> ok | no_return().
+reorganize_cluster() ->
+    set_slave_mode(?CLUSTER_REORGANIZATION_SLAVE_MODE),
+    ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION),
 
     Mutator = self(),
     ok = datastore_model:foreach_memory_key(fun
@@ -214,11 +214,17 @@ reconfigure_cluster() ->
             end
     end, #{}).
 
--spec finish_reconfiguration() -> ok.
-finish_reconfiguration() ->
+-spec finish_reorganization() -> ok.
+finish_reorganization() ->
     % TODO VFS-6169 - inactivate all memory cells migrated to new node
     set_slave_mode(?STANDBY_SLAVE_MODE).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Check whether key should be handled locally or on remote node.
+%% Can be used to change current or future node responsible for the key depending on ring generation.
+%% @end
+%%--------------------------------------------------------------------
 -spec verify_key_node(datastore:key(), consistent_hashing:ring_generation()) -> local_key | {remote_key, node()}.
 verify_key_node(Key, Generation) ->
     LocalNode = node(),
@@ -229,8 +235,8 @@ verify_key_node(Key, Generation) ->
         _ -> {remote_key, NewNode}
     end.
 
--spec reconfiguration_nodes_to_check() -> [node()].
-reconfiguration_nodes_to_check() ->
+-spec reorganization_nodes_to_check() -> [node()].
+reorganization_nodes_to_check() ->
     Node = node(),
     NodeListsToCheck = get_nodes_from_rings([?CURRENT_RING, ?PREVIOUS_RING]),
     Neighbors = lists:map(fun(Nodes) -> get_neighbors(Node, Nodes) end, NodeListsToCheck),

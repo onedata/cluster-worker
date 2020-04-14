@@ -40,9 +40,9 @@
 }).
 
 -type ha_master_data() :: #data{}.
-% Note: Reconfiguration uses failover handling methods as node deletion/adding handling by tp process
+% Note: Reorganization uses failover handling methods as node deletion/adding handling by tp process
 % is similar to node failure/recovery handling by this process
--type failover_action() :: ?REQUEST_HANDLING_ACTION | ?KEY_FLUSHING_ACTION | #preparing_reconfiguration{}.
+-type failover_action() :: ?REQUEST_HANDLING_ACTION | ?KEY_FLUSHING_ACTION | #preparing_reorganization{}.
 -export_type([ha_master_data/0, failover_action/0]).
 
 % Used messages' types:
@@ -69,10 +69,10 @@ init_data(BackupNodes) ->
     {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
 verify_slave_activity(Key, BackupNodes, Mode) ->
     case Mode of
-        ?CLUSTER_RECONFIGURATION_SLAVE_MODE ->
-            % Slave could work on one of nodes returned by following function (depending on reconfiguration process)
+        ?CLUSTER_REORGANIZATION_SLAVE_MODE ->
+            % Slave could work on one of nodes returned by following function (depending on reorganization process)
             % All nodes have to be verified
-            ToCheck = ha_datastore:reconfiguration_nodes_to_check(),
+            ToCheck = ha_datastore:reorganization_nodes_to_check(),
 
             lists:foldl(fun(NodeToCheck, {ActiveRequests1, KeysInSlaveFlush1, RequestsToHandle1}) ->
                 {ActiveRequests2, KeysInSlaveFlush2, RequestsToHandle2} = verify_slave_activity(Key, NodeToCheck),

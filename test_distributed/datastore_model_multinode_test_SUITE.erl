@@ -474,18 +474,18 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
     end, ?TEST_MODELS).
 
 node_adding_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add, prev),
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add, next).
+    cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add, prev),
+    cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add, next).
 
 node_deletion_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, prev),
-    cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, next).
+    cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, prev),
+    cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, next).
 
-cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReconfigurationType, NodeType) ->
+cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReorganizationType, NodeType) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
 
     {Key, KeyNode, KeyNode2, TestWorker, NewWorkers, _Ring1, Ring2} =
-        prepare_cluster_reconfiguration_data(Config, ReconfigurationType, NodeType),
+        prepare_cluster_reorganization_data(Config, ReorganizationType, NodeType),
     MasterPid = self(),
 
     lists:foreach(fun(Model) ->
@@ -496,7 +496,7 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdat
         assert_in_memory(KeyNode2, Model, Key),
         assert_on_disc(TestWorker, Model, Key),
 
-        case ReconfigurationType of
+        case ReorganizationType of
             add -> assert_not_in_memory(KeyNode, Model, Key);
             delete -> ok % slave is in memory
         end,
@@ -522,7 +522,7 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdat
 
         ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_resizing, [NewWorkers])),
         lists:foreach(fun(Worker) ->
-            ?assertEqual(ok, rpc:call(Worker, ha_datastore, reconfigure_cluster, []))
+            ?assertEqual(ok, rpc:call(Worker, ha_datastore, reorganize_cluster, []))
         end, Workers),
         set_ha(Config, change_config, [2, Method]),
         ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finalize_cluster_resizing, [])),
@@ -534,7 +534,7 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdat
 
         assert_value_in_memory(KeyNode, Model, Key, 3),
         % TODO VFS-6169 - check it
-%%        case {ReconfigurationType, NodeType} of
+%%        case {ReorganizationType, NodeType} of
 %%            {add, prev} -> assert_value_in_memory(KeyNode2, Model, Key, 3);
 %%            _ -> ok
 %%        end,
@@ -554,7 +554,7 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdat
         end,
 
         lists:foreach(fun(Worker) ->
-            ?assertEqual(ok, rpc:call(Worker, ha_datastore, finish_reconfiguration, []))
+            ?assertEqual(ok, rpc:call(Worker, ha_datastore, finish_reorganization, []))
         end, Workers),
         assert_value_on_disc(TestWorker, Model, Key, 4),
 
@@ -562,17 +562,17 @@ cluster_reconfiguration_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdat
     end, ?TEST_MODELS).
 
 node_adding_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
-    cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add).
+    cluster_reorganization_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, add).
 
 node_deletion_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
-    cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete).
+    cluster_reorganization_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete).
 
-cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReconfigurationType) ->
+cluster_reorganization_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReorganizationType) ->
     KeysNum = 1, % VFS-6169 - set to 5000
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
 
     {_Key, _Node, _Node2, TestWorker, NewWorkers, _Ring1, Ring2} =
-        prepare_cluster_reconfiguration_data(Config, ReconfigurationType, prev),
+        prepare_cluster_reorganization_data(Config, ReorganizationType, prev),
     MasterPid = self(),
 
     lists:foreach(fun(Model) ->
@@ -605,7 +605,7 @@ cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBefore
         ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, init_cluster_resizing, [NewWorkers])),
 
         lists:foreach(fun(Worker) ->
-            ?assertEqual(ok, rpc:call(Worker, ha_datastore, reconfigure_cluster, []))
+            ?assertEqual(ok, rpc:call(Worker, ha_datastore, reorganize_cluster, []))
         end, Workers),
         set_ha(Config, change_config, [2, Method]),
         ?assertEqual(ok, rpc:call(Worker1, consistent_hashing, finalize_cluster_resizing, [])),
@@ -627,7 +627,7 @@ cluster_reconfiguration_multikey_test(Config, Method, SpawnAndSleep, SleepBefore
         end),
 
         lists:foreach(fun(Worker) ->
-            ?assertEqual(ok, rpc:call(Worker, ha_datastore, finish_reconfiguration, []))
+            ?assertEqual(ok, rpc:call(Worker, ha_datastore, finish_reorganization, []))
         end, Workers),
 
 
@@ -689,7 +689,7 @@ prepare_ring(Config, RestrictedWorkers) ->
     consistent_hashing:set_ring(?CURRENT_RING, Ring),
     Ring.
 
-prepare_cluster_reconfiguration_data(Config, add, NewNodeType) ->
+prepare_cluster_reorganization_data(Config, add, NewNodeType) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Ring1 = prepare_ring(Config, []),
     Key = datastore_key:new(),
@@ -707,10 +707,10 @@ prepare_cluster_reconfiguration_data(Config, add, NewNodeType) ->
             [TestWorker | _] = Workers -- [KeyNode, KeyNode3],
             {Key, KeyNode, KeyNode3, TestWorker, Workers, Ring1, Ring2};
         _ ->
-            prepare_cluster_reconfiguration_data(Config, add, NewNodeType)
+            prepare_cluster_reorganization_data(Config, add, NewNodeType)
     end;
-prepare_cluster_reconfiguration_data(Config, delete, NewNodeType) ->
-    {Key, KeyNode, KeyNode2, TestWorker, Workers, Ring1, Ring2} = prepare_cluster_reconfiguration_data(Config, add, NewNodeType),
+prepare_cluster_reorganization_data(Config, delete, NewNodeType) ->
+    {Key, KeyNode, KeyNode2, TestWorker, Workers, Ring1, Ring2} = prepare_cluster_reorganization_data(Config, add, NewNodeType),
     {Key, KeyNode2, KeyNode, TestWorker, Workers -- [KeyNode], Ring2, Ring1}.
 
 
