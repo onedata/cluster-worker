@@ -296,10 +296,10 @@ init([Key]) ->
     BackupNodes = ha_datastore:get_backup_nodes(),
     SlaveData = ha_datastore_slave:init_data(),
     Mode = ha_datastore_slave:get_mode(SlaveData),
-    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} =
+    {IsHandlingRequests, KeysInSlaveFlush, RequestsToHandle} =
         ha_datastore_master:verify_slave_activity(Key, BackupNodes, Mode),
 
-    CacheWriterState = case ActiveRequests of
+    CacheWriterState = case IsHandlingRequests of
         false -> idle;
         true -> {active, backup}
     end,
@@ -341,7 +341,8 @@ handle_call(?MASTER_MSG(Msg), _From, State = #state{ha_slave_data = Data, reques
 handle_call(?MANAGEMENT_MSG(Msg), {Caller, _Tag}, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
     {Reply, Data2} = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
     State2 = case Reply of
-        {ok, Ref} -> State#state{management_request = #cluster_reorganization{ref = Ref, pid = Caller}};
+        {ok, Ref} -> State#state{management_request = #cluster_reorganization_started{
+            message_ref = Ref, caller_pid = Caller}};
         _ -> State
     end,
     {reply, Reply, handle_requests(State2#state{ha_slave_data = Data2})};
@@ -462,9 +463,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 -spec handle_requests(state()) -> state().
-handle_requests(State = #state{management_request = #cluster_reorganization{ref = Ref} = Request,
-    cache_writer_pid = Pid}) ->
-    ok = gen_server:call(Pid, Request, infinity),
+handle_requests(State = #state{management_request = #cluster_reorganization_started{message_ref = Ref} = Request,
+    cache_writer_pid = CacheWriterPid}) ->
+    ok = gen_server:call(CacheWriterPid, Request, infinity),
     State#state{management_request = undefined, cache_writer_state = {active, Ref}};
 handle_requests(State = #state{requests = []}) ->
     State;

@@ -60,8 +60,6 @@
 -type keys_set() :: sets:set(datastore:key()).
 -type cache_requests_map() :: #{datastore:key() => datastore_cache:cache_save_request()}.
 -type slave_failover_status() :: #slave_failover_status{}.
--type reorganization_request_ans() :: {ok, reference()} | {error, reorganization_in_progress}.
--type failover_request_handling_status() ::  {true, FailedNode:: node()} | false.
 
 -export_type([ha_failover_requests_data/0, ha_slave_data/0, link_to_master/0, keys_set/0, cache_requests_map/0]).
 
@@ -69,7 +67,7 @@
 -type backup_message() :: #store_backup{} | #forget_backup{}.
 -type get_slave_failover_status() :: #get_slave_failover_status{}.
 -type master_node_status_message() :: ?MASTER_DOWN | ?MASTER_UP.
--type reorganization_message() :: ?CLUSTER_REORGANIZATION.
+-type reorganization_message() :: ?CLUSTER_REORGANIZATION_STARTED.
 
 -export_type([backup_message/0, get_slave_failover_status/0, master_node_status_message/0, reorganization_message/0]).
 
@@ -140,7 +138,7 @@ prepare_and_send_reorganization_failover_requests(UsedKeys, Pid, #failover_reque
 init_data() ->
     #slave_data{slave_mode = ha_datastore:get_slave_mode()}.
 
--spec set_failover_request_handling(ha_slave_data(), failover_request_handling_status()) -> ha_slave_data().
+-spec set_failover_request_handling(ha_slave_data(), {true, FailedNode :: node()} | false) -> ha_slave_data().
 set_failover_request_handling(Data, {true, FailedNode}) ->
     Data#slave_data{failover_request_handling = true, last_failover_request_node = FailedNode};
 set_failover_request_handling(Data, FailoverRequestHandling) ->
@@ -230,7 +228,7 @@ handle_master_message(#forget_backup{keys = Inactivated}, #slave_data{backup_key
     {ok, SlaveData#slave_data{backup_keys = maps:without(maps:keys(Inactivated), DataKeys)}, WaitingRequests};
 
 % Checking slave status
-handle_master_message(#get_slave_failover_status{answer_to = Pid}, #slave_data{failover_request_handling = Status,
+handle_master_message(#get_slave_failover_status{answer_to = Pid}, #slave_data{failover_request_handling = IsHandlingRequests,
     failover_pending_cache_requests = CacheRequests, failover_finished_memory_cache_requests = MemoryRequests,
     last_failover_request_node = Node, slave_mode = Mode} = SlaveData,
     WaitingRequests) ->
@@ -238,13 +236,13 @@ handle_master_message(#get_slave_failover_status{answer_to = Pid}, #slave_data{f
         Node ->
             #qualified_datastore_requests{local_requests = LocalReversed, remote_requests = RemoteReversed} =
                 qualify_and_reverse_requests(WaitingRequests, Mode),
-            {#slave_failover_status{is_handling_requests = Status, ending_cache_requests = CacheRequests,
+            {#slave_failover_status{is_handling_requests = IsHandlingRequests, pending_cache_requests = CacheRequests,
                 finished_memory_cache_requests = maps:values(MemoryRequests),
                 requests_to_handle = lists:reverse(RemoteReversed)},
                 SlaveData#slave_data{recovered_master_pid = Pid, failover_finished_memory_cache_requests = #{}},
                 lists:reverse(LocalReversed)};
         _ ->
-            {#slave_failover_status{is_handling_requests = false, ending_cache_requests = #{},
+            {#slave_failover_status{is_handling_requests = false, pending_cache_requests = #{},
                 finished_memory_cache_requests = [], requests_to_handle = []}, SlaveData, WaitingRequests}
     end.
 
@@ -276,7 +274,7 @@ handle_internal_message(#failover_request_data_processed{finished_action = Actio
     end.
 
 -spec handle_management_msg(master_node_status_message() | ha_datastore_master:config_changed_message(),
-    ha_slave_data(), pid()) -> {ok | reorganization_request_ans(), ha_slave_data()}.
+    ha_slave_data(), pid()) -> {ok | {ok, reference()} | {error, reorganization_in_progress}, ha_slave_data()}.
 handle_management_msg(?CONFIG_CHANGED, Data, Pid) ->
     catch ha_datastore:send_sync_internal_message(Pid, ?CONFIG_CHANGED), % TODO VFS-6169 - allow infinity timeout and not catch
     {ok, Data};
@@ -285,9 +283,9 @@ handle_management_msg(?MASTER_DOWN, #slave_data{backup_keys = Keys} = Data, Pid)
     {ok, Data#slave_data{backup_keys = #{}, recovered_master_pid = undefined, slave_mode = ?FAILOVER_SLAVE_MODE}};
 handle_management_msg(?MASTER_UP, Data, _Pid) ->
     {ok, Data#slave_data{slave_mode = ?STANDBY_SLAVE_MODE}};
-handle_management_msg(?CLUSTER_REORGANIZATION, #slave_data{slave_mode = ?CLUSTER_REORGANIZATION_SLAVE_MODE} = Data, _Pid) ->
+handle_management_msg(?CLUSTER_REORGANIZATION_STARTED, #slave_data{slave_mode = ?CLUSTER_REORGANIZATION_SLAVE_MODE} = Data, _Pid) ->
     {{error, reorganization_in_progress}, Data};
-handle_management_msg(?CLUSTER_REORGANIZATION, Data, _Pid) ->
+handle_management_msg(?CLUSTER_REORGANIZATION_STARTED, Data, _Pid) ->
     Ref = make_ref(),
     {{ok, Ref}, Data#slave_data{slave_mode = ?CLUSTER_REORGANIZATION_SLAVE_MODE}}.
 

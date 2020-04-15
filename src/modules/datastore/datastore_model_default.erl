@@ -129,7 +129,7 @@ set_defaults(UniqueKey, Ctx) ->
     Ctx2 = set_memory_driver(UniqueKey, Ctx),
     Ctx3 = set_disc_driver(Ctx2),
     Ctx4 = set_remote_driver(Ctx3),
-    set_routing_key(UniqueKey, Ctx4).
+    ensure_routing_key(UniqueKey, Ctx4).
 
 %%-------------------------------------------------------------------
 %% @doc
@@ -222,8 +222,8 @@ set_remote_driver(Ctx = #{remote_driver := _RD}) ->
 set_remote_driver(Ctx) ->
     Ctx#{remote_driver => undefined}.
 
--spec set_routing_key(key(), ctx()) -> ctx().
-set_routing_key(_, Ctx = #{routing_key := _}) ->
+-spec ensure_routing_key(key(), ctx()) -> ctx().
+ensure_routing_key(_, Ctx = #{routing_key := _}) ->
     Ctx;
-set_routing_key(Key, Ctx) ->
+ensure_routing_key(Key, Ctx) ->
     Ctx#{routing_key => Key}.

@@ -376,7 +376,7 @@ foreach_memory_key(Fun, Acc0) ->
     FoldlAns = lists:foldl(fun
         (Model, {ok, Acc}) ->
             case foreach_memory_key(Model, Fun, Acc) of
-                {error, not_supported} -> {ok, Acc};
+                {error, not_supported} -> {ok, Acc}; % Ignore - it is not memory_only model
                 Acc2 -> Acc2
             end;
         (_, {stop, Acc}) ->

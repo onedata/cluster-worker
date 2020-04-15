@@ -210,7 +210,7 @@ handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
 handle_call(?INTERNAL_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_datastore_master:handle_internal_call(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
-handle_call(#cluster_reorganization{pid = Pid, ref = Ref}, From, State = #state{
+handle_call(#cluster_reorganization_started{caller_pid = CallerPid, message_ref = Ref}, From, State = #state{
     cached_keys_to_flush = CachedKeys,
     keys_in_flush = KeysInFlush,
     master_pid = MasterPid,
@@ -219,7 +219,7 @@ handle_call(#cluster_reorganization{pid = Pid, ref = Ref}, From, State = #state{
     gen_server:reply(From, ok),
     FailoverData2 = ha_datastore_slave:prepare_and_send_reorganization_failover_requests(
         maps:merge(KeysInFlush, CachedKeys), MasterPid, FailoverData),
-    Pid ! {Ref, ok},
+    CallerPid ! {Ref, ok},
     gen_server:cast(MasterPid, {mark_cache_writer_idle, Ref}),
     {noreply, State#state{ha_failover_requests_data = FailoverData2}};
 handle_call(Request, _From, State = #state{}) ->

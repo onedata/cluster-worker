@@ -125,7 +125,7 @@
 % Slave failover status is used to inform master if it is handling any master's keys
 -record(slave_failover_status, {
     is_handling_requests :: boolean(),
-    ending_cache_requests :: ha_datastore_slave:cache_requests_map(),
+    pending_cache_requests :: ha_datastore_slave:cache_requests_map(),
     finished_memory_cache_requests :: [datastore_cache:cache_save_request()],
     requests_to_handle :: datastore_writer:requests_internal()
 }).
@@ -141,11 +141,11 @@
 -define(CONFIG_CHANGED, config_changed).
 
 % Message sent to inform process that cluster reorganization (node adding/deleting) has started
--define(CLUSTER_REORGANIZATION, cluster_reorganization).
+-define(CLUSTER_REORGANIZATION_STARTED, cluster_reorganization_started).
 % Internal datastore message for reorganization handling
--record(cluster_reorganization, {
-    pid :: pid(),
-    ref :: reference()
+-record(cluster_reorganization_started, {
+    caller_pid :: pid(),
+    message_ref :: reference() % reference used to answer to caller
 }).
 
 %%%=============================================================================================================
@@ -153,7 +153,8 @@
 %%% Propagation method determines whether backup data is sent using gen_server call or cast.
 %%% Mode determines whether slave process only backups data (stores backup data until it is flushed to couchbase or
 %%% deleted) or handles requests when master is down.
-%%% Failover actions determine action that triggered failover message sending.
+%%% Failover actions are used as values of field `finished_action` in #failover_request_data_processed message
+%%% to describe activity that triggered sending message.
 %%%=============================================================================================================
 
 % Propagation methods

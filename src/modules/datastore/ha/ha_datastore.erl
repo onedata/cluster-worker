@@ -32,7 +32,7 @@
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
--export([reorganize_cluster/0, finish_reorganization/0, verify_key_node/2, reorganization_nodes_to_check/0]).
+-export([reorganize_cluster/0, finish_reorganization/0, verify_key_node/2, possible_neighbors_during_reconfiguration/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -48,7 +48,7 @@
     ha_datastore_slave:master_node_status_message() | ha_datastore_master:config_changed_message() |
     ha_datastore_slave:reorganization_message().
 
--type cluster_reorganization_request() :: #cluster_reorganization{}.
+-type cluster_reorganization_request() :: #cluster_reorganization_started{}.
 
 -export_type([ha_message_type/0, ha_message/0, cluster_reorganization_request/0]).
 
@@ -94,11 +94,11 @@ send_sync_master_message(Node, ProcessKey, Msg, _StartIfNotAlive) ->
 -spec broadcast_async_management_message(ha_datastore_slave:master_node_status_message() |
     ha_datastore_master:config_changed_message()) -> ok.
 broadcast_async_management_message(Msg) ->
-    tp_router:send_to_each(?MANAGEMENT_MSG(Msg)).
+    tp_router:broadcast(?MANAGEMENT_MSG(Msg)).
 
 -spec broadcast_sync_management_message(ha_datastore_slave:reorganization_message()) -> ok | {error, term()}.
 broadcast_sync_management_message(Msg) ->
-    tp_router:send_to_each_and_wait_for_ans(?MANAGEMENT_MSG(Msg)).
+    tp_router:broadcast_and_await_answer(?MANAGEMENT_MSG(Msg)).
 
 %%%===================================================================
 %%% Getters / setters
@@ -184,7 +184,7 @@ change_config(NodesNumber, PropagationMethod) ->
 -spec reorganize_cluster() -> ok | no_return().
 reorganize_cluster() ->
     set_slave_mode(?CLUSTER_REORGANIZATION_SLAVE_MODE),
-    ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION),
+    ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION_STARTED),
 
     Mutator = self(),
     ok = datastore_model:foreach_memory_key(fun
@@ -235,12 +235,17 @@ verify_key_node(Key, Generation) ->
         _ -> {remote_key, NewNode}
     end.
 
--spec reorganization_nodes_to_check() -> [node()].
-reorganization_nodes_to_check() ->
+%%--------------------------------------------------------------------
+%% @doc
+%% Slave could work on one of nodes returned by this function (depending on reorganization process).
+%% @end
+%%--------------------------------------------------------------------
+-spec possible_neighbors_during_reconfiguration() -> [node()].
+possible_neighbors_during_reconfiguration() ->
     Node = node(),
-    NodeListsToCheck = get_nodes_from_rings([?CURRENT_RING, ?PREVIOUS_RING]),
-    Neighbors = lists:map(fun(Nodes) -> get_neighbors(Node, Nodes) end, NodeListsToCheck),
-    lists:usort(lists:flatten(Neighbors)).
+    CurrentNeighbors = get_neighbors(Node, get_ring_nodes_or_empty(?CURRENT_RING)),
+    PreviousNeighbors = get_neighbors(Node, get_ring_nodes_or_empty(?PREVIOUS_RING)),
+    lists:usort(CurrentNeighbors ++ PreviousNeighbors).
 
 %%%===================================================================
 %%% Internal functions
@@ -280,28 +285,22 @@ copy_memory(ItemsMap) ->
 
 -spec copy_memory(node(), [datastore_cache:cache_save_request()]) -> ok | {error, term()}.
 copy_memory(Node, Items) ->
-    Ans = rpc:call(Node, datastore_cache, save, [Items]),
-    case Ans of
+    case rpc:call(Node, datastore_cache, save, [Items]) of
         {badrpc, Reason} ->
             {error, Reason};
-        _ ->
+        SaveResults ->
             % TODO VFS-6271 - delete keys from old node
-            FoldlAns = lists:foldl(fun
+            lists:foldl(fun
                 (_, {error, _} = Error) -> Error;
-                (ItemAns, _) -> ItemAns
-            end, {ok, ok, ok}, Ans),
-            case FoldlAns of
-                {ok, _, _} -> ok;
-                Other -> Other
-            end
+                ({error, _} = Error, _) -> Error;
+                ({ok, _, _}, _) -> ok
+            end, ok, SaveResults)
     end.
 
--spec get_nodes_from_rings([consistent_hashing:ring_generation()]) -> [[node()]].
-get_nodes_from_rings([]) ->
-    [];
-get_nodes_from_rings([RingGeneration | Tail]) ->
+-spec get_ring_nodes_or_empty(consistent_hashing:ring_generation()) -> [node()].
+get_ring_nodes_or_empty(RingGeneration) ->
     try
-        [consistent_hashing:get_all_nodes(RingGeneration) | get_nodes_from_rings(Tail)]
+        consistent_hashing:get_all_nodes(RingGeneration)
     catch
-        _:chash_ring_not_initialized  -> get_nodes_from_rings(Tail)
+        _:chash_ring_not_initialized  -> []
     end.

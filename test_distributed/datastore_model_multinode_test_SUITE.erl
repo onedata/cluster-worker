@@ -432,18 +432,11 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
         assert_on_disc(TestWorker, Model, Key),
         assert_not_in_memory(KeyNode, Model, Key),
 
-        UpdateFun = fun({M, F1, F2, F3}) ->
-            case SpawnAndSleep of
-                true -> timer:sleep(2000);
-                _ -> ok
-            end,
-            MasterPid ! {update, F1, node()},
-            {ok, {M, F1 + 1, F2, F3}}
-        end,
+        UpdateFun = get_update_fun(MasterPid, SpawnAndSleep),
 
         case SpawnAndSleep of
             true ->
-                % Spawn update that will start update function before calling master up but will end it after
+                % Spawn process that will start update function before calling master up but will end it after
                 % next update is called (due to sleep in update fun)
                 spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
                 timer:sleep(500);
@@ -461,8 +454,8 @@ node_transition_test(Config, Method, SpawnAndSleep, DelayRingRepair) ->
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
-        check_update(KeyNode2, 1),
-        check_update(KeyNode, 2),
+        check_update_fun(KeyNode2, 1),
+        check_update_fun(KeyNode, 2),
 
         assert_value_in_memory(KeyNode, Model, Key, 3),
         assert_value_in_memory(KeyNode2, Model, Key, 3),
@@ -481,11 +474,11 @@ node_deletion_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate) ->
     cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, prev),
     cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, delete, next).
 
-cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReorganizationType, NodeType) ->
+cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate, ReorganizationType, ReconfiguredNodeChoice) ->
     [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
 
     {Key, KeyNode, KeyNode2, TestWorker, NewWorkers, _Ring1, Ring2} =
-        prepare_cluster_reorganization_data(Config, ReorganizationType, NodeType),
+        prepare_cluster_reorganization_data(Config, ReorganizationType, ReconfiguredNodeChoice),
     MasterPid = self(),
 
     lists:foreach(fun(Model) ->
@@ -498,21 +491,14 @@ cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate
 
         case ReorganizationType of
             add -> assert_not_in_memory(KeyNode, Model, Key);
-            delete -> ok % slave is in memory
+            delete -> ok % KeyNode is used as slave so document can be in memory of this node
         end,
 
-        UpdateFun = fun({M, F1, F2, F3}) ->
-            case SpawnAndSleep of
-                true -> timer:sleep(2000);
-                _ -> ok
-            end,
-            MasterPid ! {update, F1, node()},
-            {ok, {M, F1 + 1, F2, F3}}
-        end,
+        UpdateFun = get_update_fun(MasterPid, SpawnAndSleep),
 
         case SpawnAndSleep of
             true ->
-                % Spawn update that will start update function before node adding but will end it after
+                % Spawn process that will start update function before node adding but will end it after
                 % next update is called (due to sleep in update fun)
                 spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
                 timer:sleep(500);
@@ -529,12 +515,12 @@ cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
 
-        check_update(KeyNode2, 1),
-        check_update(KeyNode, 2),
+        check_update_fun(KeyNode2, 1),
+        check_update_fun(KeyNode, 2),
 
         assert_value_in_memory(KeyNode, Model, Key, 3),
         % TODO VFS-6169 - check it
-%%        case {ReorganizationType, NodeType} of
+%%        case {ReorganizationType, ReconfiguredNodeChoice} of
 %%            {add, prev} -> assert_value_in_memory(KeyNode2, Model, Key, 3);
 %%            _ -> ok
 %%        end,
@@ -545,7 +531,7 @@ cluster_reorganization_test(Config, Method, SpawnAndSleep, SleepBeforeLastUpdate
         end,
 
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
-        check_update(KeyNode, 3),
+        check_update_fun(KeyNode, 3),
         assert_value_in_memory(KeyNode, Model, Key, 4),
 
         case SleepBeforeLastUpdate of
@@ -580,20 +566,14 @@ cluster_reorganization_multikey_test(Config, Method, SpawnAndSleep, SleepBeforeL
         set_ring(Config, Ring2),
 
         Keys = lists:map(fun(_) -> datastore_key:new() end, lists:seq(1, KeysNum)),
-        UpdateFun = fun({M, F1, F2, F3}) ->
-            case SpawnAndSleep of
-                true -> timer:sleep(2000);
-                _ -> ok
-            end,
-            {ok, {M, F1 + 1, F2, F3}}
-        end,
+        UpdateFun = get_update_fun(MasterPid, SpawnAndSleep),
 
         spawn_foreach_key(Keys, MasterPid, fun(Key) ->
             ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
 
             case SpawnAndSleep of
                 true ->
-                    % Spawn update that will start update function before node adding but will end it after
+                    % Spawn process that will start update function before node adding but will end it after
                     % next update is called (due to sleep in update fun)
                     spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
                     timer:sleep(500);
@@ -669,7 +649,17 @@ mock_node_up(CallNode, ExecuteNode, BrokenNode) ->
     ?assertEqual(ok, rpc:call(CallNode, consistent_hashing, report_node_recovery, [BrokenNode])),
     set_ha(ExecuteNode, set_standby_mode_and_broadcast_master_up_message, []).
 
-check_update(Node, Value) ->
+get_update_fun(MasterPid, SpawnAndSleep) ->
+    fun({Model, Field1, Field2, Field3}) ->
+        case SpawnAndSleep of
+            true -> timer:sleep(2000);
+            _ -> ok
+        end,
+        MasterPid ! {update, Field1, node()},
+        {ok, {Model, Field1 + 1, Field2, Field3}}
+    end.
+
+check_update_fun(Node, Value) ->
     Rec = receive
         {update, _, _} = Message -> Message
     after
@@ -680,7 +670,7 @@ check_update(Node, Value) ->
 terminate_processes(Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Worker) ->
-        rpc:call(Worker, tp_router, send_to_each, [force_terminate])
+        rpc:call(Worker, tp_router, broadcast, [force_terminate])
     end, Workers).
 
 prepare_ring(Config, RestrictedWorkers) ->
@@ -689,7 +679,9 @@ prepare_ring(Config, RestrictedWorkers) ->
     consistent_hashing:set_ring(?CURRENT_RING, Ring),
     Ring.
 
-prepare_cluster_reorganization_data(Config, add, NewNodeType) ->
+% Generate key to be tested and return it together with 2 nodes responsible for it, 2 rings (current and future)
+% used during the tests, test worker (node used for rpc calls) and list of all initial nodes
+prepare_cluster_reorganization_data(Config, add, ReconfiguredNodeChoice) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Ring1 = prepare_ring(Config, []),
     Key = datastore_key:new(),
@@ -697,7 +689,9 @@ prepare_cluster_reorganization_data(Config, add, NewNodeType) ->
     #node_routing_info{assigned_nodes = [KeyNode, KeyNode2]} = consistent_hashing:get_routing_info(Seed),
 
     Ring2 = prepare_ring(Config, [KeyNode]),
-    case {datastore_key:responsible_node(Key), NewNodeType} of
+    % Check which node is responsible for key in new ring
+    % if relation between nodes in the rings is not correct try once more
+    case {datastore_key:responsible_node(Key), ReconfiguredNodeChoice} of
         {KeyNode2, prev} ->
             consistent_hashing:cleanup(),
             [TestWorker | _] = Workers -- [KeyNode, KeyNode2],
@@ -707,10 +701,12 @@ prepare_cluster_reorganization_data(Config, add, NewNodeType) ->
             [TestWorker | _] = Workers -- [KeyNode, KeyNode3],
             {Key, KeyNode, KeyNode3, TestWorker, Workers, Ring1, Ring2};
         _ ->
-            prepare_cluster_reorganization_data(Config, add, NewNodeType)
+            prepare_cluster_reorganization_data(Config, add, ReconfiguredNodeChoice)
     end;
-prepare_cluster_reorganization_data(Config, delete, NewNodeType) ->
-    {Key, KeyNode, KeyNode2, TestWorker, Workers, Ring1, Ring2} = prepare_cluster_reorganization_data(Config, add, NewNodeType),
+prepare_cluster_reorganization_data(Config, delete, ReconfiguredNodeChoice) ->
+    {Key, KeyNode, KeyNode2, TestWorker, Workers, Ring1, Ring2} =
+        prepare_cluster_reorganization_data(Config, add, ReconfiguredNodeChoice),
+    % Change nodes and rings order as node will be deleted instead of adding
     {Key, KeyNode2, KeyNode, TestWorker, Workers -- [KeyNode], Ring2, Ring1}.
 
 

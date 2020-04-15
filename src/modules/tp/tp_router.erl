@@ -28,7 +28,7 @@
 -export([supervisor_flags/0, supervisor_children_spec/0,
     main_supervisor_flags/0, main_supervisor_children_spec/0,
     init_supervisors/0]).
--export([send_to_each/1, send_to_each_and_wait_for_ans/1]).
+-export([broadcast/1, broadcast_and_await_answer/1]).
 
 % TP process states
 -define(INITIALIZING, initializing).
@@ -298,8 +298,8 @@ get_process_size_sum() ->
         lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
     end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
 
--spec send_to_each(term()) -> ok.
-send_to_each(Msg) ->
+-spec broadcast(term()) -> ok.
+broadcast(Msg) ->
     lists:foreach(fun(Name) ->
         List = ets:tab2list(Name),
         lists:foreach(fun
@@ -308,8 +308,8 @@ send_to_each(Msg) ->
         end, List)
     end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
 
--spec send_to_each_and_wait_for_ans(term()) -> ok | {error, term()}.
-send_to_each_and_wait_for_ans(Msg) ->
+-spec broadcast_and_await_answer(term()) -> ok | {error, term()}.
+broadcast_and_await_answer(Msg) ->
     WaitList = lists:foldl(fun(Name, Acc) ->
         ets:foldl(fun
             ({_, Pid, _}, Acc2) ->

@@ -62,31 +62,29 @@ init_data(BackupNodes) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Executes verify_slave_activity(Key, Node) on selected nodes depending on mode.
+%% Gets nodes where slave can work to find slave process.
+%% Next, verifies slave activity to check if slave processes any
+%% requests connected to master's keys. In such a case master
+%% will wait with processing for slave's processing finish.
+%% Executed during start of process that works as master.
 %% @end
 %%--------------------------------------------------------------------
 -spec verify_slave_activity(datastore:key(), [node()], ha_datastore:slave_mode()) ->
-    {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
-verify_slave_activity(Key, BackupNodes, Mode) ->
-    case Mode of
-        ?CLUSTER_REORGANIZATION_SLAVE_MODE ->
-            % Slave could work on one of nodes returned by following function (depending on reorganization process)
-            % All nodes have to be verified
-            ToCheck = ha_datastore:reorganization_nodes_to_check(),
-
-            lists:foldl(fun(NodeToCheck, {ActiveRequests1, KeysInSlaveFlush1, RequestsToHandle1}) ->
-                {ActiveRequests2, KeysInSlaveFlush2, RequestsToHandle2} = verify_slave_activity(Key, NodeToCheck),
-                {ActiveRequests1 or ActiveRequests2, KeysInSlaveFlush1 ++ KeysInSlaveFlush2,
-                        RequestsToHandle1 ++ RequestsToHandle2}
-            end, {false, [], []}, ToCheck);
+    {IsHandlingRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
+verify_slave_activity(Key, _BackupNodes, ?CLUSTER_REORGANIZATION_SLAVE_MODE) ->
+    Neighbors = ha_datastore:possible_neighbors_during_reconfiguration(),
+    lists:foldl(fun(NodeToCheck, {IsHandlingRequests1, KeysInSlaveFlush1, RequestsToHandle1}) ->
+        {IsHandlingRequests2, KeysInSlaveFlush2, RequestsToHandle2} = verify_slave_activity(Key, NodeToCheck),
+        {IsHandlingRequests1 or IsHandlingRequests2, KeysInSlaveFlush1 ++ KeysInSlaveFlush2,
+                RequestsToHandle1 ++ RequestsToHandle2}
+    end, {false, [], []}, Neighbors);
+verify_slave_activity(Key, BackupNodes, _Mode) ->
+    case BackupNodes of
+        [Node | _] ->
+            % TODO VFS-6168 - do not check when master wasn't down for a long time
+            verify_slave_activity(Key, Node);
         _ ->
-            case BackupNodes of
-                [Node | _] ->
-                    % TODO VFS-6168 - do not check when master wasn't down for a long time
-                    verify_slave_activity(Key, Node);
-                _ ->
-                    {false, [], []}
-            end
+            {false, [], []}
     end.
 
 %%%===================================================================
@@ -181,17 +179,17 @@ handle_slave_lifecycle_message(?REQUEST_UNLINK, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec verify_slave_activity(datastore:key(), node()) ->
-    {ActiveRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
+    {IsHandlingRequests :: boolean(), [datastore:key()], datastore_writer:requests_internal()}.
 verify_slave_activity(Key, Node) ->
     case ha_datastore:send_sync_master_message(Node, Key, #get_slave_failover_status{answer_to = self()}, false) of
         {error, not_alive} ->
             {false, [], []};
-        #slave_failover_status{is_handling_requests = ActiveRequests,
-            ending_cache_requests = CacheRequestsMap,
+        #slave_failover_status{is_handling_requests = IsHandlingRequests,
+            pending_cache_requests = CacheRequestsMap,
             finished_memory_cache_requests = MemoryRequests,
             requests_to_handle = RequestsToHandle
         } ->
             datastore_cache:save(maps:values(CacheRequestsMap)),
             datastore_cache:save(MemoryRequests),
-            {ActiveRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
+            {IsHandlingRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
     end.
