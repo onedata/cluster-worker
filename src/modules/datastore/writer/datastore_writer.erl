@@ -297,7 +297,7 @@ init([Key]) ->
     SlaveData = ha_datastore_slave:init_data(),
     Mode = ha_datastore_slave:get_mode(SlaveData),
     {IsHandlingRequests, KeysInSlaveFlush, RequestsToHandle} =
-        ha_datastore_master:verify_slave_activity(Key, BackupNodes, Mode),
+        ha_datastore_master:inspect_slave_activity(Key, BackupNodes, Mode),
 
     CacheWriterState = case IsHandlingRequests of
         false -> idle;
@@ -369,7 +369,7 @@ handle_cast({mark_cache_writer_idle, Ref}, State = #state{
     ha_slave_data = SlaveData
 }) ->
     State2 = State#state{cache_writer_state = idle,
-        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, false)},
+        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, {?IGNORE, undefined})},
     {noreply, handle_requests(State2)};
 handle_cast({mark_disc_writer_idle, Ref}, State = #state{
     disc_writer_state = {active, Ref}
@@ -475,7 +475,7 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle, ha_slave_data = SlaveData
 }) ->
     Ref = make_ref(),
-    HandlingFailoverRequest = gen_server:call(Pid, #datastore_internal_requests_batch{
+    RemoteRequestsProcessing = gen_server:call(Pid, #datastore_internal_requests_batch{
         ref = Ref, requests = Requests, mode = ha_datastore_slave:get_mode(SlaveData)}, infinity),
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
@@ -489,7 +489,7 @@ handle_requests(State = #state{
         requests = [],
         cache_writer_state = {active, Ref},
         disc_writer_state = {active, Ref},
-        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, HandlingFailoverRequest)
+        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, RemoteRequestsProcessing)
     }.
 
 -spec schedule_terminate(state()) -> state().

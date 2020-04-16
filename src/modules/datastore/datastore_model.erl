@@ -26,7 +26,7 @@
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
--export([foreach_memory_key/2]).
+-export([fold_memory_keys/2]).
 %% for rpc
 -export([datastore_apply_all_subtrees/4]).
 
@@ -49,10 +49,11 @@
 -type fold_acc() :: datastore:fold_acc().
 -type fold_opts() :: datastore:fold_opts().
 -type one_or_many(Type) :: Type | [Type].
--type memory_fold_fun() :: fun((model() | end_of_memory, datastore:key() | end_of_memory,
-    datastore:doc() | end_of_memory, Acc :: term()) -> {ok | stop, NewAcc :: term()}).
--type driver_fold_fun() :: fun((datastore:key() | end_of_memory, datastore:doc() | end_of_memory,
-    Acc :: term()) -> {ok | stop, NewAcc :: term()}).
+% NOTE: datastore:key() if following functions is UniqueKey used internally by datastore (used also for routing)
+%       so it differs from key included in document (UniqueKey is generated using key from document)
+-type memory_fold_fun() :: fun(({model(), datastore:key(), datastore:doc()} | end_of_memory, Acc :: term()) ->
+    {ok | stop, NewAcc :: term()}).
+-type driver_fold_fun() :: fun((datastore:key(), datastore:doc(), Acc :: term()) -> {ok | stop, NewAcc :: term()}).
 
 -export_type([model/0, record/0, record_struct/0, record_version/0,
     key/0, ctx/0, diff/0, fold_opts/0, tree_ids/0, driver_fold_fun/0]).
@@ -370,12 +371,12 @@ datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args) ->
             Error
     end, ok, datastore_multiplier:get_names(Ctx)).
 
--spec foreach_memory_key(memory_fold_fun(), term()) -> term().
-foreach_memory_key(Fun, Acc0) ->
+-spec fold_memory_keys(memory_fold_fun(), term()) -> term().
+fold_memory_keys(Fun, Acc0) ->
     Models = datastore_config:get_models(),
     FoldlAns = lists:foldl(fun
         (Model, {ok, Acc}) ->
-            case foreach_memory_key(Model, Fun, Acc) of
+            case fold_memory_keys(Model, Fun, Acc) of
                 {error, not_supported} -> {ok, Acc}; % Ignore - it is not memory_only model
                 Acc2 -> Acc2
             end;
@@ -384,7 +385,7 @@ foreach_memory_key(Fun, Acc0) ->
     end, {ok, Acc0}, Models),
     case FoldlAns of
         {ok, Acc3} ->
-            {_, FinalAcc} = Fun(end_of_memory, end_of_memory, end_of_memory, Acc3),
+            {_, FinalAcc} = Fun(end_of_memory, Acc3),
             FinalAcc;
         {stop, Acc3} ->
             Acc3
@@ -561,23 +562,23 @@ fold_internal([Key | Tail], Acc, Ctx, Fun) ->
     end.
 
 %% @private
--spec foreach_memory_key(model() | ctx(), memory_fold_fun(), term()) -> {ok | stop, term()} | {error, not_supported}.
-foreach_memory_key(#{disc_driver := DD}, _Fun, _Acc0) when DD =/= undefined ->
+-spec fold_memory_keys(model() | ctx(), memory_fold_fun(), term()) -> {ok | stop, term()} | {error, not_supported}.
+fold_memory_keys(#{disc_driver := DD}, _Fun, _Acc0) when DD =/= undefined ->
     {error, not_supported};
-foreach_memory_key(#{memory_driver := undefined}, _Fun, _Acc0) ->
+fold_memory_keys(#{memory_driver := undefined}, _Fun, _Acc0) ->
     {error, not_supported};
-foreach_memory_key(#{
+fold_memory_keys(#{
     model := Model,
     memory_driver := Driver,
     memory_driver_ctx := Ctx
 }, Fun, Acc0) ->
     FoldlFun = fun(Key, Doc, Acc) ->
-        Fun(Model, Key, Doc, Acc)
+        Fun({Model, Key, Doc}, Acc)
     end,
 
     lists:foldl(fun
         (Ctx2, {ok, Acc}) -> Driver:fold(Ctx2, FoldlFun, Acc);
         (_, {stop, Acc}) -> {stop, Acc}
     end, {ok, Acc0}, datastore_multiplier:get_names(Ctx));
-foreach_memory_key(Model, Fun, Acc0) ->
-    foreach_memory_key(datastore_model_default:get_ctx(Model), Fun, Acc0).
+fold_memory_keys(Model, Fun, Acc0) ->
+    fold_memory_keys(datastore_model_default:get_ctx(Model), Fun, Acc0).

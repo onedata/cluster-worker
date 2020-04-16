@@ -32,7 +32,7 @@
 -export([get_propagation_method/0, get_backup_nodes/0, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
--export([reorganize_cluster/0, finish_reorganization/0, verify_key_node/2, possible_neighbors_during_reconfiguration/0]).
+-export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -187,12 +187,12 @@ reorganize_cluster() ->
     ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION_STARTED),
 
     Mutator = self(),
-    ok = datastore_model:foreach_memory_key(fun
-        (_, end_of_memory, _Doc, Acc) ->
+    ok = datastore_model:fold_memory_keys(fun
+        (end_of_memory, Acc) ->
             {ok, copy_memory(Acc)};
-        (Model, Key, Doc, Acc) ->
+        ({Model, Key, Doc}, Acc) ->
             RoutingKey = datastore_router:get_routing_key(Doc),
-            {Acc2, CopyNow} = case verify_key_node(RoutingKey, ?FUTURE_RING) of
+            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, ?FUTURE_RING) of
                 {remote_key, Node} ->
                     Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
                     Ctx2 = Ctx#{mutator_pid => Mutator},
@@ -225,8 +225,8 @@ finish_reorganization() ->
 %% Can be used to change current or future node responsible for the key depending on ring generation.
 %% @end
 %%--------------------------------------------------------------------
--spec verify_key_node(datastore:key(), consistent_hashing:ring_generation()) -> local_key | {remote_key, node()}.
-verify_key_node(Key, Generation) ->
+-spec qualify_by_key(datastore:key(), consistent_hashing:ring_generation()) -> local_key | {remote_key, node()}.
+qualify_by_key(Key, Generation) ->
     LocalNode = node(),
     Seed = datastore_key:get_chash_seed(Key),
     #node_routing_info{assigned_nodes = [NewNode | _]} = consistent_hashing:get_routing_info(Generation, Seed),

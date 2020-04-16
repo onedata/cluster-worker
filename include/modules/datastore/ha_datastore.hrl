@@ -104,8 +104,7 @@
 -record(failover_request_data_processed, {
     finished_action = ha_datastore_master:failover_action(),
     cache_requests_saved = #{}:: ha_datastore_slave:cache_requests_map(),
-    keys_flushed = sets:new() :: ha_datastore_slave:keys_set(),
-    failed_node :: node() | undefined
+    keys_flushed = sets:new() :: ha_datastore_slave:keys_set()
 }).
 
 %%%=============================================================================================================

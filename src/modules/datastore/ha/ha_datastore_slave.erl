@@ -104,25 +104,22 @@ report_keys_flushed(Pid, Inactivated, #failover_requests_data{keys = DataKeys} =
             Data#failover_requests_data{keys = sets:subtract(DataKeys, KeysToReport)}
     end.
 
--spec prepare_and_send_reorganization_failover_requests(
-    #{datastore:key() => datastore:ctx() | {reference() | slave_flush, datastore:ctx() | undefined}}, pid(),
+-spec prepare_and_send_reorganization_failover_requests(datastore_doc_batch:cached_keys(), pid(),
     ha_failover_requests_data()) -> ha_failover_requests_data().
-prepare_and_send_reorganization_failover_requests(UsedKeys, Pid, #failover_requests_data{keys = DataKeys} = Data) ->
-    {Master, Requests} = lists:foldl(fun
-        ({_Key, {slave_flush, undefined}}, Acc) ->
-            Acc;
-        ({Key, Value}, {_Node, List} = Acc) ->
+prepare_and_send_reorganization_failover_requests(UsedKeysMap, Pid, #failover_requests_data{keys = DataKeys} = Data) ->
+    {Master, Requests} = maps:fold(fun
+        (Key, Value, {_Node, List} = Acc) ->
             case prepare_reorganization_failover_request(Key, Value) of
                 {request, NewMaster, Request} -> {NewMaster, [Request | List]};
                 _ -> Acc
             end
-    end, {undefined, []}, maps:to_list(UsedKeys)),
+    end, {undefined, []}, UsedKeysMap),
 
     case Master of
         undefined ->
             Data;
         _ ->
-            DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(UsedKeys))),
+            DataKeys2 = sets:union(DataKeys, sets:from_list(maps:keys(UsedKeysMap))),
             CacheRequests2 = lists:map(fun({_, Key, _} = Request) -> {Key, Request} end, Requests),
             ha_datastore:send_async_internal_message(Pid,
                 #failover_request_data_processed{finished_action = #preparing_reorganization{node = Master},
@@ -138,11 +135,12 @@ prepare_and_send_reorganization_failover_requests(UsedKeys, Pid, #failover_reque
 init_data() ->
     #slave_data{slave_mode = ha_datastore:get_slave_mode()}.
 
--spec set_failover_request_handling(ha_slave_data(), {true, FailedNode :: node()} | false) -> ha_slave_data().
-set_failover_request_handling(Data, {true, FailedNode}) ->
+-spec set_failover_request_handling(ha_slave_data(),
+    {datastore_cache_writer:remote_requests_processing_mode(), FailedNode :: node() | undefined}) -> ha_slave_data().
+set_failover_request_handling(Data, {?HANDLE_LOCALLY, FailedNode}) ->
     Data#slave_data{failover_request_handling = true, last_failover_request_node = FailedNode};
-set_failover_request_handling(Data, FailoverRequestHandling) ->
-    Data#slave_data{failover_request_handling = FailoverRequestHandling}.
+set_failover_request_handling(Data, _RemoteRequestsProcessing) ->
+    Data#slave_data{failover_request_handling = false}.
 
 -spec get_mode(ha_slave_data()) -> ha_datastore:slave_mode().
 get_mode(#slave_data{slave_mode = Mode}) ->
@@ -168,7 +166,7 @@ qualify_and_reverse_requests(Requests, Mode) ->
             {Local, [Request | Remote], Master};
         (#datastore_internal_request{request = #datastore_request{ctx = #{routing_key := Key}}} =
             Request, {Local, Remote, Node}) when Mode =:= ?CLUSTER_REORGANIZATION_SLAVE_MODE ->
-            case ha_datastore:verify_key_node(Key, ?CURRENT_RING) of
+            case ha_datastore:qualify_by_key(Key, ?CURRENT_RING) of
                 {remote_key, Master} -> {Local, [Request | Remote], Master};
                 _ -> {[Request | Local], Remote, Node}
             end;
@@ -184,7 +182,7 @@ qualify_and_reverse_requests(Requests, Mode) ->
     end,
 
     #qualified_datastore_requests{local_requests = LocalList, remote_requests = RemoteList, remote_node = RemoteNode,
-        remote_processing_mode = RemoteMode}.
+        remote_requests_processing_mode = RemoteMode}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -294,12 +292,10 @@ handle_management_msg(?CLUSTER_REORGANIZATION_STARTED, Data, _Pid) ->
 %%%===================================================================
 
 %% @private
--spec prepare_reorganization_failover_request(datastore:key(), datastore:ctx() | {reference(), datastore:ctx()}) ->
+-spec prepare_reorganization_failover_request(datastore:key(), datastore:ctx()) ->
     {request, node(), datastore_cache:cache_save_request()} | ignore.
-prepare_reorganization_failover_request(Key, {_Ref, Ctx}) ->
-    prepare_reorganization_failover_request(Key, Ctx);
 prepare_reorganization_failover_request(Key, #{disc_driver := DD} = Ctx) when DD =/= undefined ->
-    case ha_datastore:verify_key_node(Key, ?FUTURE_RING) of
+    case ha_datastore:qualify_by_key(Key, ?FUTURE_RING) of
         {remote_key, NewMaster} ->
             {ok, Doc} = datastore_cache:get(Ctx, Key),
             {request, NewMaster, {Ctx, Key, Doc}};
