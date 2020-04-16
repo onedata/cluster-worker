@@ -51,7 +51,7 @@
     local_requests :: datastore_writer:requests_internal(),
     remote_requests :: datastore_writer:requests_internal(),
     remote_node :: undefined | node(),
-    remote_processing_mode :: datastore_cache_writer:remote_processing_mode()
+    remote_requests_processing_mode :: datastore_cache_writer:remote_requests_processing_mode()
 }).
 
 -endif.
