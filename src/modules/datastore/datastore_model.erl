@@ -49,7 +49,7 @@
 -type fold_acc() :: datastore:fold_acc().
 -type fold_opts() :: datastore:fold_opts().
 -type one_or_many(Type) :: Type | [Type].
-% NOTE: datastore:key() if following functions is UniqueKey used internally by datastore (used also for routing)
+% NOTE: datastore:key() in following functions is UniqueKey used internally by datastore (used also for routing)
 %       so it differs from key included in document (UniqueKey is generated using key from document)
 -type memory_fold_fun() :: fun(({model(), datastore:key(), datastore:doc()} | end_of_memory, Acc :: term()) ->
     {ok | stop, NewAcc :: term()}).
