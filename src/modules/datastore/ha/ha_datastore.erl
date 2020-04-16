@@ -133,8 +133,15 @@ get_backup_nodes() ->
                     1 ->
                         [];
                     BackupNodesNum ->
-                        Nodes = arrange_nodes(node(), consistent_hashing:get_all_nodes()),
-                        lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)))
+                        Node = node(),
+                        AllNodes = consistent_hashing:get_all_nodes(),
+                        case lists:member(Node, AllNodes) of
+                            true ->
+                                Nodes = arrange_nodes(Node, AllNodes),
+                                lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)));
+                            _ ->
+                                []
+                        end
                 end,
                 application:set_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes, Ans),
                 Ans
