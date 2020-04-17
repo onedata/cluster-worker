@@ -331,6 +331,6 @@ set_remote_driver_ctx(Ctx, #state{tree_id = ?MODEL_ALL_TREE_ID}) ->
 set_remote_driver_ctx(Ctx, #state{key = Key, tree_id = TreeId}) ->
     Ctx#{remote_driver_ctx => #{
         model => maps:get(model, Ctx),
-        routing_key => Key,
+        routing_key => maps:get(routing_key, Ctx, Key),
         source_ids => [TreeId]
     }}.
