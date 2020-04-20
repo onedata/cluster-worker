@@ -34,7 +34,7 @@
 -spec start_service(module(), service_fun_name(), service_fun_name(), service_fun_args(), binary()) ->
     ok | {error, term()}.
 start_service(Module, Fun, StopFun, Args, HashingBase) ->
-    Node = consistent_hashing:get_assigned_node(HashingBase),
+    Node = datastore_key:responsible_node(HashingBase),
     case rpc:call(Node, ?MODULE, start_service_locally, [Module, Fun, StopFun, Args, HashingBase]) of
         {badrpc, Reason} -> {error, Reason};
         Other -> Other

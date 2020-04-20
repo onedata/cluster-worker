@@ -58,7 +58,7 @@ failure_test(Config) ->
 
     {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(CallWorker, Model, save, [?DOC(Key, Model)])),
 
-    rpc:call(Node1, erlang, halt, []),
+    ?assertEqual({badrpc, nodedown}, rpc:call(Node1, erlang, halt, [])),
     StopTimestamp = os:timestamp(),
 
     ?assertEqual({ok, Doc2}, rpc:call(CallWorker, Model, get, [Key])),

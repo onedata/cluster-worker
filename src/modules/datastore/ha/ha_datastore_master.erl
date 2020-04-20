@@ -75,6 +75,9 @@ verify_slave_activity(Key, BackupNodes) ->
             case ha_datastore:send_sync_master_message(Node, Key, #get_slave_failover_status{answer_to = self()}, false) of
                 {error, not_alive} ->
                     {false, [], []};
+                {badrpc, nodedown} ->
+                    % TODO VFS-6295 - log to dedicated logfile
+                    {false, [], []};
                 #slave_failover_status{is_handling_requests = ActiveRequests,
                     ending_cache_requests = CacheRequestsMap,
                     finished_memory_cache_requests = MemoryRequests,
@@ -104,6 +107,10 @@ store_backup(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_CAL
         #store_backup{keys = Keys, cache_requests = CacheRequests}, true) of
         {ok, Pid} ->
             Data#data{slave_pid = Pid};
+        {badrpc, nodedown} ->
+            % TODO VFS-6295 - log to dedicated logfile
+            ?warning("Cannot broadcast HA data - slave down"),
+            Data;
         Error ->
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
             Data
@@ -114,6 +121,10 @@ store_backup(ProcessKey, Keys, CacheRequests, #data{link_status = ?SLAVE_NOT_LIN
         #store_backup{keys = Keys, cache_requests = CacheRequests, link = {true, self()}}, true) of
         {ok, Pid} ->
             Data#data{link_status = ?SLAVE_LINKED, slave_pid = Pid};
+        {badrpc, nodedown} ->
+            % TODO VFS-6295 - log to dedicated logfile
+            ?warning("Cannot broadcast HA data - slave down"),
+            Data;
         Error ->
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
             Data
@@ -128,7 +139,8 @@ forget_backup([], _) ->
 forget_backup(_, #data{backup_nodes = []}) ->
     ok;
 forget_backup(_, #data{slave_pid = undefined}) ->
-    ?warning("Inactivation request without slave defined"),
+    % TODO VFS-6295 - log to dedicated logfile
+    ?debug("Inactivation request without slave defined"),
     ok;
 forget_backup(Inactivated, #data{slave_pid = Pid}) ->
     ha_datastore:send_async_master_message(Pid, #forget_backup{keys = Inactivated}).

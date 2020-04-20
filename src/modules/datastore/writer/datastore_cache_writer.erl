@@ -162,7 +162,9 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
                     send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid}),
                     State2;
                 {badrpc, nodedown} ->
-                    ?error("Proxy call to failed node ~p for requests ~p", [RemoteNode, RemoteRequestsReversed]),
+                    % TODO 6169 - wrong return status in such case
+                    % TODO VFS-6295 - log to dedicated logfile
+                    ?debug("Proxy call to failed node ~p for requests ~p", [RemoteNode, RemoteRequestsReversed]),
                     handle_requests(RemoteRequests, true, State2);
                 {badrpc, Reason} ->
                     ?error("Proxy call to node ~p badrpc ~p for requests ~p",
@@ -950,6 +952,7 @@ handle_ha_requests(CachedKeys, CacheRequests, false, #state{process_key = Proces
     State#state{ha_master_data = HAData2};
 handle_ha_requests(CachedKeys, CacheRequests, true,
     #state{master_pid = MasterPid, ha_failover_requests_data = FailoverData} = State) ->
+    % TODO 6169 - check requests with local routing set in Ctx
     FailoverData2 = ha_datastore_slave:report_failover_request_handled(MasterPid, CachedKeys, CacheRequests, FailoverData),
     State#state{ha_failover_requests_data = FailoverData2}.
 
