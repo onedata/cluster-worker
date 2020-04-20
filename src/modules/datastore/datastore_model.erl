@@ -19,13 +19,14 @@
 
 %% API
 -export([init/1, get_unique_key/2]).
--export([create/2, save/2, update/3, update/4]).
+-export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
 -export([fold/3, fold/5, fold_keys/3]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
+-export([fold_memory_keys/2]).
 %% for rpc
 -export([datastore_apply_all_subtrees/4]).
 
@@ -48,9 +49,14 @@
 -type fold_acc() :: datastore:fold_acc().
 -type fold_opts() :: datastore:fold_opts().
 -type one_or_many(Type) :: Type | [Type].
+% NOTE: datastore:key() in following functions is UniqueKey used internally by datastore (used also for routing)
+%       so it differs from key included in document (UniqueKey is generated using key from document)
+-type memory_fold_fun() :: fun(({model(), datastore:key(), datastore:doc()} | end_of_memory, Acc :: term()) ->
+    {ok | stop, NewAcc :: term()}).
+-type driver_fold_fun() :: fun((datastore:key(), datastore:doc(), Acc :: term()) -> {ok | stop, NewAcc :: term()}).
 
 -export_type([model/0, record/0, record_struct/0, record_version/0,
-    key/0, ctx/0, diff/0, fold_opts/0, tree_ids/0]).
+    key/0, ctx/0, diff/0, fold_opts/0, tree_ids/0, driver_fold_fun/0]).
 
 % Default time in seconds for document to expire after delete (one year)
 -define(EXPIRY, 31536000).
@@ -116,6 +122,17 @@ save(Ctx, Doc = #document{key = Key}) ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Saves model document with given routing key in a datastore.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_with_routing_key(ctx(), doc()) -> {ok, doc()} | {error, term()}.
+save_with_routing_key(#{routing_key := RoutingKey} = Ctx, Doc = #document{key = Key}) ->
+    Ctx1 = datastore_model_default:set_defaults(Ctx),
+    Ctx2 = datastore_multiplier:extend_name(RoutingKey, Ctx1),
+    datastore_router:route(save, [Ctx2, Key, Doc]).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Updates model document in a datastore.
 %% @end
 %%--------------------------------------------------------------------
@@ -176,11 +193,11 @@ delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result);
-delete(Ctx0, Key, Pred) ->
+delete(Ctx, Key, Pred) ->
     Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
         document_expiry, ?EXPIRY),
-    Ctx = couchbase_driver:set_expiry(Ctx0, Expiry),
-    Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
+    CtxWithExpiry = couchbase_driver:set_expiry(Ctx, Expiry),
+    Result = datastore_apply(CtxWithExpiry, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
     delete_fold_link(Ctx, Key, Result).
 
@@ -365,6 +382,26 @@ datastore_apply_all_subtrees(Ctx, Fun, UniqueKey, Args) ->
             Error
     end, ok, datastore_multiplier:get_names(Ctx)).
 
+-spec fold_memory_keys(memory_fold_fun(), term()) -> term().
+fold_memory_keys(Fun, Acc0) ->
+    Models = datastore_config:get_models(),
+    FoldlAns = lists:foldl(fun
+        (Model, {ok, Acc}) ->
+            case fold_memory_keys(Model, Fun, Acc) of
+                {error, not_supported} -> {ok, Acc}; % Ignore - it is not memory_only model
+                Acc2 -> Acc2
+            end;
+        (_, {stop, Acc}) ->
+            {stop, Acc}
+    end, {ok, Acc0}, Models),
+    case FoldlAns of
+        {ok, Acc3} ->
+            {_, FinalAcc} = Fun(end_of_memory, Acc3),
+            FinalAcc;
+        {stop, Acc3} ->
+            Acc3
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -534,3 +571,25 @@ fold_internal([Key | Tail], Acc, Ctx, Fun) ->
         {error, not_found} -> fold_internal(Tail, Acc, Ctx, Fun);
         {error, Reason} -> {error, Reason}
     end.
+
+%% @private
+-spec fold_memory_keys(model() | ctx(), memory_fold_fun(), term()) -> {ok | stop, term()} | {error, not_supported}.
+fold_memory_keys(#{disc_driver := DD}, _Fun, _Acc0) when DD =/= undefined ->
+    {error, not_supported};
+fold_memory_keys(#{memory_driver := undefined}, _Fun, _Acc0) ->
+    {error, not_supported};
+fold_memory_keys(#{
+    model := Model,
+    memory_driver := Driver,
+    memory_driver_ctx := Ctx
+}, Fun, Acc0) ->
+    FoldlFun = fun(Key, Doc, Acc) ->
+        Fun({Model, Key, Doc}, Acc)
+    end,
+
+    lists:foldl(fun
+        (Ctx2, {ok, Acc}) -> Driver:fold(Ctx2, FoldlFun, Acc);
+        (_, {stop, Acc}) -> {stop, Acc}
+    end, {ok, Acc0}, datastore_multiplier:get_names(Ctx));
+fold_memory_keys(Model, Fun, Acc0) ->
+    fold_memory_keys(datastore_model_default:get_ctx(Model), Fun, Acc0).

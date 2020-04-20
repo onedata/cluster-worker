@@ -59,10 +59,10 @@
 -type cached_token_map() ::
     #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
 -type is_failover_request() :: boolean(). % see ha_datastore.hrl for failover requests description
--type remote_processing_mode() :: ?HANDLE_LOCALLY | ?DELEGATE | ?IGNORE. % remote documents processing modes
+-type remote_requests_processing_mode() :: ?HANDLE_LOCALLY | ?DELEGATE | ?IGNORE. % remote documents processing modes
                                                                          % (see datastore_protocol.hrl)
 
--export_type([keys_in_flush/0, remote_processing_mode/0]).
+-export_type([keys_in_flush/0, remote_requests_processing_mode/0]).
 
 -define(REV_LENGTH,
     application:get_env(cluster_worker, datastore_links_rev_length, 16)).
@@ -148,11 +148,11 @@ init({MasterPid, Key, BackupNodes, KeysInSlaveFlush}) ->
 handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, mode = Mode} = RequestsBatch, From,
     State = #state{process_key = ProcessKey, master_pid = Pid}) ->
     #qualified_datastore_requests{local_requests = LocalRequests, remote_requests = RemoteRequests,
-        remote_node = RemoteNode, remote_processing_mode = RemoteProcessingMode} =
+        remote_node = RemoteNode, remote_requests_processing_mode = RemoteRequestsProcessingMode} =
         ha_datastore_slave:qualify_and_reverse_requests(Requests, Mode),
-    gen_server:reply(From, RemoteProcessingMode =:= ?HANDLE_LOCALLY),
+    gen_server:reply(From, {RemoteRequestsProcessingMode, RemoteNode}),
     State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
-    State3 = case RemoteProcessingMode of
+    State3 = case RemoteRequestsProcessingMode of
         ?DELEGATE ->
             % TODO - VFS-6171 - reply to caller
             RemoteRequestsReversed = lists:reverse(RemoteRequests), % requests are stored and sent in reversed list
@@ -215,6 +215,22 @@ handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
 handle_call(?INTERNAL_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_datastore_master:handle_internal_call(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
+handle_call(#cluster_reorganization_started{caller_pid = CallerPid, message_ref = Ref}, From, State = #state{
+    cached_keys_to_flush = CachedKeys,
+    keys_in_flush = KeysInFlush,
+    master_pid = MasterPid,
+    ha_failover_requests_data = FailoverData
+}) ->
+    gen_server:reply(From, ok),
+    UsedKeysMap = maps:fold(fun
+        (_Key, {slave_flush, undefined}, Acc) -> Acc;
+        (Key, {_Ref, Ctx}, Acc) -> maps:put(Key, Ctx, Acc)
+    end, CachedKeys, KeysInFlush),
+    FailoverData2 = ha_datastore_slave:prepare_and_send_reorganization_failover_requests(
+        UsedKeysMap, MasterPid, FailoverData),
+    CallerPid ! {Ref, ok},
+    gen_server:cast(MasterPid, {mark_cache_writer_idle, Ref}),
+    {noreply, State#state{ha_failover_requests_data = FailoverData2}};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
     {noreply, State}.

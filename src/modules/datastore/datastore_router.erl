@@ -13,6 +13,7 @@
 -module(datastore_router).
 -author("Krzysztof Trzepla").
 
+-include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
@@ -20,6 +21,7 @@
 %% API
 -export([route/2, process/3]).
 -export([init_counters/0, init_report/0]).
+-export([get_routing_key/1]).
 
 -type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
@@ -89,6 +91,16 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
         ok -> apply(Module, Function, Args);
         {error, Reason} -> {error, Reason}
     end.
+
+-spec get_routing_key(datastore:doc()) -> datastore:key().
+get_routing_key(#document{value = #links_forest{key = Key}}) ->
+    Key;
+get_routing_key(#document{value = #links_node{key = Key}}) ->
+    Key;
+get_routing_key(#document{value = #links_mask{key = Key}}) ->
+    Key;
+get_routing_key(#document{key = Key}) ->
+    Key.
 
 %%%===================================================================
 %%% Internal functions

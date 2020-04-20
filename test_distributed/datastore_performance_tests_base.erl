@@ -40,9 +40,15 @@ stress_performance_test_base(Config) ->
         ?assertEqual(ok, rpc:call(W, ha_datastore, change_config, [HANodes, HaMode]))
     end, Workers),
 
-    ?assertEqual(ok, rpc:call(Worker, consistent_hashing, replicate_ring_to_nodes, [[node()]])),
+    ConsistentHashingNodes = rpc:call(Worker, consistent_hashing, get_all_nodes, []),
+    KeyAnsWorkersList = lists:map(fun(_) ->
+        Key = datastore_key:new(),
+        KeyWorker = rpc:call(Worker, datastore_key, responsible_node, [Key]),
+        NextWorker = get_next_worker(KeyWorker, ConsistentHashingNodes ++ ConsistentHashingNodes),
+        {Key, KeyWorker, NextWorker}
+    end, lists:seq(1, ProcNum)),
 
-    Ans = run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, ProcNum),
+    Ans = run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, KeyAnsWorkersList),
     ct:print("Test: repeats ~p, procs ~p, many keys ~p, HA ~p, HA mode ~p, result ~p",
         [Repeats, ProcNum, ManyKeys, HA, HaMode, lists:sum(Ans) / Repeats / ProcNum]),
     ok.
@@ -51,26 +57,22 @@ stress_performance_test_base(Config) ->
 %%% Internal functions
 %%%===================================================================
 
-run_stress_procs(_, _, _, _, 0) ->
+run_stress_procs(_, _, _, _, []) ->
     [];
-run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, Num) ->
-    run_stress_proc(Repeats, ManyKeys, MemoryOnly, CheckNextWorker),
-    Results = run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, Num - 1),
+run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, [{Key, KeyWorker, NextWorker} | Tail]) ->
+    run_stress_proc(Key, KeyWorker, NextWorker, Repeats, ManyKeys, MemoryOnly, CheckNextWorker),
+    Results = run_stress_procs(Repeats, ManyKeys, MemoryOnly, CheckNextWorker, Tail),
     [get_stress_proc_results() | Results].
 
-run_stress_proc(Repeats, ManyKeys, MemoryOnly, CheckNextWorker) ->
+run_stress_proc(Key, Worker, NextWorker, Repeats, ManyKeys, MemoryOnly, CheckNextWorker) ->
     Master = self(),
-    MainKey = datastore_key:new(),
-    Worker = datastore_key:responsible_node(MainKey),
-    Workers = consistent_hashing:get_all_nodes(),
-    NextWorker = get_next_worker(Worker, Workers ++ Workers),
     spawn(Worker, fun() ->
         try
             Ctx = case MemoryOnly of
                 true -> performance_test_record:get_memory_only_ctx();
                 _ -> performance_test_record:get_ctx()
             end,
-            Doc = #document{key = MainKey, value = #performance_test_record{}},
+            Doc = #document{key = Key, value = #performance_test_record{}},
 
             Time0 = os:timestamp(),
             save_loop(Doc, ManyKeys, Ctx, CheckNextWorker, NextWorker, Repeats),
