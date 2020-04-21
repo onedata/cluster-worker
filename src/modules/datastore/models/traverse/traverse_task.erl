@@ -22,7 +22,7 @@
     on_remote_change/4, delete_ended/2]).
 
 %%% Setters and getters API
--export([update_description/4, update_status/4, fix_description/3,
+-export([update_description/4, update_status/4, fix_description/4,
     get/2, get_execution_info/1, get_execution_info/2, is_enqueued/1,
     get_additional_data/1, get_additional_data/2, update_additional_data/4]).
 
@@ -191,8 +191,6 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskID) ->
         {ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}} ->
             ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskID, Timestamp),
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskID, StartTimestamp);
-        {error, already_finished} ->
-            ok;
         Other ->
             Other
     end.
@@ -415,9 +413,9 @@ update_status(ExtendedCtx, Pool, TaskID, NewStatus) ->
 %% Fix task description after reboot clearing information about delegated and not finished tasks.
 %% @end
 %%--------------------------------------------------------------------
--spec fix_description(ctx(), traverse:pool(), traverse:id()) -> {ok, doc()} | {error, term()}.
-fix_description(ExtendedCtx, Pool, TaskID) ->
-    Node = node(),
+-spec fix_description(ctx(), traverse:pool(), traverse:id(), node()) -> {ok, doc()} | {error, term()}.
+fix_description(ExtendedCtx, Pool, TaskID, Node) ->
+    LocalNode = node(),
     Diff = fun
         (#traverse_task{
             node = TaskNode,
@@ -433,7 +431,7 @@ fix_description(ExtendedCtx, Pool, TaskID) ->
                 master_jobs_delegated => MDone + MFailed,
                 slave_jobs_delegated => SDone + SFailed
             },
-            {ok, Task#traverse_task{description = FinalDescription}};
+            {ok, Task#traverse_task{description = FinalDescription, node = LocalNode}};
         (_) ->
             {error, other_node}
     end,

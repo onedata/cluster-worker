@@ -23,19 +23,20 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %%% Pool management API
--export([init/2, clear/1]).
+-export([init/3, clear/1]).
 %%% Task management API
--export([increment_ongoing_tasks_and_choose_node/1, decrement_ongoing_tasks/1]).
+-export([increment_ongoing_tasks_and_choose_node/1, decrement_ongoing_tasks/1, change_node_ongoing_tasks/3]).
 %%% Group management API
 -export([register_group/2, deregister_group/2, get_next_group/1]).
 
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1]).
+-export([get_ctx/0, get_record_struct/1, upgrade_record/2]).
 
 -type ctx() :: datastore:ctx().
+-type ongoing_tasks_map() :: #{node() => non_neg_integer()}.
 -type ongoing_tasks_limit() :: non_neg_integer().
 
--export_type([ongoing_tasks_limit/0]).
+-export_type([ongoing_tasks_map/0, ongoing_tasks_limit/0]).
 
 -define(CTX, #{
     model => ?MODULE
@@ -50,17 +51,19 @@
 %% Initializes new document for pool. If document exists - updates it.
 %% @end
 %%--------------------------------------------------------------------
--spec init(traverse:pool(), ongoing_tasks_limit()) -> ok | {error, term()}.
-init(Pool, Limit) ->
+-spec init(traverse:pool(), ongoing_tasks_limit(), ongoing_tasks_limit()) -> ok | {error, term()}.
+init(Pool, Limit, NodeLimit) ->
     Node = node(),
     Default = #traverse_tasks_scheduler{
         pool = Pool,
         ongoing_tasks_limit = Limit,
+        ongoing_tasks_per_node_limit = NodeLimit,
         nodes = [Node]},
     Diff = fun(#traverse_tasks_scheduler{nodes = Nodes} = Record) ->
         {ok, Record#traverse_tasks_scheduler{
             nodes = [Node | (Nodes -- [Node])],
-            ongoing_tasks_limit = Limit
+            ongoing_tasks_limit = Limit,
+            ongoing_tasks_per_node_limit = NodeLimit
         }}
     end,
     extract_ok(datastore_model:update(?CTX, Pool, Diff, Default)).
@@ -86,14 +89,17 @@ clear(Pool) ->
 %%--------------------------------------------------------------------
 -spec increment_ongoing_tasks_and_choose_node(traverse:pool()) -> {ok, node()} | {error, term()}.
 increment_ongoing_tasks_and_choose_node(Pool) ->
-    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT,
-        ongoing_tasks_limit = TL, nodes = Nodes} = Record) ->
-        case OT < TL of
+    Node = node(),
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT, ongoing_tasks_per_node = NodesOT,
+        ongoing_tasks_limit = TL, ongoing_tasks_per_node_limit = NodeTL, nodes = Nodes} = Record) ->
+        NodeOT = maps:get(Node, NodesOT, 0),
+        case OT < TL andalso NodeOT < NodeTL of
             false ->
                 {error, limit_exceeded};
             _ ->
                 {ok, Record#traverse_tasks_scheduler{
                     ongoing_tasks = OT + 1,
+                    ongoing_tasks_per_node = NodesOT#{Node => NodeOT + 1},
                     nodes = update_nodes(Nodes)
                 }}
         end
@@ -112,8 +118,24 @@ increment_ongoing_tasks_and_choose_node(Pool) ->
 %%--------------------------------------------------------------------
 -spec decrement_ongoing_tasks(traverse:pool()) -> ok | {error, term()}.
 decrement_ongoing_tasks(Pool) ->
-    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT} = Record) ->
-        {ok, Record#traverse_tasks_scheduler{ongoing_tasks = OT - 1}}
+    Node = node(),
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT, ongoing_tasks_per_node = NodesOT} = Record) ->
+        NodeOT = maps:get(Node, NodesOT, 0),
+        {ok, Record#traverse_tasks_scheduler{
+            ongoing_tasks = OT - 1, ongoing_tasks_per_node = NodesOT#{Node => NodeOT - 1}}}
+    end,
+    extract_ok(datastore_model:update(?CTX, Pool, Diff)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Updates information about tasks on node.
+%% @end
+%%--------------------------------------------------------------------
+-spec change_node_ongoing_tasks(traverse:pool(), node(), non_neg_integer()) -> ok | {error, term()}.
+change_node_ongoing_tasks(Pool, Node, TasksNum) ->
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT} = Record) ->
+        NodeOT = maps:get(Node, NodesOT, 0),
+        {ok, Record#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT#{Node => NodeOT + TasksNum}}}
     end,
     extract_ok(datastore_model:update(?CTX, Pool, Diff)).
 
@@ -199,7 +221,23 @@ get_record_struct(1) ->
         {ongoing_tasks_limit, integer},
         {groups, [string]},
         {nodes, [atom]}
+    ]};
+get_record_struct(2) ->
+    {record, [
+        {pool, string},
+        {ongoing_tasks, integer},
+        {ongoing_tasks_per_node, #{atom => integer}},
+        {ongoing_tasks_limit, integer},
+        {ongoing_tasks_per_node_limit, integer},
+        {groups, [string]},
+        {nodes, [atom]}
     ]}.
+
+-spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
+    {datastore_model:record_version(), datastore_model:record()}.
+upgrade_record(1, {?MODULE, Pool, OngoingTasks, OngoingTasksLimit, Groups, Nodes}) ->
+    OngoingTasksPerNodeLimit = max(1, math:ceil(OngoingTasksLimit / length(consistent_hashing:get_all_nodes()))),
+    {2, {?MODULE, Pool, OngoingTasks, #{}, OngoingTasksLimit, OngoingTasksPerNodeLimit, Groups, Nodes}}.
 
 %%%===================================================================
 %%% Internal functions

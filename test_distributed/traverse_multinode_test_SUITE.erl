@@ -177,7 +177,8 @@ init_per_testcase(traverse_test, Config) ->
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool,
+            [?POOL, 3, 3, 10, #{parallel_orders_per_node_limit => 10}]))
     end, Workers),
     Config;
 init_per_testcase(Case, Config) when
@@ -186,7 +187,8 @@ init_per_testcase(Case, Config) when
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 2]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool,
+            [?POOL, 3, 3, 2, #{parallel_orders_per_node_limit => 10}]))
     end, Workers),
     Config.
 
