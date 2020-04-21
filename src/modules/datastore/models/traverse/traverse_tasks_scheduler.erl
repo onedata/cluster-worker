@@ -89,18 +89,18 @@ clear(Pool) ->
 %%--------------------------------------------------------------------
 -spec increment_ongoing_tasks_and_choose_node(traverse:pool()) -> {ok, node()} | {error, term()}.
 increment_ongoing_tasks_and_choose_node(Pool) ->
-    Node = node(),
     Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT, ongoing_tasks_per_node = NodesOT,
         ongoing_tasks_limit = TL, ongoing_tasks_per_node_limit = NodeTL, nodes = Nodes} = Record) ->
-        NodeOT = maps:get(Node, NodesOT, 0),
+        [ChosenNode | _] = NewNodes = update_nodes(Nodes),
+        NodeOT = maps:get(ChosenNode, NodesOT, 0),
         case OT < TL andalso NodeOT < NodeTL of
             false ->
                 {error, limit_exceeded};
             _ ->
                 {ok, Record#traverse_tasks_scheduler{
                     ongoing_tasks = OT + 1,
-                    ongoing_tasks_per_node = NodesOT#{Node => NodeOT + 1},
-                    nodes = update_nodes(Nodes)
+                    ongoing_tasks_per_node = NodesOT#{ChosenNode => NodeOT + 1},
+                    nodes = NewNodes
                 }}
         end
     end,

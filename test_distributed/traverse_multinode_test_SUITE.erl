@@ -83,6 +83,7 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
     ok.
 
 traverse_restart_test(Config) ->
+    % TODO - check task counters in scheduler
     [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),

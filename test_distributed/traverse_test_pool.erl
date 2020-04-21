@@ -19,7 +19,7 @@
 %% Pool callbacks
 -export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1]).
 %% Helper functions
--export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0]).
+-export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2]).
 
 -define(POOL, <<"traverse_test_pool">>).
 
@@ -94,8 +94,7 @@ save_started_job(ID, Job, TaskID) ->
 
 get_job(ID) ->
     Jobs = lists:foldl(fun(Node, Acc) ->
-        Acc ++ rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]) ++
-            rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []])
+        Acc ++ get_env(Node, test_job)  ++ get_env(Node, ongoing_job)
     end, [], consistent_hashing:get_all_nodes()),
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
     {ok, Job, ?POOL, TaskID}.
@@ -140,3 +139,23 @@ get_expected() ->
     },
 
     {Expected, Description}.
+
+copy_jobs_store(From, To) ->
+    copy_env(From, To, test_job),
+    copy_env(From, To, ongoing_job).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+get_env(Node, Name) ->
+    case rpc:call(Node, application, get_env, [?CLUSTER_WORKER_APP_NAME, Name, []]) of
+        {badrpc,nodedown} -> [];
+        Other -> Other
+    end.
+
+copy_env(From, To, Name) ->
+    NewList = lists:foldl(fun({ID, _} = Element, Acc) ->
+        [Element | proplists:delete(ID, Acc)]
+    end, get_env(To, Name), get_env(From, Name)),
+    ok = rpc:call(To, application, set_env, [?CLUSTER_WORKER_APP_NAME, Name, NewList]).
