@@ -112,4 +112,18 @@
     value :: binary()
 }).
 
+% Record representing service that should work permanently
+-record(internal_service, {
+    module :: module(),
+    function :: internal_services_manager:service_fun_name(),
+    stop_function :: internal_services_manager:service_fun_name(),
+    args :: term(), % args list encoded using erlang:term_to_binary
+    hashing_key :: binary()
+}).
+
+% Record representing services running on particular node
+-record(node_internal_services, {
+    services :: [#internal_service{}]
+}).
+
 -endif.
