@@ -211,7 +211,7 @@ services_migration_test(Config) ->
 
     StartTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
-        [ha_test_utils, start_service, stop_service, [ServiceName, MasterProc], HashingBase])),
+        [ha_test_utils, <<"test_service">>, start_service, stop_service, [ServiceName, MasterProc], HashingBase])),
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
 
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),

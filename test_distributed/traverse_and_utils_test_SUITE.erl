@@ -246,7 +246,12 @@ traverse_restart_test(Config) ->
            timeout
     end,
     ?assertEqual(ok, RecAns),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
+
+    ?assertMatch({ok, _}, rpc:call(Worker, worker_pool, start_sup_pool, [?MASTER_POOL_NAME,
+        [{workers, 3}, {queue_type, lifo}]])),
+    ?assertMatch({ok, _}, rpc:call(Worker, worker_pool, start_sup_pool, [?SLAVE_POOL_NAME,
+        [{workers, 3}, {queue_type, lifo}]])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, restart_tasks, [?POOL, #{}, Worker])),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),

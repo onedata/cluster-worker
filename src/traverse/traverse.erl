@@ -60,7 +60,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([init_pool/4, init_pool/5, restart_tasks/3, stop_pool/1,
+-export([init_pool/4, init_pool/5, init_pool_service/5, restart_tasks/3, stop_pool/1, stop_pool_service/1,
     run/3, run/4, cancel/2, cancel/3, on_task_change/2, on_job_change/5]).
 %% Functions executed on pools
 -export([execute_master_job/9, execute_slave_job/5]).
@@ -166,12 +166,33 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Inits the pool (starting appropriate worker pools and adding node to load balancing document)
-%% and restarts tasks if needed.
+%% Inits the pool as an internal service to allow failover.
 %% @end
 %%--------------------------------------------------------------------
 -spec init_pool(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer(), pool_options()) -> ok | no_return().
 init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) ->
+    StartArgs = [PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options],
+    TakeoverArgs = [PoolName, Options, node()],
+    ServiceOptions = #{
+        start_function => init_pool_service,
+        start_function_args => StartArgs,
+        takeover_function => restart_tasks,
+        takeover_function_args => TakeoverArgs,
+        migrate_function => undefined,
+        migrate_function_args => [],
+        stop_function => stop_pool_service,
+        stop_function_args => [PoolName]
+    },
+    internal_services_manager:start_service(?MODULE, PoolName, <<>>, ServiceOptions).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Inits the pool (starting appropriate worker pools and adding node to load balancing document)
+%% and restarts tasks if needed.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_pool_service(pool(), non_neg_integer(), non_neg_integer(), non_neg_integer(), pool_options()) -> ok | no_return().
+init_pool_service(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) ->
     MasterPool = worker_pool:start_sup_pool(?MASTER_POOL_NAME(PoolName), [{workers, MasterJobsNum}, {queue_type, lifo}]),
     SlavePool = worker_pool:start_sup_pool(?SLAVE_POOL_NAME(PoolName), [{workers, SlaveJobsNum}, {queue_type, lifo}]),
     try
@@ -181,8 +202,7 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
             throw({error, already_exists})
     end,
 
-    ParallelOrdersPerNodeLimitDefault =
-        max(1, math:ceil(ParallelOrdersLimit / length(consistent_hashing:get_all_nodes()))),
+    ParallelOrdersPerNodeLimitDefault = max(1, ceil(ParallelOrdersLimit / length(consistent_hashing:get_all_nodes()))),
     ParallelOrdersPerNodeLimit = maps:get(parallel_orders_per_node_limit, Options, ParallelOrdersPerNodeLimitDefault),
     ok = traverse_tasks_scheduler:init(PoolName, ParallelOrdersLimit, ParallelOrdersPerNodeLimit),
 
@@ -240,12 +260,21 @@ restart_tasks(PoolName, Options, Node) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Stops pool and prevents load balancing algorithm from scheduling tasks on node.
-%% Warning: possible races with task scheduling - make sure that there are no tasks waiting to be executed.
+%% Stops pool internal service.
 %% @end
 %%--------------------------------------------------------------------
 -spec stop_pool(pool()) -> ok.
 stop_pool(PoolName) ->
+    internal_services_manager:stop_service(?MODULE, PoolName, <<>>).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Stops pool and prevents load balancing algorithm from scheduling tasks on node.
+%% Warning: possible races with task scheduling - make sure that there are no tasks waiting to be executed.
+%% @end
+%%--------------------------------------------------------------------
+-spec stop_pool_service(pool()) -> ok.
+stop_pool_service(PoolName) ->
     ok = worker_pool:stop_sup_pool(?MASTER_POOL_NAME(PoolName)),
     ok = worker_pool:stop_sup_pool(?SLAVE_POOL_NAME(PoolName)),
 

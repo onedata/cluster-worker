@@ -30,7 +30,7 @@
 -export([register_group/2, deregister_group/2, get_next_group/1]).
 
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1, upgrade_record/2]).
+-export([get_ctx/0, get_record_version/0, get_record_struct/1, upgrade_record/2]).
 
 -type ctx() :: datastore:ctx().
 -type ongoing_tasks_map() :: #{node() => non_neg_integer()}.
@@ -212,6 +212,10 @@ get_next_group(Pool) ->
 get_ctx() ->
     ?CTX.
 
+-spec get_record_version() -> datastore_model:record_version().
+get_record_version() ->
+    2.
+
 -spec get_record_struct(datastore_model:record_version()) ->
     datastore_model:record_struct().
 get_record_struct(1) ->
@@ -236,7 +240,7 @@ get_record_struct(2) ->
 -spec upgrade_record(datastore_model:record_version(), datastore_model:record()) ->
     {datastore_model:record_version(), datastore_model:record()}.
 upgrade_record(1, {?MODULE, Pool, OngoingTasks, OngoingTasksLimit, Groups, Nodes}) ->
-    OngoingTasksPerNodeLimit = max(1, math:ceil(OngoingTasksLimit / length(consistent_hashing:get_all_nodes()))),
+    OngoingTasksPerNodeLimit = max(1, ceil(OngoingTasksLimit / length(consistent_hashing:get_all_nodes()))),
     {2, {?MODULE, Pool, OngoingTasks, #{}, OngoingTasksLimit, OngoingTasksPerNodeLimit, Groups, Nodes}}.
 
 %%%===================================================================

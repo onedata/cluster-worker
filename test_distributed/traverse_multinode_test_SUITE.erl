@@ -83,7 +83,7 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
     ok.
 
 traverse_restart_test(Config) ->
-    [Worker, Worker2] = ?config(cluster_worker_nodes, Config),
+    [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
@@ -110,8 +110,14 @@ traverse_restart_test(Config) ->
             timeout
     end,
     ?assertEqual(ok, RecAns),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
-    ?assertEqual(ok, rpc:call(Worker2, traverse, init_pool, [?POOL, 3, 3, 1])),
+
+    lists:foreach(fun(W) ->
+        ?assertMatch({ok, _}, rpc:call(W, worker_pool, start_sup_pool, [?MASTER_POOL_NAME,
+            [{workers, 3}, {queue_type, lifo}]])),
+        ?assertMatch({ok, _}, rpc:call(W, worker_pool, start_sup_pool, [?SLAVE_POOL_NAME,
+            [{workers, 3}, {queue_type, lifo}]])),
+        ?assertEqual(ok, rpc:call(W, traverse, restart_tasks, [?POOL, #{}, W]))
+    end, Workers),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),

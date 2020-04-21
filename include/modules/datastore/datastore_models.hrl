@@ -115,15 +115,21 @@
 % Record representing service that should work permanently
 -record(internal_service, {
     module :: module(),
-    function :: internal_services_manager:service_fun_name(),
+    start_function :: internal_services_manager:service_fun_name(),
+    takeover_function :: internal_services_manager:service_fun_name(),
+    migrate_function :: internal_services_manager:service_fun_name(),
     stop_function :: internal_services_manager:service_fun_name(),
-    args :: term(), % args list encoded using erlang:term_to_binary
+    start_function_args :: term(), % args list encoded using erlang:term_to_binary
+    takeover_function_args :: term(),
+    migrate_function_args :: term(),
+    stop_function_args :: term(),
     hashing_key :: binary()
 }).
 
 % Record representing services running on particular node
 -record(node_internal_services, {
-    services :: [#internal_service{}]
+    services :: #{internal_services_manager:service_name() => #internal_service{}},
+    processing_node :: node() % services can be migrated in case of failure
 }).
 
 -endif.
