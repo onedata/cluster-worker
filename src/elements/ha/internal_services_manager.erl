@@ -6,9 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions used to manage high level permanent services. The service is stared at node
-%%% chosen using consistent hashing. If node fails, service is restarted at slave node.
-%%% The module bases on the fact that datastore provides HA for documents storing (see ha_datastore.hrl).
+%%% This module provides functions used to manage high level permanent services.
+%%% The service is started at node chosen using consistent hashing. If node fails,
+%%% service is restarted at slave node. The module bases on the fact that
+%%% datastore provides HA for documents storing (see ha_datastore.hrl).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(internal_services_manager).
