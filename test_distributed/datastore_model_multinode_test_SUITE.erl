@@ -25,6 +25,7 @@
 -export([
     save_should_succeed/1,
     disk_fetch_should_succeed/1,
+    services_migration_test/1,
 
     saves_should_propagate_to_backup_node_cast_ha_test/1,
     saves_should_propagate_to_backup_node_call_ha_test/1,
@@ -86,6 +87,7 @@ all() ->
     ?ALL([
         save_should_succeed,
         disk_fetch_should_succeed,
+        services_migration_test,
 
         saves_should_propagate_to_backup_node_cast_ha_test,
         saves_should_propagate_to_backup_node_call_ha_test,
@@ -195,6 +197,37 @@ disk_fetch_should_succeed(Config) ->
             ?assertMatch({ok, _}, rpc:call(W, ?MEM_DRV(Model), get, [MemCtx, UniqueKey]))
         end, lists:reverse(Workers))
     end, ?TEST_CACHED_MODELS).
+
+services_migration_test(Config) ->
+    [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    set_ha(Config, change_config, [2, call]),
+
+    HashingBase = <<"test">>,
+    ServiceName = test_service,
+    MasterProc = self(),
+    #node_routing_info{assigned_nodes = [Node1, Node2] = AssignedNodes} =
+        rpc:call(Worker0, consistent_hashing, get_routing_info, [HashingBase]),
+    [CallWorker | _] = Workers -- AssignedNodes,
+
+    StartTimestamp = os:timestamp(),
+    ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
+        [ha_test_utils, start_service, stop_service, [ServiceName, MasterProc], HashingBase])),
+    ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
+
+    ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
+    StopTimestamp = os:timestamp(),
+    ?assertEqual(ok, rpc:call(Node2, internal_services_manager, takeover, [Node1])),
+    ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
+
+    MigrationTimestamp = os:timestamp(),
+    ?assertEqual(ok, rpc:call(Node2, internal_services_manager, migrate_to_recovered_master, [Node1])),
+    MigrationFinishTimestamp = os:timestamp(),
+    ha_test_utils:check_service(ServiceName, Node1, MigrationTimestamp),
+    ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
+    timer:sleep(timer:seconds(5)), % Wait for unwanted messages to verify migration
+    ha_test_utils:clearAndCheckMessages(ServiceName, Node2, MigrationFinishTimestamp).
+
+
 
 %%%===================================================================
 %%% HA tests
@@ -777,7 +810,7 @@ stress_with_check_test_base(Config) ->
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(?TEST_MODELS, Config,
-        fun(Config2) -> Config2 end, [datastore_test_utils, datastore_performance_tests_base]).
+        fun(Config2) -> Config2 end, [datastore_test_utils, datastore_performance_tests_base, ha_test_utils]).
 
 init_per_testcase(ha_test, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -785,6 +818,8 @@ init_per_testcase(ha_test, Config) ->
     {ok, SubtreesNum} = test_utils:get_env(Worker, cluster_worker, tp_subtrees_number),
     application:set_env(cluster_worker, tp_subtrees_number, SubtreesNum),
     Config;
+init_per_testcase(services_migration_test, Config) ->
+    init_per_testcase(ha_test, Config);
 init_per_testcase(Case, Config) ->
     case lists:suffix("ha_test", atom_to_list(Case)) of
         true ->
@@ -815,6 +850,8 @@ end_per_testcase(ha_test, Config) ->
     set_ha(Config, set_standby_mode_and_broadcast_master_up_message, []),
     set_ha(Config, change_config, [1, cast]),
     test_utils:mock_unload(Workers, [ha_datastore_master]);
+end_per_testcase(services_migration_test, Config) ->
+    end_per_testcase(ha_test, Config);
 end_per_testcase(Case, Config) ->
     case lists:suffix("ha_test", atom_to_list(Case)) of
         true ->
