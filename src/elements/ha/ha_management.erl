@@ -7,7 +7,8 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% Module for high level HA management. It reacts on other nodes failures/recovery.
-%%% It uses datastore HA (see ha_datastore.hrl) and internal_services_manager (see internal_services_manager.erl).
+%%% It uses datastore HA (see ha_datastore.hrl) and internal_services_manager
+%%% (see internal_services_manager.erl).
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ha_management).
@@ -23,7 +24,7 @@
 -spec node_down(node()) -> ok | no_return().
 node_down(Node) ->
     ok = consistent_hashing:report_node_failure(Node),
-    case ha_datastore:is_master_node(Node) of
+    case ha_datastore:is_master(Node) of
         true ->
             ok = ha_datastore:set_failover_mode_and_broadcast_master_down_message(),
             ok = internal_services_manager:takeover(Node);

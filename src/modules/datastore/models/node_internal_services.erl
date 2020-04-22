@@ -6,8 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Model used to store information needed to restart permanent services in case of node failure
-%%% (see internal_services_manager.erl)
+%%% Model used to store information needed to restart permanent services
+%%% in case of node failure (see internal_services_manager.erl)
 %%% @end
 %%%-------------------------------------------------------------------
 -module(node_internal_services).
