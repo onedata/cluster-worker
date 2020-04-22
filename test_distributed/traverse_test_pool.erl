@@ -15,11 +15,12 @@
 -behaviour(traverse_behaviour).
 
 -include("global_definitions.hrl").
+-include("datastore_test_utils.hrl").
 
 %% Pool callbacks
 -export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1]).
 %% Helper functions
--export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2]).
+-export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2, check_schedulers_after_test/3]).
 
 -define(POOL, <<"traverse_test_pool">>).
 
@@ -143,6 +144,15 @@ get_expected() ->
 copy_jobs_store(From, To) ->
     copy_env(From, To, test_job),
     copy_env(From, To, ongoing_job).
+
+check_schedulers_after_test(Worker, AllWorkers, Pool) ->
+    TestFun = fun() ->
+        {ok, #document{value = #traverse_tasks_scheduler{ongoing_tasks = Tasks, ongoing_tasks_per_node = TasksPerNode}}} =
+            rpc:call(Worker, datastore_model, get, [#{model => traverse_tasks_scheduler}, Pool]),
+        {Tasks, maps:values(TasksPerNode)}
+    end,
+    ExpectedValues = lists:map(fun(_) -> 0 end, AllWorkers),
+    ?assertEqual({0, ExpectedValues}, TestFun(), 10).
 
 %%%===================================================================
 %%% Internal functions

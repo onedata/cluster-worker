@@ -51,7 +51,7 @@ traverse_and_queuing_test(Config) ->
     traverse_base(Config, KeyBeg, RunsNum, false).
 
 traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
-    [Worker, Worker2] = ?config(cluster_worker_nodes, Config),
+    [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Num) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run,
             [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>, {self(), 1, Num}]))
@@ -80,10 +80,10 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
         ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
             rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]), 2)
     end, lists:seq(1, RunsNum)),
-    ok.
+
+    traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_restart_test(Config) ->
-    % TODO - check task counters in scheduler
     [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),
@@ -167,7 +167,7 @@ traverse_restart_test(Config) ->
             ?assertEqual(length(Ans2_1 -- Expected), length(Ans2_1) - length(Expected))
     end,
 
-    ok.
+    traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 %%%===================================================================
 %%% Init/teardown functions

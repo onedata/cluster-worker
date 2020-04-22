@@ -55,7 +55,7 @@ failure_test(Config) ->
     StartTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
         [ha_test_utils, <<"test_service">>, start_service, stop_service, [ServiceName, MasterProc], Seed])),
-    TraverseID = start_traverse(CallWorker, Node1),
+    {TraverseID, TasksWorkers} = start_traverse(CallWorker, Node1),
 
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
     RecAns = receive
@@ -78,18 +78,19 @@ failure_test(Config) ->
         rpc:call(CallWorker, traverse_task, get, [?POOL, TraverseID]), ?ATTEMPTS),
 
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
-
-    ok.
+    traverse_test_pool:check_schedulers_after_test(CallWorker, TasksWorkers, ?POOL).
 
 start_traverse(CallWorker, ExpectedNode) ->
-    start_traverse(CallWorker, ExpectedNode, 1).
+    start_traverse(CallWorker, ExpectedNode, 1, []).
 
-start_traverse(CallWorker, ExpectedNode, Num) ->
+start_traverse(CallWorker, ExpectedNode, Num, TasksWorkers) ->
     ID = <<"test_traverse", (integer_to_binary(Num))/binary>>,
     ?assertEqual(ok, rpc:call(CallWorker, traverse, run, [?POOL, ID, {self(), 1, 100}])),
     case rpc:call(CallWorker, traverse_task, get, [?POOL, ID]) of
-        {ok, #document{value = #traverse_task{node = ExpectedNode}}} -> ID;
-        _ -> start_traverse(CallWorker, ExpectedNode, Num + 1)
+        {ok, #document{value = #traverse_task{node = ExpectedNode}}} ->
+            {ID, [ExpectedNode | TasksWorkers]};
+        {ok, #document{value = #traverse_task{node = OtherNode}}} ->
+            start_traverse(CallWorker, ExpectedNode, Num + 1, [OtherNode | TasksWorkers])
     end.
 
 
