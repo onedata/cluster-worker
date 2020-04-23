@@ -65,10 +65,10 @@ get_record_struct(1) ->
             {takeover_function, atom},
             {migrate_function, atom},
             {stop_function, atom},
-            {start_function_args, binary},
-            {takeover_function_args, binary},
-            {migrate_function_args, binary},
-            {stop_function_args, binary},
+            {start_function_args, term},
+            {takeover_function_args, term},
+            {migrate_function_args, term},
+            {stop_function_args, term},
             {hashing_key, string}
         ]}}},
         {processing_node, atom}

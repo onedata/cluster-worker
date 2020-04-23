@@ -19,31 +19,29 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_service/6, start_service/4, stop_service/3, takeover/1, migrate_to_recovered_master/1]).
+-export([start_service/5, start_service/6, start_service/3, start_service/4,
+    stop_service/3, takeover/1, migrate_to_recovered_master/1]).
 %% Export for internal rpc
 -export([start_service_locally/4]).
 
--type service_name() :: binary().
--type service_fun_name() :: atom().
--type service_fun_args() :: list().
--type options() :: #{
-    start_function := service_fun_name(),
-    start_function_args := service_fun_args(),
-    takeover_function => service_fun_name(),
-    takeover_function_args => service_fun_args(),
-    migrate_function => service_fun_name(),
-    migrate_function_args => service_fun_args(),
-    stop_function => service_fun_name(),
-    stop_function_args => service_fun_args()
-}.
+-define(LOCAL_HASHING_BASE, <<>>).
 
--export_type([service_name/0, service_fun_name/0]).
+% Type defining binary used by consistent hashing to chose node where service should be running.
+-type hashing_base() :: binary().
+-export_type([hashing_base/0]).
 
 %%%===================================================================
 %%% Message sending API
 %%%===================================================================
 
--spec start_service(module(), service_name(), service_fun_name(), service_fun_name(), service_fun_args(), binary()) ->
+-spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
+    internal_service:service_fun_name(), internal_service:service_fun_args()) ->
+    ok | {error, term()}.
+start_service(Module, Name, Fun, StopFun, Args) ->
+    start_service(Module, Name, Fun, StopFun, Args, ?LOCAL_HASHING_BASE).
+
+-spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
+    internal_service:service_fun_name(), internal_service:service_fun_args(), hashing_base()) ->
     ok | {error, term()}.
 start_service(Module, Name, Fun, StopFun, Args, HashingBase) ->
     Options = #{
@@ -53,7 +51,13 @@ start_service(Module, Name, Fun, StopFun, Args, HashingBase) ->
     },
     start_service(Module, Name, HashingBase, Options).
 
--spec start_service(module(), service_name(), binary(), options()) -> ok | {error, term()}.
+-spec start_service(module(), internal_service:service_name(), internal_service:options()) ->
+    ok | {error, term()}.
+start_service(Module, Name, ServiceDescription) ->
+    start_service(Module, Name, ?LOCAL_HASHING_BASE, ServiceDescription).
+
+-spec start_service(module(), internal_service:service_name(), hashing_base(), internal_service:options()) ->
+    ok | {error, term()}.
 start_service(Module, Name, HashingBase, ServiceDescription) ->
     Node = get_node(HashingBase),
     case rpc:call(Node, ?MODULE, start_service_locally, [Module, Name, HashingBase, ServiceDescription]) of
@@ -61,7 +65,7 @@ start_service(Module, Name, HashingBase, ServiceDescription) ->
         Other -> Other
     end.
 
--spec stop_service(module(), service_name(), binary()) -> ok | {error, term()}.
+-spec stop_service(module(), internal_service:service_name(), hashing_base()) -> ok | {error, term()}.
 stop_service(Module, Name, HashingBase) ->
     Node = get_node(HashingBase),
     {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
@@ -71,8 +75,8 @@ stop_service(Module, Name, HashingBase) ->
     case maps:get(ServiceName, NodeServices, undefined) of
         undefined ->
             ok;
-        #internal_service{stop_function = Fun, stop_function_args = Args} ->
-            ok = rpc:call(ProcessingNode, erlang, apply, [Module, Fun, binary_to_term(Args)]),
+        Service ->
+            ok = internal_service:apply_stop_fun(ProcessingNode, Service),
 
             Diff = fun(#node_internal_services{services = Services} = Record) ->
                 {ok, Record#node_internal_services{services = maps:remove(ServiceName, Services)}}
@@ -91,8 +95,8 @@ takeover(FailedNode) ->
     end,
     case node_internal_services:update(get_node_id(FailedNode), Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
-            lists:foreach(fun(#internal_service{module = Module, takeover_function = Fun, takeover_function_args = Args}) ->
-                ok = apply(Module, Fun, binary_to_term(Args))
+            lists:foreach(fun(Service) ->
+                ok = internal_service:apply_takeover_fun(Service)
             end, maps:values(Services));
         {error, not_found} ->
             ok
@@ -105,13 +109,9 @@ migrate_to_recovered_master(MasterNode) ->
     end,
     case node_internal_services:update(get_node_id(MasterNode), Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
-            lists:foreach(fun(#internal_service{module = Module, start_function = Fun, migrate_function = MigrateFun,
-                start_function_args = Args, migrate_function_args = MigrateArgs}) ->
-                ok = case MigrateFun of
-                    undefined -> ok;
-                    _ -> apply(Module, MigrateFun, binary_to_term(MigrateArgs))
-                end,
-                ok = rpc:call(MasterNode, erlang, apply, [Module, Fun, binary_to_term(Args)])
+            lists:foreach(fun(Service) ->
+                ok = internal_service:apply_migrate_fun(Service),
+                ok = internal_service:apply_start_fun(MasterNode, Service)
             end, maps:values(Services));
         {error, not_found} ->
             ok
@@ -121,26 +121,10 @@ migrate_to_recovered_master(MasterNode) ->
 %%% Internal functions
 %%%===================================================================
 
--spec start_service_locally(module(), service_name(), binary(), options()) -> ok | {error, term()}.
+-spec start_service_locally(module(), internal_service:service_name(), hashing_base(), internal_service:options()) ->
+    ok | {error, term()}.
 start_service_locally(Module, Name, HashingBase, ServiceDescription) ->
-    Fun = maps:get(start_function, ServiceDescription),
-    Args = maps:get(start_function_args, ServiceDescription),
-    FailoverFun = maps:get(takeover_function, ServiceDescription, Fun),
-    FailoverFunArgs = maps:get(takeover_function_args, ServiceDescription, Args),
-
-    StopFun = maps:get(stop_function, ServiceDescription, undefined),
-    StopFunDefArgs = case StopFun of
-        undefined -> [];
-        _ -> Args
-    end,
-    StopFunArgs = maps:get(stop_function_args, ServiceDescription, StopFunDefArgs),
-    MigrateFun = maps:get(migrate_function, ServiceDescription, StopFun),
-    MigrateFunArgs = maps:get(migrate_function_args, ServiceDescription, StopFunArgs),
-
-    Service = #internal_service{module = Module, start_function = Fun, takeover_function = FailoverFun,
-        migrate_function = MigrateFun, stop_function = StopFun, start_function_args = term_to_binary(Args),
-        takeover_function_args = term_to_binary(FailoverFunArgs), migrate_function_args = term_to_binary(MigrateFunArgs),
-        stop_function_args = term_to_binary(StopFunArgs), hashing_key = HashingBase},
+    Service = internal_service:new(Module, HashingBase, ServiceDescription),
     ServiceName = get_internal_name(Module, Name),
     Default = #node_internal_services{services = #{ServiceName => Service}, processing_node = node()},
     Diff = fun(#node_internal_services{services = Services} = Record) ->
@@ -151,7 +135,7 @@ start_service_locally(Module, Name, HashingBase, ServiceDescription) ->
     end,
 
     case node_internal_services:update(get_node_id(node()), Diff, Default) of
-        {ok, _} -> apply(Module, Fun, Args);
+        {ok, _} -> internal_service:apply_start_fun(Service);
         {error, already_started} -> ok
     end.
 
@@ -159,13 +143,13 @@ start_service_locally(Module, Name, HashingBase, ServiceDescription) ->
 get_node_id(Node) ->
     atom_to_binary(Node, utf8).
 
--spec get_node(binary()) -> node().
+-spec get_node(hashing_base()) -> node().
 get_node(HashingBase) ->
     case HashingBase of
-        <<>> -> node();
+        ?LOCAL_HASHING_BASE -> node();
         _ -> datastore_key:responsible_node(HashingBase) % TODO - allow stopping o services when node is failed
     end.
 
--spec get_internal_name(module(), service_name()) -> binary().
+-spec get_internal_name(module(), internal_service:service_name()) -> binary().
 get_internal_name(Module, Name) ->
     <<(atom_to_binary(Module, utf8))/binary, "###", Name/binary>>.

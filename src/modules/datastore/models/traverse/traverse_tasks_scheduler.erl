@@ -131,11 +131,11 @@ decrement_ongoing_tasks(Pool) ->
 %% Updates information about tasks on node.
 %% @end
 %%--------------------------------------------------------------------
--spec change_node_ongoing_tasks(traverse:pool(), node(), non_neg_integer()) -> ok | {error, term()}.
+-spec change_node_ongoing_tasks(traverse:pool(), node(), integer()) -> ok | {error, term()}.
 change_node_ongoing_tasks(Pool, Node, TasksNum) ->
     Diff = fun(#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT} = Record) ->
         NodeOT = maps:get(Node, NodesOT, 0),
-        {ok, Record#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT#{Node => NodeOT + TasksNum}}}
+        {ok, Record#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT#{Node => max(NodeOT + TasksNum, 0)}}}
     end,
     extract_ok(datastore_model:update(?CTX, Pool, Diff)).
 

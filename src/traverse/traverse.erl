@@ -183,7 +183,7 @@ init_pool(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Options) -
         stop_function => stop_pool_service,
         stop_function_args => [PoolName]
     },
-    internal_services_manager:start_service(?MODULE, PoolName, <<>>, ServiceOptions).
+    internal_services_manager:start_service(?MODULE, PoolName, ServiceOptions).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -414,13 +414,13 @@ update_status(ExtendedCtx, Pool, TaskID, NewStatus) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fix_description(ctx(), traverse:pool(), traverse:id(), node()) -> {ok, doc()} | {error, term()}.
-fix_description(ExtendedCtx, Pool, TaskID, Node) ->
+fix_description(ExtendedCtx, Pool, TaskID, NodeToFix) ->
     LocalNode = node(),
     Diff = fun
         (#traverse_task{
             node = TaskNode,
             description = Description} = Task
-        ) when TaskNode =:= Node ->
+        ) when TaskNode =:= NodeToFix ->
             MDone = maps:get(master_jobs_done, Description, 0),
             MFailed = maps:get(master_jobs_failed, Description, 0),
 
