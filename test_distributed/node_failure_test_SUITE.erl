@@ -31,6 +31,7 @@ all() ->
         failure_test
     ]).
 
+-define(POOL, <<"traverse_test_pool">>).
 -define(DOC(Key, Model), ?BASE_DOC(Key, ?MODEL_VALUE(Model))).
 -define(ATTEMPTS, 30).
 
@@ -53,8 +54,17 @@ failure_test(Config) ->
 
     StartTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
-        [ha_test_utils, start_service, stop_service, [ServiceName, MasterProc], Seed])),
+        [ha_test_utils, <<"test_service">>, start_service, stop_service, [ServiceName, MasterProc], Seed])),
+    {TraverseID, TasksWorkers} = start_traverse(CallWorker, Node1),
+
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
+    RecAns = receive
+        {stop, Node1} -> ok
+    after
+        5000 -> timeout
+    end,
+    ?assertEqual(ok, RecAns),
+    ?assertEqual(ok, traverse_test_pool:copy_jobs_store(Node1, Node2)),
 
     {ok, Doc2} = ?assertMatch({ok, #document{}}, rpc:call(CallWorker, Model, save, [?DOC(Key, Model)])),
 
@@ -64,10 +74,24 @@ failure_test(Config) ->
     ?assertEqual({ok, Doc2}, rpc:call(CallWorker, Model, get, [Key])),
     ?assertMatch({ok, _, #document{}},
         rpc:call(CallWorker, couchbase_driver, get, [?DISC_CTX, ?UNIQUE_KEY(Model, Key)]), ?ATTEMPTS),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
+        rpc:call(CallWorker, traverse_task, get, [?POOL, TraverseID]), ?ATTEMPTS),
 
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
+    traverse_test_pool:check_schedulers_after_test(CallWorker, TasksWorkers, ?POOL).
 
-    ok.
+start_traverse(CallWorker, ExpectedNode) ->
+    start_traverse(CallWorker, ExpectedNode, 1, []).
+
+start_traverse(CallWorker, ExpectedNode, Num, TasksWorkers) ->
+    ID = <<"test_traverse", (integer_to_binary(Num))/binary>>,
+    ?assertEqual(ok, rpc:call(CallWorker, traverse, run, [?POOL, ID, {self(), 1, 100}])),
+    case rpc:call(CallWorker, traverse_task, get, [?POOL, ID]) of
+        {ok, #document{value = #traverse_task{node = ExpectedNode}}} ->
+            {ID, [ExpectedNode | TasksWorkers]};
+        {ok, #document{value = #traverse_task{node = OtherNode}}} ->
+            start_traverse(CallWorker, ExpectedNode, Num + 1, [OtherNode | TasksWorkers])
+    end.
 
 
 %%%===================================================================
@@ -76,9 +100,15 @@ failure_test(Config) ->
 
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(?TEST_MODELS, Config,
-        fun(Config2) -> Config2 end, [datastore_test_utils, ha_test_utils]).
+        fun(Config2) -> Config2 end, [datastore_test_utils, ha_test_utils, traverse_test_pool]).
 
 init_per_testcase(_, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
+    lists:foreach(fun(Worker) ->
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 2, 2, 10]))
+    end, Workers),
     Config.
 
 end_per_testcase(_, _Config) ->
@@ -94,7 +124,10 @@ end_per_suite(_Config) ->
 set_ha(Worker, Fun, Args) when is_atom(Worker) ->
     ?assertEqual(ok, rpc:call(Worker, ha_datastore, Fun, Args));
 set_ha(Config, Fun, Args) ->
-    Workers = ?config(cluster_worker_nodes, Config),
+    [Worker1 | _] = Workers = ?config(cluster_worker_nodes, Config),
+    CMNodes = ?config(cluster_manager_nodes, Config),
     lists:foreach(fun(Worker) ->
         set_ha(Worker, Fun, Args)
-    end, Workers).
+    end, Workers),
+    Ring = rpc:call(Worker1, ctool, get_env, [?CURRENT_RING]),
+    consistent_hashing:replicate_ring_to_nodes(CMNodes, ?CURRENT_RING, Ring).
