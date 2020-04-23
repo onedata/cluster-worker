@@ -50,7 +50,7 @@
     stop_function_args => service_fun_args()
 }.
 
--export_type([service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
+-export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
 
 %%%===================================================================
 %%% API
