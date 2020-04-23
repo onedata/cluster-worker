@@ -6,7 +6,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides functions operating on #internal_service{} record used by internal_services_manager.
+%%% This module provides functions operating on #internal_service{}
+%%% record that represents service that should work permanently
+%%% (see internal_services_manager.erl). The record is stored
+%%% in datastore as a part of #node_internal_services{} record.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(internal_service).
@@ -15,7 +18,22 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([new/3, apply_start_fun/1, apply_start_fun/2, apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1]).
+-export([new/3, apply_start_fun/1, apply_start_fun/2,
+    apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1]).
+
+% Record representing service that should work permanently
+-record(internal_service, {
+    module :: module(),
+    start_function :: service_fun_name(),
+    takeover_function :: service_fun_name(),
+    migrate_function :: service_fun_name(),
+    stop_function :: service_fun_name(),
+    start_function_args :: service_fun_args(),
+    takeover_function_args :: service_fun_args(),
+    migrate_function_args :: service_fun_args(),
+    stop_function_args :: service_fun_args(),
+    hashing_key :: internal_services_manager:hashing_base()
+}).
 
 -type service() :: #internal_service{}.
 -type service_name() :: binary().
