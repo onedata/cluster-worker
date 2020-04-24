@@ -92,8 +92,14 @@ apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun, t
 -spec apply_stop_fun(node(), service()) -> term().
 apply_stop_fun(Node, #internal_service{module = Module, stop_function = Fun, stop_function_args = Args}) ->
     case Fun of
-        undefined -> ok;
-        _ -> rpc:call(Node, Module, Fun, Args)
+        undefined ->
+            ok;
+        _ ->
+            case rpc:call(Node, Module, Fun, Args) of
+                {badrpc, nodedown} -> ok;
+                {badrpc, Reason} -> {error, Reason};
+                Other -> Other
+            end
     end.
 
 -spec apply_migrate_fun(service()) -> term().

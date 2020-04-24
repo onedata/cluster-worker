@@ -16,13 +16,12 @@
 -author("Michał Wrzeszcz").
 
 -include("modules/datastore/datastore_models.hrl").
--include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
     stop_service/3, takeover/1, migrate_to_recovered_master/1, on_cluster_restart/0]).
 %% Export for internal rpc
--export([start_service_locally/4]).
+-export([start_service_locally/5]).
 
 -define(LOCAL_HASHING_BASE, <<>>).
 
@@ -59,17 +58,18 @@ start_service(Module, Name, ServiceDescription) ->
 -spec start_service(module(), internal_service:service_name(), hashing_base(), internal_service:options()) ->
     ok | {error, term()}.
 start_service(Module, Name, HashingBase, ServiceDescription) ->
-    Node = get_node(HashingBase),
-    case rpc:call(Node, ?MODULE, start_service_locally, [Module, Name, HashingBase, ServiceDescription]) of
+    {MasterNode, HandlingNode} = get_master_and_handling_nodes(HashingBase),
+    case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, Name, HashingBase, ServiceDescription]) of
         {badrpc, Reason} -> {error, Reason};
         Other -> Other
     end.
 
 -spec stop_service(module(), internal_service:service_name(), hashing_base()) -> ok | {error, term()}.
 stop_service(Module, Name, HashingBase) ->
-    Node = get_node(HashingBase),
+    {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
+    MasterNodeID = get_node_id(MasterNode),
     {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
-        node_internal_services:get(get_node_id(Node)),
+        node_internal_services:get(MasterNodeID),
 
     ServiceName = get_internal_name(Module, Name),
     case maps:get(ServiceName, NodeServices, undefined) of
@@ -81,7 +81,7 @@ stop_service(Module, Name, HashingBase) ->
             Diff = fun(#node_internal_services{services = Services} = Record) ->
                 {ok, Record#node_internal_services{services = maps:remove(ServiceName, Services)}}
             end,
-            case node_internal_services:update(get_node_id(Node), Diff) of
+            case node_internal_services:update(MasterNodeID, Diff) of
                 {ok, _} -> ok;
                 {error, not_found} -> ok
             end
@@ -124,9 +124,9 @@ on_cluster_restart() ->
 %%% Internal functions
 %%%===================================================================
 
--spec start_service_locally(module(), internal_service:service_name(), hashing_base(), internal_service:options()) ->
-    ok | {error, term()}.
-start_service_locally(Module, Name, HashingBase, ServiceDescription) ->
+-spec start_service_locally(node(), module(), internal_service:service_name(), hashing_base(),
+    internal_service:options()) -> ok | {error, term()}.
+start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription) ->
     Service = internal_service:new(Module, HashingBase, ServiceDescription),
     ServiceName = get_internal_name(Module, Name),
     Default = #node_internal_services{services = #{ServiceName => Service}, processing_node = node()},
@@ -137,7 +137,7 @@ start_service_locally(Module, Name, HashingBase, ServiceDescription) ->
         end
     end,
 
-    case node_internal_services:update(get_node_id(node()), Diff, Default) of
+    case node_internal_services:update(get_node_id(MasterNode), Diff, Default) of
         {ok, _} -> internal_service:apply_start_fun(Service);
         {error, already_started} -> ok
     end.
@@ -146,11 +146,14 @@ start_service_locally(Module, Name, HashingBase, ServiceDescription) ->
 get_node_id(Node) ->
     atom_to_binary(Node, utf8).
 
--spec get_node(hashing_base()) -> node().
-get_node(HashingBase) ->
+-spec get_master_and_handling_nodes(hashing_base()) -> {MasterNode :: node(), HandlingNode :: node()}.
+get_master_and_handling_nodes(HashingBase) ->
     case HashingBase of
-        ?LOCAL_HASHING_BASE -> node();
-        _ -> datastore_key:responsible_node(HashingBase) % TODO - allow stopping o services when node is failed
+        ?LOCAL_HASHING_BASE ->
+            {node(), node()};
+        _ ->
+            {Master, _} = datastore_key:primary_responsible_node(HashingBase),
+            {Master, datastore_key:responsible_node(HashingBase)}
     end.
 
 -spec get_internal_name(module(), internal_service:service_name()) -> binary().
