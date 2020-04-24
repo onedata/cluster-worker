@@ -27,8 +27,8 @@ node_down(Node) ->
     IsMaster = ha_datastore:is_master(Node),
     case IsMaster of
         true ->
-            ok = internal_services_manager:takeover(Node),
-            ok = ha_datastore:set_failover_mode_and_broadcast_master_down_message();
+            ok = ha_datastore:set_failover_mode_and_broadcast_master_down_message(),
+            ok = internal_services_manager:takeover(Node);
         false ->
             ok
     end,

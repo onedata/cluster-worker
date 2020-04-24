@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/1, update/3, delete/1]).
+-export([get/1, update/2, update/3, delete/1]).
 
 %% datastore_model callbacks
 -export([get_ctx/0, get_record_struct/1]).
@@ -39,6 +39,10 @@
 get(Key) ->
     datastore_model:get(?CTX, Key).
 
+-spec update(key(), diff()) -> {ok, doc()} | {error, term()}.
+update(Key, Diff) ->
+    datastore_model:update(?CTX, Key, Diff).
+
 -spec update(key(), diff(), record() | doc()) -> {ok, doc()} | {error, term()}.
 update(Key, Diff, Default) ->
     datastore_model:update(?CTX, Key, Diff, Default).
@@ -59,11 +63,17 @@ get_ctx() ->
     datastore_model:record_struct().
 get_record_struct(1) ->
     {record, [
-        {services, [{record, [
+        {services, #{string => {record, [
             {module, atom},
-            {function, atom},
+            {start_function, atom},
+            {takeover_function, atom},
+            {migrate_function, atom},
             {stop_function, atom},
-            {args, binary},
+            {start_function_args, term},
+            {takeover_function_args, term},
+            {migrate_function_args, term},
+            {stop_function_args, term},
             {hashing_key, string}
-        ]}]}
+        ]}}},
+        {processing_node, atom}
     ]}.
