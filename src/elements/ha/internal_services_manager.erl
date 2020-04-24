@@ -19,7 +19,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_service/5, takeover/1, migrate_to_recovered_master/1]).
+-export([start_service/5, takeover/1, migrate_to_recovered_master/1, on_cluster_restart/0]).
 %% Export for internal rpc
 -export([start_service_locally/5]).
 
@@ -58,6 +58,9 @@ migrate_to_recovered_master(MasterNode) ->
         ok = apply(Module, StopFun, ArgsList),
         ok = rpc:call(MasterNode, erlang, apply, [Module, Fun, ArgsList])
     end, lists:reverse(Services)).
+
+on_cluster_restart() ->
+    ok = node_internal_services:delete(get_node_id(node())).
 
 %%%===================================================================
 %%% Internal functions

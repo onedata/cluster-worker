@@ -39,6 +39,7 @@
                  memory_driver => memory_driver(),
                  memory_driver_ctx => memory_driver_ctx(),
 
+                 ha_disabled => boolean(),
                  % Memory copies external API (to be set by model)
                  memory_copies => all | none, % number of nodes used for memory copies
                  % Memory copies internal API (to be set by datastore modules)

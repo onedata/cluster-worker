@@ -653,6 +653,7 @@ cluster_init_step(init) ->
 cluster_init_step(start_default_workers) ->
     ?info("Starting default workers..."),
     init_workers(cluster_worker_modules()),
+    internal_services_manager:on_cluster_restart(),
     ?info("Default workers started successfully"),
     ok;
 cluster_init_step(start_upgrade_essential_workers) ->

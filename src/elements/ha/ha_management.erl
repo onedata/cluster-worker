@@ -24,13 +24,15 @@
 -spec node_down(node()) -> ok | no_return().
 node_down(Node) ->
     ok = consistent_hashing:report_node_failure(Node),
-    case ha_datastore:is_master(Node) of
+    IsMaster = ha_datastore:is_master(Node),
+    case IsMaster of
         true ->
             ok = internal_services_manager:takeover(Node),
             ok = ha_datastore:set_failover_mode_and_broadcast_master_down_message();
         false ->
             ok
-    end.
+    end,
+    ok = plugins:apply(node_manager_plugin, node_down, [Node, IsMaster]).
 
 -spec node_up(node()) -> ok | no_return().
 node_up(_Node) ->

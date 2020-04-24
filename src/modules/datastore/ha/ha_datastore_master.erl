@@ -97,37 +97,8 @@ store_backup(_ProcessKey, [], _CacheRequests, Data) ->
     Data;
 store_backup(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes = []} = Data) ->
     Data;
-store_backup(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_CALL_PROPAGATION,
-    backup_nodes = [Node | _]} = Data) ->
-    case ha_datastore:send_sync_master_message(Node, ProcessKey,
-        #store_backup{keys = Keys, cache_requests = CacheRequests}, true) of
-        {ok, Pid} ->
-            Data#data{slave_pid = Pid};
-        {badrpc, nodedown} ->
-            % TODO VFS-6295 - log to dedicated logfile
-            ?warning("Cannot broadcast HA data - slave down"),
-            Data;
-        Error ->
-            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
-            Data
-    end;
-store_backup(ProcessKey, Keys, CacheRequests, #data{link_status = ?SLAVE_NOT_LINKED,
-    backup_nodes = [Node | _]} = Data) ->
-    case ha_datastore:send_sync_master_message(Node, ProcessKey,
-        #store_backup{keys = Keys, cache_requests = CacheRequests, link = {true, self()}}, true) of
-        {ok, Pid} ->
-            Data#data{link_status = ?SLAVE_LINKED, slave_pid = Pid};
-        {badrpc, nodedown} ->
-            % TODO VFS-6295 - log to dedicated logfile
-            ?warning("Cannot broadcast HA data - slave down"),
-            Data;
-        Error ->
-            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
-            Data
-    end;
-store_backup(_ProcessKey, Keys, CacheRequests, #data{slave_pid = Pid} = Data) ->
-    ha_datastore:send_async_master_message(Pid, #store_backup{keys = Keys, cache_requests = CacheRequests}),
-    Data.
+store_backup(ProcessKey, Keys, CacheRequests, Data) ->
+    send_store_backup_request(ProcessKey, Keys, filter_requests(CacheRequests), Data).
 
 -spec forget_backup(datastore_doc_batch:cached_keys(), ha_master_data()) -> ok.
 forget_backup([], _) ->
@@ -205,3 +176,48 @@ inspect_slave_activity(Key, Node) ->
             datastore_cache:save(MemoryRequests),
             {IsHandlingRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
     end.
+
+-spec filter_requests([datastore_cache:cache_save_request()]) -> [datastore_cache:cache_save_request()].
+filter_requests(Requests) ->
+    lists:filter(fun
+        ({#{routing := local, disc_driver := undefined} = Ctx, _Key, _Doc}) ->
+            not maps:get(ha_disabled, Ctx, true);
+        ({Ctx, _Key, _Doc}) ->
+            not maps:get(ha_disabled, Ctx, false)
+    end, Requests).
+
+-spec send_store_backup_request(datastore:key(), datastore_doc_batch:cached_keys(),
+    [datastore_cache:cache_save_request()], ha_master_data()) -> ha_master_data().
+send_store_backup_request(_ProcessKey, _Keys, [], Data) ->
+    Data;
+send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{propagation_method = ?HA_CALL_PROPAGATION,
+    backup_nodes = [Node | _]} = Data) ->
+    case ha_datastore:send_sync_master_message(Node, ProcessKey,
+        #store_backup{keys = Keys, cache_requests = CacheRequests}, true) of
+        {ok, Pid} ->
+            Data#data{slave_pid = Pid};
+        {badrpc, nodedown} ->
+            % TODO VFS-6295 - log to dedicated logfile
+            ?warning("Cannot broadcast HA data - slave down"),
+            Data;
+        Error ->
+            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
+            Data
+    end;
+send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{link_status = ?SLAVE_NOT_LINKED,
+    backup_nodes = [Node | _]} = Data) ->
+    case ha_datastore:send_sync_master_message(Node, ProcessKey,
+        #store_backup{keys = Keys, cache_requests = CacheRequests, link = {true, self()}}, true) of
+        {ok, Pid} ->
+            Data#data{link_status = ?SLAVE_LINKED, slave_pid = Pid};
+        {badrpc, nodedown} ->
+            % TODO VFS-6295 - log to dedicated logfile
+            ?warning("Cannot broadcast HA data - slave down"),
+            Data;
+        Error ->
+            ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
+            Data
+    end;
+send_store_backup_request(_ProcessKey, Keys, CacheRequests, #data{slave_pid = Pid} = Data) ->
+    ha_datastore:send_async_master_message(Pid, #store_backup{keys = Keys, cache_requests = CacheRequests}),
+    Data.

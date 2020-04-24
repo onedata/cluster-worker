@@ -442,6 +442,9 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
                 (Node, {ok, _}) ->
                     rpc:call(Node, ?MODULE, datastore_apply_all_subtrees,
                         [Ctx, Fun, UniqueKey, Args]);
+                (Node, {error, nodedown}) ->
+                    rpc:call(Node, ?MODULE, datastore_apply_all_subtrees,
+                        [Ctx, Fun, UniqueKey, Args]);
                 (_, Error) ->
                     Error
             end, ok, consistent_hashing:get_all_nodes());

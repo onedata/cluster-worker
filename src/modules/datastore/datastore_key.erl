@@ -43,6 +43,8 @@
 -module(datastore_key).
 -author("Lukasz Opiola").
 
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
+
 -define(KEY_BYTES, application:get_env(cluster_worker, datastore_doc_key_length, 16)).
 -define(CHASH_LABEL_SEPARATOR, "ch").
 -define(CHASH_LABEL_SEPARATOR_SIZE, 2).
@@ -64,7 +66,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
--export([responsible_node/1, get_chash_seed/1]).
+-export([responsible_node/1, primary_responsible_node/1, get_chash_seed/1]).
 
 %%%===================================================================
 %%% API
@@ -156,14 +158,37 @@ adjacent_from_digest(DigestComponents, Original) when size(Original) > 0 ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns a single node responsible for handling given datastore key.
+%% If responsible node is down, returns first possible node.
 %% @end
 %%--------------------------------------------------------------------
 -spec responsible_node(key()) -> node().
 responsible_node(Key) ->
     CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_assigned_node(CHashSeed).
+    #node_routing_info{assigned_nodes = Nodes, failed_nodes = FailedNodes} =
+        consistent_hashing:get_routing_info(CHashSeed),
+    case Nodes -- FailedNodes of
+        [Node | _] -> Node;
+        [] -> throw(all_responsible_nodes_failed)
+    end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a single node responsible for handling given datastore key.
+%% Provides information if such node is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec primary_responsible_node(key()) -> {node(), IsAlive :: boolean()}.
+primary_responsible_node(Key) ->
+    CHashSeed = get_chash_seed(Key),
+    #node_routing_info{assigned_nodes = [Node | _], failed_nodes = FailedNodes} =
+        consistent_hashing:get_routing_info(CHashSeed),
+    {Node, not lists:member(Node, FailedNodes)}.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a single node responsible for handling given datastore key.
+%% @end
+%%--------------------------------------------------------------------
 -spec get_chash_seed(key()) -> key() | chash_label().
 get_chash_seed(Key) ->
     case to_basic_key_and_chash_label(Key) of
