@@ -51,7 +51,7 @@ traverse_and_queuing_test(Config) ->
     traverse_base(Config, KeyBeg, RunsNum, false).
 
 traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
-    [Worker, Worker2] = ?config(cluster_worker_nodes, Config),
+    [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Num) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run,
             [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>, {self(), 1, Num}]))
@@ -80,10 +80,11 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
         ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
             rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]), 2)
     end, lists:seq(1, RunsNum)),
-    ok.
+
+    traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_restart_test(Config) ->
-    [Worker, Worker2] = ?config(cluster_worker_nodes, Config),
+    [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
         [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
@@ -110,8 +111,14 @@ traverse_restart_test(Config) ->
             timeout
     end,
     ?assertEqual(ok, RecAns),
-    ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 1])),
-    ?assertEqual(ok, rpc:call(Worker2, traverse, init_pool, [?POOL, 3, 3, 1])),
+
+    lists:foreach(fun(W) ->
+        ?assertMatch({ok, _}, rpc:call(W, worker_pool, start_sup_pool, [?MASTER_POOL_NAME,
+            [{workers, 3}, {queue_type, lifo}]])),
+        ?assertMatch({ok, _}, rpc:call(W, worker_pool, start_sup_pool, [?SLAVE_POOL_NAME,
+            [{workers, 3}, {queue_type, lifo}]])),
+        ?assertEqual(ok, rpc:call(W, traverse, restart_tasks, [?POOL, #{}, W]))
+    end, Workers),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
     ExpLen = length(Expected),
@@ -160,7 +167,7 @@ traverse_restart_test(Config) ->
             ?assertEqual(length(Ans2_1 -- Expected), length(Ans2_1) - length(Expected))
     end,
 
-    ok.
+    traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 %%%===================================================================
 %%% Init/teardown functions
@@ -177,7 +184,8 @@ init_per_testcase(traverse_test, Config) ->
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool,
+            [?POOL, 3, 3, 10, #{parallel_orders_per_node_limit => 10}]))
     end, Workers),
     Config;
 init_per_testcase(Case, Config) when
@@ -186,7 +194,8 @@ init_per_testcase(Case, Config) when
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, test_job, []),
     test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ongoing_job, []),
     lists:foreach(fun(Worker) ->
-        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 2]))
+        ?assertEqual(ok, rpc:call(Worker, traverse, init_pool,
+            [?POOL, 3, 3, 2, #{parallel_orders_per_node_limit => 10}]))
     end, Workers),
     Config.
 
