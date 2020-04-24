@@ -29,6 +29,7 @@
                  routing_key => key(), % key used to route request to tp process and to choose node
                  fold_enabled => boolean(),
                  local_fold => boolean(), % Fold links are added using local routing
+                 fold_node => node(), % Node used to generate key for local fold
                  sync_enabled => boolean(),
                  sync_change => boolean(), % should set to 'true' for save
                                            % of remote change

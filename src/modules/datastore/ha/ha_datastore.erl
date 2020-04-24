@@ -29,7 +29,7 @@
     send_async_master_message/2, send_sync_master_message/4,
     broadcast_async_management_message/1]).
 %% API
--export([get_propagation_method/0, get_backup_nodes/0, is_master/1, get_slave_mode/0]).
+-export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
     change_config/2]).
 -export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
@@ -129,23 +129,26 @@ get_backup_nodes() ->
             Env;
         undefined ->
             critical_section:run(?MODULE, fun() ->
-                Ans = case consistent_hashing:get_nodes_assigned_per_label() of
-                    1 ->
-                        [];
-                    BackupNodesNum ->
-                        Node = node(),
-                        AllNodes = consistent_hashing:get_all_nodes(),
-                        case lists:member(Node, AllNodes) of
-                            true ->
-                                Nodes = arrange_nodes(Node, AllNodes),
-                                lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)));
-                            _ ->
-                                []
-                        end
-                end,
+                Ans = get_backup_nodes(node()),
                 application:set_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes, Ans),
                 Ans
             end)
+    end.
+
+-spec get_backup_nodes(node()) -> [node()].
+get_backup_nodes(Node) ->
+    case consistent_hashing:get_nodes_assigned_per_label() of
+        1 ->
+            [];
+        BackupNodesNum ->
+            AllNodes = consistent_hashing:get_all_nodes(),
+            case lists:member(Node, AllNodes) of
+                true ->
+                    Nodes = arrange_nodes(Node, AllNodes),
+                    lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)));
+                _ ->
+                    []
+            end
     end.
 
 -spec is_master(node()) -> boolean().
