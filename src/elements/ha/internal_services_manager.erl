@@ -20,7 +20,7 @@
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
     stop_service/3, takeover/1, migrate_to_recovered_master/1,
-    on_cluster_restart/0, get_service_and_processing_node/2]).
+    on_cluster_restart/0, do_healtcheck/4]).
 %% Export for internal rpc
 -export([start_service_locally/5]).
 
@@ -97,8 +97,9 @@ takeover(FailedNode) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                ok = internal_service:apply_takeover_fun(Service),
-                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID)
+                TakeoverAns = internal_service:apply_takeover_fun(Service),
+                HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval, TakeoverAns)
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -114,23 +115,41 @@ migrate_to_recovered_master(MasterNode) ->
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
                 ok = internal_service:apply_migrate_fun(Service),
-                ok = internal_service:apply_start_fun(MasterNode, Service),
-                ok = node_manager:init_service_healthcheck(MasterNode, ServiceName, MasterNodeID)
+                StartAns = internal_service:apply_start_fun(MasterNode, Service),
+                HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+                ok = node_manager:init_service_healthcheck(
+                    MasterNode, ServiceName, MasterNodeID, HealthcheckInterval, StartAns)
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
     end.
 
+-spec do_healtcheck(internal_service:service_name(), node_id(), non_neg_integer(), term()) ->
+    {ok, Interval :: non_neg_integer()} | ignore.
+do_healtcheck(ServiceName, MasterNodeID, LastInterval, StartFunAns) ->
+    case get_service_and_processing_node(ServiceName, MasterNodeID) of
+        {Service, Node} when Service =:= undefined orelse Node =/= node() ->
+            ignore;
+        {Service, _} ->
+            case internal_service:apply_healthcheck_fun(Service, [LastInterval, StartFunAns]) of
+                {error, undefined_fun} ->
+                    ignore;
+                {restart, NewInterval} ->
+                    % Check once more in case of race with migration
+                    case get_service_and_processing_node(ServiceName, MasterNodeID) of
+                        {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
+                            ignore;
+                        _ ->
+                            RestartAns = internal_service:apply_start_fun(Service),
+                            {ok, NewInterval, RestartAns}
+                    end;
+                {ok, NewInterval} ->
+                    {ok, NewInterval, StartFunAns}
+            end
+    end.
+
 on_cluster_restart() ->
     ok = node_internal_services:delete(get_node_id(node())).
-
--spec get_service_and_processing_node(internal_service:service_name(), node_id()) ->
-    {internal_service:service() | undefined, node()}.
-get_service_and_processing_node(ServiceName, MasterNodeID) ->
-    {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
-        node_internal_services:get(MasterNodeID),
-
-    {maps:get(ServiceName, NodeServices, undefined), ProcessingNode}.
 
 %%%===================================================================
 %%% Internal functions
@@ -152,8 +171,9 @@ start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription)
     MasterNodeID = get_node_id(MasterNode),
     case node_internal_services:update(MasterNodeID, Diff, Default) of
         {ok, _} ->
-            ok = internal_service:apply_start_fun(Service),
-            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID);
+            StartAns = internal_service:apply_start_fun(Service),
+            HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval, StartAns);
         {error, already_started} ->
             ok
     end.
@@ -175,3 +195,11 @@ get_master_and_handling_nodes(HashingBase) ->
 -spec get_internal_name(module(), internal_service:service_name()) -> internal_service:service_name().
 get_internal_name(Module, Name) ->
     <<(atom_to_binary(Module, utf8))/binary, "###", Name/binary>>.
+
+-spec get_service_and_processing_node(internal_service:service_name(), node_id()) ->
+    {internal_service:service() | undefined, node()}.
+get_service_and_processing_node(ServiceName, MasterNodeID) ->
+    {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
+        node_internal_services:get(MasterNodeID),
+
+    {maps:get(ServiceName, NodeServices, undefined), ProcessingNode}.

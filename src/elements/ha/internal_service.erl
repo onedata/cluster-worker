@@ -20,7 +20,7 @@
 %% API
 -export([new/3, apply_start_fun/1, apply_start_fun/2,
     apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
-    apply_healthcheck_fun/1]).
+    apply_healthcheck_fun/2, get_healthcheck_interval/1]).
 
 % Record representing service that should work permanently
 -record(internal_service, {
@@ -98,12 +98,16 @@ new(Module, HashingBase, ServiceDescription) ->
         healthcheck_interval = HealthcheckInterval}.
 
 -spec apply_start_fun(service()) -> term().
+apply_start_fun(#internal_service{module = Module, start_function = Fun, start_function_args = Args,
+    healthcheck_fun = undefined}) ->
+    ok = apply(Module, Fun, Args); % Do not allow error as healthcheck function is not defined
 apply_start_fun(#internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
     apply(Module, Fun, Args).
 
 -spec apply_start_fun(node(), service()) -> term().
-apply_start_fun(Node, #internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
-    rpc:call(Node, Module, Fun, Args).
+apply_start_fun(Node, Service) ->
+    rpc:call(Node, ?MODULE, apply_start_fun, [Service]).
+
 
 -spec apply_takeover_fun(service()) -> term().
 apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun, takeover_function_args = Args}) ->
@@ -126,9 +130,17 @@ apply_migrate_fun(#internal_service{module = Module, migrate_function = Fun, mig
         _ -> apply(Module, Fun, Args)
     end.
 
--spec apply_healthcheck_fun(service()) -> {Result :: term(), Interval :: non_neg_integer()} | {error, undefined_fun}.
-apply_healthcheck_fun(#internal_service{stop_function = undefined}) ->
+-spec apply_healthcheck_fun(service(), list()) ->
+    {Result :: term(), Interval :: non_neg_integer()} | {error, undefined_fun}.
+apply_healthcheck_fun(#internal_service{healthcheck_fun = undefined}, _ExtendedArgs) ->
     {error, undefined_fun};
 apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun, healthcheck_fun_args = Args,
-    healthcheck_interval = Interval}) ->
-    {apply(Module, Fun, Args), Interval}.
+    healthcheck_interval = DefaultInterval}, ExtendedArgs) ->
+    case apply(Module, Fun, Args ++ ExtendedArgs) of
+        {_Result, _OverriddenInterval} = Ans -> Ans;
+        Result -> {Result, DefaultInterval}
+    end.
+
+-spec get_healthcheck_interval(service()) -> non_neg_integer().
+get_healthcheck_interval(#internal_service{healthcheck_interval = DefaultInterval}) ->
+    DefaultInterval.

@@ -16,7 +16,7 @@
 -include_lib("ctool/include/test/assertions.hrl").
 
 %% API
--export([start_service/2, healthcheck_fun/2, stop_service/2,
+-export([start_service/2, healthcheck_fun/4, stop_service/2,
     check_service/3, check_healthcheck/3, clearAndCheckMessages/3]).
 
 %%%===================================================================
@@ -28,7 +28,7 @@ start_service(ServiceName, MasterProc) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, ServiceName, Pid),
     ok.
 
-healthcheck_fun(ServiceName, MasterProc) ->
+healthcheck_fun(ServiceName, MasterProc, _LastInterval, _StartFunAns) ->
     MasterProc ! {healthcheck, ServiceName, node(), os:timestamp()},
     ok.
 
