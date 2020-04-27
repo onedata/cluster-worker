@@ -69,11 +69,14 @@ get_record_struct(1) ->
             {takeover_function, atom},
             {migrate_function, atom},
             {stop_function, atom},
+            {healthcheck_fun, atom},
             {start_function_args, term},
             {takeover_function_args, term},
             {migrate_function_args, term},
             {stop_function_args, term},
-            {hashing_key, string}
+            {healthcheck_fun_args, term},
+            {hashing_key, string},
+            {healthcheck_interval, integer}
         ]}}},
         {processing_node, atom}
     ]}.

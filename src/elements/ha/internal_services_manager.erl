@@ -19,7 +19,8 @@
 
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
-    stop_service/3, takeover/1, migrate_to_recovered_master/1, on_cluster_restart/0]).
+    stop_service/3, takeover/1, migrate_to_recovered_master/1,
+    on_cluster_restart/0, get_service_and_processing_node/2]).
 %% Export for internal rpc
 -export([start_service_locally/5]).
 
@@ -27,7 +28,8 @@
 
 % Type defining binary used by consistent hashing to chose node where service should be running.
 -type hashing_base() :: binary().
--export_type([hashing_base/0]).
+-type node_id() :: binary().
+-export_type([hashing_base/0, node_id/0]).
 
 %%%===================================================================
 %%% Message sending API
@@ -68,14 +70,12 @@ start_service(Module, Name, HashingBase, ServiceDescription) ->
 stop_service(Module, Name, HashingBase) ->
     {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
     MasterNodeID = get_node_id(MasterNode),
-    {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
-        node_internal_services:get(MasterNodeID),
-
     ServiceName = get_internal_name(Module, Name),
-    case maps:get(ServiceName, NodeServices, undefined) of
+    {Service, ProcessingNode} = get_service_and_processing_node(ServiceName, MasterNodeID),
+    case Service of
         undefined ->
             ok;
-        Service ->
+        _ ->
             ok = internal_service:apply_stop_fun(ProcessingNode, Service),
 
             Diff = fun(#node_internal_services{services = Services} = Record) ->
@@ -93,11 +93,13 @@ takeover(FailedNode) ->
     Diff = fun(Record) ->
         {ok, Record#node_internal_services{processing_node = NewNode}}
     end,
-    case node_internal_services:update(get_node_id(FailedNode), Diff) of
+    MasterNodeID = get_node_id(FailedNode),
+    case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
-            lists:foreach(fun(Service) ->
-                ok = internal_service:apply_takeover_fun(Service)
-            end, maps:values(Services));
+            lists:foreach(fun({ServiceName, Service}) ->
+                ok = internal_service:apply_takeover_fun(Service),
+                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID)
+            end, maps:to_list(Services));
         {error, not_found} ->
             ok
     end.
@@ -107,18 +109,28 @@ migrate_to_recovered_master(MasterNode) ->
     Diff = fun(Record) ->
         {ok, Record#node_internal_services{processing_node = MasterNode}}
     end,
-    case node_internal_services:update(get_node_id(MasterNode), Diff) of
+    MasterNodeID = get_node_id(MasterNode),
+    case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
-            lists:foreach(fun(Service) ->
+            lists:foreach(fun({ServiceName, Service}) ->
                 ok = internal_service:apply_migrate_fun(Service),
-                ok = internal_service:apply_start_fun(MasterNode, Service)
-            end, maps:values(Services));
+                ok = internal_service:apply_start_fun(MasterNode, Service),
+                ok = node_manager:init_service_healthcheck(MasterNode, ServiceName, MasterNodeID)
+            end, maps:to_list(Services));
         {error, not_found} ->
             ok
     end.
 
 on_cluster_restart() ->
     ok = node_internal_services:delete(get_node_id(node())).
+
+-spec get_service_and_processing_node(internal_service:service_name(), node_id()) ->
+    {internal_service:service() | undefined, node()}.
+get_service_and_processing_node(ServiceName, MasterNodeID) ->
+    {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
+        node_internal_services:get(MasterNodeID),
+
+    {maps:get(ServiceName, NodeServices, undefined), ProcessingNode}.
 
 %%%===================================================================
 %%% Internal functions
@@ -137,12 +149,16 @@ start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription)
         end
     end,
 
-    case node_internal_services:update(get_node_id(MasterNode), Diff, Default) of
-        {ok, _} -> internal_service:apply_start_fun(Service);
-        {error, already_started} -> ok
+    MasterNodeID = get_node_id(MasterNode),
+    case node_internal_services:update(MasterNodeID, Diff, Default) of
+        {ok, _} ->
+            ok = internal_service:apply_start_fun(Service),
+            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID);
+        {error, already_started} ->
+            ok
     end.
 
--spec get_node_id(node()) -> binary().
+-spec get_node_id(node()) -> node_id().
 get_node_id(Node) ->
     atom_to_binary(Node, utf8).
 
@@ -156,6 +172,6 @@ get_master_and_handling_nodes(HashingBase) ->
             {Master, datastore_key:responsible_node(HashingBase)}
     end.
 
--spec get_internal_name(module(), internal_service:service_name()) -> binary().
+-spec get_internal_name(module(), internal_service:service_name()) -> internal_service:service_name().
 get_internal_name(Module, Name) ->
     <<(atom_to_binary(Module, utf8))/binary, "###", Name/binary>>.

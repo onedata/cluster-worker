@@ -214,19 +214,28 @@ services_migration_test(Config) ->
     [CallWorker | _] = Workers -- AssignedNodes,
 
     StartTimestamp = os:timestamp(),
+    ServiceOptions = #{
+        start_function => start_service,
+        stop_function => stop_service,
+        healthcheck_fun => healthcheck_fun,
+        start_function_args => [ServiceName, MasterProc]
+    },
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
-        [ha_test_utils, <<"test_service">>, start_service, stop_service, [ServiceName, MasterProc], HashingBase])),
+        [ha_test_utils, <<"test_service">>, HashingBase, ServiceOptions])),
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
+    ha_test_utils:check_healthcheck(ServiceName, Node1, StartTimestamp),
 
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     StopTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, takeover, [Node1])),
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
+    ha_test_utils:check_healthcheck(ServiceName, Node2, StopTimestamp),
 
     MigrationTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, migrate_to_recovered_master, [Node1])),
     MigrationFinishTimestamp = os:timestamp(),
     ha_test_utils:check_service(ServiceName, Node1, MigrationTimestamp),
+    ha_test_utils:check_healthcheck(ServiceName, Node1, MigrationTimestamp),
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     timer:sleep(timer:seconds(5)), % Wait for unwanted messages to verify migration
     ha_test_utils:clearAndCheckMessages(ServiceName, Node2, MigrationFinishTimestamp).

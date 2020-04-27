@@ -19,7 +19,8 @@
 
 %% API
 -export([new/3, apply_start_fun/1, apply_start_fun/2,
-    apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1]).
+    apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
+    apply_healthcheck_fun/1]).
 
 % Record representing service that should work permanently
 -record(internal_service, {
@@ -28,11 +29,14 @@
     takeover_function :: service_fun_name(),
     migrate_function :: service_fun_name(),
     stop_function :: service_fun_name(),
+    healthcheck_fun :: service_fun_name(),
     start_function_args :: service_fun_args(),
     takeover_function_args :: service_fun_args(),
     migrate_function_args :: service_fun_args(),
     stop_function_args :: service_fun_args(),
-    hashing_key :: internal_services_manager:hashing_base()
+    healthcheck_fun_args :: service_fun_args(),
+    hashing_key :: internal_services_manager:hashing_base(),
+    healthcheck_interval :: non_neg_integer()
 }).
 
 -type service() :: #internal_service{}.
@@ -47,7 +51,10 @@
     migrate_function => service_fun_name(),
     migrate_function_args => service_fun_args(),
     stop_function => service_fun_name(),
-    stop_function_args => service_fun_args()
+    stop_function_args => service_fun_args(),
+    healthcheck_fun => service_fun_name(),
+    healthcheck_fun_args => service_fun_args(),
+    healthcheck_interval => non_neg_integer()
 }.
 
 -export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
@@ -72,10 +79,23 @@ new(Module, HashingBase, ServiceDescription) ->
     MigrateFun = maps:get(migrate_function, ServiceDescription, StopFun),
     MigrateFunArgs = maps:get(migrate_function_args, ServiceDescription, StopFunArgs),
 
+    HealthcheckFun = maps:get(healthcheck_fun, ServiceDescription, undefined),
+    HealthcheckFunDefArgs = case HealthcheckFun of
+        undefined -> [];
+        _ -> Args
+    end,
+    HealthcheckFunArgs = maps:get(healthcheck_fun_args, ServiceDescription, HealthcheckFunDefArgs),
+    HealthcheckDefInterval = case HealthcheckFun of
+        undefined -> 0;
+        _ -> 1000
+    end,
+    HealthcheckInterval = maps:get(healthcheck_interval, ServiceDescription, HealthcheckDefInterval),
+
     #internal_service{module = Module, start_function = Fun, takeover_function = TakeoverFun,
-        migrate_function = MigrateFun, stop_function = StopFun, start_function_args = Args,
-        takeover_function_args = TakeoverFunArgs, migrate_function_args = MigrateFunArgs,
-        stop_function_args = StopFunArgs, hashing_key = HashingBase}.
+        migrate_function = MigrateFun, stop_function = StopFun, healthcheck_fun = HealthcheckFun,
+        start_function_args = Args, takeover_function_args = TakeoverFunArgs, migrate_function_args = MigrateFunArgs,
+        stop_function_args = StopFunArgs, healthcheck_fun_args = HealthcheckFunArgs, hashing_key = HashingBase,
+        healthcheck_interval = HealthcheckInterval}.
 
 -spec apply_start_fun(service()) -> term().
 apply_start_fun(#internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
@@ -90,16 +110,13 @@ apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun, t
     apply(Module, Fun, Args).
 
 -spec apply_stop_fun(node(), service()) -> term().
+apply_stop_fun(_Node, #internal_service{stop_function = undefined}) ->
+    ok;
 apply_stop_fun(Node, #internal_service{module = Module, stop_function = Fun, stop_function_args = Args}) ->
-    case Fun of
-        undefined ->
-            ok;
-        _ ->
-            case rpc:call(Node, Module, Fun, Args) of
-                {badrpc, nodedown} -> ok;
-                {badrpc, Reason} -> {error, Reason};
-                Other -> Other
-            end
+    case rpc:call(Node, Module, Fun, Args) of
+        {badrpc, nodedown} -> ok;
+        {badrpc, Reason} -> {error, Reason};
+        Other -> Other
     end.
 
 -spec apply_migrate_fun(service()) -> term().
@@ -108,3 +125,10 @@ apply_migrate_fun(#internal_service{module = Module, migrate_function = Fun, mig
         undefined -> ok;
         _ -> apply(Module, Fun, Args)
     end.
+
+-spec apply_healthcheck_fun(service()) -> {Result :: term(), Interval :: non_neg_integer()} | {error, undefined_fun}.
+apply_healthcheck_fun(#internal_service{stop_function = undefined}) ->
+    {error, undefined_fun};
+apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun, healthcheck_fun_args = Args,
+    healthcheck_interval = Interval}) ->
+    {apply(Module, Fun, Args), Interval}.

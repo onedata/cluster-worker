@@ -47,6 +47,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
+-export([init_service_healthcheck/2, init_service_healthcheck/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -290,6 +291,14 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
+-spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id()) -> ok.
+init_service_healthcheck(ServiceName, MasterNodeID) ->
+    init_service_healthcheck(node(), ServiceName, MasterNodeID).
+
+-spec init_service_healthcheck(node(), internal_service:service_name(), internal_services_manager:node_id()) -> ok.
+init_service_healthcheck(Node, ServiceName, MasterNodeID) ->
+    gen_server:cast({?NODE_MANAGER_NAME, Node}, {service_healthcheck, ServiceName, MasterNodeID}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -498,6 +507,20 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
+
+handle_cast({service_healthcheck, ServiceName, MasterNodeID} = CheckMessage, State) ->
+    case internal_services_manager:get_service_and_processing_node(ServiceName, MasterNodeID) of
+        {undefined, _Node} ->
+            State;
+        {Service, Node} when Node =:= node() ->
+            case internal_service:apply_healthcheck_fun(Service) of
+                {error, undefined_fun} -> ok;
+                {ok, Interval} -> erlang:send_after(Interval, self(), {timer, CheckMessage})
+            end,
+            State;
+        _ ->
+            State
+    end;
 
 handle_cast({update_lb_advices, Advices}, State) ->
     NewState = update_lb_advices(State, Advices),
