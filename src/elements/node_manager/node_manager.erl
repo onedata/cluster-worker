@@ -47,7 +47,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
--export([init_service_healthcheck/4, init_service_healthcheck/5]).
+-export([init_service_healthcheck/3, init_service_healthcheck/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -292,14 +292,18 @@ start_worker(Module, Args, Options) ->
     end.
 
 -spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
-    non_neg_integer(), term()) -> ok.
-init_service_healthcheck(ServiceName, MasterNodeID, LastInterval, StartFunAns) ->
-    init_service_healthcheck(node(), ServiceName, MasterNodeID, LastInterval, StartFunAns).
+    non_neg_integer()) -> ok.
+init_service_healthcheck(ServiceName, MasterNodeID, Interval) ->
+    init_service_healthcheck(node(), ServiceName, MasterNodeID, Interval).
 
 -spec init_service_healthcheck(node(), internal_service:service_name(), internal_services_manager:node_id(),
-    non_neg_integer(), term()) -> ok.
-init_service_healthcheck(Node, ServiceName, MasterNodeID, LastInterval, StartFunAns) ->
-    gen_server:cast({?NODE_MANAGER_NAME, Node}, {service_healthcheck, ServiceName, MasterNodeID, LastInterval, StartFunAns}).
+    non_neg_integer()) -> ok.
+init_service_healthcheck(Node, ServiceName, MasterNodeID, Interval) ->
+    case rpc:call(Node, erlang, send_after,
+        [Interval, ?NODE_MANAGER_NAME, {timer, {service_healthcheck, ServiceName, MasterNodeID, Interval}}]) of
+        Ref when is_reference(Ref) -> ok;
+        Error -> Error
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -510,11 +514,11 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
-handle_cast({service_healthcheck, ServiceName, MasterNodeID, LastInterval, StartFunAns}, State) ->
-    case internal_services_manager:do_healtcheck(ServiceName, MasterNodeID, LastInterval, StartFunAns) of
-        {ok, NewInterval, RestartAns} ->
+handle_cast({service_healthcheck, ServiceName, MasterNodeID, LastInterval}, State) ->
+    case internal_services_manager:do_healtcheck(ServiceName, MasterNodeID, LastInterval) of
+        {ok, NewInterval} ->
             erlang:send_after(NewInterval, self(),
-                {timer, {service_healthcheck, ServiceName, MasterNodeID, NewInterval, RestartAns}}),
+                {timer, {service_healthcheck, ServiceName, MasterNodeID, NewInterval}}),
             {noreply, State};
         ignore ->
             {noreply, State}

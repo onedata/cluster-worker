@@ -45,7 +45,7 @@
 -type service_fun_args() :: list().
 -type options() :: #{
     start_function := service_fun_name(),
-    start_function_args := service_fun_args(),
+    start_function_args => service_fun_args(),
     takeover_function => service_fun_name(),
     takeover_function_args => service_fun_args(),
     migrate_function => service_fun_name(),
@@ -66,7 +66,7 @@
 -spec new(module(), internal_services_manager:hashing_base(), options()) -> service().
 new(Module, HashingBase, ServiceDescription) ->
     Fun = maps:get(start_function, ServiceDescription),
-    Args = maps:get(start_function_args, ServiceDescription),
+    Args = maps:get(start_function_args, ServiceDescription, []),
     TakeoverFun = maps:get(takeover_function, ServiceDescription, Fun),
     TakeoverFunArgs = maps:get(takeover_function_args, ServiceDescription, Args),
 
@@ -98,15 +98,12 @@ new(Module, HashingBase, ServiceDescription) ->
         healthcheck_interval = HealthcheckInterval}.
 
 -spec apply_start_fun(service()) -> term().
-apply_start_fun(#internal_service{module = Module, start_function = Fun, start_function_args = Args,
-    healthcheck_fun = undefined}) ->
-    ok = apply(Module, Fun, Args); % Do not allow error as healthcheck function is not defined
 apply_start_fun(#internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
     apply(Module, Fun, Args).
 
 -spec apply_start_fun(node(), service()) -> term().
-apply_start_fun(Node, Service) ->
-    rpc:call(Node, ?MODULE, apply_start_fun, [Service]).
+apply_start_fun(Node, #internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
+    rpc:call(Node, Module, Fun, Args).
 
 
 -spec apply_takeover_fun(service()) -> term().
@@ -130,13 +127,13 @@ apply_migrate_fun(#internal_service{module = Module, migrate_function = Fun, mig
         _ -> apply(Module, Fun, Args)
     end.
 
--spec apply_healthcheck_fun(service(), list()) ->
+-spec apply_healthcheck_fun(service(), non_neg_integer()) ->
     {Result :: term(), Interval :: non_neg_integer()} | {error, undefined_fun}.
-apply_healthcheck_fun(#internal_service{healthcheck_fun = undefined}, _ExtendedArgs) ->
+apply_healthcheck_fun(#internal_service{healthcheck_fun = undefined}, _LastInterval) ->
     {error, undefined_fun};
 apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun, healthcheck_fun_args = Args,
-    healthcheck_interval = DefaultInterval}, ExtendedArgs) ->
-    case apply(Module, Fun, Args ++ ExtendedArgs) of
+    healthcheck_interval = DefaultInterval}, LastInterval) ->
+    case apply(Module, Fun, Args ++ [LastInterval]) of
         {_Result, _OverriddenInterval} = Ans -> Ans;
         Result -> {Result, DefaultInterval}
     end.

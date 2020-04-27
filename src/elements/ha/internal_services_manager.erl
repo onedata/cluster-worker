@@ -20,7 +20,7 @@
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
     stop_service/3, takeover/1, migrate_to_recovered_master/1,
-    on_cluster_restart/0, do_healtcheck/4]).
+    do_healtcheck/3, get_processing_node/1, on_cluster_restart/0]).
 %% Export for internal rpc
 -export([start_service_locally/5]).
 
@@ -97,9 +97,9 @@ takeover(FailedNode) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                TakeoverAns = internal_service:apply_takeover_fun(Service),
+                ok = internal_service:apply_takeover_fun(Service),
                 HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval, TakeoverAns)
+                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval)
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -115,23 +115,22 @@ migrate_to_recovered_master(MasterNode) ->
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
                 ok = internal_service:apply_migrate_fun(Service),
-                StartAns = internal_service:apply_start_fun(MasterNode, Service),
+                ok = internal_service:apply_start_fun(MasterNode, Service),
                 HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                ok = node_manager:init_service_healthcheck(
-                    MasterNode, ServiceName, MasterNodeID, HealthcheckInterval, StartAns)
+                ok = node_manager:init_service_healthcheck(MasterNode, ServiceName, MasterNodeID, HealthcheckInterval)
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
     end.
 
--spec do_healtcheck(internal_service:service_name(), node_id(), non_neg_integer(), term()) ->
-    {ok, Interval :: non_neg_integer()} | ignore.
-do_healtcheck(ServiceName, MasterNodeID, LastInterval, StartFunAns) ->
+-spec do_healtcheck(internal_service:service_name(), node_id(), non_neg_integer()) ->
+    {ok, NewInterval :: non_neg_integer()} | ignore.
+do_healtcheck(ServiceName, MasterNodeID, LastInterval) ->
     case get_service_and_processing_node(ServiceName, MasterNodeID) of
         {Service, Node} when Service =:= undefined orelse Node =/= node() ->
             ignore;
         {Service, _} ->
-            case internal_service:apply_healthcheck_fun(Service, [LastInterval, StartFunAns]) of
+            case internal_service:apply_healthcheck_fun(Service, LastInterval) of
                 {error, undefined_fun} ->
                     ignore;
                 {restart, NewInterval} ->
@@ -140,13 +139,21 @@ do_healtcheck(ServiceName, MasterNodeID, LastInterval, StartFunAns) ->
                         {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
                             ignore;
                         _ ->
-                            RestartAns = internal_service:apply_start_fun(Service),
-                            {ok, NewInterval, RestartAns}
+                            ok = internal_service:apply_start_fun(Service),
+                            {ok, NewInterval}
                     end;
                 {ok, NewInterval} ->
-                    {ok, NewInterval, StartFunAns}
+                    {ok, NewInterval}
             end
     end.
+
+-spec get_processing_node(hashing_base()) -> node().
+get_processing_node(HashingBase) ->
+    {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
+    MasterNodeID = get_node_id(MasterNode),
+    {ok, #document{value = #node_internal_services{processing_node = ProcessingNode}}} =
+        node_internal_services:get(MasterNodeID),
+    ProcessingNode.
 
 on_cluster_restart() ->
     ok = node_internal_services:delete(get_node_id(node())).
@@ -171,9 +178,9 @@ start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription)
     MasterNodeID = get_node_id(MasterNode),
     case node_internal_services:update(MasterNodeID, Diff, Default) of
         {ok, _} ->
-            StartAns = internal_service:apply_start_fun(Service),
+            ok = internal_service:apply_start_fun(Service),
             HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval, StartAns);
+            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval);
         {error, already_started} ->
             ok
     end.
