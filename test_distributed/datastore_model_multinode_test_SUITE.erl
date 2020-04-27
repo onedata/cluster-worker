@@ -230,6 +230,7 @@ services_migration_test(Config) ->
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, takeover, [Node1])),
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
     ha_test_utils:check_healthcheck(ServiceName, Node2, StopTimestamp),
+    timer:sleep(5000), % Wait for first healthcheck on master node to end healthcheck cycle
 
     MigrationTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, migrate_to_recovered_master, [Node1])),

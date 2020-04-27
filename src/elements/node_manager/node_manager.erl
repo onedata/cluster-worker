@@ -511,15 +511,15 @@ handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
 handle_cast({service_healthcheck, ServiceName, MasterNodeID} = CheckMessage, State) ->
     case internal_services_manager:get_service_and_processing_node(ServiceName, MasterNodeID) of
         {undefined, _Node} ->
-            State;
+            {noreply, State};
         {Service, Node} when Node =:= node() ->
             case internal_service:apply_healthcheck_fun(Service) of
                 {error, undefined_fun} -> ok;
                 {ok, Interval} -> erlang:send_after(Interval, self(), {timer, CheckMessage})
             end,
-            State;
+            {noreply, State};
         _ ->
-            State
+            {noreply, State}
     end;
 
 handle_cast({update_lb_advices, Advices}, State) ->
