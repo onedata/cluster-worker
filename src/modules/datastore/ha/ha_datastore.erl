@@ -299,6 +299,8 @@ get_ring_nodes_or_empty(RingGeneration) ->
         _:chash_ring_not_initialized  -> []
     end.
 
+% TODO copy memory to slave node enabling HA (during change_config)
+-spec copy_to_node(consistent_hashing:ring_generation()) -> ok | no_return().
 copy_to_node(Ring) ->
     Mutator = self(),
     ok = datastore_model:fold_memory_keys(fun

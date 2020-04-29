@@ -16,7 +16,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/1, update/2, update/3, delete/1]).
+-export([get/1, update/2, update/3]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
@@ -47,10 +47,6 @@ update(Key, Diff) ->
 -spec update(key(), diff(), record() | doc()) -> {ok, doc()} | {error, term()}.
 update(Key, Diff, Default) ->
     datastore_model:update(?CTX, Key, Diff, Default).
-
--spec delete(key()) -> ok | {error, term()}.
-delete(Key) ->
-    datastore_model:delete(?CTX, Key).
 
 %%%===================================================================
 %%% datastore_model callbacks

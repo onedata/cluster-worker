@@ -545,6 +545,7 @@ handle_cast({node_down, Node}, State) ->
 handle_cast({node_up, Node}, State) ->
     ?warning("Node ~p up", [Node]),
     ha_management:node_up(Node),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_init_ack, node()}),
     {noreply, State};
 
 handle_cast({node_ready, Node}, State) ->

@@ -126,25 +126,29 @@ migrate_to_recovered_master(MasterNode) ->
 -spec do_healtcheck(internal_service:service_name(), node_id(), non_neg_integer()) ->
     {ok, NewInterval :: non_neg_integer()} | ignore.
 do_healtcheck(ServiceName, MasterNodeID, LastInterval) ->
-    case get_service_and_processing_node(ServiceName, MasterNodeID) of
-        {Service, Node} when Service =:= undefined orelse Node =/= node() ->
-            ignore;
-        {Service, _} ->
-            case internal_service:apply_healthcheck_fun(Service, LastInterval) of
-                {error, undefined_fun} ->
-                    ignore;
-                {restart, NewInterval} ->
-                    % Check once more in case of race with migration
-                    case get_service_and_processing_node(ServiceName, MasterNodeID) of
-                        {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
-                            ignore;
-                        _ ->
-                            ok = internal_service:apply_start_fun(Service),
-                            {ok, NewInterval}
-                    end;
-                {ok, NewInterval} ->
-                    {ok, NewInterval}
-            end
+    try
+        case get_service_and_processing_node(ServiceName, MasterNodeID) of
+            {Service, Node} when Service =:= undefined orelse Node =/= node() ->
+                ignore;
+            {Service, _} ->
+                case internal_service:apply_healthcheck_fun(Service, LastInterval) of
+                    {error, undefined_fun} ->
+                        ignore;
+                    {restart, NewInterval} ->
+                        % Check once more in case of race with migration
+                        case get_service_and_processing_node(ServiceName, MasterNodeID) of
+                            {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
+                                ignore;
+                            _ ->
+                                ok = internal_service:apply_start_fun(Service),
+                                {ok, NewInterval}
+                        end;
+                    {ok, NewInterval} ->
+                        {ok, NewInterval}
+                end
+        end
+    catch
+        _:_ -> {ok, LastInterval} % Error can appear during restart and node switching
     end.
 
 -spec get_processing_node(hashing_base()) -> node().
