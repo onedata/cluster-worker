@@ -164,7 +164,7 @@ inspect_slave_activity(Key, Node) ->
     case ha_datastore:send_sync_master_message(Node, Key, #get_slave_failover_status{answer_to = self()}, false) of
         {error, not_alive} ->
             {false, [], []};
-        {badrpc, nodedown} ->
+        {badrpc, _} ->
             % TODO VFS-6295 - log to dedicated logfile
             {false, [], []};
         #slave_failover_status{is_handling_requests = IsHandlingRequests,
@@ -196,9 +196,9 @@ send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{propagation_met
         #store_backup{keys = Keys, cache_requests = CacheRequests}, true) of
         {ok, Pid} ->
             Data#data{slave_pid = Pid};
-        {badrpc, nodedown} ->
+        {badrpc, _} ->
             % TODO VFS-6295 - log to dedicated logfile
-            ?warning("Cannot broadcast HA data - slave down"),
+            ?debug("Cannot broadcast HA data - slave down"),
             Data;
         Error ->
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),
@@ -210,9 +210,9 @@ send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{link_status = ?
         #store_backup{keys = Keys, cache_requests = CacheRequests, link = {true, self()}}, true) of
         {ok, Pid} ->
             Data#data{link_status = ?SLAVE_LINKED, slave_pid = Pid};
-        {badrpc, nodedown} ->
+        {badrpc, _} ->
             % TODO VFS-6295 - log to dedicated logfile
-            ?warning("Cannot broadcast HA data - slave down"),
+            ?debug("Cannot broadcast HA data - slave down"),
             Data;
         Error ->
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),

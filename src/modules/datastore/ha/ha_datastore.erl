@@ -184,6 +184,7 @@ set_failover_mode_and_broadcast_master_down_message() ->
 -spec set_standby_mode_and_broadcast_master_up_message() -> ok.
 set_standby_mode_and_broadcast_master_up_message() ->
     ?notice("Master node up: seting standby mode and broadcasting information to tp processes"),
+    copy_to_node(?CURRENT_RING),
     set_slave_mode(?STANDBY_SLAVE_MODE),
     broadcast_async_management_message(?MASTER_UP).
 
@@ -205,34 +206,7 @@ change_config(NodesNumber, PropagationMethod) ->
 reorganize_cluster() ->
     set_slave_mode(?CLUSTER_REORGANIZATION_SLAVE_MODE),
     ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION_STARTED),
-
-    Mutator = self(),
-    ok = datastore_model:fold_memory_keys(fun
-        (end_of_memory, Acc) ->
-            {ok, copy_memory(Acc)};
-        ({Model, Key, Doc}, Acc) ->
-            RoutingKey = datastore_router:get_routing_key(Doc),
-            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, ?FUTURE_RING) of
-                {remote_key, Node} ->
-                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
-                    Ctx2 = Ctx#{mutator_pid => Mutator},
-                    NodeAcc = maps:get(Node, Acc, []),
-                    NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
-                    NewAcc = maps:put(Node, NewNodeAcc, Acc),
-                    {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE};
-                _ ->
-                    {Acc, false}
-            end,
-            case CopyNow of
-                true ->
-                    case copy_memory(Acc2) of
-                        ok -> {ok, #{}};
-                        Other -> {stop, Other}
-                    end;
-                _ ->
-                    {ok, Acc2}
-            end
-    end, #{}).
+    copy_to_node(?FUTURE_RING).
 
 -spec finish_reorganization() -> ok.
 finish_reorganization() ->
@@ -324,3 +298,32 @@ get_ring_nodes_or_empty(RingGeneration) ->
     catch
         _:chash_ring_not_initialized  -> []
     end.
+
+copy_to_node(Ring) ->
+    Mutator = self(),
+    ok = datastore_model:fold_memory_keys(fun
+        (end_of_memory, Acc) ->
+            {ok, copy_memory(Acc)};
+        ({Model, Key, Doc}, Acc) ->
+            RoutingKey = datastore_router:get_routing_key(Doc),
+            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, Ring) of
+                {remote_key, Node} ->
+                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
+                    Ctx2 = Ctx#{mutator_pid => Mutator},
+                    NodeAcc = maps:get(Node, Acc, []),
+                    NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
+                    NewAcc = maps:put(Node, NewNodeAcc, Acc),
+                    {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE};
+                _ ->
+                    {Acc, false}
+            end,
+            case CopyNow of
+                true ->
+                    case copy_memory(Acc2) of
+                        ok -> {ok, #{}};
+                        Other -> {stop, Other}
+                    end;
+                _ ->
+                    {ok, Acc2}
+            end
+    end, #{}).

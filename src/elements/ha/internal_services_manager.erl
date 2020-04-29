@@ -20,7 +20,7 @@
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
     stop_service/3, takeover/1, migrate_to_recovered_master/1,
-    do_healtcheck/3, get_processing_node/1, on_cluster_restart/0]).
+    do_healtcheck/3, get_processing_node/1]).
 %% Export for internal rpc
 -export([start_service_locally/5]).
 
@@ -154,9 +154,6 @@ get_processing_node(HashingBase) ->
     {ok, #document{value = #node_internal_services{processing_node = ProcessingNode}}} =
         node_internal_services:get(MasterNodeID),
     ProcessingNode.
-
-on_cluster_restart() ->
-    ok = node_internal_services:delete(get_node_id(node())).
 
 %%%===================================================================
 %%% Internal functions

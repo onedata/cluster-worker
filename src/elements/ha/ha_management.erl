@@ -15,7 +15,7 @@
 -author("Michał Wrzeszcz").
 
 %% API
--export([node_down/1, node_up/1]).
+-export([node_down/1, node_up/1, node_ready/1]).
 
 %%%===================================================================
 %%% API - Working in failover mode
@@ -35,5 +35,19 @@ node_down(Node) ->
     ok = plugins:apply(node_manager_plugin, node_down, [Node, IsMaster]).
 
 -spec node_up(node()) -> ok | no_return().
-node_up(_Node) ->
-    ok.
+node_up(Node) ->
+    ok = consistent_hashing:report_node_recovery(Node),
+    IsMaster = ha_datastore:is_master(Node),
+    case IsMaster of
+        true ->
+            ok = ha_datastore:set_standby_mode_and_broadcast_master_up_message();
+        false ->
+            ok
+    end,
+    ok = plugins:apply(node_manager_plugin, node_recovery, [Node, IsMaster]).
+
+-spec node_ready(node()) -> ok | no_return().
+node_ready(Node) ->
+    IsMaster = ha_datastore:is_master(Node),
+    ok = plugins:apply(node_manager_plugin, node_recovery, [Node, IsMaster]),
+    ok = internal_services_manager:migrate_to_recovered_master(Node).

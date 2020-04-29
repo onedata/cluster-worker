@@ -542,6 +542,49 @@ handle_cast({node_down, Node}, State) ->
     ha_management:node_down(Node),
     {noreply, State};
 
+handle_cast({node_up, Node}, State) ->
+    ?warning("Node ~p up", [Node]),
+    ha_management:node_up(Node),
+    {noreply, State};
+
+handle_cast({node_ready, Node}, State) ->
+    ?warning("Node ~p up", [Node]),
+    ha_management:node_ready(Node),
+    {noreply, State};
+
+handle_cast(init_restart, State) ->
+    ?info("Restart of node started"),
+    gen_server2:cast(self(), do_heartbeat),
+    init_workers(cluster_worker_modules()),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_init_done, node()}),
+    ?info("First phase of node restart finished"),
+    {noreply, State};
+
+handle_cast(finish_restart, State) ->
+    ?info("Restart of node phase 2 started"),
+
+    ?info("Starting workers essential for upgrade..."),
+    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
+    init_workers(WorkersToStart),
+    ?info("Workers essential for upgrade started successfully"),
+
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+
+    ?info("Starting listeners..."),
+    lists:foreach(fun(Module) ->
+        ok = erlang:apply(Module, start, []),
+        ?info("   * ~p started", [Module])
+    end, node_manager:listeners()),
+    ?info("All listeners started"),
+
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_done, node()}),
+    ?info("Node restart finished"),
+
+    {noreply, State};
+
 handle_cast(stop, State) ->
     {stop, normal, State};
 
@@ -678,7 +721,6 @@ cluster_init_step(init) ->
 cluster_init_step(start_default_workers) ->
     ?info("Starting default workers..."),
     init_workers(cluster_worker_modules()),
-    internal_services_manager:on_cluster_restart(),
     ?info("Default workers started successfully"),
     ok;
 cluster_init_step(start_upgrade_essential_workers) ->
