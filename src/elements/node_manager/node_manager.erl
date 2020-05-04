@@ -539,18 +539,26 @@ handle_cast({force_stop, ReasonMsg}, State) ->
 
 handle_cast({node_down, Node}, State) ->
     ?warning("Node ~p down", [Node]),
-    ha_management:node_down(Node),
+    spawn(fun() ->
+        ha_management:node_down(Node)
+    end),
     {noreply, State};
 
 handle_cast({node_up, Node}, State) ->
     ?warning("Node ~p up", [Node]),
-    ha_management:node_up(Node),
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_init_ack, node()}),
+    spawn(fun() ->
+        ha_management:node_up(Node),
+        ?warning("Node ~p up procedure finished", [Node]),
+        gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_init_ack, node()})
+    end),
     {noreply, State};
 
 handle_cast({node_ready, Node}, State) ->
-    ?warning("Node ~p up", [Node]),
-    ha_management:node_ready(Node),
+    ?warning("Node ~p ready", [Node]),
+    spawn(fun() ->
+        ha_management:node_ready(Node),
+        ?warning("Node ~p ready procedure finished", [Node])
+    end),
     {noreply, State};
 
 handle_cast(init_restart, State) ->

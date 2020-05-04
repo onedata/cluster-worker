@@ -340,6 +340,7 @@ receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
                 end,
 
                 WorkerName = case WorkerRef of
+                    {id, Name, _Key} -> Name;
                     {Name, _Node} -> Name;
                     Name -> Name
                 end,
