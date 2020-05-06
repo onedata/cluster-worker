@@ -19,7 +19,7 @@
 
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
-    stop_service/3, takeover/1, migrate_to_recovered_master/1,
+    stop_service/3, report_service_stop/3, takeover/1, migrate_to_recovered_master/1,
     do_healtcheck/3, get_processing_node/1]).
 %% Export for internal rpc
 -export([start_service_locally/5]).
@@ -58,7 +58,7 @@ start_service(Module, Name, ServiceDescription) ->
     start_service(Module, Name, ?LOCAL_HASHING_BASE, ServiceDescription).
 
 -spec start_service(module(), internal_service:service_name(), hashing_base(), internal_service:options()) ->
-    ok | {error, term()}.
+    ok | aborted | {error, term()}.
 start_service(Module, Name, HashingBase, ServiceDescription) ->
     {MasterNode, HandlingNode} = get_master_and_handling_nodes(HashingBase),
     case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, Name, HashingBase, ServiceDescription]) of
@@ -77,15 +77,18 @@ stop_service(Module, Name, HashingBase) ->
             ok;
         _ ->
             ok = internal_service:apply_stop_fun(ProcessingNode, Service),
-
-            Diff = fun(#node_internal_services{services = Services} = Record) ->
-                {ok, Record#node_internal_services{services = maps:remove(ServiceName, Services)}}
-            end,
-            case node_internal_services:update(MasterNodeID, Diff) of
-                {ok, _} -> ok;
-                {error, not_found} -> ok
-            end
+            remove_service_from_doc(MasterNodeID, ServiceName)
     end.
+
+% TODO - moze hashowac po nazwie i wywalic HashingBase?
+% TODO - moze dac mozliwosc sprawdzania czy serwis stoi zanim zablokujemy start uznajac ze juz wstal
+% zeby nie bylo sytuacji ze serwis nie zyje a nie mozemy go zrestartowac
+-spec report_service_stop(module(), internal_service:service_name(), hashing_base()) -> ok.
+report_service_stop(Module, Name, HashingBase) ->
+    {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
+    MasterNodeID = get_node_id(MasterNode),
+    ServiceName = get_internal_name(Module, Name),
+    remove_service_from_doc(MasterNodeID, ServiceName).
 
 -spec takeover(node()) -> ok | no_return().
 takeover(FailedNode) ->
@@ -115,9 +118,15 @@ migrate_to_recovered_master(MasterNode) ->
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
                 ok = internal_service:apply_migrate_fun(Service),
-                ok = internal_service:apply_start_fun(MasterNode, Service),
-                HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                ok = node_manager:init_service_healthcheck(MasterNode, ServiceName, MasterNodeID, HealthcheckInterval)
+                case internal_service:apply_start_fun(MasterNode, Service) of
+                    ok ->
+                        HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+                        ok = node_manager:init_service_healthcheck(
+                            MasterNode, ServiceName, MasterNodeID, HealthcheckInterval);
+                    abort ->
+                        remove_service_from_doc(MasterNodeID, ServiceName),
+                        ok
+                end
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -140,8 +149,13 @@ do_healtcheck(ServiceName, MasterNodeID, LastInterval) ->
                             {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
                                 ignore;
                             _ ->
-                                ok = internal_service:apply_start_fun(Service),
-                                {ok, NewInterval}
+                                case internal_service:apply_start_fun(Service) of
+                                    ok ->
+                                        {ok, NewInterval};
+                                    abort ->
+                                        remove_service_from_doc(MasterNodeID, ServiceName),
+                                        ignore
+                                end
                         end;
                     {ok, NewInterval} ->
                         {ok, NewInterval}
@@ -164,7 +178,7 @@ get_processing_node(HashingBase) ->
 %%%===================================================================
 
 -spec start_service_locally(node(), module(), internal_service:service_name(), hashing_base(),
-    internal_service:options()) -> ok | {error, term()}.
+    internal_service:options()) -> ok | aborted | {error, term()}.
 start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription) ->
     Service = internal_service:new(Module, HashingBase, ServiceDescription),
     ServiceName = get_internal_name(Module, Name),
@@ -179,9 +193,14 @@ start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription)
     MasterNodeID = get_node_id(MasterNode),
     case node_internal_services:update(MasterNodeID, Diff, Default) of
         {ok, _} ->
-            ok = internal_service:apply_start_fun(Service),
-            HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval);
+            case internal_service:apply_start_fun(Service) of
+                ok ->
+                    HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+                    ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval);
+                abort ->
+                    remove_service_from_doc(MasterNodeID, ServiceName),
+                    aborted
+            end;
         {error, already_started} ->
             ok
     end.
@@ -211,3 +230,13 @@ get_service_and_processing_node(ServiceName, MasterNodeID) ->
         node_internal_services:get(MasterNodeID),
 
     {maps:get(ServiceName, NodeServices, undefined), ProcessingNode}.
+
+-spec remove_service_from_doc(node_id(), internal_service:service_name()) -> ok.
+remove_service_from_doc(MasterNodeID, ServiceName) ->
+    Diff = fun(#node_internal_services{services = Services} = Record) ->
+        {ok, Record#node_internal_services{services = maps:remove(ServiceName, Services)}}
+    end,
+    case node_internal_services:update(MasterNodeID, Diff) of
+        {ok, _} -> ok;
+        {error, not_found} -> ok
+    end.
