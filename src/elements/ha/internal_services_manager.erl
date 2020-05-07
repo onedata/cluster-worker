@@ -184,6 +184,7 @@ start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription)
     ServiceName = get_internal_name(Module, Name),
     Default = #node_internal_services{services = #{ServiceName => Service}, processing_node = node()},
     Diff = fun(#node_internal_services{services = Services} = Record) ->
+        % TODO - dajemy flage ktora pozwala nadpisac istniejacy serwis do wykorzystania np w harvesterach
         case maps:is_key(ServiceName, Services) of
             true -> {error, already_started};
             false -> {ok, Record#node_internal_services{services = Services#{ServiceName => Service}}}

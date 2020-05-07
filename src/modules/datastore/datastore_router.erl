@@ -26,7 +26,7 @@
 -type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
 -define(EXOMETER_COUNTERS,
-    [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
+    [save, update, create_backup, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
         set_links, create_link, delete_links, fetch_link, foreach_link,
         mark_links_deleted, get_links, fold_links, get_links_trees
     ]).

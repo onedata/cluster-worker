@@ -38,6 +38,7 @@ node_down(Node) ->
 node_up(Node) ->
     % TODO - sprawdzic czy jest masterem dla wstajacego slave'a i wyslac tam kopie (uwage na race z aktualnymi zapisami)
     ok = consistent_hashing:report_node_recovery(Node),
+
     IsMaster = ha_datastore:is_master(Node),
     case IsMaster of
         true ->
@@ -45,6 +46,15 @@ node_up(Node) ->
         false ->
             ok
     end,
+
+    IsSlave = ha_datastore:is_slave(Node),
+    case IsSlave of
+        true ->
+            ok = ha_datastore:init_memory_backup();
+        false ->
+            ok
+    end,
+
     ok = plugins:apply(node_manager_plugin, node_recovery, [Node, IsMaster]).
 
 -spec node_ready(node()) -> ok | no_return().
@@ -52,4 +62,10 @@ node_ready(Node) ->
     % TODO - moze powinny byc 2 callbacki - node_up i node_ready?
 %%    IsMaster = ha_datastore:is_master(Node),
 %%    ok = plugins:apply(node_manager_plugin, node_recovery, [Node, IsMaster]),
-    ok = internal_services_manager:migrate_to_recovered_master(Node).
+    IsMaster = ha_datastore:is_master(Node),
+    case IsMaster of
+        true ->
+            ok = internal_services_manager:migrate_to_recovered_master(Node);
+        false ->
+            ok
+    end.

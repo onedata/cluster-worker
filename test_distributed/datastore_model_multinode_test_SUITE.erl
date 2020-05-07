@@ -31,6 +31,8 @@
     saves_should_propagate_to_backup_node_call_ha_test/1,
     saves_should_not_propagate_to_backup_node_when_ha_is_disabled/1,
     saves_should_not_propagate_to_backup_node_for_local_memory_model/1,
+    saves_should_propagate_to_backup_node_after_config_change_global_models/1,
+    saves_should_propagate_to_backup_node_after_config_change_local_models/1,
     calls_should_change_node_cast_ha_test/1,
     calls_should_change_node_call_ha_test/1,
     saves_should_use_recovered_node_cast_ha_test/1,
@@ -95,6 +97,8 @@ all() ->
         saves_should_propagate_to_backup_node_call_ha_test,
         saves_should_not_propagate_to_backup_node_when_ha_is_disabled,
         saves_should_not_propagate_to_backup_node_for_local_memory_model,
+        saves_should_propagate_to_backup_node_after_config_change_global_models,
+        saves_should_propagate_to_backup_node_after_config_change_local_models,
         calls_should_change_node_cast_ha_test,
         calls_should_change_node_call_ha_test,
         saves_should_use_recovered_node_cast_ha_test,
@@ -259,6 +263,12 @@ saves_should_not_propagate_to_backup_node_when_ha_is_disabled(Config) ->
 saves_should_not_propagate_to_backup_node_for_local_memory_model(Config) ->
     saves_should_not_propagate_to_backup_node(Config, true, [ets_only_model, mnesia_only_model]).
 
+saves_should_propagate_to_backup_node_after_config_change_global_models(Config) ->
+    saves_should_propagate_to_backup_node_after_config_change(Config, false).
+
+saves_should_propagate_to_backup_node_after_config_change_local_models(Config) ->
+    saves_should_propagate_to_backup_node_after_config_change(Config, true).
+
 calls_should_change_node_cast_ha_test(Config) ->
     calls_should_change_node(Config, cast).
 
@@ -415,6 +425,25 @@ saves_should_not_propagate_to_backup_node(Config, LocalRouting, Models) ->
         assert_on_disc(TestWorker, Model, Key),
         assert_not_in_memory(KeyNode2, Model, Key)
     end, Models).
+
+saves_should_propagate_to_backup_node_after_config_change(Config, LocalRouting) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+
+    CallWorker = case LocalRouting of
+        true -> KeyNode;
+        false -> TestWorker
+    end,
+
+    lists:foreach(fun(Model) ->
+        set_ha(Config, change_config, [1, call]),
+        ?assertMatch({ok, #document{}}, rpc:call(CallWorker, Model, save, [?DOC(Key, Model)])),
+        assert_in_memory(KeyNode, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
+        assert_not_in_memory(KeyNode2, Model, Key),
+
+        set_ha(Config, change_config, [2, call]),
+        assert_in_memory(KeyNode2, Model, Key)
+    end, [ets_only_model, mnesia_only_model]).
 
 calls_should_change_node(Config, Method) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
@@ -863,6 +892,12 @@ init_per_testcase(saves_should_not_propagate_to_backup_node_for_local_memory_mod
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{routing => local}),
     init_per_testcase(ha_test, Config);
+init_per_testcase(saves_should_propagate_to_backup_node_after_config_change_local_models, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{routing => local, ha_disabled => false}),
+    init_per_testcase(ha_test, Config);
+init_per_testcase(saves_should_propagate_to_backup_node_after_config_change_global_models, Config) ->
+    init_per_testcase(ha_test, Config);
 init_per_testcase(services_migration_test, Config) ->
     init_per_testcase(ha_test, Config);
 init_per_testcase(Case, Config) ->
@@ -896,9 +931,12 @@ end_per_testcase(ha_test, Config) ->
     set_ha(Config, change_config, [1, cast]),
     test_utils:mock_unload(Workers, [ha_datastore_master]);
 end_per_testcase(Case, Config) when Case =:= saves_should_not_propagate_to_backup_node_when_ha_is_disabled orelse
-    Case =:= saves_should_not_propagate_to_backup_node_for_local_memory_model ->
+    Case =:= saves_should_not_propagate_to_backup_node_for_local_memory_model orelse
+    Case =:= saves_should_propagate_to_backup_node_after_config_change_local_models ->
     Workers = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
+    end_per_testcase(ha_test, Config);
+end_per_testcase(saves_should_propagate_to_backup_node_after_config_change_global_models, Config) ->
     end_per_testcase(ha_test, Config);
 end_per_testcase(services_migration_test, Config) ->
     end_per_testcase(ha_test, Config);

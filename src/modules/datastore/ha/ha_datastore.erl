@@ -19,6 +19,7 @@
 
 -include("modules/datastore/ha_datastore.hrl").
 -include("modules/datastore/datastore_protocol.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -29,9 +30,9 @@
     send_async_master_message/2, send_sync_master_message/4,
     broadcast_async_management_message/1]).
 %% API
--export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, get_slave_mode/0]).
+-export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, is_slave/1, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
-    change_config/2]).
+    change_config/2, init_memory_backup/0]).
 -export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
 
 % Propagation methods - see ha_datastore.hrl
@@ -161,6 +162,16 @@ is_master(Node) ->
             SlaveNode =:= node()
     end.
 
+-spec is_slave(node()) -> boolean().
+is_slave(Node) ->
+    case consistent_hashing:get_nodes_assigned_per_label() of
+        1 -> % HA is disabled
+            false;
+        _ ->
+            [SlaveNode | _] = arrange_nodes(node(), consistent_hashing:get_all_nodes()),
+            SlaveNode =:= Node
+    end.
+
 -spec clean_backup_nodes_cache() -> ok.
 clean_backup_nodes_cache() ->
     critical_section:run(?MODULE, fun() ->
@@ -196,7 +207,11 @@ change_config(NodesNumber, PropagationMethod) ->
     consistent_hashing:set_nodes_assigned_per_label(NodesNumber),
     clean_backup_nodes_cache(),
     set_propagation_method(PropagationMethod),
-    broadcast_async_management_message(?CONFIG_CHANGED).
+    broadcast_async_management_message(?CONFIG_CHANGED),
+    case NodesNumber > 1 of
+        true -> ok = init_memory_backup();
+        _ -> ok
+    end.
 
 %%%===================================================================
 %%% API to reorganize cluster
@@ -306,6 +321,8 @@ copy_to_node(Ring) ->
     ok = datastore_model:fold_memory_keys(fun
         (end_of_memory, Acc) ->
             {ok, copy_memory(Acc)};
+        ({_Model, _Key, #document{deleted = true}}, Acc) ->
+            {ok, Acc};
         ({Model, Key, Doc}, Acc) ->
             RoutingKey = datastore_router:get_routing_key(Doc),
             {Acc2, CopyNow} = case qualify_by_key(RoutingKey, Ring) of
@@ -329,3 +346,46 @@ copy_to_node(Ring) ->
                     {ok, Acc2}
             end
     end, #{}).
+
+-spec init_memory_backup() -> ok | {error, term()}.
+init_memory_backup() ->
+    Mutator = self(),
+    ok = datastore_model:fold_memory_keys(fun
+        (end_of_memory, Acc) ->
+            {ok, init_memory_backup(Acc)};
+        ({_Model, _Key, #document{deleted = true}}, Acc) ->
+            {ok, Acc};
+        ({Model, Key, Doc}, Acc) ->
+            RoutingKey = datastore_router:get_routing_key(Doc),
+            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, ?CURRENT_RING) of
+                local_key ->
+                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
+                    Ctx2 = Ctx#{mutator_pid => Mutator},
+                    NewAcc = [{Ctx2, Key} | Acc],
+                    {NewAcc, length(NewAcc) >= ?MEMORY_COPY_BATCH_SIZE};
+                _ ->
+                    {Acc, false}
+            end,
+            case CopyNow of
+                true ->
+                    case init_memory_backup(Acc2) of
+                        ok -> {ok, []};
+                        Other -> {stop, Other}
+                    end;
+                _ ->
+                    {ok, Acc2}
+            end
+    end, []).
+
+-spec init_memory_backup([{datastore:ctx(), datastore:key()}]) -> ok | {error, term()}.
+init_memory_backup(Items) ->
+    lists:foldl(fun
+        ({Ctx, Key} , ok) ->
+            case datastore:create_backup(Ctx, Key) of
+                {ok, _} -> ok;
+                {error, not_found} -> ok;
+                Error -> Error
+            end;
+        (_, Acc) ->
+            Acc
+    end, ok, Items).

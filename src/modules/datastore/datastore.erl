@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([create/3, save/3, update/3, update/4]).
+-export([create/3, save/3, update/3, update/4, create_backup/2]).
 -export([get/2, exists/2]).
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
@@ -146,6 +146,17 @@ update(Ctx, Key, Diff) ->
 update(Ctx, Key, Diff, Default) ->
     datastore_hooks:wrap(Ctx, Key, update, [Diff, Default], fun
         (Function, Args) -> datastore_router:route(Function, Args)
+    end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates backup on slave node.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_backup(ctx(), key()) -> {ok, doc()} | {error, term()}.
+create_backup(Ctx, Key) ->
+    datastore_hooks:wrap(Ctx, Key, create_backup, [], fun(Function, Args) ->
+        datastore_router:route(Function, Args)
     end).
 
 %%--------------------------------------------------------------------
