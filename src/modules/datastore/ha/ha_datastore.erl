@@ -324,15 +324,21 @@ copy_to_node(Ring) ->
         ({_Model, _Key, #document{deleted = true}}, Acc) ->
             {ok, Acc};
         ({Model, Key, Doc}, Acc) ->
-            RoutingKey = datastore_router:get_routing_key(Doc),
+            {RoutingKey, Type} = datastore_router:get_routing_key(Doc),
             {Acc2, CopyNow} = case qualify_by_key(RoutingKey, Ring) of
                 {remote_key, Node} ->
                     Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
-                    Ctx2 = Ctx#{mutator_pid => Mutator},
-                    NodeAcc = maps:get(Node, Acc, []),
-                    NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
-                    NewAcc = maps:put(Node, NewNodeAcc, Acc),
-                    {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE};
+                    Routing = datastore_router:get_routing(Ctx, Type),
+                    case Routing of
+                        local ->
+                            {Acc, false};
+                        _ ->
+                            Ctx2 = Ctx#{mutator_pid => Mutator},
+                            NodeAcc = maps:get(Node, Acc, []),
+                            NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
+                            NewAcc = maps:put(Node, NewNodeAcc, Acc),
+                            {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE}
+                    end;
                 _ ->
                     {Acc, false}
             end,
@@ -356,13 +362,19 @@ init_memory_backup() ->
         ({_Model, _Key, #document{deleted = true}}, Acc) ->
             {ok, Acc};
         ({Model, Key, Doc}, Acc) ->
-            RoutingKey = datastore_router:get_routing_key(Doc),
+            {RoutingKey, Type} = datastore_router:get_routing_key(Doc),
             {Acc2, CopyNow} = case qualify_by_key(RoutingKey, ?CURRENT_RING) of
                 local_key ->
                     Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
-                    Ctx2 = Ctx#{mutator_pid => Mutator},
-                    NewAcc = [{Ctx2, Key} | Acc],
-                    {NewAcc, length(NewAcc) >= ?MEMORY_COPY_BATCH_SIZE};
+                    Routing = datastore_router:get_routing(Ctx, Type),
+                    case Routing of
+                        local ->
+                            {Acc, false};
+                        _ ->
+                            Ctx2 = Ctx#{mutator_pid => Mutator},
+                            NewAcc = [{Ctx2, Key} | Acc],
+                            {NewAcc, length(NewAcc) >= ?MEMORY_COPY_BATCH_SIZE}
+                    end;
                 _ ->
                     {Acc, false}
             end,

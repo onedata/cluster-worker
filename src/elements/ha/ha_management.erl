@@ -21,6 +21,7 @@
 %%% API - Working in failover mode
 %%%===================================================================
 
+% TODO - przy wylaczaniiu klastra wylaczyc HA zeby nie robilo problemow
 -spec node_down(node()) -> ok | no_return().
 node_down(Node) ->
     ok = consistent_hashing:report_node_failure(Node),
@@ -28,7 +29,7 @@ node_down(Node) ->
     case IsMaster of
         true ->
             ok = ha_datastore:set_failover_mode_and_broadcast_master_down_message(),
-            ok = internal_services_manager:takeover(Node);
+            ok = internal_services_manager:takeover(Node); % TODO - czemu wymagany jest spawn przy tescie? poprawic harvestery?
         false ->
             ok
     end,

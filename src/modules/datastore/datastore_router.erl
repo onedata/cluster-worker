@@ -21,7 +21,7 @@
 %% API
 -export([route/2, process/3]).
 -export([init_counters/0, init_report/0]).
--export([get_routing_key/1]).
+-export([get_routing_key/1, get_routing/2]).
 
 -type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
@@ -93,14 +93,36 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
     end.
 
 -spec get_routing_key(datastore:doc()) -> datastore:key().
-get_routing_key(#document{value = #links_forest{key = Key}}) ->
-    Key;
-get_routing_key(#document{value = #links_node{key = Key}}) ->
-    Key;
-get_routing_key(#document{value = #links_mask{key = Key}}) ->
-    Key;
+get_routing_key(#document{value = #links_forest{model = Model, key = Key}}) ->
+    {Key, check_foldl_link(Model, Key)};
+get_routing_key(#document{value = #links_node{model = Model, key = Key}}) ->
+    {Key, check_foldl_link(Model, Key)};
+get_routing_key(#document{value = #links_mask{model = Model, key = Key}}) ->
+    {Key, check_foldl_link(Model, Key)};
 get_routing_key(#document{key = Key}) ->
-    Key.
+    {Key, doc}.
+
+get_routing(#{link_routing := Routing}, link) ->
+    Routing;
+get_routing(#{routing := Routing}, _) ->
+    Routing;
+get_routing(_, _) ->
+    global.
+
+check_foldl_link(Model, Key) ->
+    FoldlKey = atom_to_binary(Model, utf8),
+    FoldlUniqueKey = datastore_key:build_adjacent(atom_to_binary(Model, utf8), Key),
+    UniqueKey = datastore_key:build_adjacent(atom_to_binary(Model, utf8), Key),
+    case FoldlKey of
+        Key -> doc;
+        UniqueKey -> doc;
+        _ -> case FoldlUniqueKey of
+            Key -> doc;
+            UniqueKey -> doc;
+            _ -> link
+        end
+    end.
+
 
 %%%===================================================================
 %%% Internal functions
