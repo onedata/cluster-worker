@@ -316,9 +316,9 @@ init([]) ->
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
 
         ?info("Running 'before_init' procedures."),
-        ok = ?CALL_PLUGIN(before_init, [[]]),
+        ok = ?CALL_PLUGIN(before_init, []),
 
-        ?info("Plugin initialised"),
+        ?info("node manager plugin initialized"),
 
         ?info("Checking if all ports are free..."),
         lists:foreach(
@@ -419,19 +419,27 @@ handle_cast(connect_to_cm, State) ->
     NewState = connect_to_cm(State),
     {noreply, NewState};
 
-handle_cast({cluster_init_step, ready}, State) ->
-    ok = cluster_init_step(ready),
-    {noreply, State};
 handle_cast({cluster_init_step, Step}, State) ->
     try
-        ok = cluster_init_step(Step),
-        report_step_finished(Step)
+        case {Step, cluster_init_step(Step)} of
+            % end of cluster init procedure
+            {cluster_ready, ok} -> ok;
+            % report the result to cluster manager
+            {_, ok} -> report_step_result(Step, success);
+            % result will be reported when the async step processing finishes
+            % (async_cluster_init_step_result message)
+            {_, async} -> ok
+        end
     catch
         Error:Reason ->
             ?error_stacktrace("Error during cluster initialization in step ~p: ~p:~p",
                 [Step, Error, Reason]),
-            report_step_finished(cluster_init_step_failure)
+            report_step_result(Step, failure)
     end,
+    {noreply, State};
+
+handle_cast({async_cluster_init_step_result, Step, Result}, State) ->
+    report_step_result(Step, Result),
     {noreply, State};
 
 handle_cast(node_initialized, State) ->
@@ -645,9 +653,9 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %% Performs all cluster init operations in given step.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok.
-cluster_init_step(init) ->
-    ?info("Successfully connected to cluster manager"),
+-spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
+cluster_init_step(init_connection) ->
+    ?info("Successfully connected to cluster manager, starting heatbeat"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
 cluster_init_step(start_default_workers) ->
@@ -675,6 +683,23 @@ cluster_init_step(start_custom_workers) ->
     init_workers(Workers),
     ?info("Custom workers started successfully"),
     ok;
+cluster_init_step(db_and_workers_ready) ->
+    ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
+    % the procedures require calls to node manager, hence they are processed asynchronously
+    spawn(fun() ->
+        Result = try
+            ok = ?CALL_PLUGIN(on_db_and_workers_ready, []),
+            ?info("Successfully executed 'on_db_and_workers_ready' procedures"),
+            success
+        catch Type:Reason ->
+            ?error_stacktrace("Failed to execute 'on_db_and_workers_ready' procedures - ~p:~p", [
+                Type, Reason
+            ]),
+            failure
+        end,
+        gen_server2:cast(?NODE_MANAGER_NAME, {async_cluster_init_step_result, db_and_workers_ready, Result})
+    end),
+    async;
 cluster_init_step(start_listeners) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
@@ -683,12 +708,9 @@ cluster_init_step(start_listeners) ->
     end, node_manager:listeners()),
     ?info("All listeners started"),
     ok;
-cluster_init_step(ready) ->
-    ?info("All nodes initialized. Running 'on_cluster_ready' procedures."),
-    spawn(fun() ->
-        ok = ?CALL_PLUGIN(on_cluster_ready, []),
-        gen_server2:cast(?NODE_MANAGER_NAME, node_initialized)
-    end),
+cluster_init_step(cluster_ready) ->
+    ?info("Cluster initialized successfully"),
+    gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
     ok.
 
 %%--------------------------------------------------------------------
@@ -1251,7 +1273,6 @@ get_current_cluster_generation() ->
 %% or step ended with failure.
 %% @end
 %%--------------------------------------------------------------------
--spec report_step_finished(cluster_manager_server:cluster_init_step()
-| cluster_init_step_failure) -> ok.
-report_step_finished(Msg) ->
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {Msg, node()}).
+-spec report_step_result(cluster_manager_server:cluster_init_step(), success | failure) -> ok.
+report_step_result(Step, Result) ->
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {cluster_init_step_report, node(), Step, Result}).
