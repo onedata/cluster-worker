@@ -136,10 +136,9 @@ custom_workers() -> [].
 
 %%--------------------------------------------------------------------
 %% @doc
-%% This callback is executed when cluster has finished to initialize
-%% (nagios has reported healthy status).
-%% Use to run custom code required for application initialization that might
-%% need working services (e.g. database).
+%% This callback is executed when cluster internals (database and workers)
+%% have finished initialization, but before the listeners (servers) are started.
+%% Use to run custom code required for application initialization.
 %% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
