@@ -180,7 +180,7 @@ inspect_slave_activity(Key, Node) ->
 -spec filter_requests([datastore_cache:cache_save_request()]) -> [datastore_cache:cache_save_request()].
 filter_requests(Requests) ->
     lists:filter(fun
-        ({#{routing := local, disc_driver := undefined} = Ctx, _Key, _Doc}) ->
+        ({#{routing := local, disc_driver := undefined} = Ctx, _Key, _}) ->
             not maps:get(ha_disabled, Ctx, true);
         ({Ctx, _Key, _Doc}) ->
             not maps:get(ha_disabled, Ctx, false)

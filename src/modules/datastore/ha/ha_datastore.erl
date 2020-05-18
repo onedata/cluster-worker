@@ -32,8 +32,9 @@
 %% API
 -export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, is_slave/1, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
-    change_config/2, init_memory_backup/0]).
+    change_config/2]).
 -export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
+-export([init_memory_backup/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -55,6 +56,7 @@
 
 % Internal module types
 -type nodes_assigned_per_key() :: pos_integer().
+-type memory_copy_acc() :: #{node() | undefined => [datastore_cache:cache_save_request()]}.
 
 -define(MEMORY_COPY_BATCH_SIZE, 200).
 
@@ -195,7 +197,7 @@ set_failover_mode_and_broadcast_master_down_message() ->
 -spec set_standby_mode_and_broadcast_master_up_message() -> ok.
 set_standby_mode_and_broadcast_master_up_message() ->
     ?notice("Master node up: seting standby mode and broadcasting information to tp processes"),
-    copy_to_node(?CURRENT_RING),
+    copy_keys(?CURRENT_RING, remote),
     set_slave_mode(?STANDBY_SLAVE_MODE),
     broadcast_async_management_message(?MASTER_UP).
 
@@ -221,7 +223,7 @@ change_config(NodesNumber, PropagationMethod) ->
 reorganize_cluster() ->
     set_slave_mode(?CLUSTER_REORGANIZATION_SLAVE_MODE),
     ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION_STARTED),
-    copy_to_node(?FUTURE_RING).
+    copy_keys(?FUTURE_RING, remote).
 
 -spec finish_reorganization() -> ok.
 finish_reorganization() ->
@@ -257,6 +259,14 @@ possible_neighbors_during_reconfiguration() ->
     lists:usort(CurrentNeighbors ++ PreviousNeighbors).
 
 %%%===================================================================
+%%% API - Memory management
+%%%===================================================================
+
+-spec init_memory_backup() -> ok | no_return().
+init_memory_backup() ->
+    copy_keys(?CURRENT_RING, local).
+
+%%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
@@ -284,9 +294,66 @@ get_neighbors(Node, AllNodes) ->
             []
     end.
 
--spec copy_memory(#{node() => [datastore_cache:cache_save_request()]}) -> ok | {error, term()}.
+-spec get_ring_nodes_or_empty(consistent_hashing:ring_generation()) -> [node()].
+get_ring_nodes_or_empty(RingGeneration) ->
+    try
+        consistent_hashing:get_all_nodes(RingGeneration)
+    catch
+        _:chash_ring_not_initialized  -> []
+    end.
+
+-spec copy_keys(consistent_hashing:ring_generation(), remote | local) -> ok | no_return().
+copy_keys(Ring, DocsToCopy) ->
+    ok = datastore_model:fold_memory_keys(fun
+        (end_of_memory, Acc) ->
+            {ok, copy_memory(Acc)};
+        ({_Model, _Key, #document{deleted = true}}, Acc) ->
+            {ok, Acc};
+        ({Model, Key, Doc}, Acc) ->
+            BasicCtx = datastore_model_default:get_basic_ctx(Model),
+            RoutingKey = datastore_router:get_routing_key(BasicCtx, Doc),
+            Ctx = datastore_model_default:set_defaults(RoutingKey, BasicCtx),
+            {Acc2, CopyNow} = case {qualify_by_key(RoutingKey, Ring), DocsToCopy} of
+                {{remote_key, Node}, remote} -> prepare_key_copy(Key, Doc, Ctx, Node, Acc);
+                {local_key, local} -> prepare_key_copy(Key, Doc, Ctx, undefined, Acc);
+                _ -> {Acc, false}
+            end,
+            case CopyNow of
+                true ->
+                    case copy_memory(Acc2) of
+                        ok -> {ok, #{}};
+                        Other -> {stop, Other}
+                    end;
+                _ ->
+                    {ok, Acc2}
+            end
+    end, #{}).
+
+-spec prepare_key_copy(datastore:key(), datastore:doc(), datastore:ctx(), node() | undefined,
+    memory_copy_acc()) -> {memory_copy_acc(), Flush :: boolean()}.
+prepare_key_copy(Key, Doc, Ctx, Node, Acc) ->
+    Ctx2 = Ctx#{mutator_pid => self()},
+    ShouldCopy = case Ctx of
+        #{routing := local} ->
+            not maps:get(ha_disabled, Ctx, true);
+        _ ->
+            not maps:get(ha_disabled, Ctx, false)
+    end,
+
+    case ShouldCopy of
+        false ->
+            {Acc, false};
+        true ->
+            NodeAcc = maps:get(Node, Acc, []),
+            NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
+            NewAcc = maps:put(Node, NewNodeAcc, Acc),
+            {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE}
+    end.
+
+-spec copy_memory(memory_copy_acc()) -> ok | {error, term()}.
 copy_memory(ItemsMap) ->
     maps:fold(fun
+        (undefined, Items, ok) -> create_backup(Items);
         (Node, Items, ok) -> copy_memory(Node, Items);
         (_Node, _Items, Acc) -> Acc
     end, ok, ItemsMap).
@@ -306,93 +373,10 @@ copy_memory(Node, Items) ->
             end, ok, SaveResults)
     end.
 
--spec get_ring_nodes_or_empty(consistent_hashing:ring_generation()) -> [node()].
-get_ring_nodes_or_empty(RingGeneration) ->
-    try
-        consistent_hashing:get_all_nodes(RingGeneration)
-    catch
-        _:chash_ring_not_initialized  -> []
-    end.
-
-% TODO copy memory to slave node enabling HA (during change_config)
--spec copy_to_node(consistent_hashing:ring_generation()) -> ok | no_return().
-copy_to_node(Ring) ->
-    Mutator = self(),
-    ok = datastore_model:fold_memory_keys(fun
-        (end_of_memory, Acc) ->
-            {ok, copy_memory(Acc)};
-        ({_Model, _Key, #document{deleted = true}}, Acc) ->
-            {ok, Acc};
-        ({Model, Key, Doc}, Acc) ->
-            {RoutingKey, Type} = datastore_router:get_routing_key(Doc),
-            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, Ring) of
-                {remote_key, Node} ->
-                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
-                    Routing = datastore_router:get_routing(Ctx, Type),
-                    case Routing of
-                        local ->
-                            {Acc, false};
-                        _ ->
-                            Ctx2 = Ctx#{mutator_pid => Mutator},
-                            NodeAcc = maps:get(Node, Acc, []),
-                            NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
-                            NewAcc = maps:put(Node, NewNodeAcc, Acc),
-                            {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE}
-                    end;
-                _ ->
-                    {Acc, false}
-            end,
-            case CopyNow of
-                true ->
-                    case copy_memory(Acc2) of
-                        ok -> {ok, #{}};
-                        Other -> {stop, Other}
-                    end;
-                _ ->
-                    {ok, Acc2}
-            end
-    end, #{}).
-
--spec init_memory_backup() -> ok | {error, term()}.
-init_memory_backup() ->
-    Mutator = self(),
-    ok = datastore_model:fold_memory_keys(fun
-        (end_of_memory, Acc) ->
-            {ok, init_memory_backup(Acc)};
-        ({_Model, _Key, #document{deleted = true}}, Acc) ->
-            {ok, Acc};
-        ({Model, Key, Doc}, Acc) ->
-            {RoutingKey, Type} = datastore_router:get_routing_key(Doc),
-            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, ?CURRENT_RING) of
-                local_key ->
-                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
-                    Routing = datastore_router:get_routing(Ctx, Type),
-                    case Routing of
-                        local ->
-                            {Acc, false};
-                        _ ->
-                            Ctx2 = Ctx#{mutator_pid => Mutator},
-                            NewAcc = [{Ctx2, Key} | Acc],
-                            {NewAcc, length(NewAcc) >= ?MEMORY_COPY_BATCH_SIZE}
-                    end;
-                _ ->
-                    {Acc, false}
-            end,
-            case CopyNow of
-                true ->
-                    case init_memory_backup(Acc2) of
-                        ok -> {ok, []};
-                        Other -> {stop, Other}
-                    end;
-                _ ->
-                    {ok, Acc2}
-            end
-    end, []).
-
--spec init_memory_backup([{datastore:ctx(), datastore:key()}]) -> ok | {error, term()}.
-init_memory_backup(Items) ->
+-spec create_backup([datastore_cache:cache_save_request()]) -> ok | {error, term()}.
+create_backup(Items) ->
     lists:foldl(fun
-        ({Ctx, Key} , ok) ->
+        ({Ctx, Key, _Doc} , ok) ->
             case datastore:create_backup(Ctx, Key) of
                 {ok, _} -> ok;
                 {error, not_found} -> ok;

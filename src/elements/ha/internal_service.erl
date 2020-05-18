@@ -18,8 +18,8 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([new/3, apply_start_fun/1, apply_start_fun/2,
-    apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
+-export([new/3, is_override_allowed/1,
+    apply_start_fun/1, apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
     apply_healthcheck_fun/2, get_healthcheck_interval/1]).
 
 % Record representing service that should work permanently
@@ -36,7 +36,8 @@
     stop_function_args :: service_fun_args(),
     healthcheck_fun_args :: service_fun_args(),
     hashing_key :: internal_services_manager:hashing_base(),
-    healthcheck_interval :: non_neg_integer()
+    healthcheck_interval :: non_neg_integer(),
+    async_start :: boolean()
 }).
 
 -type service() :: #internal_service{}.
@@ -54,7 +55,9 @@
     stop_function_args => service_fun_args(),
     healthcheck_fun => service_fun_name(),
     healthcheck_fun_args => service_fun_args(),
-    healthcheck_interval => non_neg_integer()
+    healthcheck_interval => non_neg_integer(),
+    allow_override => boolean(),
+    async_start => boolean()
 }.
 
 -export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
@@ -91,24 +94,39 @@ new(Module, HashingBase, ServiceDescription) ->
     end,
     HealthcheckInterval = maps:get(healthcheck_interval, ServiceDescription, HealthcheckDefInterval),
 
+    AsyncStart = maps:get(async_start, ServiceDescription, false),
+
     #internal_service{module = Module, start_function = Fun, takeover_function = TakeoverFun,
         migrate_function = MigrateFun, stop_function = StopFun, healthcheck_fun = HealthcheckFun,
         start_function_args = Args, takeover_function_args = TakeoverFunArgs, migrate_function_args = MigrateFunArgs,
         stop_function_args = StopFunArgs, healthcheck_fun_args = HealthcheckFunArgs, hashing_key = HashingBase,
-        healthcheck_interval = HealthcheckInterval}.
+        healthcheck_interval = HealthcheckInterval, async_start = AsyncStart}.
+
+-spec is_override_allowed(options()) -> boolean().
+is_override_allowed(ServiceDescription) ->
+    maps:get(allow_override, ServiceDescription, false).
 
 -spec apply_start_fun(service()) -> term().
-apply_start_fun(#internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
-    apply(Module, Fun, Args).
-
--spec apply_start_fun(node(), service()) -> term().
-apply_start_fun(Node, #internal_service{module = Module, start_function = Fun, start_function_args = Args}) ->
-    rpc:call(Node, Module, Fun, Args).
-
+apply_start_fun(#internal_service{module = Module, start_function = Fun,
+    start_function_args = Args, async_start = Async}) ->
+    case Async of
+        true ->
+            spawn(Module, Fun, Args),
+            ok;
+        false ->
+            apply(Module, Fun, Args)
+    end.
 
 -spec apply_takeover_fun(service()) -> term().
-apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun, takeover_function_args = Args}) ->
-    apply(Module, Fun, Args).
+apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun,
+    takeover_function_args = Args, async_start = Async}) ->
+    case Async of
+        true ->
+            spawn(Module, Fun, Args),
+            ok;
+        false ->
+            apply(Module, Fun, Args)
+    end.
 
 -spec apply_stop_fun(node(), service()) -> term().
 apply_stop_fun(_Node, #internal_service{stop_function = undefined}) ->

@@ -77,9 +77,8 @@ get_names(#{memory_driver_ctx := #{table := Table}} = Ctx) ->
 -spec get_name_extensions() ->
   [string()].
 get_name_extensions() ->
-  % TODO
-  Num = 1,%application:get_env(?CLUSTER_WORKER_APP_NAME,
-%%    tp_subtrees_number, 10),
+  Num = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    tp_subtrees_number, 10),
   lists:map(fun(Int) ->
     integer_to_list(Int)
   end, lists:seq(1, Num)).
@@ -92,9 +91,8 @@ get_name_extensions() ->
 %%--------------------------------------------------------------------
 -spec get_num(datastore:key() | pid()) -> [non_neg_integer()].
 get_num(Key) when is_binary(Key) ->
-  % TODO
-  MaxNum = 1,%application:get_env(?CLUSTER_WORKER_APP_NAME,
-%%    tp_subtrees_number, 10),
+  MaxNum = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    tp_subtrees_number, 10),
   Id = binary:decode_unsigned(Key),
   integer_to_list(Id rem MaxNum + 1);
 get_num(Key) ->

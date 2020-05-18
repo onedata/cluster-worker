@@ -184,11 +184,7 @@ primary_responsible_node(Key) ->
         consistent_hashing:get_routing_info(CHashSeed),
     {Node, not lists:member(Node, FailedNodes)}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns a single node responsible for handling given datastore key.
-%% @end
-%%--------------------------------------------------------------------
+
 -spec get_chash_seed(key()) -> key() | chash_label().
 get_chash_seed(Key) ->
     case to_basic_key_and_chash_label(Key) of

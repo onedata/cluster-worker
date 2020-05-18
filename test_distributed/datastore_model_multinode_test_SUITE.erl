@@ -825,7 +825,8 @@ prepare_cluster_reorganization_data(Config, delete, ReconfiguredNodeChoice) ->
 
 set_ring(Config, Ring) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    consistent_hashing:replicate_ring_to_nodes(Workers, ?CURRENT_RING, Ring).
+    consistent_hashing:set_ring(?CURRENT_RING, Ring),
+    consistent_hashing:replicate_ring_to_nodes(Workers).
 
 spawn_foreach_key(Keys, Fun) ->
     utils:pforeach(fun(Key) ->
@@ -917,8 +918,8 @@ end_per_testcase(ha_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
 
     Ring = prepare_ring(Config, []),
-    consistent_hashing:cleanup(),
     set_ring(Config, Ring),
+    consistent_hashing:cleanup(),
 
     lists:foreach(fun(Worker) ->
         lists:foreach(fun(FixedWorker) ->

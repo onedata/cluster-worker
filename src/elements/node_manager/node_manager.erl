@@ -47,7 +47,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
--export([init_service_healthcheck/3, init_service_healthcheck/4]).
+-export([init_service_healthcheck/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -67,6 +67,17 @@
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
+
+% Node failure/recovery protocol
+-define(NODE_DOWN(Node), {node_down, Node}).
+-define(NODE_UP(Node), {node_up, Node}).
+-define(NODE_READY(Node), {node_ready, Node}).
+% Node restart protocol
+-define(INIT_RESTART, init_restart).
+-define(RESTART_INITIALIZED, {restart_initialized, node()}).
+-define(NODE_UP_MSG_PROCESSED(SenderNode, RestartedNode), {node_up_msg_processed, SenderNode, RestartedNode}).
+-define(FINISH_RESTART, finish_restart).
+-define(RESTART_FINISHED(Node), {restart_finished, node()}).
 
 %%%===================================================================
 %%% API
@@ -294,16 +305,9 @@ start_worker(Module, Args, Options) ->
 -spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
     non_neg_integer()) -> ok.
 init_service_healthcheck(ServiceName, MasterNodeID, Interval) ->
-    init_service_healthcheck(node(), ServiceName, MasterNodeID, Interval).
-
--spec init_service_healthcheck(node(), internal_service:service_name(), internal_services_manager:node_id(),
-    non_neg_integer()) -> ok.
-init_service_healthcheck(Node, ServiceName, MasterNodeID, Interval) ->
-    case rpc:call(Node, erlang, send_after,
-        [Interval, ?NODE_MANAGER_NAME, {timer, {service_healthcheck, ServiceName, MasterNodeID, Interval}}]) of
-        Ref when is_reference(Ref) -> ok;
-        Error -> Error
-    end.
+    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+        {timer, {service_healthcheck, ServiceName, MasterNodeID, Interval}}),
+    ok.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -537,61 +541,31 @@ handle_cast({force_stop, ReasonMsg}, State) ->
     init:stop(),
     {stop, normal, State};
 
-handle_cast({node_down, Node}, State) ->
-    ?warning("Node ~p down", [Node]),
-    spawn(fun() ->
+handle_cast(?NODE_DOWN(Node), State) ->
+    handle_node_status_change_async(Node, node_down, fun() ->
         ha_management:node_down(Node)
     end),
     {noreply, State};
 
-handle_cast({node_up, Node}, State) ->
-    ?warning("Node ~p up", [Node]),
-    spawn(fun() ->
+handle_cast(?NODE_UP(Node), State) ->
+    handle_node_status_change_async(Node, node_up, fun() ->
         ha_management:node_up(Node),
-        ?warning("Node ~p up procedure finished", [Node]),
-        gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_init_ack, node()})
+        gen_server2:cast({global, ?CLUSTER_MANAGER}, ?NODE_UP_MSG_PROCESSED(node(), Node))
     end),
     {noreply, State};
 
-handle_cast({node_ready, Node}, State) ->
-    ?warning("Node ~p ready", [Node]),
-    spawn(fun() ->
-        ha_management:node_ready(Node),
-        ?warning("Node ~p ready procedure finished", [Node])
+handle_cast(?NODE_READY(Node), State) ->
+    handle_node_status_change_async(Node, node_ready, fun() ->
+        ha_management:node_ready(Node)
     end),
     {noreply, State};
 
-handle_cast(init_restart, State) ->
-    ?info("Restart of node started"),
-    gen_server2:cast(self(), do_heartbeat),
-    init_workers(cluster_worker_modules()),
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_init_done, node()}),
-    ?info("First phase of node restart finished"),
+handle_cast(?INIT_RESTART, State) ->
+    init_restart(),
     {noreply, State};
 
-handle_cast(finish_restart, State) ->
-    ?info("Restart of node phase 2 started"),
-
-    ?info("Starting workers essential for upgrade..."),
-    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
-    init_workers(WorkersToStart),
-    ?info("Workers essential for upgrade started successfully"),
-
-    ?info("Starting custom workers..."),
-    Workers = ?CALL_PLUGIN(custom_workers, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
-
-    ?info("Starting listeners..."),
-    lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, []),
-        ?info("   * ~p started", [Module])
-    end, node_manager:listeners()),
-    ?info("All listeners started"),
-
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {restart_done, node()}),
-    ?info("Node restart finished"),
-
+handle_cast(?FINISH_RESTART, State) ->
+    finish_restart(),
     {noreply, State};
 
 handle_cast(stop, State) ->
@@ -650,6 +624,7 @@ handle_info(Request, State) ->
     | {shutdown, term()}
     | term().
 terminate(Reason, State) ->
+    % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
     ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
 
     lists:foreach(fun(Module) ->
@@ -1332,3 +1307,49 @@ get_current_cluster_generation() ->
 | cluster_init_step_failure) -> ok.
 report_step_finished(Msg) ->
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {Msg, node()}).
+
+%%%===================================================================
+%%% Node restart handling
+%%%===================================================================
+
+-spec init_restart() -> ok.
+init_restart() ->
+    ?info("Restart of node initialized"),
+    gen_server2:cast(self(), do_heartbeat),
+    ok = init_workers(cluster_worker_modules()),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RESTART_INITIALIZED),
+    ?info("First phase of node restart finished"),
+    ok.
+
+-spec finish_restart() -> ok.
+finish_restart() ->
+    ?info("Restart of node - secodn phase started"),
+
+    ?info("Starting workers essential for upgrade..."),
+    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
+    init_workers(WorkersToStart),
+    ?info("Workers essential for upgrade started successfully"),
+
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+
+    ?info("Starting listeners..."),
+    lists:foreach(fun(Module) ->
+        ok = erlang:apply(Module, start, []),
+        ?info("   * ~p started", [Module])
+    end, node_manager:listeners()),
+    ?info("All listeners started"),
+
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RESTART_FINISHED(node())),
+    ?info("Node restart finished"),
+    ok.
+
+handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
+    ?info("Node ~p changed status to ~p - handling proc started", [Node, NewStatus]),
+    spawn(fun() ->
+        HandlingFun(),
+        ?info("Node ~p changed status to ~p - handling proc finished", [Node, NewStatus])
+    end),
+    ok.

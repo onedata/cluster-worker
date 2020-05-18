@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get_ctx/1, get_ctx/2, get_record_version/1, get_prehooks/1, get_posthooks/1,
+-export([get_ctx/1, get_basic_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1,
     get_default_disk_ctx/0]).
 -export([resolve_conflict/4]).
 -export([set_defaults/1, set_defaults/2]).
@@ -48,15 +48,13 @@ get_ctx(Model) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns model context by calling model's 'get_ctx/0' function and sets
-%% defaults generated using UniqueKey.
+%% Returns model context by calling model's 'get_ctx/0' function.
+%% Does not sets defaults.
 %% @end
 %%--------------------------------------------------------------------
--spec get_ctx(model(), key()) -> ctx().
-get_ctx(Model, Key) ->
-    Ctx = model_apply(Model, {get_ctx, []}, fun() -> #{model => Model} end),
-    UniqueKey = datastore_model:get_unique_key(Ctx, Key),
-    datastore_model_default:set_defaults(UniqueKey, Ctx).
+-spec get_basic_ctx(model()) -> ctx().
+get_basic_ctx(Model) ->
+    model_apply(Model, {get_ctx, []}, fun() -> #{model => Model} end).
 
 %%--------------------------------------------------------------------
 %% @doc

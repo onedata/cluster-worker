@@ -16,19 +16,21 @@
 -author("Michał Wrzeszcz").
 
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([start_service/5, start_service/6, start_service/3, start_service/4,
     stop_service/3, report_service_stop/3, takeover/1, migrate_to_recovered_master/1,
     do_healtcheck/3, get_processing_node/1]).
 %% Export for internal rpc
--export([start_service_locally/5]).
+-export([start_service_locally/5, init_service/4]).
 
 -define(LOCAL_HASHING_BASE, <<>>).
 
 % Type defining binary used by consistent hashing to chose node where service should be running.
 -type hashing_base() :: binary().
 -type node_id() :: binary().
+-type service_init_fun() :: apply_start_fun | apply_takeover_fun.
 -export_type([hashing_base/0, node_id/0]).
 
 %%%===================================================================
@@ -80,9 +82,6 @@ stop_service(Module, Name, HashingBase) ->
             remove_service_from_doc(MasterNodeID, ServiceName)
     end.
 
-% TODO - moze hashowac po nazwie i wywalic HashingBase?
-% TODO - moze dac mozliwosc sprawdzania czy serwis stoi zanim zablokujemy start uznajac ze juz wstal
-% zeby nie bylo sytuacji ze serwis nie zyje a nie mozemy go zrestartowac
 -spec report_service_stop(module(), internal_service:service_name(), hashing_base()) -> ok.
 report_service_stop(Module, Name, HashingBase) ->
     {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
@@ -100,9 +99,9 @@ takeover(FailedNode) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                ok = internal_service:apply_takeover_fun(Service),
-                HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval)
+                ?info("Taking over of service ~p from node ~p started", [ServiceName, FailedNode]),
+                init_service(Service, ServiceName, apply_takeover_fun, MasterNodeID),
+                ?info("Taking over of service ~p from node ~p finished", [ServiceName, FailedNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -117,16 +116,13 @@ migrate_to_recovered_master(MasterNode) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
+                ?info("Migration of service ~p to node ~p started", [ServiceName, MasterNode]),
                 ok = internal_service:apply_migrate_fun(Service),
-                case internal_service:apply_start_fun(MasterNode, Service) of
-                    ok ->
-                        HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                        ok = node_manager:init_service_healthcheck(
-                            MasterNode, ServiceName, MasterNodeID, HealthcheckInterval);
-                    abort ->
-                        remove_service_from_doc(MasterNodeID, ServiceName),
-                        ok
-                end
+                case rpc:call(MasterNode, ?MODULE, init_service, [Service, ServiceName, apply_start_fun, MasterNodeID]) of
+                    ok -> ok;
+                    aborted -> ok
+                end,
+                ?info("Migration of service ~p to node ~p finished", [ServiceName, MasterNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -181,29 +177,21 @@ get_processing_node(HashingBase) ->
     internal_service:options()) -> ok | aborted | {error, term()}.
 start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription) ->
     Service = internal_service:new(Module, HashingBase, ServiceDescription),
+    AllowOverride = internal_service:is_override_allowed(ServiceDescription),
     ServiceName = get_internal_name(Module, Name),
+
     Default = #node_internal_services{services = #{ServiceName => Service}, processing_node = node()},
     Diff = fun(#node_internal_services{services = Services} = Record) ->
-        % TODO - dajemy flage ktora pozwala nadpisac istniejacy serwis do wykorzystania np w harvesterach
-        case maps:is_key(ServiceName, Services) of
-            true -> {error, already_started};
-            false -> {ok, Record#node_internal_services{services = Services#{ServiceName => Service}}}
+        case {maps:is_key(ServiceName, Services), AllowOverride} of
+            {true, false} -> {error, already_started};
+            _ -> {ok, Record#node_internal_services{services = Services#{ServiceName => Service}}}
         end
     end,
 
     MasterNodeID = get_node_id(MasterNode),
     case node_internal_services:update(MasterNodeID, Diff, Default) of
-        {ok, _} ->
-            case internal_service:apply_start_fun(Service) of
-                ok ->
-                    HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                    ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval);
-                abort ->
-                    remove_service_from_doc(MasterNodeID, ServiceName),
-                    aborted
-            end;
-        {error, already_started} ->
-            ok
+        {ok, _} -> init_service(Service, ServiceName, apply_start_fun, MasterNodeID);
+        {error, already_started} -> ok
     end.
 
 -spec get_node_id(node()) -> node_id().
@@ -231,6 +219,18 @@ get_service_and_processing_node(ServiceName, MasterNodeID) ->
         node_internal_services:get(MasterNodeID),
 
     {maps:get(ServiceName, NodeServices, undefined), ProcessingNode}.
+
+-spec init_service(internal_service:service(), internal_service:service_name(), service_init_fun(), node_id()) ->
+    ok | aborted.
+init_service(Service, ServiceName, InitFun, MasterNodeID) ->
+    case internal_service:InitFun(Service) of
+        ok ->
+            HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeID, HealthcheckInterval);
+        abort ->
+            remove_service_from_doc(MasterNodeID, ServiceName),
+            aborted
+    end.
 
 -spec remove_service_from_doc(node_id(), internal_service:service_name()) -> ok.
 remove_service_from_doc(MasterNodeID, ServiceName) ->

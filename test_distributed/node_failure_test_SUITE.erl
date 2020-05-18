@@ -129,5 +129,4 @@ set_ha(Config, Fun, Args) ->
     lists:foreach(fun(Worker) ->
         set_ha(Worker, Fun, Args)
     end, Workers),
-    Ring = rpc:call(Worker1, ctool, get_env, [?CURRENT_RING]),
-    consistent_hashing:replicate_ring_to_nodes(CMNodes, ?CURRENT_RING, Ring).
+    rpc:call(Worker1, consistent_hashing, replicate_ring_to_nodes, [CMNodes]).

@@ -24,7 +24,7 @@
 -type ctx() :: #{model := datastore_model:model(),
                  mutator => datastore_doc:mutator(),
                  scope => datastore_doc:scope(),
-                 routing => local | global,
+                 routing => routing(),
                  generated_key => boolean(),
                  routing_key => key(), % key used to route request to tp process and to choose node
                  fold_enabled => boolean(),
@@ -63,6 +63,7 @@
                         % it is always a relative offset from now.
                  throw_not_found => boolean()
 }.
+-type routing() :: local | global.
 -type memory_driver() :: undefined | ets_driver | mnesia_driver.
 -type memory_driver_ctx() :: ets_driver:ctx() | mnesia_driver:ctx().
 -type disc_driver() :: undefined | couchbase_driver.
@@ -73,7 +74,7 @@
 -type driver_ctx() :: memory_driver_ctx() | disc_driver_ctx() |
                       remote_driver_ctx().
 
--export_type([ctx/0]).
+-export_type([ctx/0, routing/0]).
 -export_type([memory_driver/0, disc_driver/0, remote_driver/0, driver/0]).
 -export_type([memory_driver_ctx/0, disc_driver_ctx/0, remote_driver_ctx/0,
     driver_ctx/0]).
