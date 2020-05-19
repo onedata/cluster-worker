@@ -426,8 +426,7 @@ handle_cast({cluster_init_step, Step}, State) ->
             {cluster_ready, ok} -> ok;
             % report the result to cluster manager
             {_, ok} -> report_step_result(Step, success);
-            % result will be reported when the async step processing finishes
-            % (async_cluster_init_step_result message)
+            % result will be reported by the async process that is handling the step
             {_, async} -> ok
         end
     catch
@@ -436,10 +435,6 @@ handle_cast({cluster_init_step, Step}, State) ->
                 [Step, Error, Reason]),
             report_step_result(Step, failure)
     end,
-    {noreply, State};
-
-handle_cast({async_cluster_init_step_result, Step, Result}, State) ->
-    report_step_result(Step, Result),
     {noreply, State};
 
 handle_cast(node_initialized, State) ->
@@ -697,7 +692,7 @@ cluster_init_step(db_and_workers_ready) ->
             ]),
             failure
         end,
-        gen_server2:cast(?NODE_MANAGER_NAME, {async_cluster_init_step_result, db_and_workers_ready, Result})
+        report_step_result(db_and_workers_ready, Result)
     end),
     async;
 cluster_init_step(start_listeners) ->
