@@ -143,6 +143,9 @@ websocket_handle(ping, State) ->
     {ok, State};
 
 websocket_handle(pong, State) ->
+    % pongs are received in response to the keepalive pings sent to the client
+    % (see 'keepalive' periodical message)
+    gs_server:report_heartbeat(State#state.session_id),
     {ok, State};
 
 websocket_handle(Msg, State) ->
