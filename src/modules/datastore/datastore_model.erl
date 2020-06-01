@@ -94,6 +94,9 @@ get_unique_key(#{model := Model}, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create(ctx(), doc()) -> {ok, doc()} | {error, term()}.
+create(#{secure_fold_enabled := true} = Ctx, Doc) ->
+    UpdatedCtx = maps:remove(secure_fold_enabled, Ctx#{fold_enabled => true}),
+    fold_critical_section(Ctx, fun() -> create(UpdatedCtx, Doc) end);
 create(Ctx, Doc = #document{key = undefined}) ->
     save(Ctx, Doc);
 create(Ctx, Doc = #document{key = Key}) ->
@@ -106,6 +109,8 @@ create(Ctx, Doc = #document{key = Key}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec save(ctx(), doc()) -> {ok, doc()} | {error, term()}.
+save(#{secure_fold_enabled := true}, _Doc) ->
+    {error, not_supported};
 save(Ctx, Doc = #document{key = undefined}) ->
     Ctx2 = Ctx#{generated_key => true},
     Doc2 = Doc#document{key = datastore_key:new()},
@@ -131,6 +136,8 @@ update(Ctx, Key, Diff) ->
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff(), record() | doc()) ->
     {ok, doc()} | {error, term()}.
+update(#{secure_fold_enabled := true}, _Key, _Diff, _Default = #document{}) ->
+    {error, not_supported};
 update(Ctx, Key, Diff, Default = #document{}) ->
     Result = datastore_apply(Ctx, Key, fun datastore:update/4, update, [
         Diff, Default
@@ -172,6 +179,8 @@ delete(Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), pred()) -> ok | {error, term()}.
+delete(#{secure_fold_enabled := true} = Ctx, Key, Pred) ->
+    fold_critical_section(Ctx, fun() -> delete(Ctx#{fold_enabled => true}, Key, Pred) end);
 delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
@@ -240,6 +249,8 @@ fold(Ctx0 = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys
         _ ->
             LinksAns
     end;
+fold(Ctx = #{secure_fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
+    fold(Ctx#{fold_enabled => true}, Fun, KeyFilter, ReverseKeys, Acc);
 fold(_Ctx, _Fun, _KeyFilter, _ReverseKeys, _Acc) ->
     {error, not_supported}.
 
@@ -261,6 +272,8 @@ fold_keys(Ctx0 = #{model := Model, fold_enabled := true}, Fun, Acc) ->
     fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         Fun(Key, Acc2)
     end, Acc, #{});
+fold_keys(Ctx = #{secure_fold_enabled := true}, Fun, Acc) ->
+    fold(Ctx#{fold_enabled => true}, Fun, Acc);
 fold_keys(_Ctx, _Fun, _Acc) ->
     {error, not_supported}.
 
@@ -542,3 +555,7 @@ fold_internal([Key | Tail], Acc, Ctx, Fun) ->
         {error, not_found} -> fold_internal(Tail, Acc, Ctx, Fun);
         {error, Reason} -> {error, Reason}
     end.
+
+-spec fold_critical_section(ctx(), fun (() -> Result :: term())) -> Result :: term().
+fold_critical_section(#{model := Model}, Fun) ->
+    critical_section:run([model_fold, Model], Fun).
