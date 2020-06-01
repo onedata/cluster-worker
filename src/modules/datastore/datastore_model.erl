@@ -180,7 +180,8 @@ delete(Ctx, Key) ->
 %%--------------------------------------------------------------------
 -spec delete(ctx(), key(), pred()) -> ok | {error, term()}.
 delete(#{secure_fold_enabled := true} = Ctx, Key, Pred) ->
-    fold_critical_section(Ctx, fun() -> delete(Ctx#{fold_enabled => true}, Key, Pred) end);
+    UpdatedCtx = maps:remove(secure_fold_enabled, Ctx#{fold_enabled => true}),
+    fold_critical_section(Ctx, fun() -> delete(UpdatedCtx, Key, Pred) end);
 delete(#{disc_driver := undefined} = Ctx, Key, Pred) ->
     Result = datastore_apply(Ctx, Key, fun datastore:delete/3, delete, [Pred]),
     delete_all_links(Ctx, Key, Result),
