@@ -31,6 +31,7 @@
                  secure_fold_enabled => boolean(), % similar to fold_enabled but guarantees that fold links
                                                    % are added/deleted in the same order as create/delete
                                                    % operations that triggered link's adding/deletion
+                                                   % TOOD VFS-5971 - does not support save and update with default
                  local_fold => boolean(), % Fold links are added using local routing
                  sync_enabled => boolean(),
                  sync_change => boolean(), % should set to 'true' for save
