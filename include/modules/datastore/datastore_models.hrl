@@ -85,7 +85,9 @@
 -record(traverse_tasks_scheduler, {
     pool :: traverse:pool(),
     ongoing_tasks = 0 :: non_neg_integer(),
+    ongoing_tasks_per_node = #{} :: traverse_tasks_scheduler:ongoing_tasks_map(),
     ongoing_tasks_limit = 0 :: traverse_tasks_scheduler:ongoing_tasks_limit(),
+    ongoing_tasks_per_node_limit = 0 :: traverse_tasks_scheduler:ongoing_tasks_limit(),
     groups = [] :: [traverse:group()],
     nodes = [] :: [node()]
 }).
@@ -108,6 +110,12 @@
 % Model used for performance testing (mocked models cannot be used as they affect performance)
 -record(performance_test_record, {
     value :: binary()
+}).
+
+% Record representing services running on particular node
+-record(node_internal_services, {
+    services :: #{internal_service:service_name() => internal_service:service()},
+    processing_node :: node() % services can be migrated in case of failure
 }).
 
 -endif.

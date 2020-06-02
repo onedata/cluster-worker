@@ -46,7 +46,7 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_status/0, get_cluster_status/1, get_cluster_nodes/0, get_cluster_ips/0]).
+-export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -316,9 +316,9 @@ init([]) ->
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
 
         ?info("Running 'before_init' procedures."),
-        ok = ?CALL_PLUGIN(before_init, [[]]),
+        ok = ?CALL_PLUGIN(before_init, []),
 
-        ?info("Plugin initialised"),
+        ?info("node manager plugin initialized"),
 
         ?info("Checking if all ports are free..."),
         lists:foreach(
@@ -419,18 +419,21 @@ handle_cast(connect_to_cm, State) ->
     NewState = connect_to_cm(State),
     {noreply, NewState};
 
-handle_cast({cluster_init_step, ready}, State) ->
-    ok = cluster_init_step(ready),
-    {noreply, State};
 handle_cast({cluster_init_step, Step}, State) ->
     try
-        ok = cluster_init_step(Step),
-        report_step_finished(Step)
+        case {Step, cluster_init_step(Step)} of
+            % end of cluster init procedure
+            {cluster_ready, ok} -> ok;
+            % report the result to cluster manager
+            {_, ok} -> report_step_result(Step, success);
+            % result will be reported by the async process that is handling the step
+            {_, async} -> ok
+        end
     catch
         Error:Reason ->
             ?error_stacktrace("Error during cluster initialization in step ~p: ~p:~p",
                 [Step, Error, Reason]),
-            report_step_finished(cluster_init_step_failure)
+            report_step_result(Step, failure)
     end,
     {noreply, State};
 
@@ -511,6 +514,11 @@ handle_cast({force_stop, ReasonMsg}, State) ->
     ?critical("Force stopping application..."),
     init:stop(),
     {stop, normal, State};
+
+handle_cast({node_down, Node}, State) ->
+    ?warning("Node ~p down", [Node]),
+    ha_management:node_down(Node),
+    {noreply, State};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -640,9 +648,9 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %% Performs all cluster init operations in given step.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok.
-cluster_init_step(init) ->
-    ?info("Successfully connected to cluster manager"),
+-spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
+cluster_init_step(init_connection) ->
+    ?info("Successfully connected to cluster manager, starting heatbeat"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
 cluster_init_step(start_default_workers) ->
@@ -670,6 +678,23 @@ cluster_init_step(start_custom_workers) ->
     init_workers(Workers),
     ?info("Custom workers started successfully"),
     ok;
+cluster_init_step(db_and_workers_ready) ->
+    ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
+    % the procedures require calls to node manager, hence they are processed asynchronously
+    spawn(fun() ->
+        Result = try
+            ok = ?CALL_PLUGIN(on_db_and_workers_ready, []),
+            ?info("Successfully executed 'on_db_and_workers_ready' procedures"),
+            success
+        catch Type:Reason ->
+            ?error_stacktrace("Failed to execute 'on_db_and_workers_ready' procedures - ~p:~p", [
+                Type, Reason
+            ]),
+            failure
+        end,
+        report_step_result(db_and_workers_ready, Result)
+    end),
+    async;
 cluster_init_step(start_listeners) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
@@ -678,12 +703,9 @@ cluster_init_step(start_listeners) ->
     end, node_manager:listeners()),
     ?info("All listeners started"),
     ok;
-cluster_init_step(ready) ->
-    ?info("All nodes initialized. Running 'on_cluster_ready' procedures."),
-    spawn(fun() ->
-        ok = ?CALL_PLUGIN(on_cluster_ready, []),
-        gen_server2:cast(?NODE_MANAGER_NAME, node_initialized)
-    end),
+cluster_init_step(cluster_ready) ->
+    ?info("Cluster initialized successfully"),
+    gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
     ok.
 
 %%--------------------------------------------------------------------
@@ -1213,25 +1235,14 @@ get_cluster_status(Timeout) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Fetches cluster nodes from cluster manager.
-%% @end
-%%--------------------------------------------------------------------
--spec get_cluster_nodes() -> {ok, [node()]} | {error, cluster_not_ready}.
-get_cluster_nodes() ->
-    gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Get up to date information about IPs in the cluster.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_cluster_ips() -> [inet:ip4_address()] | no_return().
 get_cluster_ips() ->
-    {ok, Nodes} = get_cluster_nodes(),
-
     lists:map(fun(Node) ->
         {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
-    end, Nodes).
+    end, consistent_hashing:get_all_nodes()).
 
 
 %%--------------------------------------------------------------------
@@ -1257,7 +1268,6 @@ get_current_cluster_generation() ->
 %% or step ended with failure.
 %% @end
 %%--------------------------------------------------------------------
--spec report_step_finished(cluster_manager_server:cluster_init_step()
-| cluster_init_step_failure) -> ok.
-report_step_finished(Msg) ->
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {Msg, node()}).
+-spec report_step_result(cluster_manager_server:cluster_init_step(), success | failure) -> ok.
+report_step_result(Step, Result) ->
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {cluster_init_step_report, node(), Step, Result}).
