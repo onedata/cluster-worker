@@ -160,7 +160,7 @@ select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]
             Ctx2 = Ctx#{failed_nodes => FailedNodes, failed_master => lists:member(MasterNode, FailedNodes)},
             {Ctx3, TryLocalRead} = case MemCopies of
                 all ->
-                    % TODO - duplicates activity of HA
+                    % TODO VFS-6168 - duplicates activity of HA but memory copy must be saved before operation finished
                     MemCopiesNodes = AllNodes, % -- Nodes -- FailedNodes,
                     % TODO VFS-6168 - Try local reads from HA slaves
                     {Ctx2#{memory_copies_nodes => MemCopiesNodes}, true};
