@@ -32,6 +32,8 @@ node_down(Node) ->
         false ->
             ok
     end,
+
+    % TODO VFS-6388 - maybe send message to all tp processes that slave is down to unlink slave proc
     ok = plugins:apply(node_manager_plugin, node_down, [Node, IsMaster]).
 
 -spec node_up(node()) -> ok | no_return().
@@ -41,6 +43,7 @@ node_up(Node) ->
     IsMaster = ha_datastore:is_master(Node),
     case IsMaster of
         true ->
+            ok = ha_datastore:set_propagation_method_on_node(Node),
             ok = ha_datastore:set_standby_mode_and_broadcast_master_up_message();
         false ->
             ok

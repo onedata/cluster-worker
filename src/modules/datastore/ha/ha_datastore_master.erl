@@ -98,6 +98,7 @@ store_backup(_ProcessKey, [], _CacheRequests, Data) ->
 store_backup(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes = []} = Data) ->
     Data;
 store_backup(ProcessKey, Keys, CacheRequests, Data) ->
+    % TODO VFS-6168 - delete keys connected with filtered requests
     send_store_backup_request(ProcessKey, Keys, filter_requests(CacheRequests), Data).
 
 -spec forget_backup(datastore_doc_batch:cached_keys(), ha_master_data()) -> ok.
@@ -219,5 +220,6 @@ send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{link_status = ?
             Data
     end;
 send_store_backup_request(_ProcessKey, Keys, CacheRequests, #data{slave_pid = Pid} = Data) ->
+    % TODO VFS-6388 - maybe set slave_pid to undefined on node_down
     ha_datastore:send_async_master_message(Pid, #store_backup{keys = Keys, cache_requests = CacheRequests}),
     Data.

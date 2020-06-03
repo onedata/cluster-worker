@@ -21,6 +21,8 @@
 -export([new/3, is_override_allowed/1,
     apply_start_fun/1, apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
     apply_healthcheck_fun/2, get_healthcheck_interval/1]).
+%% Export for internal rpc
+-export([apply_with_retry/5]).
 
 % Record representing service that should work permanently
 -record(internal_service, {
@@ -109,24 +111,12 @@ is_override_allowed(ServiceDescription) ->
 -spec apply_start_fun(service()) -> term().
 apply_start_fun(#internal_service{module = Module, start_function = Fun,
     start_function_args = Args, async_start = Async}) ->
-    case Async of
-        true ->
-            spawn(Module, Fun, Args),
-            ok;
-        false ->
-            apply(Module, Fun, Args)
-    end.
+    apply_with_retry(Module, Fun, Args, Async).
 
 -spec apply_takeover_fun(service()) -> term().
 apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun,
     takeover_function_args = Args, async_start = Async}) ->
-    case Async of
-        true ->
-            spawn(Module, Fun, Args),
-            ok;
-        false ->
-            apply(Module, Fun, Args)
-    end.
+    apply_with_retry(Module, Fun, Args, Async).
 
 -spec apply_stop_fun(node(), service()) -> term().
 apply_stop_fun(_Node, #internal_service{stop_function = undefined}) ->
@@ -159,3 +149,27 @@ apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun, 
 -spec get_healthcheck_interval(service()) -> non_neg_integer().
 get_healthcheck_interval(#internal_service{healthcheck_interval = DefaultInterval}) ->
     DefaultInterval.
+
+-spec apply_with_retry(module(), service_fun_name(), service_fun_args(), boolean()) -> term().
+apply_with_retry(Module, Fun, Args, Async) ->
+    InitialSleep = 100,
+    RetriesNum = 3,
+    case Async of
+        true ->
+            spawn(?MODULE, apply_with_retry, [Module, Fun, Args, InitialSleep, RetriesNum]),
+            ok;
+        false ->
+            apply_with_retry(Module, Fun, Args, InitialSleep, RetriesNum)
+    end.
+
+-spec apply_with_retry(module(), service_fun_name(), service_fun_args(), non_neg_integer(), non_neg_integer()) -> term().
+apply_with_retry(Module, Fun, Args, _Sleep, 0) ->
+    apply(Module, Fun, Args);
+apply_with_retry(Module, Fun, Args, Sleep, RetryCount) ->
+    try
+        apply(Module, Fun, Args)
+    catch
+        _:_ ->
+            timer:sleep(Sleep),
+            apply_with_retry(Module, Fun, Args, Sleep * 2, RetryCount - 1)
+    end.

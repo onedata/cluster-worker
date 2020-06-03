@@ -32,7 +32,7 @@
 %% API
 -export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, is_slave/1, get_slave_mode/0]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
-    change_config/2]).
+    change_config/2, change_propagation_method/1, set_propagation_method_on_node/1]).
 -export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
 -export([init_memory_backup/0]).
 
@@ -214,6 +214,19 @@ change_config(NodesNumber, PropagationMethod) ->
         true -> ok = init_memory_backup();
         _ -> ok
     end.
+
+-spec change_propagation_method(propagation_method()) -> ok.
+change_propagation_method(PropagationMethod) ->
+    ?notice("New HA propagation method: ~p - setting environment variables"
+    " and broadcasting information to tp processes~n", [PropagationMethod]),
+    set_propagation_method(PropagationMethod),
+    broadcast_async_management_message(?CONFIG_CHANGED).
+
+-spec set_propagation_method_on_node(node()) -> ok | no_return().
+set_propagation_method_on_node(Node) ->
+    PropagationMethod = get_propagation_method(),
+    ok = rpc:call(Node, ?MODULE, change_propagation_method, [PropagationMethod]).
+
 
 %%%===================================================================
 %%% API to reorganize cluster
