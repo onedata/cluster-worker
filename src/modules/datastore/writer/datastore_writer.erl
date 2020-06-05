@@ -210,21 +210,21 @@ call(Ctx, Key, Function, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
-call(Ctx, Key, Function, Args, _Sleep, 0) ->
-    case call_async(Ctx, Key, Function, Args) of
-        {{ok, Ref}, Pid} -> wait(Ref, Pid);
-        {error, Reason} -> {error, Reason}
-    end;
-call(Ctx, Key, Function, Args, Sleep, InternalCallRetries) ->
+call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
     case call_async(Ctx, Key, Function, Args) of
         {{ok, Ref}, Pid} ->
             case wait(Ref, Pid) of
-                {error, internal_call} ->
-                    timer:sleep(Sleep),
-                    call(Ctx, Key, Function, Args, Sleep * 2, InternalCallRetries - 1);
+                {error, interrupted_call} = InterruptedCallError ->
+                    case InterruptedCallRetries of
+                        0 ->
+                            InterruptedCallError;
+                        _ ->
+                            ?info("Interrupted call - retrying"),
+                            timer:sleep(Sleep),
+                            call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
+                    end;
                 [{error, internal_call} | _] ->
-                    timer:sleep(Sleep),
-                    call(Ctx, Key, Function, Args, Sleep * 2, InternalCallRetries - 1);
+                    {error, internal_call};
                 Other -> Other
             end;
         {error, Reason} ->
