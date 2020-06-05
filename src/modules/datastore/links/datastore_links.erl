@@ -25,7 +25,7 @@
 %%%
 %%% From the API perspective there are two key objects: tree and forest iterator.
 %%% First one represents a single tree and can be created with
-%%% {@link init_tree/3} or {@link init_tree/4} functions. Second one represents
+%%% {@link init_tree/4} or {@link init_tree/5} functions. Second one represents
 %%% a collection of trees and can be created with
 %%% {@link datastore_links_iter:init/3} or {@link datastore_links_iter:init/4}
 %%% functions. Both of them use {@link datastore_doc_batch} as a local cache.
@@ -49,7 +49,7 @@
 
 %% API
 -export([get_forest_id/1, get_mask_root_id/1, get_tree_id/1]).
--export([init_tree/3, init_tree/4, init_tree/5, terminate_tree/1]).
+-export([init_tree/4, init_tree/5, terminate_tree/1]).
 -export([add/2, get/2, delete/2, mark_deleted/3]).
 -export([fold/4]).
 -export([get_links_trees/3]).
@@ -106,14 +106,6 @@ get_mask_root_id(Key) ->
 -spec get_tree_id(tree()) -> tree_id().
 get_tree_id(#bp_tree{store_state = State}) ->
     links_tree:get_tree_id(State).
-
-%%--------------------------------------------------------------------
-%% @equiv init_tree(Ctx, Key, TreeId, undefined)
-%% @end
-%%--------------------------------------------------------------------
--spec init_tree(ctx(), key(), tree_id()) -> {ok, tree()} | {error, term()}.
-init_tree(Ctx, Key, TreeId) ->
-    init_tree(Ctx, Key, TreeId, undefined).
 
 %%--------------------------------------------------------------------
 %% @equiv init_tree(Ctx, Key, TreeId, Batch, false)

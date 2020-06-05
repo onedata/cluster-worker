@@ -196,15 +196,39 @@ fetch_links_trees(Ctx, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Performs synchronous call to a datastore writer process associated
-%% with a key.
+%% @equiv call(Ctx, Key, Function, Args, 100, 5)
 %% @end
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), atom(), list()) -> term().
 call(Ctx, Key, Function, Args) ->
+    call(Ctx, Key, Function, Args, 100, 5).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Performs synchronous call to a datastore writer process associated
+%% with a key. Repeats in case of internal_call error.
+%% @end
+%%--------------------------------------------------------------------
+-spec call(ctx(), tp_key(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
+call(Ctx, Key, Function, Args, _Sleep, 0) ->
     case call_async(Ctx, Key, Function, Args) of
         {{ok, Ref}, Pid} -> wait(Ref, Pid);
         {error, Reason} -> {error, Reason}
+    end;
+call(Ctx, Key, Function, Args, Sleep, InternalCallRetries) ->
+    case call_async(Ctx, Key, Function, Args) of
+        {{ok, Ref}, Pid} ->
+            case wait(Ref, Pid) of
+                {error, internal_call} ->
+                    timer:sleep(Sleep),
+                    call(Ctx, Key, Function, Args, Sleep * 2, InternalCallRetries - 1);
+                [{error, internal_call} | _] ->
+                    timer:sleep(Sleep),
+                    call(Ctx, Key, Function, Args, Sleep * 2, InternalCallRetries - 1);
+                Other -> Other
+            end;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
