@@ -139,6 +139,7 @@ get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
         ({error, {fetch_error, not_found}}, _) -> throw(not_found);
         ({error, {{fetch_error, not_found}, _Stacktrace}}, _) -> throw(not_found);
         ({error, Reason}, _) -> {error, Reason};
+        ({{error, Reason}, _Stacktrace}, _) -> {error, Reason};
         ({ok, Link}, {ok, Acc}) -> {ok, [Link | Acc]}
     end, {ok, []}, Results),
     case Result of
@@ -276,17 +277,21 @@ get_from_tree(LinkName, TreeId, #forest_it{
     ctx = Ctx, key = Key, masks_cache = MasksCache, batch = Batch
 }) ->
     Cache = maps:get(TreeId, MasksCache),
-    {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch, true),
-    case datastore_links_crud:get(LinkName, Tree) of
-        {{ok, Link}, Tree2} ->
-            datastore_links:terminate_tree(Tree2),
-            case is_deleted(Link, Cache) of
-                true -> {error, not_found};
-                false -> {ok, Link}
+    case datastore_links:init_tree(Ctx, Key, TreeId, Batch, true) of
+        {ok, Tree} ->
+            case datastore_links_crud:get(LinkName, Tree) of
+                {{ok, Link}, Tree2} ->
+                    datastore_links:terminate_tree(Tree2),
+                    case is_deleted(Link, Cache) of
+                        true -> {error, not_found};
+                        false -> {ok, Link}
+                    end;
+                {{error, Reason}, Tree2} ->
+                    datastore_links:terminate_tree(Tree2),
+                    {error, Reason}
             end;
-        {{error, Reason}, Tree2} ->
-            datastore_links:terminate_tree(Tree2),
-            {error, Reason}
+        Error ->
+            Error
     end.
 
 %%--------------------------------------------------------------------
@@ -433,19 +438,23 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
     Fun = fun(Name, {Target, Rev}, Acc) ->
         [#link{tree_id = TreeId, name = Name, target = Target, rev = Rev} | Acc]
     end,
-    {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch, true),
-    {Result, Tree3} = case bp_tree:fold(FoldInit, Fun, [], Tree) of
-        {{ok, {Links, NodeId}}, Tree2} ->
-            {{ok, #tree_it{
-                links = filter_deleted(lists:reverse(Links), Cache),
-                next_node_id = NodeId
-            }}, Tree2};
-        {{error, not_found}, Tree2} ->
-            {{ok, #tree_it{}}, Tree2};
-        {{error, Reason}, Tree2} ->
-            {{error, Reason}, Tree2}
-    end,
-    {Result, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree3)}}.
+    case datastore_links:init_tree(Ctx, Key, TreeId, Batch, true) of
+        {ok, Tree} ->
+            {Result, Tree3} = case bp_tree:fold(FoldInit, Fun, [], Tree) of
+                {{ok, {Links, NodeId}}, Tree2} ->
+                    {{ok, #tree_it{
+                        links = filter_deleted(lists:reverse(Links), Cache),
+                        next_node_id = NodeId
+                    }}, Tree2};
+                {{error, not_found}, Tree2} ->
+                    {{ok, #tree_it{}}, Tree2};
+                {{error, Reason}, Tree2} ->
+                    {{error, Reason}, Tree2}
+            end,
+            {Result, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree3)}};
+        Error ->
+            {Error, ForestIt}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
