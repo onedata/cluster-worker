@@ -236,7 +236,10 @@ modify_subscribers(Type, Id, UpdateFun) ->
 
 -spec modify_subscriptions(gs_protocol:session_id(), gs_session:diff()) -> ok.
 modify_subscriptions(SessionId, UpdateFun) ->
-    {ok, _} = gs_session:update(SessionId, fun(Session = #gs_session{subscriptions = Subs}) ->
+    Diff = fun(Session = #gs_session{subscriptions = Subs}) ->
         {ok, Session#gs_session{subscriptions = UpdateFun(Subs)}}
-    end),
-    ok.
+    end,
+    case gs_session:update(SessionId, Diff) of
+        {ok, _} -> ok;
+        {error, not_found} -> ok  % possible when session cleanup is in progress
+    end.
