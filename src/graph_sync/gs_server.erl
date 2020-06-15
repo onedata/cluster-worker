@@ -164,7 +164,7 @@ updated(EntityType, EntityId, VersionedEntity) ->
 push_updated(ReqGRI, VersionedEntity, {SessionId, {Auth, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
         {error, not_found} ->
-            % Possible when session cleanup is in progress
+            % possible when session cleanup is in progress
             PayloadCache;
         {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
             case ?GS_LOGIC_PLUGIN:is_authorized(Auth, AuthHint, ReqGRI, get, VersionedEntity) of
@@ -208,7 +208,7 @@ deleted(EntityType, EntityId) ->
                 fun({SessionId, _}) ->
                     case gs_persistence:get_session(SessionId) of
                         {error, not_found} ->
-                            % Possible when session cleanup is in progress
+                            % possible when session cleanup is in progress
                             ok;
                         {ok, #gs_session{conn_ref = ConnRef}} ->
                             gs_ws_handler:push(ConnRef, #gs_push{
