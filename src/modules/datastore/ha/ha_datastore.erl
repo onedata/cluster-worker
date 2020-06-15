@@ -56,7 +56,7 @@
 
 % Internal module types
 -type nodes_assigned_per_key() :: pos_integer().
--type memory_copy_acc() :: #{node() | undefined => [datastore_cache:cache_save_request()]}.
+-type memory_copy_acc() :: #{node() | local_key => [datastore_cache:cache_save_request()]}.
 
 -define(MEMORY_COPY_BATCH_SIZE, 200).
 
@@ -156,23 +156,11 @@ get_backup_nodes(Node) ->
 
 -spec is_master(node()) -> boolean().
 is_master(Node) ->
-    case consistent_hashing:get_nodes_assigned_per_label() of
-        1 -> % HA is disabled
-            false;
-        _ ->
-            [SlaveNode | _] = arrange_nodes(Node, consistent_hashing:get_all_nodes()),
-            SlaveNode =:= node()
-    end.
+    is_master_slave_pair(Node, node()).
 
 -spec is_slave(node()) -> boolean().
 is_slave(Node) ->
-    case consistent_hashing:get_nodes_assigned_per_label() of
-        1 -> % HA is disabled
-            false;
-        _ ->
-            [SlaveNode | _] = arrange_nodes(node(), consistent_hashing:get_all_nodes()),
-            SlaveNode =:= Node
-    end.
+    is_master_slave_pair(node(), Node).
 
 -spec clean_backup_nodes_cache() -> ok.
 clean_backup_nodes_cache() ->
@@ -328,7 +316,7 @@ copy_keys(Ring, DocsToCopy) ->
             Ctx = datastore_model_default:set_defaults(RoutingKey, BasicCtx),
             {Acc2, CopyNow} = case {qualify_by_key(RoutingKey, Ring), DocsToCopy} of
                 {{remote_key, Node}, remote} -> prepare_key_copy(Key, Doc, Ctx, Node, Acc);
-                {local_key, local} -> prepare_key_copy(Key, Doc, Ctx, undefined, Acc);
+                {local_key, local} -> prepare_key_copy(Key, Doc, Ctx, local_key, Acc);
                 _ -> {Acc, false}
             end,
             case CopyNow of
@@ -342,7 +330,7 @@ copy_keys(Ring, DocsToCopy) ->
             end
     end, #{}).
 
--spec prepare_key_copy(datastore:key(), datastore:doc(), datastore:ctx(), node() | undefined,
+-spec prepare_key_copy(datastore:key(), datastore:doc(), datastore:ctx(), node() | local_key,
     memory_copy_acc()) -> {memory_copy_acc(), Flush :: boolean()}.
 prepare_key_copy(Key, Doc, Ctx, Node, Acc) ->
     Ctx2 = Ctx#{mutator_pid => self()},
@@ -366,7 +354,7 @@ prepare_key_copy(Key, Doc, Ctx, Node, Acc) ->
 -spec copy_memory(memory_copy_acc()) -> ok | {error, term()}.
 copy_memory(ItemsMap) ->
     maps:fold(fun
-        (undefined, Items, ok) -> create_backup(Items);
+        (local_key, Items, ok) -> create_backup(Items);
         (Node, Items, ok) -> copy_memory(Node, Items);
         (_Node, _Items, Acc) -> Acc
     end, ok, ItemsMap).
@@ -398,3 +386,13 @@ create_backup(Items) ->
         (_, Acc) ->
             Acc
     end, ok, Items).
+
+-spec is_master_slave_pair(node(), node()) -> boolean().
+is_master_slave_pair(Master, SlaveToCheck) ->
+    case consistent_hashing:get_nodes_assigned_per_label() of
+        1 -> % HA is disabled
+            false;
+        _ ->
+            [SlaveNode | _] = arrange_nodes(Master, consistent_hashing:get_all_nodes()),
+            SlaveNode =:= SlaveToCheck
+    end.

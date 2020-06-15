@@ -49,7 +49,7 @@ get_ctx(Model) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns model context by calling model's 'get_ctx/0' function.
-%% Does not sets defaults.
+%% Does not set defaults.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_basic_ctx(model()) -> ctx().

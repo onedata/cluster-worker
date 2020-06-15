@@ -57,6 +57,8 @@
 
 -type state() :: #state{}.
 -type cluster_generation() :: non_neg_integer().
+-type node_status_notification_type() :: node_down | node_up | node_ready.
+-type node_status_change_handling_fun() :: fun(() -> ok).
 
 -export_type([cluster_generation/0]).
 
@@ -1362,6 +1364,8 @@ finish_restart() ->
     ?info("Node restart finished"),
     ok.
 
+-spec handle_node_status_change_async(node(), node_status_notification_type(),
+    node_status_change_handling_fun()) -> ok.
 handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
     ?info("Node ~p changed status to ~p - handling proc started", [Node, NewStatus]),
     spawn(fun() ->

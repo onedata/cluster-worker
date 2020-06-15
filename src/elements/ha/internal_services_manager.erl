@@ -136,29 +136,13 @@ do_healtcheck(ServiceName, MasterNodeID, LastInterval) ->
             {Service, Node} when Service =:= undefined orelse Node =/= node() ->
                 ignore;
             {Service, _} ->
-                case internal_service:apply_healthcheck_fun(Service, LastInterval) of
-                    {error, undefined_fun} ->
-                        ignore;
-                    {restart, NewInterval} ->
-                        % Check once more in case of race with migration
-                        case get_service_and_processing_node(ServiceName, MasterNodeID) of
-                            {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
-                                ignore;
-                            _ ->
-                                case internal_service:apply_start_fun(Service) of
-                                    ok ->
-                                        {ok, NewInterval};
-                                    abort ->
-                                        remove_service_from_doc(MasterNodeID, ServiceName),
-                                        ignore
-                                end
-                        end;
-                    {ok, NewInterval} ->
-                        {ok, NewInterval}
-                end
+                do_healtcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval)
         end
     catch
-        _:_ -> {ok, LastInterval} % Error can appear during restart and node switching
+        _:Reason ->
+            % Error can appear during restart and node switching
+            ?debug("Service healtcheck error ~p", [Reason]),
+            {ok, LastInterval}
     end.
 
 -spec get_processing_node(hashing_base()) -> node().
@@ -240,4 +224,28 @@ remove_service_from_doc(MasterNodeID, ServiceName) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, _} -> ok;
         {error, not_found} -> ok
+    end.
+
+-spec do_healtcheck_insecure(internal_service:service_name(), internal_service:service(), node_id(),
+    non_neg_integer()) -> {ok, NewInterval :: non_neg_integer()} | ignore.
+do_healtcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval) ->
+    case internal_service:apply_healthcheck_fun(Service, LastInterval) of
+        {error, undefined_fun} ->
+            ignore;
+        {restart, NewInterval} ->
+            % Check once more in case of race with migration
+            case get_service_and_processing_node(ServiceName, MasterNodeID) of
+                {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
+                    ignore;
+                _ ->
+                    case internal_service:apply_start_fun(Service) of
+                        ok ->
+                            {ok, NewInterval};
+                        abort ->
+                            remove_service_from_doc(MasterNodeID, ServiceName),
+                            ignore
+                    end
+            end;
+        {ok, NewInterval} ->
+            {ok, NewInterval}
     end.

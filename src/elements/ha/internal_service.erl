@@ -15,6 +15,7 @@
 -module(internal_service).
 -author("Michał Wrzeszcz").
 
+-include("global_definitions.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
@@ -58,11 +59,19 @@
     healthcheck_fun => service_fun_name(),
     healthcheck_fun_args => service_fun_args(),
     healthcheck_interval => non_neg_integer(),
-    allow_override => boolean(),
+    allow_override => boolean(), % allows overriding of existing service parameters (functions, arguments, etc.)
+                                 % if it is false (default), changes are ignored if service is already working
     async_start => boolean()
 }.
 
 -export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
+
+-define(HEALTHCHECK_DEFAULT_INTERVAL,
+    application:get_env(?CLUSTER_WORKER_APP_NAME, service_healthcheck_default_interval, 1000)).
+-define(INITIAL_SLEEP,
+    application:get_env(?CLUSTER_WORKER_APP_NAME, service_retry_initial_sleep, 100)).
+-define(RETRIES_NUM,
+    application:get_env(?CLUSTER_WORKER_APP_NAME, service_start_retries_num, 1000)).
 
 %%%===================================================================
 %%% API
@@ -92,7 +101,7 @@ new(Module, HashingBase, ServiceDescription) ->
     HealthcheckFunArgs = maps:get(healthcheck_fun_args, ServiceDescription, HealthcheckFunDefArgs),
     HealthcheckDefInterval = case HealthcheckFun of
         undefined -> 0;
-        _ -> 1000
+        _ -> ?HEALTHCHECK_DEFAULT_INTERVAL
     end,
     HealthcheckInterval = maps:get(healthcheck_interval, ServiceDescription, HealthcheckDefInterval),
 
@@ -152,14 +161,12 @@ get_healthcheck_interval(#internal_service{healthcheck_interval = DefaultInterva
 
 -spec apply_with_retry(module(), service_fun_name(), service_fun_args(), boolean()) -> term().
 apply_with_retry(Module, Fun, Args, Async) ->
-    InitialSleep = 100,
-    RetriesNum = 3,
     case Async of
         true ->
-            spawn(?MODULE, apply_with_retry, [Module, Fun, Args, InitialSleep, RetriesNum]),
+            spawn(?MODULE, apply_with_retry, [Module, Fun, Args, ?INITIAL_SLEEP, ?RETRIES_NUM]),
             ok;
         false ->
-            apply_with_retry(Module, Fun, Args, InitialSleep, RetriesNum)
+            apply_with_retry(Module, Fun, Args, ?INITIAL_SLEEP, ?RETRIES_NUM)
     end.
 
 -spec apply_with_retry(module(), service_fun_name(), service_fun_args(), non_neg_integer(), non_neg_integer()) -> term().

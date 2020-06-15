@@ -22,12 +22,11 @@
 -export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
--export([fold/3, fold/5, fold_keys/3]).
+-export([fold/3, fold/5, fold_keys/3, local_fold_all_nodes/3]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
 -export([fold_memory_keys/2]).
--export([get_fold_ctx_and_key/1]).
 %% for rpc
 -export([datastore_apply_all_subtrees/4]).
 
@@ -282,6 +281,22 @@ fold_keys(Ctx0 = #{fold_enabled := true}, Fun, Acc) ->
 fold_keys(Ctx = #{secure_fold_enabled := true}, Fun, Acc) ->
     fold(Ctx#{fold_enabled => true}, Fun, Acc);
 fold_keys(_Ctx, _Fun, _Acc) ->
+    {error, not_supported}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Performs fold on each node. Function is intended to work for models with
+%% local_fold set on true (nodes store separate lists of documents managed by them).
+%% @end
+%%--------------------------------------------------------------------
+-spec local_fold_all_nodes(ctx(), fold_fun(doc()), fold_acc()) -> {ok, fold_acc()} | {error, term()}.
+local_fold_all_nodes(Ctx = #{local_fold := true}, Fun, InitialAcc) ->
+    Nodes = consistent_hashing:get_all_nodes(),
+    lists:foldl(fun
+        (Node, {ok, Acc}) -> datastore_model:fold(Ctx#{fold_node => Node}, Fun, Acc);
+        (_Node, Error) -> Error
+    end, {ok, InitialAcc}, Nodes);
+local_fold_all_nodes(_Ctx, _Fun, _Acc) ->
     {error, not_supported}.
 
 %%--------------------------------------------------------------------
