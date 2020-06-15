@@ -17,8 +17,10 @@
 -include("exometer_utils.hrl").
 
 %% API
--export([route/2, process/3]).
+-export([route/2, execute_on_node/4]).
 -export([init_counters/0, init_report/0]).
+%% Internal RPC API
+-export([execute_on_local_node/4, process/3]).
 
 -type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
@@ -69,17 +71,11 @@ route(Function, Args) ->
     try
         case {Module, TryLocalRead} of
             {datastore_writer, _} ->
-                case rpc:call(Node, datastore_router, process, [Module, Function, Args2]) of
-                    {badrpc, Reason} -> {error, Reason};
-                    Result -> Result
-                end;
+                execute_on_node(Node, datastore_router, process, [Module, Function, Args2]);
             {_, true} ->
                 datastore_router:process(Module, Function, [Node | Args2]);
             _ ->
-                case rpc:call(Node, datastore_router, process, [Module, Function, [Node | Args2]]) of
-                    {badrpc, Reason} -> {error, Reason};
-                    Result -> Result
-                end
+                execute_on_node(Node, datastore_router, process, [Module, Function, [Node | Args2]])
         end
     catch
         _:Reason2 -> {error, Reason2}
@@ -100,6 +96,19 @@ process(Module, Function, Args = [#{model := Model} | _]) ->
         ok -> apply(Module, Function, Args);
         {error, Reason} -> {error, Reason}
     end.
+
+-spec execute_on_node(node(), module(), atom(), list()) -> term().
+execute_on_node(Node, Module, Fun, Args) ->
+    MasterPid = datastore_cache_writer:get_master_pid(),
+    case rpc:call(Node, datastore_router, execute_on_local_node, [Module, Fun, Args, MasterPid]) of
+        {badrpc, Reason} -> {error, Reason};
+        Result -> Result
+    end.
+
+-spec execute_on_local_node(module(), atom(), list(), pid() | undefined) -> term().
+execute_on_local_node(Module, Fun, Args, MasterPid) ->
+    datastore_cache_writer:save_master_pid(MasterPid),
+    apply(Module, Fun, Args).
 
 %%%===================================================================
 %%% Internal functions
