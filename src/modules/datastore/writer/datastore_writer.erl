@@ -59,6 +59,10 @@
 -type tp_key() :: datastore:key() | non_neg_integer()
     | {doc | links, datastore:key()}.
 
+% NOTE: Do not use environment variables as it affects performance too much
+-define(INTERRUPTED_CALL_INITIAL_SLEEP, 100).
+-define(INTERRUPTED_CALL_RETRIES, 5).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -196,12 +200,12 @@ fetch_links_trees(Ctx, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv call(Ctx, Key, Function, Args, 100, 5)
+%% @equiv call(Ctx, Key, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES)
 %% @end
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), atom(), list()) -> term().
 call(Ctx, Key, Function, Args) ->
-    call(Ctx, Key, Function, Args, 100, 5).
+    call(Ctx, Key, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES).
 
 %%--------------------------------------------------------------------
 %% @doc
