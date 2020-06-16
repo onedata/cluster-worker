@@ -13,7 +13,7 @@
 -author("Krzysztof Trzepla").
 
 %% API
--export([init/0, get_models/0, get_throttled_models/0]).
+-export([init/0, get_models/0, get_throttled_models/0, get_timestamp/0]).
 
 -type model() :: datastore_model:model().
 
@@ -29,7 +29,10 @@
     gs_session,
     gs_subscription,
     traverse_task,
-    traverse_tasks_scheduler
+    traverse_tasks_scheduler,
+    view_traverse_job,
+    % Model used for performance testing (mocked models cannot be used as they affect performance)
+    performance_test_record
 ]).
 
 -define(PLUGIN, datastore_config_plugin).
@@ -65,6 +68,18 @@ get_models() ->
 -spec get_throttled_models() -> [model()].
 get_throttled_models() ->
     apply_plugin(get_throttled_models, [], []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns timestamp to be used to tag document.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_timestamp() -> datastore_doc:timestamp().
+get_timestamp() ->
+    case erlang:function_exported(?PLUGIN, get_timestamp, 0) of
+        true -> erlang:apply(?PLUGIN, get_timestamp, []);
+        false -> time_utils:system_time_seconds()
+    end.
 
 %%%===================================================================
 %%% Internal functions

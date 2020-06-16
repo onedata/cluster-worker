@@ -260,6 +260,7 @@ allocate_seq(Connection, CountByScope) ->
 -spec assign_seq(#{datastore_doc:scope() => [pos_integer()]},
     [save_request()]) -> {save_requests_map(), [save_response()]}.
 assign_seq(SeqsByScope, Requests) ->
+    Timestamp = datastore_config:get_timestamp(),
     {_, SaveRequests2, SaveResponses2} = lists:foldl(fun
         (
             {Ctx = #{no_seq := true}, Key, Doc = #document{}},
@@ -276,7 +277,7 @@ assign_seq(SeqsByScope, Requests) ->
         ) ->
             case maps:get(Scope, SeqsByScope2) of
                 {ok, [Seq | Seqs]} ->
-                    Doc2 = Doc#document{seq = Seq},
+                    Doc2 = Doc#document{seq = Seq, timestamp = Timestamp},
                     {
                         maps:put(Scope, {ok, Seqs}, SeqsByScope2),
                         maps:put(Key, {Ctx, {ok, 0, Doc2}}, SaveRequests),

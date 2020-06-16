@@ -64,7 +64,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
--export([responsible_node/1, responsible_nodes/2]).
+-export([responsible_node/1, get_chash_seed/1]).
 
 %%%===================================================================
 %%% API
@@ -161,19 +161,19 @@ adjacent_from_digest(DigestComponents, Original) when size(Original) > 0 ->
 -spec responsible_node(key()) -> node().
 responsible_node(Key) ->
     CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_node(CHashSeed).
+    consistent_hashing:get_assigned_node(CHashSeed).
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns a list of nodes of requested length responsible for handling
-%% given datastore key.
-%% @end
-%%--------------------------------------------------------------------
--spec responsible_nodes(key(), pos_integer()) -> [node()].
-responsible_nodes(Key, NodesCount) ->
-    CHashSeed = get_chash_seed(Key),
-    consistent_hashing:get_nodes(CHashSeed, NodesCount).
+-spec get_chash_seed(key()) -> key() | chash_label().
+get_chash_seed(Key) ->
+    case to_basic_key_and_chash_label(Key) of
+        {BasicKey, undefined} ->
+            % Legacy key - use the whole key for routing
+            BasicKey;
+        {_, CHashLabel} ->
+            % Key with a chash label - use the label for routing
+            CHashLabel
+    end.
 
 %% ====================================================================
 %% Internal functions
@@ -223,17 +223,4 @@ to_basic_key_and_chash_label(Key) ->
             {BasicKey, CHashLabel};
         _ ->
             {Key, undefined}
-    end.
-
-
-%% @private
--spec get_chash_seed(key()) -> key() | chash_label().
-get_chash_seed(Key) ->
-    case to_basic_key_and_chash_label(Key) of
-        {BasicKey, undefined} ->
-            % Legacy key - use the whole key for routing
-            BasicKey;
-        {_, CHashLabel} ->
-            % Key with a chash label - use the label for routing
-            CHashLabel
     end.

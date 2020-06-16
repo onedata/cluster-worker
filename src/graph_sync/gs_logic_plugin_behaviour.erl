@@ -20,8 +20,8 @@
 %% If error is returned, the handshake is denied.
 %% @end
 %%--------------------------------------------------------------------
--callback verify_handshake_auth(gs_protocol:client_auth()) ->
-    {ok, aai:auth()} | gs_protocol:error().
+-callback verify_handshake_auth(gs_protocol:client_auth(), ip_utils:ip()) ->
+    {ok, aai:auth()} | errors:error().
 
 
 %%--------------------------------------------------------------------
@@ -49,7 +49,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback verify_auth_override(aai:auth(), gs_protocol:auth_override()) ->
-    {ok, aai:auth()} | gs_protocol:error().
+    {ok, aai:auth()} | errors:error().
 
 
 %%--------------------------------------------------------------------
@@ -60,8 +60,8 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback is_authorized(aai:auth(), gs_protocol:auth_hint(),
-    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:versioned_entity()) ->
-    {true, gs_protocol:gri()} | false.
+    gri:gri(), gs_protocol:operation(), gs_protocol:versioned_entity()) ->
+    {true, gri:gri()} | false.
 
 
 %%--------------------------------------------------------------------
@@ -80,14 +80,22 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback handle_graph_request(aai:auth(), gs_protocol:auth_hint(),
-    gs_protocol:gri(), gs_protocol:operation(), gs_protocol:data(),
+    gri:gri(), gs_protocol:operation(), gs_protocol:data(),
     gs_protocol:versioned_entity()) -> gs_protocol:graph_request_result().
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns if given GRI is subscribable, i.e. clients can subscribe for changes
-%% concerning that GRI.
+%% Returns whether given GRI is subscribable, i.e. clients can subscribe for
+%% changes concerning that GRI.
 %% @end
 %%--------------------------------------------------------------------
--callback is_subscribable(gs_protocol:gri()) -> boolean().
+-callback is_subscribable(gri:gri()) -> boolean().
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns whether entity type in given GRI is supported by the server.
+%% @end
+%%--------------------------------------------------------------------
+-callback is_type_supported(gri:gri()) -> boolean().

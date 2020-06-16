@@ -147,5 +147,5 @@ get_record_struct(1) ->
     {record, [
         {model, atom},
         {key, string},
-        {node, {custom, {?MODULE, encode, decode}}}
+        {node, {custom, json, {?MODULE, encode, decode}}}
     ]}.

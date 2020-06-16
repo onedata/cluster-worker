@@ -15,6 +15,7 @@
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/assertions.hrl").
 -include_lib("ctool/include/test/performance.hrl").
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 
 %% export for ct
 -export([all/0]).
@@ -39,24 +40,29 @@ test_hashing(Config) ->
 
     % Check label mapping to a single node
     NodesChosenForLabels = lists:map(fun(Label) ->
-        Node = rpc:call(FirstNode, consistent_hashing, get_node, [Label]),
+        Node = rpc:call(FirstNode, consistent_hashing, get_assigned_node, [Label]),
         % The same label should yield the same node
-        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_node, [Label])),
+        ?assertEqual(Node, rpc:call(FirstNode, consistent_hashing, get_assigned_node, [Label])),
         ?assert(erlang:is_atom(Node)),
         ?assert(lists:member(Node, AllNodes)),
         Node
     end, Labels),
 
-    % Check label mapping to multiple nodes
+    % Check label mapping to with get_routing_info
     lists:foreach(fun(Label) ->
         lists:foreach(fun(NodesCount) ->
-            Nodes = rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount]),
+            rpc:call(FirstNode, consistent_hashing, set_nodes_assigned_per_label, [NodesCount]),
+            #node_routing_info{assigned_nodes = AssignedNodes, failed_nodes = Failed, all_nodes = All} = Nodes =
+                rpc:call(FirstNode, consistent_hashing, get_routing_info, [Label]),
             % The same label should yield the same nodes
-            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_nodes, [Label, NodesCount])),
+            ?assertEqual(Nodes, rpc:call(FirstNode, consistent_hashing, get_routing_info, [Label])),
+            % TODO - uncomment after VFS-6209
+%%            ?assertEqual(NodesCount, length(Associated)),
+            ?assertEqual(lists:sort(AllNodes), All),
             lists:foreach(fun(Node) ->
                 ?assert(erlang:is_atom(Node)),
                 ?assert(lists:member(Node, AllNodes))
-            end, Nodes)
+            end, AssignedNodes ++ Failed)
         end, lists:seq(1, length(AllNodes)))
     end, Labels),
 

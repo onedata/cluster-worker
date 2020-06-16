@@ -124,9 +124,9 @@ all() ->
 -define(VIEW_FUNCTION(Key), <<"function (doc, meta) {\r\n"
                               "  emit(", Key/binary, ", null);\r\n"
                               "}\r\n">>).
--define(DESIGN_EJSON(ViewFuntion), {[{<<"views">>,
+-define(DESIGN_EJSON(ViewFunction), {[{<<"views">>,
     {[{?VIEW,
-        {[{<<"map">>, ViewFuntion}]}
+        {[{<<"map">>, ViewFunction}]}
     }]}
 }]}).
 -define(DESIGN_EJSON, ?DESIGN_EJSON(?VIEW_FUNCTION)).
@@ -330,6 +330,7 @@ cberl_test_base(Config) ->
     end, [], maps:to_list(FinalAns)).
 
 save_should_return_doc(Config) ->
+    Timestamp = datastore_config:get_timestamp(),
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     {ok, _, Doc} = ?assertMatch({ok, _, #document{}},
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC])
@@ -338,6 +339,8 @@ save_should_return_doc(Config) ->
     ?assertEqual(?VALUE, Doc#document.value),
     ?assertEqual(?SCOPE, Doc#document.scope),
     ?assertEqual(1, Doc#document.seq),
+    ?assert(is_integer(Doc#document.timestamp)),
+    ?assert(Doc#document.timestamp >= Timestamp),
     ?assertEqual(false, Doc#document.deleted),
     ?assertEqual(1, Doc#document.version).
 
@@ -354,6 +357,7 @@ save_should_not_increment_seq_counter(Config) ->
         save, [?CTX#{no_seq => true}, ?KEY, ?DOC]
     )),
     ?assertEqual(null, Doc#document.seq),
+    ?assertEqual(null, Doc#document.timestamp),
     ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver,
         get_counter, [?CTX, couchbase_changes:get_seq_key(?SCOPE)]
     )).
@@ -571,7 +575,7 @@ query_view_should_return_empty_result(Config) ->
     rpc:call(Worker, couchbase_driver, save_design_doc,
         [?CTX, ?DESIGN, ?DESIGN_EJSON]
     ),
-    ?assertMatch({ok, {[]}},
+    ?assertMatch({ok, #{<<"rows">> := []}},
         rpc:call(Worker, couchbase_driver, query_view,
             [?CTX, ?DESIGN, ?VIEW, [{stale, false}, {key, ?KEY}]]
         )
@@ -583,16 +587,16 @@ query_view_should_return_result(Config) ->
         [?CTX, ?DESIGN, ?DESIGN_EJSON]
     ),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
-    {ok, {[Result]}} = ?assertMatch({ok, {[_]}},
+    {ok, #{<<"rows">> := [Row]}} = ?assertMatch({ok, #{<<"rows">> := [_]}},
         rpc:call(Worker, couchbase_driver, query_view,
             [?CTX, ?DESIGN, ?VIEW, [
                 {stale, false}, {key, ?KEY}
             ]]
         )
     ),
-    ?assertEqual(?KEY, proplists:get_value(<<"id">>, Result)),
-    ?assertEqual(?KEY, proplists:get_value(<<"key">>, Result)),
-    ?assertEqual(null, proplists:get_value(<<"value">>, Result)).
+    ?assertEqual(?KEY, maps:get(<<"id">>, Row)),
+    ?assertEqual(?KEY, maps:get(<<"key">>, Row)),
+    ?assertEqual(null, maps:get(<<"value">>, Row)).
 
 query_view_should_return_result_with_integer_key(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -600,7 +604,7 @@ query_view_should_return_result_with_integer_key(Config) ->
         [?CTX, ?DESIGN, ?DESIGN_EJSON(?VIEW_FUNCTION(<<"1">>))]
     ),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
-    {ok, {[_|_]}} = ?assertMatch({ok, {[_|_]}},
+    ?assertMatch({ok, #{<<"rows">> := [_|_]}},
         rpc:call(Worker, couchbase_driver, query_view,
             [?CTX, ?DESIGN, ?VIEW, [
                 {stale, false}, {key, 1}
@@ -614,7 +618,7 @@ query_view_should_return_result_with_string_key(Config) ->
         [?CTX, ?DESIGN, ?DESIGN_EJSON(?VIEW_FUNCTION(<<"'1'">>))]
     ),
     rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY, ?DOC]),
-    {ok, {[_|_]}} = ?assertMatch({ok, {[_|_]}},
+    ?assertMatch({ok, #{<<"rows">> := [_|_]}},
         rpc:call(Worker, couchbase_driver, query_view,
             [?CTX, ?DESIGN, ?VIEW, [
                 {stale, false}, {key, <<"1">>}

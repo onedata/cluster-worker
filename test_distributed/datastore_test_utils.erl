@@ -16,7 +16,7 @@
 -include("global_definitions.hrl").
 
 %% API
--export([init_suite/1, init_suite/2, init_suite/3]).
+-export([init_suite/1, init_suite/2, init_suite/3, init_suite/4]).
 -export([init_models/1, init_models/2]).
 -export([get_memory_driver/1, get_disc_driver/1]).
 
@@ -35,13 +35,16 @@ init_suite(Models, Config) ->
     init_suite(Models, Config, fun(Config2) -> Config2 end).
 
 init_suite(Models, Config, Fun) ->
+    init_suite(Models, Config, Fun, [datastore_test_utils]).
+
+init_suite(Models, Config, Fun, LoadModules) ->
     PostHook = fun(Config2) ->
         Workers = ?config(cluster_worker_nodes, Config2),
         datastore_test_utils:init_models(Workers, Models),
         Fun(Config2)
     end,
     [
-        {?LOAD_MODULES, [datastore_test_utils]},
+        {?LOAD_MODULES, LoadModules},
         {?ENV_UP_POSTHOOK, PostHook}
         | Config
     ].

@@ -226,7 +226,7 @@ fetch_changes(#state{
     ]),
 
     case QueryAns of
-        {ok, {Changes}} ->
+        {ok, #{<<"rows">> := Changes}} ->
             State2 = #state{
                 seq_safe = SeqSafe3
             } = process_changes(SeqSafe2, Seq2 + 1, Changes, State, []),
@@ -272,12 +272,12 @@ process_changes(SeqSafe, Seq, [], State, WorkersChecked) ->
             State
     end;
 process_changes(SeqSafe, Seq, [Change | _] = Changes, State, WorkersChecked) ->
-    case lists:keyfind(<<"key">>, 1, Change) of
-        {<<"key">>, [_, SeqSafe]} ->
+    case maps:get(<<"key">>, Change) of
+        [_, SeqSafe] ->
             process_changes(SeqSafe + 1, Seq, tl(Changes), State#state{
                 seq_safe = SeqSafe
             }, WorkersChecked);
-        {<<"key">>, [_, _]} ->
+        [_, _] ->
             case ignore_change(SeqSafe, State, WorkersChecked, true) of
                 {true, WorkersChecked2} ->
                     process_changes(SeqSafe + 1, Seq, Changes, State#state{

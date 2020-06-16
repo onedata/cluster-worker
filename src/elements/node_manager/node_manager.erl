@@ -46,7 +46,7 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_nodes/0, get_cluster_ips/0]).
+-export([get_cluster_status/0, get_cluster_status/1, get_cluster_nodes/0, get_cluster_ips/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -59,10 +59,11 @@
 
 -export_type([cluster_generation/0]).
 
--define(EXOMETER_COUNTERS,
-            [processes_num, memory_erlang, memory_node, cpu_node]).
+-define(EXOMETER_COUNTERS, [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
+
+-define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
 
@@ -98,11 +99,11 @@ init_report() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% List of modules provided by cluster-worker.
-%% Use in plugins when specifying modules_with_args.
+%% Use in plugins when specifying custom_workers.
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
-    | {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
+| {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
@@ -113,7 +114,7 @@ cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 -spec modules() -> Models :: [atom()].
 modules() ->
     DefaultWorkers = cluster_worker_modules(),
-    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    CustomWorkers = ?CALL_PLUGIN(custom_workers, []),
     lists:map(fun
         ({Module, _}) -> Module;
         ({singleton, Module, _}) -> Module;
@@ -127,7 +128,7 @@ modules() ->
 %%--------------------------------------------------------------------
 -spec listeners() -> Listeners :: [atom()].
 listeners() ->
-    plugins:apply(node_manager_plugin, listeners, []).
+    ?CALL_PLUGIN(listeners, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -315,7 +316,7 @@ init([]) ->
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
 
         ?info("Running 'before_init' procedures."),
-        ok = plugins:apply(node_manager_plugin, before_init, [[]]),
+        ok = ?CALL_PLUGIN(before_init, [[]]),
 
         ?info("Plugin initialised"),
 
@@ -348,7 +349,8 @@ init([]) ->
 
         {ok, #state{
             cm_con_status = not_connected,
-            monitoring_state = MonitoringState}}
+            monitoring_state = MonitoringState
+        }}
     catch
         _:Error ->
             ?error_stacktrace("Cannot start node_manager: ~p", [Error]),
@@ -397,8 +399,8 @@ handle_call(enable_throttling, _From, State) ->
 handle_call({apply, M, F, A}, _From, State) ->
     {reply, apply(M, F, A), State};
 
-handle_call(_Request, _From, State) ->
-    plugins:apply(node_manager_plugin, handle_call, [_Request, _From, State]).
+handle_call(Request, From, State) ->
+    ?CALL_PLUGIN(handle_call, [Request, From, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -453,7 +455,7 @@ handle_cast(check_memory, State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
     erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
     spawn(fun() ->
-        plugins:apply(node_manager_plugin, clear_memory, [false])
+        ?CALL_PLUGIN(clear_memory, [false])
     end),
     {noreply, State};
 
@@ -513,8 +515,8 @@ handle_cast({force_stop, ReasonMsg}, State) ->
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-handle_cast(_Request, State) ->
-    plugins:apply(node_manager_plugin, handle_cast, [_Request, State]).
+handle_cast(Request, State) ->
+    ?CALL_PLUGIN(handle_cast, [Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -534,7 +536,7 @@ handle_info({timer, Msg}, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
-    {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+    {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
     case lists:member(Node, CMNodes) of
         false ->
             ?warning("Node manager received unexpected nodedown msg: ~p",
@@ -549,7 +551,7 @@ handle_info({nodedown, Node}, State) ->
     {noreply, State};
 
 handle_info(Request, State) ->
-    plugins:apply(node_manager_plugin, handle_info, [Request, State]).
+    ?CALL_PLUGIN(handle_info, [Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -579,7 +581,7 @@ terminate(Reason, State) ->
     end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
-    plugins:apply(node_manager_plugin, terminate, [Reason, State]).
+    ?CALL_PLUGIN(terminate, [Reason, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -592,7 +594,7 @@ terminate(Reason, State) ->
     OldVsn :: Vsn | {down, Vsn},
     Vsn :: term().
 code_change(OldVsn, State, Extra) ->
-    plugins:apply(node_manager_plugin, code_change, [OldVsn, State, Extra]).
+    ?CALL_PLUGIN(code_change, [OldVsn, State, Extra]).
 
 %%%===================================================================
 %%% Internal functions
@@ -619,7 +621,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
             ?debug("Workers supervisor not started, retrying in ~p ms", [Interval]),
             State#state{cm_con_status = not_connected};
         _ ->
-            {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+            {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
             case (catch init_net_connection(CMNodes)) of
                 ok ->
                     ?info("Initializing connection to cluster manager"),
@@ -648,20 +650,26 @@ cluster_init_step(start_default_workers) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(start_custom_workers) ->
-    ?info("Starting custom workers..."),
-    Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
+cluster_init_step(start_upgrade_essential_workers) ->
+    ?info("Starting workers essential for upgrade..."),
+    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
+    init_workers(WorkersToStart),
+    ?info("Workers essential for upgrade started successfully"),
     ok;
 cluster_init_step(upgrade_cluster) ->
-    case node() == consistent_hashing:get_node(upgrade_cluster) of
+    case node() == consistent_hashing:get_assigned_node(upgrade_cluster) of
         true ->
             upgrade_cluster(),
             ok;
         false ->
             ok
     end;
+cluster_init_step(start_custom_workers) ->
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+    ok;
 cluster_init_step(start_listeners) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
@@ -671,9 +679,9 @@ cluster_init_step(start_listeners) ->
     ?info("All listeners started"),
     ok;
 cluster_init_step(ready) ->
-    ?info("All nodes initialized. Running 'after_init' procedures."),
+    ?info("All nodes initialized. Running 'on_cluster_ready' procedures."),
     spawn(fun() ->
-        ok = plugins:apply(node_manager_plugin, after_init, [[]]),
+        ok = ?CALL_PLUGIN(on_cluster_ready, []),
         gen_server2:cast(?NODE_MANAGER_NAME, node_initialized)
     end),
     ok.
@@ -692,8 +700,8 @@ upgrade_cluster() ->
             ?error("Error when retrieving current cluster generation: ~p", [Error]),
             throw(Error);
         {ok, CurrentGen} ->
-            InstalledGen = plugins:apply(node_manager_plugin, installed_cluster_generation, []),
-            OldestKnownGen = plugins:apply(node_manager_plugin, oldest_known_cluster_generation, []),
+            InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
+            OldestKnownGen = ?CALL_PLUGIN(oldest_known_cluster_generation, []),
             upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
     end.
 
@@ -707,7 +715,7 @@ upgrade_cluster(CurrentGen, _InstalledGen, {OldestKnownGen, ReadableVersion}) wh
 
 upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < InstalledGen ->
     ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGen, InstalledGen]),
-    {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGen]),
+    {ok, NewGeneration} = ?CALL_PLUGIN(upgrade_cluster, [CurrentGen]),
     case NewGeneration > InstalledGen of
         true ->
             ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
@@ -761,7 +769,6 @@ do_heartbeat(#state{cm_con_status = connected, monitoring_state = MonState, last
     NewMonState = monitoring:update(MonState),
     NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
-    ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     {NewMonState, NewLSA};
 
@@ -819,7 +826,7 @@ init_net_connection([Node | Nodes]) ->
 -spec init_workers() -> ok.
 init_workers() ->
     DefaultWorkers = cluster_worker_modules(),
-    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    CustomWorkers = ?CALL_PLUGIN(custom_workers, []),
     init_workers(DefaultWorkers ++ CustomWorkers).
 
 
@@ -844,13 +851,13 @@ init_workers(Workers) ->
             end;
         ({Module, Args, Options}) ->
             case proplists:get_value(prehook, Options) of
-              undefined -> ok;
-              Prehook -> ok = apply(Module, Prehook, [])
+                undefined -> ok;
+                Prehook -> ok = apply(Module, Prehook, [])
             end,
             ok = start_worker(Module, Args, Options),
             case proplists:get_value(posthook, Options) of
-              undefined -> ok;
-              Posthook -> ok = apply(Module, Posthook, [])
+                undefined -> ok;
+                Posthook -> ok = apply(Module, Posthook, [])
             end
     end, Workers),
     ok.
@@ -1189,6 +1196,23 @@ get_ip_address() ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Fetches cluster status from cluster manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_cluster_status() ->
+    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
+get_cluster_status() ->
+    get_cluster_status(infinity).
+
+
+-spec get_cluster_status(Timeout :: non_neg_integer() | infinity) ->
+    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
+get_cluster_status(Timeout) ->
+    gen_server2:call({global, ?CLUSTER_MANAGER}, cluster_status, Timeout).
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Fetches cluster nodes from cluster manager.
 %% @end
 %%--------------------------------------------------------------------
@@ -1221,7 +1245,7 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> {ok, plugins:apply(node_manager_plugin, installed_cluster_generation, [])};
+        {error, not_found} -> {ok, ?CALL_PLUGIN(installed_cluster_generation, [])};
         {error, _} = Error -> Error
     end.
 
@@ -1234,6 +1258,6 @@ get_current_cluster_generation() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec report_step_finished(cluster_manager_server:cluster_init_step()
-    | cluster_init_step_failure) -> ok.
+| cluster_init_step_failure) -> ok.
 report_step_finished(Msg) ->
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {Msg, node()}).

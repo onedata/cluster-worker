@@ -31,7 +31,9 @@
 ]).
 
 -define(MODEL_VALUE(Model), ?MODEL_VALUE(Model, 1)).
--define(MODEL_VALUE(Model, N), {Model, N, integer_to_binary(N), 'field'}).
+-define(MODEL_VALUE(Model, N), ?MODEL_VALUE(Model, N, 'field')).
+-define(MODEL_VALUE(Model, N, Field3), ?MODEL_VALUE(Model, N, integer_to_binary(N), Field3)).
+-define(MODEL_VALUE(Model, Field1, Field2, Field3), {Model, Field1, Field2, Field3}).
 
 -define(MEM_DRV, ets_driver).
 -define(MEM_DRV(Model), datastore_test_utils:get_memory_driver(Model)).

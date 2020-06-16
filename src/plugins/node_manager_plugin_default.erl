@@ -18,9 +18,11 @@
 -export([installed_cluster_generation/0]).
 -export([oldest_known_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
--export([renamed_models/0, listeners/0, modules_with_args/0]).
--export([before_init/1, after_init/1]).
+-export([renamed_models/0, listeners/0]).
+-export([before_init/1]).
+-export([upgrade_essential_workers/0, custom_workers/0]).
 -export([upgrade_cluster/1]).
+-export([on_cluster_ready/0]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
@@ -101,12 +103,21 @@ listeners() -> [
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of modules with configs to be loaded by node_manager.
+%% List of workers modules with configs that should be started before upgrade.
 %% @end
 %%--------------------------------------------------------------------
--spec modules_with_args() -> [{module(), list()}
+-spec upgrade_essential_workers() -> [{module(), list()}
     | {module(), list(), [atom()]} | {singleton, module(), list()}].
-modules_with_args() -> [].
+upgrade_essential_workers() -> [].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of workers modules with configs to be loaded by node_manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec custom_workers() -> [{module(), list()}
+    | {module(), list(), [atom()]} | {singleton, module(), list()}].
+custom_workers() -> [].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -129,8 +140,8 @@ before_init([]) ->
 %% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec after_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
-after_init([]) ->
+-spec on_cluster_ready() -> Result :: ok | {error, Reason :: term()}.
+on_cluster_ready() ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -139,7 +150,8 @@ after_init([]) ->
 %% This callback is executed only on one cluster node.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_cluster(integer()) -> {ok, integer()}.
+-spec upgrade_cluster(node_manager:cluster_generation()) ->
+    {ok, node_manager:cluster_generation()}.
 upgrade_cluster(CurrentGeneration) ->
     {ok, CurrentGeneration + 1}.
 
