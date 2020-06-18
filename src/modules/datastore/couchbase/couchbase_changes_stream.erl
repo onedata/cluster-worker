@@ -243,7 +243,8 @@ get_changes(Since, Until, #state{} = State) ->
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Until2]},
-                    {inclusive_end, false}
+                    {inclusive_end, false},
+                    {stale, false}
                 ]
             ),
 
