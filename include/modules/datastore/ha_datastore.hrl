@@ -34,6 +34,11 @@
 %%% in propagation of information that master is working again). In such a case, slave process redirects request to
 %%% master that will handle it and answer directly to calling process. For such redirection, datastore_internal_request
 %%% is used - no new message in HA protocol is needed.
+%%%
+%%% HA is used during cluster reorganization (permanent node adding/deleting). In such a case reorganization status
+%%% is set and keys migration is initialized. All tp processes remember operations on keys that will belong to other
+%%% nodes after reorganization and new masters for such keys use failover mechanism (mechanism used when any node fails)
+%%% to takeover such keys. Standby mode is restored after migration.
 %%% @end
 %%%-------------------------------------------------------------------------------------------------------------
 
@@ -119,7 +124,7 @@
 % Slave failover status is used to inform master if it is handling any master's keys
 -record(slave_failover_status, {
     is_handling_requests :: boolean(),
-    ending_cache_requests :: ha_datastore_slave:cache_requests_map(),
+    pending_cache_requests :: ha_datastore_slave:cache_requests_map(),
     finished_memory_cache_requests :: [datastore_cache:cache_save_request()],
     requests_to_handle :: datastore_writer:requests_internal()
 }).
@@ -134,11 +139,21 @@
 % (processes get configuration during initialization and cache it)
 -define(CONFIG_CHANGED, config_changed).
 
+% Message sent to inform process that cluster reorganization (node adding/deleting) has started
+-define(CLUSTER_REORGANIZATION_STARTED, cluster_reorganization_started).
+% Internal datastore message for reorganization handling
+-record(cluster_reorganization_started, {
+    caller_pid :: pid(),
+    message_ref :: reference() % reference used to answer to caller
+}).
+
 %%%=============================================================================================================
-%%% Propagation method and slave mode names.
+%%% Propagation methods, slave mode and failover actions names.
 %%% Propagation method determines whether backup data is sent using gen_server call or cast.
 %%% Mode determines whether slave process only backups data (stores backup data until it is flushed to couchbase or
 %%% deleted) or handles requests when master is down.
+%%% Failover actions are used as values of field `finished_action` in #failover_request_data_processed message
+%%% to describe activity that triggered sending message.
 %%%=============================================================================================================
 
 % Propagation methods
@@ -147,5 +162,15 @@
 % Slave modes
 -define(STANDBY_SLAVE_MODE, standby). % process only backup data
 -define(FAILOVER_SLAVE_MODE, failover). % handle requests that should be handled by master (master is down)
+-define(CLUSTER_REORGANIZATION_SLAVE_MODE, cluster_reorganization). % special requests handling mode to prepare
+                                                                    % permanent new master migration to other node
+% Failover actions
+% Note: Reorganization uses failover handling methods as node deletion/adding handling by tp process
+% is similar to node failure/recovery handling by this process
+-define(REQUEST_HANDLING_ACTION, request_handling).
+-define(KEY_FLUSHING_ACTION, keys_flushing).
+-record(preparing_reorganization, {
+    node :: node()
+}).
 
 -endif.

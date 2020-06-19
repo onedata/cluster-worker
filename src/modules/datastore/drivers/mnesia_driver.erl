@@ -17,6 +17,7 @@
 %% API
 -export([init/2]).
 -export([save/3, get/2, delete/2]).
+-export([fold/3]).
 
 -type table() :: atom().
 -type ctx() :: #{table => table()}.
@@ -94,4 +95,17 @@ delete(#{table := Table}, Key) ->
         ok
     catch
         _:{aborted, Reason} -> {error, {Reason, erlang:get_stacktrace()}}
+    end.
+
+-spec fold(ctx(), datastore_model:driver_fold_fun(), term()) -> {ok | stop, term()}.
+fold(#{table := Table}, Fun, Acc0) ->
+    try
+        mnesia:async_dirty(fun() ->
+            mnesia:foldl(fun
+                (#entry{key = Key, value = Doc}, {ok, Acc}) -> Fun(Key, Doc, Acc);
+                (_, {stop, Acc}) -> {stop, Acc}
+            end, {ok, Acc0}, Table)
+        end)
+    catch
+        _:Reason -> {error, {Reason, erlang:get_stacktrace()}}
     end.

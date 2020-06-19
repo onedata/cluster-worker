@@ -35,6 +35,7 @@
 
 %% API
 -export([handshake/4]).
+-export([report_heartbeat/1]).
 -export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
@@ -97,6 +98,20 @@ handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = R
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Called by the connection process on every heartbeat received from the client.
+%% @end
+%%--------------------------------------------------------------------
+-spec report_heartbeat(gs_protocol:session_id()) -> ok.
+report_heartbeat(SessionId) ->
+    {ok, #gs_session{
+        auth = Auth, conn_ref = ConnRef
+    }} = gs_persistence:get_session(SessionId),
+    ?GS_LOGIC_PLUGIN:client_heartbeat(Auth, ConnRef),
+    ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Cleans up all data related to given session, including its subscriptions.
 %% @end
 %%--------------------------------------------------------------------
@@ -149,7 +164,7 @@ updated(EntityType, EntityId, VersionedEntity) ->
 push_updated(ReqGRI, VersionedEntity, {SessionId, {Auth, AuthHint}}, PayloadCache) ->
     case gs_persistence:get_session(SessionId) of
         {error, not_found} ->
-            % Possible when session cleanup is in progress
+            % possible when session cleanup is in progress
             PayloadCache;
         {ok, #gs_session{protocol_version = ProtoVer, conn_ref = ConnRef, translator = Translator}} ->
             case ?GS_LOGIC_PLUGIN:is_authorized(Auth, AuthHint, ReqGRI, get, VersionedEntity) of
@@ -193,7 +208,7 @@ deleted(EntityType, EntityId) ->
                 fun({SessionId, _}) ->
                     case gs_persistence:get_session(SessionId) of
                         {error, not_found} ->
-                            % Possible when session cleanup is in progress
+                            % possible when session cleanup is in progress
                             ok;
                         {ok, #gs_session{conn_ref = ConnRef}} ->
                             gs_ws_handler:push(ConnRef, #gs_push{

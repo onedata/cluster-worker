@@ -36,6 +36,8 @@
     delete_should_ignore_missing_value/1,
     delete_should_mark_value_deleted/1,
     fold_should_return_all_values/1,
+    secure_fold_should_return_empty_list/1,
+    secure_fold_should_return_not_empty_list/1,
     fold_should_return_all_values2/1,
     fold_keys_should_return_all_keys/1,
     add_links_should_succeed/1,
@@ -86,6 +88,8 @@ all() ->
         delete_should_ignore_missing_value,
         delete_should_mark_value_deleted,
         fold_should_return_all_values,
+        secure_fold_should_return_empty_list,
+        secure_fold_should_return_not_empty_list,
         fold_should_return_all_values2,
         fold_keys_should_return_all_keys,
         add_links_should_succeed,
@@ -263,6 +267,83 @@ fold_should_return_all_values(Config) ->
         ])),
         Keys = [Doc#document.key || Doc <- Docs],
         ?assert(lists:member(ExpectedKey, Keys))
+    end, ?TEST_MODELS).
+
+secure_fold_should_return_empty_list(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Master = self(),
+    ok = test_utils:mock_expect(Workers, datastore_model, create,
+        fun(Ctx, Doc) ->
+            put(model_ctx, Ctx), % remember for use in datastore:create mock
+            meck:passthrough([Ctx, Doc])
+        end),
+
+    ok = test_utils:mock_expect(Workers, datastore, create,
+        fun(Ctx, Key, Doc) ->
+            Ans = meck:passthrough([Ctx, Key, #document{key = DocKey} = Doc]),
+            ModelCtx = get(model_ctx), % get Ctx from process memory as Ctx in first arg is changed by datastore
+            spawn(fun() ->
+                AnsToSend = datastore_model:delete(ModelCtx, DocKey),
+                Master ! {del_ans, AnsToSend}
+            end),
+            timer:sleep(1000),
+            Ans
+        end),
+
+    lists:foreach(fun(Model) ->
+        {ok, #document{key = ExpectedKey}} = ?assertMatch({ok, #document{}},
+            rpc:call(Worker, Model, create, [?DOC(Model)])
+        ),
+
+        DelAns = receive
+            {del_ans, Received} -> Received
+        after
+            5000 -> timeout
+        end,
+        ?assertEqual(ok, DelAns),
+
+        {ok, Keys} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_keys, [
+            fun(Key, Acc) -> {ok, [Key | Acc]} end, []
+        ])),
+        ?assertNot(lists:member(ExpectedKey, Keys))
+    end, ?TEST_MODELS).
+
+secure_fold_should_return_not_empty_list(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Master = self(),
+    ok = test_utils:mock_expect(Workers, datastore_model, delete,
+        fun(Ctx, Key) ->
+            put(model_ctx, Ctx), % remember for use in datastore:create mock
+            put(model_key, Key), % remember for use in datastore:create mock
+            meck:passthrough([Ctx, Key])
+        end),
+    ok = test_utils:mock_expect(Workers, datastore, delete,
+        fun(#{model := Model} = Ctx, Key, Pred) ->
+            Ans = meck:passthrough([Ctx, Key, Pred]),
+            ModelCtx = get(model_ctx), % get Ctx from process memory as Ctx in first arg is changed by datastore
+            ModelKey = get(model_key), % get key from process memory as key in second arg is changed by datastore
+            spawn(fun() ->
+                AnsToSend = datastore_model:create(ModelCtx, ?DOC(ModelKey, Model)),
+                Master ! {create_ans, AnsToSend}
+            end),
+            timer:sleep(1000),
+            Ans
+        end),
+
+    lists:foreach(fun(Model) ->
+        ?assertMatch(ok, rpc:call(Worker, Model, delete, [?KEY])),
+
+        DelAns = receive
+            {create_ans, Received} -> Received
+        after
+            5000 -> timeout
+        end,
+        ?assertMatch({ok, _}, DelAns),
+
+        {ok, Keys} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_keys, [
+            fun(Key, Acc) -> {ok, [Key | Acc]} end, []
+        ])),
+        ?assert(lists:member(?KEY, Keys))
     end, ?TEST_MODELS).
 
 fold_should_return_all_values2(Config) ->
@@ -1177,6 +1258,13 @@ init_per_testcase(get_links_after_expiration_time_should_succeed = Case, Config)
     test_utils:set_env(Workers, cluster_worker, document_expiry, 1),
     test_utils:set_env(Workers, cluster_worker, link_disk_expiry, 1),
     [{doc_expiry, DocExpiry}, {link_expiry, LinkExpiry} | init_per_testcase(?DEFAULT_CASE(Case), Config)];
+init_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_list orelse
+    Case =:= secure_fold_should_return_not_empty_list ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{secure_fold_enabled => true}),
+    ok = test_utils:mock_new(Workers, datastore_model),
+    ok = test_utils:mock_new(Workers, datastore),
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1206,6 +1294,11 @@ end_per_testcase(get_links_after_expiration_time_should_succeed, Config) ->
     LinkExpiry = ?config(link_expiry, Config),
     test_utils:set_env(Workers, cluster_worker, document_expiry, DocExpiry),
     test_utils:set_env(Workers, cluster_worker, link_disk_expiry, LinkExpiry);
+end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_list orelse
+    Case =:= secure_fold_should_return_not_empty_list ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
+    test_utils:mock_unload(Workers, [datastore_model, datastore]);
 end_per_testcase(_Case, _Config) ->
     ok.
 

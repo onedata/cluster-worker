@@ -28,11 +28,13 @@
 -export([supervisor_flags/0, supervisor_children_spec/0,
     main_supervisor_flags/0, main_supervisor_children_spec/0,
     init_supervisors/0]).
--export([send_to_each/1]).
+-export([broadcast/1, broadcast_and_await_answer/1]).
 
 % TP process states
 -define(INITIALIZING, initializing).
 -define(INITIALIZED, initialized).
+
+-define(WAIT_TIMEOUT, timer:seconds(30)).
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -296,20 +298,33 @@ get_process_size_sum() ->
         lists:sum(lists:map(fun({_K, V}) -> V end, List)) + Acc
     end, 0, datastore_multiplier:get_names(?TP_SIZE_TABLE)).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Sends message to all tp processes.
-%% @end
-%%--------------------------------------------------------------------
--spec send_to_each(term()) -> ok.
-send_to_each(Msg) ->
+-spec broadcast(term()) -> ok.
+broadcast(Msg) ->
     lists:foreach(fun(Name) ->
         List = ets:tab2list(Name),
         lists:foreach(fun
-            ({_, Pid, _}) -> catch gen_server:call(Pid, Msg); % Catch in case of process termination
+            ({_, Pid, _}) -> catch gen_server:call(Pid, Msg, infinity); % Catch in case of process termination
             (_) -> ok
         end, List)
     end, datastore_multiplier:get_names(?TP_ROUTING_TABLE)).
+
+-spec broadcast_and_await_answer(term()) -> ok | {error, term()}.
+broadcast_and_await_answer(Msg) ->
+    WaitList = lists:foldl(fun(Name, Acc) ->
+        ets:foldl(fun
+            ({_, Pid, _}, Acc2) ->
+                try
+                    {ok, Ref} = gen_server:call(Pid, Msg, infinity),
+                    [{Ref, Pid} | Acc2]
+                catch % Catch in case of process termination
+                    _:_ -> Acc2
+                end;
+            (_, Acc2) ->
+                Acc2
+        end, Acc, Name)
+    end, [], datastore_multiplier:get_names(?TP_ROUTING_TABLE)),
+
+    wait_and_check(lists:reverse(WaitList)).
 
 %%%===================================================================
 %%% Internal functions
@@ -325,3 +340,31 @@ send_to_each(Msg) ->
 update_size(Table, Diff) ->
     ets:update_counter(Table, ?TP_ROUTING_TABLE_SIZE,
         {2, Diff}, {?TP_ROUTING_TABLE_SIZE, 0}).
+
+-spec wait_and_check([{reference(), pid()}]) -> ok | {error, term()}.
+wait_and_check([]) ->
+    ok;
+wait_and_check([{Ref, Pid} | Tail]) ->
+    case wait(Ref, Pid, ?WAIT_TIMEOUT, true) of
+        ok ->
+            wait_and_check(Tail);
+        Error ->
+            ?error("Error waiting for tp proocess ~p ans: ~p", [Pid, Error]),
+            Error
+    end.
+
+%% @private
+-spec wait(reference(), pid(), non_neg_integer(), boolean()) -> term() | {error, term()}.
+wait(Ref, Pid, Timeout, CheckAndRetry) ->
+    receive
+        {Ref, Response} -> Response
+    after
+        Timeout ->
+            case {CheckAndRetry, rpc:call(node(Pid), erlang, is_process_alive, [Pid])} of
+                {true, true} -> wait(Ref, Pid, Timeout, CheckAndRetry);
+                {true, _} -> wait(Ref, Pid, Timeout, false); % retry last time to prevent race between
+                                                             % answer sending / process terminating
+                {_, {badrpc, Reason}} -> {error, Reason};
+                _ -> {error, timeout}
+            end
+    end.

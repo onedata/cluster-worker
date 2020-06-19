@@ -35,6 +35,15 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Called periodically on every ping-pong message exchange with the client.
+%% @end
+%%--------------------------------------------------------------------
+-callback client_heartbeat(aai:auth(), gs_server:conn_ref()) ->
+    ok.
+
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Callback called when a client disconnects from the Graph Sync server.
 %% @end
 %%--------------------------------------------------------------------

@@ -28,10 +28,10 @@
 -include("modules/datastore/datastore_links.hrl").
 
 %% List API
--export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_local_jobs/2]).
+-export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_node_jobs/3]).
 %% Modify API
 -export([add_link/6, add_scheduled_link/6, add_job_link/3,
-    delete_link/6, delete_scheduled_link/6, delete_job_link/3]).
+    delete_link/6, delete_scheduled_link/6, delete_job_link/4]).
 
 % Forests for scheduled, ongoing and ended tasks
 -define(SCHEDULED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "SCHEDULED_")).
@@ -42,8 +42,9 @@
 -define(LOAD_BALANCING_FOREST_KEY(ScheduledForestKey, Group, EnvironmentID),
     <<ScheduledForestKey/binary, "###", Group/binary, "###", EnvironmentID/binary>>).
 % Definitions used to list ongoing jobs (used during provider restart)
--define(JOB_KEY(Pool, CallbackModule),
-    <<Pool/binary, "###", (atom_to_binary(CallbackModule, utf8))/binary, "###JOBS">>).
+-define(JOB_KEY(Pool, CallbackModule, Node),
+    <<Pool/binary, "###", (atom_to_binary(CallbackModule, utf8))/binary, "###",
+        (atom_to_binary(Node, utf8))/binary, "###JOBS">>).
 -define(JOB_TREE, <<"JOB_TREE">>).
 % Other definitions
 -define(LINK_NAME_ID_PART_LENGTH, 6).
@@ -143,13 +144,13 @@ get_first_scheduled_link(Pool, GroupID, EnvironmentID) ->
 %% Gets list of ongoing jobs.
 %% @end
 %%--------------------------------------------------------------------
--spec list_local_jobs(traverse:pool(), traverse:callback_module()) -> {ok, [traverse:id()]}.
+-spec list_node_jobs(traverse:pool(), traverse:callback_module(), node()) -> {ok, [traverse:id()]}.
 % TODO VFS-5528 - use batches
-list_local_jobs(Pool, CallbackModule) ->
+list_node_jobs(Pool, CallbackModule, Node) ->
     Ctx = traverse_task:get_ctx(),
     datastore_model:fold_links(
         Ctx#{local_links_tree_id => ?JOB_TREE, routing => local},
-        ?JOB_KEY(Pool, CallbackModule),
+        ?JOB_KEY(Pool, CallbackModule, Node),
         ?JOB_TREE,
         fun(#link{target = Target}, Acc) -> {ok, [Target | Acc]} end,
         [],
@@ -192,7 +193,7 @@ add_job_link(Pool, CallbackModule, JobID) ->
     Ctx = traverse_task:get_ctx(),
     case datastore_model:add_links(
         Ctx#{local_links_tree_id => ?JOB_TREE, routing => local},
-        ?JOB_KEY(Pool, CallbackModule),
+        ?JOB_KEY(Pool, CallbackModule, node()),
         ?JOB_TREE,
         [{JobID, JobID}]
     ) of
@@ -228,12 +229,12 @@ delete_scheduled_link(Pool, Tree, Id, Timestamp, GroupID, EnvironmentID) ->
 %% Deletes link from jobs tree.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_job_link(traverse:pool(), traverse:callback_module(), traverse:job_id()) -> ok.
-delete_job_link(Pool, CallbackModule, JobID) ->
+-spec delete_job_link(traverse:pool(), traverse:callback_module(), node(), traverse:job_id()) -> ok.
+delete_job_link(Pool, CallbackModule, Node, JobID) ->
     Ctx = traverse_task:get_ctx(),
     [ok] = datastore_model:delete_links(
         Ctx#{local_links_tree_id => ?JOB_TREE, routing => local},
-        ?JOB_KEY(Pool, CallbackModule),
+        ?JOB_KEY(Pool, CallbackModule, Node),
         ?JOB_TREE,
         [JobID]
     ),

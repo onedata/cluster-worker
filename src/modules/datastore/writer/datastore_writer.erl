@@ -36,6 +36,7 @@
 
 -record(state, {
     requests = [] :: requests_internal(),
+    management_request :: ha_datastore:cluster_reorganization_request() | undefined,
     cache_writer_pid :: pid(),
     cache_writer_state = idle :: idle | {active, reference() | backup}, % backup if process is waiting for slave action
     disc_writer_state = idle :: idle | {active, reference()},
@@ -273,20 +274,10 @@ call_if_alive(Key, Request) ->
 %% Waits for a completion of asynchronous call to datastore writer.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(reference(), pid()) -> term() | {error, timeout}.
+-spec wait(reference(), pid()) -> term() | {error, term()}.
 wait(Ref, Pid) ->
     Timeout = ?WAIT_TIMEOUT,
-    receive
-        {Ref, {request_delegated, ProxyPid}} -> wait(Ref, ProxyPid);
-        {Ref, Response} -> Response
-    after
-        Timeout ->
-            case rpc:call(node(Pid), erlang, is_process_alive, [Pid]) of
-                true -> wait(Ref, Pid);
-                {badrpc, Reason} -> {error, Reason};
-                _ -> {error, timeout}
-            end
-    end.
+    wait(Ref, Pid, Timeout, true).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -303,16 +294,19 @@ wait(Ref, Pid) ->
     {stop, Reason :: term()} | ignore.
 init([Key]) ->
     BackupNodes = ha_datastore:get_backup_nodes(),
-    {ActiveRequests, KeysInSlaveFlush, RequestsToHandle} = ha_datastore_master:verify_slave_activity(Key, BackupNodes),
+    SlaveData = ha_datastore_slave:init_data(),
+    Mode = ha_datastore_slave:get_mode(SlaveData),
+    {IsHandlingRequests, KeysInSlaveFlush, RequestsToHandle} =
+        ha_datastore_master:inspect_slave_activity(Key, BackupNodes, Mode),
 
-    CacheWriterState = case ActiveRequests of
+    CacheWriterState = case IsHandlingRequests of
         false -> idle;
         true -> {active, backup}
     end,
 
     {ok, Pid} = datastore_cache_writer:start_link(self(), Key, BackupNodes, KeysInSlaveFlush),
 
-    State = #state{cache_writer_pid = Pid, ha_slave_data = ha_datastore_slave:init_data(),
+    State = #state{cache_writer_pid = Pid, ha_slave_data = SlaveData,
         cache_writer_state = CacheWriterState, requests = RequestsToHandle},
     {ok, schedule_terminate(State)}.
 
@@ -344,9 +338,14 @@ handle_call(?MASTER_MSG(Msg), _From, State = #state{ha_slave_data = Data, reques
     {Ans, Data2, WaitingRequests2} = ha_datastore_slave:handle_master_message(Msg, Data, WaitingRequests),
     State2 = State#state{ha_slave_data = Data2, requests = WaitingRequests2},
     {reply, Ans, State2};
-handle_call(?MANAGEMENT_MSG(Msg), _From, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
-    Data2 = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
-    {reply, ok, State#state{ha_slave_data = Data2}};
+handle_call(?MANAGEMENT_MSG(Msg), {Caller, _Tag}, State = #state{ha_slave_data = Data, cache_writer_pid = Pid}) ->
+    {Reply, Data2} = ha_datastore_slave:handle_management_msg(Msg, Data, Pid),
+    State2 = case Reply of
+        {ok, Ref} -> State#state{management_request = #cluster_reorganization_started{
+            message_ref = Ref, caller_pid = Caller}};
+        _ -> State
+    end,
+    {reply, Reply, handle_requests(State2#state{ha_slave_data = Data2})};
 % Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
     gen_server:call(Pid, {terminate, []}, infinity),
@@ -370,7 +369,7 @@ handle_cast({mark_cache_writer_idle, Ref}, State = #state{
     ha_slave_data = SlaveData
 }) ->
     State2 = State#state{cache_writer_state = idle,
-        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, false)},
+        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, {?IGNORE, undefined})},
     {noreply, handle_requests(State2)};
 handle_cast({mark_disc_writer_idle, Ref}, State = #state{
     disc_writer_state = {active, Ref}
@@ -464,6 +463,10 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 -spec handle_requests(state()) -> state().
+handle_requests(State = #state{management_request = #cluster_reorganization_started{message_ref = Ref} = Request,
+    cache_writer_pid = CacheWriterPid}) ->
+    ok = gen_server:call(CacheWriterPid, Request, infinity),
+    State#state{management_request = undefined, cache_writer_state = {active, Ref}};
 handle_requests(State = #state{requests = []}) ->
     State;
 handle_requests(State = #state{cache_writer_state = {active, _}}) ->
@@ -472,7 +475,7 @@ handle_requests(State = #state{
     requests = Requests, cache_writer_pid = Pid, cache_writer_state = idle, ha_slave_data = SlaveData
 }) ->
     Ref = make_ref(),
-    HandlingFailoverRequest = gen_server:call(Pid, #datastore_internal_requests_batch{
+    RemoteRequestsProcessing = gen_server:call(Pid, #datastore_internal_requests_batch{
         ref = Ref, requests = Requests, mode = ha_datastore_slave:get_mode(SlaveData)}, infinity),
 
     case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_gc, on) of
@@ -486,7 +489,7 @@ handle_requests(State = #state{
         requests = [],
         cache_writer_state = {active, Ref},
         disc_writer_state = {active, Ref},
-        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, HandlingFailoverRequest)
+        ha_slave_data = ha_datastore_slave:set_failover_request_handling(SlaveData, RemoteRequestsProcessing)
     }.
 
 -spec schedule_terminate(state()) -> state().
@@ -541,3 +544,20 @@ get_key_num(Key, SpaceSize) when is_binary(Key) ->
     Id rem SpaceSize + 1;
 get_key_num(Key, SpaceSize) ->
     get_key_num(crypto:hash(md5, term_to_binary(Key)), SpaceSize).
+
+%% @private
+-spec wait(reference(), pid(), non_neg_integer(), boolean()) -> term() | {error, term()}.
+wait(Ref, Pid, Timeout, CheckAndRetry) ->
+    receive
+        {Ref, {request_delegated, ProxyPid}} -> wait(Ref, ProxyPid);
+        {Ref, Response} -> Response
+    after
+        Timeout ->
+            case {CheckAndRetry, rpc:call(node(Pid), erlang, is_process_alive, [Pid])} of
+                {true, true} -> wait(Ref, Pid, Timeout, CheckAndRetry);
+                {true, _} -> wait(Ref, Pid, Timeout, false); % retry last time to prevent race between
+                                                             % answer sending / process terminating
+                {_, {badrpc, Reason}} -> {error, Reason};
+                _ -> {error, timeout}
+            end
+    end.
