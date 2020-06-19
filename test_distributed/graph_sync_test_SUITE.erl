@@ -46,7 +46,6 @@
     auto_scope_test/1,
     bad_entity_type_test/1,
     session_persistence_test/1,
-    subscribers_persistence_test/1,
     subscriptions_persistence_test/1,
     gs_server_session_clearing_test_api_level/1,
     gs_server_session_clearing_test_connection_level/1
@@ -65,7 +64,6 @@
     auto_scope_test,
     bad_entity_type_test,
     session_persistence_test,
-    subscribers_persistence_test,
     subscriptions_persistence_test,
     gs_server_session_clearing_test_api_level,
     gs_server_session_clearing_test_connection_level
@@ -732,13 +730,13 @@ auth_override_test_base(Config, ProtoVersion) ->
     % For test purposes, there are defined blacklisted ip, interface and consumer token.
     ReqWithOverrideData = fun(PeerIp, Interface, ConsumerToken) ->
         GetUserReq#gs_req{
-        auth_override = #auth_override{
-            client_auth = {token, ?USER_2_TOKEN},
-            peer_ip = PeerIp,
-            interface = Interface,
-            consumer_token = ConsumerToken
-        }
-    } end,
+            auth_override = #auth_override{
+                client_auth = {token, ?USER_2_TOKEN},
+                peer_ip = PeerIp,
+                interface = Interface,
+                consumer_token = ConsumerToken
+            }
+        } end,
 
     % Additional auth override options are supported since version 4
     case ProtoVersion > 3 of
@@ -958,142 +956,115 @@ bad_entity_type_test_base(Config, ProtoVersion) ->
     disconnect_client([Client1]).
 
 
-
 session_persistence_test(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
-    {ok, SessionId} = ?assertMatch(
-        {ok, _},
-        rpc:call(Node, gs_persistence, create_session, [#gs_session{
+    Session = ?assertMatch(
+        #gs_session{
             auth = dummyAuth,
             conn_ref = dummyConnRef,
-            protocol_version = 7,
             translator = dummyTranslator
-        }])
+        },
+        rpc:call(Node, gs_persistence, create_session, [dummyAuth, dummyConnRef, 7, dummyTranslator])
     ),
 
-    ?assertMatch(
-        {ok, #gs_session{
-            id = SessionId,
-            auth = dummyAuth,
-            conn_ref = dummyConnRef,
-            protocol_version = 7,
-            translator = dummyTranslator
-        }},
-        rpc:call(Node, gs_persistence, get_session, [SessionId])
-    ),
+    SessionId = Session#gs_session.id,
+
+    ?assertMatch({ok, Session}, rpc:call(Node, gs_persistence, get_session, [SessionId])),
 
     ?assertMatch(ok, rpc:call(Node, gs_persistence, delete_session, [SessionId])),
 
-    ?assertNotMatch({ok, _}, rpc:call(Node, gs_persistence, get_session, [SessionId])),
-    ok.
+    ?assertMatch({error, not_found}, rpc:call(Node, gs_persistence, get_session, [SessionId])).
 
 
-subscribers_persistence_test(Config) ->
+subscriptions_persistence_test(Config) ->
     [Node | _] = ?config(cluster_worker_nodes, Config),
-    DummyGsSession = #gs_session{
-        auth = dummyAuth,
-        conn_ref = dummyConnRef,
-        protocol_version = 7,
-        translator = dummyTranslator
-    },
-    {ok, Session1} = rpc:call(Node, gs_persistence, create_session, [DummyGsSession]),
-    {ok, Session2} = rpc:call(Node, gs_persistence, create_session, [DummyGsSession]),
-    {ok, Session3} = rpc:call(Node, gs_persistence, create_session, [DummyGsSession]),
+    #gs_session{id = Sess1} = rpc:call(Node, gs_persistence, create_session, [auth, self(), 7, dummyTranslator]),
+    #gs_session{id = Sess2} = rpc:call(Node, gs_persistence, create_session, [auth, self(), 7, dummyTranslator]),
+    #gs_session{id = Sess3} = rpc:call(Node, gs_persistence, create_session, [auth, self(), 7, dummyTranslator]),
     Auth1 = dummyAuth1,
     Auth2 = dummyAuth2,
     Auth3 = dummyAuth3,
     AuthHint1 = dummyAuthHint1,
     AuthHint2 = dummyAuthHint2,
     AuthHint3 = dummyAuthHint3,
-    Sub1 = {Session1, {Auth1, AuthHint1}},
-    Sub2 = {Session2, {Auth2, AuthHint2}},
-    Sub3 = {Session3, {Auth3, AuthHint3}},
+    Sub1 = {Sess1, {Auth1, AuthHint1}},
+    Sub2 = {Sess2, {Auth2, AuthHint2}},
+    Sub3 = {Sess3, {Auth3, AuthHint3}},
 
     UserId = <<"dummyId">>,
-    GRI = #gri{type = od_user, id = UserId, aspect = instance, scope = private},
+    GRIPriv = #gri{type = od_user, id = UserId, aspect = instance, scope = private},
+    GRIProt = #gri{type = od_user, id = UserId, aspect = instance, scope = protected},
+    GRIShrd = #gri{type = od_user, id = UserId, aspect = instance, scope = shared},
 
-    {ok, Subscribers1} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
-    ?assertEqual(#{}, Subscribers1),
+    ?assertEqual(#{}, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session1, Auth1, AuthHint1])),
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session2, Auth2, AuthHint2])),
-    {ok, Subscribers2} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
-    Expected2 = ordsets:from_list([Sub1, Sub2]),
-    ?assertMatch(#{{instance, private} := Expected2}, Subscribers2),
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess1, GRIPriv, Auth1, AuthHint1])),
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess2, GRIShrd, Auth2, AuthHint2])),
+    ?assertEqual(#{
+        {instance, private} => [Sub1],
+        {instance, shared} => [Sub2]
+    }, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual([GRIPriv], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
-    % Subscribing should be idempotent
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session2, Auth2, AuthHint2])),
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session2, Auth2, AuthHint2])),
-    {ok, Subscribers3} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
-    Expected3 = ordsets:from_list([Sub1, Sub2]),
-    ?assertMatch(#{{instance, private} := Expected3}, Subscribers3),
+    % subscribing should be idempotent
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess1, GRIPriv, Auth1, AuthHint1])),
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess2, GRIShrd, Auth2, AuthHint2])),
+    ?assertEqual(#{
+        {instance, private} => [Sub1],
+        {instance, shared} => [Sub2]
+    }, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual([GRIPriv], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
-    % Add third subscriber
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscriber, [GRI, Session3, Auth3, AuthHint3])),
-    {ok, Subscribers4} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
-    Expected4 = ordsets:from_list([Sub1, Sub2, Sub3]),
-    ?assertMatch(#{{instance, private} := Expected4}, Subscribers4),
+    % subscribe for different scopes
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess1, GRIProt, Auth1, AuthHint1])),
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess2, GRIProt, Auth2, AuthHint2])),
+    ?assertEqual(#{
+        {instance, private} => [Sub1],
+        {instance, protected} => ordsets:from_list([Sub1, Sub2]),
+        {instance, shared} => [Sub2]
+    }, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual(ordsets:from_list([GRIPriv, GRIProt]), rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual(ordsets:from_list([GRIProt, GRIShrd]), rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
-    % Remove second subscriber
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_subscriber, [GRI, Session2])),
-    {ok, Subscribers5} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
-    Expected5 = ordsets:from_list([Sub1, Sub3]),
-    ?assertMatch(#{{instance, private} := Expected5}, Subscribers5),
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, subscribe, [Sess3, GRIShrd, Auth3, AuthHint3])),
+    ?assertEqual(#{
+        {instance, private} => [Sub1],
+        {instance, protected} => ordsets:from_list([Sub1, Sub2]),
+        {instance, shared} => ordsets:from_list([Sub2, Sub3])
+    }, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual(ordsets:from_list([GRIPriv, GRIProt]), rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual(ordsets:from_list([GRIProt, GRIShrd]), rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
-    % Remove all subscribers
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscribers, [GRI])),
-    {ok, Subscribers6} = rpc:call(Node, gs_persistence, get_subscribers, [od_user, UserId]),
-    ?assertEqual(#{}, Subscribers6),
-    ok.
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, unsubscribe, [Sess2, GRIProt])),
+    ?assertEqual(#{
+        {instance, private} => [Sub1],
+        {instance, protected} => [Sub1],
+        {instance, shared} => ordsets:from_list([Sub2, Sub3])
+    }, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual(ordsets:from_list([GRIPriv, GRIProt]), rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, delete_session, [Sess1])),
+    ?assertEqual({error, not_found}, rpc:call(Node, gs_persistence, get_session, [Sess1])),
+    ?assertEqual(#{
+        {instance, shared} => ordsets:from_list([Sub2, Sub3])
+    }, rpc:call(Node, gs_persistence, get_entity_subscribers, [od_user, UserId])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess1])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess2])),
+    ?assertEqual([GRIShrd], rpc:call(Node, gs_subscriber, get_subscriptions, [Sess3])),
 
-subscriptions_persistence_test(Config) ->
-    [Node | _] = ?config(cluster_worker_nodes, Config),
-    {ok, SessionId} = rpc:call(Node, gs_persistence, create_session, [#gs_session{
-        auth = dummyAuth,
-        conn_ref = dummyConnRef,
-        protocol_version = 7,
-        translator = dummyTranslator
-    }]),
-
-    % Scopes differentiate resources, so below three GRIs are not the same
-    GRI1 = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = private},
-    GRI2 = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = protected},
-    GRI3 = #gri{type = od_user, id = <<"dummyId">>, aspect = instance, scope = shared},
-
-    {ok, Subscriptions1} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    ?assertMatch([], Subscriptions1),
-
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI1])),
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI3])),
-    {ok, Subscriptions2} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected2 = lists:sort([GRI1, GRI3]),
-    ?assertMatch(Expected2, lists:sort(Subscriptions2)),
-
-    % Subscribing should be idempotent
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI1])),
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI1])),
-    {ok, Subscriptions3} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected3 = lists:sort([GRI1, GRI3]),
-    ?assertMatch(Expected3, lists:sort(Subscriptions3)),
-
-    % Add second GRI
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, add_subscription, [SessionId, GRI2])),
-    {ok, Subscriptions4} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected4 = lists:sort([GRI1, GRI2, GRI3]),
-    ?assertMatch(Expected4, lists:sort(Subscriptions4)),
-
-    % Remove first GRI
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_subscription, [SessionId, GRI1])),
-    {ok, Subscriptions5} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    Expected5 = lists:sort([GRI2, GRI3]),
-    ?assertMatch(Expected5, lists:sort(Subscriptions5)),
-
-    % Remove all GRIs
-    ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscriptions, [SessionId])),
-    {ok, Subscriptions6} = rpc:call(Node, gs_persistence, get_subscriptions, [SessionId]),
-    ?assertMatch([], Subscriptions6),
-    ok.
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, delete_session, [Sess2])),
+    ?assertEqual(ok, rpc:call(Node, gs_persistence, delete_session, [Sess3])).
 
 
 gs_server_session_clearing_test_api_level(Config) ->
@@ -1105,12 +1076,10 @@ gs_server_session_clearing_test_api_level(Config) ->
         auth = Auth,
         supported_versions = gs_protocol:supported_versions()
     }},
-    {ok, #gs_resp{response = #gs_resp_handshake{
-        version = _Version,
-        session_id = SessionId,
+    {ok, SessionData, #gs_resp{response = #gs_resp_handshake{
         identity = ?SUB(user, ?USER_1)
     }}} = ?assertMatch(
-        {ok, _},
+        {ok, _, _},
         rpc:call(Node, gs_server, handshake, [ConnRef, Translator, HandshakeReq, ?DUMMY_IP])
     ),
 
@@ -1119,7 +1088,7 @@ gs_server_session_clearing_test_api_level(Config) ->
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscribers, [GRI1])),
     ?assertMatch(
         {ok, _},
-        rpc:call(Node, gs_server, handle_request, [SessionId, #gs_req{request = #gs_req_graph{
+        rpc:call(Node, gs_server, handle_request, [SessionData, #gs_req{request = #gs_req_graph{
             gri = GRI1,
             operation = get,
             subscribe = true
@@ -1131,7 +1100,7 @@ gs_server_session_clearing_test_api_level(Config) ->
     ?assertMatch(ok, rpc:call(Node, gs_persistence, remove_all_subscribers, [GRI2])),
     ?assertMatch(
         {ok, _},
-        rpc:call(Node, gs_server, handle_request, [SessionId, #gs_req{request = #gs_req_graph{
+        rpc:call(Node, gs_server, handle_request, [SessionData, #gs_req{request = #gs_req_graph{
             gri = GRI2,
             operation = get,
             auth_hint = ?THROUGH_SPACE(?SPACE_1),
@@ -1140,12 +1109,10 @@ gs_server_session_clearing_test_api_level(Config) ->
     ),
 
     % Make sure that client disconnect removes all subscriptions
-    ?assertMatch(ok, rpc:call(Node, gs_server, cleanup_client_session, [SessionId])),
-
-    ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscriptions, [SessionId])),
-    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_1])),
-    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_2])),
-    ok.
+    ?assertEqual(ok, rpc:call(Node, gs_server, cleanup_session, [SessionData])),
+    ?assertEqual([], rpc:call(Node, gs_subscriber, get_subscriptions, [SessionData#gs_session.id])),
+    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_1])),
+    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_2])).
 
 
 gs_server_session_clearing_test_connection_level(Config) ->
@@ -1183,12 +1150,9 @@ gs_server_session_clearing_test_connection_level_base(Config, ProtoVersion) ->
     ),
 
     disconnect_client(Client1),
-
-    ?assertMatch({ok, []}, rpc:call(Node, gs_persistence, get_subscriptions, [SessionId])),
-    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_1])),
-    ?assertEqual({ok, #{}}, rpc:call(Node, gs_persistence, get_subscribers, [od_user, ?USER_2])),
-
-    ok.
+    ?assertMatch([], rpc:call(Node, gs_subscriber, get_subscriptions, [SessionId])),
+    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_1])),
+    ?assertEqual(#{}, rpc:call(Node, gs_subscription, get_entity_subscribers, [od_user, ?USER_2])).
 
 %%%===================================================================
 %%% Helper functions related to asynchronous subscriptions messages

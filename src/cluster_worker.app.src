@@ -286,7 +286,7 @@
 
             % This option sets default time interval between sending ping frames
             % by Graph Sync websocket server and client to each other.
-            {graph_sync_websocket_keepalive, 30000},
+            {graph_sync_websocket_keepalive, 15000},
 
             % Maximum time the calling process will wait for Graph Sync client to start
             % (start returns after handshake is performed).
