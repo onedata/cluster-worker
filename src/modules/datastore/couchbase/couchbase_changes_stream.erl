@@ -244,7 +244,10 @@ get_changes(Since, Until, #state{} = State) ->
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Until2]},
                     {inclusive_end, false},
-                    {stale, false}
+                    {stale, false} % use stale=false option as couchbase_changes_stream does
+                                   % not analyse missing documents (couchbase_changes_worker does),
+                                   % without it document can be lost when view is being rebuilt
+                                   % by couch after an error
                 ]
             ),
 
