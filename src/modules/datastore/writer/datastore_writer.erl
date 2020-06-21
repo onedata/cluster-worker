@@ -238,9 +238,13 @@ call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
                 {error, interrupted_call} = InterruptedCallError ->
                     case InterruptedCallRetries of
                         0 ->
+                            ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
+                            "no retries left", [Function, Args, Key, Ctx]),
                             InterruptedCallError;
                         _ ->
-                            ?info("Interrupted call - retrying"),
+                            ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
+                            "~p retries left, next retry in ~p ms",
+                                [Function, Args, Key, Ctx, InterruptedCallRetries, Sleep]),
                             timer:sleep(Sleep),
                             call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
                     end;
