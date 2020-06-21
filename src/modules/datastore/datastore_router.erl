@@ -13,6 +13,7 @@
 -module(datastore_router).
 -author("Krzysztof Trzepla").
 
+-include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 -include("exometer_utils.hrl").
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
@@ -20,6 +21,7 @@
 %% API
 -export([route/2, execute_on_node/4]).
 -export([init_counters/0, init_report/0]).
+-export([get_routing_key/1]).
 %% Internal RPC API
 -export([execute_on_local_node/4, process/3]).
 
@@ -104,6 +106,16 @@ execute_on_node(Node, Module, Fun, Args) ->
 execute_on_local_node(Module, Fun, Args, MasterPid) ->
     datastore_cache_writer:save_master_pid(MasterPid),
     apply(Module, Fun, Args).
+
+-spec get_routing_key(datastore:doc()) -> datastore:key().
+get_routing_key(#document{value = #links_forest{key = Key}}) ->
+    Key;
+get_routing_key(#document{value = #links_node{key = Key}}) ->
+    Key;
+get_routing_key(#document{value = #links_mask{key = Key}}) ->
+    Key;
+get_routing_key(#document{key = Key}) ->
+    Key.
 
 %%%===================================================================
 %%% Internal functions

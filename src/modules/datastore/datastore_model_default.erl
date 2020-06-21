@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get_ctx/1, get_record_version/1, get_prehooks/1, get_posthooks/1,
+-export([get_ctx/1, get_ctx/2, get_record_version/1, get_prehooks/1, get_posthooks/1,
     get_default_disk_ctx/0]).
 -export([resolve_conflict/4]).
 -export([set_defaults/1, set_defaults/2]).
@@ -23,6 +23,7 @@
 -type model() :: datastore_model:model().
 -type version() :: datastore_model:record_version().
 -type doc() :: datastore:doc().
+-type key() :: datastore:key().
 -type ctx() :: datastore:ctx().
 
 -define(DEFAULT_BUCKET, <<"onedata">>).
@@ -44,6 +45,18 @@
 get_ctx(Model) ->
     Ctx = model_apply(Model, {get_ctx, []}, fun() -> #{model => Model} end),
     set_defaults(Ctx).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns model context by calling model's 'get_ctx/0' function and sets
+%% defaults generated using UniqueKey.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_ctx(model(), key()) -> ctx().
+get_ctx(Model, Key) ->
+    Ctx = model_apply(Model, {get_ctx, []}, fun() -> #{model => Model} end),
+    UniqueKey = datastore_model:get_unique_key(Ctx, Key),
+    datastore_model_default:set_defaults(UniqueKey, Ctx).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -111,11 +124,12 @@ set_defaults(Ctx) ->
 %% Sets defaults for a datastore model context.
 %% @end
 %%--------------------------------------------------------------------
--spec set_defaults(datastore_model:key(), ctx()) -> ctx().
+-spec set_defaults(key(), ctx()) -> ctx().
 set_defaults(UniqueKey, Ctx) ->
     Ctx2 = set_memory_driver(UniqueKey, Ctx),
     Ctx3 = set_disc_driver(Ctx2),
-    set_remote_driver(Ctx3).
+    Ctx4 = set_remote_driver(Ctx3),
+    ensure_routing_key(UniqueKey, Ctx4).
 
 %%-------------------------------------------------------------------
 %% @doc
@@ -155,10 +169,11 @@ model_apply(Model, {Function, Args}, DefaultFun) ->
 -spec set_memory_driver(ctx()) -> ctx().
 set_memory_driver(Ctx = #{memory_driver := undefined}) ->
     Ctx;
-set_memory_driver(Ctx = #{model := Model}) ->
-    Ctx#{memory_driver => ets_driver,
-        memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(Model)},
-        memory_driver_opts => []}.
+set_memory_driver(Ctx = #{model := Model, memory_driver := _MemDriver}) ->
+    Ctx#{memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(Model)},
+        memory_driver_opts => []};
+set_memory_driver(Ctx) ->
+    set_memory_driver(Ctx#{memory_driver => ets_driver}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -166,12 +181,11 @@ set_memory_driver(Ctx = #{model := Model}) ->
 %% Sets default memory driver.
 %% @end
 %%--------------------------------------------------------------------
--spec set_memory_driver(datastore_model:key(), ctx()) -> ctx().
+-spec set_memory_driver(key(), ctx()) -> ctx().
 set_memory_driver(_UniqueKey, Ctx = #{memory_driver := undefined}) ->
     Ctx;
-set_memory_driver(UniqueKey, Ctx = #{model := Model, memory_driver := MemDriver}) ->
-    Ctx#{memory_driver => MemDriver,
-        memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(UniqueKey, Model)},
+set_memory_driver(UniqueKey, Ctx = #{model := Model, memory_driver := _MemDriver}) ->
+    Ctx#{memory_driver_ctx => #{table => ?EXTEND_TABLE_NAME(UniqueKey, Model)},
         memory_driver_opts => []};
 set_memory_driver(UniqueKey, Ctx) ->
     set_memory_driver(UniqueKey, Ctx#{memory_driver => ets_driver}).
@@ -207,3 +221,9 @@ set_remote_driver(Ctx = #{remote_driver := _RD}) ->
     Ctx;
 set_remote_driver(Ctx) ->
     Ctx#{remote_driver => undefined}.
+
+-spec ensure_routing_key(key(), ctx()) -> ctx().
+ensure_routing_key(_, Ctx = #{routing_key := _}) ->
+    Ctx;
+ensure_routing_key(Key, Ctx) ->
+    Ctx#{routing_key => Key}.

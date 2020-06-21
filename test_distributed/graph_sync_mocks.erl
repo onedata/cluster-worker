@@ -28,6 +28,7 @@
 -export([
     verify_handshake_auth/2,
     client_connected/2,
+    client_heartbeat/2,
     client_disconnected/2,
     verify_auth_override/2,
     is_authorized/5,
@@ -124,6 +125,9 @@ client_auth_to_auth(nobody) -> ?NOBODY.
 
 
 client_connected(_Auth, _) -> ok.
+
+
+client_heartbeat(_Auth, _) -> ok.
 
 
 client_disconnected(_Auth, _) -> ok.

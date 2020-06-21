@@ -499,7 +499,8 @@ save_memory_copies(#{memory_copies_nodes := Nodes} = Ctx, Key, Doc, PoolType) ->
         {[], []} ->
             ok;
         _ ->
-            ?error("Error saving memory copies for key: ~p~ndoc: ~p~nnodes ~p~nrpc ans: ~p", [Key, Doc, Nodes, FullAns])
+            % TODO VFS-6295 - log to dedicated logfile
+            ?debug("Error saving memory copies for key: ~p~ndoc: ~p~nnodes ~p~nrpc ans: ~p", [Key, Doc, Nodes, FullAns])
     end;
 save_memory_copies(_Ctx, _Key, _Doc, _PoolType) ->
     ok.

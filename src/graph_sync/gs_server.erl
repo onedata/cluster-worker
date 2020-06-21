@@ -35,6 +35,7 @@
 
 %% API
 -export([handshake/4]).
+-export([report_heartbeat/1]).
 -export([cleanup_client_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
 -export([handle_request/2]).
@@ -93,6 +94,20 @@ handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = R
                     })}
             end
     end.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Called by the connection process on every heartbeat received from the client.
+%% @end
+%%--------------------------------------------------------------------
+-spec report_heartbeat(gs_protocol:session_id()) -> ok.
+report_heartbeat(SessionId) ->
+    {ok, #gs_session{
+        auth = Auth, conn_ref = ConnRef
+    }} = gs_persistence:get_session(SessionId),
+    ?GS_LOGIC_PLUGIN:client_heartbeat(Auth, ConnRef),
+    ok.
 
 
 %%--------------------------------------------------------------------
