@@ -396,16 +396,19 @@ cache_disc_or_remote_results(#{disc_driver := DD} = Ctx, Keys, Results) when DD 
 
     wait(Futures);
 cache_disc_or_remote_results(#{memory_driver := MD} = Ctx, Keys, Results) when MD =/= undefined ->
-    lists:foreach(fun
-        ({Key, {ok, memory, Doc}}) ->
-            save_memory_copies(Ctx, Key, Doc, memory);
-        ({Key, {error, not_found}}) ->
+    lists:map(fun
+        ({Key, {ok, memory, Doc} = Result}) ->
+            save_memory_copies(Ctx, Key, Doc, memory),
+            Result;
+        ({Key, {ok, remote, Doc}}) ->
+            wait(save_async(Ctx, Key, Doc, false, true));
+        ({Key, {error, not_found} = Result}) ->
             Doc = #document{key = Key, value = undefined, deleted = true},
-            save_memory_copies(Ctx, Key, Doc, memory);
-        (_) ->
-            ok
-    end, lists:zip(Keys, Results)),
-    Results;
+            save_memory_copies(Ctx, Key, Doc, memory),
+            Result;
+        ({_Key, Result}) ->
+            Result
+    end, lists:zip(Keys, Results));
 cache_disc_or_remote_results(_Ctx, _Keys, Results) ->
     Results.
 
