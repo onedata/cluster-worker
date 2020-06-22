@@ -293,10 +293,8 @@ get_links(FetchNode, Ctx, Key, TreeIds, LinkNames) ->
         end, LinkNames)
     catch
         _:_ ->
-            case rpc:call(FetchNode, datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames]) of
-                {badrpc, RpcReason} -> {error, RpcReason};
-                RpcResult -> RpcResult
-            end
+            datastore_router:execute_on_node(FetchNode,
+                datastore_writer, fetch_links, [Ctx, Key, TreeIds, LinkNames])
     end.
 
 %%--------------------------------------------------------------------
@@ -320,10 +318,7 @@ get_links_trees(FetchNode, Ctx, Key) ->
         end
     catch
         _:_ ->
-            case rpc:call(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key]) of
-                {badrpc, Reason3} -> {error, Reason3};
-                Result -> Result
-            end
+            datastore_router:execute_on_node(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key])
     end.
 
 %%%===================================================================
@@ -340,10 +335,7 @@ get_links_trees(FetchNode, Ctx, Key) ->
 fetch_missing(FetchNode, Ctx, Key) ->
     case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
         true ->
-            case rpc:call(FetchNode, datastore_writer, fetch, [Ctx, Key]) of
-                {badrpc, Reason} -> {error, Reason};
-                Result -> Result
-            end;
+            datastore_router:execute_on_node(FetchNode, datastore_writer, fetch, [Ctx, Key]);
         _ ->
             {error, not_found}
     end.

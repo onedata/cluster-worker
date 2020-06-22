@@ -100,17 +100,21 @@ apply(Ctx, Key, TreeId, Function, Args) ->
     Ref = make_ref(),
     Batch = datastore_doc_batch:init(),
     Batch2 = datastore_doc_batch:init_request(Ref, Batch),
-    {ok, Tree} = datastore_links:init_tree(Ctx, Key, TreeId, Batch2),
-    {Result, Tree2} = erlang:apply(?MODULE, Function, Args ++ [Tree]),
-    Batch3 = datastore_links:terminate_tree(Tree2),
-    {Result2, Batch5} = case Result of
-        {error, Reason} ->
-            {{error, Reason}, Batch3};
-        _ ->
-            Batch4 = datastore_doc_batch:apply(Batch3),
-            case datastore_doc_batch:terminate_request(Ref, Batch4) of
-                ok -> {Result, Batch4};
-                {error, Reason} -> {{error, Reason}, Batch4}
-            end
+    {Result2, Batch5} = case datastore_links:init_tree(Ctx, Key, TreeId, Batch2) of
+        {ok, Tree} ->
+            {Result, Tree2} = erlang:apply(?MODULE, Function, Args ++ [Tree]),
+            Batch3 = datastore_links:terminate_tree(Tree2),
+            case Result of
+                {error, Reason} ->
+                    {{error, Reason}, Batch3};
+                _ ->
+                    Batch4 = datastore_doc_batch:apply(Batch3),
+                    case datastore_doc_batch:terminate_request(Ref, Batch4) of
+                        ok -> {Result, Batch4};
+                        {error, Reason} -> {{error, Reason}, Batch4}
+                    end
+            end;
+        Error ->
+            {Error, Batch2}
     end,
     {Result2, datastore_doc_batch:terminate(Batch5)}.
