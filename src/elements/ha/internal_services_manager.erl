@@ -19,15 +19,15 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_service/5, start_service/6, start_service/3, start_service/4,
+-export([start_service/6, start_service/3, start_service/4,
     stop_service/3, report_service_stop/3, takeover/1, migrate_to_recovered_master/1,
-    do_healtcheck/3, get_processing_node/1]).
+    do_healthcheck/3, get_processing_node/1]).
 %% Export for internal rpc
 -export([start_service_locally/5, init_service/4]).
 
 -define(LOCAL_HASHING_BASE, <<>>).
 
-% Type defining binary used by consistent hashing to chose node where service should be running.
+% Type used by consistent hashing to chose node where service should be running.
 -type hashing_base() :: binary().
 -type node_id() :: binary().
 -type service_init_fun() :: apply_start_fun | apply_takeover_fun.
@@ -38,14 +38,8 @@
 %%%===================================================================
 
 -spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
-    internal_service:service_fun_name(), internal_service:service_fun_args()) ->
-    ok | {error, term()}.
-start_service(Module, Name, Fun, StopFun, Args) ->
-    start_service(Module, Name, Fun, StopFun, Args, ?LOCAL_HASHING_BASE).
-
--spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
     internal_service:service_fun_name(), internal_service:service_fun_args(), hashing_base()) ->
-    ok | {error, term()}.
+    ok | aborted | {error, term()}.
 start_service(Module, Name, Fun, StopFun, Args, HashingBase) ->
     Options = #{
         start_function => Fun,
@@ -55,7 +49,7 @@ start_service(Module, Name, Fun, StopFun, Args, HashingBase) ->
     start_service(Module, Name, HashingBase, Options).
 
 -spec start_service(module(), internal_service:service_name(), internal_service:options()) ->
-    ok | {error, term()}.
+    ok | aborted | {error, term()}.
 start_service(Module, Name, ServiceDescription) ->
     start_service(Module, Name, ?LOCAL_HASHING_BASE, ServiceDescription).
 
@@ -73,11 +67,10 @@ stop_service(Module, Name, HashingBase) ->
     {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
     MasterNodeID = get_node_id(MasterNode),
     ServiceName = get_internal_name(Module, Name),
-    {Service, ProcessingNode} = get_service_and_processing_node(ServiceName, MasterNodeID),
-    case Service of
-        undefined ->
+    case get_service_and_processing_node(ServiceName, MasterNodeID) of
+        {undefined, _} ->
             ok;
-        _ ->
+        {Service, ProcessingNode} ->
             ok = internal_service:apply_stop_fun(ProcessingNode, Service),
             remove_service_from_doc(MasterNodeID, ServiceName)
     end.
@@ -99,9 +92,9 @@ takeover(FailedNode) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                ?info("Taking over of service ~p from node ~p started", [ServiceName, FailedNode]),
+                ?info("Starting takeover of service ~s from node ~ts", [ServiceName, FailedNode]),
                 init_service(Service, ServiceName, apply_takeover_fun, MasterNodeID),
-                ?info("Taking over of service ~p from node ~p finished", [ServiceName, FailedNode])
+                ?info("Finished takeover of service ~s from node ~ts", [ServiceName, FailedNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -116,32 +109,32 @@ migrate_to_recovered_master(MasterNode) ->
     case node_internal_services:update(MasterNodeID, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                ?info("Migration of service ~p to node ~p started", [ServiceName, MasterNode]),
+                ?info("Starting migration of service ~s to node ~ts", [ServiceName, MasterNode]),
                 ok = internal_service:apply_migrate_fun(Service),
                 case rpc:call(MasterNode, ?MODULE, init_service, [Service, ServiceName, apply_start_fun, MasterNodeID]) of
                     ok -> ok;
                     aborted -> ok
                 end,
-                ?info("Migration of service ~p to node ~p finished", [ServiceName, MasterNode])
+                ?info("Finished migration of service ~s to node ~ts", [ServiceName, MasterNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
     end.
 
--spec do_healtcheck(internal_service:service_name(), node_id(), non_neg_integer()) ->
+-spec do_healthcheck(internal_service:service_name(), node_id(), non_neg_integer()) ->
     {ok, NewInterval :: non_neg_integer()} | ignore.
-do_healtcheck(ServiceName, MasterNodeID, LastInterval) ->
+do_healthcheck(ServiceName, MasterNodeID, LastInterval) ->
     try
         case get_service_and_processing_node(ServiceName, MasterNodeID) of
             {Service, Node} when Service =:= undefined orelse Node =/= node() ->
                 ignore;
             {Service, _} ->
-                do_healtcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval)
+                do_healthcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval)
         end
     catch
         _:Reason ->
             % Error can appear during restart and node switching
-            ?debug("Service healtcheck error ~p", [Reason]),
+            ?debug("Service healthcheck error ~p", [Reason]),
             {ok, LastInterval}
     end.
 
@@ -188,8 +181,8 @@ get_master_and_handling_nodes(HashingBase) ->
         ?LOCAL_HASHING_BASE ->
             {node(), node()};
         _ ->
-            {Master, _} = datastore_key:primary_responsible_node(HashingBase),
-            {Master, datastore_key:responsible_node(HashingBase)}
+            {datastore_key:primary_responsible_node(HashingBase),
+                datastore_key:responsible_node(HashingBase)}
     end.
 
 -spec get_internal_name(module(), internal_service:service_name()) -> internal_service:service_name().
@@ -226,9 +219,9 @@ remove_service_from_doc(MasterNodeID, ServiceName) ->
         {error, not_found} -> ok
     end.
 
--spec do_healtcheck_insecure(internal_service:service_name(), internal_service:service(), node_id(),
+-spec do_healthcheck_insecure(internal_service:service_name(), internal_service:service(), node_id(),
     non_neg_integer()) -> {ok, NewInterval :: non_neg_integer()} | ignore.
-do_healtcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval) ->
+do_healthcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval) ->
     case internal_service:apply_healthcheck_fun(Service, LastInterval) of
         {error, undefined_fun} ->
             ignore;
@@ -236,7 +229,7 @@ do_healtcheck_insecure(ServiceName, Service, MasterNodeID, LastInterval) ->
             % Check once more in case of race with migration
             case get_service_and_processing_node(ServiceName, MasterNodeID) of
                 {Service2, Node2} when Service2 =:= undefined orelse Node2 =/= node() ->
-                    ignore;
+                    ignore; % service has been stopped (Service2 =:= undefined) or migrated (Node2 =/= node())
                 _ ->
                     case internal_service:apply_start_fun(Service) of
                         ok ->

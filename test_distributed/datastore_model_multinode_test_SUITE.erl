@@ -887,7 +887,7 @@ init_per_testcase(ha_test, Config) ->
     Config;
 init_per_testcase(saves_should_not_propagate_to_backup_node_when_ha_is_disabled, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{ha_disabled => true}),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{ha_enabled => false}),
     init_per_testcase(ha_test, Config);
 init_per_testcase(saves_should_not_propagate_to_backup_node_for_local_memory_model, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
@@ -895,7 +895,7 @@ init_per_testcase(saves_should_not_propagate_to_backup_node_for_local_memory_mod
     init_per_testcase(ha_test, Config);
 init_per_testcase(saves_should_propagate_to_backup_node_after_config_change_local_models, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{routing => local, ha_disabled => false}),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{routing => local, ha_enabled => true}),
     init_per_testcase(ha_test, Config);
 init_per_testcase(saves_should_propagate_to_backup_node_after_config_change_global_models, Config) ->
     init_per_testcase(ha_test, Config);

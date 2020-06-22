@@ -174,15 +174,13 @@ responsible_node(Key) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns a single node responsible for handling given datastore key.
-%% Provides information if such node is alive.
 %% @end
 %%--------------------------------------------------------------------
--spec primary_responsible_node(key()) -> {node(), IsAlive :: boolean()}.
+-spec primary_responsible_node(key()) -> node().
 primary_responsible_node(Key) ->
     CHashSeed = get_chash_seed(Key),
-    #node_routing_info{assigned_nodes = [Node | _], failed_nodes = FailedNodes} =
-        consistent_hashing:get_routing_info(CHashSeed),
-    {Node, not lists:member(Node, FailedNodes)}.
+    #node_routing_info{assigned_nodes = [Node | _]} = consistent_hashing:get_routing_info(CHashSeed),
+    Node.
 
 
 -spec get_chash_seed(key()) -> key() | chash_label().

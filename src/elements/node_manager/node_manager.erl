@@ -524,14 +524,14 @@ handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
 handle_cast({service_healthcheck, ServiceName, MasterNodeID, LastInterval}, State) ->
-    case internal_services_manager:do_healtcheck(ServiceName, MasterNodeID, LastInterval) of
+    case internal_services_manager:do_healthcheck(ServiceName, MasterNodeID, LastInterval) of
         {ok, NewInterval} ->
             erlang:send_after(NewInterval, self(),
-                {timer, {service_healthcheck, ServiceName, MasterNodeID, NewInterval}}),
-            {noreply, State};
+                {timer, {service_healthcheck, ServiceName, MasterNodeID, NewInterval}});
         ignore ->
-            {noreply, State}
-    end;
+            ok
+    end,
+    {noreply, State};
 
 handle_cast({update_lb_advices, Advices}, State) ->
     NewState = update_lb_advices(State, Advices),
@@ -1341,7 +1341,7 @@ init_restart() ->
 
 -spec finish_restart() -> ok.
 finish_restart() ->
-    ?info("Restart of node - secodn phase started"),
+    ?info("Restart of node - second phase started"),
 
     ?info("Starting workers essential for upgrade..."),
     WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
@@ -1369,7 +1369,13 @@ finish_restart() ->
 handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
     ?info("Node ~p changed status to ~p - handling proc started", [Node, NewStatus]),
     spawn(fun() ->
-        HandlingFun(),
+        try
+            HandlingFun()
+        catch
+            Error:Reason ->
+                ?error_stacktrace("Error handling notification about node ~p changing status to ~p: ~p:~p",
+                    [Node, NewStatus, Error,Reason])
+        end,
         ?info("Node ~p changed status to ~p - handling proc finished", [Node, NewStatus])
     end),
     ok.

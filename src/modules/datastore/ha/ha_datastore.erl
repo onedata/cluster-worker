@@ -30,9 +30,10 @@
     send_async_master_message/2, send_sync_master_message/4,
     broadcast_async_management_message/1]).
 %% API
--export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, is_slave/1, get_slave_mode/0]).
+-export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, is_slave/1, get_slave_mode/0,
+    is_ha_enabled/1]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
-    change_config/2, change_propagation_method/1, set_propagation_method_on_node/1]).
+    change_config/2, change_propagation_method/1, replicate_propagation_method_settings_to_node/1]).
 -export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
 -export([init_memory_backup/0]).
 
@@ -111,8 +112,8 @@ broadcast_sync_management_message(Msg) ->
 get_propagation_method() ->
     application:get_env(?CLUSTER_WORKER_APP_NAME, ha_propagation_method, ?HA_CAST_PROPAGATION).
 
--spec set_propagation_method(propagation_method()) -> ok.
-set_propagation_method(PropagationMethod) ->
+-spec set_propagation_method_env(propagation_method()) -> ok.
+set_propagation_method_env(PropagationMethod) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, ha_propagation_method, PropagationMethod).
 
 
@@ -162,12 +163,11 @@ is_master(Node) ->
 is_slave(Node) ->
     is_master_slave_pair(node(), Node).
 
--spec clean_backup_nodes_cache() -> ok.
-clean_backup_nodes_cache() ->
-    critical_section:run(?MODULE, fun() ->
-        application_controller:unset_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes)
-    end),
-    ok.
+-spec is_ha_enabled(datastore:ctx()) -> boolean().
+is_ha_enabled(#{routing := local, disc_driver := undefined} = Ctx) ->
+    maps:get(ha_enabled, Ctx, false);
+is_ha_enabled(Ctx) ->
+    maps:get(ha_enabled, Ctx, true).
 
 %%%===================================================================
 %%% API to configure processes - sets information in environment variables
@@ -191,27 +191,27 @@ set_standby_mode_and_broadcast_master_up_message() ->
 
 
 -spec change_config(nodes_assigned_per_key(), propagation_method()) -> ok.
-change_config(NodesNumber, PropagationMethod) ->
-    ?notice("New HA configuration: nodes number: ~p, propagation method: ~p - setting environment variables"
-        " and broadcasting information to tp processes~n", [NodesNumber, PropagationMethod]),
-    consistent_hashing:set_nodes_assigned_per_label(NodesNumber),
+change_config(NodesAssignedPerKey, PropagationMethod) ->
+    ?notice("New HA configuration: nodes assiged per key: ~p, propagation method: ~p - "
+        "broadcasting information to tp processes", [NodesAssignedPerKey, PropagationMethod]),
+    consistent_hashing:set_nodes_assigned_per_label(NodesAssignedPerKey),
     clean_backup_nodes_cache(),
-    set_propagation_method(PropagationMethod),
+    set_propagation_method_env(PropagationMethod),
     broadcast_async_management_message(?CONFIG_CHANGED),
-    case NodesNumber > 1 of
+    case NodesAssignedPerKey > 1 of
         true -> ok = init_memory_backup();
         _ -> ok
     end.
 
 -spec change_propagation_method(propagation_method()) -> ok.
 change_propagation_method(PropagationMethod) ->
-    ?notice("New HA propagation method: ~p - setting environment variables"
-    " and broadcasting information to tp processes~n", [PropagationMethod]),
-    set_propagation_method(PropagationMethod),
+    ?notice("New HA propagation method: ~p - broadcasting information to tp processes",
+        [PropagationMethod]),
+    set_propagation_method_env(PropagationMethod),
     broadcast_async_management_message(?CONFIG_CHANGED).
 
--spec set_propagation_method_on_node(node()) -> ok | no_return().
-set_propagation_method_on_node(Node) ->
+-spec replicate_propagation_method_settings_to_node(node()) -> ok | no_return().
+replicate_propagation_method_settings_to_node(Node) ->
     PropagationMethod = get_propagation_method(),
     ok = rpc:call(Node, ?MODULE, change_propagation_method, [PropagationMethod]).
 
@@ -270,6 +270,13 @@ init_memory_backup() ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+-spec clean_backup_nodes_cache() -> ok.
+clean_backup_nodes_cache() ->
+    critical_section:run(?MODULE, fun() ->
+        application_controller:unset_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes)
+    end),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -333,20 +340,12 @@ copy_keys(Ring, DocsToCopy) ->
 -spec prepare_key_copy(datastore:key(), datastore:doc(), datastore:ctx(), node() | local_key,
     memory_copy_acc()) -> {memory_copy_acc(), Flush :: boolean()}.
 prepare_key_copy(Key, Doc, Ctx, Node, Acc) ->
-    Ctx2 = Ctx#{mutator_pid => self()},
-    ShouldCopy = case Ctx of
-        #{routing := local} ->
-            not maps:get(ha_disabled, Ctx, true);
-        _ ->
-            not maps:get(ha_disabled, Ctx, false)
-    end,
-
-    case ShouldCopy of
+    case is_ha_enabled(Ctx) of
         false ->
             {Acc, false};
         true ->
             NodeAcc = maps:get(Node, Acc, []),
-            NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
+            NewNodeAcc = [{Ctx#{mutator_pid => self()}, Key, Doc} | NodeAcc],
             NewAcc = maps:put(Node, NewNodeAcc, Acc),
             {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE}
     end.
@@ -390,9 +389,9 @@ create_backup(Items) ->
 -spec is_master_slave_pair(node(), node()) -> boolean().
 is_master_slave_pair(Master, SlaveToCheck) ->
     case consistent_hashing:get_nodes_assigned_per_label() of
-        1 -> % HA is disabled
+        1 -> % There is one node assigned per label so nodes have no slaves
             false;
-        _ ->
+        _ -> % Each node has assigned slave - verify if nodes from arguments are master/slave pair
             [SlaveNode | _] = arrange_nodes(Master, consistent_hashing:get_all_nodes()),
             SlaveNode =:= SlaveToCheck
     end.

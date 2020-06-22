@@ -43,7 +43,7 @@ node_up(Node) ->
     IsMaster = ha_datastore:is_master(Node),
     case IsMaster of
         true ->
-            ok = ha_datastore:set_propagation_method_on_node(Node),
+            ok = ha_datastore:replicate_propagation_method_settings_to_node(Node),
             ok = ha_datastore:set_standby_mode_and_broadcast_master_up_message();
         false ->
             ok

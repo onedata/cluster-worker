@@ -17,6 +17,7 @@
 
 -include("global_definitions.hrl").
 -include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([new/3, is_override_allowed/1,
@@ -63,6 +64,7 @@
                                  % if it is false (default), changes are ignored if service is already working
     async_start => boolean()
 }.
+-type init_fun_answer() :: ok | abort.
 
 -export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
 
@@ -71,7 +73,7 @@
 -define(INITIAL_SLEEP,
     application:get_env(?CLUSTER_WORKER_APP_NAME, service_retry_initial_sleep, 100)).
 -define(RETRIES_NUM,
-    application:get_env(?CLUSTER_WORKER_APP_NAME, service_start_retries_num, 1000)).
+    application:get_env(?CLUSTER_WORKER_APP_NAME, service_start_retries_num, 8)).
 
 %%%===================================================================
 %%% API
@@ -117,12 +119,12 @@ new(Module, HashingBase, ServiceDescription) ->
 is_override_allowed(ServiceDescription) ->
     maps:get(allow_override, ServiceDescription, false).
 
--spec apply_start_fun(service()) -> term().
+-spec apply_start_fun(service()) -> init_fun_answer().
 apply_start_fun(#internal_service{module = Module, start_function = Fun,
     start_function_args = Args, async_start = Async}) ->
     apply_with_retry(Module, Fun, Args, Async).
 
--spec apply_takeover_fun(service()) -> term().
+-spec apply_takeover_fun(service()) -> init_fun_answer().
 apply_takeover_fun(#internal_service{module = Module, takeover_function = Fun,
     takeover_function_args = Args, async_start = Async}) ->
     apply_with_retry(Module, Fun, Args, Async).
@@ -156,10 +158,10 @@ apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun, 
     end.
 
 -spec get_healthcheck_interval(service()) -> non_neg_integer().
-get_healthcheck_interval(#internal_service{healthcheck_interval = DefaultInterval}) ->
-    DefaultInterval.
+get_healthcheck_interval(#internal_service{healthcheck_interval = Interval}) ->
+    Interval.
 
--spec apply_with_retry(module(), service_fun_name(), service_fun_args(), boolean()) -> term().
+-spec apply_with_retry(module(), service_fun_name(), service_fun_args(), boolean()) -> init_fun_answer().
 apply_with_retry(Module, Fun, Args, Async) ->
     case Async of
         true ->
@@ -169,14 +171,17 @@ apply_with_retry(Module, Fun, Args, Async) ->
             apply_with_retry(Module, Fun, Args, ?INITIAL_SLEEP, ?RETRIES_NUM)
     end.
 
--spec apply_with_retry(module(), service_fun_name(), service_fun_args(), non_neg_integer(), non_neg_integer()) -> term().
+-spec apply_with_retry(module(), service_fun_name(), service_fun_args(), non_neg_integer(), non_neg_integer()) ->
+    init_fun_answer().
 apply_with_retry(Module, Fun, Args, _Sleep, 0) ->
     apply(Module, Fun, Args);
 apply_with_retry(Module, Fun, Args, Sleep, RetryCount) ->
     try
         apply(Module, Fun, Args)
     catch
-        _:_ ->
+        Error:Reason ->
+            ?debug_stacktrace("Error while applying fun ~p:~p with args ~p: ~p~p",
+                [Module, Fun, Args, Error, Reason]),
             timer:sleep(Sleep),
             apply_with_retry(Module, Fun, Args, Sleep * 2, RetryCount - 1)
     end.

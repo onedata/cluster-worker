@@ -99,7 +99,7 @@ store_backup(_ProcessKey, _Keys, _CacheRequests, #data{backup_nodes = []} = Data
     Data;
 store_backup(ProcessKey, Keys, CacheRequests, Data) ->
     % TODO VFS-6168 - delete keys connected with filtered requests
-    send_store_backup_request(ProcessKey, Keys, filter_requests(CacheRequests), Data).
+    send_store_backup_request(ProcessKey, Keys, filter_requests_with_disabled_ha(CacheRequests), Data).
 
 -spec forget_backup(datastore_doc_batch:cached_keys(), ha_master_data()) -> ok.
 forget_backup([], _) ->
@@ -178,14 +178,9 @@ inspect_slave_activity(Key, Node) ->
             {IsHandlingRequests, maps:keys(CacheRequestsMap), RequestsToHandle}
     end.
 
--spec filter_requests([datastore_cache:cache_save_request()]) -> [datastore_cache:cache_save_request()].
-filter_requests(Requests) ->
-    lists:filter(fun
-        ({#{routing := local, disc_driver := undefined} = Ctx, _Key, _}) ->
-            not maps:get(ha_disabled, Ctx, true);
-        ({Ctx, _Key, _Doc}) ->
-            not maps:get(ha_disabled, Ctx, false)
-    end, Requests).
+-spec filter_requests_with_disabled_ha([datastore_cache:cache_save_request()]) -> [datastore_cache:cache_save_request()].
+filter_requests_with_disabled_ha(Requests) ->
+    lists:filter(fun({Ctx, _Key, _Doc}) -> ha_datastore:is_ha_enabled(Ctx) end, Requests).
 
 -spec send_store_backup_request(datastore:key(), datastore_doc_batch:cached_keys(),
     [datastore_cache:cache_save_request()], ha_master_data()) -> ha_master_data().
@@ -213,7 +208,7 @@ send_store_backup_request(ProcessKey, Keys, CacheRequests, #data{link_status = ?
             Data#data{link_status = ?SLAVE_LINKED, slave_pid = Pid};
         {badrpc, _} ->
             % TODO VFS-6295 - log to dedicated logfile
-            ?debug("Cannot broadcast HA data - slave down"),
+            ?debug("Cannot broadcast HA data to backup changed documents - slave down"),
             Data;
         Error ->
             ?warning("Cannot broadcast HA data because of error: ~p", [Error]),

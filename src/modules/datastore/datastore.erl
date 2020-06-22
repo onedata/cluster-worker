@@ -33,7 +33,7 @@
                                                    % operations that triggered link's adding/deletion
                                                    % TOOD VFS-5971 - does not support save and update with default
                  local_fold => boolean(), % Fold links are added using local routing
-                 fold_node => node(), % Node used to generate key for local fold
+                 local_fold_node => node(), % Node used to generate key for local fold
                  sync_enabled => boolean(),
                  sync_change => boolean(), % should set to 'true' for save
                                            % of remote change
@@ -44,7 +44,7 @@
                  memory_driver => memory_driver(),
                  memory_driver_ctx => memory_driver_ctx(),
 
-                 ha_disabled => boolean(),
+                 ha_enabled => boolean(),
                  % Memory copies external API (to be set by model)
                  memory_copies => all | none, % number of nodes used for memory copies
                  % Memory copies internal API (to be set by datastore modules)
