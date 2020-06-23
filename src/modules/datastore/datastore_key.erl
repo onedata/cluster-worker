@@ -66,7 +66,7 @@
 %% API
 -export([new/0, new_from_digest/1]).
 -export([new_adjacent_to/1, build_adjacent/2, adjacent_from_digest/2]).
--export([responsible_node/1, primary_responsible_node/1, get_chash_seed/1]).
+-export([any_responsible_node/1, primary_responsible_node/1, get_chash_seed/1]).
 
 %%%===================================================================
 %%% API
@@ -161,8 +161,8 @@ adjacent_from_digest(DigestComponents, Original) when size(Original) > 0 ->
 %% If responsible node is down, returns first possible node.
 %% @end
 %%--------------------------------------------------------------------
--spec responsible_node(key()) -> node().
-responsible_node(Key) ->
+-spec any_responsible_node(key()) -> node().
+any_responsible_node(Key) ->
     CHashSeed = get_chash_seed(Key),
     #node_routing_info{assigned_nodes = Nodes, failed_nodes = FailedNodes} =
         consistent_hashing:get_routing_info(CHashSeed),

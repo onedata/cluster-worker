@@ -38,7 +38,6 @@
     takeover_function_args :: service_fun_args(),
     migrate_function_args :: service_fun_args(),
     stop_function_args :: service_fun_args(),
-    healthcheck_fun_args :: service_fun_args(),
     hashing_key :: internal_services_manager:hashing_base(),
     healthcheck_interval :: non_neg_integer(),
     async_start :: boolean()
@@ -58,10 +57,9 @@
     stop_function => service_fun_name(),
     stop_function_args => service_fun_args(),
     healthcheck_fun => service_fun_name(),
-    healthcheck_fun_args => service_fun_args(),
     healthcheck_interval => non_neg_integer(),
-    allow_override => boolean(), % allows overriding of existing service parameters (functions, arguments, etc.)
-                                 % if it is false (default), changes are ignored if service is already working
+    allow_override => boolean(), % allows overriding of existing service ; if it is false (default),
+                                 % an error is returned if service using the name already exists
     async_start => boolean()
 }.
 -type init_fun_answer() :: ok | abort.
@@ -96,11 +94,6 @@ new(Module, HashingBase, ServiceDescription) ->
     MigrateFunArgs = maps:get(migrate_function_args, ServiceDescription, StopFunArgs),
 
     HealthcheckFun = maps:get(healthcheck_fun, ServiceDescription, undefined),
-    HealthcheckFunDefArgs = case HealthcheckFun of
-        undefined -> [];
-        _ -> Args
-    end,
-    HealthcheckFunArgs = maps:get(healthcheck_fun_args, ServiceDescription, HealthcheckFunDefArgs),
     HealthcheckDefInterval = case HealthcheckFun of
         undefined -> 0;
         _ -> ?HEALTHCHECK_DEFAULT_INTERVAL
@@ -112,7 +105,7 @@ new(Module, HashingBase, ServiceDescription) ->
     #internal_service{module = Module, start_function = Fun, takeover_function = TakeoverFun,
         migrate_function = MigrateFun, stop_function = StopFun, healthcheck_fun = HealthcheckFun,
         start_function_args = Args, takeover_function_args = TakeoverFunArgs, migrate_function_args = MigrateFunArgs,
-        stop_function_args = StopFunArgs, healthcheck_fun_args = HealthcheckFunArgs, hashing_key = HashingBase,
+        stop_function_args = StopFunArgs, hashing_key = HashingBase,
         healthcheck_interval = HealthcheckInterval, async_start = AsyncStart}.
 
 -spec is_override_allowed(options()) -> boolean().
@@ -150,9 +143,9 @@ apply_migrate_fun(#internal_service{module = Module, migrate_function = Fun, mig
     {Result :: term(), Interval :: non_neg_integer()} | {error, undefined_fun}.
 apply_healthcheck_fun(#internal_service{healthcheck_fun = undefined}, _LastInterval) ->
     {error, undefined_fun};
-apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun, healthcheck_fun_args = Args,
+apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun,
     healthcheck_interval = DefaultInterval}, LastInterval) ->
-    case apply(Module, Fun, Args ++ [LastInterval]) of
+    case apply(Module, Fun, [LastInterval]) of
         {_Result, _OverriddenInterval} = Ans -> Ans;
         Result -> {Result, DefaultInterval}
     end.

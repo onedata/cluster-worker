@@ -411,7 +411,7 @@ prepare_args(Plugin, Request, MsgId, ReplyTo) ->
 choose_node(WorkerRef) ->
     case WorkerRef of
         {id, WName, Id} ->
-            {WName, datastore_key:responsible_node(Id)};
+            {WName, datastore_key:any_responsible_node(Id)};
         {WName, WNode} ->
             {WName, WNode};
         WName ->

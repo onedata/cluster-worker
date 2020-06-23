@@ -26,6 +26,7 @@
 -include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
+-include_lib("cluster_manager/include/node_management_protocol.hrl").
 
 -define(CLUSTER_WORKER_MODULES, [
     {datastore_worker, [
@@ -58,7 +59,6 @@
 -type state() :: #state{}.
 -type cluster_generation() :: non_neg_integer().
 -type node_status_notification_type() :: node_down | node_up | node_ready.
--type node_status_change_handling_fun() :: fun(() -> ok).
 
 -export_type([cluster_generation/0]).
 
@@ -69,17 +69,6 @@
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
-
-% Node failure/recovery protocol
--define(NODE_DOWN(Node), {node_down, Node}).
--define(NODE_UP(Node), {node_up, Node}).
--define(NODE_READY(Node), {node_ready, Node}).
-% Node restart protocol
--define(INIT_RESTART, init_restart).
--define(RESTART_INITIALIZED, {restart_initialized, node()}).
--define(NODE_UP_MSG_PROCESSED(SenderNode, RestartedNode), {node_up_msg_processed, SenderNode, RestartedNode}).
--define(FINISH_RESTART, finish_restart).
--define(RESTART_FINISHED(Node), {restart_finished, node()}).
 
 %%%===================================================================
 %%% API
@@ -306,9 +295,9 @@ start_worker(Module, Args, Options) ->
 
 -spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
     non_neg_integer()) -> ok.
-init_service_healthcheck(ServiceName, MasterNodeID, Interval) ->
+init_service_healthcheck(ServiceName, MasterNodeId, Interval) ->
     erlang:send_after(Interval, ?NODE_MANAGER_NAME,
-        {timer, {service_healthcheck, ServiceName, MasterNodeID, Interval}}),
+        {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}),
     ok.
 
 %%%===================================================================
@@ -440,11 +429,11 @@ handle_cast(connect_to_cm, State) ->
     NewState = connect_to_cm(State),
     {noreply, NewState};
 
-handle_cast({cluster_init_step, Step}, State) ->
+handle_cast(?INIT_STEP_MSG(Step), State) ->
     try
         case {Step, cluster_init_step(Step)} of
             % end of cluster init procedure
-            {cluster_ready, ok} -> ok;
+            {?CLUSTER_READY, ok} -> ok;
             % report the result to cluster manager
             {_, ok} -> report_step_result(Step, success);
             % result will be reported by the async process that is handling the step
@@ -523,24 +512,24 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
-handle_cast({service_healthcheck, ServiceName, MasterNodeID, LastInterval}, State) ->
-    case internal_services_manager:do_healthcheck(ServiceName, MasterNodeID, LastInterval) of
+handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, State) ->
+    case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
         {ok, NewInterval} ->
             erlang:send_after(NewInterval, self(),
-                {timer, {service_healthcheck, ServiceName, MasterNodeID, NewInterval}});
+                {timer, {service_healthcheck, ServiceName, MasterNodeId, NewInterval}});
         ignore ->
             ok
     end,
     {noreply, State};
 
-handle_cast({update_lb_advices, Advices}, State) ->
+handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
     NewState = update_lb_advices(State, Advices),
     {noreply, NewState};
 
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
-handle_cast({force_stop, ReasonMsg}, State) ->
+handle_cast(?FORCE_STOP(ReasonMsg), State) ->
     ?critical("Received stop signal from cluster manager: ~s", [ReasonMsg]),
     ?critical("Force stopping application..."),
     init:stop(),
@@ -555,7 +544,7 @@ handle_cast(?NODE_DOWN(Node), State) ->
 handle_cast(?NODE_UP(Node), State) ->
     handle_node_status_change_async(Node, node_up, fun() ->
         ha_management:node_up(Node),
-        gen_server2:cast({global, ?CLUSTER_MANAGER}, ?NODE_UP_MSG_PROCESSED(node(), Node))
+        gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_ACKNOWLEDGED(node(), Node))
     end),
     {noreply, State};
 
@@ -565,12 +554,12 @@ handle_cast(?NODE_READY(Node), State) ->
     end),
     {noreply, State};
 
-handle_cast(?INIT_RESTART, State) ->
-    init_restart(),
+handle_cast(?INITIALIZE_RECOVERY, State) ->
+    initialize_recovery(),
     {noreply, State};
 
-handle_cast(?FINISH_RESTART, State) ->
-    finish_restart(),
+handle_cast(?FINALIZE_RECOVERY, State) ->
+    finalize_recovery(),
     {noreply, State};
 
 handle_cast(stop, State) ->
@@ -703,36 +692,36 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
-cluster_init_step(init_connection) ->
+cluster_init_step(?INIT_CONNECTION) ->
     ?info("Successfully connected to cluster manager, starting heatbeat"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
-cluster_init_step(start_default_workers) ->
+cluster_init_step(?START_DEFAULT_WORKERS) ->
     ?info("Starting default workers..."),
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(start_upgrade_essential_workers) ->
+cluster_init_step(?START_UPGRADE_ESSENTIAL_WORKERS) ->
     ?info("Starting workers essential for upgrade..."),
     WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
     init_workers(WorkersToStart),
     ?info("Workers essential for upgrade started successfully"),
     ok;
-cluster_init_step(upgrade_cluster) ->
-    case node() == consistent_hashing:get_assigned_node(upgrade_cluster) of
+cluster_init_step(?UPGRADE_CLUSTER) ->
+    case node() == consistent_hashing:get_assigned_node(?UPGRADE_CLUSTER) of
         true ->
             upgrade_cluster(),
             ok;
         false ->
             ok
     end;
-cluster_init_step(start_custom_workers) ->
+cluster_init_step(?START_CUSTOM_WORKERS) ->
     ?info("Starting custom workers..."),
     Workers = ?CALL_PLUGIN(custom_workers, []),
     init_workers(Workers),
     ?info("Custom workers started successfully"),
     ok;
-cluster_init_step(db_and_workers_ready) ->
+cluster_init_step(?DB_AND_WORKERS_READY) ->
     ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
     % the procedures require calls to node manager, hence they are processed asynchronously
     spawn(fun() ->
@@ -746,10 +735,10 @@ cluster_init_step(db_and_workers_ready) ->
             ]),
             failure
         end,
-        report_step_result(db_and_workers_ready, Result)
+        report_step_result(?DB_AND_WORKERS_READY, Result)
     end),
     async;
-cluster_init_step(start_listeners) ->
+cluster_init_step(?START_LISTENERS) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
         ok = erlang:apply(Module, start, []),
@@ -757,7 +746,7 @@ cluster_init_step(start_listeners) ->
     end, node_manager:listeners()),
     ?info("All listeners started"),
     ok;
-cluster_init_step(cluster_ready) ->
+cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
     gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
     ok.
@@ -1327,21 +1316,21 @@ report_step_result(Step, Result) ->
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {cluster_init_step_report, node(), Step, Result}).
 
 %%%===================================================================
-%%% Node restart handling
+%%% Node recovery handling
 %%%===================================================================
 
--spec init_restart() -> ok.
-init_restart() ->
-    ?info("Restart of node initialized"),
+-spec initialize_recovery() -> ok.
+initialize_recovery() ->
+    ?info("Recovery of node initialized"),
     gen_server2:cast(self(), do_heartbeat),
     ok = init_workers(cluster_worker_modules()),
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RESTART_INITIALIZED),
-    ?info("First phase of node restart finished"),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_INITIALIZED(node())),
+    ?info("First phase of node recovery finished"),
     ok.
 
--spec finish_restart() -> ok.
-finish_restart() ->
-    ?info("Restart of node - second phase started"),
+-spec finalize_recovery() -> ok.
+finalize_recovery() ->
+    ?info("Recovery of node - second phase started"),
 
     ?info("Starting workers essential for upgrade..."),
     WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
@@ -1360,14 +1349,14 @@ finish_restart() ->
     end, node_manager:listeners()),
     ?info("All listeners started"),
 
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RESTART_FINISHED(node())),
-    ?info("Node restart finished"),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_FINALIZED(node())),
+    ?info("Node recovery finished"),
     ok.
 
--spec handle_node_status_change_async(node(), node_status_notification_type(),
-    node_status_change_handling_fun()) -> ok.
+-spec handle_node_status_change_async(node(), NodeStatusNotificationType :: node_down | node_up | node_ready,
+    HandlingFun :: fun(() -> ok)) -> ok.
 handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
-    ?info("Node ~p changed status to ~p - handling proc started", [Node, NewStatus]),
+    ?info("Started processing transition of node ~p to status ~p", [Node, NewStatus]),
     spawn(fun() ->
         try
             HandlingFun()
@@ -1376,6 +1365,6 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
                 ?error_stacktrace("Error handling notification about node ~p changing status to ~p: ~p:~p",
                     [Node, NewStatus, Error,Reason])
         end,
-        ?info("Node ~p changed status to ~p - handling proc finished", [Node, NewStatus])
+        ?info("Finished processing transition of node ~p to status ~p", [Node, NewStatus])
     end),
     ok.

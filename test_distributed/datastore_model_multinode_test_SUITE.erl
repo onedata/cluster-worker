@@ -224,6 +224,7 @@ services_migration_test(Config) ->
         healthcheck_fun => healthcheck_fun,
         start_function_args => [ServiceName, MasterProc]
     },
+    ha_test_utils:set_envs(Workers, ServiceName, MasterProc),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
         [ha_test_utils, <<"test_service">>, HashingBase, ServiceOptions])),
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
@@ -801,7 +802,7 @@ prepare_cluster_reorganization_data(Config, add, ReconfiguredNodeChoice) ->
     InitialRing = prepare_ring(Config, [KeyNode]),
     % Check which node is responsible for key in new ring
     % if relation between nodes in the rings is not correct try once more
-    case {datastore_key:responsible_node(Key), ReconfiguredNodeChoice} of
+    case {datastore_key:any_responsible_node(Key), ReconfiguredNodeChoice} of
         {KeySlaveNode, prev} ->
             consistent_hashing:cleanup(),
             [TestWorker | _] = Workers -- [KeyNode, KeySlaveNode],
