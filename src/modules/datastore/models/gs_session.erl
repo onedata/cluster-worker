@@ -6,8 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides DB API for record gs_session that holds information
-%%% about a Graph Sync session.
+%%% DB API for gs_session record.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(gs_session).
@@ -16,84 +15,56 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([create/1, get/1, delete/1, update/2, list/0]).
+-export([create/4, get/1, delete/1]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
 
--type ctx() :: datastore:ctx().
--type key() :: datastore:key().
--type record() :: #gs_session{}.
--type doc() :: datastore_doc:doc(record()).
--type diff() :: datastore_doc:diff(record()).
+-type data() :: #gs_session{}.
 
--export_type([key/0, doc/0, diff/0]).
+-export_type([data/0]).
 
 -define(CTX, #{
     model => ?MODULE,
     disc_driver => undefined,
-    fold_enabled => true
+    memory_copies => all
 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates Graph Sync session record.
-%% @end
-%%--------------------------------------------------------------------
--spec create(doc()) -> {ok, doc()} | {error, term()}.
-create(Doc) ->
-    datastore_model:create(?CTX, Doc).
+-spec create(aai:auth(), gs_server:conn_ref(), gs_protocol:protocol_version(), gs_server:translator()) ->
+    data().
+create(Auth, ConnRef, ProtoVersion, Translator) ->
+    SessionId = datastore_key:new(),
+    SessionData = #gs_session{
+        id = SessionId,
+        auth = Auth,
+        conn_ref = ConnRef,
+        protocol_version = ProtoVersion,
+        translator = Translator
+    },
+    {ok, _} = datastore_model:create(?CTX, #document{key = SessionId, value = SessionData}),
+    SessionData.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns Graph Sync session record.
-%% @end
-%%--------------------------------------------------------------------
--spec get(key()) -> {ok, doc()} | {error, term()}.
-get(Key) ->
-    datastore_model:get(?CTX, Key).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Deletes Graph Sync session record.
-%% @end
-%%--------------------------------------------------------------------
--spec delete(key()) -> ok | {error, term()}.
-delete(Key) ->
-    datastore_model:delete(?CTX, Key).
+-spec get(gs_protocol:session_id()) -> {ok, data()} | {error, term()}.
+get(SessionId) ->
+    case datastore_model:get(?CTX, SessionId) of
+        {ok, #document{value = SessionData}} -> {ok, SessionData};
+        {error, _} = Error -> Error
+    end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Updates existing Graph Sync session record or creates default one.
-%% @end
-%%--------------------------------------------------------------------
--spec update(key(), diff()) -> {ok, doc()} | {error, term()}.
-update(Key, Diff) ->
-    datastore_model:update(?CTX, Key, Diff).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of all records.
-%% @end
-%%--------------------------------------------------------------------
--spec list() -> {ok, [doc()]} | {error, term()}.
-list() ->
-    datastore_model:fold(?CTX, fun(Doc, Acc) -> {ok, [Doc | Acc]} end, []).
+-spec delete(gs_protocol:session_id()) -> ok | {error, term()}.
+delete(SessionId) ->
+    datastore_model:delete(?CTX, SessionId).
 
 %%%===================================================================
 %%% datastore_model callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns model's context.
-%% @end
-%%--------------------------------------------------------------------
--spec get_ctx() -> ctx().
+-spec get_ctx() -> datastore:ctx().
 get_ctx() ->
     ?CTX.
-

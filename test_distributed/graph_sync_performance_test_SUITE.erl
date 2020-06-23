@@ -397,13 +397,11 @@ terminate_clients(Config, SupervisorPid) ->
 
 
 simulate_subscribe(Config, Gri, SessionId, Auth, AuthHint) ->
-    rpc:call(random_node(Config), gs_persistence, add_subscriber, [Gri, SessionId, Auth, AuthHint]),
-    rpc:call(random_node(Config), gs_persistence, add_subscription, [SessionId, Gri]).
+    rpc:call(random_node(Config), gs_persistence, subscribe, [SessionId, Gri, Auth, AuthHint]).
 
 
 simulate_unsubscribe(Config, Gri, SessionId) ->
-    rpc:call(random_node(Config), gs_persistence, remove_subscriber, [Gri, SessionId]),
-    rpc:call(random_node(Config), gs_persistence, remove_subscription, [SessionId, Gri]).
+    rpc:call(random_node(Config), gs_persistence, unsubscribe, [SessionId, Gri]).
 
 
 random_node(Config) ->
