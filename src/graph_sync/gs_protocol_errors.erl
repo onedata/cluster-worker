@@ -83,6 +83,13 @@ error_to_json(_, ?ERROR_NOT_FOUND) ->
     #{
         <<"id">> => <<"notFound">>
     };
+error_to_json(ProtoVersion, ?ERROR_UNAUTHORIZED(AuthError)) ->
+    #{
+        <<"id">> => <<"unauthorized">>,
+        <<"details">> => #{
+            <<"authError">> => error_to_json(ProtoVersion, AuthError)
+        }
+    };
 error_to_json(_, ?ERROR_UNAUTHORIZED) ->
     #{
         <<"id">> => <<"unauthorized">>
@@ -499,6 +506,9 @@ json_to_error(_, #{<<"id">> := <<"notSupported">>}) ->
 
 json_to_error(_, #{<<"id">> := <<"notFound">>}) ->
     ?ERROR_NOT_FOUND;
+
+json_to_error(ProtoVersion, #{<<"id">> := <<"unauthorized">>, <<"details">> := #{<<"authError">> := AuthError}}) ->
+    ?ERROR_UNAUTHORIZED(json_to_error(ProtoVersion, AuthError));
 
 json_to_error(_, #{<<"id">> := <<"unauthorized">>}) ->
     ?ERROR_UNAUTHORIZED;

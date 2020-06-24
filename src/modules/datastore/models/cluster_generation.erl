@@ -21,7 +21,6 @@
 -export([get_ctx/0, get_record_struct/1]).
 
 -type ctx() :: datastore:ctx().
--type key() :: datastore:key().
 -type record() :: #cluster_generation{}.
 -type doc() :: datastore_doc:doc(record()).
 

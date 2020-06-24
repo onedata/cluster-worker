@@ -641,6 +641,7 @@ encode_decode_error() ->
         ?ERROR_NOT_IMPLEMENTED,
         ?ERROR_NOT_SUPPORTED,
         ?ERROR_NOT_FOUND,
+        ?ERROR_UNAUTHORIZED(?ERROR_UNKNOWN_ERROR(#{<<"id">> => <<"tokenInvalid">>})),
         ?ERROR_UNAUTHORIZED,
         ?ERROR_FORBIDDEN,
         ?ERROR_BAD_MACAROON,
