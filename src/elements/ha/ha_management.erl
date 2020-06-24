@@ -17,35 +17,36 @@
 %% API
 -export([node_down/1, node_up/1, node_ready/1]).
 
+-type node_type() :: master | slave.
+
 %%%===================================================================
 %%% API - Working in failover mode
 %%%===================================================================
 
--spec node_down(node()) -> boolean() | no_return().
+-spec node_down(node()) -> node_type() | no_return().
 node_down(Node) ->
     % TODO VFS-6388 - maybe send message to all tp processes that slave is down to unlink slave proc
     ok = consistent_hashing:report_node_failure(Node),
-    IsMaster = ha_datastore:is_master(Node),
-    case IsMaster of
+    case ha_datastore:is_master(Node) of
         true ->
             ok = ha_datastore:set_failover_mode_and_broadcast_master_down_message(),
-            ok = internal_services_manager:takeover(Node);
+            ok = internal_services_manager:takeover(Node),
+            master;
         false ->
-            ok
-    end,
-    IsMaster.
+            slave
+    end.
 
--spec node_up(node()) -> boolean() | no_return().
+-spec node_up(node()) -> node_type() | no_return().
 node_up(Node) ->
     ok = consistent_hashing:report_node_recovery(Node),
 
-    IsMaster = ha_datastore:is_master(Node),
-    case IsMaster of
+    NodeType = case ha_datastore:is_master(Node) of
         true ->
             ok = ha_datastore:replicate_propagation_method_settings_to_node(Node),
-            ok = ha_datastore:set_standby_mode_and_broadcast_master_up_message();
+            ok = ha_datastore:set_standby_mode_and_broadcast_master_up_message(),
+            master;
         false ->
-            ok
+            slave
     end,
 
     case ha_datastore:is_slave(Node) of
@@ -54,15 +55,14 @@ node_up(Node) ->
         false ->
             ok
     end,
-    IsMaster.
+    NodeType.
 
--spec node_ready(node()) -> boolean() | no_return().
+-spec node_ready(node()) -> node_type() | no_return().
 node_ready(Node) ->
-    IsMaster = ha_datastore:is_master(Node),
-    case IsMaster of
+    case ha_datastore:is_master(Node) of
         true ->
-            ok = internal_services_manager:migrate_to_recovered_master(Node);
+            ok = internal_services_manager:migrate_to_recovered_master(Node),
+            master;
         false ->
-            ok
-    end,
-    IsMaster.
+            slave
+    end.

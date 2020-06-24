@@ -537,8 +537,8 @@ handle_cast(?FORCE_STOP(ReasonMsg), State) ->
 handle_cast(?NODE_DOWN(Node), State) ->
     handle_node_status_change_async(Node, node_down, fun() ->
         ok = case ha_management:node_down(Node) of
-            true -> plugins:apply(node_manager_plugin, master_node_down, [Node]);
-            false -> ok % Failed node is not master for this node - ignore
+            master -> plugins:apply(node_manager_plugin, master_node_down, [Node]);
+            slave -> ok % Failed node is not master for this node - ignore
         end
     end),
     {noreply, State};
@@ -546,8 +546,8 @@ handle_cast(?NODE_DOWN(Node), State) ->
 handle_cast(?NODE_UP(Node), State) ->
     handle_node_status_change_async(Node, node_up, fun() ->
         ok = case ha_management:node_up(Node) of
-            true -> plugins:apply(node_manager_plugin, master_node_up, [Node]);
-            false -> ok % Recovered node is not master for this node - ignore
+            master -> plugins:apply(node_manager_plugin, master_node_up, [Node]);
+            slave -> ok % Recovered node is not master for this node - ignore
         end,
         gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_ACKNOWLEDGED(node(), Node))
     end),
@@ -556,8 +556,8 @@ handle_cast(?NODE_UP(Node), State) ->
 handle_cast(?NODE_READY(Node), State) ->
     handle_node_status_change_async(Node, node_ready, fun() ->
         ok = case ha_management:node_ready(Node) of
-            true -> plugins:apply(node_manager_plugin, master_node_ready, [Node]);
-            false -> ok % Recovered node is not master for this node - ignore
+            master -> plugins:apply(node_manager_plugin, master_node_ready, [Node]);
+            slave -> ok % Recovered node is not master for this node - ignore
         end
     end),
     {noreply, State};
