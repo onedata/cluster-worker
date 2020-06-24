@@ -764,11 +764,13 @@ batch_link_apply(Tree, Fun) ->
 -spec links_tree_apply(ctx(), key(), tree_id(), batch(),
     fun((tree()) -> {term(), tree()})) -> {term(), batch()}.
 links_tree_apply(Ctx, Key, TreeId, Batch, Fun) ->
-    {ok, Tree} = datastore_links:init_tree(
-        set_mutator_pid(Ctx), Key, TreeId, Batch
-    ),
-    {Result, Tree2} = Fun(Tree),
-    {Result, datastore_links:terminate_tree(Tree2)}.
+    case datastore_links:init_tree(set_mutator_pid(Ctx), Key, TreeId, Batch) of
+        {ok, Tree} ->
+            {Result, Tree2} = Fun(Tree),
+            {Result, datastore_links:terminate_tree(Tree2)};
+        Error ->
+            {Error, Batch}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private

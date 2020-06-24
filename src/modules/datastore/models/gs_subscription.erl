@@ -6,8 +6,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module provides DB API for record gs_subscription that holds
-%%% information about clients subscribing for certain resource.
+%%% DB API for gs_subscription record.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(gs_subscription).
@@ -16,81 +15,56 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([get/2, update/4, create/3, list/0]).
+-export([get_entity_subscribers/2, modify_entity_subscribers/3]).
 
 %% datastore_model callbacks
 -export([get_ctx/0]).
 
--type ctx() :: datastore:ctx().
--type record() :: #gs_subscription{}.
--type doc() :: datastore_doc:doc(record()).
--type diff() :: datastore_doc:diff(record()).
-
--export_type([doc/0, diff/0]).
+-type entity_subscribers_diff() :: fun((gs_persistence:entity_subscribers()) -> gs_persistence:entity_subscribers()).
 
 -define(CTX, #{
     model => ?MODULE,
-    disc_driver => undefined,
-    fold_enabled => true
+    disc_driver => undefined
 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns Graph Sync subscription record.
-%% @end
-%%--------------------------------------------------------------------
--spec get(gs_protocol:entity_type(), gs_protocol:entity_id()) ->
-    {ok, doc()} | {error, term()}.
-get(Type, Id) ->
-    datastore_model:get(?CTX, id(Type, Id)).
+-spec get_entity_subscribers(gs_protocol:entity_type(), gs_protocol:entity_id()) ->
+    gs_persistence:entity_subscribers().
+get_entity_subscribers(EntityType, EntityId) ->
+    case datastore_model:get(?CTX, id(EntityType, EntityId)) of
+        {error, not_found} ->
+            #{};
+        {ok, #document{value = #gs_subscription{subscribers = Subscribers}}} ->
+            Subscribers
+    end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Updates existing Graph Sync subscription record or creates default one.
-%% @end
-%%--------------------------------------------------------------------
--spec update(gs_protocol:entity_type(), gs_protocol:entity_id(), diff(), record()) ->
-    {ok, doc()} | {error, term()}.
-update(Type, Id, Diff, Default) ->
-    datastore_model:update(?CTX, id(Type, Id), Diff, Default).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates Graph Sync subscription record.
-%% @end
-%%--------------------------------------------------------------------
--spec create(gs_protocol:entity_type(), gs_protocol:entity_id(), doc()) ->
-    {ok, doc()} | {error, term()}.
-create(Type, Id, Doc) ->
-    datastore_model:create(?CTX, Doc#document{key = id(Type, Id)}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns list of all records.
-%% @end
-%%--------------------------------------------------------------------
--spec list() -> {ok, [doc()]} | {error, term()}.
-list() ->
-    datastore_model:fold(?CTX, fun(Doc, Acc) -> {ok, [Doc | Acc]} end, []).
+-spec modify_entity_subscribers(gs_protocol:entity_type(), gs_protocol:entity_id(), entity_subscribers_diff()) ->
+    ok.
+modify_entity_subscribers(EntityType, EntityId, UpdateFun) ->
+    Default = #gs_subscription{subscribers = UpdateFun(#{})},
+    Diff = fun(Subscription = #gs_subscription{subscribers = Subscribers}) ->
+        {ok, Subscription#gs_subscription{subscribers = UpdateFun(Subscribers)}}
+    end,
+    {ok, _} = datastore_model:update(?CTX, id(EntityType, EntityId), Diff, Default),
+    ok.
 
 %%%===================================================================
 %%% datastore_model callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns model's context.
-%% @end
-%%--------------------------------------------------------------------
--spec get_ctx() -> ctx().
+-spec get_ctx() -> datastore:ctx().
 get_ctx() ->
     ?CTX.
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
+%% @private
 -spec id(gs_protocol:entity_type(), gs_protocol:entity_id()) -> binary().
-id(Type, Id) ->
-    <<(atom_to_binary(Type, utf8))/binary, Id/binary>>.
+id(EntityType, EntityId) ->
+    <<(atom_to_binary(EntityType, utf8))/binary, EntityId/binary>>.

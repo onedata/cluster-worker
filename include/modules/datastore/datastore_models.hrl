@@ -46,19 +46,24 @@
     value :: term()
 }).
 
-% Holds information about Graph Sync session
+% Holds information about a Graph Sync session - each GS connection has its
+% own gs_session
 -record(gs_session, {
-    id :: undefined | gs_protocol:session_id(),
+    id :: gs_protocol:session_id(),
     auth :: aai:auth(),
-    protocol_version = 0 :: gs_protocol:protocol_version(),
-    conn_ref :: undefined | gs_server:conn_ref(),
-    translator :: gs_server:translator(),
+    conn_ref :: gs_server:conn_ref(),
+    protocol_version :: gs_protocol:protocol_version(),
+    translator :: gs_server:translator()
+}).
+
+% Holds a list of subscriptions of a subscriber - related 1:1 with gs_session
+-record(gs_subscriber, {
     subscriptions = [] :: gs_persistence:subscriptions()
 }).
 
-% Holds a list of subscribers for certain resource.
+% Holds a list of subscribers (session ids) for resources of a certain entity.
 -record(gs_subscription, {
-    subscribers = #{} :: gs_persistence:subscribers()
+    subscribers = #{} :: gs_persistence:entity_subscribers()
 }).
 
 % Models for traversing via different structures (see traverse.erl)

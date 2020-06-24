@@ -69,6 +69,10 @@
 
 -export_type([requests_internal/0]).
 
+% NOTE: Do not use environment variables as it affects performance too much
+-define(INTERRUPTED_CALL_INITIAL_SLEEP, 100).
+-define(INTERRUPTED_CALL_RETRIES, 5).
+
 % Macros used to set tp call and waiting parameters
 -define(TP_CALL_TIMEOUT, application:get_env(?CLUSTER_WORKER_APP_NAME,
     datastore_writer_request_queueing_timeout, timer:minutes(1))).
@@ -223,15 +227,43 @@ fetch_links_trees(Ctx, Key) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Performs synchronous call to a datastore writer process associated
-%% with a key.
+%% @equiv call(Ctx, Key, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES)
 %% @end
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), atom(), list()) -> term().
 call(Ctx, Key, Function, Args) ->
+    call(Ctx, Key, Function, Args, ?INTERRUPTED_CALL_INITIAL_SLEEP, ?INTERRUPTED_CALL_RETRIES).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Performs synchronous call to a datastore writer process associated
+%% with a key. Repeats in case of internal_call error.
+%% @end
+%%--------------------------------------------------------------------
+-spec call(ctx(), tp_key(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
+call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
     case call_async(Ctx, Key, Function, Args) of
-        {{ok, Ref}, Pid} -> wait(Ref, Pid);
-        {error, Reason} -> {error, Reason}
+        {{ok, Ref}, Pid} ->
+            case wait(Ref, Pid) of
+                {error, interrupted_call} = InterruptedCallError ->
+                    case InterruptedCallRetries of
+                        0 ->
+                            ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
+                            "no retries left", [Function, Args, Key, Ctx]),
+                            InterruptedCallError;
+                        _ ->
+                            ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
+                            "~p retries left, next retry in ~p ms",
+                                [Function, Args, Key, Ctx, InterruptedCallRetries, Sleep]),
+                            timer:sleep(Sleep),
+                            call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
+                    end;
+                [{error, internal_call} | _] ->
+                    {error, internal_call};
+                Other -> Other
+            end;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
