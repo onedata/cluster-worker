@@ -210,11 +210,11 @@ services_migration_test(Config) ->
     [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
     set_ha(Config, change_config, [2, call]),
 
-    HashingBase = <<"test">>,
+    NodeSelector = <<"test">>,
     ServiceName = test_service,
     MasterProc = self(),
     #node_routing_info{assigned_nodes = [Node1, Node2] = AssignedNodes} =
-        rpc:call(Worker0, consistent_hashing, get_routing_info, [HashingBase]),
+        rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
     StartTimestamp = os:timestamp(),
@@ -226,7 +226,7 @@ services_migration_test(Config) ->
     },
     ha_test_utils:set_envs(Workers, ServiceName, MasterProc),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
-        [ha_test_utils, <<"test_service">>, HashingBase, ServiceOptions])),
+        [ha_test_utils, <<"test_service">>, NodeSelector, ServiceOptions])),
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
     ha_test_utils:check_healthcheck(ServiceName, Node1, StartTimestamp),
 

@@ -23,48 +23,48 @@
     stop_service/3, report_service_stop/3, takeover/1, migrate_to_recovered_master/1,
     do_healthcheck/3, get_processing_node/1]).
 %% Export for internal rpc
--export([start_service_locally/5, init_service/4]).
+-export([start_service_locally/4, init_service/4]).
 
--define(LOCAL_HASHING_BASE, <<>>).
+-define(LOCAL_NODE_SELECTOR, <<>>). % Forces choice of local node instead use of consistent_hashing
 
 % Type used by consistent hashing to chose node where service should be running.
--type hashing_base() :: binary().
+-type node_selector() :: binary().
 -type node_id() :: binary().
 -type service_init_fun() :: apply_start_fun | apply_takeover_fun.
--export_type([hashing_base/0, node_id/0]).
+-export_type([node_id/0]).
 
 %%%===================================================================
 %%% Message sending API
 %%%===================================================================
 
 -spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
-    internal_service:service_fun_name(), internal_service:service_fun_args(), hashing_base()) ->
+    internal_service:service_fun_name(), internal_service:service_fun_args(), node_selector()) ->
     ok | aborted | {error, term()}.
-start_service(Module, Name, Fun, StopFun, Args, HashingBase) ->
+start_service(Module, Name, Fun, StopFun, Args, NodeSelector) ->
     Options = #{
         start_function => Fun,
         stop_function => StopFun,
         start_function_args => Args
     },
-    start_service(Module, Name, HashingBase, Options).
+    start_service(Module, Name, NodeSelector, Options).
 
 -spec start_service(module(), internal_service:service_name(), internal_service:options()) ->
     ok | aborted | {error, term()}.
 start_service(Module, Name, ServiceDescription) ->
-    start_service(Module, Name, ?LOCAL_HASHING_BASE, ServiceDescription).
+    start_service(Module, Name, ?LOCAL_NODE_SELECTOR, ServiceDescription).
 
--spec start_service(module(), internal_service:service_name(), hashing_base(), internal_service:options()) ->
+-spec start_service(module(), internal_service:service_name(), node_selector(), internal_service:options()) ->
     ok | aborted | {error, term()}.
-start_service(Module, Name, HashingBase, ServiceDescription) ->
-    {MasterNode, HandlingNode} = get_master_and_handling_nodes(HashingBase),
-    case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, Name, HashingBase, ServiceDescription]) of
+start_service(Module, Name, NodeSelector, ServiceDescription) ->
+    {MasterNode, HandlingNode} = get_master_and_handling_nodes(NodeSelector),
+    case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, Name, ServiceDescription]) of
         {badrpc, Reason} -> {error, Reason};
         Other -> Other
     end.
 
--spec stop_service(module(), internal_service:service_name(), hashing_base()) -> ok | {error, term()}.
-stop_service(Module, Name, HashingBase) ->
-    {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
+-spec stop_service(module(), internal_service:service_name(), node_selector()) -> ok | {error, term()}.
+stop_service(Module, Name, NodeSelector) ->
+    {MasterNode, _} = get_master_and_handling_nodes(NodeSelector),
     MasterNodeId = get_node_id(MasterNode),
     ServiceName = get_internal_name(Module, Name),
     case get_service_and_processing_node(ServiceName, MasterNodeId) of
@@ -75,9 +75,9 @@ stop_service(Module, Name, HashingBase) ->
             remove_service_from_doc(MasterNodeId, ServiceName)
     end.
 
--spec report_service_stop(module(), internal_service:service_name(), hashing_base()) -> ok.
-report_service_stop(Module, Name, HashingBase) ->
-    {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
+-spec report_service_stop(module(), internal_service:service_name(), node_selector()) -> ok.
+report_service_stop(Module, Name, NodeSelector) ->
+    {MasterNode, _} = get_master_and_handling_nodes(NodeSelector),
     MasterNodeId = get_node_id(MasterNode),
     ServiceName = get_internal_name(Module, Name),
     remove_service_from_doc(MasterNodeId, ServiceName).
@@ -111,10 +111,7 @@ migrate_to_recovered_master(MasterNode) ->
             lists:foreach(fun({ServiceName, Service}) ->
                 ?info("Starting migration of service ~s to node ~ts", [ServiceName, MasterNode]),
                 ok = internal_service:apply_migrate_fun(Service),
-                case rpc:call(MasterNode, ?MODULE, init_service, [Service, ServiceName, apply_start_fun, MasterNodeId]) of
-                    ok -> ok;
-                    aborted -> ok
-                end,
+                rpc:call(MasterNode, ?MODULE, init_service, [Service, ServiceName, apply_start_fun, MasterNodeId]),
                 ?info("Finished migration of service ~s to node ~ts", [ServiceName, MasterNode])
             end, maps:to_list(Services));
         {error, not_found} ->
@@ -138,9 +135,9 @@ do_healthcheck(ServiceName, MasterNodeId, LastInterval) ->
             {ok, LastInterval}
     end.
 
--spec get_processing_node(hashing_base()) -> node().
-get_processing_node(HashingBase) ->
-    {MasterNode, _} = get_master_and_handling_nodes(HashingBase),
+-spec get_processing_node(node_selector()) -> node().
+get_processing_node(NodeSelector) ->
+    {MasterNode, _} = get_master_and_handling_nodes(NodeSelector),
     MasterNodeId = get_node_id(MasterNode),
     {ok, #document{value = #node_internal_services{processing_node = ProcessingNode}}} =
         node_internal_services:get(MasterNodeId),
@@ -150,10 +147,10 @@ get_processing_node(HashingBase) ->
 %%% Internal functions
 %%%===================================================================
 
--spec start_service_locally(node(), module(), internal_service:service_name(), hashing_base(),
+-spec start_service_locally(node(), module(), internal_service:service_name(),
     internal_service:options()) -> ok | aborted | {error, term()}.
-start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription) ->
-    Service = internal_service:new(Module, HashingBase, ServiceDescription),
+start_service_locally(MasterNode, Module, Name, ServiceDescription) ->
+    Service = internal_service:new(Module, ServiceDescription),
     AllowOverride = internal_service:is_override_allowed(ServiceDescription),
     ServiceName = get_internal_name(Module, Name),
 
@@ -175,14 +172,14 @@ start_service_locally(MasterNode, Module, Name, HashingBase, ServiceDescription)
 get_node_id(Node) ->
     atom_to_binary(Node, utf8).
 
--spec get_master_and_handling_nodes(hashing_base()) -> {MasterNode :: node(), HandlingNode :: node()}.
-get_master_and_handling_nodes(HashingBase) ->
-    case HashingBase of
-        ?LOCAL_HASHING_BASE ->
+-spec get_master_and_handling_nodes(node_selector()) -> {MasterNode :: node(), HandlingNode :: node()}.
+get_master_and_handling_nodes(NodeSelector) ->
+    case NodeSelector of
+        ?LOCAL_NODE_SELECTOR ->
             {node(), node()};
         _ ->
-            {datastore_key:primary_responsible_node(HashingBase),
-                datastore_key:any_responsible_node(HashingBase)}
+            {datastore_key:primary_responsible_node(NodeSelector),
+                datastore_key:any_responsible_node(NodeSelector)}
     end.
 
 -spec get_internal_name(module(), internal_service:service_name()) -> internal_service:service_name().

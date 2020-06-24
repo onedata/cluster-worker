@@ -340,7 +340,7 @@ assert_keys_are_same_length(Keys) ->
 % adjacent <-> are routed to the same node
 assert_keys_are_adjacent(Keys) ->
     foreach_pair(fun(KeyAlpha, KeyBeta) ->
-        ?assertEqual(datastore_key:any_responsible_node(KeyAlpha), datastore_key:responsible_node(KeyBeta))
+        ?assertEqual(datastore_key:any_responsible_node(KeyAlpha), datastore_key:any_responsible_node(KeyBeta))
     end, Keys).
 
 

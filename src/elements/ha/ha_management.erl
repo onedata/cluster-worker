@@ -21,8 +21,9 @@
 %%% API - Working in failover mode
 %%%===================================================================
 
--spec node_down(node()) -> ok | no_return().
+-spec node_down(node()) -> boolean() | no_return().
 node_down(Node) ->
+    % TODO VFS-6388 - maybe send message to all tp processes that slave is down to unlink slave proc
     ok = consistent_hashing:report_node_failure(Node),
     IsMaster = ha_datastore:is_master(Node),
     case IsMaster of
@@ -32,11 +33,9 @@ node_down(Node) ->
         false ->
             ok
     end,
+    IsMaster.
 
-    % TODO VFS-6388 - maybe send message to all tp processes that slave is down to unlink slave proc
-    ok = plugins:apply(node_manager_plugin, node_down, [Node, IsMaster]).
-
--spec node_up(node()) -> ok | no_return().
+-spec node_up(node()) -> boolean() | no_return().
 node_up(Node) ->
     ok = consistent_hashing:report_node_recovery(Node),
 
@@ -55,10 +54,9 @@ node_up(Node) ->
         false ->
             ok
     end,
+    IsMaster.
 
-    ok = plugins:apply(node_manager_plugin, node_up, [Node, IsMaster]).
-
--spec node_ready(node()) -> ok | no_return().
+-spec node_ready(node()) -> boolean() | no_return().
 node_ready(Node) ->
     IsMaster = ha_datastore:is_master(Node),
     case IsMaster of
@@ -67,5 +65,4 @@ node_ready(Node) ->
         false ->
             ok
     end,
-
-    ok = plugins:apply(node_manager_plugin, node_ready, [Node, IsMaster]).
+    IsMaster.

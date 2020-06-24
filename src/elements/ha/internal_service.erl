@@ -20,7 +20,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([new/3, is_override_allowed/1,
+-export([new/2, is_override_allowed/1,
     apply_start_fun/1, apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
     apply_healthcheck_fun/2, get_healthcheck_interval/1]).
 %% Export for internal rpc
@@ -38,7 +38,6 @@
     takeover_function_args :: service_fun_args(),
     migrate_function_args :: service_fun_args(),
     stop_function_args :: service_fun_args(),
-    hashing_key :: internal_services_manager:hashing_base(),
     healthcheck_interval :: non_neg_integer(),
     async_start :: boolean()
 }).
@@ -62,7 +61,10 @@
                                  % an error is returned if service using the name already exists
     async_start => boolean()
 }.
--type init_fun_answer() :: ok | abort.
+-type init_fun_answer() :: ok | abort. % Function that starts service can return `abort` when its internal
+                                       % logic verifies that service should not be started because something has
+                                       % changed from the moment its start has been initiated. In such a case
+                                       % all changes in metadata connected with the service will be reversed.
 
 -export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
 
@@ -77,8 +79,8 @@
 %%% API
 %%%===================================================================
 
--spec new(module(), internal_services_manager:hashing_base(), options()) -> service().
-new(Module, HashingBase, ServiceDescription) ->
+-spec new(module(), options()) -> service().
+new(Module, ServiceDescription) ->
     Fun = maps:get(start_function, ServiceDescription),
     Args = maps:get(start_function_args, ServiceDescription, []),
     TakeoverFun = maps:get(takeover_function, ServiceDescription, Fun),
@@ -105,8 +107,7 @@ new(Module, HashingBase, ServiceDescription) ->
     #internal_service{module = Module, start_function = Fun, takeover_function = TakeoverFun,
         migrate_function = MigrateFun, stop_function = StopFun, healthcheck_fun = HealthcheckFun,
         start_function_args = Args, takeover_function_args = TakeoverFunArgs, migrate_function_args = MigrateFunArgs,
-        stop_function_args = StopFunArgs, hashing_key = HashingBase,
-        healthcheck_interval = HealthcheckInterval, async_start = AsyncStart}.
+        stop_function_args = StopFunArgs, healthcheck_interval = HealthcheckInterval, async_start = AsyncStart}.
 
 -spec is_override_allowed(options()) -> boolean().
 is_override_allowed(ServiceDescription) ->

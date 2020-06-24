@@ -58,7 +58,6 @@
 
 -type state() :: #state{}.
 -type cluster_generation() :: non_neg_integer().
--type node_status_notification_type() :: node_down | node_up | node_ready.
 
 -export_type([cluster_generation/0]).
 
@@ -537,20 +536,29 @@ handle_cast(?FORCE_STOP(ReasonMsg), State) ->
 
 handle_cast(?NODE_DOWN(Node), State) ->
     handle_node_status_change_async(Node, node_down, fun() ->
-        ha_management:node_down(Node)
+        ok = case ha_management:node_down(Node) of
+            true -> plugins:apply(node_manager_plugin, master_node_down, [Node]);
+            false -> ok % Failed node is not master for this node - ignore
+        end
     end),
     {noreply, State};
 
 handle_cast(?NODE_UP(Node), State) ->
     handle_node_status_change_async(Node, node_up, fun() ->
-        ha_management:node_up(Node),
+        ok = case ha_management:node_up(Node) of
+            true -> plugins:apply(node_manager_plugin, master_node_up, [Node]);
+            false -> ok % Recovered node is not master for this node - ignore
+        end,
         gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_ACKNOWLEDGED(node(), Node))
     end),
     {noreply, State};
 
 handle_cast(?NODE_READY(Node), State) ->
     handle_node_status_change_async(Node, node_ready, fun() ->
-        ha_management:node_ready(Node)
+        ok = case ha_management:node_ready(Node) of
+            true -> plugins:apply(node_manager_plugin, master_node_ready, [Node]);
+            false -> ok % Recovered node is not master for this node - ignore
+        end
     end),
     {noreply, State};
 
@@ -744,7 +752,7 @@ cluster_init_step(?START_LISTENERS) ->
         ok = erlang:apply(Module, start, []),
         ?info("   * ~p started", [Module])
     end, node_manager:listeners()),
-    ?info("All listeners started"),
+    ?info("Listeners started successfully"),
     ok;
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
@@ -1321,36 +1329,21 @@ report_step_result(Step, Result) ->
 
 -spec initialize_recovery() -> ok.
 initialize_recovery() ->
-    ?info("Recovery of node initialized"),
+    ?info("Starting phase 1/2 of node recovery"),
     gen_server2:cast(self(), do_heartbeat),
-    ok = init_workers(cluster_worker_modules()),
+    cluster_init_step(?START_DEFAULT_WORKERS),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_INITIALIZED(node())),
-    ?info("First phase of node recovery finished"),
+    ?info("Phase 1/2 of node recovery finished successfully"),
     ok.
 
 -spec finalize_recovery() -> ok.
 finalize_recovery() ->
-    ?info("Recovery of node - second phase started"),
-
-    ?info("Starting workers essential for upgrade..."),
-    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
-    init_workers(WorkersToStart),
-    ?info("Workers essential for upgrade started successfully"),
-
-    ?info("Starting custom workers..."),
-    Workers = ?CALL_PLUGIN(custom_workers, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
-
-    ?info("Starting listeners..."),
-    lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, []),
-        ?info("   * ~p started", [Module])
-    end, node_manager:listeners()),
-    ?info("All listeners started"),
-
+    ?info("Starting phase 2/2 of node recovery"),
+    cluster_init_step(?START_UPGRADE_ESSENTIAL_WORKERS),
+    cluster_init_step(?START_CUSTOM_WORKERS),
+    cluster_init_step(?START_LISTENERS),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_FINALIZED(node())),
-    ?info("Node recovery finished"),
+    ?info("Phase 2/2 of node recovery finished successfully"),
     ok.
 
 -spec handle_node_status_change_async(node(), NodeStatusNotificationType :: node_down | node_up | node_ready,

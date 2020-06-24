@@ -28,7 +28,7 @@
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
--export([node_down/2, node_up/2, node_ready/2]).
+-export([master_node_down/1, master_node_up/1, master_node_ready/1]).
 
 -type model() :: datastore_model:model().
 -type record_version() :: datastore_model:record_version().
@@ -259,32 +259,29 @@ exometer_reporters() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Callback used to customize behavior in case of other node failure. Second
-%% argument informs if failed node is master (see ha_datastore.hrl) for current node.
+%% Callback used to customize behavior in case of master node failure.
 %% @end
 %%--------------------------------------------------------------------
--spec node_down(node(), boolean()) -> ok.
-node_down(_FailedNode, _IsFailedNodeMaster) ->
+-spec master_node_down(node()) -> ok.
+master_node_down(_FailedNode) ->
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Callback used to customize behavior when other node recovers after failure.
+%% Callback used to customize behavior when master node recovers after failure.
 %% It is called after basic workers (especially datastore) have been restarted.
-%% Second argument informs if recovered node is master (see ha_datastore.hrl) for current node.
 %% @end
 %%--------------------------------------------------------------------
--spec node_up(node(), boolean()) -> ok.
-node_up(_RecoveredNode, _IsRecoveredNodeMaster) ->
+-spec master_node_up(node()) -> ok.
+master_node_up(_RecoveredNode) ->
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Callback used to customize behavior when other node recovers after failure.
+%% Callback used to customize behavior when master node recovers after failure.
 %% It is called after all workers and listeners have been restarted.
-%% Second argument informs if recovered node is master (see ha_datastore.hrl) for current node.
 %% @end
 %%--------------------------------------------------------------------
--spec node_ready(node(), boolean()) -> ok.
-node_ready(_RecoveredNode, _IsRecoveredNodeMaster) ->
+-spec master_node_ready(node()) -> ok.
+master_node_ready(_RecoveredNode) ->
     ok.
