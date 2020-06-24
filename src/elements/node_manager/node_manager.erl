@@ -538,7 +538,7 @@ handle_cast(?NODE_DOWN(Node), State) ->
     handle_node_status_change_async(Node, node_down, fun() ->
         ok = case ha_management:node_down(Node) of
             master -> plugins:apply(node_manager_plugin, master_node_down, [Node]);
-            slave -> ok % Failed node is not master for this node - ignore
+            non_master -> ok % Failed node is not master for this node - ignore
         end
     end),
     {noreply, State};
@@ -547,7 +547,7 @@ handle_cast(?NODE_UP(Node), State) ->
     handle_node_status_change_async(Node, node_up, fun() ->
         ok = case ha_management:node_up(Node) of
             master -> plugins:apply(node_manager_plugin, master_node_up, [Node]);
-            slave -> ok % Recovered node is not master for this node - ignore
+            non_master -> ok % Recovered node is not master for this node - ignore
         end,
         gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_ACKNOWLEDGED(node(), Node))
     end),
@@ -557,7 +557,7 @@ handle_cast(?NODE_READY(Node), State) ->
     handle_node_status_change_async(Node, node_ready, fun() ->
         ok = case ha_management:node_ready(Node) of
             master -> plugins:apply(node_manager_plugin, master_node_ready, [Node]);
-            slave -> ok % Recovered node is not master for this node - ignore
+            non_master -> ok % Recovered node is not master for this node - ignore
         end
     end),
     {noreply, State};
@@ -1352,12 +1352,12 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
     ?info("Started processing transition of node ~p to status ~p", [Node, NewStatus]),
     spawn(fun() ->
         try
-            HandlingFun()
+            HandlingFun(),
+            ?info("Finished processing transition of node ~p to status ~p", [Node, NewStatus])
         catch
             Error:Reason ->
-                ?error_stacktrace("Error handling notification about node ~p changing status to ~p: ~p:~p",
+                ?error_stacktrace("Error while processing transition of node ~p to status ~p: ~p:~p",
                     [Node, NewStatus, Error,Reason])
-        end,
-        ?info("Finished processing transition of node ~p to status ~p", [Node, NewStatus])
+        end
     end),
     ok.

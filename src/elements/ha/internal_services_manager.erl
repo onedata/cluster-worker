@@ -92,9 +92,11 @@ takeover(FailedNode) ->
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                ?info("Starting takeover of service ~s from node ~ts", [ServiceName, FailedNode]),
+                ?info("Starting takeover of service ~s (module ~p) from node ~ts",
+                    [ServiceName, internal_service:get_module(Service), FailedNode]),
                 init_service(Service, ServiceName, apply_takeover_fun, MasterNodeId),
-                ?info("Finished takeover of service ~s from node ~ts", [ServiceName, FailedNode])
+                ?info("Finished takeover of service ~s (module ~p) from node ~ts",
+                    [ServiceName, internal_service:get_module(Service), FailedNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -109,10 +111,12 @@ migrate_to_recovered_master(MasterNode) ->
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
             lists:foreach(fun({ServiceName, Service}) ->
-                ?info("Starting migration of service ~s to node ~ts", [ServiceName, MasterNode]),
+                ?info("Starting migration of service ~s (module ~p) to node ~ts",
+                    [ServiceName, internal_service:get_module(Service), MasterNode]),
                 ok = internal_service:apply_migrate_fun(Service),
                 rpc:call(MasterNode, ?MODULE, init_service, [Service, ServiceName, apply_start_fun, MasterNodeId]),
-                ?info("Finished migration of service ~s to node ~ts", [ServiceName, MasterNode])
+                ?info("Finished migration of service ~s (module ~p) to node ~ts",
+                    [ServiceName, internal_service:get_module(Service), MasterNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -222,7 +226,7 @@ do_healthcheck_insecure(ServiceName, Service, MasterNodeId, LastInterval) ->
     case internal_service:apply_healthcheck_fun(Service, LastInterval) of
         {error, undefined_fun} ->
             ignore;
-        {restart, NewInterval} ->
+        {restart, _} ->
             % Check once more in case of race with migration
             case get_service_and_processing_node(ServiceName, MasterNodeId) of
                 {undefined, _} ->
@@ -232,7 +236,14 @@ do_healthcheck_insecure(ServiceName, Service, MasterNodeId, LastInterval) ->
                 _ ->
                     case internal_service:apply_start_fun(Service) of
                         ok ->
-                            {ok, NewInterval};
+                            % If the service started, interval can be different
+                            % than returned from the first call of healthcheck function
+                            case internal_service:apply_healthcheck_fun(Service, LastInterval) of
+                                {error, undefined_fun} ->
+                                    ignore;
+                                {_, NewInterval} ->
+                                    {ok, NewInterval}
+                            end;
                         abort ->
                             remove_service_from_doc(MasterNodeId, ServiceName),
                             ignore

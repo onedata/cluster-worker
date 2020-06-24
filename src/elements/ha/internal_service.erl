@@ -20,7 +20,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([new/2, is_override_allowed/1,
+-export([new/2, is_override_allowed/1, get_module/1,
     apply_start_fun/1, apply_takeover_fun/1, apply_stop_fun/2, apply_migrate_fun/1,
     apply_healthcheck_fun/2, get_healthcheck_interval/1]).
 %% Export for internal rpc
@@ -112,6 +112,10 @@ new(Module, ServiceDescription) ->
 -spec is_override_allowed(options()) -> boolean().
 is_override_allowed(ServiceDescription) ->
     maps:get(allow_override, ServiceDescription, false).
+
+-spec get_module(service()) -> module().
+get_module(#internal_service{module = Module}) ->
+    Module.
 
 -spec apply_start_fun(service()) -> init_fun_answer().
 apply_start_fun(#internal_service{module = Module, start_function = Fun,
