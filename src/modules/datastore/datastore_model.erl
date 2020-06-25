@@ -22,7 +22,7 @@
 -export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
--export([fold/3, fold/5, fold_keys/3]).
+-export([fold/3, fold/5, fold_keys/3, local_fold_all_nodes/3]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6]).
 -export([get_links_trees/2]).
@@ -243,14 +243,8 @@ fold(Ctx, Fun, Acc) ->
 %%--------------------------------------------------------------------
 -spec fold(ctx(), fold_fun(doc()), fold_fun(key()), boolean(), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold(Ctx0 = #{model := Model, fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
-    {Ctx, ModelKey} = case Ctx0 of
-        #{local_fold := true} ->
-            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(node(), utf8))/binary>>,
-            {Ctx0#{routing => local}, NodeModelKey};
-        _ ->
-            {Ctx0, atom_to_binary(Model, utf8)}
-    end,
+fold(Ctx0 = #{fold_enabled := true}, Fun, KeyFilter, ReverseKeys, Acc) ->
+    {Ctx, ModelKey} = get_fold_ctx_and_key(Ctx0),
     LinksAns = fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         KeyFilter(Key, Acc2)
     end, [], #{}),
@@ -279,20 +273,30 @@ fold(_Ctx, _Fun, _KeyFilter, _ReverseKeys, _Acc) ->
 %%--------------------------------------------------------------------
 -spec fold_keys(ctx(), fold_fun(key()), fold_acc()) ->
     {ok, fold_acc()} | {error, term()}.
-fold_keys(Ctx0 = #{model := Model, fold_enabled := true}, Fun, Acc) ->
-    {Ctx, ModelKey} = case Ctx0 of
-        #{local_fold := true} ->
-            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(node(), utf8))/binary>>,
-            {Ctx0#{routing => local}, NodeModelKey};
-        _ ->
-            {Ctx0, atom_to_binary(Model, utf8)}
-    end,
+fold_keys(Ctx0 = #{fold_enabled := true}, Fun, Acc) ->
+    {Ctx, ModelKey} = get_fold_ctx_and_key(Ctx0),
     fold_links(Ctx, ModelKey, ?MODEL_ALL_TREE_ID, fun(#link{name = Key}, Acc2) ->
         Fun(Key, Acc2)
     end, Acc, #{});
 fold_keys(Ctx = #{secure_fold_enabled := true}, Fun, Acc) ->
     fold(Ctx#{fold_enabled => true}, Fun, Acc);
 fold_keys(_Ctx, _Fun, _Acc) ->
+    {error, not_supported}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Performs fold on each node. Function is intended to work for models with
+%% local_fold set on true (nodes store separate lists of documents managed by them).
+%% @end
+%%--------------------------------------------------------------------
+-spec local_fold_all_nodes(ctx(), fold_fun(doc()), fold_acc()) -> {ok, fold_acc()} | {error, term()}.
+local_fold_all_nodes(Ctx = #{local_fold := true}, Fun, InitialAcc) ->
+    Nodes = consistent_hashing:get_all_nodes(),
+    lists:foldl(fun
+        (Node, {ok, Acc}) -> datastore_model:fold(Ctx#{local_fold_node => Node}, Fun, Acc);
+        (_Node, Error) -> Error
+    end, {ok, InitialAcc}, Nodes);
+local_fold_all_nodes(_Ctx, _Fun, _Acc) ->
     {error, not_supported}.
 
 %%--------------------------------------------------------------------
@@ -420,6 +424,17 @@ fold_memory_keys(Fun, Acc0) ->
             Acc3
     end.
 
+-spec get_fold_ctx_and_key(ctx()) -> {ctx(), key()}.
+get_fold_ctx_and_key(#{model := Model} = Ctx) ->
+    case Ctx of
+        #{local_fold := true} ->
+            Node = maps:get(local_fold_node, Ctx, node()),
+            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(Node, utf8))/binary>>,
+            {Ctx#{routing => local}, NodeModelKey};
+        _ ->
+            {Ctx, atom_to_binary(Model, utf8)}
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -460,6 +475,9 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
                 (Node, {ok, _}) ->
                     rpc:call(Node, ?MODULE, datastore_apply_all_subtrees,
                         [Ctx, Fun, UniqueKey, Args]);
+                (Node, {error, nodedown}) ->
+                    rpc:call(Node, ?MODULE, datastore_apply_all_subtrees,
+                        [Ctx, Fun, UniqueKey, Args]);
                 (_, Error) ->
                     Error
             end, ok, consistent_hashing:get_all_nodes());
@@ -475,15 +493,9 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
 %%--------------------------------------------------------------------
 -spec add_fold_link(ctx(), key(), {ok, doc()} | {error, term()}) ->
     {ok, doc()} | {error, term()}.
-add_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, {ok, Doc}) ->
+add_fold_link(Ctx = #{fold_enabled := true}, Key, {ok, Doc}) ->
     Ctx2 = Ctx#{sync_enabled => false},
-    {Ctx3, ModelKey} = case Ctx2 of
-        #{local_fold := true} ->
-            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(node(), utf8))/binary>>,
-            {Ctx2#{routing => local}, NodeModelKey};
-        _ ->
-            {Ctx2, atom_to_binary(Model, utf8)}
-    end,
+    {Ctx3, ModelKey} = get_fold_ctx_and_key(Ctx2),
     case add_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
         [{ok, #link{}}] -> {ok, Doc};
         [{error, already_exists}] -> {ok, Doc};
@@ -500,15 +512,9 @@ add_fold_link(_Ctx, _Key, Result) ->
 %%--------------------------------------------------------------------
 -spec delete_fold_link(ctx(), key(), ok | {error, term()}) ->
     ok | {error, term()}.
-delete_fold_link(Ctx = #{model := Model, fold_enabled := true}, Key, ok) ->
+delete_fold_link(Ctx = #{fold_enabled := true}, Key, ok) ->
     Ctx2 = Ctx#{sync_enabled => false},
-    {Ctx3, ModelKey} = case Ctx2 of
-        #{local_fold := true} ->
-            NodeModelKey = <<(atom_to_binary(Model, utf8))/binary, "###", (atom_to_binary(node(), utf8))/binary>>,
-            {Ctx2#{routing => local}, NodeModelKey};
-        _ ->
-            {Ctx2, atom_to_binary(Model, utf8)}
-    end,
+    {Ctx3, ModelKey} = get_fold_ctx_and_key(Ctx2),
     case delete_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [Key]) of
         [ok] -> ok;
         [{error, Reason}] -> {error, Reason}

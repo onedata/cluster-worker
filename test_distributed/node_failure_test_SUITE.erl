@@ -78,7 +78,7 @@ failure_test(Config) ->
         rpc:call(CallWorker, traverse_task, get, [?POOL, TraverseID]), ?ATTEMPTS),
 
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
-    traverse_test_pool:check_schedulers_after_test(CallWorker, TasksWorkers, ?POOL).
+    traverse_test_pool:check_schedulers_after_test(CallWorker, lists:usort(TasksWorkers ++ [Node2]), ?POOL).
 
 start_traverse(CallWorker, ExpectedNode) ->
     start_traverse(CallWorker, ExpectedNode, 1, []).
@@ -129,5 +129,4 @@ set_ha(Config, Fun, Args) ->
     lists:foreach(fun(Worker) ->
         set_ha(Worker, Fun, Args)
     end, Workers),
-    Ring = rpc:call(Worker1, ctool, get_env, [?CURRENT_RING]),
-    consistent_hashing:replicate_ring_to_nodes(CMNodes, ?CURRENT_RING, Ring).
+    rpc:call(Worker1, consistent_hashing, replicate_ring_to_nodes, [CMNodes]).

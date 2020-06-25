@@ -19,6 +19,7 @@
 
 -include("modules/datastore/ha_datastore.hrl").
 -include("modules/datastore/datastore_protocol.hrl").
+-include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
 -include_lib("ctool/include/hashing/consistent_hashing.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -29,10 +30,12 @@
     send_async_master_message/2, send_sync_master_message/4,
     broadcast_async_management_message/1]).
 %% API
--export([get_propagation_method/0, get_backup_nodes/0, is_master/1, get_slave_mode/0]).
+-export([get_propagation_method/0, get_backup_nodes/0, get_backup_nodes/1, is_master/1, is_slave/1, get_slave_mode/0,
+    is_ha_enabled/1]).
 -export([set_failover_mode_and_broadcast_master_down_message/0, set_standby_mode_and_broadcast_master_up_message/0,
-    change_config/2]).
+    change_config/2, change_propagation_method/1, replicate_propagation_method_settings_to_node/1]).
 -export([reorganize_cluster/0, finish_reorganization/0, qualify_by_key/2, possible_neighbors_during_reconfiguration/0]).
+-export([init_memory_backup/0]).
 
 % Propagation methods - see ha_datastore.hrl
 -type propagation_method() :: ?HA_CALL_PROPAGATION | ?HA_CAST_PROPAGATION.
@@ -54,6 +57,7 @@
 
 % Internal module types
 -type nodes_assigned_per_key() :: pos_integer().
+-type memory_copy_acc() :: #{node() | local_key => [datastore_cache:cache_save_request()]}.
 
 -define(MEMORY_COPY_BATCH_SIZE, 200).
 
@@ -108,8 +112,8 @@ broadcast_sync_management_message(Msg) ->
 get_propagation_method() ->
     application:get_env(?CLUSTER_WORKER_APP_NAME, ha_propagation_method, ?HA_CAST_PROPAGATION).
 
--spec set_propagation_method(propagation_method()) -> ok.
-set_propagation_method(PropagationMethod) ->
+-spec set_propagation_method_env(propagation_method()) -> ok.
+set_propagation_method_env(PropagationMethod) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, ha_propagation_method, PropagationMethod).
 
 
@@ -129,41 +133,41 @@ get_backup_nodes() ->
             Env;
         undefined ->
             critical_section:run(?MODULE, fun() ->
-                Ans = case consistent_hashing:get_nodes_assigned_per_label() of
-                    1 ->
-                        [];
-                    BackupNodesNum ->
-                        Node = node(),
-                        AllNodes = consistent_hashing:get_all_nodes(),
-                        case lists:member(Node, AllNodes) of
-                            true ->
-                                Nodes = arrange_nodes(Node, AllNodes),
-                                lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)));
-                            _ ->
-                                []
-                        end
-                end,
+                Ans = get_backup_nodes(node()),
                 application:set_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes, Ans),
                 Ans
             end)
     end.
 
--spec is_master(node()) -> boolean().
-is_master(Node) ->
+-spec get_backup_nodes(node()) -> [node()].
+get_backup_nodes(Node) ->
     case consistent_hashing:get_nodes_assigned_per_label() of
-        1 -> % HA is disabled
-            false;
-        _ ->
-            [SlaveNode | _] = arrange_nodes(Node, consistent_hashing:get_all_nodes()),
-            SlaveNode =:= node()
+        1 ->
+            [];
+        BackupNodesNum ->
+            AllNodes = consistent_hashing:get_all_nodes(),
+            case lists:member(Node, AllNodes) of
+                true ->
+                    Nodes = arrange_nodes(Node, AllNodes),
+                    lists:sublist(Nodes, min(BackupNodesNum - 1, length(Nodes)));
+                _ ->
+                    []
+            end
     end.
 
--spec clean_backup_nodes_cache() -> ok.
-clean_backup_nodes_cache() ->
-    critical_section:run(?MODULE, fun() ->
-        application_controller:unset_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes)
-    end),
-    ok.
+-spec is_master(node()) -> boolean().
+is_master(Node) ->
+    is_master_slave_pair(Node, node()).
+
+-spec is_slave(node()) -> boolean().
+is_slave(Node) ->
+    is_master_slave_pair(node(), Node).
+
+-spec is_ha_enabled(datastore:ctx()) -> boolean().
+is_ha_enabled(#{routing := local, disc_driver := undefined} = Ctx) ->
+    maps:get(ha_enabled, Ctx, false);
+is_ha_enabled(Ctx) ->
+    maps:get(ha_enabled, Ctx, true).
 
 %%%===================================================================
 %%% API to configure processes - sets information in environment variables
@@ -181,18 +185,36 @@ set_failover_mode_and_broadcast_master_down_message() ->
 -spec set_standby_mode_and_broadcast_master_up_message() -> ok.
 set_standby_mode_and_broadcast_master_up_message() ->
     ?notice("Master node up: seting standby mode and broadcasting information to tp processes"),
+    copy_keys(?CURRENT_RING, remote),
     set_slave_mode(?STANDBY_SLAVE_MODE),
     broadcast_async_management_message(?MASTER_UP).
 
 
 -spec change_config(nodes_assigned_per_key(), propagation_method()) -> ok.
-change_config(NodesNumber, PropagationMethod) ->
-    ?notice("New HA configuration: nodes number: ~p, propagation method: ~p - setting environment variables"
-        " and broadcasting information to tp processes~n", [NodesNumber, PropagationMethod]),
-    consistent_hashing:set_nodes_assigned_per_label(NodesNumber),
+change_config(NodesAssignedPerKey, PropagationMethod) ->
+    ?notice("New HA configuration: nodes assiged per key: ~p, propagation method: ~p - "
+        "broadcasting information to tp processes", [NodesAssignedPerKey, PropagationMethod]),
+    consistent_hashing:set_nodes_assigned_per_label(NodesAssignedPerKey),
     clean_backup_nodes_cache(),
-    set_propagation_method(PropagationMethod),
+    set_propagation_method_env(PropagationMethod),
+    broadcast_async_management_message(?CONFIG_CHANGED),
+    case NodesAssignedPerKey > 1 of
+        true -> ok = init_memory_backup();
+        _ -> ok
+    end.
+
+-spec change_propagation_method(propagation_method()) -> ok.
+change_propagation_method(PropagationMethod) ->
+    ?notice("New HA propagation method: ~p - broadcasting information to tp processes",
+        [PropagationMethod]),
+    set_propagation_method_env(PropagationMethod),
     broadcast_async_management_message(?CONFIG_CHANGED).
+
+-spec replicate_propagation_method_settings_to_node(node()) -> ok | no_return().
+replicate_propagation_method_settings_to_node(Node) ->
+    PropagationMethod = get_propagation_method(),
+    ok = rpc:call(Node, ?MODULE, change_propagation_method, [PropagationMethod]).
+
 
 %%%===================================================================
 %%% API to reorganize cluster
@@ -202,34 +224,7 @@ change_config(NodesNumber, PropagationMethod) ->
 reorganize_cluster() ->
     set_slave_mode(?CLUSTER_REORGANIZATION_SLAVE_MODE),
     ok = broadcast_sync_management_message(?CLUSTER_REORGANIZATION_STARTED),
-
-    Mutator = self(),
-    ok = datastore_model:fold_memory_keys(fun
-        (end_of_memory, Acc) ->
-            {ok, copy_memory(Acc)};
-        ({Model, Key, Doc}, Acc) ->
-            RoutingKey = datastore_router:get_routing_key(Doc),
-            {Acc2, CopyNow} = case qualify_by_key(RoutingKey, ?FUTURE_RING) of
-                {remote_key, Node} ->
-                    Ctx = datastore_model_default:get_ctx(Model, RoutingKey),
-                    Ctx2 = Ctx#{mutator_pid => Mutator},
-                    NodeAcc = maps:get(Node, Acc, []),
-                    NewNodeAcc = [{Ctx2, Key, Doc} | NodeAcc],
-                    NewAcc = maps:put(Node, NewNodeAcc, Acc),
-                    {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE};
-                _ ->
-                    {Acc, false}
-            end,
-            case CopyNow of
-                true ->
-                    case copy_memory(Acc2) of
-                        ok -> {ok, #{}};
-                        Other -> {stop, Other}
-                    end;
-                _ ->
-                    {ok, Acc2}
-            end
-    end, #{}).
+    copy_keys(?FUTURE_RING, remote).
 
 -spec finish_reorganization() -> ok.
 finish_reorganization() ->
@@ -265,8 +260,23 @@ possible_neighbors_during_reconfiguration() ->
     lists:usort(CurrentNeighbors ++ PreviousNeighbors).
 
 %%%===================================================================
+%%% API - Memory management
+%%%===================================================================
+
+-spec init_memory_backup() -> ok | no_return().
+init_memory_backup() ->
+    copy_keys(?CURRENT_RING, local).
+
+%%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+-spec clean_backup_nodes_cache() -> ok.
+clean_backup_nodes_cache() ->
+    critical_section:run(?MODULE, fun() ->
+        application_controller:unset_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes)
+    end),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -292,9 +302,58 @@ get_neighbors(Node, AllNodes) ->
             []
     end.
 
--spec copy_memory(#{node() => [datastore_cache:cache_save_request()]}) -> ok | {error, term()}.
+-spec get_ring_nodes_or_empty(consistent_hashing:ring_generation()) -> [node()].
+get_ring_nodes_or_empty(RingGeneration) ->
+    try
+        consistent_hashing:get_all_nodes(RingGeneration)
+    catch
+        _:chash_ring_not_initialized  -> []
+    end.
+
+-spec copy_keys(consistent_hashing:ring_generation(), remote | local) -> ok | no_return().
+copy_keys(Ring, DocsToCopy) ->
+    ok = datastore_model:fold_memory_keys(fun
+        (end_of_memory, Acc) ->
+            {ok, copy_memory(Acc)};
+        ({_Model, _Key, #document{deleted = true}}, Acc) ->
+            {ok, Acc};
+        ({Model, Key, Doc}, Acc) ->
+            BasicCtx = datastore_model_default:get_basic_ctx(Model),
+            RoutingKey = datastore_router:get_routing_key(BasicCtx, Doc),
+            Ctx = datastore_model_default:set_defaults(RoutingKey, BasicCtx),
+            {Acc2, CopyNow} = case {qualify_by_key(RoutingKey, Ring), DocsToCopy} of
+                {{remote_key, Node}, remote} -> prepare_key_copy(Key, Doc, Ctx, Node, Acc);
+                {local_key, local} -> prepare_key_copy(Key, Doc, Ctx, local_key, Acc);
+                _ -> {Acc, false}
+            end,
+            case CopyNow of
+                true ->
+                    case copy_memory(Acc2) of
+                        ok -> {ok, #{}};
+                        Other -> {stop, Other}
+                    end;
+                _ ->
+                    {ok, Acc2}
+            end
+    end, #{}).
+
+-spec prepare_key_copy(datastore:key(), datastore:doc(), datastore:ctx(), node() | local_key,
+    memory_copy_acc()) -> {memory_copy_acc(), Flush :: boolean()}.
+prepare_key_copy(Key, Doc, Ctx, Node, Acc) ->
+    case is_ha_enabled(Ctx) of
+        false ->
+            {Acc, false};
+        true ->
+            NodeAcc = maps:get(Node, Acc, []),
+            NewNodeAcc = [{Ctx#{mutator_pid => self()}, Key, Doc} | NodeAcc],
+            NewAcc = maps:put(Node, NewNodeAcc, Acc),
+            {NewAcc, length(NewNodeAcc) >= ?MEMORY_COPY_BATCH_SIZE}
+    end.
+
+-spec copy_memory(memory_copy_acc()) -> ok | {error, term()}.
 copy_memory(ItemsMap) ->
     maps:fold(fun
+        (local_key, Items, ok) -> create_backup(Items);
         (Node, Items, ok) -> copy_memory(Node, Items);
         (_Node, _Items, Acc) -> Acc
     end, ok, ItemsMap).
@@ -314,10 +373,25 @@ copy_memory(Node, Items) ->
             end, ok, SaveResults)
     end.
 
--spec get_ring_nodes_or_empty(consistent_hashing:ring_generation()) -> [node()].
-get_ring_nodes_or_empty(RingGeneration) ->
-    try
-        consistent_hashing:get_all_nodes(RingGeneration)
-    catch
-        _:chash_ring_not_initialized  -> []
+-spec create_backup([datastore_cache:cache_save_request()]) -> ok | {error, term()}.
+create_backup(Items) ->
+    lists:foldl(fun
+        ({Ctx, Key, _Doc} , ok) ->
+            case datastore:create_backup(Ctx, Key) of
+                {ok, _} -> ok;
+                {error, not_found} -> ok;
+                Error -> Error
+            end;
+        (_, Acc) ->
+            Acc
+    end, ok, Items).
+
+-spec is_master_slave_pair(node(), node()) -> boolean().
+is_master_slave_pair(Master, SlaveToCheck) ->
+    case consistent_hashing:get_nodes_assigned_per_label() of
+        1 -> % There is one node assigned per label so nodes have no slaves
+            false;
+        _ -> % Each node has assigned slave - verify if nodes from arguments are master/slave pair
+            [SlaveNode | _] = arrange_nodes(Master, consistent_hashing:get_all_nodes()),
+            SlaveNode =:= SlaveToCheck
     end.

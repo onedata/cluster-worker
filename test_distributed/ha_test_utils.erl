@@ -16,7 +16,8 @@
 -include_lib("ctool/include/test/assertions.hrl").
 
 %% API
--export([start_service/2, stop_service/2, check_service/3, clearAndCheckMessages/3]).
+-export([start_service/2, set_envs/3, healthcheck_fun/1, stop_service/2,
+    check_service/3, check_healthcheck/3, clearAndCheckMessages/3]).
 
 %%%===================================================================
 %%% API
@@ -27,6 +28,14 @@ start_service(ServiceName, MasterProc) ->
     application:set_env(?CLUSTER_WORKER_APP_NAME, ServiceName, Pid),
     ok.
 
+set_envs(Workers, ServiceName, MasterProc) ->
+    test_utils:set_env(Workers, ?CLUSTER_WORKER_APP_NAME, ha_test_utils_data, {ServiceName, MasterProc}).
+
+healthcheck_fun(_LastInterval) ->
+    {ok, {ServiceName, MasterProc}} = application:get_env(ha_test_utils_data),
+    MasterProc ! {healthcheck, ServiceName, node(), os:timestamp()},
+    ok.
+
 stop_service(ServiceName, _MasterProc) ->
     Pid = application:get_env(?CLUSTER_WORKER_APP_NAME, ServiceName, undefined),
     application:unset_env(?CLUSTER_WORKER_APP_NAME, ServiceName),
@@ -34,7 +43,10 @@ stop_service(ServiceName, _MasterProc) ->
     ok.
 
 check_service(ServiceName, ExpectedNode, MinTimestamp) ->
-    check_service(ServiceName, ExpectedNode, MinTimestamp, undefined).
+    check(ServiceName, ExpectedNode, MinTimestamp, undefined, service_message).
+
+check_healthcheck(ServiceName, ExpectedNode, MinTimestamp) ->
+    check(ServiceName, ExpectedNode, MinTimestamp, undefined, healthcheck).
 
 clearAndCheckMessages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
     receive
@@ -53,21 +65,21 @@ clearAndCheckMessages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
 %%%===================================================================
 
 service_proc(ServiceName, MasterProc) ->
-    MasterProc ! {ServiceName, node(), os:timestamp()},
+    MasterProc ! {service_message, ServiceName, node(), os:timestamp()},
     receive
         stop -> ok
     after
         1000 -> service_proc(ServiceName, MasterProc)
     end.
 
-check_service(ServiceName, ExpectedNode, MinTimestamp, LastMessage) ->
+check(ServiceName, ExpectedNode, MinTimestamp, LastMessage, MessageType) ->
     Ans = receive
-        {ServiceName, Node, Timestamp} -> {ok, Node, Timestamp}
+        {MessageType, ServiceName, Node, Timestamp} -> {ok, Node, Timestamp}
     after
         5000 -> {error, timeout, LastMessage}
     end,
     {ok, TestNode, TestTimestamp} = ?assertMatch({ok, _, _}, Ans),
     case ExpectedNode =:= TestNode andalso timer:now_diff(TestTimestamp, MinTimestamp) >= 0 of
         true -> ok;
-        false -> check_service(ServiceName, ExpectedNode, MinTimestamp, Ans)
+        false -> check(ServiceName, ExpectedNode, MinTimestamp, Ans, MessageType)
     end.

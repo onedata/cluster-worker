@@ -18,7 +18,7 @@
  {<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},2},
  {<<"cluster_manager">>,
   {raw,"ssh://git@git.onedata.org:7999/vfs/cluster-manager.git",
-       {mod_ref,git,{ref,"c0e78976f20c5fd1d6b72f198fc2355ef052a3f0"},[]}},
+       {mod_ref,git,{ref,"2a65437e6fc50d4f42a3db5259f3e3c8b7a2d2e9"},[]}},
   0},
  {<<"cowboy">>,
   {git,"git://github.com/ninenines/cowboy.git",
@@ -30,7 +30,7 @@
   2},
  {<<"ctool">>,
   {git,"ssh://git@git.onedata.org:7999/vfs/ctool.git",
-       {ref,"58c8f8bc73ac8bef1625b42c286cbf139af64dd2"}},
+       {ref,"87612df52fb419bc00a9cacab43ab4749069b3f2"}},
   0},
  {<<"edown">>,
   {git,"git://github.com/uwiger/edown.git",
@@ -126,7 +126,8 @@
  {<<"worker_pool">>,
   {git,"https://github.com/inaka/worker_pool",
        {ref,"ae5aa2e5819f7cce3aa3fbc50d39743de3515cdc"}},
-  0}]}.
+  0},
+ {<<"yamerl">>,{pkg,<<"yamerl">>,<<"0.7.0">>},1}]}.
 [
 {pkg_hash,[
  {<<"certifi">>, <<"861A57F3808F7EB0C2D1802AFEAAE0FA5DE813B0DF0979153CBAFCD853ABABAF">>},
@@ -136,5 +137,6 @@
  {<<"metrics">>, <<"25F094DEA2CDA98213CECC3AEFF09E940299D950904393B2A29D191C346A8486">>},
  {<<"mimerl">>, <<"993F9B0E084083405ED8252B99460C4F0563E41729AB42D9074FD5E52439BE88">>},
  {<<"ssl_verify_fun">>, <<"28A4D65B7F59893BC2C7DE786DEC1E1555BD742D336043FE644AE956C3497FBE">>},
- {<<"stacktrace_compat">>, <<"8AD31C32C9A0EADB1EB298F04DC8B0C8D79BCC6233A638B02791FFCA4F331275">>}]}
+ {<<"stacktrace_compat">>, <<"8AD31C32C9A0EADB1EB298F04DC8B0C8D79BCC6233A638B02791FFCA4F331275">>},
+ {<<"yamerl">>, <<"E51DBA652DCE74C20A88294130B48051EBBBB0BE7D76F22DE064F0F3CCF0AAF5">>}]}
 ].

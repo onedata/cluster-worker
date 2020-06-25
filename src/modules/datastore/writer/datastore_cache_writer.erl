@@ -506,6 +506,14 @@ batch_request(#datastore_request{function = update, ctx = Ctx, args = [Key, Diff
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Doc, Batch2)
     end);
+batch_request(#datastore_request{function = create_backup, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
+    batch_apply(Batch, fun(Batch2) ->
+        CtxWithMutator = set_mutator_pid(Ctx),
+        case datastore_doc:fetch(CtxWithMutator, Key, Batch2) of
+            {{ok, Doc}, Batch3} -> datastore_doc:save(CtxWithMutator, Key, Doc, Batch3);
+            Other -> Other
+        end
+    end);
 batch_request(#datastore_request{function = fetch, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:fetch(set_mutator_pid(Ctx), Key, Batch2)

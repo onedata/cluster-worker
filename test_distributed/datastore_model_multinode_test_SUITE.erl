@@ -29,6 +29,10 @@
 
     saves_should_propagate_to_backup_node_cast_ha_test/1,
     saves_should_propagate_to_backup_node_call_ha_test/1,
+    saves_should_not_propagate_to_backup_node_when_ha_is_disabled/1,
+    saves_should_not_propagate_to_backup_node_for_local_memory_model/1,
+    saves_should_propagate_to_backup_node_after_config_change_global_models/1,
+    saves_should_propagate_to_backup_node_after_config_change_local_models/1,
     calls_should_change_node_cast_ha_test/1,
     calls_should_change_node_call_ha_test/1,
     saves_should_use_recovered_node_cast_ha_test/1,
@@ -91,6 +95,10 @@ all() ->
 
         saves_should_propagate_to_backup_node_cast_ha_test,
         saves_should_propagate_to_backup_node_call_ha_test,
+        saves_should_not_propagate_to_backup_node_when_ha_is_disabled,
+        saves_should_not_propagate_to_backup_node_for_local_memory_model,
+        saves_should_propagate_to_backup_node_after_config_change_global_models,
+        saves_should_propagate_to_backup_node_after_config_change_local_models,
         calls_should_change_node_cast_ha_test,
         calls_should_change_node_call_ha_test,
         saves_should_use_recovered_node_cast_ha_test,
@@ -202,27 +210,38 @@ services_migration_test(Config) ->
     [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
     set_ha(Config, change_config, [2, call]),
 
-    HashingBase = <<"test">>,
+    NodeSelector = <<"test">>,
     ServiceName = test_service,
     MasterProc = self(),
     #node_routing_info{assigned_nodes = [Node1, Node2] = AssignedNodes} =
-        rpc:call(Worker0, consistent_hashing, get_routing_info, [HashingBase]),
+        rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
     StartTimestamp = os:timestamp(),
+    ServiceOptions = #{
+        start_function => start_service,
+        stop_function => stop_service,
+        healthcheck_fun => healthcheck_fun,
+        start_function_args => [ServiceName, MasterProc]
+    },
+    ha_test_utils:set_envs(Workers, ServiceName, MasterProc),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
-        [ha_test_utils, <<"test_service">>, start_service, stop_service, [ServiceName, MasterProc], HashingBase])),
+        [ha_test_utils, <<"test_service">>, NodeSelector, ServiceOptions])),
     ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
+    ha_test_utils:check_healthcheck(ServiceName, Node1, StartTimestamp),
 
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     StopTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, takeover, [Node1])),
     ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
+    ha_test_utils:check_healthcheck(ServiceName, Node2, StopTimestamp),
+    timer:sleep(5000), % Wait for first healthcheck on master node to end healthcheck cycle
 
     MigrationTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, migrate_to_recovered_master, [Node1])),
     MigrationFinishTimestamp = os:timestamp(),
     ha_test_utils:check_service(ServiceName, Node1, MigrationTimestamp),
+    ha_test_utils:check_healthcheck(ServiceName, Node1, MigrationTimestamp),
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     timer:sleep(timer:seconds(5)), % Wait for unwanted messages to verify migration
     ha_test_utils:clearAndCheckMessages(ServiceName, Node2, MigrationFinishTimestamp).
@@ -238,6 +257,18 @@ saves_should_propagate_to_backup_node_cast_ha_test(Config) ->
 
 saves_should_propagate_to_backup_node_call_ha_test(Config) ->
     saves_should_propagate_to_backup_node(Config, call).
+
+saves_should_not_propagate_to_backup_node_when_ha_is_disabled(Config) ->
+    saves_should_not_propagate_to_backup_node(Config, false, ?TEST_MODELS).
+
+saves_should_not_propagate_to_backup_node_for_local_memory_model(Config) ->
+    saves_should_not_propagate_to_backup_node(Config, true, [ets_only_model, mnesia_only_model]).
+
+saves_should_propagate_to_backup_node_after_config_change_global_models(Config) ->
+    saves_should_propagate_to_backup_node_after_config_change(Config, false).
+
+saves_should_propagate_to_backup_node_after_config_change_local_models(Config) ->
+    saves_should_propagate_to_backup_node_after_config_change(Config, true).
 
 calls_should_change_node_cast_ha_test(Config) ->
     calls_should_change_node(Config, cast).
@@ -378,6 +409,42 @@ saves_should_propagate_to_backup_node(Config, Method) ->
         assert_on_disc(TestWorker, Model, Key),
         assert_in_memory(KeyNode2, Model, Key)
     end, ?TEST_MODELS).
+
+saves_should_not_propagate_to_backup_node(Config, LocalRouting, Models) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+    set_ha(Config, change_config, [2, call]),
+
+    CallWorker = case LocalRouting of
+        true -> KeyNode;
+        false -> TestWorker
+    end,
+
+    lists:foreach(fun(Model) ->
+        ?assertMatch({ok, #document{}}, rpc:call(CallWorker, Model, save, [?DOC(Key, Model)])),
+
+        assert_in_memory(KeyNode, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
+        assert_not_in_memory(KeyNode2, Model, Key)
+    end, Models).
+
+saves_should_propagate_to_backup_node_after_config_change(Config, LocalRouting) ->
+    {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
+
+    CallWorker = case LocalRouting of
+        true -> KeyNode;
+        false -> TestWorker
+    end,
+
+    lists:foreach(fun(Model) ->
+        set_ha(Config, change_config, [1, call]),
+        ?assertMatch({ok, #document{}}, rpc:call(CallWorker, Model, save, [?DOC(Key, Model)])),
+        assert_in_memory(KeyNode, Model, Key),
+        assert_on_disc(TestWorker, Model, Key),
+        assert_not_in_memory(KeyNode2, Model, Key),
+
+        set_ha(Config, change_config, [2, call]),
+        assert_in_memory(KeyNode2, Model, Key)
+    end, [ets_only_model, mnesia_only_model]).
 
 calls_should_change_node(Config, Method) ->
     {Key, KeyNode, KeyNode2, TestWorker} = prepare_ha_test(Config),
@@ -735,7 +802,7 @@ prepare_cluster_reorganization_data(Config, add, ReconfiguredNodeChoice) ->
     InitialRing = prepare_ring(Config, [KeyNode]),
     % Check which node is responsible for key in new ring
     % if relation between nodes in the rings is not correct try once more
-    case {datastore_key:responsible_node(Key), ReconfiguredNodeChoice} of
+    case {datastore_key:any_responsible_node(Key), ReconfiguredNodeChoice} of
         {KeySlaveNode, prev} ->
             consistent_hashing:cleanup(),
             [TestWorker | _] = Workers -- [KeyNode, KeySlaveNode],
@@ -759,7 +826,8 @@ prepare_cluster_reorganization_data(Config, delete, ReconfiguredNodeChoice) ->
 
 set_ring(Config, Ring) ->
     Workers = ?config(cluster_worker_nodes, Config),
-    consistent_hashing:replicate_ring_to_nodes(Workers, ?CURRENT_RING, Ring).
+    consistent_hashing:set_ring(?CURRENT_RING, Ring),
+    consistent_hashing:replicate_ring_to_nodes(Workers).
 
 spawn_foreach_key(Keys, Fun) ->
     utils:pforeach(fun(Key) ->
@@ -818,6 +886,20 @@ init_per_testcase(ha_test, Config) ->
     {ok, SubtreesNum} = test_utils:get_env(Worker, cluster_worker, tp_subtrees_number),
     application:set_env(cluster_worker, tp_subtrees_number, SubtreesNum),
     Config;
+init_per_testcase(saves_should_not_propagate_to_backup_node_when_ha_is_disabled, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{ha_enabled => false}),
+    init_per_testcase(ha_test, Config);
+init_per_testcase(saves_should_not_propagate_to_backup_node_for_local_memory_model, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{routing => local}),
+    init_per_testcase(ha_test, Config);
+init_per_testcase(saves_should_propagate_to_backup_node_after_config_change_local_models, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{routing => local, ha_enabled => true}),
+    init_per_testcase(ha_test, Config);
+init_per_testcase(saves_should_propagate_to_backup_node_after_config_change_global_models, Config) ->
+    init_per_testcase(ha_test, Config);
 init_per_testcase(services_migration_test, Config) ->
     init_per_testcase(ha_test, Config);
 init_per_testcase(Case, Config) ->
@@ -837,8 +919,8 @@ end_per_testcase(ha_test, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
 
     Ring = prepare_ring(Config, []),
-    consistent_hashing:cleanup(),
     set_ring(Config, Ring),
+    consistent_hashing:cleanup(),
 
     lists:foreach(fun(Worker) ->
         lists:foreach(fun(FixedWorker) ->
@@ -850,6 +932,14 @@ end_per_testcase(ha_test, Config) ->
     set_ha(Config, set_standby_mode_and_broadcast_master_up_message, []),
     set_ha(Config, change_config, [1, cast]),
     test_utils:mock_unload(Workers, [ha_datastore_master]);
+end_per_testcase(Case, Config) when Case =:= saves_should_not_propagate_to_backup_node_when_ha_is_disabled orelse
+    Case =:= saves_should_not_propagate_to_backup_node_for_local_memory_model orelse
+    Case =:= saves_should_propagate_to_backup_node_after_config_change_local_models ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
+    end_per_testcase(ha_test, Config);
+end_per_testcase(saves_should_propagate_to_backup_node_after_config_change_global_models, Config) ->
+    end_per_testcase(ha_test, Config);
 end_per_testcase(services_migration_test, Config) ->
     end_per_testcase(ha_test, Config);
 end_per_testcase(Case, Config) ->

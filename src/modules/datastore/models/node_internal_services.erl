@@ -19,7 +19,7 @@
 -export([get/1, update/2, update/3]).
 
 %% datastore_model callbacks
--export([get_ctx/0, get_record_struct/1]).
+-export([get_ctx/0]).
 
 -type ctx() :: datastore:ctx().
 -type key() :: datastore:key().
@@ -28,7 +28,8 @@
 -type diff() :: datastore_doc:diff(record()).
 
 -define(CTX, #{
-    model => ?MODULE
+    model => ?MODULE,
+    disc_driver => undefined
 }).
 
 %%%===================================================================
@@ -54,22 +55,3 @@ update(Key, Diff, Default) ->
 -spec get_ctx() -> ctx().
 get_ctx() ->
     ?CTX.
-
--spec get_record_struct(datastore_model:record_version()) ->
-    datastore_model:record_struct().
-get_record_struct(1) ->
-    {record, [
-        {services, #{string => {record, [
-            {module, atom},
-            {start_function, atom},
-            {takeover_function, atom},
-            {migrate_function, atom},
-            {stop_function, atom},
-            {start_function_args, term},
-            {takeover_function_args, term},
-            {migrate_function_args, term},
-            {stop_function_args, term},
-            {hashing_key, string}
-        ]}}},
-        {processing_node, atom}
-    ]}.
