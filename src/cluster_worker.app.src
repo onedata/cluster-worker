@@ -304,7 +304,7 @@
             % Interval between exometer reports
             {exometer_logging_interval, 15000},
             % Interval between checking if exometer reporters are alive
-            {exometer_check_interval_seconds, 60000},
+            {exometer_check_interval, 60000},
             % List of exometer counters that should be off or atom 'all'
             % e.g., [[mod, datastore, save_time]]
             % to apply - use exometer_utils:init_exometer_counters()

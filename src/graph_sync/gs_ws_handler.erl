@@ -28,7 +28,7 @@
 
 -type state() :: #pre_handshake_state{} | #gs_session{}.
 
--define(KEEPALIVE_INTERVAL, application:get_env(
+-define(KEEPALIVE_INTERVAL_MILLIS, application:get_env(
     ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(15)
 )).
 
@@ -43,7 +43,8 @@
 % API
 -export([
     push/2,
-    kill/1
+    kill/1,
+    keepalive_interval/0
 ]).
 
 
@@ -73,7 +74,7 @@ init(Req, [Translator]) ->
 %%--------------------------------------------------------------------
 -spec websocket_init(state()) -> {ok, state()}.
 websocket_init(State) ->
-    erlang:send_after(?KEEPALIVE_INTERVAL, self(), keepalive),
+    erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
     {ok, State}.
 
 
@@ -129,6 +130,9 @@ websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = Prot
 websocket_handle(ping, SessionData) ->
     {ok, SessionData};
 
+websocket_handle({ping, _Payload}, SessionData) ->
+    {ok, SessionData};
+
 websocket_handle(pong, SessionData) ->
     % pongs are received in response to the keepalive pings sent to the client
     % (see 'keepalive' periodical message)
@@ -158,7 +162,7 @@ websocket_info(terminate, SessionData) ->
     {stop, SessionData};
 
 websocket_info(keepalive, SessionData) ->
-    erlang:send_after(?KEEPALIVE_INTERVAL, self(), keepalive),
+    erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
     {reply, ping, SessionData};
 
 websocket_info({push, Msg}, #gs_session{protocol_version = ProtoVer} = SessionData) ->
@@ -223,6 +227,11 @@ push(WebsocketPid, Msg) when WebsocketPid /= undefined ->
 kill(WebsocketPid) when WebsocketPid /= undefined ->
     WebsocketPid ! terminate,
     ok.
+
+
+-spec keepalive_interval() -> time_utils:seconds().
+keepalive_interval() ->
+    ?KEEPALIVE_INTERVAL_MILLIS div 1000.
 
 %%%===================================================================
 %%% Internal functions
