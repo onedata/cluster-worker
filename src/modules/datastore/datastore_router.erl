@@ -21,14 +21,14 @@
 %% API
 -export([route/2, execute_on_node/4]).
 -export([init_counters/0, init_report/0]).
--export([get_routing_key/1]).
+-export([get_routing_key/2]).
 %% Internal RPC API
 -export([execute_on_local_node/4, process/3]).
 
 -type local_read() :: boolean(). % true if read should be tried locally before delegation to chosen node
 
 -define(EXOMETER_COUNTERS,
-    [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
+    [save, update, create_backup, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
         set_links, create_link, delete_links, fetch_link, foreach_link,
         mark_links_deleted, get_links, fold_links, get_links_trees
     ]).
@@ -107,15 +107,15 @@ execute_on_local_node(Module, Fun, Args, MasterPid) ->
     datastore_cache_writer:save_master_pid(MasterPid),
     apply(Module, Fun, Args).
 
--spec get_routing_key(datastore:doc()) -> datastore:key().
-get_routing_key(#document{value = #links_forest{key = Key}}) ->
+-spec get_routing_key(datastore:ctx(), datastore:doc()) -> datastore:key().
+get_routing_key(_Ctx, #document{value = #links_forest{key = Key}}) ->
     Key;
-get_routing_key(#document{value = #links_node{key = Key}}) ->
+get_routing_key(_Ctx, #document{value = #links_node{key = Key}}) ->
     Key;
-get_routing_key(#document{value = #links_mask{key = Key}}) ->
+get_routing_key(_Ctx, #document{value = #links_mask{key = Key}}) ->
     Key;
-get_routing_key(#document{key = Key}) ->
-    Key.
+get_routing_key(Ctx, #document{key = Key}) ->
+    datastore_model:get_unique_key(Ctx, Key).
 
 %%%===================================================================
 %%% Internal functions
@@ -169,9 +169,10 @@ select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]
             Ctx2 = Ctx#{failed_nodes => FailedNodes, failed_master => lists:member(MasterNode, FailedNodes)},
             {Ctx3, TryLocalRead} = case MemCopies of
                 all ->
-                    MemCopiesNodes = AllNodes -- Nodes -- FailedNodes,
+                    % TODO VFS-6168 - duplicates activity of HA but memory copy must be saved before operation finished
+                    MemCopiesNodes = AllNodes, % -- Nodes -- FailedNodes,
                     % TODO VFS-6168 - Try local reads from HA slaves
-                    {Ctx2#{memory_copies_nodes => MemCopiesNodes}, lists:member(node(), MemCopiesNodes)};
+                    {Ctx2#{memory_copies_nodes => MemCopiesNodes}, true};
                 none ->
                     {Ctx2, false}
             end,

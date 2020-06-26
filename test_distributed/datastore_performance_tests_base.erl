@@ -43,7 +43,7 @@ stress_performance_test_base(Config) ->
     ConsistentHashingNodes = rpc:call(Worker, consistent_hashing, get_all_nodes, []),
     KeyAnsWorkersList = lists:map(fun(_) ->
         Key = datastore_key:new(),
-        KeyWorker = rpc:call(Worker, datastore_key, responsible_node, [Key]),
+        KeyWorker = rpc:call(Worker, datastore_key, any_responsible_node, [Key]),
         NextWorker = get_next_worker(KeyWorker, ConsistentHashingNodes ++ ConsistentHashingNodes),
         {Key, KeyWorker, NextWorker}
     end, lists:seq(1, ProcNum)),

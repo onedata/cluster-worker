@@ -64,8 +64,9 @@
 % Unique message id used to match requests to responses.
 -type message_id() :: binary().
 -type protocol_version() :: non_neg_integer().
-% Graph Sync session id, used as reference to store subscriptions data
--type session_id() :: gs_session:key().
+% Graph Sync session id - identifies a connection, corresponding client and
+% serves as reference to store subscriptions data
+-type session_id() :: binary().
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
 -type handshake_attributes() :: undefined | json_map().

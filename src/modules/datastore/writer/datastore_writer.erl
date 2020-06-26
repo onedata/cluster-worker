@@ -23,7 +23,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/3, save/3, update/3, update/4, fetch/2, delete/3]).
+-export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
 -export([generic_call/2, call_if_alive/2]).
@@ -120,6 +120,15 @@ update(Ctx, Key, Diff) ->
 -spec update(ctx(), key(), diff(), doc()) -> {ok, doc()} | {error, term()}.
 update(Ctx, Key, Diff, Default) ->
     call(Ctx, get_key(Ctx, Key, doc), update, [Key, Diff, Default]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Synchronous and thread safe {@link datastore:create_backup/2} implementation.
+%% @end
+%%--------------------------------------------------------------------
+-spec create_backup(ctx(), key()) -> {ok, doc()} | {error, term()}.
+create_backup(Ctx, Key) ->
+    call(Ctx, get_key(Ctx, Key, doc), create_backup, [Key]).
 
 %%--------------------------------------------------------------------
 %% @doc

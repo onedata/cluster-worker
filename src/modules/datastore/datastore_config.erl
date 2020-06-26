@@ -27,6 +27,7 @@
     cluster_generation,
     task_pool,
     gs_session,
+    gs_subscriber,
     gs_subscription,
     traverse_task,
     traverse_tasks_scheduler,

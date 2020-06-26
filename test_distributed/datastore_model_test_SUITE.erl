@@ -15,6 +15,7 @@
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
 -include("datastore_performance_tests_base.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2,
@@ -1173,20 +1174,21 @@ create_get_performance(Config) ->
     ok.
 
 test_create_get() ->
-    ID = ?KEY,
-    % Use gs_subscription as example of existing model
+    NonExistingId = ?KEY,
+    % Use gs_subscriber as example of existing model
     % (model emulation affects results).
-    Doc = #document{value = #gs_subscription{}},
     Time0 = os:timestamp(),
-    ?assertEqual({error, not_found}, gs_subscription:get(test, ID)),
+    ?assertEqual({error, not_found}, gs_session:get(NonExistingId)),
     Time1 = os:timestamp(),
-    ?assertEqual({error, not_found}, gs_subscription:get(test, ID)),
+    ?assertEqual({error, not_found}, gs_session:get(NonExistingId)),
     Time2 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:create(test, ID, Doc)),
+    #gs_session{id = ExistingId} = ?assertMatch(
+        #gs_session{}, gs_session:create(?USER(<<"123">>), self(), 4, dummyTranslator)
+    ),
     Time3 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:get(test, ID)),
+    ?assertMatch({ok, _}, gs_session:get(ExistingId)),
     Time4 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:get(test, ID)),
+    ?assertMatch({ok, _}, gs_session:get(ExistingId)),
     Time5 = os:timestamp(),
 
     Diff1 = timer:now_diff(Time1, Time0),
