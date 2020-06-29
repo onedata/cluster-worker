@@ -190,7 +190,11 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
-terminate(Reason, #state{} = State) ->
+terminate(Reason, #state{callback = Callback, seq_safe = SeqSafe} = State) ->
+    case Reason of
+        normal -> ok;
+        _ -> Callback({error, SeqSafe, Reason})
+    end,
     ?log_terminate(Reason, State).
 
 %%--------------------------------------------------------------------
@@ -226,8 +230,7 @@ fetch_changes(#state{
     seq = Seq,
     batch_size = BatchSize,
     interval = Interval,
-    gc = GCPid,
-    callback = Callback
+    gc = GCPid
 } = State) ->
     SeqSafe2 = SeqSafe + 1,
     Seq2 = min(SeqSafe2 + BatchSize - 1, Seq),
@@ -249,16 +252,11 @@ fetch_changes(#state{
 
             ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
             gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
+            stream_docs(Changes, Bucket, SeqSafe3, State),
 
-            case {SeqSafe3, Callback} of
-                {Seq2, _} ->
-                    erlang:send_after(0, self(), update);
-                {_, undefined} ->
-                    erlang:send_after(Interval, self(), update);
-                _ ->
-                    Docs = couchbase_changes_utils:get_docs(Changes, Bucket, <<>>, SeqSafe3),
-                    Callback({ok, Docs}),
-                    erlang:send_after(Interval, self(), update)
+            case SeqSafe3 of
+                Seq2 -> erlang:send_after(0, self(), update);
+                _ -> erlang:send_after(Interval, self(), update)
             end,
             State2;
         Error ->
@@ -316,7 +314,7 @@ process_changes(SeqSafe, Seq, [Change | _] = Changes, State, WorkersChecked) ->
 %% Check whether provided sequence number can be ignored.
 %% @end
 %%--------------------------------------------------------------------
--spec ignore_change(couchbase_changes:seq(), state(), [pid()], boolean()) -> 
+-spec ignore_change(couchbase_changes:seq(), state(), [pid()], boolean()) ->
     {boolean(), [pid()]}.
 ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope},
     WorkersChecked, Retry) ->
@@ -414,3 +412,16 @@ check_reconect_retry() ->
 
     Now = os:timestamp(),
     timer:now_diff(Now, StartTime) < TimeoutUs.
+
+%% @private
+-spec stream_docs([couchbase_changes:change()], couchbase_config:bucket(),
+    couchbase_changes:seq(), state()) -> ok.
+stream_docs(_Changes, _Bucket, _SeqSafe, #state{callback = undefined}) ->
+    ok;
+stream_docs(Changes, Bucket, SeqSafe, #state{callback = Callback}) ->
+    case couchbase_changes_utils:get_docs(Changes, Bucket, <<>>, SeqSafe) of
+        [] -> ok;
+        Docs ->
+            Callback({ok, Docs}),
+            ok
+    end.
