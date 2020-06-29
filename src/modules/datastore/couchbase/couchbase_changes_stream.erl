@@ -43,6 +43,7 @@
 -type state() :: #state{}.
 
 -define(STOP, stop).
+-define(STALE_OPTION, application:get_env(?CLUSTER_WORKER_APP_NAME, stale_view_option, false)).
 
 %%%===================================================================
 %%% API
@@ -159,9 +160,10 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_info(update, #state{since = Since, until = Until} = State) ->
+handle_info(update, #state{since = Since, until = Until,
+    bucket = Bucket, except_mutator = Mutator} = State) ->
     {Changes, State2} = get_changes(Since, Until, State),
-    Docs = get_docs(Changes, State2),
+    Docs = couchbase_changes_utils:get_docs(Changes, Bucket, Mutator, Until),
     stream_docs(Docs, State2),
     case State2#state.since >= Until of
         true -> {stop, normal, State2};
@@ -244,10 +246,10 @@ get_changes(Since, Until, #state{} = State) ->
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Until2]},
                     {inclusive_end, false},
-                    {stale, false} % use stale=false option as couchbase_changes_stream does
-                                   % not analyse missing documents (couchbase_changes_worker does),
-                                   % without it document can be lost when view is being rebuilt
-                                   % by couch after an error
+                    {stale, ?STALE_OPTION} % use stale=false option as couchbase_changes_stream does
+                                           % not analyse missing documents (couchbase_changes_worker does),
+                                           % without it document can be lost when view is being rebuilt
+                                           % by couch after an error
                 ]
             ),
 
@@ -259,38 +261,6 @@ get_changes(Since, Until, #state{} = State) ->
                     {[], State}
             end
     end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns list of documents associated with the changes. Skips documents that
-%% has changed in the database since the changes generation (they will be
-%% included in the future changes).
-%% @end
-%%--------------------------------------------------------------------
--spec get_docs([couchbase_changes:change()], state()) -> [datastore:doc()].
-get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
-    KeyRevisionsAnsSequences = lists:filtermap(fun(Change) ->
-        Key = maps:get(<<"id">>, Change),
-        Value = maps:get(<<"value">>, Change),
-        [_, Seq] = maps:get(<<"key">>, Change),
-        Rev = maps:get(<<"_rev">>, Value),
-        case maps:get(<<"_mutator">>, Value) of
-            Mutator -> false;
-            _ -> {true, {Key, {Rev, Seq}}}
-        end
-    end, Changes),
-    Ctx = #{bucket => Bucket},
-    {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAnsSequences),
-    lists:filtermap(fun
-        ({{ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) ->
-            {true, Doc};
-        ({{ok, _, #document{}}, _Rev}) ->
-            false;
-        ({{error, not_found}, Rev}) ->
-            ?debug("Document not found in changes stream in revision ~p", [Rev]),
-            false
-    end, lists:zip(couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
 
 %%--------------------------------------------------------------------
 %% @private

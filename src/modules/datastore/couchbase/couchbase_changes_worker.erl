@@ -24,7 +24,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2]).
+-export([start_link/2, start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -37,7 +37,11 @@
     seq_safe :: couchbase_changes:until(),
     batch_size :: non_neg_integer(),
     interval :: non_neg_integer(),
-    gc :: pid()
+    gc :: pid(),
+
+    % Optional callback that allows changes handling without usage of changes stream
+    % (when only one changes stream with all documents is needed)
+    callback :: couchbase_changes:callback() | undefined
 }).
 
 -type state() :: #state{}.
@@ -48,13 +52,23 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts CouchBase changes worker.
+%% @equiv start_link(Bucket, Scope, undefined).
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(couchbase_config:bucket(), datastore_doc:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope) ->
-    gen_server2:start_link(?MODULE, [Bucket, Scope], []).
+    start_link(Bucket, Scope, undefined).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts CouchBase changes worker.
+%% @end
+%%--------------------------------------------------------------------
+-spec start_link(couchbase_config:bucket(), datastore_doc:scope(),
+    couchbase_changes:callback() | undefined) -> {ok, pid()} | {error, Reason :: term()}.
+start_link(Bucket, Scope, Callback) ->
+    gen_server2:start_link(?MODULE, [Bucket, Scope, Callback], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -69,7 +83,7 @@ start_link(Bucket, Scope) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Bucket, Scope]) ->
+init([Bucket, Scope, Callback]) ->
     {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
@@ -77,7 +91,7 @@ init([Bucket, Scope]) ->
     SeqKey = couchbase_changes:get_seq_key(Scope),
     {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_update_interval, 1000),
+        couchbase_changes_update_interval, 5000),
     erlang:send_after(Interval, self(), update),
 
     Seq3 = case SeqSafe > Seq of
@@ -100,7 +114,8 @@ init([Bucket, Scope]) ->
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_batch_size, 100),
         interval = Interval,
-        gc = GCPid
+        gc = GCPid,
+        callback = Callback
     }}.
 
 %%--------------------------------------------------------------------
@@ -211,7 +226,8 @@ fetch_changes(#state{
     seq = Seq,
     batch_size = BatchSize,
     interval = Interval,
-    gc = GCPid
+    gc = GCPid,
+    callback = Callback
 } = State) ->
     SeqSafe2 = SeqSafe + 1,
     Seq2 = min(SeqSafe2 + BatchSize - 1, Seq),
@@ -234,9 +250,15 @@ fetch_changes(#state{
             ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
             gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
 
-            case SeqSafe3 of
-                Seq2 -> erlang:send_after(0, self(), update);
-                _ -> erlang:send_after(Interval, self(), update)
+            case {SeqSafe3, Callback} of
+                {Seq2, _} ->
+                    erlang:send_after(0, self(), update);
+                {_, undefined} ->
+                    erlang:send_after(Interval, self(), update);
+                _ ->
+                    Docs = couchbase_changes_utils:get_docs(Changes, Bucket, <<>>, SeqSafe3),
+                    Callback({ok, Docs}),
+                    erlang:send_after(Interval, self(), update)
             end,
             State2;
         Error ->
