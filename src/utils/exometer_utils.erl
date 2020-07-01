@@ -362,9 +362,9 @@ strip_graphite_prefix(Option) ->
 -spec is_counter_excluded(Param :: list()) -> boolean().
 is_counter_excluded([thread, _Thread, mod, Module | _]) ->
   Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    excluded_exometer_counters, []),
+    excluded_exometer_modules, [datastore_router]),
   Excluded =:= all orelse lists:member(Module, Excluded);
 is_counter_excluded(Param) ->
   Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    excluded_exometer_counters, []),
+    excluded_exometer_modules, [datastore_router]),
   Excluded =:= all orelse lists:member(Param, Excluded).

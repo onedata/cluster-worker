@@ -32,7 +32,7 @@
         set_links, create_link, delete_links, fetch_link, foreach_link,
         mark_links_deleted, get_links, fold_links, get_links_trees
     ]).
--define(EXOMETER_DATASTORE_NAME(Param), ?exometer_name(?MODULE, Param)).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 
 % Macros used when node is down and request is routed again
 -define(RETRY_COUNT, application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_router_retry_count, 5)).
@@ -50,7 +50,7 @@
 -spec init_counters() -> ok.
 init_counters() ->
     Counters = lists:map(fun(Name) ->
-        {?EXOMETER_DATASTORE_NAME(Name), counter}
+        {?EXOMETER_NAME(Name), counter}
     end, ?EXOMETER_COUNTERS),
     ?init_counters(Counters).
 
@@ -62,7 +62,7 @@ init_counters() ->
 -spec init_report() -> ok.
 init_report() ->
     Counters = lists:map(fun(Name) ->
-        {?EXOMETER_DATASTORE_NAME(Name), [value]}
+        {?EXOMETER_NAME(Name), [value]}
     end, ?EXOMETER_COUNTERS),
     ?init_reports(Counters).
 
@@ -85,10 +85,10 @@ route(Function, Args) ->
 %%--------------------------------------------------------------------
 -spec process(module(), atom(), list()) -> term().
 process(datastore_doc, Function, Args) ->
-    ?update_datastore_counter(?EXOMETER_DATASTORE_NAME(Function)),
+    ?update_counter(?EXOMETER_NAME(Function)),
     apply(datastore_doc, Function, Args);
 process(Module, Function, Args = [#{model := Model} | _]) ->
-    ?update_datastore_counter(?EXOMETER_DATASTORE_NAME(Function)),
+    ?update_counter(?EXOMETER_NAME(Function)),
     case datastore_throttling:throttle_model(Model) of
         ok -> apply(Module, Function, Args);
         {error, Reason} -> {error, Reason}

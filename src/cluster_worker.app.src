@@ -308,7 +308,7 @@
             % List of exometer counters that should be off or atom 'all'
             % e.g., [[mod, datastore, save_time]]
             % to apply - use exometer_utils:init_exometer_counters()
-            {excluded_exometer_counters, []},
+            {excluded_exometer_modules, [datastore_router]},
 
             % Should lager reporter be on
             {exometer_lager_reporter, false},
