@@ -78,7 +78,7 @@ update_counter(Param) ->
 %% Updates exometer counter if it is not at excluded list.
 %% @end
 %%--------------------------------------------------------------------
--spec update_counter(Param :: list(), Value :: integer()) -> ok.
+-spec update_counter(Param :: list(), Value :: number()) -> ok.
 update_counter(Param, Value) ->
   case is_counter_excluded(Param) of
     true ->
@@ -360,6 +360,10 @@ strip_graphite_prefix(Option) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec is_counter_excluded(Param :: list()) -> boolean().
+is_counter_excluded([thread, _Thread, mod, Module | _]) ->
+  Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    excluded_exometer_counters, []),
+  Excluded =:= all orelse lists:member(Module, Excluded);
 is_counter_excluded(Param) ->
   Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
     excluded_exometer_counters, []),

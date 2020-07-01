@@ -18,13 +18,12 @@
 
 -behaviour(gen_server).
 
--include("global_definitions.hrl").
 -include("modules/datastore/datastore.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2, start_link/3]).
+-export([start_link/2, start_link/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -58,7 +57,7 @@
 -spec start_link(couchbase_config:bucket(), datastore_doc:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_link(Bucket, Scope) ->
-    start_link(Bucket, Scope, undefined).
+    start_link(Bucket, Scope, undefined, undefined).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -66,9 +65,10 @@ start_link(Bucket, Scope) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(couchbase_config:bucket(), datastore_doc:scope(),
-    couchbase_changes:callback() | undefined) -> {ok, pid()} | {error, Reason :: term()}.
-start_link(Bucket, Scope, Callback) ->
-    gen_server2:start_link(?MODULE, [Bucket, Scope, Callback], []).
+    couchbase_changes:callback() | undefined, couchbase_changes:since() | undefined) ->
+    {ok, pid()} | {error, Reason :: term()}.
+start_link(Bucket, Scope, Callback, PropagationSince) ->
+    gen_server2:start_link(?MODULE, [Bucket, Scope, Callback, PropagationSince], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -83,7 +83,7 @@ start_link(Bucket, Scope, Callback) ->
 -spec init(Args :: term()) ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
-init([Bucket, Scope, Callback]) ->
+init([Bucket, Scope, Callback, PropagationSince]) ->
     {ok, GCPid} = couchbase_changes_worker_gc:start_link(Bucket, Scope),
     Ctx = #{bucket => Bucket},
     SeqSafeKey = couchbase_changes:get_seq_safe_key(Scope),
@@ -91,8 +91,13 @@ init([Bucket, Scope, Callback]) ->
     SeqKey = couchbase_changes:get_seq_key(Scope),
     {ok, _, Seq} = couchbase_driver:get_counter(Ctx, SeqKey, 0),
     Interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_update_interval, 5000),
-    erlang:send_after(Interval, self(), update),
+        couchbase_changes_update_interval, 1000),
+
+    case PropagationSince of
+        undefined -> erlang:send_after(Interval, self(), update);
+        Num when Num >= SeqSafe -> erlang:send_after(Interval, self(), update);
+        _ -> erlang:send_after(Interval, self(), {propagate_changes, PropagationSince})
+    end,
 
     Seq3 = case SeqSafe > Seq of
         true ->
@@ -173,6 +178,9 @@ handle_info(update, #state{
         {error, _Reason} -> Seq
     end,
     {noreply, fetch_changes(State#state{seq = Seq3})};
+handle_info({propagate_changes, Since}, #state{} = State) ->
+    propagate_changes(Since, State),
+    {noreply, State};
 handle_info(update, #state{} = State) ->
     {noreply, fetch_changes(State)};
 handle_info(Info, #state{} = State) ->
@@ -425,3 +433,44 @@ stream_docs(Changes, Bucket, SeqSafe, #state{callback = Callback}) ->
             Callback({ok, Docs}),
             ok
     end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Function used during worker init to propagate changes up to SeqSafe (if requested)
+%% @end
+%%--------------------------------------------------------------------
+-spec propagate_changes(couchbase_changes:since(), state()) -> ok.
+propagate_changes(Since, #state{seq_safe = SeqSafe, interval = Interval,
+    bucket = Bucket, scope = Scope} = State) ->
+    BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_stream_batch_size, 1000),
+    Until = min(Since + BatchSize, SeqSafe),
+
+    QueryAns = couchbase_driver:query_view(#{bucket => Bucket},
+        couchbase_changes:design(), couchbase_changes:view(), [
+            {startkey, [Scope, Since]},
+            {endkey, [Scope, Until]},
+            {inclusive_end, true},
+            {stale, ?CHANGES_STALE_OPTION} % use stale=false option as propagation
+                                           % does not analyse missing documents (fetching does),
+                                           % without it document can be lost when view is being rebuilt
+                                           % by couch after an error
+        ]
+    ),
+
+    NewSince = case QueryAns of
+        {ok, #{<<"rows">> := Changes}} ->
+            stream_docs(Changes, Bucket, Until, State),
+            Until;
+        Error ->
+            ?error("Cannot get changes, error: ~p", [Error]),
+            Since
+    end,
+
+    case NewSince of
+        SeqSafe -> erlang:send_after(Interval, self(), update);
+        Since -> erlang:send_after(Interval, self(), {propagate_changes, NewSince});
+        _ -> erlang:send_after(0, self(), {propagate_changes, NewSince})
+    end,
+    ok.

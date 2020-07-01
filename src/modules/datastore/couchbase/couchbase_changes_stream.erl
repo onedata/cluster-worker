@@ -16,7 +16,6 @@
 
 -behaviour(gen_server).
 
--include("global_definitions.hrl").
 -include("modules/datastore/datastore.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
@@ -43,7 +42,6 @@
 -type state() :: #state{}.
 
 -define(STOP, stop).
--define(STALE_OPTION, application:get_env(?CLUSTER_WORKER_APP_NAME, stale_view_option, false)).
 
 %%%===================================================================
 %%% API
@@ -110,7 +108,7 @@ init([Bucket, Scope, Callback, Opts, LinkedProcesses]) ->
         until = proplists:get_value(until, Opts, infinity),
         except_mutator = proplists:get_value(except_mutator, Opts),
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_batch_size, 200),
+            couchbase_changes_stream_batch_size, 1000),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 1000),
         linked_processes = LinkedProcesses
@@ -246,10 +244,10 @@ get_changes(Since, Until, #state{} = State) ->
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Until2]},
                     {inclusive_end, false},
-                    {stale, ?STALE_OPTION} % use stale=false option as couchbase_changes_stream does
-                                           % not analyse missing documents (couchbase_changes_worker does),
-                                           % without it document can be lost when view is being rebuilt
-                                           % by couch after an error
+                    {stale, ?CHANGES_STALE_OPTION} % use stale=false option as couchbase_changes_stream does
+                                                   % not analyse missing documents (couchbase_changes_worker does),
+                                                   % without it document can be lost when view is being rebuilt
+                                                   % by couch after an error
                 ]
             ),
 
