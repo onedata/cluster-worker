@@ -300,8 +300,15 @@ init_report(Param, Report, Reporters) ->
   Name = extend_counter_name(Param),
   case is_counter_excluded(Param) of
     true ->
-      exometer_report:unsubscribe(exometer_report_lager, Name, Report),
-      ok;
+      LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_lager_reporter, false),
+      case LagerOn andalso lists:member(exometer_report_lager, Reporters) of
+        true ->
+          exometer_report:unsubscribe(exometer_report_lager, Name, Report),
+          ok;
+        false ->
+          ok
+      end;
     _ ->
       LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_lager_reporter, false),
