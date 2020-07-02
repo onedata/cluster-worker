@@ -16,8 +16,8 @@
 
 -behaviour(gen_server).
 
--include("global_definitions.hrl").
 -include("modules/datastore/datastore.hrl").
+-include("modules/datastore/datastore_changes.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -109,7 +109,7 @@ init([Bucket, Scope, Callback, Opts, LinkedProcesses]) ->
         until = proplists:get_value(until, Opts, infinity),
         except_mutator = proplists:get_value(except_mutator, Opts),
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_batch_size, 200),
+            couchbase_changes_stream_batch_size, 1000),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 1000),
         linked_processes = LinkedProcesses
@@ -159,9 +159,10 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
-handle_info(update, #state{since = Since, until = Until} = State) ->
+handle_info(update, #state{since = Since, until = Until,
+    bucket = Bucket, except_mutator = Mutator} = State) ->
     {Changes, State2} = get_changes(Since, Until, State),
-    Docs = get_docs(Changes, State2),
+    Docs = couchbase_changes_utils:get_docs(Changes, Bucket, Mutator, Until),
     stream_docs(Docs, State2),
     case State2#state.since >= Until of
         true -> {stop, normal, State2};
@@ -243,7 +244,11 @@ get_changes(Since, Until, #state{} = State) ->
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Until2]},
-                    {inclusive_end, false}
+                    {inclusive_end, false},
+                    {stale, ?CHANGES_STALE_OPTION} % use stale=false option as couchbase_changes_stream does
+                                                   % not analyse missing documents (couchbase_changes_worker does),
+                                                   % without it document can be lost when view is being rebuilt
+                                                   % by couch after an error
                 ]
             ),
 
@@ -255,35 +260,6 @@ get_changes(Since, Until, #state{} = State) ->
                     {[], State}
             end
     end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns list of documents associated with the changes. Skips documents that
-%% has changed in the database since the changes generation (they will be
-%% included in the future changes).
-%% @end
-%%--------------------------------------------------------------------
--spec get_docs([couchbase_changes:change()], state()) -> [datastore:doc()].
-get_docs(Changes, #state{bucket = Bucket, except_mutator = Mutator}) ->
-    KeyRevisionsAnsSequences = lists:filtermap(fun(Change) ->
-        Key = maps:get(<<"id">>, Change),
-        Value = maps:get(<<"value">>, Change),
-        [_, Seq] = maps:get(<<"key">>, Change),
-        Rev = maps:get(<<"_rev">>, Value),
-        case maps:get(<<"_mutator">>, Value) of
-            Mutator -> false;
-            _ -> {true, {Key, {Rev, Seq}}}
-        end
-    end, Changes),
-    Ctx = #{bucket => Bucket},
-    {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAnsSequences),
-    lists:filtermap(fun
-        ({{ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) ->
-            {true, Doc};
-        ({{ok, _, #document{}}, _Rev}) ->
-            false
-    end, lists:zip(couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
 
 %%--------------------------------------------------------------------
 %% @private

@@ -110,7 +110,7 @@ get(Ctx, Keys) ->
 get(Ctx, <<_/binary>> = Key, DiscFallback) ->
     hd(get(Ctx, [Key], DiscFallback));
 get(Ctx, Keys, DiscFallback) when is_list(Keys) ->
-    ?update_datastore_counter(?EXOMETER_NAME(cache_get), length(Keys)),
+    ?update_datastore_internal_counter(?EXOMETER_NAME(cache_get), length(Keys)),
     lists:map(fun
         ({ok, _, Doc}) -> {ok, Doc};
         ({error, Reason}) -> {error, Reason}
@@ -129,7 +129,7 @@ get(Ctx, Keys, DiscFallback) when is_list(Keys) ->
 fetch(Ctx, <<_/binary>> = Key) ->
     hd(fetch(Ctx, [Key]));
 fetch(Ctx, Keys) when is_list(Keys) ->
-    ?update_datastore_counter(?EXOMETER_NAME(cache_fetch), length(Keys)),
+    ?update_datastore_internal_counter(?EXOMETER_NAME(cache_fetch), length(Keys)),
     Results = fetch_local_or_remote(Ctx, Keys),
     Results2 = cache_disc_or_remote_results(Ctx, Keys, Results),
 
@@ -165,7 +165,7 @@ get_remote(Ctx, Key) ->
 -spec save([{ctx(), key(), doc()}]) ->
     [{ok, durability(), doc()} | {error, term()}].
 save(Items) when is_list(Items) ->
-    ?update_datastore_counter(?EXOMETER_NAME(cache_save), length(Items)),
+    ?update_datastore_internal_counter(?EXOMETER_NAME(cache_save), length(Items)),
     lists:map(fun
         ({error, {enomem, _Doc}}) -> {error, enomem};
         (Other) -> Other
@@ -188,7 +188,7 @@ save(Ctx, Key, Doc) ->
 %%--------------------------------------------------------------------
 -spec flush([{ctx(), key()}]) -> [{ok, doc()} | {error, term()}].
 flush(Items) when is_list(Items) ->
-    ?update_datastore_counter(?EXOMETER_NAME(cache_flush), length(Items)),
+    ?update_datastore_internal_counter(?EXOMETER_NAME(cache_flush), length(Items)),
     lists:map(fun
         ({ok, disc, Doc}) -> {ok, Doc};
         ({error, Reason}) -> {error, Reason}
