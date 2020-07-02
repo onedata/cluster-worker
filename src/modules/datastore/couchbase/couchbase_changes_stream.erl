@@ -17,6 +17,7 @@
 -behaviour(gen_server).
 
 -include("modules/datastore/datastore.hrl").
+-include("modules/datastore/datastore_changes.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
 
