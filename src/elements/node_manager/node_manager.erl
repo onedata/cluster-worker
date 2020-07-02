@@ -987,10 +987,10 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
 
     MemUsage = monitoring:mem_usage(MonState),
 
-    exometer:update(?EXOMETER_NAME(processes_num), PNum),
-    exometer:update(?EXOMETER_NAME(memory_erlang), MemInt),
-    exometer:update(?EXOMETER_NAME(memory_node), MemUsage),
-    exometer:update(?EXOMETER_NAME(cpu_node), CPU * 100),
+    ?update_counter(?EXOMETER_NAME(processes_num), PNum),
+    ?update_counter(?EXOMETER_NAME(memory_erlang), MemInt),
+    ?update_counter(?EXOMETER_NAME(memory_node), MemUsage),
+    ?update_counter(?EXOMETER_NAME(cpu_node), CPU * 100),
 
     Now = os:timestamp(),
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,

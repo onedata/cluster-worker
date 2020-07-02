@@ -78,7 +78,7 @@ update_counter(Param) ->
 %% Updates exometer counter if it is not at excluded list.
 %% @end
 %%--------------------------------------------------------------------
--spec update_counter(Param :: list(), Value :: integer()) -> ok.
+-spec update_counter(Param :: list(), Value :: number()) -> ok.
 update_counter(Param, Value) ->
   case is_counter_excluded(Param) of
     true ->
@@ -300,8 +300,15 @@ init_report(Param, Report, Reporters) ->
   Name = extend_counter_name(Param),
   case is_counter_excluded(Param) of
     true ->
-      exometer_report:unsubscribe(exometer_report_lager, Name, Report),
-      ok;
+      LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        exometer_lager_reporter, false),
+      case LagerOn andalso lists:member(exometer_report_lager, Reporters) of
+        true ->
+          exometer_report:unsubscribe(exometer_report_lager, Name, Report),
+          ok;
+        false ->
+          ok
+      end;
     _ ->
       LagerOn = application:get_env(?CLUSTER_WORKER_APP_NAME,
         exometer_lager_reporter, false),
@@ -360,7 +367,11 @@ strip_graphite_prefix(Option) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec is_counter_excluded(Param :: list()) -> boolean().
+is_counter_excluded([thread, _Thread, mod, Module | _]) ->
+  Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
+    excluded_exometer_modules, [datastore_router]),
+  Excluded =:= all orelse lists:member(Module, Excluded);
 is_counter_excluded(Param) ->
   Excluded = application:get_env(?CLUSTER_WORKER_APP_NAME,
-    excluded_exometer_counters, []),
+    excluded_exometer_modules, [datastore_router]),
   Excluded =:= all orelse lists:member(Param, Excluded).
