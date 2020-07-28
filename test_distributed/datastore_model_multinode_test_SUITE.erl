@@ -659,7 +659,7 @@ cluster_reorganization_multikey_test(Config, Method, SimulateSlowUpdate, DelayLa
         Keys = lists:map(fun(_) -> datastore_key:new() end, lists:seq(1, KeysNum)),
         UpdateFun = get_update_fun(MasterPid, SimulateSlowUpdate),
 
-        spawn_foreach_key(Keys, fun(Key) ->
+        lists_utils:pforeach(fun(Key) ->
             ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [?DOC(Key, Model)])),
 
             case SimulateSlowUpdate of
@@ -671,26 +671,26 @@ cluster_reorganization_multikey_test(Config, Method, SimulateSlowUpdate, DelayLa
                 _ ->
                     ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
             end
-        end),
+        end, Keys),
 
         reorganize_cluster(Config, ReorganizedNodes, Method),
 
-        spawn_foreach_key(Keys, fun(Key) ->
+        lists_utils:pforeach(fun(Key) ->
             ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
             ?assertMatch({ok, #document{deleted = false, value = {_, 3, _, _}}},
                 rpc:call(TestWorker, Model, get, [Key]), 3)
-        end),
+        end, Keys),
 
         case DelayLastCheck of
             true -> timer:sleep(10000); % Wait for race on flush
             false -> ok
         end,
 
-        spawn_foreach_key(Keys, fun(Key) ->
+        lists_utils:pforeach(fun(Key) ->
             ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])),
             ?assertMatch({ok, #document{deleted = false, value = {_, 4, _, _}}},
                 rpc:call(TestWorker, Model, get, [Key]))
-        end),
+        end, Keys),
 
         finish_reorganization(Config),
 
@@ -698,9 +698,9 @@ cluster_reorganization_multikey_test(Config, Method, SimulateSlowUpdate, DelayLa
             true -> ok;
             false -> timer:sleep(10000) % Wait for race on flush
         end,
-        spawn_foreach_key(Keys, fun(Key) ->
+        lists_utils:pforeach(fun(Key) ->
             assert_value_on_disc(TestWorker, Model, Key, 4)
-        end),
+        end, Keys),
 
         terminate_processes(Config)
     end, ?TEST_MODELS).
@@ -828,17 +828,6 @@ set_ring(Config, Ring) ->
     Workers = ?config(cluster_worker_nodes, Config),
     consistent_hashing:set_ring(?CURRENT_RING, Ring),
     consistent_hashing:replicate_ring_to_nodes(Workers).
-
-spawn_foreach_key(Keys, Fun) ->
-    utils:pforeach(fun(Key) ->
-        try
-            Fun(Key),
-            ok
-        catch
-            Error:Reason ->
-                {error, Error, Reason, erlang:get_stacktrace()}
-        end
-    end, Keys).
 
 %%%===================================================================
 %%% HA stress tests

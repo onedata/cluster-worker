@@ -122,7 +122,7 @@ tp_server_call_should_return_response(Config) ->
 tp_server_multiple_requests_should_create_single_process(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Self = self(),
-    utils:pforeach(fun(_) ->
+    lists_utils:pforeach(fun(_) ->
         ?assertMatch({reply, _}, rpc:call(Worker, tp, call, [
             ?TP_MODULE, ?TP_ARGS, ?TP_KEY, reply
         ])),

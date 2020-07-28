@@ -242,7 +242,7 @@ update_propagation_performance_base(Config) ->
         Config, ClientNum, true, GatherUpdate, OnSuccessFun
     ),
 
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         {ok, #gs_resp_graph{}} = gs_client:graph_request(hd(Auths), #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, update, #{
@@ -296,11 +296,11 @@ subscriptions_performance_base(Config) ->
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_subscribe(Config, GRI(Seq), SessionId, Auth, AuthHint)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
 
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_unsubscribe(Config, GRI(Seq), SessionId)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
     ?end_measurement(subscribe_unsubscribe_time),
@@ -347,11 +347,11 @@ subscribers_performance_base(Config) ->
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Auth, AuthHint)
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
 
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_unsubscribe(Config, ?USER_1_GRI, SessionId(Seq))
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
     ?end_measurement(subscribe_unsubscribe_time),

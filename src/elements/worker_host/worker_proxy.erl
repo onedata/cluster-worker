@@ -127,7 +127,7 @@ multicall(WorkerName, Request) ->
     [{Node :: node(), ok | {ok, term()} | {error, term()}}].
 multicall(WorkerName, Request, Timeout) ->
     {ok, Nodes} = request_dispatcher:get_worker_nodes(WorkerName),
-    utils:pmap(fun(Node) ->
+    lists_utils:pmap(fun(Node) ->
         {Node, call_direct({WorkerName, Node}, Request, Timeout)}
     end, Nodes).
 
@@ -277,7 +277,7 @@ multicast(WorkerName, Request, ReplyTo) ->
     ReplyTo :: process_ref(), MsgId :: term() | undefined) -> ok.
 multicast(WorkerName, Request, ReplyTo, MsgId) ->
     {ok, Nodes} = request_dispatcher:get_worker_nodes(WorkerName),
-    utils:pforeach(fun(Node) ->
+    lists_utils:pforeach(fun(Node) ->
         cast({WorkerName, Node}, Request, ReplyTo, MsgId)
     end, Nodes).
 
