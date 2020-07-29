@@ -96,7 +96,7 @@ parallel_requests_should_return_responses_base(Config) ->
     OpDelay = ?config(op_delay, Config),
     Ids = lists:seq(1, OpsNum),
 
-    ?assertEqual(Ids, utils:pmap(fun(N) ->
+    ?assertEqual(Ids, lists_utils:pmap(fun(N) ->
         timer:sleep(rand:uniform(OpDelay)),
         rpc:call(Worker, datastore_writer, call, [?CTX, ?KEY, test_call, [
             fun() ->

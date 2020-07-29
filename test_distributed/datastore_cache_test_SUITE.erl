@@ -333,7 +333,7 @@ parallel_save_should_not_overflow_cache_size(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, ets, delete_all_objects, [?TABLE1(?MODEL)]),
     ThrNum = 1000,
-    Results = utils:pmap(fun(Doc = #document{key = Key}) ->
+    Results = lists_utils:pmap(fun(Doc = #document{key = Key}) ->
         timer:sleep(rand:uniform(100)),
         case rpc:call(Worker, datastore_cache, save, [?CTX(?KEY), Key, Doc]) of
             {ok, memory, #document{}} ->

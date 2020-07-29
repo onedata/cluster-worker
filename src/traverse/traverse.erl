@@ -568,7 +568,7 @@ execute_slave_job(PoolName, CallbackModule, ExtendedCtx, TaskId, Job) ->
 
 -spec run_on_slave_pool(pool(), execution_pool(), callback_module(), ctx(), id(), job() | [job()]) -> [ok | error].
 run_on_slave_pool(PoolName, SlavePool, CallbackModule, ExtendedCtx, TaskId, Jobs) when is_list(Jobs) ->
-    utils:pmap(fun(Job) ->
+    lists_utils:pmap(fun(Job) ->
         worker_pool:call(SlavePool, {?MODULE, execute_slave_job, [PoolName, CallbackModule, ExtendedCtx, TaskId, Job]},
             worker_pool:default_strategy(), ?CALL_TIMEOUT)
     end, Jobs);
