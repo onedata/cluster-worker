@@ -109,7 +109,7 @@ init([Bucket, Scope, Callback, Opts, LinkedProcesses]) ->
         until = proplists:get_value(until, Opts, infinity),
         except_mutator = proplists:get_value(except_mutator, Opts),
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_stream_batch_size, 1000),
+            couchbase_changes_stream_batch_size, 500),
         interval = application:get_env(?CLUSTER_WORKER_APP_NAME,
             couchbase_changes_stream_update_interval, 1000),
         linked_processes = LinkedProcesses
@@ -224,8 +224,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 -spec get_changes(couchbase_changes:since(), couchbase_changes:until(), state()) ->
     {[couchbase_changes:change()], state()}.
-get_changes(Since, infinity, #state{batch_size = BatchSize} = State) ->
-    get_changes(Since, Since + BatchSize, State);
 get_changes(Since, Until, #state{} = State) ->
     #state{
         bucket = Bucket,
@@ -233,33 +231,54 @@ get_changes(Since, Until, #state{} = State) ->
         batch_size = BatchSize
     } = State,
     Ctx = #{bucket => Bucket},
-    SeqSafe = get_seq_safe(Scope, Ctx),
-    Until2 = min(Since + BatchSize, min(Until, SeqSafe + 1)),
+    Endkey = calculate_endkey(Until, Scope, Ctx),
 
-    case Since >= Until2 of
+    case Since >= Endkey of
         true ->
             {[], State};
         false ->
             QueryAns = couchbase_driver:query_view(Ctx,
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, [Scope, Since]},
-                    {endkey, [Scope, Until2]},
+                    {endkey, [Scope, Endkey]},
+                    {limit, BatchSize},
                     {inclusive_end, false},
                     {stale, ?CHANGES_STALE_OPTION} % use stale=false option as couchbase_changes_stream does
-                                                   % not analyse missing documents (couchbase_changes_worker does),
-                                                   % without it document can be lost when view is being rebuilt
-                                                   % by couch after an error
+                    % not analyse missing documents (couchbase_changes_worker does),
+                    % without it document can be lost when view is being rebuilt
+                    % by couch after an error
                 ]
             ),
 
             case QueryAns of
                 {ok, #{<<"rows">> := Changes}} ->
-                    {Changes, State#state{since = Until2}};
+                    case length(Changes) of
+                        BatchSize ->
+                            LastSeq = lists:foldl(fun(Change, Acc) ->
+                                [_, Seq] = maps:get(<<"key">>, Change),
+                                case Seq > Acc of
+                                    true -> Seq;
+                                    false -> Acc
+                                end
+                            end, Since, Changes),
+                            {Changes, State#state{since = LastSeq + 1}};
+                        _ ->
+                            {Changes, State#state{since = Endkey}}
+                    end;
                 Error ->
                     ?error("Cannot get changes, error: ~p", [Error]),
                     {[], State}
             end
     end.
+
+%% @private
+-spec calculate_endkey(couchbase_changes:until(), datastore_doc:scope(),
+    couchbase_driver:ctx()) -> couchbase_changes:until().
+calculate_endkey(infinity, Scope, Ctx) ->
+    get_seq_safe(Scope, Ctx) + 1;
+calculate_endkey(Until, Scope, Ctx) ->
+    SeqSafe = get_seq_safe(Scope, Ctx),
+    min(Until, SeqSafe + 1).
 
 %%--------------------------------------------------------------------
 %% @private

@@ -118,7 +118,7 @@ init([Bucket, Scope, Callback, PropagationSince]) ->
         seq = Seq3,
         seq_safe = SeqSafe,
         batch_size = application:get_env(?CLUSTER_WORKER_APP_NAME,
-            couchbase_changes_batch_size, 100),
+            couchbase_changes_batch_size, 200),
         interval = Interval,
         gc = GCPid,
         callback = Callback
