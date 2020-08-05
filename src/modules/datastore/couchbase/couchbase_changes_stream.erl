@@ -241,7 +241,7 @@ get_changes(Since, Until, #state{} = State) ->
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Endkey]},
-                    {limit, BatchSize},
+                    {limit, BatchSize}, % TODO - moze dodac tez w workerze limit i prosic np 2 razy wiecej?
                     {inclusive_end, false},
                     {stale, ?CHANGES_STALE_OPTION} % use stale=false option as couchbase_changes_stream does
                     % not analyse missing documents (couchbase_changes_worker does),
@@ -252,19 +252,8 @@ get_changes(Since, Until, #state{} = State) ->
 
             case QueryAns of
                 {ok, #{<<"rows">> := Changes}} ->
-                    case length(Changes) of
-                        BatchSize ->
-                            LastSeq = lists:foldl(fun(Change, Acc) ->
-                                [_, Seq] = maps:get(<<"key">>, Change),
-                                case Seq > Acc of
-                                    true -> Seq;
-                                    false -> Acc
-                                end
-                            end, Since, Changes),
-                            {Changes, State#state{since = LastSeq + 1}};
-                        _ ->
-                            {Changes, State#state{since = Endkey}}
-                    end;
+                    UpperSeqNum = couchbase_changes_utils:get_upper_seq_num(Changes, BatchSize, Endkey - 1),
+                    {Changes, State#state{since = UpperSeqNum + 1}};
                 Error ->
                     ?error("Cannot get changes, error: ~p", [Error]),
                     {[], State}

@@ -242,35 +242,36 @@ fetch_changes(#state{
     gc = GCPid
 } = State) ->
     SeqSafe2 = SeqSafe + 1,
-    Seq2 = min(SeqSafe2 + BatchSize - 1, Seq),
 
     Ctx = #{bucket => Bucket},
     Design = couchbase_changes:design(),
     View = couchbase_changes:view(),
     QueryAns = couchbase_driver:query_view(Ctx, Design, View, [
         {startkey, [Scope, SeqSafe2]},
-        {endkey, [Scope, Seq2]},
+        {endkey, [Scope, Seq]},
+        {limit, BatchSize},
         {inclusive_end, true}
     ]),
 
     case QueryAns of
         {ok, #{<<"rows">> := Changes}} ->
+            UpperSeqNum = couchbase_changes_utils:get_upper_seq_num(Changes, BatchSize, Seq),
             State2 = #state{
                 seq_safe = SeqSafe3
-            } = process_changes(SeqSafe2, Seq2 + 1, Changes, State, []),
+            } = process_changes(SeqSafe2, UpperSeqNum + 1, Changes, State, []),
 
             ets:insert(?CHANGES_COUNTERS, {Scope, SeqSafe3}),
             gen_server:cast(GCPid, {batch_ready, SeqSafe3}),
             stream_docs(Changes, Bucket, SeqSafe3, State),
 
             case SeqSafe3 of
-                Seq2 -> erlang:send_after(0, self(), update);
+                UpperSeqNum -> erlang:send_after(0, self(), update);
                 _ -> erlang:send_after(Interval, self(), update)
             end,
             State2;
         Error ->
             ?warning("Cannot fetch changes, error: ~p, scope: ~p, start: ~p, stop: ~p", [
-                Error, Scope, SeqSafe2, Seq2
+                Error, Scope, SeqSafe2, Seq
             ]),
 
             erlang:send_after(Interval, self(), update),
@@ -446,12 +447,12 @@ propagate_changes(Since, #state{seq_safe = SeqSafe, interval = Interval,
     bucket = Bucket, scope = Scope} = State) ->
     BatchSize = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_changes_stream_batch_size, 1000),
-    Until = min(Since + BatchSize, SeqSafe),
 
     QueryAns = couchbase_driver:query_view(#{bucket => Bucket},
         couchbase_changes:design(), couchbase_changes:view(), [
             {startkey, [Scope, Since]},
-            {endkey, [Scope, Until]},
+            {endkey, [Scope, SeqSafe]},
+            {limit, BatchSize},
             {inclusive_end, true},
             {stale, ?CHANGES_STALE_OPTION} % use stale=false option as propagation
                                            % does not analyse missing documents (fetching does),
@@ -462,15 +463,17 @@ propagate_changes(Since, #state{seq_safe = SeqSafe, interval = Interval,
 
     NewSince = case QueryAns of
         {ok, #{<<"rows">> := Changes}} ->
-            stream_docs(Changes, Bucket, Until, State),
-            Until;
+            UpperSeqNum = couchbase_changes_utils:get_upper_seq_num(Changes, BatchSize, SeqSafe),
+            stream_docs(Changes, Bucket, UpperSeqNum, State),
+            UpperSeqNum + 1;
         Error ->
             ?error("Cannot get changes, error: ~p", [Error]),
             Since
     end,
 
+    SeqSafeToStartUpdate = SeqSafe + 1,
     case NewSince of
-        SeqSafe -> erlang:send_after(Interval, self(), update);
+        SeqSafeToStartUpdate -> erlang:send_after(Interval, self(), update);
         Since -> erlang:send_after(Interval, self(), {propagate_changes, NewSince});
         _ -> erlang:send_after(0, self(), {propagate_changes, NewSince})
     end,
