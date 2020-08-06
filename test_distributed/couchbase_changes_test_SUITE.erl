@@ -634,13 +634,13 @@ stream_should_return_all_changes_one_by_one(Config) ->
 
 worker_should_return_all_changes_one_by_one(Config) ->
     worker_should_return_all_changes_one_by_one_base(Config, 0),
-    worker_should_return_all_changes_one_by_one_base(Config, 100).
+    worker_should_return_all_changes_one_by_one_base(Config, 1).
 
-worker_should_return_all_changes_one_by_one_base(Config, ExistingDocsNum) ->
-    ct:print("xxxx"),
+worker_should_return_all_changes_one_by_one_base(Config, DocsBatchesSaved) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     Self = self(),
     DocNum = 100,
+    ExistingDocsNum = DocsBatchesSaved * DocNum,
 
     Callback = fun(Any) -> Self ! Any end,
     {ok, WorkerPid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes_worker, start_link,

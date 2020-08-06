@@ -57,7 +57,7 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns larges sequence number from list of changes.
+%% Returns largest sequence number from list of changes.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_upper_seq_num([couchbase_changes:change()], non_neg_integer(),

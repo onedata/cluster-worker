@@ -241,12 +241,12 @@ get_changes(Since, Until, #state{} = State) ->
                 couchbase_changes:design(), couchbase_changes:view(), [
                     {startkey, [Scope, Since]},
                     {endkey, [Scope, Endkey]},
-                    {limit, BatchSize}, % TODO - moze dodac tez w workerze limit i prosic np 2 razy wiecej?
+                    {limit, BatchSize},
                     {inclusive_end, false},
                     {stale, ?CHANGES_STALE_OPTION} % use stale=false option as couchbase_changes_stream does
-                    % not analyse missing documents (couchbase_changes_worker does),
-                    % without it document can be lost when view is being rebuilt
-                    % by couch after an error
+                                                   % not analyse missing documents (couchbase_changes_worker does),
+                                                   % without it document can be lost when view is being rebuilt
+                                                   % by couch after an error
                 ]
             ),
 
