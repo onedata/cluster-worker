@@ -38,7 +38,9 @@
     stream_should_ignore_changes/1,
     stream_should_ignore_changes2/1,
     stream_should_ignore_changes3/1,
-    stream_should_ignore_changes4/1
+    stream_should_ignore_changes4/1,
+    stream_should_return_all_changes_one_by_one/1,
+    worker_should_return_all_changes_one_by_one/1
 ]).
 
 %% test_bases
@@ -65,7 +67,9 @@ all() ->
         stream_should_ignore_changes,
         stream_should_ignore_changes2,
         stream_should_ignore_changes3,
-        stream_should_ignore_changes4
+        stream_should_ignore_changes4,
+        stream_should_return_all_changes_one_by_one,
+        worker_should_return_all_changes_one_by_one
     ], [
         stream_should_return_last_changes
     ]).
@@ -612,6 +616,47 @@ stream_should_ignore_changes4(Config) ->
     ?assert(timer:now_diff(os:timestamp(), T2) =< timer:seconds(20) * 1000),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
 
+stream_should_return_all_changes_one_by_one(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = 100,
+    Callback = fun(Any) -> Self ! Any end,
+    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
+        [?BUCKET, ?SCOPE, Callback]
+    )),
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(1, DocNum))),
+    lists:foreach(fun(SeqNum) ->
+        {ok, [Doc]} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        ?assertEqual(Doc#document.seq, SeqNum)
+    end, lists:seq(1, DocNum)).
+
+worker_should_return_all_changes_one_by_one(Config) ->
+    worker_should_return_all_changes_one_by_one_base(Config, 0),
+    worker_should_return_all_changes_one_by_one_base(Config, 1).
+
+worker_should_return_all_changes_one_by_one_base(Config, DocsBatchesSaved) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Self = self(),
+    DocNum = 100,
+    ExistingDocsNum = DocsBatchesSaved * DocNum,
+
+    Callback = fun(Any) -> Self ! Any end,
+    {ok, WorkerPid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes_worker, start_link,
+        [?BUCKET, ?SCOPE, Callback, 1]
+    )),
+
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
+        rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
+    end, lists:seq(ExistingDocsNum + 1, ExistingDocsNum + DocNum))),
+    lists:foreach(fun(SeqNum) ->
+        {ok, [Doc]} = ?assertReceivedNextMatch({ok, _}, ?TIMEOUT),
+        ?assertEqual(Doc#document.seq, SeqNum)
+    end, lists:seq(1, ExistingDocsNum + DocNum)),
+
+    ?assertEqual(ok, rpc:call(Worker, gen_server, stop, [WorkerPid])).
+
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
@@ -628,7 +673,37 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
+init_per_testcase(stream_should_return_all_changes_one_by_one = Case, Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    BatchSize = test_utils:get_env(Worker, cluster_worker, couchbase_changes_stream_batch_size),
+    test_utils:set_env(Workers, cluster_worker, couchbase_changes_stream_batch_size, 1),
+    init(Case, [{def_batch_size, BatchSize} | Config], true);
+init_per_testcase(worker_should_return_all_changes_one_by_one = Case, Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    BatchSize = test_utils:get_env(Worker, cluster_worker, couchbase_changes_batch_size),
+    StreamBatchSize = test_utils:get_env(Worker, cluster_worker, couchbase_changes_stream_batch_size),
+    test_utils:set_env(Workers, cluster_worker, couchbase_changes_batch_size, 1),
+    test_utils:set_env(Workers, cluster_worker, couchbase_changes_stream_batch_size, 1),
+    init(Case, [{def_batch_size, BatchSize}, {def_stream_batch_size, StreamBatchSize} | Config], false);
 init_per_testcase(Case, Config) ->
+    init(Case, Config, true).
+
+end_per_testcase(stream_should_return_all_changes_one_by_one = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    BatchSize = ?config(def_batch_size, Config),
+    test_utils:set_env(Workers, cluster_worker, couchbase_changes_stream_batch_size, BatchSize),
+    cleanup(Case, Config, true);
+end_per_testcase(worker_should_return_all_changes_one_by_one = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    BatchSize = ?config(def_batch_size, Config),
+    StreamBatchSize = ?config(def_stream_batch_size, Config),
+    test_utils:set_env(Workers, cluster_worker, couchbase_changes_batch_size, BatchSize),
+    test_utils:set_env(Workers, cluster_worker, couchbase_changes_stream_batch_size, StreamBatchSize),
+    cleanup(Case, Config, false);
+end_per_testcase(Case, Config) ->
+    cleanup(Case, Config, true).
+
+init(Case, Config, StartWorker) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun({Key, Value}) ->
         test_utils:set_env(Worker, cluster_worker, Key, Value)
@@ -640,16 +715,28 @@ init_per_testcase(Case, Config) ->
     test_utils:mock_expect(Workers, couchbase_pool, get_timeout, fun() ->
         get_couchbase_pool_timeout(Case)
     end),
-    ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, start,
-        [?BUCKET, get_scope(Case)]
-    )),
+
+    case StartWorker of
+        true ->
+            ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, start,
+                [?BUCKET, get_scope(Case)]
+            ));
+        false ->
+            ok
+    end,
     Config.
 
-end_per_testcase(Case, Config) ->
+cleanup(Case, Config, StopWorker) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, couchbase_changes, stop,
-        [?BUCKET, get_scope(Case)]
-    )),
+    case StopWorker of
+        true ->
+            ?assertEqual(ok, rpc:call(Worker, couchbase_changes, stop,
+                [?BUCKET, get_scope(Case)]
+            ));
+        false ->
+            ok
+    end,
+
     test_utils:mock_unload(Worker, couchbase_crud).
 
 %%%===================================================================

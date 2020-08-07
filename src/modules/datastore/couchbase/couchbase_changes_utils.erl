@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([get_docs/4]).
+-export([get_docs/4, get_upper_seq_num/3]).
 
 %%%===================================================================
 %%% API
@@ -54,3 +54,25 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
             ?debug("Document not found in changes stream in revision ~p", [Rev]),
             false
     end, lists:zip(couchbase_driver:get(Ctx, Keys), RevisionsAnsSequences)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns largest sequence number from list of changes.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_upper_seq_num([couchbase_changes:change()], non_neg_integer(),
+    couchbase_changes:until()) -> non_neg_integer().
+get_upper_seq_num(Changes, BatchSize, LastRequested) ->
+    case length(Changes) of
+        BatchSize ->
+            LastSeq = lists:foldl(fun(Change, Acc) ->
+                [_, Seq] = maps:get(<<"key">>, Change),
+                case Seq > Acc of
+                    true -> Seq;
+                    false -> Acc
+                end
+            end, 0, Changes),
+            LastSeq;
+        _ ->
+            LastRequested
+    end.
