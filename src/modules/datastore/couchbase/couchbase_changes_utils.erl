@@ -33,7 +33,7 @@
 -spec get_docs([couchbase_changes:change()], couchbase_config:bucket(), datastore_doc:mutator(),
     couchbase_changes:seq()) -> [datastore:doc()].
 get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
-    KeyRevisionsAnsSequences = lists:filtermap(fun(Change) ->
+    KeyRevisionsAndSequences = lists:filtermap(fun(Change) ->
         Key = maps:get(<<"id">>, Change),
         Value = maps:get(<<"value">>, Change),
         [_, Seq] = maps:get(<<"key">>, Change),
@@ -44,7 +44,7 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
         end
     end, Changes),
     Ctx = #{bucket => Bucket},
-    {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAnsSequences),
+    {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAndSequences),
     lists:filtermap(fun
         ({{ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
             {true, Doc};
