@@ -243,10 +243,11 @@ get_changes(Since, Until, #state{} = State) ->
                     {endkey, [Scope, Endkey]},
                     {limit, BatchSize},
                     {inclusive_end, false},
-                    {stale, ?CHANGES_STALE_OPTION} % use stale=false option as couchbase_changes_stream does
-                                                   % not analyse missing documents (couchbase_changes_worker does),
-                                                   % without it document can be lost when view is being rebuilt
-                                                   % by couch after an error
+                    {stale, ?CHANGES_STALE_OPTION} % it is recommended to use stale=false option as
+                                                   % couchbase_changes_stream does not analyse missing documents
+                                                   % (couchbase_changes_worker does), without it document can be
+                                                   % lost when view is being rebuilt by couch after an error;
+                                                   % use stale=true only when you are fully aware of view status
                 ]
             ),
 

@@ -38,7 +38,7 @@
                              {replica_update_min_changes, integer()}.
 -type view_creation_opts() :: [view_creation_opt()].
 -type view_opt() :: {descending, boolean()} |
-                    {endkey, binary() | list()} |
+                    {endkey, binary() | [datastore_doc:scope() | couchbase_changes:until()]} |
                     {endkey_docid, binary()} |
                     {full_set, boolean()} |
                     {group, boolean()} |
@@ -52,7 +52,7 @@
                     {spatial, boolean()} |
                     {skip, integer()} |
                     {stale, false | ok | update_after} |
-                    {startkey, binary() | list()} |
+                    {startkey, binary() | [datastore_doc:scope() | couchbase_changes:since()]} |
                     {startkey_docid, binary()} |
                     {bbox, binary()} |
                     {start_range, binary()} |
