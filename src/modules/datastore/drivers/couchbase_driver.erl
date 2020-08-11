@@ -38,7 +38,7 @@
                              {replica_update_min_changes, integer()}.
 -type view_creation_opts() :: [view_creation_opt()].
 -type view_opt() :: {descending, boolean()} |
-                    {endkey, binary()} |
+                    {endkey, binary() | [datastore_doc:scope() | couchbase_changes:until()]} |
                     {endkey_docid, binary()} |
                     {full_set, boolean()} |
                     {group, boolean()} |
@@ -52,11 +52,12 @@
                     {spatial, boolean()} |
                     {skip, integer()} |
                     {stale, false | ok | update_after} |
-                    {startkey, binary()} |
+                    {startkey, binary() | [datastore_doc:scope() | couchbase_changes:since()]} |
                     {startkey_docid, binary()} |
                     {bbox, binary()} |
                     {start_range, binary()} |
                     {end_range, binary()}.
+
 -type db_host() :: list().
 
 -export_type([ctx/0, key/0, value/0, item/0, design/0, view/0, view_opt/0, db_host/0]).
@@ -315,7 +316,7 @@ save_spatial_view_doc(Ctx, ViewName, Function, Opts) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec query_view(ctx(), design(), view(), [view_opt()]) ->
-    {ok, term()} | {error, term()}.
+    {ok, json_utils:json_term()} | {error, term()}.
 query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
     Mode = maps:get(pool_mode, Ctx, read),
     couchbase_pool:post(Bucket, Mode, {query_view, DesignName, ViewName, Opts}).

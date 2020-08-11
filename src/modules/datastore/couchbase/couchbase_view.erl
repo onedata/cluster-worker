@@ -82,7 +82,7 @@ delete_design_doc(Connection, DesignName) ->
 %%--------------------------------------------------------------------
 -spec query(cberl:connection(), couchbase_driver:design(),
     couchbase_driver:view(), [couchbase_driver:view_opt()]) ->
-    {ok, datastore_json:ejson()} | {error, term()}.
+    {ok, json_utils:json_term()} | {error, term()}.
 query(Connection, DesignName, ViewName, Opts) ->
     Type = case proplists:get_value(spatial, Opts, false) of
         true -> <<"_spatial">>;
@@ -94,13 +94,11 @@ query(Connection, DesignName, ViewName, Opts) ->
     ContentType = <<"application/json">>,
     case cberl:http(Connection, view, get, Path, ContentType, <<>>, ?TIMEOUT) of
         {ok, _Code, Response} ->
-            case jiffy:decode(Response) of
-                {[{<<"total_rows">>, _TotalRows}, {<<"rows">>, Rows}]} ->
-                    {ok, {lists:map(fun({Row}) -> Row end, Rows)}};
-                {[{<<"rows">>, Rows}]} ->
-                    {ok, {lists:map(fun({Row}) -> Row end, Rows)}};
-                {[{<<"error">>, Error}, {<<"reason">>, Reason}]} ->
-                    {error, {Error, Reason}}
+            case json_utils:decode(Response) of
+                #{<<"error">> := Error, <<"reason">> := Reason} ->
+                    {error, {Error, Reason}};
+                DecodedResult ->
+                    {ok, DecodedResult}
             end;
         {error, Reason} ->
             {error, Reason}

@@ -236,12 +236,15 @@
                     {changes, 3}
                 ]}
             ]},
+            % Parameters of pools used to save documents in couch
             {couchbase_pool_min_batch_size, 250},
             {couchbase_pool_batch_size, 1000},
             {couchbase_pool_max_batch_size, 2000},
+            % Parameters used by couchbase_changes_worker
             {couchbase_changes_batch_size, 200},
             {couchbase_changes_update_interval, 1000},
-            {couchbase_changes_stream_batch_size, 200},
+            % Parameters used by couchbase_changes_stream
+            {couchbase_changes_stream_batch_size, 500},
             {couchbase_changes_stream_update_interval, 1000},
             % Should couchbase pool force garbage collection (options: on, off)
             {couchbase_pool_gc, off},
@@ -308,7 +311,7 @@
             % List of exometer counters that should be off or atom 'all'
             % e.g., [[mod, datastore, save_time]]
             % to apply - use exometer_utils:init_exometer_counters()
-            {excluded_exometer_counters, []},
+            {excluded_exometer_modules, [datastore_router]},
 
             % Should lager reporter be on
             {exometer_lager_reporter, false},

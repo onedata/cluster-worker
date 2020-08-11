@@ -19,7 +19,7 @@
 %-define(skip_exometer, 1).
 % Skip (replace with ok) exometer counters that are updated during datastore calls
 % Counters used by datastore backend (async saves to couch) are not skipped
--define(skip_datastore_foreground, 1).
+-define(skip_datastore_internals, 1).
 
 -ifdef(skip_exometer).
 
@@ -32,8 +32,8 @@
 -define(reset(_Param), ok).
 -define(init_exometer_reporters, ok).
 -define(init_exometer_reporters(_InitReports), ok).
--define(update_datastore_counter(_Param), ok).
--define(update_datastore_counter(_Param, _Value), ok).
+-define(update_datastore_internal_counter(_Param), ok).
+-define(update_datastore_internal_counter(_Param, _Value), ok).
 
 -endif.
 
@@ -52,13 +52,13 @@
 -define(init_exometer_reporters(InitReports),
   exometer_utils:init_exometer_reporters(InitReports)).
 
--ifdef(skip_datastore_foreground).
--define(update_datastore_counter(_Param), ok).
--define(update_datastore_counter(_Param, _Value), ok).
+-ifdef(skip_datastore_internals).
+-define(update_datastore_internal_counter(_Param), ok).
+-define(update_datastore_internal_counter(_Param, _Value), ok).
 -endif.
--ifndef(skip_datastore_foreground).
--define(update_datastore_counter(Param), exometer_utils:update_counter(Param)).
--define(update_datastore_counter(Param, Value),
+-ifndef(skip_datastore_internals).
+-define(update_datastore_internal_counter(Param), exometer_utils:update_counter(Param)).
+-define(update_datastore_internal_counter(Param, Value),
   exometer_utils:update_counter(Param, Value)).
 -endif.
 
