@@ -225,7 +225,8 @@ update_propagation_performance_base(Config) ->
     end,
 
     User1Data = (?USER_DATA_WITHOUT_GRI(?USER_1))#{
-        <<"gri">> => gs_protocol:gri_to_string(#gri{type = od_user, id = ?USER_1, aspect = instance})
+        <<"gri">> => gri:serialize(#gri{type = od_user, id = ?USER_1, aspect = instance}),
+        <<"revision">> => 1
     },
 
     OnSuccessFun = fun(Auth) ->
@@ -241,7 +242,7 @@ update_propagation_performance_base(Config) ->
         Config, ClientNum, true, GatherUpdate, OnSuccessFun
     ),
 
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         {ok, #gs_resp_graph{}} = gs_client:graph_request(hd(Auths), #gri{
             type = od_user, id = ?USER_1, aspect = instance
         }, update, #{
@@ -295,11 +296,11 @@ subscriptions_performance_base(Config) ->
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_subscribe(Config, GRI(Seq), SessionId, Auth, AuthHint)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
 
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_unsubscribe(Config, GRI(Seq), SessionId)
     end, lists:seq(StartSubscriptions + 1, EndSubscriptions)),
     ?end_measurement(subscribe_unsubscribe_time),
@@ -346,11 +347,11 @@ subscribers_performance_base(Config) ->
 
 
     ?begin_measurement(subscribe_unsubscribe_time),
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_subscribe(Config, ?USER_1_GRI, SessionId(Seq), Auth, AuthHint)
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
 
-    utils:pforeach(fun(Seq) ->
+    lists_utils:pforeach(fun(Seq) ->
         simulate_unsubscribe(Config, ?USER_1_GRI, SessionId(Seq))
     end, lists:seq(StartSubscribers + 1, EndSubscribers)),
     ?end_measurement(subscribe_unsubscribe_time),
@@ -380,7 +381,7 @@ spawn_clients(Config, ClientNum) ->
 
 spawn_clients(Config, ClientNum, RetryFlag, CallbackFunction, OnSuccessFun) ->
     URL = get_gs_ws_url(Config),
-    Auth = {macaroon, ?USER_1_MACAROON, []},
+    Auth = {token, ?USER_1_TOKEN},
     Identity = ?SUB(user, ?USER_1),
     AuthsAndIdentities = lists:duplicate(ClientNum, {Auth, Identity}),
     graph_sync_test_utils:spawn_clients(
@@ -396,13 +397,11 @@ terminate_clients(Config, SupervisorPid) ->
 
 
 simulate_subscribe(Config, Gri, SessionId, Auth, AuthHint) ->
-    rpc:call(random_node(Config), gs_persistence, add_subscriber, [Gri, SessionId, Auth, AuthHint]),
-    rpc:call(random_node(Config), gs_persistence, add_subscription, [SessionId, Gri]).
+    rpc:call(random_node(Config), gs_persistence, subscribe, [SessionId, Gri, Auth, AuthHint]).
 
 
 simulate_unsubscribe(Config, Gri, SessionId) ->
-    rpc:call(random_node(Config), gs_persistence, remove_subscriber, [Gri, SessionId]),
-    rpc:call(random_node(Config), gs_persistence, remove_subscription, [SessionId, Gri]).
+    rpc:call(random_node(Config), gs_persistence, unsubscribe, [SessionId, Gri]).
 
 
 random_node(Config) ->

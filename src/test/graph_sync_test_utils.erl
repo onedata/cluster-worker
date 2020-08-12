@@ -18,7 +18,6 @@
 -include_lib("ctool/include/test/test_utils.hrl").
 
 -define(NO_OP_FUN, fun(_) -> ok end).
--define(SUPPORTED_PROTO_VERSIONS, [1, 2]).
 
 %% API
 -export([spawn_clients/3, spawn_clients/4, spawn_clients/5, spawn_clients/6]).
@@ -36,7 +35,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec spawn_clients(URL :: string() | binary(), SslOpts :: list(),
-    AuthsAndIdentities :: [{websocket_req:authorization(), aai:subject()}]) ->
+    AuthsAndIdentities :: [{gs_protocol:client_auth(), aai:subject()}]) ->
     {ok, SupervisorPid :: pid(), Clients :: [pid()]}.
 spawn_clients(URL, SslOpts, AuthsAndIdentities) ->
     spawn_clients(URL, SslOpts, AuthsAndIdentities, true).
@@ -50,7 +49,7 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec spawn_clients(URL :: string() | binary(), SslOpts :: list(),
-    AuthsAndIdentities :: [{websocket_req:authorization(), aai:subject()}],
+    AuthsAndIdentities :: [{gs_protocol:client_auth(), aai:subject()}],
     RetryFlag :: boolean()) -> {ok, SupervisorPid :: pid(), Clients :: [pid()]}.
 spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag) ->
     spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, ?NO_OP_FUN).
@@ -65,7 +64,7 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec spawn_clients(URL :: string() | binary(), SslOpts :: list(),
-    AuthsAndIdentities :: [{websocket_req:authorization(), aai:subject()}],
+    AuthsAndIdentities :: [{gs_protocol:client_auth(), aai:subject()}],
     RetryFlag :: boolean(), gs_client:push_callback()) ->
     {ok, SupervisorPid :: pid(), Clients :: [pid()]}.
 spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback) ->
@@ -84,7 +83,7 @@ spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec spawn_clients(URL :: string() | binary(), SslOpts :: list(),
-    AuthsAndIdentities :: [{websocket_req:authorization(), aai:subject()}],
+    AuthsAndIdentities :: [{gs_protocol:client_auth(), aai:subject()}],
     RetryFlag :: boolean(), gs_client:push_callback(),
     OnSuccessFun :: fun((gs_client:client_ref()) -> any())) ->
     {ok, SupervisorPid :: pid(), Clients :: [pid()]}.
@@ -155,7 +154,7 @@ terminate_clients(SupervisorPid, GracePeriod) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec do_spawn_clients(URL :: string() | binary(), SslOpts :: list(),
-    AuthsAndIdentities :: [{websocket_req:authorization(), aai:subject()}],
+    AuthsAndIdentities :: [{gs_protocol:client_auth(), aai:subject()}],
     RetryFlag :: boolean(), gs_client:push_callback(),
     OnSuccessFun :: fun((gs_client:client_ref()) -> any())) ->
     Clients :: [pid()].
@@ -217,7 +216,7 @@ do_spawn_clients(URL, SslOpts, AuthsAndIdentities, RetryFlag, PushCallback, OnSu
 %% @end
 %%--------------------------------------------------------------------
 -spec spawn_client(URL :: string() | binary(), SslOpts :: list(),
-    websocket_req:authorization(), aai:subject(), gs_client:push_callback(),
+    gs_protocol:client_auth(), aai:subject(), gs_client:push_callback(),
     OnSuccessFun :: fun((gs_client:client_ref()) -> any())) -> Client :: pid().
 spawn_client(URL, SslOpts, Auth, Identity, PushCallback, OnSuccessFun) ->
     {ok, Client, #gs_resp_handshake{identity = Identity}} = gs_client:start_link(

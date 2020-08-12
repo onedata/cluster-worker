@@ -31,6 +31,7 @@
 
 %% API
 -export([init/0, apply/1, terminate/1]).
+-export([create_cache_requests/1, apply_cache_requests/2]).
 -export([init_request/2, terminate_request/2]).
 -export([save/4, create/4, fetch/3]).
 
@@ -73,22 +74,31 @@ init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Applies documents batch on a datastore cache.
+%% Create requests to be applied on a datastore cache to save changes connected to batch.
 %% @end
 %%--------------------------------------------------------------------
--spec apply(batch()) -> batch().
-apply(Batch = #batch{cache = Cache, cache_mod_keys = CMK,
+-spec create_cache_requests(batch()) -> [datastore_cache:cache_save_request()].
+create_cache_requests(#batch{cache = Cache, cache_mod_keys = CMK,
     cache_added_keys = CAK}) ->
     KeysOrder = (CMK -- CAK) ++ CAK,
-    Requests = lists:foldl(fun(Key, Acc) ->
+    lists:foldl(fun(Key, Acc) ->
         case maps:get(Key, Cache, undefined) of
             #entry{ctx = Ctx, doc = Doc, status = pending} ->
                 [{Ctx, Key, Doc} | Acc];
             _ ->
                 Acc
         end
-    end, [], KeysOrder),
-    {_, Keys, _} = lists:unzip3(Requests),
+    end, [], KeysOrder).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Applies requests on a datastore cache and updates batch (marks changes as applied).
+%% Returns also list of successfully applied requests.
+%% @end
+%%--------------------------------------------------------------------
+-spec apply_cache_requests(batch(), [datastore_cache:cache_save_request()]) ->
+    {batch(), CachedRequests :: [datastore_cache:cache_save_request()]}.
+apply_cache_requests(Batch, Requests) ->
     Responses = datastore_cache:save(Requests),
     Statuses = lists:map(fun
         ({ok, memory, _}) -> cached;
@@ -96,12 +106,27 @@ apply(Batch = #batch{cache = Cache, cache_mod_keys = CMK,
         ({error, Reason}) -> {error, Reason}
     end, Responses),
     Batch2 = Batch#batch{cache_mod_keys = [], cache_added_keys = []},
-    lists:foldl(fun({Key, Status}, Batch2 = #batch{cache = Cache2}) ->
+    lists:foldl(fun({{_, Key, _} = Request, Status}, {Batch3 = #batch{cache = Cache2}, CachedRequests}) ->
         Entry = maps:get(Key, Cache2),
-        Batch2#batch{
+        Batch4 = Batch3#batch{
             cache = maps:put(Key, Entry#entry{status = Status}, Cache2)
-        }
-    end, Batch2, lists:zip(Keys, Statuses)).
+        },
+        case Status of
+            cached -> {Batch4, [Request | CachedRequests]};
+            _ -> {Batch4, CachedRequests}
+        end
+    end, {Batch2, []}, lists:zip(Requests, Statuses)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Applies documents batch on a datastore cache.
+%% @end
+%%--------------------------------------------------------------------
+-spec apply(batch()) -> batch().
+apply(Batch) ->
+    Requests = create_cache_requests(Batch),
+    {Batch2, _} = apply_cache_requests(Batch, Requests),
+    Batch2.
 
 %%--------------------------------------------------------------------
 %% @doc

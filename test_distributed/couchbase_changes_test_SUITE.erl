@@ -139,7 +139,7 @@ seq_safe_should_be_incremented_on_multiple_same_doc_save(Config) ->
 seq_safe_should_be_incremented_on_multiple_diff_docs_save(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     DocNum = 100,
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
     ?assertMatch({ok, _, DocNum}, rpc:call(Worker, couchbase_driver,
@@ -185,7 +185,7 @@ stream_should_return_all_changes(Config) ->
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback]
     )),
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
     assert_all(fun(SeqList) ->
@@ -223,7 +223,7 @@ stream_should_return_last_changes_base(Config) ->
     {ok, Pid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes,
         stream, [?BUCKET, ?SCOPE, Callback]
     )),
-    ?assertAllMatch(#document{}, utils:pmap(fun(N) ->
+    ?assertAllMatch(#document{}, lists_utils:pmap(fun(N) ->
         lists:foldl(fun(M, Doc) ->
             {ok, _, Doc2} = rpc:call(Worker, couchbase_driver, save, [
                 ?CTX, Doc#document.key, Doc#document{revs = [?REV]}
@@ -246,7 +246,7 @@ stream_should_return_all_changes_except_mutator(Config) ->
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{except_mutator, <<"0">>}]]
     )),
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save,
             [?CTX, ?KEY(N), ?DOC(N, ?VALUE(N), integer_to_binary(N rem 10))]
         )
@@ -275,7 +275,7 @@ stream_should_return_changes_from_finite_range(Config) ->
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]
     )),
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
     assert_all(fun(SeqList) ->
@@ -296,7 +296,7 @@ stream_should_return_changes_from_infinite_range(Config) ->
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since}]]
     )),
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
     assert_all(fun(SeqList) ->
@@ -336,11 +336,11 @@ stream_should_ignore_changes(Config) ->
     Since = 51,
     Until = 90,
 
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
 
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
 
@@ -399,7 +399,7 @@ stream_should_ignore_changes2(Config) ->
         end, {[], #{}, []}, Requests)
     end),
 
-    SaveAns = utils:pmap(fun(N) ->
+    SaveAns = lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum)),
     ?assertAllMatch({ok, _, _},
@@ -462,7 +462,7 @@ stream_should_ignore_changes3(Config) ->
         end, {[], #{}}, Requests)
     end),
 
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
 
@@ -568,7 +568,7 @@ stream_should_ignore_changes4(Config) ->
         end, {[], #{}}, Requests)
     end),
 
-    SaveAns = utils:pmap(fun(N) ->
+    SaveAns = lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum)),
     ?assertAllMatch({ok, _, _},
@@ -595,7 +595,7 @@ stream_should_ignore_changes4(Config) ->
     ?assert(timer:now_diff(os:timestamp(), T1) >= timer:minutes(1) * 1000),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT),
 
-    SaveAns2 = utils:pmap(fun(N) ->
+    SaveAns2 = lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(DocNum + 1, DocNum2)),
     ?assertAllMatch({ok, _, _},
@@ -624,7 +624,7 @@ stream_should_return_all_changes_one_by_one(Config) ->
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback]
     )),
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
     lists:foreach(fun(SeqNum) ->
@@ -647,7 +647,7 @@ worker_should_return_all_changes_one_by_one_base(Config, DocsBatchesSaved) ->
         [?BUCKET, ?SCOPE, Callback, 1]
     )),
 
-    ?assertAllMatch({ok, _, _}, utils:pmap(fun(N) ->
+    ?assertAllMatch({ok, _, _}, lists_utils:pmap(fun(N) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(ExistingDocsNum + 1, ExistingDocsNum + DocNum))),
     lists:foreach(fun(SeqNum) ->

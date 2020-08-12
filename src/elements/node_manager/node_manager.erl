@@ -26,6 +26,7 @@
 -include("elements/worker_host/worker_protocol.hrl").
 -include_lib("ctool/include/logging.hrl").
 -include_lib("ctool/include/global_definitions.hrl").
+-include_lib("cluster_manager/include/node_management_protocol.hrl").
 
 -define(CLUSTER_WORKER_MODULES, [
     {datastore_worker, [
@@ -46,7 +47,8 @@
 -export([single_error_log/2, single_error_log/3, single_error_log/4,
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
--export([get_cluster_nodes/0, get_cluster_ips/0]).
+-export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
+-export([init_service_healthcheck/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -59,10 +61,11 @@
 
 -export_type([cluster_generation/0]).
 
--define(EXOMETER_COUNTERS,
-            [processes_num, memory_erlang, memory_node, cpu_node]).
+-define(EXOMETER_COUNTERS, [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 -define(EXOMETER_DEFAULT_DATA_POINTS_NUMBER, 10000).
+
+-define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
 
@@ -98,11 +101,11 @@ init_report() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% List of modules provided by cluster-worker.
-%% Use in plugins when specifying modules_with_args.
+%% Use in plugins when specifying custom_workers.
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_worker_modules() -> Models :: [{atom(), [any()]}
-    | {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
+| {atom(), [any()], [any()]} | {singleton, atom(), [any()]}].
 cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 
 %%--------------------------------------------------------------------
@@ -113,7 +116,7 @@ cluster_worker_modules() -> ?CLUSTER_WORKER_MODULES.
 -spec modules() -> Models :: [atom()].
 modules() ->
     DefaultWorkers = cluster_worker_modules(),
-    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    CustomWorkers = ?CALL_PLUGIN(custom_workers, []),
     lists:map(fun
         ({Module, _}) -> Module;
         ({singleton, Module, _}) -> Module;
@@ -127,7 +130,7 @@ modules() ->
 %%--------------------------------------------------------------------
 -spec listeners() -> Listeners :: [atom()].
 listeners() ->
-    plugins:apply(node_manager_plugin, listeners, []).
+    ?CALL_PLUGIN(listeners, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -289,6 +292,13 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
+-spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
+    non_neg_integer()) -> ok.
+init_service_healthcheck(ServiceName, MasterNodeId, Interval) ->
+    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+        {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}),
+    ok.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -315,9 +325,9 @@ init([]) ->
         catch ets:new(?HELPER_ETS, [named_table, public, set]),
 
         ?info("Running 'before_init' procedures."),
-        ok = plugins:apply(node_manager_plugin, before_init, [[]]),
+        ok = ?CALL_PLUGIN(before_init, []),
 
-        ?info("Plugin initialised"),
+        ?info("node manager plugin initialized"),
 
         ?info("Checking if all ports are free..."),
         lists:foreach(
@@ -338,7 +348,7 @@ init([]) ->
         next_task_check(),
         erlang:send_after(datastore_throttling:plan_next_throttling_check(), self(), {timer, configure_throttling}),
         {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
-        {ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+        {ok, ExometerInterval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval),
         erlang:send_after(ExometerInterval, self(), {timer, check_exometer}),
         erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
         ?info("All checks performed"),
@@ -348,7 +358,8 @@ init([]) ->
 
         {ok, #state{
             cm_con_status = not_connected,
-            monitoring_state = MonitoringState}}
+            monitoring_state = MonitoringState
+        }}
     catch
         _:Error ->
             ?error_stacktrace("Cannot start node_manager: ~p", [Error]),
@@ -397,8 +408,8 @@ handle_call(enable_throttling, _From, State) ->
 handle_call({apply, M, F, A}, _From, State) ->
     {reply, apply(M, F, A), State};
 
-handle_call(_Request, _From, State) ->
-    plugins:apply(node_manager_plugin, handle_call, [_Request, _From, State]).
+handle_call(Request, From, State) ->
+    ?CALL_PLUGIN(handle_call, [Request, From, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -417,18 +428,21 @@ handle_cast(connect_to_cm, State) ->
     NewState = connect_to_cm(State),
     {noreply, NewState};
 
-handle_cast({cluster_init_step, ready}, State) ->
-    ok = cluster_init_step(ready),
-    {noreply, State};
-handle_cast({cluster_init_step, Step}, State) ->
+handle_cast(?INIT_STEP_MSG(Step), State) ->
     try
-        ok = cluster_init_step(Step),
-        report_step_finished(Step)
+        case {Step, cluster_init_step(Step)} of
+            % end of cluster init procedure
+            {?CLUSTER_READY, ok} -> ok;
+            % report the result to cluster manager
+            {_, ok} -> report_step_result(Step, success);
+            % result will be reported by the async process that is handling the step
+            {_, async} -> ok
+        end
     catch
         Error:Reason ->
             ?error_stacktrace("Error during cluster initialization in step ~p: ~p:~p",
                 [Step, Error, Reason]),
-            report_step_finished(cluster_init_step_failure)
+            report_step_result(Step, failure)
     end,
     {noreply, State};
 
@@ -453,12 +467,12 @@ handle_cast(check_memory, State) ->
     {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, memory_check_interval_seconds),
     erlang:send_after(timer:seconds(Interval), self(), {timer, check_memory}),
     spawn(fun() ->
-        plugins:apply(node_manager_plugin, clear_memory, [false])
+        ?CALL_PLUGIN(clear_memory, [false])
     end),
     {noreply, State};
 
 handle_cast(check_exometer, State) ->
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval_seconds),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, exometer_check_interval),
     erlang:send_after(Interval, self(), {timer, check_exometer}),
     spawn(fun() ->
         ?init_exometer_reporters
@@ -497,24 +511,70 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
-handle_cast({update_lb_advices, Advices}, State) ->
+handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, State) ->
+    case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
+        {ok, NewInterval} ->
+            erlang:send_after(NewInterval, self(),
+                {timer, {service_healthcheck, ServiceName, MasterNodeId, NewInterval}});
+        ignore ->
+            ok
+    end,
+    {noreply, State};
+
+handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
     NewState = update_lb_advices(State, Advices),
     {noreply, NewState};
 
 handle_cast({update_scheduler_info, SI}, State) ->
     {noreply, State#state{scheduler_info = SI}};
 
-handle_cast({force_stop, ReasonMsg}, State) ->
+handle_cast(?FORCE_STOP(ReasonMsg), State) ->
     ?critical("Received stop signal from cluster manager: ~s", [ReasonMsg]),
     ?critical("Force stopping application..."),
     init:stop(),
     {stop, normal, State};
 
+handle_cast(?NODE_DOWN(Node), State) ->
+    handle_node_status_change_async(Node, node_down, fun() ->
+        ok = case ha_management:node_down(Node) of
+            master -> plugins:apply(node_manager_plugin, master_node_down, [Node]);
+            non_master -> ok % Failed node is not master for this node - ignore
+        end
+    end),
+    {noreply, State};
+
+handle_cast(?NODE_UP(Node), State) ->
+    handle_node_status_change_async(Node, node_up, fun() ->
+        ok = case ha_management:node_up(Node) of
+            master -> plugins:apply(node_manager_plugin, master_node_up, [Node]);
+            non_master -> ok % Recovered node is not master for this node - ignore
+        end,
+        gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_ACKNOWLEDGED(node(), Node))
+    end),
+    {noreply, State};
+
+handle_cast(?NODE_READY(Node), State) ->
+    handle_node_status_change_async(Node, node_ready, fun() ->
+        ok = case ha_management:node_ready(Node) of
+            master -> plugins:apply(node_manager_plugin, master_node_ready, [Node]);
+            non_master -> ok % Recovered node is not master for this node - ignore
+        end
+    end),
+    {noreply, State};
+
+handle_cast(?INITIALIZE_RECOVERY, State) ->
+    initialize_recovery(),
+    {noreply, State};
+
+handle_cast(?FINALIZE_RECOVERY, State) ->
+    finalize_recovery(),
+    {noreply, State};
+
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-handle_cast(_Request, State) ->
-    plugins:apply(node_manager_plugin, handle_cast, [_Request, State]).
+handle_cast(Request, State) ->
+    ?CALL_PLUGIN(handle_cast, [Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -534,7 +594,7 @@ handle_info({timer, Msg}, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node}, State) ->
-    {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+    {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
     case lists:member(Node, CMNodes) of
         false ->
             ?warning("Node manager received unexpected nodedown msg: ~p",
@@ -549,7 +609,7 @@ handle_info({nodedown, Node}, State) ->
     {noreply, State};
 
 handle_info(Request, State) ->
-    plugins:apply(node_manager_plugin, handle_info, [Request, State]).
+    ?CALL_PLUGIN(handle_info, [Request, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -566,6 +626,7 @@ handle_info(Request, State) ->
     | {shutdown, term()}
     | term().
 terminate(Reason, State) ->
+    % TODO VFS-6339 - Unregister node during normal stop not to start HA procedures
     ?info("Shutting down ~p due to ~p", [?MODULE, Reason]),
 
     lists:foreach(fun(Module) ->
@@ -579,7 +640,7 @@ terminate(Reason, State) ->
     end, node_manager:listeners()),
     ?info("All listeners stopped"),
 
-    plugins:apply(node_manager_plugin, terminate, [Reason, State]).
+    ?CALL_PLUGIN(terminate, [Reason, State]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -592,7 +653,7 @@ terminate(Reason, State) ->
     OldVsn :: Vsn | {down, Vsn},
     Vsn :: term().
 code_change(OldVsn, State, Extra) ->
-    plugins:apply(node_manager_plugin, code_change, [OldVsn, State, Extra]).
+    ?CALL_PLUGIN(code_change, [OldVsn, State, Extra]).
 
 %%%===================================================================
 %%% Internal functions
@@ -619,7 +680,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
             ?debug("Workers supervisor not started, retrying in ~p ms", [Interval]),
             State#state{cm_con_status = not_connected};
         _ ->
-            {ok, CMNodes} = plugins:apply(node_manager_plugin, cm_nodes, []),
+            {ok, CMNodes} = ?CALL_PLUGIN(cm_nodes, []),
             case (catch init_net_connection(CMNodes)) of
                 ok ->
                     ?info("Initializing connection to cluster manager"),
@@ -638,44 +699,64 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %% Performs all cluster init operations in given step.
 %% @end
 %%--------------------------------------------------------------------
--spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok.
-cluster_init_step(init) ->
-    ?info("Successfully connected to cluster manager"),
+-spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
+cluster_init_step(?INIT_CONNECTION) ->
+    ?info("Successfully connected to cluster manager, starting heatbeat"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
-cluster_init_step(start_default_workers) ->
+cluster_init_step(?START_DEFAULT_WORKERS) ->
     ?info("Starting default workers..."),
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(start_custom_workers) ->
-    ?info("Starting custom workers..."),
-    Workers = plugins:apply(node_manager_plugin, modules_with_args, []),
-    init_workers(Workers),
-    ?info("Custom workers started successfully"),
+cluster_init_step(?START_UPGRADE_ESSENTIAL_WORKERS) ->
+    ?info("Starting workers essential for upgrade..."),
+    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
+    init_workers(WorkersToStart),
+    ?info("Workers essential for upgrade started successfully"),
     ok;
-cluster_init_step(upgrade_cluster) ->
-    case node() == consistent_hashing:get_node(upgrade_cluster) of
+cluster_init_step(?UPGRADE_CLUSTER) ->
+    case node() == consistent_hashing:get_assigned_node(?UPGRADE_CLUSTER) of
         true ->
             upgrade_cluster(),
             ok;
         false ->
             ok
     end;
-cluster_init_step(start_listeners) ->
+cluster_init_step(?START_CUSTOM_WORKERS) ->
+    ?info("Starting custom workers..."),
+    Workers = ?CALL_PLUGIN(custom_workers, []),
+    init_workers(Workers),
+    ?info("Custom workers started successfully"),
+    ok;
+cluster_init_step(?DB_AND_WORKERS_READY) ->
+    ?info("Database and workers ready - executing 'on_db_and_workers_ready' procedures..."),
+    % the procedures require calls to node manager, hence they are processed asynchronously
+    spawn(fun() ->
+        Result = try
+            ok = ?CALL_PLUGIN(on_db_and_workers_ready, []),
+            ?info("Successfully executed 'on_db_and_workers_ready' procedures"),
+            success
+        catch Type:Reason ->
+            ?error_stacktrace("Failed to execute 'on_db_and_workers_ready' procedures - ~p:~p", [
+                Type, Reason
+            ]),
+            failure
+        end,
+        report_step_result(?DB_AND_WORKERS_READY, Result)
+    end),
+    async;
+cluster_init_step(?START_LISTENERS) ->
     ?info("Starting listeners..."),
     lists:foreach(fun(Module) ->
         ok = erlang:apply(Module, start, []),
         ?info("   * ~p started", [Module])
     end, node_manager:listeners()),
-    ?info("All listeners started"),
+    ?info("Listeners started successfully"),
     ok;
-cluster_init_step(ready) ->
-    ?info("All nodes initialized. Running 'after_init' procedures."),
-    spawn(fun() ->
-        ok = plugins:apply(node_manager_plugin, after_init, [[]]),
-        gen_server2:cast(?NODE_MANAGER_NAME, node_initialized)
-    end),
+cluster_init_step(?CLUSTER_READY) ->
+    ?info("Cluster initialized successfully"),
+    gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
     ok.
 
 %%--------------------------------------------------------------------
@@ -692,8 +773,8 @@ upgrade_cluster() ->
             ?error("Error when retrieving current cluster generation: ~p", [Error]),
             throw(Error);
         {ok, CurrentGen} ->
-            InstalledGen = plugins:apply(node_manager_plugin, installed_cluster_generation, []),
-            OldestKnownGen = plugins:apply(node_manager_plugin, oldest_known_cluster_generation, []),
+            InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
+            OldestKnownGen = ?CALL_PLUGIN(oldest_known_cluster_generation, []),
             upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
     end.
 
@@ -707,7 +788,7 @@ upgrade_cluster(CurrentGen, _InstalledGen, {OldestKnownGen, ReadableVersion}) wh
 
 upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < InstalledGen ->
     ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGen, InstalledGen]),
-    {ok, NewGeneration} = plugins:apply(node_manager_plugin, upgrade_cluster, [CurrentGen]),
+    {ok, NewGeneration} = ?CALL_PLUGIN(upgrade_cluster, [CurrentGen]),
     case NewGeneration > InstalledGen of
         true ->
             ?error("Cluster upgraded to too high generation ~p. Installed generation: ~p",
@@ -761,7 +842,6 @@ do_heartbeat(#state{cm_con_status = connected, monitoring_state = MonState, last
     NewMonState = monitoring:update(MonState),
     NewLSA = analyse_monitoring_state(NewMonState, SchedulerInfo, LSA),
     NodeState = monitoring:get_node_state(NewMonState),
-    ?debug("Sending heartbeat to cluster manager"),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, {heartbeat, NodeState}),
     {NewMonState, NewLSA};
 
@@ -819,7 +899,7 @@ init_net_connection([Node | Nodes]) ->
 -spec init_workers() -> ok.
 init_workers() ->
     DefaultWorkers = cluster_worker_modules(),
-    CustomWorkers = plugins:apply(node_manager_plugin, modules_with_args, []),
+    CustomWorkers = ?CALL_PLUGIN(custom_workers, []),
     init_workers(DefaultWorkers ++ CustomWorkers).
 
 
@@ -844,13 +924,13 @@ init_workers(Workers) ->
             end;
         ({Module, Args, Options}) ->
             case proplists:get_value(prehook, Options) of
-              undefined -> ok;
-              Prehook -> ok = apply(Module, Prehook, [])
+                undefined -> ok;
+                Prehook -> ok = apply(Module, Prehook, [])
             end,
             ok = start_worker(Module, Args, Options),
             case proplists:get_value(posthook, Options) of
-              undefined -> ok;
-              Posthook -> ok = apply(Module, Posthook, [])
+                undefined -> ok;
+                Posthook -> ok = apply(Module, Posthook, [])
             end
     end, Workers),
     ok.
@@ -1189,12 +1269,20 @@ get_ip_address() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Fetches cluster nodes from cluster manager.
+%% Fetches cluster status from cluster manager.
 %% @end
 %%--------------------------------------------------------------------
--spec get_cluster_nodes() -> {ok, [node()]} | {error, cluster_not_ready}.
-get_cluster_nodes() ->
-    gen_server2:call({global, ?CLUSTER_MANAGER}, get_nodes).
+-spec get_cluster_status() ->
+    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
+get_cluster_status() ->
+    get_cluster_status(infinity).
+
+
+-spec get_cluster_status(Timeout :: non_neg_integer() | infinity) ->
+    {ok, {cluster_status:status(), [cluster_status:node_status()]}} | {error, term()}.
+get_cluster_status(Timeout) ->
+    gen_server2:call({global, ?CLUSTER_MANAGER}, cluster_status, Timeout).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1203,11 +1291,9 @@ get_cluster_nodes() ->
 %%--------------------------------------------------------------------
 -spec get_cluster_ips() -> [inet:ip4_address()] | no_return().
 get_cluster_ips() ->
-    {ok, Nodes} = get_cluster_nodes(),
-
     lists:map(fun(Node) ->
         {_, _, _, _} = rpc:call(Node, ?MODULE, get_ip_address, [])
-    end, Nodes).
+    end, consistent_hashing:get_all_nodes()).
 
 
 %%--------------------------------------------------------------------
@@ -1221,7 +1307,7 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> {ok, plugins:apply(node_manager_plugin, installed_cluster_generation, [])};
+        {error, not_found} -> {ok, ?CALL_PLUGIN(installed_cluster_generation, [])};
         {error, _} = Error -> Error
     end.
 
@@ -1233,7 +1319,45 @@ get_current_cluster_generation() ->
 %% or step ended with failure.
 %% @end
 %%--------------------------------------------------------------------
--spec report_step_finished(cluster_manager_server:cluster_init_step()
-    | cluster_init_step_failure) -> ok.
-report_step_finished(Msg) ->
-    gen_server2:cast({global, ?CLUSTER_MANAGER}, {Msg, node()}).
+-spec report_step_result(cluster_manager_server:cluster_init_step(), success | failure) -> ok.
+report_step_result(Step, Result) ->
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, {cluster_init_step_report, node(), Step, Result}).
+
+%%%===================================================================
+%%% Node recovery handling
+%%%===================================================================
+
+-spec initialize_recovery() -> ok.
+initialize_recovery() ->
+    ?info("Starting phase 1/2 of node recovery"),
+    gen_server2:cast(self(), do_heartbeat),
+    cluster_init_step(?START_DEFAULT_WORKERS),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_INITIALIZED(node())),
+    ?info("Phase 1/2 of node recovery finished successfully"),
+    ok.
+
+-spec finalize_recovery() -> ok.
+finalize_recovery() ->
+    ?info("Starting phase 2/2 of node recovery"),
+    cluster_init_step(?START_UPGRADE_ESSENTIAL_WORKERS),
+    cluster_init_step(?START_CUSTOM_WORKERS),
+    cluster_init_step(?START_LISTENERS),
+    gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_FINALIZED(node())),
+    ?info("Phase 2/2 of node recovery finished successfully"),
+    ok.
+
+-spec handle_node_status_change_async(node(), NodeStatusNotificationType :: node_down | node_up | node_ready,
+    HandlingFun :: fun(() -> ok)) -> ok.
+handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
+    ?info("Started processing transition of node ~p to status ~p", [Node, NewStatus]),
+    spawn(fun() ->
+        try
+            HandlingFun(),
+            ?info("Finished processing transition of node ~p to status ~p", [Node, NewStatus])
+        catch
+            Error:Reason ->
+                ?error_stacktrace("Error while processing transition of node ~p to status ~p: ~p:~p",
+                    [Node, NewStatus, Error,Reason])
+        end
+    end),
+    ok.

@@ -14,6 +14,7 @@
 
 -ifdef(TEST).
 
+-include_lib("ctool/include/hashing/consistent_hashing.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(LEGACY_KEY_CHARS, 32).
@@ -49,11 +50,13 @@ datastore_key_test_() ->
 
 setup() ->
     meck:new(consistent_hashing, []),
-    meck:expect(consistent_hashing, get_node, fun(Key) ->
+    meck:expect(consistent_hashing, get_routing_info, fun(Key) ->
         % Mock consistent hashing by simply returning node with number equal to
         % modulo of the key's decimal representation
         KeyInt = list_to_integer(binary_to_list(Key), 16),
-        list_to_atom(str_utils:format("node~B@cluster.example.com", [KeyInt rem ?MOCK_CLUSTER_NODES_COUNT]))
+        #node_routing_info{assigned_nodes =
+            [list_to_atom(str_utils:format("node~B@cluster.example.com", [KeyInt rem ?MOCK_CLUSTER_NODES_COUNT]))],
+            failed_nodes = [], all_nodes = []}
     end).
 
 teardown(_) ->
@@ -337,7 +340,7 @@ assert_keys_are_same_length(Keys) ->
 % adjacent <-> are routed to the same node
 assert_keys_are_adjacent(Keys) ->
     foreach_pair(fun(KeyAlpha, KeyBeta) ->
-        ?assertEqual(datastore_key:responsible_node(KeyAlpha), datastore_key:responsible_node(KeyBeta))
+        ?assertEqual(datastore_key:any_responsible_node(KeyAlpha), datastore_key:any_responsible_node(KeyBeta))
     end, Keys).
 
 

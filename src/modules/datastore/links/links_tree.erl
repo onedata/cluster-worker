@@ -195,9 +195,9 @@ create_node(Node, State = #state{ctx = Ctx, key = Key, batch = Batch}) ->
 -spec get_node(node_id(), state()) ->
     {{ok, links_node()} | {error, term()}, state()}.
 get_node(NodeId, State = #state{ctx = Ctx, batch = Batch, tree_id = TreeID}) ->
-    LocalTreeID = maps:get(local_links_tree_id, Ctx, undefined),
+    LocalTreeId = maps:get(local_links_tree_id, Ctx, undefined),
     Ctx2 = set_remote_driver_ctx(Ctx, State),
-    Ctx3 = case {Batch, LocalTreeID} of
+    Ctx3 = case {Batch, LocalTreeId} of
         {undefined, _} ->
             Ctx2#{include_deleted => true};
         {_, undefined} ->
@@ -331,6 +331,6 @@ set_remote_driver_ctx(Ctx, #state{tree_id = ?MODEL_ALL_TREE_ID}) ->
 set_remote_driver_ctx(Ctx, #state{key = Key, tree_id = TreeId}) ->
     Ctx#{remote_driver_ctx => #{
         model => maps:get(model, Ctx),
-        routing_key => Key,
+        routing_key => maps:get(routing_key, Ctx, Key),
         source_ids => [TreeId]
     }}.

@@ -14,6 +14,8 @@
 
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
+-include("datastore_performance_tests_base.hrl").
+-include_lib("ctool/include/aai/aai.hrl").
 
 %% export for ct
 -export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2,
@@ -35,6 +37,8 @@
     delete_should_ignore_missing_value/1,
     delete_should_mark_value_deleted/1,
     fold_should_return_all_values/1,
+    secure_fold_should_return_empty_list/1,
+    secure_fold_should_return_not_empty_list/1,
     fold_should_return_all_values2/1,
     fold_keys_should_return_all_keys/1,
     add_links_should_succeed/1,
@@ -58,7 +62,11 @@
     link_doc_should_expire/1,
     link_del_should_delay_inactivate/1,
     fold_links_id_should_succeed/1,
-    fold_links_token_and_id_should_succeed/1
+    fold_links_token_and_id_should_succeed/1,
+    stress_performance_test/1,
+    stress_performance_test_base/1,
+    memory_only_stress_performance_test/1,
+    memory_only_stress_performance_test_base/1
 ]).
 
 % for rpc
@@ -81,6 +89,8 @@ all() ->
         delete_should_ignore_missing_value,
         delete_should_mark_value_deleted,
         fold_should_return_all_values,
+        secure_fold_should_return_empty_list,
+        secure_fold_should_return_not_empty_list,
         fold_should_return_all_values2,
         fold_keys_should_return_all_keys,
         add_links_should_succeed,
@@ -101,10 +111,14 @@ all() ->
         link_doc_should_expire,
         link_del_should_delay_inactivate,
         fold_links_id_should_succeed,
-        fold_links_token_and_id_should_succeed
+        fold_links_token_and_id_should_succeed,
+        memory_only_stress_performance_test,
+        stress_performance_test
     ], [
         links_performance,
-        create_get_performance
+        create_get_performance,
+        memory_only_stress_performance_test,
+        stress_performance_test
     ]).
 
 -define(DOC(Model), ?DOC(?KEY, Model)).
@@ -113,42 +127,12 @@ all() ->
 -define(ATTEMPTS, 30).
 
 -define(REPEATS, 1).
+-define(HA_REPEATS, 5).
 -define(SUCCESS_RATE, 100).
 
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
-
-create_get_performance(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    {ok, Times} = ?assertMatch({ok, _},
-        rpc:call(Worker, ?MODULE, test_create_get, [])),
-    ct:print("Times: ~p", [Times]),
-    ok.
-
-test_create_get() ->
-    ID = ?KEY,
-    % Use gs_subscription as example of existing model
-    % (model emulation affects results).
-    Doc = #document{value = #gs_subscription{}},
-    Time0 = os:timestamp(),
-    ?assertEqual({error, not_found}, gs_subscription:get(test, ID)),
-    Time1 = os:timestamp(),
-    ?assertEqual({error, not_found}, gs_subscription:get(test, ID)),
-    Time2 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:create(test, ID, Doc)),
-    Time3 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:get(test, ID)),
-    Time4 = os:timestamp(),
-    ?assertMatch({ok, _}, gs_subscription:get(test, ID)),
-    Time5 = os:timestamp(),
-
-    Diff1 = timer:now_diff(Time1, Time0),
-    Diff2 = timer:now_diff(Time2, Time1),
-    Diff3 = timer:now_diff(Time3, Time2),
-    Diff4 = timer:now_diff(Time4, Time3),
-    Diff5 = timer:now_diff(Time5, Time4),
-    {ok, {Diff1, Diff2, Diff3, Diff4, Diff5}}.
 
 create_should_succeed(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -284,6 +268,83 @@ fold_should_return_all_values(Config) ->
         ])),
         Keys = [Doc#document.key || Doc <- Docs],
         ?assert(lists:member(ExpectedKey, Keys))
+    end, ?TEST_MODELS).
+
+secure_fold_should_return_empty_list(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Master = self(),
+    ok = test_utils:mock_expect(Workers, datastore_model, create,
+        fun(Ctx, Doc) ->
+            put(model_ctx, Ctx), % remember for use in datastore:create mock
+            meck:passthrough([Ctx, Doc])
+        end),
+
+    ok = test_utils:mock_expect(Workers, datastore, create,
+        fun(Ctx, Key, Doc) ->
+            Ans = meck:passthrough([Ctx, Key, #document{key = DocKey} = Doc]),
+            ModelCtx = get(model_ctx), % get Ctx from process memory as Ctx in first arg is changed by datastore
+            spawn(fun() ->
+                AnsToSend = datastore_model:delete(ModelCtx, DocKey),
+                Master ! {del_ans, AnsToSend}
+            end),
+            timer:sleep(1000),
+            Ans
+        end),
+
+    lists:foreach(fun(Model) ->
+        {ok, #document{key = ExpectedKey}} = ?assertMatch({ok, #document{}},
+            rpc:call(Worker, Model, create, [?DOC(Model)])
+        ),
+
+        DelAns = receive
+            {del_ans, Received} -> Received
+        after
+            5000 -> timeout
+        end,
+        ?assertEqual(ok, DelAns),
+
+        {ok, Keys} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_keys, [
+            fun(Key, Acc) -> {ok, [Key | Acc]} end, []
+        ])),
+        ?assertNot(lists:member(ExpectedKey, Keys))
+    end, ?TEST_MODELS).
+
+secure_fold_should_return_not_empty_list(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Master = self(),
+    ok = test_utils:mock_expect(Workers, datastore_model, delete,
+        fun(Ctx, Key) ->
+            put(model_ctx, Ctx), % remember for use in datastore:create mock
+            put(model_key, Key), % remember for use in datastore:create mock
+            meck:passthrough([Ctx, Key])
+        end),
+    ok = test_utils:mock_expect(Workers, datastore, delete,
+        fun(#{model := Model} = Ctx, Key, Pred) ->
+            Ans = meck:passthrough([Ctx, Key, Pred]),
+            ModelCtx = get(model_ctx), % get Ctx from process memory as Ctx in first arg is changed by datastore
+            ModelKey = get(model_key), % get key from process memory as key in second arg is changed by datastore
+            spawn(fun() ->
+                AnsToSend = datastore_model:create(ModelCtx, ?DOC(ModelKey, Model)),
+                Master ! {create_ans, AnsToSend}
+            end),
+            timer:sleep(1000),
+            Ans
+        end),
+
+    lists:foreach(fun(Model) ->
+        ?assertMatch(ok, rpc:call(Worker, Model, delete, [?KEY])),
+
+        DelAns = receive
+            {create_ans, Received} -> Received
+        after
+            5000 -> timeout
+        end,
+        ?assertMatch({ok, _}, DelAns),
+
+        {ok, Keys} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_keys, [
+            fun(Key, Acc) -> {ok, [Key | Acc]} end, []
+        ])),
+        ?assert(lists:member(?KEY, Keys))
     end, ?TEST_MODELS).
 
 fold_should_return_all_values2(Config) ->
@@ -732,6 +793,130 @@ get_links_trees_should_return_all_trees(Config) ->
         end, TreeIds)
     end, ?TEST_MODELS).
 
+expired_doc_should_not_exist(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(T) ->
+        Model = ets_cached_model,
+        Ctx = (datastore_test_utils:get_ctx(Model))#{expiry => T},
+        {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
+            rpc:call(Worker, datastore_model, create, [Ctx, ?DOC(?KEY(T), Model)])
+        ),
+        assert_on_disc(Worker, Model, Key),
+        timer:sleep(8000),
+        assert_not_on_disc(Worker, Model, Key)
+    end, [os:system_time(second)+5, 5]).
+
+deleted_doc_should_expire(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_cached_model,
+    Key = ?KEY,
+    Ctx = datastore_test_utils:get_ctx(Model),
+    {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
+        rpc:call(Worker, datastore_model, create, [Ctx, ?DOC(Key, Model)])
+    ),
+    assert_on_disc(Worker, Model, Key),
+
+    ?assertMatch(ok,
+        rpc:call(Worker, datastore_model, delete, [Ctx, Key])
+    ),
+    assert_on_disc(Worker, Model, Key, false),
+    timer:sleep(8000),
+    assert_not_on_disc(Worker, Model, Key).
+
+link_doc_should_expire(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_cached_model,
+    LinksNum = 1,
+    Links = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum))),
+    {LinksNames, _} = lists:unzip(Links),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+    ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+
+    CreatedNodes = get_link_nodes(create_link_node),
+    lists:foreach(fun(Node) -> assert_key_on_disc(Worker, Model, Node) end,
+        CreatedNodes),
+
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+    ?assertAllMatch({error, not_found}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+
+    DeletedNodes = get_link_nodes(delete_link_node),
+    ?assertEqual(1, length(DeletedNodes)),
+    [DeletedNode] = DeletedNodes,
+    assert_key_on_disc(Worker, Model, DeletedNode, false),
+    timer:sleep(8000),
+    assert_key_not_on_disc(Worker, Model, DeletedNode).
+
+link_del_should_delay_inactivate(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Model = ets_only_model,
+    LinksNum = 1,
+    Links = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum))),
+    {LinksNames, _} = lists:unzip(Links),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+    ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+    Now = os:timestamp(),
+    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+    ?assertAllMatch({error, not_found}, rpc:call(Worker, Model, get_links, [
+        ?KEY, ?LINK_TREE_ID, LinksNames
+    ])),
+
+    DeletedNodes = get_link_nodes(delete_link_node),
+    ?assertEqual(1, length(DeletedNodes)),
+    [DeletedNode] = DeletedNodes,
+    timer:sleep(timer:seconds(15)),
+    Inactivated = get_link_nodes(inactivate),
+
+    Timestamp = lists:foldl(fun({Map, T}, Acc) ->
+        case maps:is_key(DeletedNode, Map) of
+            true -> T;
+            _ -> Acc
+        end
+    end, undefined, Inactivated),
+
+    case Timestamp of
+        undefined -> ct:print("Inactivated ~p", [Inactivated]);
+        _ -> ok
+    end,
+
+    ?assertNotEqual(undefined, Timestamp),
+    ?assert(timer:now_diff(Timestamp, Now) > 5000000).
+
+%%%===================================================================
+%%% Stress tests
+%%%===================================================================
+
+memory_only_stress_performance_test(Config) ->
+    ?PERFORMANCE(Config, [
+        ?SINGLENODE_TEST(true, 1)
+    ]).
+memory_only_stress_performance_test_base(Config) ->
+    datastore_performance_tests_base:stress_performance_test_base(Config).
+
+stress_performance_test(Config) ->
+    ?PERFORMANCE(Config, [
+        ?SINGLENODE_TEST(false, ?HA_REPEATS)
+    ]).
+stress_performance_test_base(Config) ->
+    datastore_performance_tests_base:stress_performance_test_base(Config).
+
 links_performance(Config) ->
     ?PERFORMANCE(Config, [
         {repeats, ?REPEATS},
@@ -765,13 +950,13 @@ links_performance(Config) ->
             {description, "High number of links"}
         ]}
         % TODO - VFS-4937
-%%        {config, [{name, large},
-%%            {parameters, [
-%%                [{name, links_num}, {value, 100000}],
-%%                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
-%%            ]},
-%%            {description, "Very high number of links"}
-%%        ]}
+        %%        {config, [{name, large},
+        %%            {parameters, [
+        %%                [{name, links_num}, {value, 100000}],
+        %%                [{name, orders}, {value, [128, 1024, 5120, 10240]}]
+        %%            ]},
+        %%            {description, "Very high number of links"}
+        %%        ]}
     ]).
 links_performance_base(Config) ->
     ct:timetrap({hours, 2}),
@@ -971,134 +1156,55 @@ links_performance_base(Config, Order) ->
     DelTime3Diff = timer:now_diff(T5Del, T4Del),
     DelTime4Diff = timer:now_diff(T7Del, T6Del),
     ct:pal("Results for order ~p, links num ~p:~n"
-        "add all ~p, add half ~p, add second half ~p~n"
+    "add all ~p, add half ~p, add second half ~p~n"
     "list all ~p, list offset (batch 100) ~p, list offset (batch 2000) ~p~n"
     "list token (batch 100) ~p, list token (batch 2000) ~p~n"
     "list by id (batch 2000) ~p, list by id with neg offest (batch 2000) ~p~n"
-        "dell all ~p, dell all reversed ~p, dell 1/3 ~p, dell one by one ~p~n",
+    "dell all ~p, dell all reversed ~p, dell 1/3 ~p, dell one by one ~p~n",
         [Order, LinksNum, AddTime1Diff, AddTime2Diff, AddTime3Diff,
             ListTimeDiff1, ListTimeDiff2, ListTimeDiff3,
             ListTimeDiff4, ListTimeDiff5, ListTimeDiff6, ListTimeDiff7,
             DelTime1Diff, DelTime2Diff, DelTime3Diff, DelTime4Diff]).
 
-del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
-    lists:map(fun(Name) ->
-        apply(Model, delete_links, [Key, Tree, Name])
-    end, ExpectedLinkNames).
-
-
-expired_doc_should_not_exist(Config) ->
+create_get_performance(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
-    lists:foreach(fun(T) ->
-        Model = ets_cached_model,
-        Ctx = (datastore_test_utils:get_ctx(Model))#{expiry => T},
-        {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
-            rpc:call(Worker, datastore_model, create, [Ctx, ?DOC(?KEY(T), Model)])
-        ),
-        assert_on_disc(Worker, Model, Key),
-        timer:sleep(8000),
-        assert_not_on_disc(Worker, Model, Key)
-    end, [os:system_time(second)+5, 5]).
+    {ok, Times} = ?assertMatch({ok, _},
+        rpc:call(Worker, ?MODULE, test_create_get, [])),
+    ct:print("Times: ~p", [Times]),
+    ok.
 
-deleted_doc_should_expire(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    Model = ets_cached_model,
-    Key = ?KEY,
-    Ctx = datastore_test_utils:get_ctx(Model),
-    {ok, #document{key = Key}} = ?assertMatch({ok, #document{}},
-        rpc:call(Worker, datastore_model, create, [Ctx, ?DOC(Key, Model)])
+test_create_get() ->
+    NonExistingId = ?KEY,
+    % Use gs_subscriber as example of existing model
+    % (model emulation affects results).
+    Time0 = os:timestamp(),
+    ?assertEqual({error, not_found}, gs_session:get(NonExistingId)),
+    Time1 = os:timestamp(),
+    ?assertEqual({error, not_found}, gs_session:get(NonExistingId)),
+    Time2 = os:timestamp(),
+    #gs_session{id = ExistingId} = ?assertMatch(
+        #gs_session{}, gs_session:create(?USER(<<"123">>), self(), 4, dummyTranslator)
     ),
-    assert_on_disc(Worker, Model, Key),
+    Time3 = os:timestamp(),
+    ?assertMatch({ok, _}, gs_session:get(ExistingId)),
+    Time4 = os:timestamp(),
+    ?assertMatch({ok, _}, gs_session:get(ExistingId)),
+    Time5 = os:timestamp(),
 
-    ?assertMatch(ok,
-        rpc:call(Worker, datastore_model, delete, [Ctx, Key])
-    ),
-    assert_on_disc(Worker, Model, Key, false),
-    timer:sleep(8000),
-    assert_not_on_disc(Worker, Model, Key).
-
-link_doc_should_expire(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    Model = ets_cached_model,
-    LinksNum = 1,
-    Links = lists:sort(lists:map(fun(N) ->
-        {?LINK_NAME(N), ?LINK_TARGET(N)}
-    end, lists:seq(1, LinksNum))),
-    {LinksNames, _} = lists:unzip(Links),
-    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-        ?KEY, ?LINK_TREE_ID, Links
-    ])),
-    ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
-        ?KEY, ?LINK_TREE_ID, LinksNames
-    ])),
-
-    CreatedNodes = get_link_nodes(create_link_node),
-    lists:foreach(fun(Node) -> assert_key_on_disc(Worker, Model, Node) end,
-        CreatedNodes),
-
-    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-        ?KEY, ?LINK_TREE_ID, LinksNames
-    ])),
-    ?assertAllMatch({error, not_found}, rpc:call(Worker, Model, get_links, [
-        ?KEY, ?LINK_TREE_ID, LinksNames
-    ])),
-
-    DeletedNodes = get_link_nodes(delete_link_node),
-    ?assertEqual(1, length(DeletedNodes)),
-    [DeletedNode] = DeletedNodes,
-    assert_key_on_disc(Worker, Model, DeletedNode, false),
-    timer:sleep(8000),
-    assert_key_not_on_disc(Worker, Model, DeletedNode).
-
-link_del_should_delay_inactivate(Config) ->
-    [Worker | _] = ?config(cluster_worker_nodes, Config),
-    Model = ets_only_model,
-    LinksNum = 1,
-    Links = lists:sort(lists:map(fun(N) ->
-        {?LINK_NAME(N), ?LINK_TARGET(N)}
-    end, lists:seq(1, LinksNum))),
-    {LinksNames, _} = lists:unzip(Links),
-    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
-        ?KEY, ?LINK_TREE_ID, Links
-    ])),
-    ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
-        ?KEY, ?LINK_TREE_ID, LinksNames
-    ])),
-    Now = os:timestamp(),
-    ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
-        ?KEY, ?LINK_TREE_ID, LinksNames
-    ])),
-    ?assertAllMatch({error, not_found}, rpc:call(Worker, Model, get_links, [
-        ?KEY, ?LINK_TREE_ID, LinksNames
-    ])),
-
-    DeletedNodes = get_link_nodes(delete_link_node),
-    ?assertEqual(1, length(DeletedNodes)),
-    [DeletedNode] = DeletedNodes,
-    timer:sleep(timer:seconds(15)),
-    Inactivated = get_link_nodes(inactivate),
-
-    Timestamp = lists:foldl(fun({Map, T}, Acc) ->
-        case maps:is_key(DeletedNode, Map) of
-            true -> T;
-            _ -> Acc
-        end
-    end, undefined, Inactivated),
-
-    case Timestamp of
-        undefined -> ct:print("Inactivated ~p", [Inactivated]);
-        _ -> ok
-    end,
-
-    ?assertNotEqual(undefined, Timestamp),
-    ?assert(timer:now_diff(Timestamp, Now) > 5000000).
+    Diff1 = timer:now_diff(Time1, Time0),
+    Diff2 = timer:now_diff(Time2, Time1),
+    Diff3 = timer:now_diff(Time3, Time2),
+    Diff4 = timer:now_diff(Time4, Time3),
+    Diff5 = timer:now_diff(Time5, Time4),
+    {ok, {Diff1, Diff2, Diff3, Diff4, Diff5}}.
 
 %%%===================================================================
 %%% Init/teardown functions
 %%%===================================================================
 
 init_per_suite(Config) ->
-    datastore_test_utils:init_suite(Config).
+    datastore_test_utils:init_suite(?TEST_MODELS, Config,
+        fun(Config2) -> Config2 end, [datastore_test_utils, datastore_performance_tests_base]).
 
 init_per_testcase(deleted_doc_should_expire = Case, Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
@@ -1154,6 +1260,13 @@ init_per_testcase(get_links_after_expiration_time_should_succeed = Case, Config)
     test_utils:set_env(Workers, cluster_worker, document_expiry, 1),
     test_utils:set_env(Workers, cluster_worker, link_disk_expiry, 1),
     [{doc_expiry, DocExpiry}, {link_expiry, LinkExpiry} | init_per_testcase(?DEFAULT_CASE(Case), Config)];
+init_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_list orelse
+    Case =:= secure_fold_should_return_not_empty_list ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{secure_fold_enabled => true}),
+    ok = test_utils:mock_new(Workers, datastore_model),
+    ok = test_utils:mock_new(Workers, datastore),
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(_, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     application:load(cluster_worker),
@@ -1183,6 +1296,11 @@ end_per_testcase(get_links_after_expiration_time_should_succeed, Config) ->
     LinkExpiry = ?config(link_expiry, Config),
     test_utils:set_env(Workers, cluster_worker, document_expiry, DocExpiry),
     test_utils:set_env(Workers, cluster_worker, link_disk_expiry, LinkExpiry);
+end_per_testcase(Case, Config) when Case =:= secure_fold_should_return_empty_list orelse
+    Case =:= secure_fold_should_return_not_empty_list ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Workers, cluster_worker, test_ctx_base, #{}),
+    test_utils:mock_unload(Workers, [datastore_model, datastore]);
 end_per_testcase(_Case, _Config) ->
     ok.
 
@@ -1379,3 +1497,8 @@ get_link_nodes() ->
     after
         1000 -> []
     end.
+
+del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
+    lists:map(fun(Name) ->
+        apply(Model, delete_links, [Key, Tree, Name])
+    end, ExpectedLinkNames).

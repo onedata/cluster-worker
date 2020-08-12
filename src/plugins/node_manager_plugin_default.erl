@@ -18,12 +18,17 @@
 -export([installed_cluster_generation/0]).
 -export([oldest_known_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
--export([renamed_models/0, listeners/0, modules_with_args/0]).
--export([before_init/1, after_init/1]).
+-export([renamed_models/0]).
+-export([before_init/0]).
+-export([upgrade_essential_workers/0]).
 -export([upgrade_cluster/1]).
+-export([custom_workers/0]).
+-export([on_db_and_workers_ready/0]).
+-export([listeners/0]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
+-export([master_node_down/1, master_node_up/1, master_node_ready/1]).
 
 -type model() :: datastore_model:model().
 -type record_version() :: datastore_model:record_version().
@@ -91,47 +96,24 @@ renamed_models() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of listeners to be loaded by node_manager.
-%% @end
-%%--------------------------------------------------------------------
--spec listeners() -> Listeners :: [atom()].
-listeners() -> [
-    nagios_listener
-].
-
-%%--------------------------------------------------------------------
-%% @doc
-%% List of modules with configs to be loaded by node_manager.
-%% @end
-%%--------------------------------------------------------------------
--spec modules_with_args() -> [{module(), list()}
-    | {module(), list(), [atom()]} | {singleton, module(), list()}].
-modules_with_args() -> [].
-
-%%--------------------------------------------------------------------
-%% @doc
 %% This callback is executed when node manager starts. At time
 %% of invocation, node_manager is not set init'ed yet. Use to inject
 %% custom initialisation.
 %% This callback is executed on all cluster nodes.
 %% @end
 %%--------------------------------------------------------------------
--spec before_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
-before_init([]) ->
+-spec before_init() -> ok | {error, Reason :: term()}.
+before_init() ->
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc
-%% This callback is executed when cluster has finished to initialize
-%% (nagios has reported healthy status).
-%% Use to run custom code required for application initialization that might
-%% need working services (e.g. database).
-%% This callback is executed on all cluster nodes.
+%% List of workers modules with configs that should be started before upgrade.
 %% @end
 %%--------------------------------------------------------------------
--spec after_init(Args :: term()) -> Result :: ok | {error, Reason :: term()}.
-after_init([]) ->
-    ok.
+-spec upgrade_essential_workers() -> [{module(), list()}
+| {module(), list(), [atom()]} | {singleton, module(), list()}].
+upgrade_essential_workers() -> [].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -139,9 +121,41 @@ after_init([]) ->
 %% This callback is executed only on one cluster node.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_cluster(integer()) -> {ok, integer()}.
+-spec upgrade_cluster(node_manager:cluster_generation()) ->
+    {ok, node_manager:cluster_generation()}.
 upgrade_cluster(CurrentGeneration) ->
     {ok, CurrentGeneration + 1}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of workers modules with configs to be loaded by node_manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec custom_workers() -> [{module(), list()}
+| {module(), list(), [atom()]} | {singleton, module(), list()}].
+custom_workers() -> [].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% This callback is executed when cluster internals (database and workers)
+%% have finished initialization, but before the listeners (servers) are started.
+%% Use to run custom code required for application initialization.
+%% This callback is executed on all cluster nodes.
+%% @end
+%%--------------------------------------------------------------------
+-spec on_db_and_workers_ready() -> Result :: ok | {error, Reason :: term()}.
+on_db_and_workers_ready() ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% List of listeners to be loaded by node_manager.
+%% @end
+%%--------------------------------------------------------------------
+-spec listeners() -> Listeners :: [atom()].
+listeners() -> [
+    nagios_listener
+].
 
 %%--------------------------------------------------------------------
 %% @private
@@ -243,3 +257,31 @@ modules_with_exometer() ->
 exometer_reporters() ->
   [].
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Callback used to customize behavior in case of master node failure.
+%% @end
+%%--------------------------------------------------------------------
+-spec master_node_down(node()) -> ok.
+master_node_down(_FailedNode) ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Callback used to customize behavior when master node recovers after failure.
+%% It is called after basic workers (especially datastore) have been restarted.
+%% @end
+%%--------------------------------------------------------------------
+-spec master_node_up(node()) -> ok.
+master_node_up(_RecoveredNode) ->
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Callback used to customize behavior when master node recovers after failure.
+%% It is called after all workers and listeners have been restarted.
+%% @end
+%%--------------------------------------------------------------------
+-spec master_node_ready(node()) -> ok.
+master_node_ready(_RecoveredNode) ->
+    ok.

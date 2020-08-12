@@ -129,9 +129,9 @@ terminate(#forest_it{batch = Batch}) ->
     {{ok, [link()]} | {error, term()}, forest_it()}.
 get(LinkName, ForestIt = #forest_it{tree_ids = TreeIds}) ->
     MasterPid = datastore_cache_writer:get_master_pid(),
-    Results = utils:pmap(fun(TreeId) ->
+    Results = lists_utils:pmap(fun(TreeId) ->
         datastore_cache_writer:save_master_pid(MasterPid),
-        get_from_tree(LinkName, TreeId, ForestIt)
+        catch get_from_tree(LinkName, TreeId, ForestIt)
     end, TreeIds),
     Result = lists:foldl(fun
         (_, {error, Reason}) -> {error, Reason};

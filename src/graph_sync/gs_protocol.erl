@@ -14,7 +14,7 @@
 -author("Lukasz Opiola").
 
 -include("graph_sync/graph_sync.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 -include_lib("ctool/include/logging.hrl").
 
@@ -64,8 +64,9 @@
 % Unique message id used to match requests to responses.
 -type message_id() :: binary().
 -type protocol_version() :: non_neg_integer().
-% Graph Sync session id, used as reference to store subscriptions data
--type session_id() :: gs_session:key().
+% Graph Sync session id - identifies a connection, corresponding client and
+% serves as reference to store subscriptions data
+-type session_id() :: binary().
 % Optional, arbitrary attributes that can be sent by the sever with successful
 % handshake response.
 -type handshake_attributes() :: undefined | json_map().
@@ -79,13 +80,18 @@
 % Special 'nobody' auth can be used to indicate that the client is requesting
 % public access (typically works the same as not providing any auth, but might
 % be subject to server's implementation).
--type client_auth() :: undefined | nobody | {macaroon, Macaroon :: binary(), DischMacaroons :: [binary()]}.
+-type client_auth() :: undefined | nobody | {token, tokens:serialized()}.
 
 % Used to override the client authorization established on connection level, per
-% request. Can be used for example by providers to authorize a certain request
-% with a user's token, while still using the Graph Sync channel that was opened
-% with provider's auth.
--type auth_override() :: client_auth().
+% request. Can be used by providers to authorize a certain request with a user's
+% token, while still using the Graph Sync channel that was opened with provider's auth.
+% PeerIp is used to indicate the IP address of the client on behalf of whom the
+% channel owner is authorizing.
+% Interface can be passed to indicate the interface of the Oneprovider to which
+% the user has connected.
+% Auth override can only be specified if the owner of the GS channel is
+% an op-worker or op-panel service.
+-type auth_override() :: undefined | #auth_override{}.
 
 % Possible entity types
 -type entity_type() :: atom().
@@ -95,8 +101,6 @@
 % Scope of given aspect, allows to differentiate access to subsets of aspect data
 % 'auto' scope means the maximum scope (if any) the client is authorized to access.
 -type scope() :: private | protected | shared | public | auto.
-% Graph Resource Identifier - a record identifying a certain resource in the graph.
--type gri() :: #gri{}.
 % Requested operation
 -type operation() :: create | get | update | delete.
 % Data included in the request or response and its format:
@@ -108,8 +112,8 @@
 % resources or disambiguate issuer of an operation.
 -type auth_hint() :: undefined | {
     throughUser | throughGroup | throughSpace | throughProvider |
-    throughHandleService | throughHandle | throughHarvester | throughCluster|
-    asUser | asGroup | asSpace,
+    throughHandleService | throughHandle | throughHarvester | throughCluster |
+    asUser | asGroup | asSpace | asHarvester,
     EntityId :: binary()
 }.
 % Generic term representing an entity in the system. If prefetched, it can be
@@ -129,15 +133,13 @@
 
 -type rpc_result() :: {ok, data()} | {error, term()}.
 
--type error() :: {error, term()}.
-
 -type graph_create_result() :: ok | {ok, value, term()} |
-{ok, resource, {gri(), {term(), revision()}} | {gri(), auth_hint(), {term(), revision()}}} |
-error().
+{ok, resource, {gri:gri(), {term(), revision()}} | {gri:gri(), auth_hint(), {term(), revision()}}} |
+errors:error().
 -type graph_get_result() :: {ok, {term(), revision()}} |
-{ok, gri(), {term(), revision()}} | error().
--type graph_delete_result() :: ok | error().
--type graph_update_result() :: ok | error().
+{ok, gri:gri(), {term(), revision()}} | {ok, value, term()} | errors:error().
+-type graph_delete_result() :: ok | {ok, value, term()} | errors:error().
+-type graph_update_result() :: ok | errors:error().
 
 -type graph_request_result() :: graph_create_result() | graph_get_result() |
 graph_update_result() | graph_delete_result().
@@ -156,7 +158,6 @@ graph_update_result() | graph_delete_result().
     entity_id/0,
     aspect/0,
     scope/0,
-    gri/0,
     operation/0,
     data_format/0,
     data/0,
@@ -169,7 +170,6 @@ graph_update_result() | graph_delete_result().
     rpc_function/0,
     rpc_args/0,
     rpc_result/0,
-    error/0,
     graph_create_result/0,
     graph_get_result/0,
     graph_delete_result/0,
@@ -189,22 +189,6 @@ graph_update_result() | graph_delete_result().
     generate_error_response/2,
     generate_error_push_message/1
 ]).
--export([string_to_gri/1, gri_to_string/1]).
--export([undefined_to_null/1, null_to_undefined/1]).
-
-% Functions returning plugin module names
--export([gs_protocol_plugin_module/0]).
-
--define(GS_PROTOCOL_PLUGIN, (gs_protocol_plugin_module())).
-
-%%%===================================================================
-%%% Plugin module names. Defined as functions instead of using it literally in code to prevent dialyzer warnings about
-%%  unknown module, since the module exists only in apps having cluster_worker as a dependency.
-%%%===================================================================
-
--spec gs_protocol_plugin_module() -> module().
-gs_protocol_plugin_module() ->
-    gs_protocol_plugin.
 
 %%%===================================================================
 %%% API
@@ -216,7 +200,7 @@ gs_protocol_plugin_module() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec supported_versions() -> [protocol_version()].
-supported_versions() -> [1, 2, 3].
+supported_versions() -> ?SUPPORTED_PROTO_VERSIONS.
 
 
 %%--------------------------------------------------------------------
@@ -251,7 +235,7 @@ greatest_common_version_sorted(_, _) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec encode(protocol_version(), req_wrapper() | resp_wrapper() | push_wrapper()) ->
-    {ok, json_map()} | error().
+    {ok, json_map()} | errors:error().
 encode(ProtocolVersion, Record) ->
     try
         JSONMap = case Record of
@@ -278,7 +262,7 @@ encode(ProtocolVersion, Record) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec decode(protocol_version(), json_map()) ->
-    {ok, req_wrapper() | resp_wrapper() | push_wrapper()} | error().
+    {ok, req_wrapper() | resp_wrapper() | push_wrapper()} | errors:error().
 decode(ProtocolVersion, JSONMap) ->
     try
         Record = case maps:get(<<"type">>, JSONMap) of
@@ -320,7 +304,7 @@ generate_success_response(#gs_req{id = Id, subtype = Subtype}, Response) ->
 %% error response.
 %% @end
 %%--------------------------------------------------------------------
--spec generate_error_response(req_wrapper(), Error :: error()) ->
+-spec generate_error_response(req_wrapper(), errors:error()) ->
     resp_wrapper().
 generate_error_response(#gs_req{id = Id, subtype = Subtype}, Error) ->
     #gs_resp{
@@ -337,68 +321,13 @@ generate_error_response(#gs_req{id = Id, subtype = Subtype}, Error) ->
 %% that could not be coupled with any request.
 %% @end
 %%--------------------------------------------------------------------
--spec generate_error_push_message(Error :: error()) -> push_wrapper().
+-spec generate_error_push_message(errors:error()) -> push_wrapper().
 generate_error_push_message(Error) ->
     #gs_push{
         subtype = error, message = #gs_push_error{
             error = Error
         }}.
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% If given term is undefined returns null, otherwise returns unchanged term.
-%% @end
-%%--------------------------------------------------------------------
--spec undefined_to_null(undefined | term()) -> null | term().
-undefined_to_null(undefined) ->
-    null;
-undefined_to_null(Other) ->
-    Other.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% If given term is null returns undefined, otherwise returns unchanged term.
-%% @end
-%%--------------------------------------------------------------------
--spec null_to_undefined(null | term()) -> undefined | term().
-null_to_undefined(null) ->
-    undefined;
-null_to_undefined(Other) ->
-    Other.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Converts GRI expressed as string into record.
-%% @end
-%%--------------------------------------------------------------------
--spec string_to_gri(binary()) -> gri().
-string_to_gri(String) ->
-    [TypeStr, IdBinary, AspectScope] = binary:split(String, <<".">>, [global]),
-    Type = ?GS_PROTOCOL_PLUGIN:decode_entity_type(TypeStr),
-    Id = string_to_id(IdBinary),
-    {Aspect, Scope} = case binary:split(AspectScope, <<":">>, [global]) of
-        [A, S] -> {string_to_aspect(A), string_to_scope(S)};
-        [A] -> {string_to_aspect(A), private}
-    end,
-    #gri{type = Type, id = Id, aspect = Aspect, scope = Scope}.
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Converts GRI expressed as record into string.
-%% @end
-%%--------------------------------------------------------------------
--spec gri_to_string(gri()) -> binary().
-gri_to_string(#gri{type = Type, id = Id, aspect = Aspect, scope = Scope}) ->
-    <<
-        (?GS_PROTOCOL_PLUGIN:encode_entity_type(Type))/binary, ".",
-        (id_to_string(Id))/binary, ".",
-        (aspect_to_string(Aspect))/binary, ":",
-        (scope_to_string(Scope))/binary
-    >>.
 
 %%%===================================================================
 %%% Internal functions
@@ -423,7 +352,7 @@ encode_request(ProtocolVersion, #gs_req{} = GSReq) ->
         <<"id">> => Id,
         <<"type">> => <<"request">>,
         <<"subtype">> => subtype_to_string(Subtype),
-        <<"authOverride">> => client_auth_to_json(AuthOverride),
+        <<"authOverride">> => auth_override_to_json(ProtocolVersion, AuthOverride),
         <<"payload">> => Payload
     }.
 
@@ -437,7 +366,7 @@ encode_request_handshake(_, #gs_req_handshake{} = Req) ->
     #{
         <<"supportedVersions">> => SupportedVersions,
         <<"auth">> => client_auth_to_json(Auth),
-        <<"sessionId">> => undefined_to_null(SessionId)
+        <<"sessionId">> => utils:undefined_to_null(SessionId)
     }.
 
 
@@ -459,9 +388,9 @@ encode_request_graph(_, #gs_req_graph{} = Req) ->
         subscribe = Subscribe, auth_hint = AuthHint
     } = Req,
     #{
-        <<"gri">> => gri_to_string(GRI),
+        <<"gri">> => gri:serialize(GRI),
         <<"operation">> => operation_to_string(Operation),
-        <<"data">> => undefined_to_null(Data),
+        <<"data">> => utils:undefined_to_null(Data),
         <<"subscribe">> => Subscribe,
         <<"authHint">> => auth_hint_to_json(AuthHint)
     }.
@@ -473,7 +402,7 @@ encode_request_unsub(_, #gs_req_unsub{} = Req) ->
         gri = GRI
     } = Req,
     #{
-        <<"gri">> => gri_to_string(GRI)
+        <<"gri">> => gri:serialize(GRI)
     }.
 
 
@@ -503,14 +432,14 @@ encode_response(ProtocolVersion, #gs_resp{} = GSReq) ->
         <<"subtype">> => subtype_to_string(Subtype),
         <<"payload">> => #{
             <<"success">> => Success,
-            <<"error">> => gs_protocol_errors:error_to_json(ProtocolVersion, Error),
-            <<"data">> => undefined_to_null(Data)
+            <<"error">> => errors:to_json(Error),
+            <<"data">> => utils:undefined_to_null(Data)
         }
     }.
 
 
 -spec encode_response_handshake(protocol_version(), handshake_resp()) -> json_map().
-encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
+encode_response_handshake(ProtocolVersion, #gs_resp_handshake{} = Resp) ->
     % Handshake messages do not change regardless of the protocol version
     #gs_resp_handshake{
         version = Version, session_id = SessionId,
@@ -519,8 +448,11 @@ encode_response_handshake(_, #gs_resp_handshake{} = Resp) ->
     #{
         <<"version">> => Version,
         <<"sessionId">> => SessionId,
-        <<"identity">> => identity_to_json(Identity),
-        <<"attributes">> => undefined_to_null(Attributes)
+        <<"identity">> => case ProtocolVersion >= 4 of
+            true -> aai:serialize_subject(Identity);
+            false -> deprecated_subject_to_json(Identity)
+        end,
+        <<"attributes">> => utils:undefined_to_null(Attributes)
     }.
 
 
@@ -529,23 +461,17 @@ encode_response_rpc(_, #gs_resp_rpc{} = Resp) ->
     #gs_resp_rpc{
         result = Result
     } = Resp,
-    undefined_to_null(Result).
+    utils:undefined_to_null(Result).
 
 
 -spec encode_response_graph(protocol_version(), graph_resp()) -> json_map().
 encode_response_graph(_, #gs_resp_graph{data_format = undefined}) ->
     undefined;
-encode_response_graph(1, #gs_resp_graph{data_format = Format, data = Result}) ->
-    case Format of
-        value -> #{<<"data">> => undefined_to_null(Result)};
-        resource -> Result
-    end;
-% Covers all versions since 2
 encode_response_graph(_, #gs_resp_graph{data_format = Format, data = Result}) ->
     FormatStr = data_format_to_str(Format),
     #{
         <<"format">> => FormatStr,
-        FormatStr => undefined_to_null(Result)
+        FormatStr => utils:undefined_to_null(Result)
     }.
 
 
@@ -566,7 +492,7 @@ encode_push(ProtocolVersion, #gs_push{} = GSReq) ->
         #gs_push_nosub{} ->
             encode_push_nosub(ProtocolVersion, Message);
         #gs_push_error{} ->
-            encode_push_error(ProtocolVersion, Message)
+            encode_push_error(Message)
     end,
     #{
         <<"type">> => <<"push">>,
@@ -581,9 +507,9 @@ encode_push_graph(_, #gs_push_graph{} = Message) ->
         gri = GRI, change_type = UpdateType, data = Data
     } = Message,
     #{
-        <<"gri">> => gri_to_string(GRI),
-        <<"updateType">> => update_type_to_string(UpdateType),
-        <<"data">> => undefined_to_null(Data)
+        <<"gri">> => gri:serialize(GRI),
+        <<"updateType">> => update_type_to_str(UpdateType),
+        <<"data">> => utils:undefined_to_null(Data)
     }.
 
 
@@ -593,23 +519,16 @@ encode_push_nosub(_, #gs_push_nosub{} = Message) ->
         gri = GRI, auth_hint = AuthHint, reason = Reason
     } = Message,
     #{
-        <<"gri">> => gri_to_string(GRI),
+        <<"gri">> => gri:serialize(GRI),
         <<"authHint">> => auth_hint_to_json(AuthHint),
-        <<"reason">> => nosub_reason_to_json(Reason)
+        <<"reason">> => nosub_reason_to_str(Reason)
     }.
 
 
--spec encode_push_error(protocol_version(), error_push()) -> json_map().
-encode_push_error(?BASIC_PROTOCOL, Message) ->
-    % Error push message may be sent before negotiating handshake, so it must
-    % support the basic protocol (currently the same as 1. protocol version).
-    encode_push_error(3, Message);
-encode_push_error(ProtocolVersion, #gs_push_error{} = Message) ->
-    #gs_push_error{
-        error = Error
-    } = Message,
+-spec encode_push_error(error_push()) -> json_map().
+encode_push_error(#gs_push_error{error = Error}) ->
     #{
-        <<"error">> => gs_protocol_errors:error_to_json(ProtocolVersion, Error)
+        <<"error">> => errors:to_json(Error)
     }.
 
 
@@ -632,7 +551,7 @@ decode_request(ProtocolVersion, ReqJSON) ->
     #gs_req{
         id = maps:get(<<"id">>, ReqJSON),
         subtype = Subtype,
-        auth_override = json_to_client_auth(AuthOverride),
+        auth_override = json_to_auth_override(ProtocolVersion, AuthOverride),
         request = Request
     }.
 
@@ -646,7 +565,7 @@ decode_request_handshake(_, PayloadJSON) ->
     #gs_req_handshake{
         supported_versions = SupportedVersions,
         auth = json_to_client_auth(Auth),
-        session_id = null_to_undefined(SessionId)
+        session_id = utils:null_to_undefined(SessionId)
     }.
 
 
@@ -661,9 +580,9 @@ decode_request_rpc(_, PayloadJSON) ->
 -spec decode_request_graph(protocol_version(), json_map()) -> graph_req().
 decode_request_graph(_, PayloadJSON) ->
     #gs_req_graph{
-        gri = string_to_gri(maps:get(<<"gri">>, PayloadJSON)),
+        gri = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
         operation = string_to_operation(maps:get(<<"operation">>, PayloadJSON)),
-        data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
+        data = utils:null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
         subscribe = maps:get(<<"subscribe">>, PayloadJSON, false),
         auth_hint = json_to_auth_hint(maps:get(<<"authHint">>, PayloadJSON, null))
     }.
@@ -672,7 +591,7 @@ decode_request_graph(_, PayloadJSON) ->
 -spec decode_request_unsub(protocol_version(), json_map()) -> unsub_req().
 decode_request_unsub(_, PayloadJSON) ->
     #gs_req_unsub{
-        gri = string_to_gri(maps:get(<<"gri">>, PayloadJSON))
+        gri = gri:deserialize(maps:get(<<"gri">>, PayloadJSON))
     }.
 
 
@@ -680,9 +599,7 @@ decode_request_unsub(_, PayloadJSON) ->
 decode_response(ProtocolVersion, ReqJSON) ->
     PayloadJSON = maps:get(<<"payload">>, ReqJSON),
     Success = maps:get(<<"success">>, PayloadJSON),
-    Error = gs_protocol_errors:json_to_error(
-        ProtocolVersion, maps:get(<<"error">>, PayloadJSON, null)
-    ),
+    Error = errors:from_json(maps:get(<<"error">>, PayloadJSON, null)),
     DataJSON = maps:get(<<"data">>, PayloadJSON, #{}),
     Subtype = string_to_subtype(maps:get(<<"subtype">>, ReqJSON)),
     Response = case Success of
@@ -710,7 +627,7 @@ decode_response(ProtocolVersion, ReqJSON) ->
 
 
 -spec decode_response_handshake(protocol_version(), json_map()) -> handshake_resp().
-decode_response_handshake(_, DataJSON) ->
+decode_response_handshake(ProtocolVersion, DataJSON) ->
     % Handshake messages do not change regardless of the protocol version
     Version = maps:get(<<"version">>, DataJSON),
     SessionId = maps:get(<<"sessionId">>, DataJSON),
@@ -718,38 +635,23 @@ decode_response_handshake(_, DataJSON) ->
     Attributes = maps:get(<<"attributes">>, DataJSON, #{}),
     #gs_resp_handshake{
         version = Version,
-        session_id = null_to_undefined(SessionId),
-        identity = json_to_identity(Identity),
-        attributes = null_to_undefined(Attributes)
+        session_id = utils:null_to_undefined(SessionId),
+        identity = case ProtocolVersion >= 4 of
+            true -> aai:deserialize_subject(Identity);
+            false -> deprecated_json_to_subject(Identity)
+        end,
+        attributes = utils:null_to_undefined(Attributes)
     }.
 
 
 -spec decode_response_rpc(protocol_version(), json_map()) -> rpc_resp().
 decode_response_rpc(_, DataJSON) ->
     #gs_resp_rpc{
-        result = null_to_undefined(DataJSON)
+        result = utils:null_to_undefined(DataJSON)
     }.
 
 
 -spec decode_response_graph(protocol_version(), json_map()) -> graph_resp().
-decode_response_graph(1, DataJSON) ->
-    case DataJSON of
-        null ->
-            #gs_resp_graph{};
-        Map when map_size(Map) == 0 ->
-            #gs_resp_graph{};
-        #{<<"data">> := Data} ->
-            #gs_resp_graph{
-                data_format = value,
-                data = Data
-            };
-        #{<<"gri">> := _} ->
-            #gs_resp_graph{
-                data_format = resource,
-                data = DataJSON
-            }
-    end;
-% Covers all versions since 2
 decode_response_graph(_, null) ->
     #gs_resp_graph{};
 decode_response_graph(_, Map) when map_size(Map) == 0 ->
@@ -779,7 +681,7 @@ decode_push(ProtocolVersion, ReqJSON) ->
         nosub ->
             decode_push_nosub(ProtocolVersion, PayloadJSON);
         error ->
-            decode_push_error(ProtocolVersion, PayloadJSON)
+            decode_push_error(PayloadJSON)
     end,
     #gs_push{
         subtype = Subtype, message = Message
@@ -788,13 +690,13 @@ decode_push(ProtocolVersion, ReqJSON) ->
 
 -spec decode_push_graph(protocol_version(), json_map()) -> graph_push().
 decode_push_graph(_, PayloadJSON) ->
-    GRI = string_to_gri(maps:get(<<"gri">>, PayloadJSON)),
-    UpdateType = string_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
-    Data = null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
+    GRI = gri:deserialize(maps:get(<<"gri">>, PayloadJSON)),
+    UpdateType = str_to_update_type(maps:get(<<"updateType">>, PayloadJSON)),
+    Data = utils:null_to_undefined(maps:get(<<"data">>, PayloadJSON, #{})),
     #gs_push_graph{
         gri = GRI,
         change_type = UpdateType,
-        data = null_to_undefined(Data)
+        data = utils:null_to_undefined(Data)
     }.
 
 
@@ -804,21 +706,16 @@ decode_push_nosub(_, PayloadJSON) ->
     Reason = maps:get(<<"reason">>, PayloadJSON),
     AuthHint = maps:get(<<"authHint">>, PayloadJSON, null),
     #gs_push_nosub{
-        gri = string_to_gri(GRI),
+        gri = gri:deserialize(GRI),
         auth_hint = json_to_auth_hint(AuthHint),
-        reason = json_to_nosub_reason(Reason)
+        reason = str_to_nosub_reason(Reason)
     }.
 
 
--spec decode_push_error(protocol_version(), json_map()) -> error_push().
-decode_push_error(?BASIC_PROTOCOL, PayloadJSON) ->
-    % Error push message may be sent before negotiating handshake, so it must
-    % support the basic protocol (currently the same as 1. protocol version).
-    decode_push_error(3, PayloadJSON);
-decode_push_error(ProtocolVersion, PayloadJSON) ->
-    Error = maps:get(<<"error">>, PayloadJSON),
+-spec decode_push_error(json_map()) -> error_push().
+decode_push_error(#{<<"error">> := Error}) ->
     #gs_push_error{
-        error = gs_protocol_errors:json_to_error(ProtocolVersion, Error)
+        error = errors:from_json(Error)
     }.
 
 
@@ -845,8 +742,11 @@ json_to_client_auth(null) ->
     undefined;
 json_to_client_auth(<<"nobody">>) ->
     nobody;
-json_to_client_auth(#{<<"macaroon">> := Macaroon} = Json) ->
-    {macaroon, Macaroon, maps:get(<<"discharge-macaroons">>, Json, [])}.
+json_to_client_auth(#{<<"token">> := Token}) ->
+    {token, Token};
+%% @todo VFS-5554 Deprecated, kept for backward compatibility
+json_to_client_auth(#{<<"macaroon">> := Token}) ->
+    {token, Token}.
 
 
 -spec client_auth_to_json(client_auth()) -> null | json_map() | binary().
@@ -854,10 +754,64 @@ client_auth_to_json(undefined) ->
     null;
 client_auth_to_json(nobody) ->
     <<"nobody">>;
-client_auth_to_json({macaroon, Macaroon, DischargeMacaroons}) -> #{
-    <<"macaroon">> => Macaroon,
-    <<"discharge-macaroons">> => DischargeMacaroons
+client_auth_to_json({token, Token}) -> #{
+    <<"token">> => Token,
+%% @todo VFS-5554 Deprecated, kept for backward compatibility
+    <<"macaroon">> => Token
 }.
+
+
+-spec json_to_auth_override(protocol_version(), null | json_map() | binary()) -> auth_override().
+json_to_auth_override(_, null) ->
+    undefined;
+json_to_auth_override(3, Data) ->
+    #auth_override{
+        client_auth = json_to_client_auth(Data),
+        peer_ip = undefined,
+        interface = undefined,
+        consumer_token = undefined,
+        data_access_caveats_policy = disallow_data_access_caveats
+    };
+json_to_auth_override(_, #{<<"clientAuth">> := ClientAuth} = Data) ->
+    #auth_override{
+        client_auth = json_to_client_auth(ClientAuth),
+        peer_ip = case maps:get(<<"peerIp">>, Data, null) of
+            null -> undefined;
+            IpBin -> element(2, {ok, _} = ip_utils:to_ip4_address(IpBin))
+        end,
+        interface = case maps:get(<<"interface">>, Data, null) of
+            null -> undefined;
+            Interface -> cv_interface:deserialize_interface(Interface)
+        end,
+        consumer_token = utils:null_to_undefined(maps:get(<<"consumerToken">>, Data, null)),
+        data_access_caveats_policy = case maps:get(<<"dataAccessCaveatsPolicy">>, Data, null) of
+            null -> disallow_data_access_caveats;
+            Bin -> str_to_data_access_caveats_policy(Bin)
+        end
+    }.
+
+
+-spec auth_override_to_json(protocol_version(), auth_override()) -> null | json_map() | binary().
+auth_override_to_json(_, undefined) ->
+    null;
+auth_override_to_json(3, #auth_override{client_auth = ClientAuth}) ->
+    client_auth_to_json(ClientAuth);
+auth_override_to_json(_, #auth_override{} = AuthOverride) ->
+    #{
+        <<"clientAuth">> => client_auth_to_json(AuthOverride#auth_override.client_auth),
+        <<"peerIp">> => case AuthOverride#auth_override.peer_ip of
+            undefined -> null;
+            PeerIp -> element(2, {ok, _} = ip_utils:to_binary(PeerIp))
+        end,
+        <<"interface">> => case AuthOverride#auth_override.interface of
+            undefined -> null;
+            Interface -> cv_interface:serialize_interface(Interface)
+        end,
+        <<"consumerToken">> => utils:undefined_to_null(AuthOverride#auth_override.consumer_token),
+        <<"dataAccessCaveatsPolicy">> => data_access_caveats_policy_to_str(
+            AuthOverride#auth_override.data_access_caveats_policy
+        )
+    }.
 
 
 -spec operation_to_string(operation()) -> binary().
@@ -874,122 +828,54 @@ string_to_operation(<<"update">>) -> update;
 string_to_operation(<<"delete">>) -> delete.
 
 
--spec id_to_string(undefined | binary()) -> binary().
-id_to_string(undefined) -> <<"null">>;
-id_to_string(?SELF) -> <<"self">>;
-id_to_string(Bin) -> Bin.
-
-
--spec string_to_id(binary()) -> undefined | binary().
-string_to_id(<<"null">>) -> undefined;
-string_to_id(<<"self">>) -> ?SELF;
-string_to_id(Bin) -> Bin.
-
-
--spec aspect_to_string(aspect()) -> binary().
-aspect_to_string(Aspect) ->
-    case Aspect of
-        {A, B} -> <<(atom_to_binary(A, utf8))/binary, ",", B/binary>>;
-        A -> atom_to_binary(A, utf8)
-    end.
-
-
--spec string_to_aspect(binary()) -> aspect().
-string_to_aspect(String) ->
-    case binary:split(String, <<",">>, [global]) of
-        [A] -> binary_to_existing_atom(A, utf8);
-        [A, B] -> {binary_to_existing_atom(A, utf8), B}
-    end.
-
-
--spec scope_to_string(scope()) -> binary().
-scope_to_string(private) -> <<"private">>;
-scope_to_string(protected) -> <<"protected">>;
-scope_to_string(shared) -> <<"shared">>;
-scope_to_string(public) -> <<"public">>;
-scope_to_string(auto) -> <<"auto">>.
-
-
--spec string_to_scope(binary()) -> scope().
-string_to_scope(<<"private">>) -> private;
-string_to_scope(<<"protected">>) -> protected;
-string_to_scope(<<"shared">>) -> shared;
-string_to_scope(<<"public">>) -> public;
-string_to_scope(<<"auto">>) -> auto.
-
-
 -spec auth_hint_to_json(undefined | auth_hint()) -> null | json_map().
 auth_hint_to_json(undefined) -> null;
 auth_hint_to_json(?THROUGH_USER(UserId)) -> <<"throughUser:", UserId/binary>>;
-auth_hint_to_json(?THROUGH_GROUP(GroupId)) ->
-    <<"throughGroup:", GroupId/binary>>;
-auth_hint_to_json(?THROUGH_SPACE(SpaceId)) ->
-    <<"throughSpace:", SpaceId/binary>>;
-auth_hint_to_json(?THROUGH_PROVIDER(ProvId)) ->
-    <<"throughProvider:", ProvId/binary>>;
-auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) ->
-    <<"throughHandleService:", HSId/binary>>;
-auth_hint_to_json(?THROUGH_HANDLE(HandleId)) ->
-    <<"throughHandle:", HandleId/binary>>;
-auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) ->
-    <<"throughHarvester:", HarvesterId/binary>>;
-auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) ->
-    <<"throughCluster:", ClusterId/binary>>;
+auth_hint_to_json(?THROUGH_GROUP(GroupId)) -> <<"throughGroup:", GroupId/binary>>;
+auth_hint_to_json(?THROUGH_SPACE(SpaceId)) -> <<"throughSpace:", SpaceId/binary>>;
+auth_hint_to_json(?THROUGH_PROVIDER(ProvId)) -> <<"throughProvider:", ProvId/binary>>;
+auth_hint_to_json(?THROUGH_HANDLE_SERVICE(HSId)) -> <<"throughHandleService:", HSId/binary>>;
+auth_hint_to_json(?THROUGH_HANDLE(HandleId)) -> <<"throughHandle:", HandleId/binary>>;
+auth_hint_to_json(?THROUGH_HARVESTER(HarvesterId)) -> <<"throughHarvester:", HarvesterId/binary>>;
+auth_hint_to_json(?THROUGH_CLUSTER(ClusterId)) -> <<"throughCluster:", ClusterId/binary>>;
 auth_hint_to_json(?AS_USER(UserId)) -> <<"asUser:", UserId/binary>>;
 auth_hint_to_json(?AS_GROUP(GroupId)) -> <<"asGroup:", GroupId/binary>>;
-auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>.
+auth_hint_to_json(?AS_SPACE(SpaceId)) -> <<"asSpace:", SpaceId/binary>>;
+auth_hint_to_json(?AS_HARVESTER(HarvesterId)) -> <<"asHarvester:", HarvesterId/binary>>.
 
 
 -spec json_to_auth_hint(null | json_map()) -> undefined | auth_hint().
 json_to_auth_hint(null) -> undefined;
 json_to_auth_hint(<<"throughUser:", UserId/binary>>) -> ?THROUGH_USER(UserId);
-json_to_auth_hint(<<"throughGroup:", GroupId/binary>>) ->
-    ?THROUGH_GROUP(GroupId);
-json_to_auth_hint(<<"throughSpace:", SpaceId/binary>>) ->
-    ?THROUGH_SPACE(SpaceId);
-json_to_auth_hint(<<"throughProvider:", ProvId/binary>>) ->
-    ?THROUGH_PROVIDER(ProvId);
-json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) ->
-    ?THROUGH_HANDLE_SERVICE(HSId);
-json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) ->
-    ?THROUGH_HANDLE(HandleId);
-json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) ->
-    ?THROUGH_HARVESTER(HarvesterId);
-json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) ->
-    ?THROUGH_CLUSTER(ClusterId);
+json_to_auth_hint(<<"throughGroup:", GroupId/binary>>) -> ?THROUGH_GROUP(GroupId);
+json_to_auth_hint(<<"throughSpace:", SpaceId/binary>>) -> ?THROUGH_SPACE(SpaceId);
+json_to_auth_hint(<<"throughProvider:", ProvId/binary>>) -> ?THROUGH_PROVIDER(ProvId);
+json_to_auth_hint(<<"throughHandleService:", HSId/binary>>) -> ?THROUGH_HANDLE_SERVICE(HSId);
+json_to_auth_hint(<<"throughHandle:", HandleId/binary>>) -> ?THROUGH_HANDLE(HandleId);
+json_to_auth_hint(<<"throughHarvester:", HarvesterId/binary>>) -> ?THROUGH_HARVESTER(HarvesterId);
+json_to_auth_hint(<<"throughCluster:", ClusterId/binary>>) -> ?THROUGH_CLUSTER(ClusterId);
 json_to_auth_hint(<<"asUser:", UserId/binary>>) -> ?AS_USER(UserId);
 json_to_auth_hint(<<"asGroup:", GroupId/binary>>) -> ?AS_GROUP(GroupId);
-json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId).
+json_to_auth_hint(<<"asSpace:", SpaceId/binary>>) -> ?AS_SPACE(SpaceId);
+json_to_auth_hint(<<"asHarvester:", HarvesterId/binary>>) -> ?AS_HARVESTER(HarvesterId).
 
 
--spec identity_to_json(aai:subject()) -> binary() | json_map().
-identity_to_json(?SUB(nobody)) -> <<"nobody">>;
-identity_to_json(?SUB(user, UserId)) -> #{<<"user">> => UserId};
-identity_to_json(?SUB(?ONEPROVIDER, PrId)) -> #{<<"provider">> => PrId}.
+-spec nosub_reason_to_str(nosub_reason()) -> binary().
+nosub_reason_to_str(forbidden) -> <<"forbidden">>.
 
 
--spec json_to_identity(binary() | json_map()) -> aai:subject().
-json_to_identity(<<"nobody">>) -> ?SUB(nobody);
-json_to_identity(#{<<"user">> := UserId}) -> ?SUB(user, UserId);
-json_to_identity(#{<<"provider">> := PrId}) -> ?SUB(?ONEPROVIDER, PrId).
+-spec str_to_nosub_reason(binary()) -> nosub_reason().
+str_to_nosub_reason(<<"forbidden">>) -> forbidden.
 
 
--spec nosub_reason_to_json(nosub_reason()) -> binary().
-nosub_reason_to_json(forbidden) -> <<"forbidden">>.
+-spec update_type_to_str(change_type()) -> binary().
+update_type_to_str(updated) -> <<"updated">>;
+update_type_to_str(deleted) -> <<"deleted">>.
 
 
--spec json_to_nosub_reason(binary()) -> nosub_reason().
-json_to_nosub_reason(<<"forbidden">>) -> forbidden.
-
-
--spec update_type_to_string(change_type()) -> binary().
-update_type_to_string(updated) -> <<"updated">>;
-update_type_to_string(deleted) -> <<"deleted">>.
-
-
--spec string_to_update_type(binary()) -> change_type().
-string_to_update_type(<<"updated">>) -> updated;
-string_to_update_type(<<"deleted">>) -> deleted.
+-spec str_to_update_type(binary()) -> change_type().
+str_to_update_type(<<"updated">>) -> updated;
+str_to_update_type(<<"deleted">>) -> deleted.
 
 
 -spec data_format_to_str(atom()) -> binary().
@@ -1000,3 +886,39 @@ data_format_to_str(value) -> <<"value">>.
 -spec str_to_data_format(binary()) -> atom().
 str_to_data_format(<<"resource">>) -> resource;
 str_to_data_format(<<"value">>) -> value.
+
+
+-spec data_access_caveats_policy_to_str(data_access_caveats:policy()) -> binary().
+data_access_caveats_policy_to_str(disallow_data_access_caveats) -> <<"disallowDataAccessCaveats">>;
+data_access_caveats_policy_to_str(allow_data_access_caveats) -> <<"allowDataAccessCaveats">>.
+
+
+-spec str_to_data_access_caveats_policy(binary()) -> data_access_caveats:policy().
+str_to_data_access_caveats_policy(<<"disallowDataAccessCaveats">>) -> disallow_data_access_caveats;
+str_to_data_access_caveats_policy(<<"allowDataAccessCaveats">>) -> allow_data_access_caveats.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deprecated - used for backward compatibility with 19.02.* (proto version < 4).
+%% @end
+%%--------------------------------------------------------------------
+-spec deprecated_subject_to_json(aai:subject()) -> json_utils:json_term().
+deprecated_subject_to_json(?SUB(nobody)) -> <<"nobody">>;
+% root subject must not have a representation outside of the application
+deprecated_subject_to_json(?SUB(root)) -> <<"nobody">>;
+deprecated_subject_to_json(?SUB(user, UserId)) -> #{<<"user">> => UserId};
+deprecated_subject_to_json(?SUB(?ONEPROVIDER, PrId)) -> #{<<"provider">> => PrId}.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Deprecated - used for backward compatibility with 19.02.* (proto version < 4).
+%% @end
+%%--------------------------------------------------------------------
+-spec deprecated_json_to_subject(json_utils:json_term()) -> aai:subject().
+deprecated_json_to_subject(<<"nobody">>) -> ?SUB(nobody);
+deprecated_json_to_subject(#{<<"user">> := UserId}) -> ?SUB(user, UserId);
+deprecated_json_to_subject(#{<<"provider">> := PrId}) -> ?SUB(?ONEPROVIDER, PrId).

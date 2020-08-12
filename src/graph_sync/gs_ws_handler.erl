@@ -17,24 +17,19 @@
 
 -include("global_definitions.hrl").
 -include("graph_sync/graph_sync.hrl").
--include_lib("ctool/include/api_errors.hrl").
+-include("modules/datastore/datastore_models.hrl").
+-include_lib("ctool/include/errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 -record(pre_handshake_state, {
-    % @TODO DEPRECATED VFS-5436 - used when auth macaroons are sent in headers
-    http_auth :: gs_protocol:client_auth(),
+    peer_ip :: ip_utils:ip(),
     translator :: module()
 }).
 
--record(state, {
-    session_id = <<"">> :: gs_protocol:session_id(),
-    protocol_version = 0 :: gs_protocol:protocol_version()
-}).
+-type state() :: #pre_handshake_state{} | #gs_session{}.
 
--type state() :: #pre_handshake_state{} | #state{}.
-
--define(KEEPALIVE_INTERVAL, application:get_env(
-    ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(30)
+-define(KEEPALIVE_INTERVAL_MILLIS, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, graph_sync_websocket_keepalive, timer:seconds(15)
 )).
 
 %% Cowboy WebSocket handler callbacks
@@ -48,7 +43,8 @@
 % API
 -export([
     push/2,
-    kill/1
+    kill/1,
+    keepalive_interval/0
 ]).
 
 
@@ -64,8 +60,9 @@
 -spec init(Req :: cowboy_req:req(), Opts :: any()) ->
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
+    {PeerIp, _} = cowboy_req:peer(Req),
     {cowboy_websocket, Req, #pre_handshake_state{
-        http_auth = parse_auth_from_headers(Req),
+        peer_ip = PeerIp,
         translator = Translator
     }}.
 
@@ -75,9 +72,9 @@ init(Req, [Translator]) ->
 %% Initialize timer between sending keepalives/ping frames.
 %% @end
 %%--------------------------------------------------------------------
--spec websocket_init(State :: state()) -> {ok, State :: state()}.
+-spec websocket_init(state()) -> {ok, state()}.
 websocket_init(State) ->
-    erlang:send_after(?KEEPALIVE_INTERVAL, self(), keepalive),
+    erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
     {ok, State}.
 
 
@@ -94,25 +91,16 @@ websocket_init(State) ->
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
+websocket_handle({text, Data}, #pre_handshake_state{peer_ip = PeerIp} = State) ->
     #pre_handshake_state{
-        http_auth = HttpAuth,
         translator = Translator
     } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(HttpAuth, self(), Translator, Request) of
-                {ok, Resp} ->
-                    #gs_resp{
-                        response = #gs_resp_handshake{
-                            session_id = SessionId,
-                            version = ProtoVersion
-                        }} = Resp,
-                    {Resp, #state{
-                        session_id = SessionId,
-                        protocol_version = ProtoVersion
-                    }};
+            case gs_server:handshake(self(), Translator, Request, PeerIp) of
+                {ok, SessionData, HandshakeResp} ->
+                    {HandshakeResp, SessionData};
                 {error, ErrMsg} ->
                     {ErrMsg, State}
             end;
@@ -126,29 +114,34 @@ websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     {ok, JSONMap} = gs_protocol:encode(?BASIC_PROTOCOL, Response),
     {reply, {text, json_utils:encode(JSONMap)}, NewState};
 
-websocket_handle({text, Data}, State) ->
-    #state{session_id = SessionId, protocol_version = ProtocolVersion} = State,
-    case decode_body(ProtocolVersion, Data) of
+websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = ProtoVersion}) ->
+    case decode_body(ProtoVersion, Data) of
         {ok, Requests} ->
             % process_request_async should not crash, but if it does,
             % cowboy will log the error.
-            process_request_async(SessionId, Requests),
-            {ok, State};
+            process_request_async(SessionData, Requests),
+            {ok, SessionData};
         {error, _} = Error ->
             ErrorMsg = gs_protocol:generate_error_push_message(Error),
-            {ok, ErrorJSONMap} = gs_protocol:encode(ProtocolVersion, ErrorMsg),
-            {reply, {text, json_utils:encode(ErrorJSONMap)}, State}
+            {ok, ErrorJSONMap} = gs_protocol:encode(ProtoVersion, ErrorMsg),
+            {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
     end;
 
-websocket_handle(ping, State) ->
-    {ok, State};
+websocket_handle(ping, SessionData) ->
+    {ok, SessionData};
 
-websocket_handle(pong, State) ->
-    {ok, State};
+websocket_handle({ping, _Payload}, SessionData) ->
+    {ok, SessionData};
 
-websocket_handle(Msg, State) ->
+websocket_handle(pong, SessionData) ->
+    % pongs are received in response to the keepalive pings sent to the client
+    % (see 'keepalive' periodical message)
+    gs_server:report_heartbeat(SessionData),
+    {ok, SessionData};
+
+websocket_handle(Msg, SessionData) ->
     ?warning("Unexpected frame in GS websocket handler: ~p", [Msg]),
-    {ok, State}.
+    {ok, SessionData}.
 
 
 %%--------------------------------------------------------------------
@@ -165,17 +158,17 @@ websocket_handle(Msg, State) ->
     Info :: any(),
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_info(terminate, State) ->
-    {stop, State};
+websocket_info(terminate, SessionData) ->
+    {stop, SessionData};
 
-websocket_info(keepalive, State) ->
-    erlang:send_after(?KEEPALIVE_INTERVAL, self(), keepalive),
-    {reply, ping, State};
+websocket_info(keepalive, SessionData) ->
+    erlang:send_after(?KEEPALIVE_INTERVAL_MILLIS, self(), keepalive),
+    {reply, ping, SessionData};
 
-websocket_info({push, Msg}, #state{protocol_version = ProtoVer} = State) ->
+websocket_info({push, Msg}, #gs_session{protocol_version = ProtoVer} = SessionData) ->
     try
         {ok, JSONMap} = gs_protocol:encode(ProtoVer, Msg),
-        {reply, {text, json_utils:encode(JSONMap)}, State}
+        {reply, {text, json_utils:encode(JSONMap)}, SessionData}
     catch
         Type:Message ->
             ?error_stacktrace(
@@ -183,12 +176,12 @@ websocket_info({push, Msg}, #state{protocol_version = ProtoVer} = State) ->
                 "it cannot be encoded - ~p:~p~nMessage: ~p", [
                     Type, Message, Msg
                 ]),
-            {ok, State}
+            {ok, SessionData}
     end;
 
-websocket_info(Msg, State) ->
+websocket_info(Msg, SessionData) ->
     ?warning("Unexpected message in GS websocket handler: ~p", [Msg]),
-    {ok, State}.
+    {ok, SessionData}.
 
 
 %%--------------------------------------------------------------------
@@ -205,9 +198,9 @@ websocket_info(Msg, State) ->
     State :: state().
 terminate(_Reason, _Req, #pre_handshake_state{}) ->
     ok;
-terminate(_Reason, _Req, #state{session_id = SessionId}) ->
+terminate(_Reason, _Req, #gs_session{id = SessionId} = SessionData) ->
     ?debug("Graph Sync connection terminating, sessionId: ~s", [SessionId]),
-    gs_server:cleanup_client_session(SessionId),
+    gs_server:cleanup_session(SessionData),
     ok.
 
 %%%===================================================================
@@ -235,6 +228,11 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
     WebsocketPid ! terminate,
     ok.
 
+
+-spec keepalive_interval() -> time_utils:seconds().
+keepalive_interval() ->
+    ?KEEPALIVE_INTERVAL_MILLIS div 1000.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -246,17 +244,16 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
 %% multiple requests). After processing, the response is pushed to the client.
 %% @end
 %%--------------------------------------------------------------------
--spec process_request_async(gs_protocol:session_id(),
-    gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]) -> ok.
-process_request_async(SessionId, RequestList) when is_list(RequestList) ->
-    lists:foreach(
-        fun(Request) ->
-            process_request_async(SessionId, Request)
-        end, RequestList);
-process_request_async(SessionId, Request) ->
+-spec process_request_async(gs_session:data(), gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]) ->
+    ok.
+process_request_async(SessionData, RequestList) when is_list(RequestList) ->
+    lists:foreach(fun(Request) ->
+        process_request_async(SessionData, Request)
+    end, RequestList);
+process_request_async(SessionData, Request) ->
     WebsocketPid = self(),
     spawn(fun() ->
-        Response = try gs_server:handle_request(SessionId, Request) of
+        Response = try gs_server:handle_request(SessionData, Request) of
             {ok, Resp} ->
                 gs_protocol:generate_success_response(Request, Resp);
             {error, _} = Error ->
@@ -284,7 +281,7 @@ process_request_async(SessionId, Request) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_body(gs_protocol:protocol_version(), Data :: binary()) ->
-    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | gs_protocol:error().
+    {ok, gs_protocol:req_wrapper() | [gs_protocol:req_wrapper()]} | errors:error().
 decode_body(ProtocolVersion, Data) ->
     try
         case json_utils:decode(Data) of
@@ -299,19 +296,4 @@ decode_body(ProtocolVersion, Data) ->
     catch
         _:_ ->
             ?ERROR_BAD_MESSAGE(Data)
-    end.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Looks for the "Macaroon" header and return the macaroon GS auth, or undefined
-%% if the header is not found.
-%% @TODO DEPRECATED VFS-5436 - HTTP auth supported for backward compatibility
-%% @end
-%%--------------------------------------------------------------------
--spec parse_auth_from_headers(cowboy_req:req()) -> gs_protocol:client_auth().
-parse_auth_from_headers(Req) ->
-    case cowboy_req:header(<<"macaroon">>, Req) of
-        undefined -> undefined;
-        Macaroon -> {macaroon, Macaroon, []}
     end.
