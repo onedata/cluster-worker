@@ -33,7 +33,7 @@
 -spec get_docs([couchbase_changes:change()], couchbase_config:bucket(), datastore_doc:mutator(),
     couchbase_changes:seq()) -> [datastore:doc()].
 get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
-    KeyRevisionsAnsSequences = lists:filtermap(fun(Change) ->
+    KeyRevisionsAndSequences = lists:filtermap(fun(Change) ->
         Key = maps:get(<<"id">>, Change),
         Value = maps:get(<<"value">>, Change),
         [_, Seq] = maps:get(<<"key">>, Change),
@@ -44,7 +44,7 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
         end
     end, Changes),
     Ctx = #{bucket => Bucket},
-    {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAnsSequences),
+    {Keys, RevisionsAnsSequences} = lists:unzip(KeyRevisionsAndSequences),
     lists:filtermap(fun
         ({{ok, _, #document{revs = [Rev | _], seq = Seq} = Doc}, {Rev, Seq}}) when Seq =< MaxSeqNum ->
             {true, Doc};
@@ -57,7 +57,10 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns largest sequence number from list of changes.
+%% Returns largest sequence number connected with changes request.
+%% If returned batch is full - it is calculated from batch. Otherwise,
+%% last requested number is returned as lower numbers of changes in batch
+%% than requested means that there are no more changes up to requested number.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_upper_seq_num([couchbase_changes:change()], non_neg_integer(),
@@ -65,14 +68,10 @@ get_docs(Changes, Bucket, FilterMutator, MaxSeqNum) ->
 get_upper_seq_num(Changes, BatchSize, LastRequested) ->
     case length(Changes) of
         BatchSize ->
-            LastSeq = lists:foldl(fun(Change, Acc) ->
+            lists:foldl(fun(Change, Acc) ->
                 [_, Seq] = maps:get(<<"key">>, Change),
-                case Seq > Acc of
-                    true -> Seq;
-                    false -> Acc
-                end
-            end, 0, Changes),
-            LastSeq;
+                max(Seq, Acc)
+            end, 0, Changes);
         _ ->
             LastRequested
     end.
