@@ -302,7 +302,7 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
     {Name, Node} = choose_node(WorkerRef),
     Args = prepare_args(Name, Request, MsgId),
     ExecuteAns = execute(Args, Node, ExecOption, Timeout),
-    receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request).
+    receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request, true).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -312,8 +312,8 @@ call(WorkerRef, Request, Timeout, ExecOption) ->
 %%--------------------------------------------------------------------
 -spec receive_loop(ExecuteAns :: term(), MsgId :: term(),
     Timeout :: timeout_spec(), WorkerRef :: request_dispatcher:worker_ref(),
-    Request :: term()) -> Result :: term() | {error, term()}.
-receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
+    Request :: term(), CheckAndRetry :: boolean()) -> Result :: term() | {error, term()}.
+receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request, CheckAndRetry) ->
     {AfterTime, TimeoutFun} = case Timeout of
         {_Time, _Fun} -> Timeout;
         _ -> {Timeout, fun() -> ok end}
@@ -321,11 +321,15 @@ receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request) ->
     receive
         #worker_answer{id = MsgId, response = Response} -> Response
     after AfterTime ->
-        case is_pid(ExecuteAns) andalso
-            rpc:call(node(ExecuteAns), erlang, is_process_alive, [ExecuteAns]) of
-            true ->
+        case {CheckAndRetry, is_pid(ExecuteAns) andalso
+            rpc:call(node(ExecuteAns), erlang, is_process_alive, [ExecuteAns])} of
+            {true, true} ->
                 TimeoutFun(),
-                receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request);
+                receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request, CheckAndRetry);
+            {true, _} ->
+                % retry last time to prevent race between answer sending / process terminating
+                TimeoutFun(),
+                receive_loop(ExecuteAns, MsgId, Timeout, WorkerRef, Request, false);
             _ ->
                 LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
                 {MsgFormat, FormatArgs} = case LogRequest of
