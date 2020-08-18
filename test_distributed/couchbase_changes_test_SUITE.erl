@@ -220,6 +220,7 @@ stream_should_return_last_changes_base(Config) ->
             end, Docs);
         (_Any) -> ok
     end,
+    BorderSeqNum = rpc:call(Worker, couchbase_changes_stream, get_seq_safe, [?SCOPE, #{bucket => ?BUCKET}]),
     {ok, Pid} = ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes,
         stream, [?BUCKET, ?SCOPE, Callback]
     )),
@@ -231,11 +232,7 @@ stream_should_return_last_changes_base(Config) ->
             Doc2#document{value = ?VALUE(M + 1)}
         end, ?DOC(N, ?VALUE(1)), lists:seq(1, ChangesNum))
     end, lists:seq(1, DocNum))),
-    lists:foldl(fun(_, KeysList) ->
-        Doc = ?assertReceivedNextMatch(#document{}, ?TIMEOUT),
-        ?assert(lists:member(Doc#document.key, KeysList)),
-        lists:delete(Doc#document.key, KeysList)
-    end, [?KEY(N) || N <- lists:seq(1, DocNum)], lists:seq(1, DocNum)),
+    check_changes_from_stream(DocNum, [?KEY(N) || N <- lists:seq(1, DocNum)], BorderSeqNum),
     ?assertEqual(ok, rpc:call(Worker, couchbase_changes, cancel_stream, [Pid])).
 
 stream_should_return_all_changes_except_mutator(Config) ->
@@ -760,3 +757,16 @@ assert_all(_, []) ->
 assert_all(Fun, List) ->
     List1 = Fun(List),
     assert_all(Fun, List1).
+
+check_changes_from_stream(0, [], _BorderSeqNum) ->
+    ok;
+check_changes_from_stream(DocsRemaining, KeysList, BorderSeqNum) ->
+    Doc = ?assertReceivedNextMatch(#document{}, ?TIMEOUT),
+    case Doc#document.seq =< BorderSeqNum of
+        true ->
+            check_changes_from_stream(DocsRemaining, KeysList, BorderSeqNum);
+        false ->
+            ?assert(lists:member(Doc#document.key, KeysList)),
+            check_changes_from_stream(DocsRemaining - 1,
+                lists:delete(Doc#document.key, KeysList), BorderSeqNum)
+    end.
