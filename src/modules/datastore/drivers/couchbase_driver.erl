@@ -115,7 +115,7 @@ delete_async(#{bucket := Bucket} = Ctx, Key) ->
 wait(Futures) when is_list(Futures) ->
     [wait(Future) || Future <- Futures];
 wait(Future) ->
-    case couchbase_pool:wait(Future) of
+    case couchbase_pool:wait(Future, true) of
         {error, key_enoent} -> {error, not_found};
         {error, key_eexists} -> {error, already_exists};
         Other -> Other

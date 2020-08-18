@@ -17,7 +17,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([post_async/3, post_async/4, post/3, wait/1]).
+-export([post_async/3, post_async/4, post/3, wait/2]).
 -export([get_timeout/0, get_modes/0, get_size/2]).
 -export([get_request_queue_size/1, get_request_queue_size/2,
     get_worker_queue_size_stats/1, get_worker_queue_size_stats/2,
@@ -116,23 +116,26 @@ post_async(Bucket, Mode, Request, ResponseTo) ->
 %%--------------------------------------------------------------------
 -spec post(couchbase_config:bucket(), mode(), request()) -> response().
 post(Bucket, Mode, Request) ->
-    wait(post_async(Bucket, Mode, Request)).
+    wait(post_async(Bucket, Mode, Request), true).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Waits for response associated with a reference.
 %% @end
 %%--------------------------------------------------------------------
--spec wait(future()) -> response().
-wait({Future, Worker} = WaitData) ->
+-spec wait(future(), boolean()) -> response().
+wait({Future, Worker} = WaitData, CheckAndRetry) ->
     Timeout = get_timeout(),
     receive
         {Future, Response} -> Response
     after
         Timeout ->
-            case erlang:is_process_alive(Worker) of
-                true ->
-                    wait(WaitData);
+            case {CheckAndRetry, erlang:is_process_alive(Worker)} of
+                {true, true} ->
+                    wait(WaitData, CheckAndRetry);
+                {true, _} ->
+                    wait(WaitData, false); % retry last time to prevent race between
+                                           % answer sending / process terminating
                 _ ->
                     {error, timeout}
             end

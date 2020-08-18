@@ -65,7 +65,7 @@
 %% Functions executed on pools
 -export([execute_master_job/9, execute_slave_job/5]).
 %% For rpc
--export([run_on_master_pool/9]).
+-export([run_on_master_pool/9, run_task/3]).
 
 % Basic types for execution environment
 -type pool() :: binary(). % term used to identify instance of execution environment
@@ -707,7 +707,42 @@ run_task(PoolName, TaskId, Executor) ->
 retry_run(PoolName, Executor, Delay) ->
     spawn(fun() ->
         timer:sleep(Delay),
-        check_task_list_and_run(PoolName, Executor, [])
+
+        case traverse_tasks_scheduler:get_next_group(PoolName) of
+            {error, no_groups} ->
+                ok;
+            {ok, GroupId} ->
+                ToStart = case traverse_task_list:get_first_scheduled_link(PoolName, GroupId, Executor) of
+                    {ok, not_found} ->
+                        case deregister_group_and_check(PoolName, GroupId, Executor) of
+                            ok ->
+                                empty_group;
+                            {abort, ID} ->
+                                {ok, ID}
+                        end;
+                    {ok, ID} ->
+                        {ok, ID}
+                end,
+
+                case ToStart of
+                    empty_group ->
+                        retry_run(PoolName, Executor, 0);
+                    {ok, TaskId} ->
+                        case traverse_tasks_scheduler:increment_ongoing_tasks_and_choose_node(PoolName) of
+                            {ok, Node} ->
+                                case rpc:call(Node, ?MODULE, run_task, [PoolName, TaskId, Executor]) of
+                                    ok ->
+                                        ok;
+                                    start_interrupted ->
+                                        % TODO VFS-6297 - what if node crashes before next line
+                                        traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName),
+                                        retry_run(PoolName, Executor, 10000)
+                                end;
+                            {error, limit_exceeded} ->
+                                ok
+                        end
+                end
+        end
     end),
     ok.
 
