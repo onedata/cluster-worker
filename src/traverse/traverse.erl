@@ -243,7 +243,9 @@ restart_tasks(PoolName, Options, Node) ->
                     {ok, Job, _, TaskId} = CallbackModule:get_job(JobId),
                     case maps:get(TaskId, IdToCtx, undefined) of
                         undefined ->
-                            ?warning("Job: ~p (id: ~p) of undefined (probably finished) task: ~p", [Job, JobId, TaskId]),
+                            ?warning("Found job ~s assigned to task ~s which does not exist (anymore?). Job data:~n~p", [
+                                JobId, TaskId, Job
+                            ]),
                             ok;
                         ExtendedCtx ->
                             {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, #{
