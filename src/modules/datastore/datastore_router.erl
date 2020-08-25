@@ -172,7 +172,7 @@ select_node([#{memory_copies := MemCopies, routing_key := Key} = Ctx | ArgsTail]
                     % TODO VFS-6168 - duplicates activity of HA but memory copy must be saved before operation finished
                     MemCopiesNodes = AllNodes, % -- Nodes -- FailedNodes,
                     % TODO VFS-6168 - Try local reads from HA slaves
-                    {Ctx2#{memory_copies_nodes => MemCopiesNodes}, true};
+                    {Ctx2#{memory_copies_nodes => MemCopiesNodes -- [Node]}, true};
                 none ->
                     {Ctx2, false}
             end,
