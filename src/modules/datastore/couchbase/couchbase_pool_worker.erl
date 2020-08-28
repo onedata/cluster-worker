@@ -175,8 +175,9 @@ terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) ->
         shutdown -> ok;
         {shutdown, _} -> ok;
         _ ->
-            application:set_env(?CLUSTER_WORKER_APP_NAME, db_connection_timestamp,
-                os:timestamp())
+            % Catch as function can throw error when application is stopping
+            catch application:set_env(?CLUSTER_WORKER_APP_NAME,
+                db_connection_timestamp, os:timestamp())
     end,
     catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
     ?log_terminate(Reason, State).

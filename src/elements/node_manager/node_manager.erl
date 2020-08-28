@@ -36,7 +36,7 @@
     {tp_router, [
         {supervisor_flags, tp_router:main_supervisor_flags()},
         {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
-    ], [supervisor_first, {posthook, init_supervisors}]}
+    ], [worker_first, {posthook, init_supervisors}]}
 ]).
 
 -define(HELPER_ETS, node_manager_helper_ets).
@@ -234,7 +234,7 @@ start_worker(Module, Args, Options) ->
         {ok, LoadMemorySize} = application:get_env(?CLUSTER_WORKER_APP_NAME, worker_load_memory_size),
         WorkerSupervisorName = ?WORKER_HOST_SUPERVISOR_NAME(Module),
 
-        case lists:member(supervisor_first, Options) of
+        case lists:member(worker_first, Options) of
             true ->
                 case supervisor:start_child(
                     ?MAIN_WORKER_SUPERVISOR_NAME,
