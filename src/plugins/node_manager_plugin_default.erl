@@ -20,7 +20,7 @@
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
 -export([before_init/0]).
--export([upgrade_essential_workers/0]).
+-export([before_cluster_upgrade/0]).
 -export([upgrade_cluster/1]).
 -export([custom_workers/0]).
 -export([on_db_and_workers_ready/0]).
@@ -108,12 +108,12 @@ before_init() ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% List of workers modules with configs that should be started before upgrade.
+%% Callback executed before cluster upgrade so that any required preparation
+%% can be done.
 %% @end
 %%--------------------------------------------------------------------
--spec upgrade_essential_workers() -> [{module(), list()}
-| {module(), list(), [atom()]} | {singleton, module(), list()}].
-upgrade_essential_workers() -> [].
+-spec before_cluster_upgrade() -> ok.
+before_cluster_upgrade() -> ok.
 
 %%--------------------------------------------------------------------
 %% @doc
