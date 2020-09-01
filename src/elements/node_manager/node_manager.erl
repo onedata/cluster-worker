@@ -707,7 +707,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
-    ?info("Successfully connected to cluster manager, starting heatbeat"),
+    ?info("Successfully connected to cluster manager, starting heartbeat"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
 cluster_init_step(?START_DEFAULT_WORKERS) ->
