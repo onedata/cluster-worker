@@ -512,13 +512,19 @@ handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
 handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, State) ->
-    case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
-        {ok, NewInterval} ->
-            erlang:send_after(NewInterval, self(),
-                {timer, {service_healthcheck, ServiceName, MasterNodeId, NewInterval}});
-        ignore ->
-            ok
-    end,
+    % run the healthcheck asynchronously to allow calling the node_manager from
+    % within the healthcheck procedure
+    NodeManager = self(),
+    spawn(fun() ->
+        case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
+            {ok, NewInterval} ->
+                erlang:send_after(NewInterval, NodeManager,
+                    {timer, {service_healthcheck, ServiceName, MasterNodeId, NewInterval}}
+                );
+            ignore ->
+                ok
+        end
+    end),
     {noreply, State};
 
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
@@ -701,7 +707,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
-    ?info("Successfully connected to cluster manager, starting heatbeat"),
+    ?info("Successfully connected to cluster manager, starting heartbeat"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
 cluster_init_step(?START_DEFAULT_WORKERS) ->
@@ -709,11 +715,10 @@ cluster_init_step(?START_DEFAULT_WORKERS) ->
     init_workers(cluster_worker_modules()),
     ?info("Default workers started successfully"),
     ok;
-cluster_init_step(?START_UPGRADE_ESSENTIAL_WORKERS) ->
-    ?info("Starting workers essential for upgrade..."),
-    WorkersToStart = ?CALL_PLUGIN(upgrade_essential_workers, []),
-    init_workers(WorkersToStart),
-    ?info("Workers essential for upgrade started successfully"),
+cluster_init_step(?PREPARE_FOR_UPGRADE) ->
+    ?info("Preparing cluster for upgrade..."),
+    ?CALL_PLUGIN(before_cluster_upgrade, []),
+    ?info("The cluster is ready for upgrade"),
     ok;
 cluster_init_step(?UPGRADE_CLUSTER) ->
     case node() == consistent_hashing:get_assigned_node(?UPGRADE_CLUSTER) of
@@ -1339,7 +1344,7 @@ initialize_recovery() ->
 -spec finalize_recovery() -> ok.
 finalize_recovery() ->
     ?info("Starting phase 2/2 of node recovery"),
-    cluster_init_step(?START_UPGRADE_ESSENTIAL_WORKERS),
+    cluster_init_step(?PREPARE_FOR_UPGRADE),
     cluster_init_step(?START_CUSTOM_WORKERS),
     cluster_init_step(?START_LISTENERS),
     gen_server2:cast({global, ?CLUSTER_MANAGER}, ?RECOVERY_FINALIZED(node())),
@@ -1357,7 +1362,7 @@ handle_node_status_change_async(Node, NewStatus, HandlingFun) ->
         catch
             Error:Reason ->
                 ?error_stacktrace("Error while processing transition of node ~p to status ~p: ~p:~p",
-                    [Node, NewStatus, Error,Reason])
+                    [Node, NewStatus, Error, Reason])
         end
     end),
     ok.

@@ -133,9 +133,12 @@ do_healthcheck(ServiceName, MasterNodeId, LastInterval) ->
                 do_healthcheck_insecure(ServiceName, Service, MasterNodeId, LastInterval)
         end
     catch
-        _:Reason ->
-            % Error can appear during restart and node switching
-            ?debug("Service healthcheck error ~p", [Reason]),
+        Class:Reason ->
+            ?warning_stacktrace(
+                "Healthcheck function of service ~s crashed (this may happen during cluster reorganization)~n"
+                "Error was: ~w:~p",
+                [ServiceName, Class, Reason]
+            ),
             {ok, LastInterval}
     end.
 
