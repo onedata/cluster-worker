@@ -204,13 +204,21 @@ get_service_and_processing_node(ServiceName, MasterNodeId) ->
 -spec init_service(internal_service:service(), internal_service:service_name(), service_init_fun(), node_id()) ->
     ok | aborted.
 init_service(Service, ServiceName, InitFun, MasterNodeId) ->
-    case internal_service:InitFun(Service) of
-        ok ->
-            HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-            ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeId, HealthcheckInterval);
-        abort ->
+    try
+        case internal_service:InitFun(Service) of
+            ok ->
+                HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
+                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeId, HealthcheckInterval);
+            abort ->
+                remove_service_from_doc(MasterNodeId, ServiceName),
+                aborted
+        end
+    catch
+        Error:Reason ->
+            ?error_stacktrace("Error while initializing service ~s - ~p:~p",
+                [ServiceName, Error, Reason]),
             remove_service_from_doc(MasterNodeId, ServiceName),
-            aborted
+            error(service_init_failure)
     end.
 
 -spec remove_service_from_doc(node_id(), internal_service:service_name()) -> ok.
