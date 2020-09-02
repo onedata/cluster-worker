@@ -212,10 +212,10 @@ init_service(Service, ServiceName, InitFun, MasterNodeId) ->
         end
     catch
         Error:Reason ->
-            ?error_stacktrace("Error while initializing service ~p: ~p~p",
+            ?error_stacktrace("Error while initializing service ~s - ~p:~p",
                 [ServiceName, Error, Reason]),
             remove_service_from_doc(MasterNodeId, ServiceName),
-            throw(Reason)
+            error(service_init_failure)
     end.
 
 -spec remove_service_from_doc(node_id(), internal_service:service_name()) -> ok.
