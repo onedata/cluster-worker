@@ -723,8 +723,19 @@ cluster_init_step(?PREPARE_FOR_UPGRADE) ->
 cluster_init_step(?UPGRADE_CLUSTER) ->
     case node() == consistent_hashing:get_assigned_node(?UPGRADE_CLUSTER) of
         true ->
-            upgrade_cluster(),
-            ok;
+            spawn(fun() ->
+                Result = try
+                    upgrade_cluster(),
+                    success
+                catch Type:Reason ->
+                    ?error_stacktrace("Failed to upgrade cluster - ~p:~p", [
+                        Type, Reason
+                    ]),
+                    failure
+                end,
+                report_step_result(?UPGRADE_CLUSTER, Result)
+            end),
+            async;
         false ->
             ok
     end;
