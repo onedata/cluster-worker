@@ -15,7 +15,8 @@
 -include("datastore_test_utils.hrl").
 
 %% export for ct
--export([all/0, init_per_suite/1, init_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1,
+    init_per_testcase/2, end_per_testcase/2]).
 
 %% tests
 -export([
@@ -38,6 +39,8 @@
     multi_tree_fold_should_return_all_using_not_existing_ids/1,
     multi_tree_fold_should_return_all_using_id_with_offset/1,
     multi_tree_fold_should_return_all_using_id_with_neg_offset/1,
+    multi_tree_fold_should_return_all_using_empty_id_with_neg_offset/1,
+    multi_tree_fold_should_return_non_with_neg_offset/1,
     multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset/1,
     multi_sorted_tree_fold_should_return_all_using_not_existing_ids/1,
     multi_sorted_tree_fold_should_return_all_using_id_with_neg_offset/1,
@@ -68,6 +71,8 @@ all() ->
         multi_tree_fold_should_return_all_using_not_existing_ids,
         multi_tree_fold_should_return_all_using_id_with_offset,
         multi_tree_fold_should_return_all_using_id_with_neg_offset,
+        multi_tree_fold_should_return_all_using_empty_id_with_neg_offset,
+        multi_tree_fold_should_return_non_with_neg_offset,
         multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset,
         multi_sorted_tree_fold_should_return_all_using_not_existing_ids,
         multi_sorted_tree_fold_should_return_all_using_id_with_neg_offset,
@@ -372,6 +377,31 @@ multi_tree_fold_should_return_all_using_id_with_neg_offset(Config) ->
         prev_link_name => StartName2, offset => Offset}, [], false, undefined),
     ?assert(length(ExpectedLinks) > length(Links2)).
 
+multi_tree_fold_should_return_all_using_empty_id_with_neg_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    TreesNum = 3,
+    LinksNum = 1,
+    Size = 1000,
+    Offset = -100,
+    AllLinks = lists:flatten(lists:map(fun(N) ->
+        add_links(Worker, ?CTX(?KEY), ?KEY, ?LINK_TREE_ID(N), LinksNum)
+    end, lists:seq(1, TreesNum))),
+
+    ExpectedLinks = get_expected_links(AllLinks),
+    Links = fold_links_id_and_neg_offset(Worker, ?CTX(?KEY), ?KEY, #{size => Size,
+        prev_link_name => <<>>, offset => Offset}, [], false, ExpectedLinks),
+    ?assertEqual(ExpectedLinks, Links).
+
+multi_tree_fold_should_return_non_with_neg_offset(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    Size = 1000,
+    Offset = -100,
+
+    ExpectedLinks = [],
+    Links = fold_links_id_and_neg_offset(Worker, ?CTX(?KEY), ?KEY, #{size => Size,
+        prev_link_name => <<>>, offset => Offset}, [], false, ExpectedLinks),
+    ?assertEqual(ExpectedLinks, Links).
+
 multi_tree_fold_should_return_all_using_not_existsing_id_with_neg_offset(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     TreesNum = 5,
@@ -464,6 +494,9 @@ multi_sorted_tree_fold_should_return_all_using_not_existsing_middle_id_with_neg_
 init_per_suite(Config) ->
     datastore_test_utils:init_suite([?MODEL], Config).
 
+end_per_suite(_Config) ->
+    ok.
+
 init_per_testcase(Case, Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
 
@@ -474,6 +507,9 @@ init_per_testcase(Case, Config) ->
     rpc:call(Worker, datastore_cache_manager, reset, [disc1]),
     rpc:call(Worker, datastore_cache_manager, resize, [disc1, cache_size(Case)]),
     Config.
+
+end_per_testcase(_Case, _Config) ->
+    ok.
 
 %%%===================================================================
 %%% Internal functions
