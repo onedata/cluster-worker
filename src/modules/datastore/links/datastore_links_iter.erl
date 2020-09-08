@@ -325,12 +325,12 @@ init_forest_fold(ForestIt = #forest_it{tree_ids = TreeIds}, Opts) ->
 %%--------------------------------------------------------------------
 -spec add_prev_fold_nodes({ok | {error, term()}, forest_it()}, fold_opts(), list(), list()) ->
     {ok | {error, term()}, forest_it()}.
-add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt} = Ans,
+add_prev_fold_nodes({ok, #forest_it{heap = Heap} = ForestIt} = Ans,
     #{offset := Offset, prev_link_name := PrevLinkName} = Opts, EmptyTrees, ForceContinue) when Offset < 0 ->
     HeapList = gb_trees:to_list(Heap),
-    Keys = lists:foldl(fun({_, #tree_it{links = Links}}, Acc) ->
-        Acc ++ lists:map(fun(#link{name = Name}) -> Name end, Links)
-    end, [], HeapList),
+    {Keys, TreeIds} = lists:foldl(fun({{_, TreeId}, #tree_it{links = Links}}, {LinksAcc, TreesAcc}) ->
+        {LinksAcc ++ lists:map(fun(#link{name = Name}) -> Name end, Links), [TreeId | TreesAcc]}
+    end, {[], []}, HeapList),
     Keys2 = lists:sort(Keys),
 
     Continue = case ForceContinue of
@@ -346,8 +346,8 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
             {true, ForceContinue}
     end,
 
-    case Continue of
-        {true, FoldIds} when FoldIds =/= [] ->
+    case {Continue, gb_trees:is_empty(Heap)} of
+        {{true, FoldIds}, _} when FoldIds =/= [] ->
             Ans2 = lists:foldl(fun
                 ({{Name, TreeId} = ItKey, #tree_it{links = Links} = TreeIt},
                     {ok, #forest_it{heap = TmpHeap} = ForestIt2, TmpEmptyTrees}) ->
@@ -382,6 +382,8 @@ add_prev_fold_nodes({ok, #forest_it{heap = Heap, tree_ids = TreeIds} = ForestIt}
             end, {ok, ForestIt#forest_it{heap = gb_trees:empty()}, EmptyTrees}, HeapList),
 
             add_prev_fold_nodes(Ans2, Opts, EmptyTrees, []);
+        {_, true} ->
+            Ans;
         _ ->
             SmallerKeys = lists:takewhile(fun(Key) -> Key < PrevLinkName end, Keys2),
             FirstIncluded = lists:nth(max(length(SmallerKeys) + Offset + 1, 1), Keys2),
