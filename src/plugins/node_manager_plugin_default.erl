@@ -16,7 +16,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 -export([installed_cluster_generation/0]).
--export([oldest_known_cluster_generation/0]).
+-export([oldest_upgradable_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
 -export([before_init/0]).
@@ -53,9 +53,9 @@ installed_cluster_generation() ->
 %% upgraded to installed_cluster_generation.
 %% @end
 %%--------------------------------------------------------------------
--spec oldest_known_cluster_generation() ->
+-spec oldest_upgradable_cluster_generation() ->
     {node_manager:cluster_generation(), HumanReadableVersion :: binary()}.
-oldest_known_cluster_generation() ->
+oldest_upgradable_cluster_generation() ->
     {1, <<"19.02.*">>}.
 
 %%--------------------------------------------------------------------

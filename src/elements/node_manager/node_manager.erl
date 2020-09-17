@@ -790,19 +790,19 @@ upgrade_cluster() ->
             throw(Error);
         {ok, CurrentGen} ->
             InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
-            OldestKnownGen = ?CALL_PLUGIN(oldest_known_cluster_generation, []),
-            upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
+            OldestUpgradableGen = ?CALL_PLUGIN(oldest_upgradable_cluster_generation, []),
+            upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen)
     end.
 
 %% @private
 -spec upgrade_cluster(CurrentGen :: cluster_generation(), InstalledGen :: cluster_generation(),
     {OldestKnownGen :: cluster_generation(), ReadableVersion :: binary()}) -> ok.
-upgrade_cluster(CurrentGen, _InstalledGen, {OldestKnownGen, ReadableVersion}) when CurrentGen < OldestKnownGen ->
+upgrade_cluster(CurrentGen, _InstalledGen, {OldestUpgradableGen, ReadableVersion}) when CurrentGen < OldestUpgradableGen ->
     ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
     "~nOldest supported version: ~s", [ReadableVersion]),
     throw({error, too_old_cluster_generation});
 
-upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < InstalledGen ->
+upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen) when CurrentGen < InstalledGen ->
     ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGen, InstalledGen]),
     {ok, NewGeneration} = ?CALL_PLUGIN(upgrade_cluster, [CurrentGen]),
     case NewGeneration > InstalledGen of
@@ -815,7 +815,7 @@ upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < Inst
     end,
     ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
     {ok, _} = cluster_generation:save(NewGeneration),
-    upgrade_cluster(NewGeneration, InstalledGen, OldestKnownGen);
+    upgrade_cluster(NewGeneration, InstalledGen, OldestUpgradableGen);
 
 upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
     {ok, _} = cluster_generation:save(CurrentGen),
