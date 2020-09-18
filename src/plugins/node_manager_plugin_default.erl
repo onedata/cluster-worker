@@ -15,7 +15,7 @@
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
 
--export([installed_cluster_generation/0]).
+-export([cluster_generations/0]).
 -export([oldest_upgradable_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
@@ -40,12 +40,14 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the current cluster generation of this software.
+%% Returns list of all cluster generations known to this software.
+%% Human readable version is included to for logging purposes.
 %% @end
 %%--------------------------------------------------------------------
--spec installed_cluster_generation() -> node_manager:cluster_generation().
-installed_cluster_generation() ->
-    1.
+-spec cluster_generations() -> 
+    [{node_manager:cluster_generation(), HumanReadableVersion :: binary()}].
+cluster_generations() ->
+    [{1, <<"19.02.*">>}].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,9 +56,9 @@ installed_cluster_generation() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec oldest_upgradable_cluster_generation() ->
-    {node_manager:cluster_generation(), HumanReadableVersion :: binary()}.
+    node_manager:cluster_generation().
 oldest_upgradable_cluster_generation() ->
-    {1, <<"19.02.*">>}.
+    1.
 
 %%--------------------------------------------------------------------
 %% @doc

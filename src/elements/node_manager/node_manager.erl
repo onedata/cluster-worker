@@ -789,9 +789,11 @@ upgrade_cluster() ->
             ?error("Error when retrieving current cluster generation: ~p", [Error]),
             throw(Error);
         {ok, CurrentGen} ->
-            InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
+            AllClusterGens = ?CALL_PLUGIN(cluster_generations, []),
             OldestUpgradableGen = ?CALL_PLUGIN(oldest_upgradable_cluster_generation, []),
-            upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen)
+            {InstalledGen, _} = lists:last(AllClusterGens),
+            Version = kv_utils:get(OldestUpgradableGen, AllClusterGens),
+            upgrade_cluster(CurrentGen, InstalledGen, {OldestUpgradableGen, Version})
     end.
 
 %% @private
