@@ -792,7 +792,7 @@ upgrade_cluster() ->
             AllClusterGens = ?CALL_PLUGIN(cluster_generations, []),
             OldestUpgradableGen = ?CALL_PLUGIN(oldest_upgradable_cluster_generation, []),
             {InstalledGen, _} = lists:last(AllClusterGens),
-            Version = kv_utils:get(OldestUpgradableGen, AllClusterGens),
+            Version = kv_utils:get(OldestUpgradableGen, AllClusterGens, <<>>),
             upgrade_cluster(CurrentGen, InstalledGen, {OldestUpgradableGen, Version})
     end.
 
@@ -1325,7 +1325,10 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> {ok, ?CALL_PLUGIN(installed_cluster_generation, [])};
+        {error, not_found} -> 
+            AllGens = ?CALL_PLUGIN(cluster_generations, []),
+            {InstalledGen, _} = lists:last(AllGens),
+            {ok, InstalledGen};
         {error, _} = Error -> Error
     end.
 

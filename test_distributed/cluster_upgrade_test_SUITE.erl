@@ -108,9 +108,9 @@ upgrade_cluster(Workers) ->
     rpc:call(lists_utils:random_element(Workers), node_manager, upgrade_cluster, []).
 
 mock_installed_generation(Workers, Gen) ->
-    test_utils:mock_expect(Workers, node_manager_plugin_default, installed_cluster_generation,
-        fun() -> Gen end).
+    test_utils:mock_expect(Workers, node_manager_plugin_default, cluster_generations,
+        fun() -> lists:map(fun(G) -> {G, <<>>} end, lists:seq(0, Gen)) end).
 
 mock_oldest_known_generation(Workers, Gen) ->
-    test_utils:mock_expect(Workers, node_manager_plugin_default, oldest_known_cluster_generation,
-        fun() -> {Gen, <<>>} end).
+    test_utils:mock_expect(Workers, node_manager_plugin_default, oldest_upgradable_cluster_generation,
+        fun() -> Gen end).
