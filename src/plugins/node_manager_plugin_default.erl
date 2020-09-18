@@ -54,7 +54,7 @@ cluster_generations() ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns the oldest upgradable generation - the lowest one that can be directly
-%% current cluster generation (the last from the list returned by cluster_generations())
+%% upgraded to current cluster generation (the last from the list returned by cluster_generations())
 %% @end
 %%--------------------------------------------------------------------
 -spec oldest_upgradable_cluster_generation() ->
