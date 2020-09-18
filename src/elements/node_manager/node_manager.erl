@@ -792,8 +792,8 @@ upgrade_cluster() ->
             AllClusterGens = ?CALL_PLUGIN(cluster_generations, []),
             OldestUpgradableGen = ?CALL_PLUGIN(oldest_upgradable_cluster_generation, []),
             {InstalledGen, _} = lists:last(AllClusterGens),
-            Version = kv_utils:get(OldestUpgradableGen, AllClusterGens, <<>>),
-            upgrade_cluster(CurrentGen, InstalledGen, {OldestUpgradableGen, Version})
+            OldestUpgradableVersion = kv_utils:get(OldestUpgradableGen, AllClusterGens, <<>>),
+            upgrade_cluster(CurrentGen, InstalledGen, {OldestUpgradableGen, OldestUpgradableVersion})
     end.
 
 %% @private

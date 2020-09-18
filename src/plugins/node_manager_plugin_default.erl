@@ -14,6 +14,7 @@
 
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("ctool/include/onedata.hrl").
 
 -export([cluster_generations/0]).
 -export([oldest_upgradable_cluster_generation/0]).
@@ -41,18 +42,19 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Returns list of all cluster generations known to this software.
-%% Human readable version is included to for logging purposes.
+%% Human readable version is included too for easier maintenance and logging purposes.
+%% The last generation returned on the list is assumed to be the current software generation.
 %% @end
 %%--------------------------------------------------------------------
 -spec cluster_generations() -> 
-    [{node_manager:cluster_generation(), HumanReadableVersion :: binary()}].
+    [{node_manager:cluster_generation(), onedata:release_version()}].
 cluster_generations() ->
-    [{1, <<"19.02.*">>}].
+    [{1, ?LINE_19_02}].
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the oldest known generation - the lowest one that can be directly
-%% upgraded to installed_cluster_generation.
+%% Returns the oldest upgradable generation - the lowest one that can be directly
+%% current cluster generation (the last from the list returned by cluster_generations())
 %% @end
 %%--------------------------------------------------------------------
 -spec oldest_upgradable_cluster_generation() ->
