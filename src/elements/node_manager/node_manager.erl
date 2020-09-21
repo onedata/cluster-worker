@@ -789,20 +789,22 @@ upgrade_cluster() ->
             ?error("Error when retrieving current cluster generation: ~p", [Error]),
             throw(Error);
         {ok, CurrentGen} ->
-            InstalledGen = ?CALL_PLUGIN(installed_cluster_generation, []),
-            OldestKnownGen = ?CALL_PLUGIN(oldest_known_cluster_generation, []),
-            upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen)
+            AllClusterGens = ?CALL_PLUGIN(cluster_generations, []),
+            OldestUpgradableGen = ?CALL_PLUGIN(oldest_upgradable_cluster_generation, []),
+            {InstalledGen, _} = lists:last(AllClusterGens),
+            OldestUpgradableVersion = kv_utils:get(OldestUpgradableGen, AllClusterGens, <<>>),
+            upgrade_cluster(CurrentGen, InstalledGen, {OldestUpgradableGen, OldestUpgradableVersion})
     end.
 
 %% @private
 -spec upgrade_cluster(CurrentGen :: cluster_generation(), InstalledGen :: cluster_generation(),
     {OldestKnownGen :: cluster_generation(), ReadableVersion :: binary()}) -> ok.
-upgrade_cluster(CurrentGen, _InstalledGen, {OldestKnownGen, ReadableVersion}) when CurrentGen < OldestKnownGen ->
+upgrade_cluster(CurrentGen, _InstalledGen, {OldestUpgradableGen, ReadableVersion}) when CurrentGen < OldestUpgradableGen ->
     ?critical("Cluster in too old version to be upgraded directly. Upgrade to intermediate version first."
     "~nOldest supported version: ~s", [ReadableVersion]),
     throw({error, too_old_cluster_generation});
 
-upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < InstalledGen ->
+upgrade_cluster(CurrentGen, InstalledGen, OldestUpgradableGen) when CurrentGen < InstalledGen ->
     ?info("Upgrading cluster from generation ~p to ~p...", [CurrentGen, InstalledGen]),
     {ok, NewGeneration} = ?CALL_PLUGIN(upgrade_cluster, [CurrentGen]),
     case NewGeneration > InstalledGen of
@@ -815,7 +817,7 @@ upgrade_cluster(CurrentGen, InstalledGen, OldestKnownGen) when CurrentGen < Inst
     end,
     ?info("Cluster succesfully upgraded to generation ~p", [NewGeneration]),
     {ok, _} = cluster_generation:save(NewGeneration),
-    upgrade_cluster(NewGeneration, InstalledGen, OldestKnownGen);
+    upgrade_cluster(NewGeneration, InstalledGen, OldestUpgradableGen);
 
 upgrade_cluster(CurrentGen, _InstalledGen, _OldestKnownGen) ->
     {ok, _} = cluster_generation:save(CurrentGen),
@@ -1323,7 +1325,10 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> {ok, ?CALL_PLUGIN(installed_cluster_generation, [])};
+        {error, not_found} -> 
+            AllGens = ?CALL_PLUGIN(cluster_generations, []),
+            {InstalledGen, _} = lists:last(AllGens),
+            {ok, InstalledGen};
         {error, _} = Error -> Error
     end.
 

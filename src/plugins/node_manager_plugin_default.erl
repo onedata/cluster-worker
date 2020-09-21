@@ -14,9 +14,10 @@
 
 -include("global_definitions.hrl").
 -include_lib("ctool/include/logging.hrl").
+-include_lib("ctool/include/onedata.hrl").
 
--export([installed_cluster_generation/0]).
--export([oldest_known_cluster_generation/0]).
+-export([cluster_generations/0]).
+-export([oldest_upgradable_cluster_generation/0]).
 -export([app_name/0, cm_nodes/0, db_nodes/0]).
 -export([renamed_models/0]).
 -export([before_init/0]).
@@ -40,23 +41,26 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the current cluster generation of this software.
+%% Returns list of all cluster generations known to this software.
+%% Human readable version is included too for easier maintenance and logging purposes.
+%% The last generation returned on the list is assumed to be the current software generation.
 %% @end
 %%--------------------------------------------------------------------
--spec installed_cluster_generation() -> node_manager:cluster_generation().
-installed_cluster_generation() ->
-    1.
+-spec cluster_generations() -> 
+    [{node_manager:cluster_generation(), onedata:release_version()}].
+cluster_generations() ->
+    [{1, ?LINE_19_02}].
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns the oldest known generation - the lowest one that can be directly
-%% upgraded to installed_cluster_generation.
+%% Returns the oldest upgradable generation - the lowest one that can be directly
+%% upgraded to current cluster generation (the last from the list returned by cluster_generations())
 %% @end
 %%--------------------------------------------------------------------
--spec oldest_known_cluster_generation() ->
-    {node_manager:cluster_generation(), HumanReadableVersion :: binary()}.
-oldest_known_cluster_generation() ->
-    {1, <<"19.02.*">>}.
+-spec oldest_upgradable_cluster_generation() ->
+    node_manager:cluster_generation().
+oldest_upgradable_cluster_generation() ->
+    1.
 
 %%--------------------------------------------------------------------
 %% @doc
