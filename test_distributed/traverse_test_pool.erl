@@ -32,7 +32,7 @@ do_master_job({Master, Num, ID}, #{task_id := <<"sequential_traverse_test">>,
     master_job_starter_callback := MasterJobCallback}) ->
     MasterJobs = case Num < 1000 of
         true ->
-            ok = MasterJobCallback([{Master, 10 * Num, ID}]),
+            ok = MasterJobCallback(#{jobs => [{Master, 10 * Num, ID}]}),
             [{Master, 10 * Num + 5, ID}];
         _ ->
             []
