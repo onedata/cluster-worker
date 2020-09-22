@@ -634,14 +634,13 @@ batch_request(#datastore_request{function = fold_links, ctx = Ctx, args = [Key, 
     Batch3 = datastore_links_iter:terminate(ForestIt),
     case CacheToken of
         true ->
-            case maps:get(token, Opts, undefined) of
-                undefined ->
-                    {{Ref, Result}, Batch3, LinkTokens};
-                OldToken ->
-                    {Result0, Token} = Result,
+            case {Result, maps:get(token, Opts, undefined)} of
+                {{Result0, #link_token{} = Token}, OldToken} when OldToken =/= undefined ->
                     {NewToken, LinkTokens2} =
                         set_link_token(LinkTokens, Token, OldToken),
-                    {{Ref, {Result0, NewToken}}, Batch3, LinkTokens2}
+                    {{Ref, {Result0, NewToken}}, Batch3, LinkTokens2};
+                _ ->
+                    {{Ref, Result}, Batch3, LinkTokens}
             end;
         _ ->
             {{Ref, Result}, Batch3, LinkTokens}
