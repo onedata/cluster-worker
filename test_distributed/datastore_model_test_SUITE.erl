@@ -48,6 +48,7 @@
     mark_links_deleted_should_succeed/1,
     fold_links_should_succeed/1,
     fold_links_token_should_succeed/1,
+    fold_links_token_should_return_error_on_db_error/1,
     get_links_trees_should_return_all_trees/1,
     fold_links_token_should_succeed_after_token_timeout/1,
     links_performance/1,
@@ -93,6 +94,7 @@ all() ->
         mark_links_deleted_should_succeed,
         fold_links_should_succeed,
         fold_links_token_should_succeed,
+        fold_links_token_should_return_error_on_db_error,
         get_links_trees_should_return_all_trees,
         fold_links_token_should_succeed_after_token_timeout,
         links_performance,
@@ -628,6 +630,24 @@ fold_links_token_should_succeed(Config) ->
         end, lists:zip(ExpectedLinks2, Links))
     end, ?TEST_MODELS).
 
+fold_links_token_should_return_error_on_db_error(Config) ->
+    [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
+    Model = ets_only_model,
+    LinksNum = 10,
+
+    Links = lists:sort(lists:map(fun(N) ->
+        {?LINK_NAME(N), ?LINK_TARGET(N)}
+    end, lists:seq(1, LinksNum))),
+    ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
+        ?KEY, ?LINK_TREE_ID, Links
+    ])),
+
+    test_utils:mock_expect(Workers, datastore_links, get_links_trees,
+        fun(_Ctx, _Key, Batch) -> {{error, etmpfail}, Batch} end),
+    ?assertMatch({error, _}, rpc:call(Worker, Model, fold_links,
+        [?KEY, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{token => #link_token{}}]
+    )).
+
 fold_links_token_should_succeed_after_token_timeout(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
@@ -1100,6 +1120,10 @@ link_del_should_delay_inactivate(Config) ->
 init_per_suite(Config) ->
     datastore_test_utils:init_suite(Config).
 
+init_per_testcase(fold_links_token_should_return_error_on_db_error = Case, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_new(Workers, [datastore_links]),
+    init_per_testcase(?DEFAULT_CASE(Case), Config);
 init_per_testcase(deleted_doc_should_expire = Case, Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     {ok, Expiry} = test_utils:get_env(Worker, cluster_worker, document_expiry),
@@ -1161,6 +1185,9 @@ init_per_testcase(_, Config) ->
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 10),
     Config.
 
+end_per_testcase(fold_links_token_should_return_error_on_db_error, Config) ->
+    Workers = ?config(cluster_worker_nodes, Config),
+    test_utils:mock_unload(Workers, [datastore_links]);
 end_per_testcase(deleted_doc_should_expire, Config) ->
     Workers = ?config(cluster_worker_nodes, Config),
     Expiry = ?config(expiry, Config),
