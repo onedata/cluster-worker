@@ -628,23 +628,24 @@ batch_request(#datastore_request{function = fold_links, ctx = Ctx, args = [Key, 
             Opts
     end,
 
-    {Result, ForestIt} = datastore_links_iter:fold(Ctx2, Key, TreeIds,
+    {FoldResult, ForestIt} = datastore_links_iter:fold(Ctx2, Key, TreeIds,
         Fun, Acc, Opts2, Batch2),
 
     Batch3 = datastore_links_iter:terminate(ForestIt),
     case CacheToken of
         true ->
-            case maps:get(token, Opts, undefined) of
-                undefined ->
-                    {{Ref, Result}, Batch3, LinkTokens};
-                OldToken ->
-                    {Result0, Token} = Result,
+            case {FoldResult, maps:get(token, Opts, undefined)} of
+                % If fold is executed with token, final results is extended with new token
+                % that has to be processed before returning it to caller
+                {{ListingResult, #link_token{} = Token}, OldToken} when OldToken =/= undefined ->
                     {NewToken, LinkTokens2} =
                         set_link_token(LinkTokens, Token, OldToken),
-                    {{Ref, {Result0, NewToken}}, Batch3, LinkTokens2}
+                    {{Ref, {ListingResult, NewToken}}, Batch3, LinkTokens2};
+                _ ->
+                    {{Ref, FoldResult}, Batch3, LinkTokens}
             end;
         _ ->
-            {{Ref, Result}, Batch3, LinkTokens}
+            {{Ref, FoldResult}, Batch3, LinkTokens}
     end;
 batch_request(#datastore_request{function = fetch_links_trees, ctx = Ctx, args = [Key]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->

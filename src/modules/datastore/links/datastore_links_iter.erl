@@ -207,15 +207,15 @@ fold(Ctx, Key, TreeId, Fun, Acc, Opts, InitBatch) ->
     case init(Ctx, Key, TreeId, InitBatch) of
         {ok, ForestIt} ->
             {Result, ForestIt2} = Ans = fold(Fun, Acc, ForestIt, Opts),
-            case maps:get(token, Opts, undefined) of
-                undefined ->
-                    Ans;
-                _ ->
+            case {Result, maps:get(token, Opts, undefined)} of
+                {{ok, _}, OldToken} when OldToken =/= undefined ->
                     IsLast = gb_trees:is_empty(ForestIt2#forest_it.heap),
                     Token = #link_token{
                         restart_token = ForestIt2#forest_it{batch = undefined},
                         is_last = IsLast},
-                    {{Result, Token}, ForestIt2}
+                    {{Result, Token}, ForestIt2};
+                _ ->
+                    Ans
             end;
         Other ->
             Other
