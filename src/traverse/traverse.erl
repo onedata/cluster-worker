@@ -119,9 +119,9 @@
 -type master_job_starter_callback() :: fun((master_job_starter_args()) -> ok).
 -type master_job_starter_args() :: #{
     jobs => [job()],
-    cancel_callback => fun((description()) -> ok)
+    cancel_callback => job_cancel_callback()
 }.
--type job_cancel_callback() :: fun((master_job_extended_args(), description()) -> ok).
+-type job_cancel_callback() :: fun((description()) -> ok).
 -type job_finish_callback() :: fun((master_job_extended_args(), description()) -> ok).
 % Types used to provide additional information to framework
 -type timestamp() :: non_neg_integer(). % Timestamp used to sort tasks (usually provided by callback function)
@@ -477,8 +477,8 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList))),
                     master_jobs_delegated => -1 * (length(MasterJobsList) + length(AsyncMasterJobsList)) - 1
                 },
-                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Args, _Description) -> ok end),
-                CancelCallback(MasterJobExtendedArgs, CancelDescription),
+                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Description) -> ok end),
+                CancelCallback(CancelDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, CancelDescription);
             _ ->
 %%                CancelCallback = maps:get(init_callback, MasterAns, fun(_Args) -> ok end),
