@@ -67,6 +67,7 @@
 %% For rpc
 -export([run_on_master_pool/9, run_task/3]).
 
+%% @formatter:off
 % Basic types for execution environment
 -type pool() :: binary(). % term used to identify instance of execution environment
 -type callback_module() :: module().
@@ -115,8 +116,12 @@
     task_id => id(),
     master_job_starter_callback => master_job_starter_callback()
 }.
--type master_job_starter_callback() :: fun(([job()]) -> ok).
--type job_cancel_callback() :: fun((master_job_extended_args(), description()) -> ok).
+-type master_job_starter_callback() :: fun((master_job_starter_args()) -> ok).
+-type master_job_starter_args() :: #{
+    jobs => [job()],
+    cancel_callback => job_cancel_callback()
+}.
+-type job_cancel_callback() :: fun((description()) -> ok).
 -type job_finish_callback() :: fun((master_job_extended_args(), description()) -> ok).
 % Types used to provide additional information to framework
 -type timestamp() :: non_neg_integer(). % Timestamp used to sort tasks (usually provided by callback function)
@@ -128,6 +133,7 @@
     remote_driver => datastore:remote_driver(),
     remote_driver_ctx => datastore:remote_driver_ctx()
 }.
+%% @formatter:on
 % Internal types for framework
 -type execution_pool() :: worker_pool:name(). % internal names of worker pools used by framework
 -type ctx() :: traverse_task:ctx().
@@ -448,7 +454,7 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
         MasterJobCallback = prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule,
             ExtendedCtx, Executor, TaskId),
         MasterJobExtendedArgs = #{task_id => TaskId, master_job_starter_callback => MasterJobCallback},
-        {ok, MasterAns} =  CallbackModule:do_master_job(Job, MasterJobExtendedArgs),
+        {ok, MasterAns} = CallbackModule:do_master_job(Job, MasterJobExtendedArgs),
         MasterJobsList = maps:get(master_jobs, MasterAns, []),
         AsyncMasterJobsList = maps:get(async_master_jobs, MasterAns, []),
         SlaveJobsList = maps:get(slave_jobs, MasterAns, []),
@@ -471,8 +477,8 @@ execute_master_job(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
                     slave_jobs_delegated => -1 * (length(SlaveJobsList) + length(lists:flatten(SequentialSlaveJobsList))),
                     master_jobs_delegated => -1 * (length(MasterJobsList) + length(AsyncMasterJobsList)) - 1
                 },
-                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Args, _Description) -> ok end),
-                CancelCallback(MasterJobExtendedArgs, CancelDescription),
+                CancelCallback = maps:get(cancel_callback, MasterAns, fun(_Description) -> ok end),
+                CancelCallback(CancelDescription),
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, CancelDescription);
             _ ->
 %%                CancelCallback = maps:get(init_callback, MasterAns, fun(_Args) -> ok end),
@@ -600,7 +606,8 @@ run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx,
 -spec prepare_master_callback(pool(), execution_pool(), execution_pool(), callback_module(), ctx(), environment_id(),
     id()) -> master_job_starter_callback().
 prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId) ->
-    fun(Jobs) ->
+    fun(Args) ->
+        Jobs = maps:get(jobs, Args, []),
         Description = #{
             master_jobs_delegated => length(Jobs)
         },
@@ -610,6 +617,10 @@ prepare_master_callback(PoolName, MasterPool, SlavePool, CallbackModule, Extende
                 CancelDescription = #{
                     master_jobs_delegated => -1 * length(Jobs)
                 },
+                case maps:get(cancel_callback, Args, undefined) of
+                    undefined -> ok;
+                    CancelCallback -> CancelCallback(CancelDescription)
+                end,
                 {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, CancelDescription);
             _ ->
                 run_on_master_pool(PoolName, MasterPool, SlavePool, CallbackModule, ExtendedCtx, Executor, TaskId, Jobs)
