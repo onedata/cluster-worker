@@ -63,20 +63,20 @@ gen_hex(Size) ->
     hex_utils:hex(crypto:strong_rand_bytes(Size)).
 
 gen_key(Seed, Key) when is_binary(Seed) ->
-    Time1 = erlang:monotonic_time(nanosecond),
+    Time1 = time_utils:timestamp_nanos(),
     Ctx = crypto:hash_init(md5),
 
-    Time2 = erlang:monotonic_time(nanosecond),
+    Time2 = time_utils:timestamp_nanos(),
     Ctx2 = crypto:hash_update(Ctx, Seed),
 
-    Time3 = erlang:monotonic_time(nanosecond),
+    Time3 = time_utils:timestamp_nanos(),
     Ctx3 = crypto:hash_update(Ctx2, Key),
 
-    Time4 = erlang:monotonic_time(nanosecond),
+    Time4 = time_utils:timestamp_nanos(),
     Digest = crypto:hash_final(Ctx3),
 
-    Time5 = erlang:monotonic_time(nanosecond),
+    Time5 = time_utils:timestamp_nanos(),
     hex_utils:hex(Digest),
-    Time6 = erlang:monotonic_time(nanosecond),
+    Time6 = time_utils:timestamp_nanos(),
 
     [Time2-Time1, Time3-Time2, Time4-Time3, Time5-Time4, Time6-Time5].

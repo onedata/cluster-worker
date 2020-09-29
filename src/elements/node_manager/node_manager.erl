@@ -527,6 +527,16 @@ handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, Stat
     end),
     {noreply, State};
 
+handle_cast(synchronize_clock, State) ->
+    % periodical synchronization is best-effort - should not crash the node,
+    % errors should be logged within the synchronize_clock/0 callback
+    ?debug("Attempted node's clock synchronization with result: ~p", [
+        plugins:apply(node_manager_plugin, synchronize_clock, [])
+    ]),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, clock_synchronization_interval_seconds),
+    erlang:send_after(timer:seconds(Interval), self(), {timer, synchronize_clock}),
+    {noreply, State};
+
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
     NewState = update_lb_advices(State, Advices),
     {noreply, NewState};
@@ -707,7 +717,13 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
-    ?info("Successfully connected to cluster manager, starting heartbeat"),
+    ?info("Successfully connected to cluster manager"),
+    ?info("Synchronizing node's clock..."),
+    ok = plugins:apply(node_manager_plugin, synchronize_clock, []),
+    ?info("Clock synchronized successfully"),
+    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, clock_synchronization_interval_seconds),
+    erlang:send_after(timer:seconds(Interval), self(), {timer, synchronize_clock}),
+    ?info("Starting regular heartbeat to cluster manager"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
 cluster_init_step(?START_DEFAULT_WORKERS) ->

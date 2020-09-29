@@ -240,13 +240,12 @@ cberl_test_base(Config) ->
                     end, lists:seq(Num0 * BatchSize + 1 + ProcNum * Repeats * (BatchSize + 1),
                         Num0 * (BatchSize + 1) + ProcNum * Repeats * (BatchSize + 1))),
 
-                    T1 = erlang:monotonic_time(),
+                    T1 = time_utils:timestamp_micros(),
                     {ok, Ref2} = apply(cberl_nif, map_to_cberl_req(OperationType),
                         [From, Client, Connection, Requests]),
                     {ok, Response, ResponseList} = receive
                         {Ref2, R} ->
-                            Time = erlang:convert_time_unit(erlang:monotonic_time() - T1,
-                                native, micro_seconds),
+                            Time = time_utils:timestamp_micros() - T1,
                             {ok, AnsList} = R,
                             lists:foreach(fun(A) ->
                                  case A of
@@ -266,14 +265,13 @@ cberl_test_base(Config) ->
                                 {K, Cas}
                             end, ResponseList),
 
-                            T2 = erlang:monotonic_time(),
+                            T2 = time_utils:timestamp_micros(),
                             {ok, Ref3} = apply(cberl_nif, durability,
                                 [From, Client, Connection, DurableRequests, {1, -1}]),
 
                             {ok, Response2} = receive
                                 {Ref3, R2} ->
-                                    Time2 = erlang:convert_time_unit(erlang:monotonic_time() - T2,
-                                        native, micro_seconds),
+                                    Time2 = time_utils:timestamp_micros() - T2,
                                     {ok, AnsList2} = R2,
                                     lists:foreach(fun(A) ->
                                         case A of

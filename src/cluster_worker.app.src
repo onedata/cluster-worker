@@ -62,6 +62,11 @@
             %% Memory usage level above which caches will be cleared
             {node_mem_ratio_to_clear_cache, 90},
 
+            %% How ofter node's clock is synchronized with an exemplar remote clock.
+            %% The target clock may vary for each cluster, defaults to the
+            %% Cluster Manager's clock.
+            {clock_synchronization_interval_seconds, 300}, % 5 minutes
+
             %% Number of tp processes to reduce tp process idle time
             {throttling_reduce_idle_time_memory_proc_number, 2000},
             {throttling_min_idle_time_memory_proc_number, 10000},

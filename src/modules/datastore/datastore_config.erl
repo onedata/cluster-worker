@@ -80,7 +80,7 @@ get_throttled_models() ->
 get_timestamp() ->
     case erlang:function_exported(?PLUGIN, get_timestamp, 0) of
         true -> erlang:apply(?PLUGIN, get_timestamp, []);
-        false -> time_utils:system_time_seconds()
+        false -> time_utils:timestamp_seconds()
     end.
 
 %%%===================================================================
