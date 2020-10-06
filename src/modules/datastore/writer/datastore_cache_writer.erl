@@ -71,6 +71,7 @@
     application:get_env(?CLUSTER_WORKER_APP_NAME, datastore_writer_flush_delay, timer:seconds(1))).
 -define(FLUSH_INTERVAL, 100). % Time in us between consecutive flushes
 -define(FLUSH_COOLDOWN, application:get_env(?CLUSTER_WORKER_APP_NAME, flush_key_cooldown_sec, 3)).
+-define(TERMINATE_CHECK_INTERVAL, 1000).
 
 %%%===================================================================
 %%% API
@@ -151,6 +152,8 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
         remote_node = RemoteNode, remote_requests_processing_mode = RemoteRequestsProcessingMode} =
         ha_datastore_slave:qualify_and_reverse_requests(Requests, Mode),
     gen_server:reply(From, {RemoteRequestsProcessingMode, RemoteNode}),
+    % TODO 6169 - handle case when LocalRequests are [] and flush is not triggered
+    % (can requests_ref block process termination?)
     State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
     State3 = case RemoteRequestsProcessingMode of
         ?DELEGATE ->
@@ -191,24 +194,28 @@ handle_call(#datastore_flush_request{keys = Keys}, From, State = #state{
     tp_router:update_process_size(Pid, maps:size(NewKeys)),
     State2 = State#state{cached_keys_to_flush = NewKeys},
     {noreply, schedule_flush(State2)};
+% Standard termination request
 handle_call(terminate, _From, #state{
-    requests_ref = undefined,
-    cached_keys_to_flush = #{},
-    keys_to_expire = #{},
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
-    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
-    datastore_cache:inactivate(ToInactivate),
-    {stop, normal, ok, State};
-handle_call(terminate, _From, State) ->
-    {reply, working, State};
-handle_call({terminate, Requests}, _From, State) ->
-    State2 = #state{
-        keys_to_inactivate = ToInactivate,
-        disc_writer_pid = Pid} = handle_requests(Requests, false, State), % TODO - VFS-6169 Handle failover and proxy requests
-    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
-    datastore_cache:inactivate(ToInactivate),
-    {stop, normal, ok, State2};
+    case allow_terminate(State) of
+        true ->
+            catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
+            datastore_cache:inactivate(ToInactivate),
+            {stop, normal, ok, State};
+        false ->
+            {reply, working, State}
+    end;
+% Termination request during node shutdown
+handle_call({terminate, Requests}, From, State) ->
+    State2 = handle_requests(Requests, false, State), % TODO - VFS-6169 Handle failover and proxy requests
+    case handle_call(terminate, From, State2) of
+        {reply, working, State} ->
+            erlang:send_after(?TERMINATE_CHECK_INTERVAL, self(), {check_terminate, From}),
+            {noreply, State2};
+        Other ->
+            Other
+    end;
 handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_datastore_master:handle_slave_lifecycle_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
@@ -272,8 +279,8 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
             {#{}, #{}, KIF}
     end,
 
-    NewRef = case Ref of
-        CurrentRef -> undefined;
+    NewRef = case {Ref, map_size(NotFlushed)} of
+        {CurrentRef, 0} -> undefined;
         _ -> CurrentRef
     end,
 
@@ -312,6 +319,16 @@ handle_cast(Request, #state{} = State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}.
+handle_info(flush, State = #state{
+    master_pid = MasterPid,
+    requests_ref = Ref,
+    cached_keys_to_flush = CachedKeys,
+    keys_in_flush = KiF
+}) when map_size(CachedKeys) =:= 0, map_size(KiF) =:= 0 ->
+    % Some requests' handling may not change any key
+    % However, master has to be informed
+    gen_server:cast(MasterPid, {mark_disc_writer_idle, Ref}),
+    {noreply, State#state{requests_ref = undefined, flush_timer = undefined}};
 handle_info(flush, State = #state{
     disc_writer_pid = Pid,
     requests_ref = Ref,
@@ -400,6 +417,19 @@ handle_info(flush, State = #state{
     {noreply, State3};
 handle_info(inactivate, #state{} = State) ->
     {noreply, check_inactivate(State#state{inactivate_timer = undefined})};
+handle_info({check_terminate, ReplyTo} = Msg, #state{
+    keys_to_inactivate = ToInactivate,
+    disc_writer_pid = Pid} = State) ->
+    case allow_terminate(State) of
+        true ->
+            catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
+            datastore_cache:inactivate(ToInactivate),
+            gen_server:reply(ReplyTo, ok),
+            {stop, normal, State};
+        false ->
+            erlang:send_after(?TERMINATE_CHECK_INTERVAL, self(), Msg),
+            {noreply, State}
+    end;
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.
@@ -844,7 +874,15 @@ schedule_flush(State) ->
 
 %% @private
 -spec schedule_flush(state(), non_neg_integer()) -> state().
-schedule_flush(State = #state{cached_keys_to_flush = Map}, _Delay) when map_size(Map) == 0 ->
+schedule_flush(State = #state{cached_keys_to_flush = Map, requests_ref = undefined}, _Delay)
+    when map_size(Map) == 0 ->
+    % Nothing to flush and non request is waiting for flush confirmation
+    State;
+schedule_flush(State = #state{cached_keys_to_flush = Map, keys_in_flush = KiF}, _Delay)
+    when map_size(Map) == 0, map_size(KiF) =/= 0 ->
+    % There is a request waiting for flush confirmation
+    % but there is also pending flush request that will send confirmation
+    % or trigger next flush
     State;
 schedule_flush(State = #state{flush_timer = OldTimer}, Delay) ->
     case {OldTimer, Delay} of
@@ -989,3 +1027,14 @@ handle_ha_inactivate(Inactivated,
     ha_datastore_master:forget_backup(Inactivated, HAData),
     FailoverData2 = ha_datastore_slave:report_keys_flushed(MasterPid, Inactivated, FailoverData),
     State#state{ha_failover_requests_data = FailoverData2}.
+
+-spec allow_terminate(state()) -> boolean().
+allow_terminate(#state{
+    requests_ref = undefined,
+    cached_keys_to_flush = ToFlush,
+    keys_in_flush = KiF,
+    keys_to_expire = ToExpire
+}) when map_size(ToFlush) =:= 0, map_size(ToExpire) =:= 0, map_size(KiF) =:= 0 ->
+    true;
+allow_terminate(_) ->
+    false.
