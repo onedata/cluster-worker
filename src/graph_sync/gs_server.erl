@@ -34,7 +34,7 @@
 
 
 %% API
--export([handshake/4]).
+-export([handshake/5]).
 -export([report_heartbeat/1]).
 -export([cleanup_session/1, terminate_connection/1]).
 -export([updated/3, deleted/2]).
@@ -63,9 +63,9 @@ gs_logic_plugin_module() ->
 %% Returns success or error handshake response depending on the outcome.
 %% @end
 %%--------------------------------------------------------------------
--spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip()) ->
+-spec handshake(conn_ref(), translator(), gs_protocol:req_wrapper(), ip_utils:ip(), gs_protocol:cookies()) ->
     {ok, gs_session:data(), gs_protocol:resp_wrapper()} | {error, gs_protocol:resp_wrapper()}.
-handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req, PeerIp) ->
+handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = Req, PeerIp, Cookies) ->
     #gs_req_handshake{supported_versions = AuthVersions, auth = ClientAuth} = HReq,
     ServerVersions = gs_protocol:supported_versions(),
     case gs_protocol:greatest_common_version(AuthVersions, ServerVersions) of
@@ -74,7 +74,7 @@ handshake(ConnRef, Translator, #gs_req{request = #gs_req_handshake{} = HReq} = R
                 Req, ?ERROR_BAD_VERSION(ServerVersions))
             };
         {true, Version} ->
-            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth, PeerIp) of
+            case ?GS_LOGIC_PLUGIN:verify_handshake_auth(ClientAuth, PeerIp, Cookies) of
                 {error, _} = Error ->
                     {error, gs_protocol:generate_error_response(Req, Error)};
                 {ok, Auth} ->

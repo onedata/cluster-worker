@@ -82,6 +82,11 @@
 % be subject to server's implementation).
 -type client_auth() :: undefined | nobody | {token, tokens:serialized()}.
 
+% HTTP cookies optionally sent in WebSocket connection request headers (rather
+% than in the handshake payload) that can be later used to verify authorization
+% during the handshake. Dedicated for GS channels opened by Web browsers.
+-type cookies() :: [{binary(), binary()}].
+
 % Used to override the client authorization established on connection level, per
 % request. Can be used by providers to authorize a certain request with a user's
 % token, while still using the Graph Sync channel that was opened with provider's auth.
@@ -153,6 +158,8 @@ graph_update_result() | graph_delete_result().
     handshake_attributes/0,
     message_type/0,
     message_subtype/0,
+    client_auth/0,
+    cookies/0,
     auth_override/0,
     entity_type/0,
     entity_id/0,
@@ -175,8 +182,7 @@ graph_update_result() | graph_delete_result().
     graph_delete_result/0,
     graph_update_result/0,
     graph_request_result/0,
-    json_map/0,
-    client_auth/0
+    json_map/0
 ]).
 
 %% API
