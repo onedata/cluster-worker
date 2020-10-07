@@ -389,7 +389,7 @@ handle_call(?MANAGEMENT_MSG(Msg), {Caller, _Tag}, State = #state{ha_slave_data =
     {reply, Reply, handle_requests(State2#state{ha_slave_data = Data2})};
 % Call used during the test (do not use - test-only method)
 handle_call(force_terminate, _From, State = #state{cache_writer_pid = Pid}) ->
-    gen_server:call(Pid, {terminate, []}, infinity),
+    gen_server:call(Pid, force_terminate, infinity),
     {stop, normal, ok,  State};
 handle_call(Request, _From, State = #state{}) ->
     ?log_bad_request(Request),
@@ -484,6 +484,9 @@ handle_info(Info, State = #state{}) ->
 terminate(Reason, State = #state{
     requests = Requests, cache_writer_pid = Pid
 }) ->
+    % TODO VFS-6169 - Can hang when HA is enabled and node is not fully recovered
+    % (datastore_cache_writer will be waiting for #failover_request_data_processed message
+    % that can not appear because datastore_writer is responsible for proxying it)
     catch gen_server:call(Pid, {terminate, Requests}, infinity),
     tp_router:delete_process_size(self()),
     ?log_terminate(Reason, State).

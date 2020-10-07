@@ -152,8 +152,6 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
         remote_node = RemoteNode, remote_requests_processing_mode = RemoteRequestsProcessingMode} =
         ha_datastore_slave:qualify_and_reverse_requests(Requests, Mode),
     gen_server:reply(From, {RemoteRequestsProcessingMode, RemoteNode}),
-    % TODO 6169 - handle case when LocalRequests are [] and flush is not triggered
-    % (can requests_ref block process termination?)
     State2 = handle_requests(LocalRequests, false, State#state{requests_ref = Ref}),
     State3 = case RemoteRequestsProcessingMode of
         ?DELEGATE ->
@@ -165,7 +163,7 @@ handle_call(#datastore_internal_requests_batch{ref = Ref, requests = Requests, m
                     send_proxy_info(RemoteRequestsReversed, {request_delegated, ProxyPid}),
                     State2;
                 {badrpc, nodedown} ->
-                    % TODO 6169 - wrong return status in such case
+                    % TODO VFS-6169 - wrong return status in such case
                     % TODO VFS-6295 - log to dedicated logfile
                     ?debug("Proxy call to failed node ~p for requests ~p", [RemoteNode, RemoteRequestsReversed]),
                     handle_requests(RemoteRequests, true, State2);
@@ -216,6 +214,13 @@ handle_call({terminate, Requests}, From, State) ->
         Other ->
             Other
     end;
+% Call used during the test (do not use - test-only method)
+handle_call(force_terminate, _From, #state{
+    keys_to_inactivate = ToInactivate,
+    disc_writer_pid = Pid} = State) ->
+    catch gen_server:call(Pid, terminate, infinity), % catch exception - disc writer could be already terminated
+    datastore_cache:inactivate(ToInactivate),
+    {stop, normal, ok, State};
 handle_call(?SLAVE_MSG(Msg), _From, #state{ha_master_data = Data} = State) ->
     Data2 = ha_datastore_master:handle_slave_lifecycle_message(Msg, Data),
     {reply, ok, State#state{ha_master_data = Data2}};
@@ -1017,7 +1022,7 @@ handle_ha_requests(CachedKeys, CacheRequests, false, #state{process_key = Proces
     State#state{ha_master_data = HAData2};
 handle_ha_requests(CachedKeys, CacheRequests, true,
     #state{master_pid = MasterPid, ha_failover_requests_data = FailoverData} = State) ->
-    % TODO 6169 - check requests with local routing set in Ctx
+    % TODO VFS-6169 - check requests with local routing set in Ctx
     FailoverData2 = ha_datastore_slave:report_failover_request_handled(MasterPid, CachedKeys, CacheRequests, FailoverData),
     State#state{ha_failover_requests_data = FailoverData2}.
 
