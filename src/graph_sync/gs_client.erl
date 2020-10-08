@@ -43,6 +43,8 @@
 -type client_ref() :: pid().
 -export_type([push_callback/0, client_ref/0]).
 
+-type auth() :: gs_protocol:client_auth() | {with_http_cookies, gs_protocol:client_auth(), gs_protocol:cookies()}.
+
 -export([init/2, websocket_handle/3, websocket_info/3, websocket_terminate/3]).
 -export([start_link/4, start_link/5, kill/1]).
 -export([
@@ -62,7 +64,7 @@
 %% @equiv start_link(URL, Auth, SupportedVersions, PushCallback, []).
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(URL :: string() | binary(), gs_protocol:client_auth(),
+-spec start_link(URL :: string() | binary(), auth(),
     SupportedVersions :: [gs_protocol:protocol_version()], push_callback()) ->
     {ok, client_ref(), gs_protocol:handshake_resp()} | errors:error().
 start_link(URL, Auth, SupportedVersions, PushCallback) ->
@@ -77,16 +79,19 @@ start_link(URL, Auth, SupportedVersions, PushCallback) ->
 %% Allows to pass options to websocket_client:start_link.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(URL :: string() | binary(), gs_protocol:client_auth(),
-    SupportedVersions :: [gs_protocol:protocol_version()], push_callback(),
-    Opts :: list()) ->
+-spec start_link(URL :: string() | binary(), auth(),
+    SupportedVersions :: [gs_protocol:protocol_version()], push_callback(), Opts :: list()) ->
     {ok, client_ref(), gs_protocol:handshake_resp()} | errors:error().
 start_link(URL, Auth, SupportedVersions, PushCallback, Opts) when is_binary(URL) ->
     start_link(binary_to_list(URL), Auth, SupportedVersions, PushCallback, Opts);
 start_link(URL, Auth, SupportedVersions, PushCallback, Opts) ->
-    case websocket_client:start_link(URL, ?MODULE, [], Opts) of
+    {ProtocolAuth, Cookies} = case Auth of
+        {with_http_cookies, ClientAuth, HttpCookies} -> {ClientAuth, HttpCookies};
+        ClientAuth -> {ClientAuth, []}
+    end,
+    case websocket_client:start_link(URL, Cookies, ?MODULE, [], Opts) of
         {ok, Pid} ->
-            Pid ! {init, self(), SupportedVersions, Auth, PushCallback},
+            Pid ! {init, self(), SupportedVersions, ProtocolAuth, PushCallback},
             receive
                 {init_result, #gs_resp_handshake{} = HandshakeResponse} ->
                     {ok, Pid, HandshakeResponse};
