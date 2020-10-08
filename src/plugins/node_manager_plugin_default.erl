@@ -29,7 +29,6 @@
 -export([listeners/0]).
 -export([handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([clear_memory/1]).
--export([synchronize_clock/0]).
 -export([modules_with_exometer/0, exometer_reporters/0]).
 -export([master_node_down/1, master_node_up/1, master_node_ready/1]).
 
@@ -244,18 +243,6 @@ code_change(_OldVsn, State, _Extra) ->
 -spec clear_memory(HighMemUse :: boolean()) -> ok.
 clear_memory(_HighMemUse) ->
     ok.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Synchronizes local node's clock with an exemplar remote clock. The target
-%% clock may vary for each cluster, defaults to the Cluster Manager's clock.
-%% @end
-%%--------------------------------------------------------------------
--spec synchronize_clock() -> ok | ignored | error.
-synchronize_clock() ->
-    time_utils:synchronize_with_remote_clock(fun() ->
-        gen_server:call({global, ?CLUSTER_MANAGER}, get_current_time)
-    end).
 
 %%--------------------------------------------------------------------
 %% @doc

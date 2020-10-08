@@ -49,6 +49,7 @@
 -export([init_report/0, init_counters/0]).
 -export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
 -export([init_service_healthcheck/3]).
+-export([force_restart_service_healthcheck/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -292,12 +293,17 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
+
 -spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
     non_neg_integer()) -> ok.
 init_service_healthcheck(ServiceName, MasterNodeId, Interval) ->
-    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
-        {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}),
-    ok.
+    gen_server2:cast(?NODE_MANAGER_NAME, {schedule_service_healthcheck, ServiceName, MasterNodeId, Interval}).
+
+
+-spec force_restart_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
+    non_neg_integer()) -> ok.
+force_restart_service_healthcheck(ServiceName, MasterNodeId, InitialInterval) ->
+    gen_server2:cast(?NODE_MANAGER_NAME, {service_healthcheck, ServiceName, MasterNodeId, InitialInterval}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -512,29 +518,22 @@ handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
 handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, State) ->
-    % run the healthcheck asynchronously to allow calling the node_manager from
-    % within the healthcheck procedure
+    % run the healthcheck asynchronously to allow calling the node_manager from within the healthcheck procedure
     NodeManager = self(),
     spawn(fun() ->
         case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
             {ok, NewInterval} ->
-                erlang:send_after(NewInterval, NodeManager,
-                    {timer, {service_healthcheck, ServiceName, MasterNodeId, NewInterval}}
-                );
+                gen_server2:call(NodeManager, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval});
             ignore ->
                 ok
         end
     end),
     {noreply, State};
 
-handle_cast(synchronize_clock, State) ->
-    % periodical synchronization is best-effort - should not crash the node,
-    % errors should be logged within the synchronize_clock/0 callback
-    ?debug("Attempted node's clock synchronization with result: ~p", [
-        plugins:apply(node_manager_plugin, synchronize_clock, [])
-    ]),
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, clock_synchronization_interval_seconds),
-    erlang:send_after(timer:seconds(Interval), self(), {timer, synchronize_clock}),
+handle_cast({schedule_service_healthcheck, ServiceName, MasterNodeId, Interval}, State) ->
+    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+        {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}
+    ),
     {noreply, State};
 
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
@@ -718,11 +717,6 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
     ?info("Successfully connected to cluster manager"),
-    ?info("Synchronizing node's clock..."),
-    ok = plugins:apply(node_manager_plugin, synchronize_clock, []),
-    ?info("Clock synchronized successfully"),
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, clock_synchronization_interval_seconds),
-    erlang:send_after(timer:seconds(Interval), self(), {timer, synchronize_clock}),
     ?info("Starting regular heartbeat to cluster manager"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
@@ -968,6 +962,7 @@ init_workers(Workers) ->
             end
     end, Workers),
     ok.
+
 
 %%--------------------------------------------------------------------
 %% @private
