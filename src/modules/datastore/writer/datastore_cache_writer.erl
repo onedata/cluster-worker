@@ -209,7 +209,7 @@ handle_call({terminate, Requests}, From, State) ->
     State2 = handle_requests(Requests, false, State), % TODO - VFS-6169 Handle failover and proxy requests
     case handle_call(terminate, From, State2) of
         {reply, working, State} ->
-            erlang:send_after(?TERMINATE_CHECK_INTERVAL, self(), {check_terminate, From}),
+            schedule_terminate_check(From),
             {noreply, State2};
         Other ->
             Other
@@ -422,7 +422,7 @@ handle_info(flush, State = #state{
     {noreply, State3};
 handle_info(inactivate, #state{} = State) ->
     {noreply, check_inactivate(State#state{inactivate_timer = undefined})};
-handle_info({check_terminate, ReplyTo} = Msg, #state{
+handle_info({check_terminate, ReplyTo}, #state{
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
     case allow_terminate(State) of
@@ -432,7 +432,7 @@ handle_info({check_terminate, ReplyTo} = Msg, #state{
             gen_server:reply(ReplyTo, ok),
             {stop, normal, State};
         false ->
-            erlang:send_after(?TERMINATE_CHECK_INTERVAL, self(), Msg),
+            schedule_terminate_check(ReplyTo),
             {noreply, State}
     end;
 handle_info(Info, #state{} = State) ->
@@ -881,7 +881,7 @@ schedule_flush(State) ->
 -spec schedule_flush(state(), non_neg_integer()) -> state().
 schedule_flush(State = #state{cached_keys_to_flush = Map, requests_ref = undefined}, _Delay)
     when map_size(Map) == 0 ->
-    % Nothing to flush and non request is waiting for flush confirmation
+    % Nothing to flush and no requests are waiting for flush confirmation
     State;
 schedule_flush(State = #state{cached_keys_to_flush = Map, keys_in_flush = KiF}, _Delay)
     when map_size(Map) == 0, map_size(KiF) =/= 0 ->
@@ -1043,3 +1043,7 @@ allow_terminate(#state{
     true;
 allow_terminate(_) ->
     false.
+
+-spec schedule_terminate_check(ReplyTo :: {pid(), Tag :: term()}) -> TimerRef :: reference().
+schedule_terminate_check(ReplyTo) ->
+    erlang:send_after(?TERMINATE_CHECK_INTERVAL, self(), {check_terminate, ReplyTo}).
