@@ -23,7 +23,8 @@
 
 -record(pre_handshake_state, {
     peer_ip :: ip_utils:ip(),
-    translator :: module()
+    cookies :: gs_protocol:cookies(),
+    translator :: gs_server:translator()
 }).
 
 -type state() :: #pre_handshake_state{} | #gs_session{}.
@@ -61,8 +62,10 @@
     {ok | cowboy_websocket, cowboy_req:req(), #pre_handshake_state{}}.
 init(Req, [Translator]) ->
     {PeerIp, _} = cowboy_req:peer(Req),
+    Cookies = cowboy_req:parse_cookies(Req),
     {cowboy_websocket, Req, #pre_handshake_state{
         peer_ip = PeerIp,
+        cookies = Cookies,
         translator = Translator
     }}.
 
@@ -91,14 +94,16 @@ websocket_init(State) ->
     InFrame :: {text | binary | ping | pong, binary()},
     State :: state(),
     OutFrame :: cow_ws:frame().
-websocket_handle({text, Data}, #pre_handshake_state{peer_ip = PeerIp} = State) ->
+websocket_handle({text, Data}, #pre_handshake_state{} = State) ->
     #pre_handshake_state{
+        peer_ip = PeerIp,
+        cookies = Cookies,
         translator = Translator
     } = State,
     % If there was no handshake yet, expect only handshake messages
     {Response, NewState} = case decode_body(?BASIC_PROTOCOL, Data) of
         {ok, #gs_req{request = #gs_req_handshake{}} = Request} ->
-            case gs_server:handshake(self(), Translator, Request, PeerIp) of
+            case gs_server:handshake(self(), Translator, Request, PeerIp, Cookies) of
                 {ok, SessionData, HandshakeResp} ->
                     {HandshakeResp, SessionData};
                 {error, ErrMsg} ->

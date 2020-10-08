@@ -92,17 +92,32 @@ handshake_test_base(Config, ProtoVersion) ->
     % Try to connect with user 2 token
     Client3 = spawn_client(Config, ProtoVersion, {token, ?USER_2_TOKEN}, ?SUB(user, ?USER_2)),
 
+    % Try to connect with user 1 token requiring session cookies...
+    Client4 = spawn_client(
+        Config, ProtoVersion, {with_http_cookies, {token, ?USER_1_TOKEN_REQUIRING_COOKIES}, ?DUMMY_COOKIES},
+        ?SUB(user, ?USER_1)
+    ),
+    % ... it should not succeed if there are no cookies provided
+    spawn_client(
+        Config, ProtoVersion, {with_http_cookies, {token, ?USER_1_TOKEN_REQUIRING_COOKIES}, []},
+        ?ERROR_UNAUTHORIZED
+    ),
+    spawn_client(
+        Config, ProtoVersion, {token, ?USER_1_TOKEN_REQUIRING_COOKIES},
+        ?ERROR_UNAUTHORIZED
+    ),
+
     % Try to connect with bad token
     spawn_client(Config, ProtoVersion, {token, <<"bkkwksdf">>}, ?ERROR_UNAUTHORIZED),
 
     % Try to connect with provider token
-    Client4 = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
+    Client5 = spawn_client(Config, ProtoVersion, {token, ?PROVIDER_1_TOKEN}, ?SUB(?ONEPROVIDER, ?PROVIDER_1)),
 
     % Try to connect with bad protocol version
     SuppVersions = gs_protocol:supported_versions(),
     spawn_client(Config, [lists:max(SuppVersions) + 1], undefined, ?ERROR_BAD_VERSION(SuppVersions)),
 
-    disconnect_client([Client1, Client2, Client3, Client4]),
+    disconnect_client([Client1, Client2, Client3, Client4, Client5]),
 
     ok.
 
@@ -1080,7 +1095,7 @@ gs_server_session_clearing_test_api_level(Config) ->
         identity = ?SUB(user, ?USER_1)
     }}} = ?assertMatch(
         {ok, _, _},
-        rpc:call(Node, gs_server, handshake, [ConnRef, Translator, HandshakeReq, ?DUMMY_IP])
+        rpc:call(Node, gs_server, handshake, [ConnRef, Translator, HandshakeReq, ?DUMMY_IP, _Cookies = []])
     ),
 
     GRI1 = #gri{type = od_user, id = ?USER_1, aspect = instance},

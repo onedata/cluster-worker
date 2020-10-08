@@ -20,7 +20,7 @@
 %% If error is returned, the handshake is denied.
 %% @end
 %%--------------------------------------------------------------------
--callback verify_handshake_auth(gs_protocol:client_auth(), ip_utils:ip()) ->
+-callback verify_handshake_auth(gs_protocol:client_auth(), ip_utils:ip(), gs_protocol:cookies()) ->
     {ok, aai:auth()} | errors:error().
 
 

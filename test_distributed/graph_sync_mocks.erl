@@ -26,7 +26,7 @@
     mock_max_scope_towards_handle_service/3
 ]).
 -export([
-    verify_handshake_auth/2,
+    verify_handshake_auth/3,
     client_connected/2,
     client_heartbeat/2,
     client_disconnected/2,
@@ -49,7 +49,7 @@ mock_callbacks(Config) ->
     Nodes = ?config(cluster_worker_nodes, Config),
 
     ok = test_utils:mock_new(Nodes, ?GS_LOGIC_PLUGIN, [non_strict]),
-    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/2),
+    ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, verify_handshake_auth, fun verify_handshake_auth/3),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_connected, fun client_connected/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_heartbeat, fun client_heartbeat/2),
     ok = test_utils:mock_expect(Nodes, ?GS_LOGIC_PLUGIN, client_disconnected, fun client_disconnected/2),
@@ -80,15 +80,17 @@ unmock_callbacks(Config) ->
     test_utils:mock_unload([node()], ?GS_LOGIC_PLUGIN).
 
 
-verify_handshake_auth({token, ?USER_1_TOKEN}, _) ->
+verify_handshake_auth({token, ?USER_1_TOKEN}, _, _) ->
     {ok, ?USER(?USER_1)};
-verify_handshake_auth({token, ?USER_2_TOKEN}, _) ->
+verify_handshake_auth({token, ?USER_2_TOKEN}, _, _) ->
     {ok, ?USER(?USER_2)};
-verify_handshake_auth({token, ?PROVIDER_1_TOKEN}, _) ->
+verify_handshake_auth({token, ?PROVIDER_1_TOKEN}, _, _) ->
     {ok, ?PROVIDER(?PROVIDER_1)};
-verify_handshake_auth(undefined, _) ->
+verify_handshake_auth({token, ?USER_1_TOKEN_REQUIRING_COOKIES}, _, ?DUMMY_COOKIES) ->
+    {ok, ?USER(?USER_1)};
+verify_handshake_auth(undefined, _, _) ->
     {ok, ?NOBODY};
-verify_handshake_auth(_, _) ->
+verify_handshake_auth(_, _, _) ->
     ?ERROR_UNAUTHORIZED.
 
 
