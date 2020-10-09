@@ -443,7 +443,8 @@ saves_should_propagate_to_backup_node_after_config_change(Config, LocalRouting) 
         assert_not_in_memory(KeyNode2, Model, Key),
 
         set_ha(Config, change_config, [2, call]),
-        assert_in_memory(KeyNode2, Model, Key)
+        assert_in_memory(KeyNode2, Model, Key),
+        terminate_processes(Config)
     end, [ets_only_model, mnesia_only_model]).
 
 calls_should_change_node(Config, Method) ->
@@ -468,7 +469,8 @@ calls_should_change_node(Config, Method) ->
         assert_on_disc(TestWorker, Model, Key, true),
 
         mock_node_up(TestWorker, KeyNode2, KeyNode),
-        set_ha(Config, change_config, [1, cast])
+        set_ha(Config, change_config, [1, cast]),
+        terminate_processes(Config)
     end, ?TEST_MODELS).
 
 saves_should_use_recovered_node(Config, Method) ->
@@ -486,7 +488,8 @@ saves_should_use_recovered_node(Config, Method) ->
         set_ha(KeyNode2, set_standby_mode_and_broadcast_master_up_message, []),
         ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, save, [Doc2])),
         assert_in_memory(KeyNode, Model, Key),
-        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, report_node_recovery, [KeyNode]))
+        ?assertEqual(ok, rpc:call(TestWorker, consistent_hashing, report_node_recovery, [KeyNode])),
+        terminate_processes(Config)
     end, ?TEST_MODELS).
 
 saves_should_change_node_dynamic(Config, Method) ->
@@ -517,7 +520,8 @@ saves_should_change_node_dynamic(Config, Method) ->
 
         set_ha(KeyNode2, set_failover_mode_and_broadcast_master_down_message, []),
         assert_on_disc(TestWorker, Model, Key),
-        set_ha(KeyNode2, set_standby_mode_and_broadcast_master_up_message, [])
+        set_ha(KeyNode2, set_standby_mode_and_broadcast_master_up_message, []),
+        terminate_processes(Config)
     end, ?TEST_MODELS -- [disc_only_model]).
 
 node_transition_test(Config, Method, SimulateSlowUpdate, DelayRingRepair) ->
