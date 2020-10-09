@@ -193,6 +193,10 @@ handle_call(#datastore_flush_request{keys = Keys}, From, State = #state{
     State2 = State#state{cached_keys_to_flush = NewKeys},
     {noreply, schedule_flush(State2)};
 % Standard termination request
+% If datastore_cache_writer cannot terminate instantly, it replies 'working` and will not terminate.
+% Datastore_writer will try again later.
+% The reason of such behaviour is that new requests can appear anytime so
+% datastore_writer should not be blocked waiting for datastore_cache_writer termination.
 handle_call(terminate, _From, #state{
     keys_to_inactivate = ToInactivate,
     disc_writer_pid = Pid} = State) ->
@@ -205,6 +209,10 @@ handle_call(terminate, _From, #state{
             {reply, working, State}
     end;
 % Termination request during node shutdown
+% If datastore_cache_writer cannot terminate instantly, it starts procedure that leads to termination.
+% Datastore_writer will be answered when datastore_cache_writer is ready to terminate.
+% The reason of such behaviour is that new requests will not appear (cluster is terminating) and
+% datastore_writer should be blocked to prevent node termination before all documents are flushed.
 handle_call({terminate, Requests}, From, State) ->
     State2 = handle_requests(Requests, false, State), % TODO - VFS-6169 Handle failover and proxy requests
     case handle_call(terminate, From, State2) of
