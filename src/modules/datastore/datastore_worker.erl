@@ -15,6 +15,7 @@
 
 -behaviour(worker_plugin_behaviour).
 
+-include("global_definitions.hrl").
 -include("modules/datastore/datastore.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("exometer_utils.hrl").
@@ -26,7 +27,7 @@
 %% API
 -export([supervisor_flags/0, supervisor_children_spec/0]).
 -export([init_counters/0, init_report/0]).
--export([check_db_connection/0]).
+-export([check_db_connection/0, get_application_closing_status/0]).
 
 -define(EXOMETER_COUNTERS,
     [save, update, create, create_or_update, get, delete, exists, add_links, check_and_add_links,
@@ -36,6 +37,9 @@
 
 -define(EXOMETER_NAME(Param), ?exometer_name(datastore, Param)).
 -define(SAVE_CHECK_INTERVAL, timer:seconds(5)).
+-define(APPLICATION_CLOSING_STATUS_ENV, application_closing_status).
+
+-type closing_status() :: last_closing_procedure_succeded | last_closing_procedure_failed | undefined.
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -80,6 +84,9 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
+    wait_for_database_flush(),
+    ?info("All regural documents flushed. Saving information about application closing"),
+    check_db_connection_loop({write, ?TEST_DOC_INIT_VALUE}, "Waiting to save information about application closing"),
     wait_for_database_flush().
 
 %%%===================================================================
@@ -154,8 +161,13 @@ supervisor_children_spec() ->
 -spec check_db_connection() -> ok.
 check_db_connection() ->
     ?info("Waiting for database readiness..."),
-    check_db_connection_loop(),
+    check_db_connection_loop(read, "Database not ready yet..."),
+    check_db_connection_loop({write, ?TEST_DOC_INIT_VALUE}, "Database not ready yet..."),
     ?info("Database ready").
+
+-spec get_application_closing_status() -> closing_status().
+get_application_closing_status() ->
+    application:get_env(?CLUSTER_WORKER_APP_NAME, ?APPLICATION_CLOSING_STATUS_ENV, undefined).
 
 %%%===================================================================
 %%% Internal functions
@@ -187,23 +199,49 @@ wait_for_database_flush(Size) ->
     timer:sleep(5000),
     wait_for_database_flush(couchbase_config:get_flush_queue_size()).
 
--spec check_db_connection_loop() -> ok.
-check_db_connection_loop() ->
+-spec check_db_connection_loop(read | {write, binary()}, string()) -> ok.
+check_db_connection_loop(TestOperation, InfoLog) ->
     CheckAns = try
-        Ctx = datastore_model_default:get_default_disk_ctx(),
-        TestDoc = #document{key = ?TEST_DOC_KEY},
-        couchbase_driver:save(Ctx#{no_seq => true}, ?TEST_DOC_KEY, TestDoc)
+        case TestOperation of
+            read -> read_application_closing_status();
+            {write, Value} -> perform_test_db_write(Value)
+        end
     catch
         E1:E2 ->
             {E1, E2}
     end,
 
     case CheckAns of
+        ok ->
+            ok;
         {ok, _, _} ->
             ok;
         Error ->
-            ?debug("Test db save failed with error ~p", [Error]),
-            ?info("Database not ready yet..."),
+            ?debug("Test db ~p failed with error ~p", [TestOperation, Error]),
+            ?info(InfoLog),
             timer:sleep(?SAVE_CHECK_INTERVAL),
-            check_db_connection_loop()
+            check_db_connection_loop(TestOperation, InfoLog)
     end.
+
+-spec read_application_closing_status() -> ok | {error, term()}.
+read_application_closing_status() ->
+    Ctx = datastore_model_default:get_default_disk_ctx(),
+    case couchbase_driver:get(Ctx, ?TEST_DOC_KEY) of
+        {ok, _, ?TEST_DOC_INIT_VALUE} ->
+            application:set_env(?CLUSTER_WORKER_APP_NAME,
+                ?APPLICATION_CLOSING_STATUS_ENV, last_closing_procedure_failed);
+        {ok, _, ?TEST_DOC_FINAL_VALUE} ->
+            application:set_env(?CLUSTER_WORKER_APP_NAME, ?
+            APPLICATION_CLOSING_STATUS_ENV, last_closing_procedure_succeded);
+        {error, not_found} ->
+            ok;
+        Error ->
+            Error
+    end.
+
+-spec perform_test_db_write(binary()) -> {ok, cberl:cas(), couchbase_driver:value()} | {error, term()}.
+perform_test_db_write(Value) ->
+    Key = ?TEST_DOC_KEY,
+    Ctx = datastore_model_default:get_default_disk_ctx(),
+    TestDoc = #document{key = Key, value = Value},
+    couchbase_driver:save(Ctx#{no_seq => true}, Key, TestDoc).

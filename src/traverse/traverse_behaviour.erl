@@ -13,8 +13,8 @@
 -module(traverse_behaviour).
 -author("Michal Wrzeszcz").
 
--optional_callbacks([task_started/2, task_finished/2, task_canceled/2,
-    on_cancel_init/2, get_sync_info/1, get_timestamp/0, to_string/1]).
+-optional_callbacks([task_started/2, task_finished/2, task_canceled/2, on_cancel_init/2,
+    task_restart_after_node_crash/2, get_sync_info/1, get_timestamp/0, to_string/1]).
 
 %%%===================================================================
 %%% Traverse API
@@ -88,6 +88,14 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback on_cancel_init(traverse:id(), traverse:pool()) -> ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Is executed after node crash to decide if task should be restarted or cancelled.
+%% @end
+%%--------------------------------------------------------------------
+-callback task_restart_after_node_crash(traverse:id(), traverse:pool()) ->
+    traverse:action_on_restart_after_node_crash().
 
 %%%===================================================================
 %%% Optional job sync and queuing API

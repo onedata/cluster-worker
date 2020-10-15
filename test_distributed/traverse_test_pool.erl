@@ -18,9 +18,11 @@
 -include("datastore_test_utils.hrl").
 
 %% Pool callbacks
--export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1]).
+-export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1,
+    task_restart_after_node_crash/2]).
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2, check_schedulers_after_test/3]).
+-export([delete_ongoing_jobs/1]).
 
 -define(POOL, <<"traverse_test_pool">>).
 
@@ -97,8 +99,11 @@ get_job(ID) ->
     Jobs = lists:foldl(fun(Node, Acc) ->
         Acc ++ get_env(Node, test_job)  ++ get_env(Node, ongoing_job)
     end, [], consistent_hashing:get_all_nodes()),
-    {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, undefined}),
+    {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, <<>>}),
     {ok, Job, ?POOL, TaskID}.
+
+task_restart_after_node_crash(_, _) ->
+    cancel_task.
 
 %%%===================================================================
 %%% Helper functions
@@ -153,6 +158,10 @@ check_schedulers_after_test(Worker, AllWorkers, Pool) ->
     end,
     ExpectedValues = lists:map(fun(_) -> 0 end, AllWorkers),
     ?assertEqual({0, ExpectedValues}, TestFun(), 10).
+
+delete_ongoing_jobs(Node) ->
+    rpc:call(Node, application, set_env, [?CLUSTER_WORKER_APP_NAME, ongoing_job, []]),
+    ok.
 
 %%%===================================================================
 %%% Internal functions

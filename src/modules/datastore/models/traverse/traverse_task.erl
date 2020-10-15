@@ -18,7 +18,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
--export([create/11, start/5, schedule_for_local_execution/3, finish/4, cancel/5, on_task_change/2,
+-export([create/11, start/5, schedule_for_local_execution/3, finish/5, cancel/5, on_task_change/2,
     on_remote_change/4, delete_ended/2]).
 
 %%% Setters and getters API
@@ -172,13 +172,13 @@ schedule_for_local_execution(Pool, TaskId, #document{value = #traverse_task{
     ok = traverse_tasks_scheduler:register_group(Pool, GroupId).
 
 
--spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id()) -> ok | {error, term()}.
-finish(ExtendedCtx, Pool, CallbackModule, TaskId) ->
+-spec finish(ctx(), traverse:pool(), traverse:callback_module(), traverse:id(), boolean()) -> ok | {error, term()}.
+finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel) ->
     {ok, Timestamp} = get_timestamp(CallbackModule),
     Diff = fun
-        (#traverse_task{status = ongoing, canceled = false} = Task) ->
+        (#traverse_task{status = ongoing, canceled = false} = Task) when Cancel =:= false ->
             {ok, Task#traverse_task{status = finished, finish_time = Timestamp}};
-        (#traverse_task{status = ongoing, canceled = true} = Task) ->
+        (#traverse_task{status = ongoing} = Task) ->
             {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
         (#traverse_task{status = canceling, canceled = true} = Task) ->
             {ok, Task#traverse_task{status = canceled, finish_time = Timestamp}};
@@ -449,16 +449,19 @@ is_enqueued(#document{value = #traverse_task{
 }}) ->
     Enqueued and not Canceled.
 
--spec get_execution_info(doc()) -> {ok, traverse:callback_module(), traverse:environment_id(), traverse:job_id()}.
+-spec get_execution_info(doc()) -> {ok, traverse:callback_module(), traverse:environment_id(),
+    traverse:job_id(), node(), traverse:timestamp()}.
 get_execution_info(#document{value = #traverse_task{
     callback_module = CallbackModule,
     executor = Executor,
-    main_job_id = MainJobId
+    main_job_id = MainJobId,
+    node = Node,
+    start_time = StartTimestamp
 }}) ->
-    {ok, CallbackModule, Executor, MainJobId}.
+    {ok, CallbackModule, Executor, MainJobId, Node, StartTimestamp}.
 
 -spec get_execution_info(traverse:pool(), traverse:id()) -> {ok, traverse:callback_module(),
-    traverse:environment_id(), traverse:job_id()} | {error, term()}.
+    traverse:environment_id(), traverse:job_id(), node()} | {error, term()}.
 get_execution_info(Pool, TaskId) ->
     case datastore_model:get(?CTX, ?DOC_ID(Pool, TaskId)) of
         {ok, Doc} ->
@@ -589,7 +592,7 @@ decode_description(Term) ->
 get_timestamp(CallbackModule) ->
     case erlang:function_exported(CallbackModule, get_timestamp, 0) of
         true -> CallbackModule:get_timestamp();
-        _ -> {ok, time_utils:timestamp_millis()}
+        _ -> {ok, time_utils:timestamp_seconds()}
     end.
 
 -spec decode_id(datastore:key()) -> {traverse:pool(), traverse:id()}.

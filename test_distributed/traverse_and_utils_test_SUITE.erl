@@ -29,9 +29,16 @@
     traverse_loadbalancingt_test/1,
     traverse_loadbalancingt_mixed_ids_test/1,
     traverse_restart_test/1,
+    traverse_restart_with_ongoing_jobs_error_test/1,
+    traverse_restart_with_task_links_error_test/1,
+    traverse_restart_with_job_links_error_test/1,
+    traverse_restart_after_node_error_test/1,
     traverse_cancel_test/1,
     traverse_multienvironment_test/1
 ]).
+
+% For RPC
+-export([delete_task_links/0, delete_job_links/0]).
 
 all() ->
     ?ALL([
@@ -44,6 +51,10 @@ all() ->
         traverse_loadbalancingt_test,
         traverse_loadbalancingt_mixed_ids_test,
         traverse_restart_test,
+        traverse_restart_with_ongoing_jobs_error_test,
+        traverse_restart_with_task_links_error_test,
+        traverse_restart_with_job_links_error_test,
+        traverse_restart_after_node_error_test,
         traverse_cancel_test,
         traverse_multienvironment_test
     ]).
@@ -135,11 +146,11 @@ sequential_traverse_test(Config) ->
 traverse_multitask_concurrent_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_multitask_concurrent_test1">>, {self(), 1, 1}])),
+        [?POOL, <<"1traverse_multitask_concurrent_test">>, {self(), 1, 1}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_multitask_concurrent_test2">>, {self(), 1, 2}])),
+        [?POOL, <<"2traverse_multitask_concurrent_test">>, {self(), 1, 2}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_multitask_concurrent_test3">>, {self(), 1, 3}])),
+        [?POOL, <<"3traverse_multitask_concurrent_test">>, {self(), 1, 3}])),
 
     {Expected0, Description} = traverse_test_pool:get_expected(),
     Expected = Expected0 ++ Expected0 ++ Expected0,
@@ -147,26 +158,26 @@ traverse_multitask_concurrent_test(Config) ->
     ?assertEqual(lists:sort(Expected), lists:sort(Ans)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multitask_concurrent_test1">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"1traverse_multitask_concurrent_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multitask_concurrent_test2">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"2traverse_multitask_concurrent_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multitask_concurrent_test3">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"3traverse_multitask_concurrent_test">>]), 2),
 
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_multitask_sequential_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_multitask_sequential_test1">>, {self(), 1, 1}])),
+        [?POOL, <<"1traverse_multitask_sequential_test">>, {self(), 1, 1}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_multitask_sequential_test2">>, {self(), 1, 2}])),
+        [?POOL, <<"2traverse_multitask_sequential_test">>, {self(), 1, 2}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_multitask_sequential_test3">>, {self(), 1, 3}])),
+        [?POOL, <<"3traverse_multitask_sequential_test">>, {self(), 1, 3}])),
 
-    ?assertMatch({ok, [<<"traverse_multitask_sequential_test1">>], _},
+    ?assertMatch({ok, [<<"1traverse_multitask_sequential_test">>], _},
         rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing])),
-    ?assertMatch({ok, [<<"traverse_multitask_sequential_test2">>, <<"traverse_multitask_sequential_test3">>], _},
+    ?assertMatch({ok, [<<"2traverse_multitask_sequential_test">>, <<"3traverse_multitask_sequential_test">>], _},
         rpc:call(Worker, traverse_task_list, list, [?POOL, scheduled])),
 
     {Expected, Description} = traverse_test_pool:get_expected(),
@@ -181,16 +192,16 @@ traverse_multitask_sequential_test(Config) ->
     ?assertEqual(Expected, lists:sort(Ans3)),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, enqueued = false, status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multitask_sequential_test1">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"1traverse_multitask_sequential_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, enqueued = false, status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multitask_sequential_test2">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"2traverse_multitask_sequential_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, enqueued = false, status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_multitask_sequential_test3">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"3traverse_multitask_sequential_test">>]), 2),
 
     ?assertMatch({ok, [], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing]), 1),
     ?assertMatch({ok, [], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, scheduled])),
-    check_ended(Worker, [<<"traverse_multitask_sequential_test1">>, <<"traverse_multitask_sequential_test2">>,
-        <<"traverse_multitask_sequential_test3">>]),
+    check_ended(Worker, [<<"1traverse_multitask_sequential_test">>, <<"2traverse_multitask_sequential_test">>,
+        <<"3traverse_multitask_sequential_test">>]),
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_loadbalancingt_test(Config) ->
@@ -200,8 +211,8 @@ traverse_loadbalancingt_test(Config) ->
     traverse_loadbalancingt_base(Config, Tasks, Check).
 
 traverse_loadbalancingt_mixed_ids_test(Config) ->
-    Tasks = [{<<"tlmid9">>, <<"tlmid1">>, 1}, {<<"tlmid2">>, <<"tlmid2">>, 2}, {<<"tlmid3">>, <<"tlmid2">>, 3},
-        {<<"tlmid8">>, <<"tlmid2">>, 4}, {<<"tlmid5">>, <<"tlmid3">>, 5}, {<<"tlmid6">>, <<"tlmid3">>, 6}],
+    Tasks = [{<<"9tlmid">>, <<"1tlmid">>, 1}, {<<"2tlmid">>, <<"2tlmid">>, 2}, {<<"3tlmid">>, <<"2tlmid">>, 3},
+        {<<"8tlmid">>, <<"2tlmid">>, 4}, {<<"5tlmid">>, <<"3tlmid">>, 5}, {<<"6tlmid">>, <<"3tlmid">>, 6}],
     Check = [{1,1}, {2,2}, {3,5}, {4,3}, {5,6}, {6,4}],
     traverse_loadbalancingt_base(Config, Tasks, Check).
 
@@ -234,13 +245,65 @@ traverse_loadbalancingt_base(Config, Tasks, Check) ->
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_restart_test(Config) ->
+    traverse_restart_test_base(Config, <<"traverse_restart_test">>, fun() -> ok end, finished).
+
+traverse_restart_with_ongoing_jobs_error_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    DeleteMetadataFun = fun() ->
+        ?assertEqual(ok, traverse_test_pool:delete_ongoing_jobs(Worker))
+    end,
+    traverse_restart_test_base(Config, <<"traverse_restart_with_ongoing_jobs_error_test">>, DeleteMetadataFun, canceled).
+
+traverse_restart_with_task_links_error_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    DeleteMetadataFun = fun() ->
+        ?assertEqual(ok, rpc:call(Worker, ?MODULE, delete_task_links, []))
+    end,
+    traverse_restart_test_base(Config, <<"traverse_restart_with_task_links_error_test">>, DeleteMetadataFun, finished).
+
+delete_task_links() ->
+    Ctx = traverse_task:get_ctx(),
+    Forest = traverse_task_list:forest_key(?POOL, ongoing),
+
+    {ok, Tasks} = datastore_model:fold_links(Ctx, Forest, all, fun
+        (#link{name = Name, tree_id = TreeId}, Acc) -> {ok, [{Name, TreeId} | Acc]}
+    end, [], #{}),
+
+    lists:foreach(fun({TaskId, Tree}) ->
+        [ok] = datastore_model:delete_links(Ctx,
+            Forest, Tree, [TaskId])
+    end, Tasks).
+
+traverse_restart_with_job_links_error_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    DeleteMetadataFun = fun() ->
+        ?assertEqual(ok, rpc:call(Worker, ?MODULE, delete_job_links, []))
+    end,
+    traverse_restart_test_base(Config, <<"traverse_restart_with_job_links_error_test">>, DeleteMetadataFun, canceled).
+
+delete_job_links() ->
+    {ok, JobIds} = traverse_task_list:list_node_jobs(?POOL, traverse_test_pool, node()),
+    lists:foreach(fun(JobId) ->
+        ok = traverse_task_list:delete_job_link(?POOL, traverse_test_pool, node(), JobId)
+    end, JobIds).
+
+traverse_restart_after_node_error_test(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    DeleteMetadataFun = fun() ->
+        ?assertEqual(ok, rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME,
+            application_closing_status, last_closing_procedure_failed]))
+    end,
+    traverse_restart_test_base(Config, <<"traverse_restart_after_node_error_test">>, DeleteMetadataFun, canceled).
+
+traverse_restart_test_base(Config, TaskNameBase, BeforeRestartAction, FirstJobStatus) ->
+    Task1 = <<"1", TaskNameBase/binary>>,
+    Task2 = <<"2", TaskNameBase/binary>>,
+    Task3 = <<"3", TaskNameBase/binary>>,
+
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test2">>, {self(), 1, 2}])),
-    ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test3">>, {self(), 1, 3}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task1, {self(), 1, 100}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task2, {self(), 1, 2}])),
+    ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, Task3, {self(), 1, 3}])),
 
     RecAns = receive 
         {stop, _} ->
@@ -251,6 +314,8 @@ traverse_restart_test(Config) ->
            timeout
     end,
     ?assertEqual(ok, RecAns),
+
+    BeforeRestartAction(),
 
     ?assertMatch({ok, _}, rpc:call(Worker, worker_pool, start_sup_pool, [?MASTER_POOL_NAME,
         [{workers, 3}, {queue_type, lifo}]])),
@@ -266,36 +331,40 @@ traverse_restart_test(Config) ->
     Ans1 = lists:sublist(Ans, 1, AnsLen - 2*ExpLen),
     Ans2 = lists:sublist(Ans, AnsLen - 2*ExpLen  + 1, ExpLen),
     Ans3 = lists:sublist(Ans, AnsLen - ExpLen + 1, ExpLen),
-    ?assertEqual(Expected, lists:sort(Ans2)),
-    ?assertEqual(Expected, lists:sort(Ans3)),
-    ?assertEqual(length(Ans1 -- Expected), length(Ans1) - length(Expected)),
+    ?assertEqual(Expected, lists:sort(Ans2)), % check answers form task 2
+    ?assertEqual(Expected, lists:sort(Ans3)), % check answers form task 3
+    case FirstJobStatus of
+        % check answers form task 1
+        finished -> ?assertEqual(length(Ans1 -- Expected), length(Ans1) - length(Expected));
+        canceled -> ok % first job was canceled so we cannot perform check for it
+    end,
 
-    ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>]), 2),
-    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>]), 2),
-    ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>]), 2),
+    ?assertMatch({ok, #document{value = #traverse_task{status = FirstJobStatus}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, Task1]), 2),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished, description = Description}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, Task2]), 2),
+    ?assertMatch({ok, #document{value = #traverse_task{status = finished, description = Description}}},
+        rpc:call(Worker, traverse_task, get, [?POOL, Task3]), 2),
 
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_cancel_test(Config) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_cancel_test1">>, {self(), 1, 100}])),
+        [?POOL, <<"1traverse_cancel_test">>, {self(), 1, 100}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_cancel_test2">>, {self(), 1, 2}])),
+        [?POOL, <<"2traverse_cancel_test">>, {self(), 1, 2}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_cancel_test3">>, {self(), 1, 3}])),
+        [?POOL, <<"3traverse_cancel_test">>, {self(), 1, 3}])),
 
-    ?assertMatch({ok, [<<"traverse_cancel_test1">>], _},
+    ?assertMatch({ok, [<<"1traverse_cancel_test">>], _},
         rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing])),
-    ?assertMatch({ok, [<<"traverse_cancel_test2">>, <<"traverse_cancel_test3">>], _},
+    ?assertMatch({ok, [<<"2traverse_cancel_test">>, <<"3traverse_cancel_test">>], _},
         rpc:call(Worker, traverse_task_list, list, [?POOL, scheduled])),
 
     RecAns = receive
         {stop, _} ->
-            ?assertEqual(ok, rpc:call(Worker, traverse, cancel, [?POOL, <<"traverse_cancel_test1">>]))
+            ?assertEqual(ok, rpc:call(Worker, traverse, cancel, [?POOL, <<"1traverse_cancel_test">>]))
     after
         5000 ->
             timeout
@@ -316,16 +385,16 @@ traverse_cancel_test(Config) ->
     ?assert(length(Expected) > length(Ans1)),
 
     ?assertMatch({ok, #document{value = #traverse_task{canceled = true, status = canceled}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_cancel_test1">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"1traverse_cancel_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, canceled = false, status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_cancel_test2">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"2traverse_cancel_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description, canceled = false, status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_cancel_test3">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"3traverse_cancel_test">>]), 2),
 
     ?assertMatch({ok, [], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, ongoing]), 1),
     ?assertMatch({ok, [], _}, rpc:call(Worker, traverse_task_list, list, [?POOL, scheduled])),
-    check_ended(Worker, [<<"traverse_cancel_test1">>, <<"traverse_cancel_test2">>,
-        <<"traverse_cancel_test3">>]),
+    check_ended(Worker, [<<"1traverse_cancel_test">>, <<"2traverse_cancel_test">>,
+        <<"3traverse_cancel_test">>]),
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
 traverse_multienvironment_test(Config) ->
@@ -374,6 +443,8 @@ init_per_testcase(Case, Config) when
 init_per_testcase(Case, Config) when
     Case =:= traverse_multitask_sequential_test ; Case =:= traverse_loadbalancingt_test ;
     Case =:= traverse_loadbalancingt_mixed_ids_test ; Case =:= traverse_restart_test ;
+    Case =:= traverse_restart_with_ongoing_jobs_error_test ; Case =:= traverse_restart_with_task_links_error_test ;
+    Case =:= traverse_restart_with_job_links_error_test ; Case =:= traverse_restart_after_node_error_test ;
     Case =:= traverse_cancel_test ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME, test_job, []]),

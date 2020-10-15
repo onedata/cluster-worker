@@ -33,6 +33,9 @@
 -export([add_link/6, add_scheduled_link/6, add_job_link/3,
     delete_link/6, delete_scheduled_link/6, delete_job_link/4]).
 
+%% For tests
+-export([forest_key/2]).
+
 % Forests for scheduled, ongoing and ended tasks
 -define(SCHEDULED_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "SCHEDULED_")).
 -define(ONGOING_FOREST_KEY(Pool), ?FOREST_KEY(Pool, "ONGOING_")).

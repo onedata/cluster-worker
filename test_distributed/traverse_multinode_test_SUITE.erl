@@ -50,11 +50,11 @@ traverse_and_queuing_test(Config) ->
     RunsNum = 8,
     traverse_base(Config, KeyBeg, RunsNum, false).
 
-traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
+traverse_base(Config, KeyEnd, RunsNum, CheckID) ->
     [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun(Num) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run,
-            [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>, {self(), 1, Num}]))
+            [?POOL, <<(integer_to_binary(Num))/binary, KeyEnd/binary>>, {self(), 1, Num}]))
     end, lists:seq(1, RunsNum)),
 
     {Expected0, Description} = traverse_test_pool:get_expected(),
@@ -78,7 +78,7 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
 
     lists:foreach(fun(Num) ->
         ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-            rpc:call(Worker, traverse_task, get, [?POOL, <<KeyBeg/binary, (integer_to_binary(Num))/binary>>]), 2)
+            rpc:call(Worker, traverse_task, get, [?POOL, <<(integer_to_binary(Num))/binary, KeyEnd/binary>>]), 2)
     end, lists:seq(1, RunsNum)),
 
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
@@ -86,13 +86,13 @@ traverse_base(Config, KeyBeg, RunsNum, CheckID) ->
 traverse_restart_test(Config) ->
     [Worker, Worker2] = Workers = ?config(cluster_worker_nodes, Config),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test1">>, {self(), 1, 100}])),
+        [?POOL, <<"1traverse_restart_test">>, {self(), 1, 100}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test1_1">>, {self(), 1, 101}])),
+        [?POOL, <<"t_1traverse_restart_test">>, {self(), 1, 101}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test2">>, {self(), 1, 2}])),
+        [?POOL, <<"2traverse_restart_test">>, {self(), 1, 2}])),
     ?assertEqual(ok, rpc:call(Worker, traverse, run,
-        [?POOL, <<"traverse_restart_test3">>, {self(), 1, 3}])),
+        [?POOL, <<"3traverse_restart_test">>, {self(), 1, 3}])),
 
     RecAns = receive
         {stop, W} ->
@@ -129,13 +129,13 @@ traverse_restart_test(Config) ->
     Ans2Len = length(Ans2),
 
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test2">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"2traverse_restart_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{description = Description}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test3">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"3traverse_restart_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"1traverse_restart_test">>]), 2),
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
-        rpc:call(Worker, traverse_task, get, [?POOL, <<"traverse_restart_test1_1">>]), 2),
+        rpc:call(Worker, traverse_task, get, [?POOL, <<"t_1traverse_restart_test">>]), 2),
 
     case Ans1Len of
         _ when Ans1Len >= 3 * ExpLen ->
