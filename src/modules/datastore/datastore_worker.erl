@@ -86,7 +86,7 @@ handle(Request) ->
 cleanup() ->
     wait_for_database_flush(),
     ?info("All regural documents flushed. Saving information about application closing"),
-    check_db_connection_loop({write, ?TEST_DOC_INIT_VALUE}, "Waiting to save information about application closing"),
+    db_action_loop({write, ?TEST_DOC_FINAL_VALUE}, "Waiting to save information about application closing"),
     wait_for_database_flush().
 
 %%%===================================================================
@@ -161,8 +161,8 @@ supervisor_children_spec() ->
 -spec check_db_connection() -> ok.
 check_db_connection() ->
     ?info("Waiting for database readiness..."),
-    check_db_connection_loop(read, "Database not ready yet..."),
-    check_db_connection_loop({write, ?TEST_DOC_INIT_VALUE}, "Database not ready yet..."),
+    db_action_loop(read, "Database not ready yet..."),
+    db_action_loop({write, ?TEST_DOC_INIT_VALUE}, "Database not ready yet..."),
     ?info("Database ready").
 
 -spec get_application_closing_status() -> closing_status().
@@ -199,10 +199,10 @@ wait_for_database_flush(Size) ->
     timer:sleep(5000),
     wait_for_database_flush(couchbase_config:get_flush_queue_size()).
 
--spec check_db_connection_loop(read | {write, binary()}, string()) -> ok.
-check_db_connection_loop(TestOperation, InfoLog) ->
+-spec db_action_loop(read | {write, binary()}, string()) -> ok.
+db_action_loop(Operation, InfoLog) ->
     CheckAns = try
-        case TestOperation of
+        case Operation of
             read -> read_application_closing_status();
             {write, Value} -> perform_test_db_write(Value)
         end
@@ -217,20 +217,20 @@ check_db_connection_loop(TestOperation, InfoLog) ->
         {ok, _, _} ->
             ok;
         Error ->
-            ?debug("Test db ~p failed with error ~p", [TestOperation, Error]),
+            ?debug("Test db ~p failed with error ~p", [Operation, Error]),
             ?info(InfoLog),
             timer:sleep(?SAVE_CHECK_INTERVAL),
-            check_db_connection_loop(TestOperation, InfoLog)
+            db_action_loop(Operation, InfoLog)
     end.
 
 -spec read_application_closing_status() -> ok | {error, term()}.
 read_application_closing_status() ->
     Ctx = datastore_model_default:get_default_disk_ctx(),
     case couchbase_driver:get(Ctx, ?TEST_DOC_KEY) of
-        {ok, _, ?TEST_DOC_INIT_VALUE} ->
+        {ok, _, #document{value = ?TEST_DOC_INIT_VALUE}} ->
             application:set_env(?CLUSTER_WORKER_APP_NAME,
                 ?APPLICATION_CLOSING_STATUS_ENV, last_closing_procedure_failed);
-        {ok, _, ?TEST_DOC_FINAL_VALUE} ->
+        {ok, _, #document{value = ?TEST_DOC_FINAL_VALUE}} ->
             application:set_env(?CLUSTER_WORKER_APP_NAME, ?
             APPLICATION_CLOSING_STATUS_ENV, last_closing_procedure_succeded);
         {error, not_found} ->
