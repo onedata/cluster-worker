@@ -16,7 +16,7 @@
 
 
 %% export for ct
--export([all/0]).
+-export([all/0, init_per_suite/1, end_per_suite/1]).
 
 %% tests
 -export([
@@ -83,3 +83,17 @@ request_should_timeout_on_database_connection_crash(Config) ->
     ?assertEqual({error, timeout}, rpc:call(Worker, couchbase_pool, post,
         [?BUCKET, write, {save, #{}, key, value}]
     )).
+
+%%%===================================================================
+%%% Init/teardown functions
+%%%===================================================================
+
+init_per_suite(Config) ->
+    Config.
+
+end_per_suite(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    test_utils:set_env(Worker, cluster_worker, couchbase_operation_timeout,
+        timer:seconds(60000)),
+    test_utils:set_env(Worker, cluster_worker, couchbase_durability_timeout,
+        timer:seconds(300000)).
