@@ -39,7 +39,7 @@
 -define(SAVE_CHECK_INTERVAL, timer:seconds(5)).
 -define(APPLICATION_CLOSING_STATUS_ENV, application_closing_status).
 
--type closing_status() :: last_closing_procedure_succeded | last_closing_procedure_failed | undefined.
+-type closing_status() :: ?CLOSING_PROCEDURE_SUCCEEDED | ?CLOSING_PROCEDURE_FAILED | undefined.
 
 %%%===================================================================
 %%% worker_plugin_behaviour callbacks
@@ -86,8 +86,7 @@ handle(Request) ->
 cleanup() ->
     wait_for_database_flush(),
     ?info("All regural documents flushed. Saving information about application closing"),
-    db_action_loop({write, ?TEST_DOC_FINAL_VALUE}, "Waiting to save information about application closing"),
-    wait_for_database_flush().
+    persist_application_closing_info().
 
 %%%===================================================================
 %%% API
@@ -161,8 +160,8 @@ supervisor_children_spec() ->
 -spec check_db_connection() -> ok.
 check_db_connection() ->
     ?info("Waiting for database readiness..."),
-    db_action_loop(read, "Database not ready yet..."),
-    db_action_loop({write, ?TEST_DOC_INIT_VALUE}, "Database not ready yet..."),
+    check_db_read_and_set_application_closing_status(),
+    check_db_write_and_persist_initial_info(),
     ?info("Database ready").
 
 -spec get_application_closing_status() -> closing_status().
@@ -199,49 +198,64 @@ wait_for_database_flush(Size) ->
     timer:sleep(5000),
     wait_for_database_flush(couchbase_config:get_flush_queue_size()).
 
--spec db_action_loop(read | {write, binary()}, string()) -> ok.
-db_action_loop(Operation, InfoLog) ->
-    CheckAns = try
-        case Operation of
-            read -> read_application_closing_status();
-            {write, Value} -> perform_test_db_write(Value)
-        end
-    catch
-        E1:E2 ->
-            {E1, E2}
-    end,
+-spec check_db_read_and_set_application_closing_status() -> ok.
+check_db_read_and_set_application_closing_status() ->
+    {ok, Value} = db_action_loop(fun read_application_closing_status/0, "Database not ready yet..."),
+    set_application_closing_status(Value).
 
-    case CheckAns of
-        ok ->
-            ok;
-        {ok, _, _} ->
-            ok;
+check_db_write_and_persist_initial_info() ->
+    db_action_loop(fun() -> perform_test_db_write(?TEST_DOC_INIT_VALUE) end, "Database not ready yet..."),
+    wait_for_database_flush().
+
+persist_application_closing_info() ->
+    db_action_loop(fun() -> perform_test_db_write(?TEST_DOC_FINAL_VALUE) end,
+        "Waiting to save information about application closing"),
+    wait_for_database_flush().
+
+-spec db_action_loop(fun(() -> {ok, datastore:doc() | undefined} | {error, term()}), string()) ->
+    {ok, datastore:doc() | undefined}.
+db_action_loop(Operation, InfoLog) ->
+    case Operation() of
+        {ok, _} = OkAns ->
+            OkAns;
         Error ->
-            ?debug("Test db ~p failed with error ~p", [Operation, Error]),
+            ?debug("Db action ~p failed with error ~p", [Operation, Error]),
             ?info(InfoLog),
             timer:sleep(?SAVE_CHECK_INTERVAL),
             db_action_loop(Operation, InfoLog)
     end.
 
--spec read_application_closing_status() -> ok | {error, term()}.
+-spec read_application_closing_status() -> {ok, datastore:doc() | undefined} | {error, term()}.
 read_application_closing_status() ->
     Ctx = datastore_model_default:get_default_disk_ctx(),
     case couchbase_driver:get(Ctx, ?TEST_DOC_KEY) of
-        {ok, _, #document{value = ?TEST_DOC_INIT_VALUE}} ->
-            application:set_env(?CLUSTER_WORKER_APP_NAME,
-                ?APPLICATION_CLOSING_STATUS_ENV, last_closing_procedure_failed);
-        {ok, _, #document{value = ?TEST_DOC_FINAL_VALUE}} ->
-            application:set_env(?CLUSTER_WORKER_APP_NAME, ?
-            APPLICATION_CLOSING_STATUS_ENV, last_closing_procedure_succeded);
+        {ok, _, #document{} = Doc} ->
+            {ok, Doc};
         {error, not_found} ->
-            ok;
+            % First start of the application - closing status does not exist
+            {ok, undefined};
         Error ->
             Error
     end.
 
--spec perform_test_db_write(binary()) -> {ok, cberl:cas(), couchbase_driver:value()} | {error, term()}.
+-spec set_application_closing_status(datastore:doc() | undefined) -> ok.
+set_application_closing_status(#document{value = ?TEST_DOC_INIT_VALUE}) ->
+    application:set_env(?CLUSTER_WORKER_APP_NAME,
+        ?APPLICATION_CLOSING_STATUS_ENV, ?CLOSING_PROCEDURE_FAILED);
+set_application_closing_status(#document{value = ?TEST_DOC_FINAL_VALUE}) ->
+    application:set_env(?CLUSTER_WORKER_APP_NAME,
+        ?APPLICATION_CLOSING_STATUS_ENV, ?CLOSING_PROCEDURE_SUCCEEDED);
+set_application_closing_status(_) ->
+    ok.
+
+-spec perform_test_db_write(binary()) -> {ok, datastore:doc()} | {error, term()}.
 perform_test_db_write(Value) ->
     Key = ?TEST_DOC_KEY,
     Ctx = datastore_model_default:get_default_disk_ctx(),
     TestDoc = #document{key = Key, value = Value},
-    couchbase_driver:save(Ctx#{no_seq => true}, Key, TestDoc).
+    case couchbase_driver:save(Ctx#{no_seq => true}, Key, TestDoc) of
+        {ok, _, #document{} = Doc} ->
+            {ok, Doc};
+        Error ->
+            Error
+    end.

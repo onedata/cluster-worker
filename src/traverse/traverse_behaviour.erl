@@ -95,7 +95,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -callback task_restart_after_node_crash(traverse:id(), traverse:pool()) ->
-    traverse:action_on_restart_after_node_crash().
+    traverse:node_crash_policy().
 
 %%%===================================================================
 %%% Optional job sync and queuing API

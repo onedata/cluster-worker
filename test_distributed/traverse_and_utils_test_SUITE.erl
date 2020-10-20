@@ -26,8 +26,8 @@
     sequential_traverse_test/1,
     traverse_multitask_concurrent_test/1,
     traverse_multitask_sequential_test/1,
-    traverse_loadbalancingt_test/1,
-    traverse_loadbalancingt_mixed_ids_test/1,
+    traverse_loadbalancing_test/1,
+    traverse_loadbalancing_mixed_ids_test/1,
     traverse_restart_test/1,
     traverse_restart_with_ongoing_jobs_error_test/1,
     traverse_restart_with_task_links_error_test/1,
@@ -48,8 +48,8 @@ all() ->
         sequential_traverse_test,
         traverse_multitask_concurrent_test,
         traverse_multitask_sequential_test,
-        traverse_loadbalancingt_test,
-        traverse_loadbalancingt_mixed_ids_test,
+        traverse_loadbalancing_test,
+        traverse_loadbalancing_mixed_ids_test,
         traverse_restart_test,
         traverse_restart_with_ongoing_jobs_error_test,
         traverse_restart_with_task_links_error_test,
@@ -204,19 +204,19 @@ traverse_multitask_sequential_test(Config) ->
         <<"3traverse_multitask_sequential_test">>]),
     traverse_test_pool:check_schedulers_after_test(Worker, Workers, ?POOL).
 
-traverse_loadbalancingt_test(Config) ->
+traverse_loadbalancing_test(Config) ->
     Tasks = [{<<"tlt1">>, <<"tlt1">>, 1}, {<<"tlt2">>, <<"tlt2">>, 2}, {<<"tlt3">>, <<"tlt2">>, 3},
         {<<"tlt4">>, <<"tlt2">>, 4}, {<<"tlt5">>, <<"tlt3">>, 5}, {<<"tlt6">>, <<"tlt3">>, 6}],
     Check = [{1,1}, {2,2}, {3,5}, {4,3}, {5,6}, {6,4}],
-    traverse_loadbalancingt_base(Config, Tasks, Check).
+    traverse_loadbalancing_base(Config, Tasks, Check).
 
-traverse_loadbalancingt_mixed_ids_test(Config) ->
+traverse_loadbalancing_mixed_ids_test(Config) ->
     Tasks = [{<<"9tlmid">>, <<"1tlmid">>, 1}, {<<"2tlmid">>, <<"2tlmid">>, 2}, {<<"3tlmid">>, <<"2tlmid">>, 3},
         {<<"8tlmid">>, <<"2tlmid">>, 4}, {<<"5tlmid">>, <<"3tlmid">>, 5}, {<<"6tlmid">>, <<"3tlmid">>, 6}],
     Check = [{1,1}, {2,2}, {3,5}, {4,3}, {5,6}, {6,4}],
-    traverse_loadbalancingt_base(Config, Tasks, Check).
+    traverse_loadbalancing_base(Config, Tasks, Check).
 
-traverse_loadbalancingt_base(Config, Tasks, Check) ->
+traverse_loadbalancing_base(Config, Tasks, Check) ->
     [Worker | _] = Workers = ?config(cluster_worker_nodes, Config),
     lists:foreach(fun({ID, GR, Ans}) ->
         ?assertEqual(ok, rpc:call(Worker, traverse, run, [?POOL, ID, {self(), 1, Ans}, #{group_id => GR}]))
@@ -441,8 +441,8 @@ init_per_testcase(Case, Config) when
     ?assertEqual(ok, rpc:call(Worker, traverse, init_pool, [?POOL, 3, 3, 10])),
     Config;
 init_per_testcase(Case, Config) when
-    Case =:= traverse_multitask_sequential_test ; Case =:= traverse_loadbalancingt_test ;
-    Case =:= traverse_loadbalancingt_mixed_ids_test ; Case =:= traverse_restart_test ;
+    Case =:= traverse_multitask_sequential_test ; Case =:= traverse_loadbalancing_test ;
+    Case =:= traverse_loadbalancing_mixed_ids_test ; Case =:= traverse_restart_test ;
     Case =:= traverse_restart_with_ongoing_jobs_error_test ; Case =:= traverse_restart_with_task_links_error_test ;
     Case =:= traverse_restart_with_job_links_error_test ; Case =:= traverse_restart_after_node_error_test ;
     Case =:= traverse_cancel_test ->

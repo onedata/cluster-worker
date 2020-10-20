@@ -15,6 +15,7 @@
 -module(traverse_task).
 -author("Michal Wrzeszcz").
 
+-include("traverse/traverse.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% Lifecycle API
@@ -449,8 +450,7 @@ is_enqueued(#document{value = #traverse_task{
 }}) ->
     Enqueued and not Canceled.
 
--spec get_execution_info(doc()) -> {ok, traverse:callback_module(), traverse:environment_id(),
-    traverse:job_id(), node(), traverse:timestamp()}.
+-spec get_execution_info(doc()) -> {ok, traverse:task_execution_info()}.
 get_execution_info(#document{value = #traverse_task{
     callback_module = CallbackModule,
     executor = Executor,
@@ -458,10 +458,15 @@ get_execution_info(#document{value = #traverse_task{
     node = Node,
     start_time = StartTimestamp
 }}) ->
-    {ok, CallbackModule, Executor, MainJobId, Node, StartTimestamp}.
+    {ok, #task_execution_info{
+        callback_module = CallbackModule,
+        executor = Executor,
+        main_job_id = MainJobId,
+        node = Node,
+        start_time = StartTimestamp
+    }}.
 
--spec get_execution_info(traverse:pool(), traverse:id()) -> {ok, traverse:callback_module(),
-    traverse:environment_id(), traverse:job_id(), node()} | {error, term()}.
+-spec get_execution_info(traverse:pool(), traverse:id()) -> {ok, traverse:task_execution_info()} | {error, term()}.
 get_execution_info(Pool, TaskId) ->
     case datastore_model:get(?CTX, ?DOC_ID(Pool, TaskId)) of
         {ok, Doc} ->

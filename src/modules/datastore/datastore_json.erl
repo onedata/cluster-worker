@@ -46,7 +46,7 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec encode(doc() | ejson()) -> ejson() | no_return().
-encode(#document{key = <<?TEST_DOC_KEY_BEG, _Node/binary>> = Key} = Doc) -> % Test document
+encode(#document{key = <<?TEST_DOC_KEY_PREFIX, _Node/binary>> = Key} = Doc) -> % Test document
     {[
         {<<"_key">>, Key},
         {<<"_scope">>, Doc#document.scope},
@@ -83,7 +83,7 @@ encode(EJson) ->
 -spec decode(ejson()) -> ejson() | doc().
 decode({Term} = EJson) when is_list(Term) ->
     case lists:keyfind(<<"_key">>, 1, Term) of
-        {_, <<?TEST_DOC_KEY_BEG, _Node/binary>> = Key} ->
+        {_, <<?TEST_DOC_KEY_PREFIX, _Node/binary>> = Key} ->
             {_, Scope} = lists:keyfind(<<"_scope">>, 1, Term),
             {_, Value} = lists:keyfind(<<"_value">>, 1, Term),
             #document{
