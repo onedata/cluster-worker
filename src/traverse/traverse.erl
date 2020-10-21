@@ -58,6 +58,7 @@
 -author("Michal Wrzeszcz").
 
 -include("traverse/traverse.hrl").
+-include("modules/datastore/datastore.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -908,7 +909,7 @@ get_tasks_jobs(PoolName, CallbackModule, Node, Executor, InitialTaskIdToCtxMap) 
     pool_options(), node()) -> {TasksToRestart :: [id()], TasksToCancel :: [id()]} | no_return().
 clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Options, Node) ->
     ShouldRestart = maps:get(restart, Options, true),
-    DBError = datastore_worker:get_application_closing_status() =:= last_closing_procedure_failed,
+    DBError = datastore_worker:get_application_closing_status() =:= ?CLOSING_PROCEDURE_FAILED,
     LocalNode = node(),
     TasksWithJobs = maps:keys(JobsPerTask),
     OtherTasks = maps:keys(maps:without(TasksWithJobs, TaskIdToCtxMap)),

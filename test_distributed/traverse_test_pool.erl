@@ -44,9 +44,9 @@ do_master_job({Master, Num, ID}, #{task_id := <<"sequential_traverse_test">>,
     SlaveJobs = [{Master, Num + 3, ID}],
     {ok, #{sequential_slave_jobs => SequentialSlaveJobs, slave_jobs => SlaveJobs, async_master_jobs => MasterJobs}};
 do_master_job({Master, 100, ID}, _) when ID == 100 ; ID == 101 ->
-    timer:sleep(500),
+    timer:sleep(1000),
     Master ! {stop, node()},
-    timer:sleep(500),
+    timer:sleep(1000),
     do_master_job_helper({Master, 100, ID});
 do_master_job({Master, Num, ID}, _) ->
     do_master_job_helper({Master, Num, ID}).
