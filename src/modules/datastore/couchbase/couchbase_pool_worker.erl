@@ -154,6 +154,8 @@ handle_cast(Request, #state{} = State) ->
 handle_info({post, Request}, #state{requests_queue = Queue} = State) ->
     State2 = State#state{requests_queue = queue:in(Request, Queue)},
     {noreply, process_requests(State2)};
+handle_info({'EXIT', _, Reason}, State = #state{}) ->
+    {stop, Reason, State};
 handle_info(Info, #state{} = State) ->
     ?log_bad_request(Info),
     {noreply, State}.

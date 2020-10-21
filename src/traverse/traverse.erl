@@ -57,6 +57,8 @@
 -module(traverse).
 -author("Michal Wrzeszcz").
 
+-include("traverse/traverse.hrl").
+-include("modules/datastore/datastore.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -98,6 +100,7 @@
     group_id => group(),
     additional_data => additional_data()
 }.
+-type task_execution_info() :: #task_execution_info{}. % see traverse.hrl
 % Basic types for jobs management
 -type job() :: term().
 -type job_id() :: datastore:key().
@@ -137,9 +140,15 @@
 % Internal types for framework
 -type execution_pool() :: worker_pool:name(). % internal names of worker pools used by framework
 -type ctx() :: traverse_task:ctx().
+-type node_crash_policy() :: restart | cancel_task.
+-type task_callback() :: task_started | task_finished | task_canceled | on_cancel_init.
+% Types used by functions that restart tasks after node restart
+-type tasks_ctxs() :: #{id() => ctx() | ctx_not_found}.
+-type jobs_per_task() :: #{id() => [{job_id(), job()}]}.
 
--export_type([pool/0, id/0, task/0, group/0, job/0, job_id/0, job_status/0, environment_id/0, description/0, status/0,
-    additional_data/0, master_job_extended_args/0, timestamp/0, sync_info/0, master_job_map/0, callback_module/0]).
+-export_type([pool/0, id/0, task/0, group/0, task_execution_info/0, job/0, job_id/0, job_status/0,
+    environment_id/0, description/0, status/0, additional_data/0, master_job_extended_args/0, timestamp/0,
+    sync_info/0, master_job_map/0, callback_module/0, node_crash_policy/0]).
 
 -define(MASTER_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_master">>, utf8)).
 -define(SLAVE_POOL_NAME(Pool), binary_to_atom(<<Pool/binary, "_slave">>, utf8)).
@@ -218,53 +227,29 @@ init_pool_service(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Op
 %% @doc
 %% Restart tasks that have been running on particular node. Can be used during node restart or to handle
 %% failure of other node.
+%% Warning - if node has not been stopped properly, some tasks can be corrupted and impossible to be restarted.
 %% @end
 %%--------------------------------------------------------------------
 -spec restart_tasks(pool(), pool_options(), node()) -> ok | no_return().
 restart_tasks(PoolName, Options, Node) ->
     Executor = maps:get(executor, Options, ?DEFAULT_ENVIRONMENT_ID),
     CallbackModules = maps:get(callback_modules, Options, [binary_to_atom(PoolName, utf8)]),
-    ShouldRestart = maps:get(restart, Options, true),
-    IdToCtx = repair_ongoing_tasks(PoolName, Executor, Node),
+    LocalNode = node(),
+    ok = traverse_tasks_scheduler:reset_node_ongoing_tasks(PoolName, Node),
 
-    case ShouldRestart of
-        true ->
-            lists:foreach(fun(CallbackModule) ->
-                {ok, JobIds} = traverse_task_list:list_node_jobs(PoolName, CallbackModule, Node),
-                LocalNode = node(),
-                case Node of
-                    LocalNode -> ok;
-                    _ ->
-                        lists:foreach(fun(JobId) ->
-                            traverse_task_list:add_job_link(PoolName, CallbackModule, JobId),
-                            traverse_task_list:delete_job_link(PoolName, CallbackModule, Node, JobId)
-                        end, JobIds),
+    TaskIdToCtxMap = repair_ongoing_tasks(PoolName, Executor, Node),
+    lists:foreach(fun(CallbackModule) ->
+        {JobsPerTask, JobsWitoutCtx, UpdatedTaskIdToCtxMap} =
+            get_tasks_jobs(PoolName, CallbackModule, Node, Executor, TaskIdToCtxMap),
+        {TasksToRestart, TasksToCancel} = clasiffy_tasks_to_restart_and_cancel(
+            UpdatedTaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Options, Node),
 
-                        TasksNum = maps:size(IdToCtx),
-                        traverse_tasks_scheduler:change_node_ongoing_tasks(PoolName, LocalNode, TasksNum),
-                        traverse_tasks_scheduler:change_node_ongoing_tasks(PoolName, Node, -1 * TasksNum)
-                end,
+        traverse_tasks_scheduler:change_node_ongoing_tasks(PoolName, LocalNode, length(TasksToRestart)),
+        clean_tasks_and_jobs(UpdatedTaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node),
+        restart_jobs(UpdatedTaskIdToCtxMap, maps:with(TasksToRestart, JobsPerTask), PoolName, CallbackModule, Executor, Node)
+    end, CallbackModules),
 
-                lists:foreach(fun(JobId) ->
-                    {ok, Job, _, TaskId} = CallbackModule:get_job(JobId),
-                    case maps:get(TaskId, IdToCtx, undefined) of
-                        undefined ->
-                            ?warning("Found job ~s assigned to task ~s which does not exist (anymore?). Job data:~n~p", [
-                                JobId, TaskId, Job
-                            ]),
-                            ok;
-                        ExtendedCtx ->
-                            {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, #{
-                                master_jobs_delegated => 1
-                            }),
-                            ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
-                                CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId)
-                    end
-                end, JobIds)
-            end, CallbackModules);
-        false ->
-            ok
-    end.
+    schedule_waiting_tasks_if_possible(PoolName, Executor).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -388,7 +373,10 @@ on_job_change(Job, JobId, PoolName, TaskId, Environment) ->
                 false ->
                     ok;
                 true ->
-                    {ok, CallbackModule, Executor, _} = traverse_task:get_execution_info(Task),
+                    {ok, #task_execution_info{
+                        callback_module = CallbackModule,
+                        executor = Executor
+                    }} = traverse_task:get_execution_info(Task),
                     case Executor =:= Environment of
                         true ->
                             maybe_run_scheduled_task(PoolName, CallbackModule, TaskId, Task, Executor, Job, JobId);
@@ -418,7 +406,10 @@ cancel(PoolName, TaskId) ->
 cancel(PoolName, TaskId, Environment) ->
     case traverse_task:get(PoolName, TaskId) of
         {ok, Task} ->
-            {ok, CallbackModule, _, MainJobId} = traverse_task:get_execution_info(Task),
+            {ok, #task_execution_info{
+                callback_module = CallbackModule,
+                main_job_id = MainJobId
+            }} = traverse_task:get_execution_info(Task),
             case CallbackModule:get_job(MainJobId) of
                 {ok, Job, _, _} ->
                     ExtendedCtx = get_extended_ctx(CallbackModule, Job),
@@ -650,7 +641,7 @@ maybe_finish(PoolName, CallbackModule, ExtendedCtx, TaskId, Executor, #{
                 _ -> task_callback(CallbackModule, task_finished, TaskId, PoolName)
             end,
 
-            case traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId) of
+            case traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, false) of
                 ok -> check_task_list_and_run(PoolName, Executor, []);
                 {error, already_finished} -> ok
             end;
@@ -698,7 +689,10 @@ check_task_list_and_run(PoolName, Executor, CheckedGroups) ->
 
 -spec run_task(pool(), id(), environment_id()) -> ok | start_interrupted.
 run_task(PoolName, TaskId, Executor) ->
-    {ok, CallbackModule, _, MainJobId} = traverse_task:get_execution_info(PoolName, TaskId),
+    {ok, #task_execution_info{
+        callback_module = CallbackModule,
+        main_job_id = MainJobId
+    }} = traverse_task:get_execution_info(PoolName, TaskId),
     case  CallbackModule:get_job(MainJobId) of
         {ok, Job, _, _} ->
             ExtendedCtx = get_extended_ctx(CallbackModule, Job),
@@ -799,13 +793,22 @@ get_extended_ctx(CallbackModule, Job) ->
     end,
     maps:merge(traverse_task:get_ctx(), CtxExtension).
 
--spec task_callback(callback_module(), task_started | task_finished | task_canceled | on_cancel_init, id(), pool()) -> ok.
+-spec task_callback(callback_module(), task_callback(), id(), pool()) -> ok.
 task_callback(CallbackModule, Method, TaskId, PoolName) ->
     case erlang:function_exported(CallbackModule, Method, 2) of
         true ->
             ok = CallbackModule:Method(TaskId, PoolName);
         _ ->
             ok
+    end.
+
+-spec get_node_crash_policy(callback_module(), id(), pool()) -> node_crash_policy().
+get_node_crash_policy(CallbackModule, TaskId, PoolName) ->
+    case erlang:function_exported(CallbackModule, node_crash_policy, 2) of
+        true ->
+            CallbackModule:node_crash_policy(TaskId, PoolName);
+        _ ->
+            restart
     end.
 
 -spec to_string(callback_module(), job()) -> term().
@@ -817,19 +820,201 @@ to_string(CallbackModule, Job) ->
             str_utils:format_bin("~p", [Job])
     end.
 
--spec repair_ongoing_tasks(pool(), environment_id(), node()) -> #{id() => ctx()}.
+-spec repair_ongoing_tasks(pool(), environment_id(), node()) -> tasks_ctxs().
 repair_ongoing_tasks(Pool, Executor, Node) ->
     {ok, TaskIds, _} = traverse_task_list:list(Pool, ongoing, #{tree_id => Executor}),
 
+    % Repair all tasks found using links (links repair is not needed)
     lists:foldl(fun(Id, Acc) ->
-        {ok, CallbackModule, Executor, MainJobId} = traverse_task:get_execution_info(Pool, Id),
-        {ok, Job, _, _} = CallbackModule:get_job(MainJobId),
-        ExtendedCtx = get_extended_ctx(CallbackModule, Job),
-        case traverse_task:fix_description(ExtendedCtx, Pool, Id, Node) of
-            {ok, _} -> Acc#{Id => ExtendedCtx};
-            {error, other_node} -> Acc
-        end
+        {_, UpdatedAcc} = repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, Acc, false),
+        UpdatedAcc
     end, #{}, TaskIds).
+
+-spec repair_ongoing_task_and_add_to_map(pool(), environment_id(), node(), id(), tasks_ctxs(), boolean()) ->
+    {ok | other_node | not_found, tasks_ctxs()}.
+repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TaskIdToCtxMap, FixLink) ->
+    case traverse_task:get_execution_info(Pool, Id) of
+        {ok, #task_execution_info{
+            callback_module = CallbackModule,
+            executor = Executor,
+            main_job_id = MainJobId,
+            node = Node,
+            start_time = Timestamp
+        }} ->
+            case CallbackModule:get_job(MainJobId) of
+                {ok, Job, _, _} ->
+                    ExtendedCtx = get_extended_ctx(CallbackModule, Job),
+                    fix_task_description(Pool, Executor, Node, Id, TaskIdToCtxMap, FixLink, ExtendedCtx, Timestamp);
+                JobError ->
+                    ?warning("Error getting main job ~p for task id ~p (pool ~p, executor ~p, node ~p): ~p",
+                        [MainJobId, Id, Pool, Executor, Node, JobError]),
+                    TaskIdToCtxMap#{Id => ctx_not_found}
+            end;
+        {ok, #task_execution_info{}} ->
+            {other_node, TaskIdToCtxMap};
+        InfoError ->
+            ?warning("Error getting execution info for task id ~p (pool ~p, executor ~p, node ~p): ~p",
+                [Id, Pool, Executor, Node, InfoError]),
+            {not_found, TaskIdToCtxMap}
+    end.
+
+-spec fix_task_description(pool(), environment_id(), node(), id(), tasks_ctxs(), boolean(), ctx(), timestamp()) ->
+    {ok | other_node, tasks_ctxs()}.
+fix_task_description(Pool, Executor, Node, Id, TaskIdToCtxMap, FixLink, ExtendedCtx, Timestamp) ->
+    case traverse_task:fix_description(ExtendedCtx, Pool, Id, Node) of
+        {ok, _} when FixLink ->
+            ok = traverse_task_list:add_link(ExtendedCtx,
+                Pool, ongoing, Executor, Id, Timestamp),
+            {ok, TaskIdToCtxMap#{Id => ExtendedCtx}};
+        {ok, _} ->
+            {ok, TaskIdToCtxMap#{Id => ExtendedCtx}};
+        {error, other_node} ->
+            {other_node, TaskIdToCtxMap}
+    end.
+
+-spec get_tasks_jobs(pool(), callback_module(), node(),environment_id(), tasks_ctxs()) ->
+    {JobsPerTask :: jobs_per_task(), JobsWitoutCtx :: [job_id()],
+        UpdatedTaskIdToCtxMap :: tasks_ctxs()} | no_return().
+get_tasks_jobs(PoolName, CallbackModule, Node, Executor, InitialTaskIdToCtxMap) ->
+    {ok, JobIds} = traverse_task_list:list_node_jobs(PoolName, CallbackModule, Node),
+    lists:foldl(fun(JobId, {JobsPerTask, JobsWitoutCtx, TaskIdToCtxMap}) ->
+        case CallbackModule:get_job(JobId) of
+            {ok, Job, _, TaskId} ->
+                case maps:get(TaskId, TaskIdToCtxMap, ctx_not_found) of
+                    ctx_not_found ->
+                        ?warning("Found job ~s assigned to task ~s (callback module ~p, pool name ~p, node ~p) "
+                        "which does not exist (anymore?). Job data:~n~p~nTrying to find task without link", [
+                            JobId, TaskId, CallbackModule, PoolName, Node, Job
+                        ]),
+                        % Task has not been found using task links so it has not been repaired
+                        % Repair it and fix its link
+                        case repair_ongoing_task_and_add_to_map(PoolName, Executor, Node, TaskId, TaskIdToCtxMap, true) of
+                            {ok, UpdatedTaskIdToCtxMap} ->
+                                {JobsPerTask#{TaskId => [{JobId, Job}]}, JobsWitoutCtx, UpdatedTaskIdToCtxMap};
+                            _ ->
+                                {JobsPerTask, [JobId | JobsWitoutCtx], TaskIdToCtxMap}
+                        end;
+                    _ExtendedCtx ->
+                        TaskJobs = maps:get(TaskId, JobsPerTask, []),
+                        {JobsPerTask#{TaskId => [{JobId, Job} | TaskJobs]}, JobsWitoutCtx, TaskIdToCtxMap}
+                end;
+            Error ->
+                ?warning("Error getting job ~p (callback module ~p, pool name ~p, node ~p): ~p",
+                    [JobId, CallbackModule, PoolName, Node, Error]),
+                {JobsPerTask, [JobId | JobsWitoutCtx], TaskIdToCtxMap}
+        end
+    end, {#{}, [], InitialTaskIdToCtxMap}, JobIds).
+
+-spec clasiffy_tasks_to_restart_and_cancel(tasks_ctxs(), jobs_per_task(), pool(), callback_module(),
+    pool_options(), node()) -> {TasksToRestart :: [id()], TasksToCancel :: [id()]} | no_return().
+clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Options, Node) ->
+    ShouldRestart = maps:get(restart, Options, true),
+    DBError = datastore_worker:get_application_closing_status() =:= ?CLOSING_PROCEDURE_FAILED,
+    LocalNode = node(),
+    TasksWithJobs = maps:keys(JobsPerTask),
+    OtherTasks = maps:keys(maps:without(TasksWithJobs, TaskIdToCtxMap)),
+
+    case {ShouldRestart, DBError andalso Node =:= LocalNode} of
+        {true, true} ->
+            lists:foldl(fun(TaskId, {ToRestartAcc, ToCancelAcc}) ->
+                case get_node_crash_policy(CallbackModule, TaskId, PoolName) of
+                    cancel_task -> {ToRestartAcc, [TaskId | ToCancelAcc]};
+                    _ -> {[TaskId | ToRestartAcc], ToCancelAcc}
+                end
+            end, {[], OtherTasks}, TasksWithJobs);
+        {true, false} ->
+            {TasksWithJobs, OtherTasks};
+        {false, _} ->
+            {[], maps:keys(TaskIdToCtxMap)}
+    end.
+
+-spec clean_tasks_and_jobs(tasks_ctxs(), jobs_per_task(), [id()], [job_id()],
+    pool(), callback_module(), node()) -> ok.
+clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node) ->
+    lists:foreach(fun(TaskId) ->
+        ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
+        traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true),
+
+        clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
+    end, TasksToCancel),
+
+    clean_jobs(JobsWitoutCtx, PoolName, CallbackModule, Node).
+
+-spec clean_jobs([job_id()], pool(), callback_module(), node()) -> ok.
+clean_jobs(JobIds, PoolName, CallbackModule, Node) ->
+    lists:foreach(fun(JobId) ->
+        traverse_task_list:delete_job_link(PoolName, CallbackModule, Node, JobId)
+    end, JobIds).
+
+-spec restart_jobs(tasks_ctxs(), jobs_per_task(), pool(), callback_module(), environment_id(), node()) ->
+    ok | no_return().
+restart_jobs(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Executor, Node) ->
+    LocalNode = node(),
+    lists:foreach(fun({TaskId, JobsToRestart}) ->
+        lists:foreach(fun({JobId, Job}) ->
+            case Node of
+                LocalNode -> ok;
+                _ ->
+                    traverse_task_list:add_job_link(PoolName, CallbackModule, JobId),
+                    traverse_task_list:delete_job_link(PoolName, CallbackModule, Node, JobId)
+            end,
+
+            ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
+            {ok, _, _} = traverse_task:update_description(ExtendedCtx, PoolName, TaskId, #{
+                master_jobs_delegated => 1
+            }),
+            ok = run_on_master_pool(PoolName, ?MASTER_POOL_NAME(PoolName), ?SLAVE_POOL_NAME(PoolName),
+                CallbackModule, ExtendedCtx, Executor, TaskId, Job, JobId)
+        end, JobsToRestart)
+    end, maps:to_list(JobsPerTask)).
+
+-spec schedule_waiting_tasks_if_possible(pool(), environment_id()) -> ok | no_return().
+schedule_waiting_tasks_if_possible(PoolName, Executor) ->
+    case traverse_tasks_scheduler:get_next_group(PoolName) of
+        {error, no_groups} ->
+            ok;
+        {ok, GroupId} ->
+            case traverse_task_list:get_first_scheduled_link(PoolName, GroupId, Executor) of
+                {ok, not_found} ->
+                    deregister_group_and_schedule_waiting_tasks_if_possible(PoolName, Executor, GroupId);
+                {ok, TaskId} ->
+                    schedule_task_and_check_other_waiting(PoolName, Executor, TaskId)
+            end
+    end.
+
+-spec deregister_group_and_schedule_waiting_tasks_if_possible(pool(), environment_id(), group()) ->
+    ok | no_return().
+deregister_group_and_schedule_waiting_tasks_if_possible(PoolName, Executor, GroupId) ->
+    case deregister_group_and_check(PoolName, GroupId, Executor) of
+        ok ->
+            ?info("Group ~p deregistered on restart of node for pool ~p and executor ~p",
+                [GroupId, PoolName, Executor]),
+            schedule_waiting_tasks_if_possible(PoolName, Executor);
+        {abort, _TaskId} ->
+            ?info("Group ~p deregistration on restart of node aborted for pool ~p and executor ~p",
+                [GroupId, PoolName, Executor]),
+            schedule_waiting_tasks_if_possible(PoolName, Executor)
+    end.
+
+-spec schedule_task_and_check_other_waiting(pool(), environment_id(), id()) -> ok | no_return().
+schedule_task_and_check_other_waiting(PoolName, Executor, TaskId) ->
+    case traverse_tasks_scheduler:increment_ongoing_tasks_and_choose_node(PoolName) of
+        {ok, Node} ->
+            case rpc:call(Node, ?MODULE, run_task, [PoolName, TaskId, Executor]) of
+                ok ->
+                    ?info("Task ~p started on restart of node for pool ~p and executor ~p",
+                        [TaskId, PoolName, Executor]),
+                    schedule_waiting_tasks_if_possible(PoolName, Executor);
+                start_interrupted ->
+                    ?info("Task ~p start interrupted on restart of node for pool ~p and executor ~p",
+                        [TaskId, PoolName, Executor]),
+                    % TODO VFS-6297 - what if node crashes before next line
+                    traverse_tasks_scheduler:decrement_ongoing_tasks(PoolName),
+                    schedule_waiting_tasks_if_possible(PoolName, Executor)
+            end;
+        {error, limit_exceeded} ->
+            ok
+    end.
 
 -spec log_error_with_stacktrace(term(), string(), [term()]) -> ok.
 log_error_with_stacktrace(Stacktrace, Format, Args) ->

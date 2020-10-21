@@ -25,7 +25,8 @@
 %%% Pool management API
 -export([init/3, clear/1]).
 %%% Task management API
--export([increment_ongoing_tasks_and_choose_node/1, decrement_ongoing_tasks/1, change_node_ongoing_tasks/3]).
+-export([increment_ongoing_tasks_and_choose_node/1, decrement_ongoing_tasks/1,
+    change_node_ongoing_tasks/3, reset_node_ongoing_tasks/2]).
 %%% Group management API
 -export([register_group/2, deregister_group/2, get_next_group/1]).
 
@@ -132,10 +133,22 @@ decrement_ongoing_tasks(Pool) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec change_node_ongoing_tasks(traverse:pool(), node(), integer()) -> ok | {error, term()}.
+change_node_ongoing_tasks(_Pool, _Node, 0) ->
+    ok;
 change_node_ongoing_tasks(Pool, Node, TasksNum) ->
-    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT} = Record) ->
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT, ongoing_tasks_per_node = NodesOT} = Record) ->
         NodeOT = maps:get(Node, NodesOT, 0),
-        {ok, Record#traverse_tasks_scheduler{ongoing_tasks_per_node = NodesOT#{Node => max(NodeOT + TasksNum, 0)}}}
+        {ok, Record#traverse_tasks_scheduler{ongoing_tasks = max(OT + TasksNum, 0),
+            ongoing_tasks_per_node = NodesOT#{Node => max(NodeOT + TasksNum, 0)}}}
+    end,
+    extract_ok(datastore_model:update(?CTX, Pool, Diff)).
+
+-spec reset_node_ongoing_tasks(traverse:pool(), node()) -> ok | {error, term()}.
+reset_node_ongoing_tasks(Pool, Node) ->
+    Diff = fun(#traverse_tasks_scheduler{ongoing_tasks = OT, ongoing_tasks_per_node = NodesOT} = Record) ->
+        NodeOT = maps:get(Node, NodesOT, 0),
+        {ok, Record#traverse_tasks_scheduler{ongoing_tasks = max(OT - NodeOT, 0),
+            ongoing_tasks_per_node = NodesOT#{Node => 0}}}
     end,
     extract_ok(datastore_model:update(?CTX, Pool, Diff)).
 

@@ -152,7 +152,8 @@ job_persistence_test(Config) ->
     ?assertTaskFinished(TaskId1),
     ?assertBatchPrehooksCalled(Ref2, DocsNum, ?DEFAULT_BATCH_SIZE, true),
     ?assertTaskFinished(TaskId2),
-    ?assertMatch({ok, [TaskId1, TaskId2], _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
+    SortedTasks = lists:sort([TaskId1, TaskId2]),
+    ?assertMatch({ok, SortedTasks, _}, list_ended_tasks(W, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS).
 
 traverse_token_test(Config) ->
     [W | _] = ?config(cluster_worker_nodes, Config),
@@ -322,7 +323,10 @@ delete_ended_task(Worker, CallbackModule, TaskId) ->
 
 list_tasks(Worker, CallbackModule, Type) ->
     Pool = atom_to_binary(CallbackModule, utf8),
-    rpc:call(Worker, traverse_task_list, list, [Pool, Type]).
+    case rpc:call(Worker, traverse_task_list, list, [Pool, Type]) of
+        {ok, List, RestartInfo} -> {ok, lists:sort(List), RestartInfo};
+        Other -> Other
+    end.
 
 clean_traverse_tasks(Worker) ->
     ?assertMatch({ok, [], _}, list_ongoing_tasks(Worker, ?VIEW_PROCESSING_MODULE), ?ATTEMPTS),
