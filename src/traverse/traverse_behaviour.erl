@@ -14,7 +14,7 @@
 -author("Michal Wrzeszcz").
 
 -optional_callbacks([task_started/2, task_finished/2, task_canceled/2, on_cancel_init/2,
-    task_restart_after_node_crash/2, get_sync_info/1, get_timestamp/0, to_string/1]).
+    node_crash_policy/2, get_sync_info/1, get_timestamp/0, to_string/1]).
 
 %%%===================================================================
 %%% Traverse API
@@ -94,7 +94,7 @@
 %% Is executed after node crash to decide if task should be restarted or cancelled.
 %% @end
 %%--------------------------------------------------------------------
--callback task_restart_after_node_crash(traverse:id(), traverse:pool()) ->
+-callback node_crash_policy(traverse:id(), traverse:pool()) ->
     traverse:node_crash_policy().
 
 %%%===================================================================

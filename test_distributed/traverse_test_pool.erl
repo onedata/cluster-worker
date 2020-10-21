@@ -19,7 +19,7 @@
 
 %% Pool callbacks
 -export([do_master_job/2, do_slave_job/2, task_finished/2, update_job_progress/5, get_job/1,
-    task_restart_after_node_crash/2]).
+    node_crash_policy/2]).
 %% Helper functions
 -export([get_slave_ans/1, get_node_slave_ans/2, get_expected/0, copy_jobs_store/2, check_schedulers_after_test/3]).
 -export([delete_ongoing_jobs/1]).
@@ -102,7 +102,7 @@ get_job(ID) ->
     {Job, TaskID} =  proplists:get_value(ID, Jobs, {undefined, <<>>}),
     {ok, Job, ?POOL, TaskID}.
 
-task_restart_after_node_crash(_, _) ->
+node_crash_policy(_, _) ->
     cancel_task.
 
 %%%===================================================================
