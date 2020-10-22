@@ -349,14 +349,14 @@ handle_requests_batch(Connection, RequestsBatch) ->
 
     SaveResponses = handle_save_requests_batch(Connection, SaveRequests),
 
-    T1 = time_utils:timestamp_micros(),
+    T1 = clock:timestamp_micros(),
     GetResponses = couchbase_crud:get(Connection, GetRequests),
-    Time = time_utils:timestamp_micros() - T1,
+    Time = clock:timestamp_micros() - T1,
     couchbase_batch:check_timeout(GetResponses, get, Time),
 
-    T2 = time_utils:timestamp_micros(),
+    T2 = clock:timestamp_micros(),
     DeleteResponses = couchbase_crud:delete(Connection, RemoveRequests),
-    Time2 = time_utils:timestamp_micros() - T2,
+    Time2 = clock:timestamp_micros() - T2,
     couchbase_batch:check_timeout(DeleteResponses, delete, Time2),
 
     #{
@@ -445,9 +445,9 @@ wait(WaitFun, FunName) ->
     Num :: non_neg_integer(), atom()) -> {ok | timeout,
     {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
 wait(WaitFun, Num, FunName) ->
-    T1 = time_utils:timestamp_micros(),
+    T1 = clock:timestamp_micros(),
     {_, SaveResponses} = Ans = WaitFun(),
-    Time = time_utils:timestamp_micros() - T1,
+    Time = clock:timestamp_micros() - T1,
     case couchbase_batch:check_timeout(SaveResponses, FunName, Time) of
         timeout when Num > 1 ->
             wait(WaitFun, Num - 1, FunName);
@@ -476,15 +476,15 @@ handle_request(_Connection, {delete, _, Key}, ResponsesBatch) ->
     RemoveResponses = maps:get(delete, ResponsesBatch),
     get_response(Key, RemoveResponses);
 handle_request(Connection, {get_counter, Key, Default}, _) ->
-    T1 = time_utils:timestamp_micros(),
+    T1 = clock:timestamp_micros(),
     Ans = couchbase_crud:get_counter(Connection, Key, Default),
-    Time = time_utils:timestamp_micros() - T1,
+    Time = clock:timestamp_micros() - T1,
     couchbase_batch:check_timeout([Ans], get_counter, Time),
     Ans;
 handle_request(Connection, {update_counter, Key, Delta, Default}, _) ->
-    T1 = time_utils:timestamp_micros(),
+    T1 = clock:timestamp_micros(),
     Ans = couchbase_crud:update_counter(Connection, Key, Delta, Default),
-    Time = time_utils:timestamp_micros() - T1,
+    Time = clock:timestamp_micros() - T1,
     couchbase_batch:check_timeout([Ans], update_counter, Time),
     Ans;
 handle_request(Connection, {save_design_doc, DesignName, EJson}, _) ->

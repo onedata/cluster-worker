@@ -19,9 +19,11 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_service/6, start_service/3, start_service/4,
-    stop_service/3, report_service_stop/3, takeover/1, migrate_to_recovered_master/1,
-    do_healthcheck/3, get_processing_node/1]).
+-export([start_service/6, start_service/3, start_service/4]).
+-export([reschedule_healthcheck/4]).
+-export([stop_service/3, report_service_stop/3]).
+-export([takeover/1, migrate_to_recovered_master/1]).
+-export([do_healthcheck/3, get_processing_node/1]).
 %% Export for internal rpc
 -export([start_service_locally/4, init_service/4]).
 
@@ -33,6 +35,10 @@
 -type service_init_fun() :: apply_start_fun | apply_takeover_fun.
 -export_type([node_id/0]).
 
+% Concatenation of module and service name, used to identify a service across this module
+-opaque unique_service_name() :: binary().
+-export_type([unique_service_name/0]).
+
 %%%===================================================================
 %%% Message sending API
 %%%===================================================================
@@ -40,47 +46,60 @@
 -spec start_service(module(), internal_service:service_name(), internal_service:service_fun_name(),
     internal_service:service_fun_name(), internal_service:service_fun_args(), node_selector()) ->
     ok | aborted | {error, term()}.
-start_service(Module, Name, Fun, StopFun, Args, NodeSelector) ->
+start_service(Module, ServiceName, Fun, StopFun, Args, NodeSelector) ->
     Options = #{
         start_function => Fun,
         stop_function => StopFun,
         start_function_args => Args
     },
-    start_service(Module, Name, NodeSelector, Options).
+    start_service(Module, ServiceName, NodeSelector, Options).
 
 -spec start_service(module(), internal_service:service_name(), internal_service:options()) ->
     ok | aborted | {error, term()}.
-start_service(Module, Name, ServiceDescription) ->
-    start_service(Module, Name, ?LOCAL_NODE_SELECTOR, ServiceDescription).
+start_service(Module, ServiceName, ServiceDescription) ->
+    start_service(Module, ServiceName, ?LOCAL_NODE_SELECTOR, ServiceDescription).
 
 -spec start_service(module(), internal_service:service_name(), node_selector(), internal_service:options()) ->
     ok | aborted | {error, term()}.
-start_service(Module, Name, NodeSelector, ServiceDescription) ->
+start_service(Module, ServiceName, NodeSelector, ServiceDescription) ->
     {MasterNode, HandlingNode} = get_master_and_handling_nodes(NodeSelector),
-    case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, Name, ServiceDescription]) of
+    case rpc:call(HandlingNode, ?MODULE, start_service_locally, [MasterNode, Module, ServiceName, ServiceDescription]) of
         {badrpc, Reason} -> {error, Reason};
         Other -> Other
     end.
 
--spec stop_service(module(), internal_service:service_name(), node_selector()) -> ok | {error, term()}.
-stop_service(Module, Name, NodeSelector) ->
+-spec reschedule_healthcheck(module(), internal_service:service_name(), node_selector(),
+    internal_service:healthcheck_interval()) -> ok | ignored.
+reschedule_healthcheck(Module, ServiceName, NodeSelector, NewInterval) ->
     {MasterNode, _} = get_master_and_handling_nodes(NodeSelector),
     MasterNodeId = get_node_id(MasterNode),
-    ServiceName = get_internal_name(Module, Name),
-    case get_service_and_processing_node(ServiceName, MasterNodeId) of
-        {undefined, _} ->
+    UniqueName = gen_unique_service_name(Module, ServiceName),
+    case get_service_and_processing_node(UniqueName, MasterNodeId) of
+        stopped ->
+            ignored;
+        {_, ProcessingNode} ->
+            node_manager:reschedule_service_healthcheck(ProcessingNode, UniqueName, MasterNodeId, NewInterval)
+    end.
+
+-spec stop_service(module(), internal_service:service_name(), node_selector()) -> ok | {error, term()}.
+stop_service(Module, ServiceName, NodeSelector) ->
+    {MasterNode, _} = get_master_and_handling_nodes(NodeSelector),
+    MasterNodeId = get_node_id(MasterNode),
+    UniqueName = gen_unique_service_name(Module, ServiceName),
+    case get_service_and_processing_node(UniqueName, MasterNodeId) of
+        stopped ->
             ok;
         {Service, ProcessingNode} ->
             ok = internal_service:apply_stop_fun(ProcessingNode, Service),
-            remove_service_from_doc(MasterNodeId, ServiceName)
+            remove_service_from_doc(MasterNodeId, UniqueName)
     end.
 
 -spec report_service_stop(module(), internal_service:service_name(), node_selector()) -> ok.
-report_service_stop(Module, Name, NodeSelector) ->
+report_service_stop(Module, ServiceName, NodeSelector) ->
     {MasterNode, _} = get_master_and_handling_nodes(NodeSelector),
     MasterNodeId = get_node_id(MasterNode),
-    ServiceName = get_internal_name(Module, Name),
-    remove_service_from_doc(MasterNodeId, ServiceName).
+    UniqueName = gen_unique_service_name(Module, ServiceName),
+    remove_service_from_doc(MasterNodeId, UniqueName).
 
 -spec takeover(node()) -> ok | no_return().
 takeover(FailedNode) ->
@@ -91,12 +110,10 @@ takeover(FailedNode) ->
     MasterNodeId = get_node_id(FailedNode),
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
-            lists:foreach(fun({ServiceName, Service}) ->
-                ?info("Starting takeover of service ~s (module ~p) from node ~ts",
-                    [ServiceName, internal_service:get_module(Service), FailedNode]),
-                init_service(Service, ServiceName, apply_takeover_fun, MasterNodeId),
-                ?info("Finished takeover of service ~s (module ~p) from node ~ts",
-                    [ServiceName, internal_service:get_module(Service), FailedNode])
+            lists:foreach(fun({UniqueName, Service}) ->
+                ?info("Starting takeover of service ~s from node ~ts", [UniqueName, FailedNode]),
+                init_service(Service, UniqueName, apply_takeover_fun, MasterNodeId),
+                ?info("Finished takeover of service ~s from node ~ts", [UniqueName, FailedNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
@@ -110,34 +127,34 @@ migrate_to_recovered_master(MasterNode) ->
     MasterNodeId = get_node_id(MasterNode),
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, #document{value = #node_internal_services{services = Services}}} ->
-            lists:foreach(fun({ServiceName, Service}) ->
-                ?info("Starting migration of service ~s (module ~p) to node ~ts",
-                    [ServiceName, internal_service:get_module(Service), MasterNode]),
+            lists:foreach(fun({UniqueName, Service}) ->
+                ?info("Starting migration of service ~s to node ~ts", [UniqueName, MasterNode]),
                 ok = internal_service:apply_migrate_fun(Service),
-                rpc:call(MasterNode, ?MODULE, init_service, [Service, ServiceName, apply_start_fun, MasterNodeId]),
-                ?info("Finished migration of service ~s (module ~p) to node ~ts",
-                    [ServiceName, internal_service:get_module(Service), MasterNode])
+                rpc:call(MasterNode, ?MODULE, init_service, [Service, UniqueName, apply_start_fun, MasterNodeId]),
+                ?info("Finished migration of service ~s to node ~ts", [UniqueName, MasterNode])
             end, maps:to_list(Services));
         {error, not_found} ->
             ok
     end.
 
--spec do_healthcheck(internal_service:service_name(), node_id(), non_neg_integer()) ->
-    {ok, NewInterval :: non_neg_integer()} | ignore.
-do_healthcheck(ServiceName, MasterNodeId, LastInterval) ->
+-spec do_healthcheck(unique_service_name(), node_id(), internal_service:healthcheck_interval()) ->
+    {ok, NewInterval :: internal_service:healthcheck_interval()} | ignore.
+do_healthcheck(UniqueName, MasterNodeId, LastInterval) ->
     try
-        case get_service_and_processing_node(ServiceName, MasterNodeId) of
-            {Service, Node} when Service =:= undefined orelse Node =/= node() ->
+        case get_service_and_processing_node(UniqueName, MasterNodeId) of
+            stopped ->
+                ignore;
+            {_, OtherNode} when OtherNode =/= node() ->
                 ignore;
             {Service, _} ->
-                do_healthcheck_insecure(ServiceName, Service, MasterNodeId, LastInterval)
+                do_healthcheck_insecure(UniqueName, Service, MasterNodeId, LastInterval)
         end
     catch
         Class:Reason ->
             ?warning_stacktrace(
                 "Healthcheck function of service ~s crashed (this may happen during cluster reorganization)~n"
                 "Error was: ~w:~p",
-                [ServiceName, Class, Reason]
+                [UniqueName, Class, Reason]
             ),
             {ok, LastInterval}
     end.
@@ -154,24 +171,28 @@ get_processing_node(NodeSelector) ->
 %%% Internal functions
 %%%===================================================================
 
+-spec gen_unique_service_name(module(), internal_service:service_name()) -> unique_service_name().
+gen_unique_service_name(Module, ServiceName) ->
+    <<(atom_to_binary(Module, utf8))/binary, "###", ServiceName/binary>>.
+
 -spec start_service_locally(node(), module(), internal_service:service_name(),
     internal_service:options()) -> ok | aborted | {error, term()}.
-start_service_locally(MasterNode, Module, Name, ServiceDescription) ->
+start_service_locally(MasterNode, Module, ServiceName, ServiceDescription) ->
     Service = internal_service:new(Module, ServiceDescription),
     AllowOverride = internal_service:is_override_allowed(ServiceDescription),
-    ServiceName = get_internal_name(Module, Name),
+    UniqueName = gen_unique_service_name(Module, ServiceName),
 
-    Default = #node_internal_services{services = #{ServiceName => Service}, processing_node = node()},
+    Default = #node_internal_services{services = #{UniqueName => Service}, processing_node = node()},
     Diff = fun(#node_internal_services{services = Services} = Record) ->
-        case {maps:is_key(ServiceName, Services), AllowOverride} of
+        case {maps:is_key(UniqueName, Services), AllowOverride} of
             {true, false} -> {error, already_started};
-            _ -> {ok, Record#node_internal_services{services = Services#{ServiceName => Service}}}
+            _ -> {ok, Record#node_internal_services{services = Services#{UniqueName => Service}}}
         end
     end,
 
     MasterNodeId = get_node_id(MasterNode),
     case node_internal_services:update(MasterNodeId, Diff, Default) of
-        {ok, _} -> init_service(Service, ServiceName, apply_start_fun, MasterNodeId);
+        {ok, _} -> init_service(Service, UniqueName, apply_start_fun, MasterNodeId);
         {error, already_started} -> ok
     end.
 
@@ -189,61 +210,60 @@ get_master_and_handling_nodes(NodeSelector) ->
                 datastore_key:any_responsible_node(NodeSelector)}
     end.
 
--spec get_internal_name(module(), internal_service:service_name()) -> internal_service:service_name().
-get_internal_name(Module, Name) ->
-    <<(atom_to_binary(Module, utf8))/binary, "###", Name/binary>>.
+-spec get_service_and_processing_node(unique_service_name(), node_id()) ->
+    stopped | {internal_service:service(), node()}.
+get_service_and_processing_node(UniqueName, MasterNodeId) ->
+    {ok, #document{value = #node_internal_services{
+        services = NodeServices, processing_node = ProcessingNode
+    }}} = node_internal_services:get(MasterNodeId),
+    case maps:get(UniqueName, NodeServices, undefined) of
+        undefined -> stopped;  % service has been stopped, possibly in the migration process
+        Service -> {Service, ProcessingNode}
+    end.
 
--spec get_service_and_processing_node(internal_service:service_name(), node_id()) ->
-    {internal_service:service() | undefined, node()}.
-get_service_and_processing_node(ServiceName, MasterNodeId) ->
-    {ok, #document{value = #node_internal_services{services = NodeServices, processing_node = ProcessingNode}}} =
-        node_internal_services:get(MasterNodeId),
-
-    {maps:get(ServiceName, NodeServices, undefined), ProcessingNode}.
-
--spec init_service(internal_service:service(), internal_service:service_name(), service_init_fun(), node_id()) ->
+-spec init_service(internal_service:service(), unique_service_name(), service_init_fun(), node_id()) ->
     ok | aborted.
-init_service(Service, ServiceName, InitFun, MasterNodeId) ->
+init_service(Service, UniqueName, InitFun, MasterNodeId) ->
     try
         case internal_service:InitFun(Service) of
             ok ->
                 HealthcheckInterval = internal_service:get_healthcheck_interval(Service),
-                ok = node_manager:init_service_healthcheck(ServiceName, MasterNodeId, HealthcheckInterval);
+                node_manager:reschedule_service_healthcheck(node(), UniqueName, MasterNodeId, HealthcheckInterval);
             abort ->
-                remove_service_from_doc(MasterNodeId, ServiceName),
+                remove_service_from_doc(MasterNodeId, UniqueName),
                 aborted
         end
     catch
         Error:Reason ->
             ?error_stacktrace("Error while initializing service ~s - ~p:~p",
-                [ServiceName, Error, Reason]),
-            remove_service_from_doc(MasterNodeId, ServiceName),
+                [UniqueName, Error, Reason]),
+            remove_service_from_doc(MasterNodeId, UniqueName),
             error(service_init_failure)
     end.
 
--spec remove_service_from_doc(node_id(), internal_service:service_name()) -> ok.
-remove_service_from_doc(MasterNodeId, ServiceName) ->
+-spec remove_service_from_doc(node_id(), unique_service_name()) -> ok.
+remove_service_from_doc(MasterNodeId, UniqueName) ->
     Diff = fun(#node_internal_services{services = Services} = Record) ->
-        {ok, Record#node_internal_services{services = maps:remove(ServiceName, Services)}}
+        {ok, Record#node_internal_services{services = maps:remove(UniqueName, Services)}}
     end,
     case node_internal_services:update(MasterNodeId, Diff) of
         {ok, _} -> ok;
         {error, not_found} -> ok
     end.
 
--spec do_healthcheck_insecure(internal_service:service_name(), internal_service:service(), node_id(),
-    non_neg_integer()) -> {ok, NewInterval :: non_neg_integer()} | ignore.
-do_healthcheck_insecure(ServiceName, Service, MasterNodeId, LastInterval) ->
+-spec do_healthcheck_insecure(unique_service_name(), internal_service:service(), node_id(),
+    internal_service:healthcheck_interval()) -> {ok, NewInterval :: internal_service:healthcheck_interval()} | ignore.
+do_healthcheck_insecure(UniqueName, Service, MasterNodeId, LastInterval) ->
     case internal_service:apply_healthcheck_fun(Service, LastInterval) of
         {error, undefined_fun} ->
             ignore;
         {restart, _} ->
             % Check once more in case of race with migration
-            case get_service_and_processing_node(ServiceName, MasterNodeId) of
-                {undefined, _} ->
-                    ignore; % service has been stopped
+            case get_service_and_processing_node(UniqueName, MasterNodeId) of
+                stopped ->
+                    ignore;
                 {_, OtherNode} when OtherNode =/= node() ->
-                    ignore; % service has been migrated to other node
+                    ignore;  % service has been migrated to other node
                 _ ->
                     case internal_service:apply_start_fun(Service) of
                         ok ->
@@ -256,7 +276,7 @@ do_healthcheck_insecure(ServiceName, Service, MasterNodeId, LastInterval) ->
                                     {ok, NewInterval}
                             end;
                         abort ->
-                            remove_service_from_doc(MasterNodeId, ServiceName),
+                            remove_service_from_doc(MasterNodeId, UniqueName),
                             ignore
                     end
             end;

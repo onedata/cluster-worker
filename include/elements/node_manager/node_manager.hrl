@@ -26,7 +26,8 @@
     cache_cleaning_pid = undefined :: undefined | pid(),
     % {timestamp of last_analysis, pid that performs analysis}
     last_state_analysis = {{0, 0, 0}, undefined} :: {erlang:timestamp(), undefined | pid()},
-    throttling = true
+    throttling = true,
+    scheduled_service_healthchecks = #{} :: #{internal_service:service_name() => TimerRef :: reference()}
 }).
 
 -endif.

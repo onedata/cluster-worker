@@ -75,13 +75,13 @@ simple_call_test(Config) ->
 simple_call_test_base(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
-    T1 = time_utils:timestamp_millis(),
+    T1 = clock:timestamp_millis(),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [datastore_worker, ping, ?REQUEST_TIMEOUT])),
-    T2 = time_utils:timestamp_millis(),
+    T2 = clock:timestamp_millis(),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{datastore_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
-    T3 = time_utils:timestamp_millis(),
+    T3 = clock:timestamp_millis(),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{datastore_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
-    T4 = time_utils:timestamp_millis(),
+    T4 = clock:timestamp_millis(),
 
     [
         #parameter{name = dispatcher, value = T2 - T1, unit = "ms",
@@ -123,10 +123,10 @@ direct_cast_test_base(Config) ->
             ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [datastore_worker, ping, {proc, Self}, MsgId]))
         end,
 
-        BeforeProcessing = time_utils:timestamp_millis(),
+        BeforeProcessing = clock:timestamp_millis(),
         for(1, ProcSendNum, SendReq),
         count_answers(ProcSendNum),
-        AfterProcessing = time_utils:timestamp_millis(),
+        AfterProcessing = clock:timestamp_millis(),
         AfterProcessing - BeforeProcessing
     end,
 
@@ -167,10 +167,10 @@ redirect_cast_test_base(Config) ->
             ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker2}, ping, {proc, Self}, MsgId]))
         end,
 
-        BeforeProcessing = time_utils:timestamp_millis(),
+        BeforeProcessing = clock:timestamp_millis(),
         for(1, ProcSendNum, SendReq),
         count_answers(ProcSendNum),
-        AfterProcessing = time_utils:timestamp_millis(),
+        AfterProcessing = clock:timestamp_millis(),
         AfterProcessing - BeforeProcessing
     end,
 
@@ -233,10 +233,10 @@ mixed_cast_test_core(Config) ->
             ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker2}, ping, {proc, Self}, 2 * MsgId]))
         end,
 
-        BeforeProcessing = time_utils:timestamp_millis(),
+        BeforeProcessing = clock:timestamp_millis(),
         for(1, ProcSendNum, SendReq),
         count_answers(2 * ProcSendNum),
-        AfterProcessing = time_utils:timestamp_millis(),
+        AfterProcessing = clock:timestamp_millis(),
         AfterProcessing - BeforeProcessing
     end,
 

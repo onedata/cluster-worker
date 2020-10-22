@@ -48,8 +48,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
--export([init_service_healthcheck/3]).
--export([force_restart_service_healthcheck/3]).
+-export([reschedule_service_healthcheck/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -293,17 +292,10 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
-
--spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
-    non_neg_integer()) -> ok.
-init_service_healthcheck(ServiceName, MasterNodeId, Interval) ->
-    gen_server2:cast(?NODE_MANAGER_NAME, {schedule_service_healthcheck, ServiceName, MasterNodeId, Interval}).
-
-
--spec force_restart_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
-    non_neg_integer()) -> ok.
-force_restart_service_healthcheck(ServiceName, MasterNodeId, InitialInterval) ->
-    gen_server2:cast(?NODE_MANAGER_NAME, {service_healthcheck, ServiceName, MasterNodeId, InitialInterval}).
+-spec reschedule_service_healthcheck(node(), internal_services_manager:unique_service_name(),
+    internal_services_manager:node_id(), internal_service:healthcheck_interval()) -> ok.
+reschedule_service_healthcheck(Node, ServiceName, MasterNodeId, NewInterval) ->
+    gen_server2:cast({?NODE_MANAGER_NAME, Node}, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -523,18 +515,31 @@ handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, Stat
     spawn(fun() ->
         case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
             {ok, NewInterval} ->
-                gen_server2:call(NodeManager, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval});
+                gen_server2:cast(NodeManager, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval});
             ignore ->
                 ok
         end
     end),
-    {noreply, State};
+    {noreply, State#state{scheduled_service_healthchecks = maps:remove(
+        ServiceName, State#state.scheduled_service_healthchecks
+    )}};
 
 handle_cast({schedule_service_healthcheck, ServiceName, MasterNodeId, Interval}, State) ->
-    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+    TimerRef = erlang:send_after(Interval, ?NODE_MANAGER_NAME,
         {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}
     ),
-    {noreply, State};
+    PreviousHealthchecks = State#state.scheduled_service_healthchecks,
+    % check if any healthcheck is currently scheduled, in such case cancel it
+    % (service_healthcheck normally removes the triggering timer, so this means
+    % that the healthcheck has been rescheduled)
+    PrunedHealthchecks = case maps:take(ServiceName, PreviousHealthchecks) of
+        error ->
+            PreviousHealthchecks;
+        {PreviousTimer, NewMap} ->
+            erlang:cancel_timer(PreviousTimer),
+            NewMap
+    end,
+    {noreply, State#state{scheduled_service_healthchecks = PrunedHealthchecks#{ServiceName => TimerRef}}};
 
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
     NewState = update_lb_advices(State, Advices),
@@ -716,6 +721,7 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
+    clock:try_to_restore_previous_synchronization(),
     ?info("Successfully connected to cluster manager"),
     ?info("Starting regular heartbeat to cluster manager"),
     gen_server2:cast(self(), do_heartbeat),
@@ -1336,7 +1342,7 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> 
+        {error, not_found} ->
             AllGens = ?CALL_PLUGIN(cluster_generations, []),
             {InstalledGen, _} = lists:last(AllGens),
             {ok, InstalledGen};
