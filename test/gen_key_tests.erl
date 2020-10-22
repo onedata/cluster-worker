@@ -21,7 +21,9 @@
 %%%===================================================================
 
 gen_key_test_() ->
-    {timeout, 120, fun test_gen_key/0}.
+    {setup, fun node_cache:init/0, fun(_) -> ets:delete(node_cache) end, 
+        {timeout, 120, fun test_gen_key/0}
+    }.
 
 %%%===================================================================
 %%% Test functions
