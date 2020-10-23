@@ -18,7 +18,7 @@
 %% API
 -export([start_service/2, set_envs/3, healthcheck_fun/1, stop_service/2]).
 -export([assert_service_started/3, assert_healthcheck_done/3, assert_healthcheck_not_done/2]).
--export([clear_and_check_messages/3]).
+-export([flush_and_check_messages/3]).
 
 %%%===================================================================
 %%% API
@@ -34,6 +34,7 @@ set_envs(Workers, ServiceName, MasterProc) ->
 
 healthcheck_fun(_LastInterval) ->
     {ok, {ServiceName, MasterProc}} = application:get_env(ha_test_utils_data),
+    % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     MasterProc ! {healthcheck, ServiceName, node(), os:timestamp()},
     ok.
 
@@ -50,16 +51,16 @@ assert_healthcheck_done(ServiceName, ExpectedNode, MinTimestamp) ->
     check_msg_received(ServiceName, ExpectedNode, MinTimestamp, undefined, healthcheck).
 
 assert_healthcheck_not_done(ServiceName, ExpectedNode) ->
-    check_msg_not_received(ServiceName, ExpectedNode, healthcheck).
+    ?assertNotReceivedMatch({healthcheck, ServiceName, ExpectedNode, _}, 5000).
 
-clear_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
+flush_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
     receive
         {ServiceName, Node, Timestamp} ->
             case timer:now_diff(Timestamp, CheckMinTimestamp) > 0 of
                 true -> ?assertNotEqual(ExcludedNode, Node);
                 false -> ok
             end,
-            clear_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp)
+            flush_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp)
     after
         0 -> ok
     end.
@@ -87,12 +88,3 @@ check_msg_received(ServiceName, ExpectedNode, MinTimestamp, LastMessage, Message
         true -> ok;
         false -> check_msg_received(ServiceName, ExpectedNode, MinTimestamp, Ans, MessageType)
     end.
-
-check_msg_not_received(ServiceName, ExpectedNode, MessageType) ->
-    ?assert(receive
-        {MessageType, ServiceName, ExpectedNode, _} ->
-            false
-    after
-        5000 ->
-            true
-    end).

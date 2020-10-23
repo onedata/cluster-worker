@@ -354,7 +354,7 @@ test_get(Size) ->
     GBSet = gb_sets:from_ordset(List),
     GBTree = gb_trees:from_orddict(List),
 
-    T1 = os:timestamp(),
+    T1 = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     lists:foreach(fun(I) ->
         erlang:element(I, Tuple)
     end, Seq),

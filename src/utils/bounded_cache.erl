@@ -208,7 +208,7 @@ invalidate(Cache) ->
 %%--------------------------------------------------------------------
 -spec get_timestamp() -> timestamp().
 get_timestamp() ->
-    {Mega, Sec, Micro} = os:timestamp(),
+    {Mega, Sec, Micro} = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     (Mega * 1000000 + Sec) * 1000000 + Micro.
 
 %%%===================================================================

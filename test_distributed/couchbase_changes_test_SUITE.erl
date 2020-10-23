@@ -466,7 +466,7 @@ stream_should_ignore_changes3(Config) ->
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
         couchbase_changes_restart_timeout, timer:minutes(1)),
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
-        db_connection_timestamp, os:timestamp()),
+        db_connection_timestamp, os:timestamp()), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     Callback = fun(Any) -> Self ! Any end,
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]

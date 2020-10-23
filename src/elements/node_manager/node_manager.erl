@@ -292,10 +292,14 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
--spec reschedule_service_healthcheck(node(), internal_services_manager:unique_service_name(),
+-spec reschedule_service_healthcheck(node() | pid(), internal_services_manager:unique_service_name(),
     internal_services_manager:node_id(), internal_service:healthcheck_interval()) -> ok.
-reschedule_service_healthcheck(Node, ServiceName, MasterNodeId, NewInterval) ->
-    gen_server2:cast({?NODE_MANAGER_NAME, Node}, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval}).
+reschedule_service_healthcheck(NodeOrPid, ServiceName, MasterNodeId, NewInterval) ->
+    GenServerName = case NodeOrPid of
+        Pid when is_pid(Pid) -> Pid;
+        Node when is_atom(Node) -> {?NODE_MANAGER_NAME, Node}
+    end,
+    gen_server2:cast(GenServerName, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -515,7 +519,7 @@ handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, Stat
     spawn(fun() ->
         case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
             {ok, NewInterval} ->
-                gen_server2:cast(NodeManager, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval});
+                reschedule_service_healthcheck(NodeManager, ServiceName, MasterNodeId, NewInterval);
             ignore ->
                 ok
         end
@@ -1027,7 +1031,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
     ?update_counter(?EXOMETER_NAME(memory_node), MemUsage),
     ?update_counter(?EXOMETER_NAME(cpu_node), CPU * 100),
 
-    Now = os:timestamp(),
+    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
     MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
     MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),

@@ -219,7 +219,7 @@ services_migration_test(Config) ->
         rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
-    StartTimestamp = os:timestamp(),
+    StartTimestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     ServiceOptions = #{
         start_function => start_service,
         stop_function => stop_service,
@@ -246,7 +246,7 @@ services_migration_test(Config) ->
     ha_test_utils:assert_healthcheck_done(ServiceName, Node1, MigrationTimestamp),
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     timer:sleep(timer:seconds(5)), % Wait for unwanted messages to verify migration
-    ha_test_utils:clear_and_check_messages(ServiceName, Node2, MigrationFinishTimestamp).
+    ha_test_utils:flush_and_check_messages(ServiceName, Node2, MigrationFinishTimestamp).
 
 service_healthcheck_rescheduling_test(Config) ->
     [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),

@@ -275,7 +275,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
-    Timestamp = os:timestamp(),
+    Timestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     {KIF2, FT2, Flushed} = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             Filtered = maps:filter(fun(_K, {V, _}) ->
@@ -357,7 +357,7 @@ handle_info(flush, State = #state{
                 ToFlush0 = maps:without(KiFKeys, CachedKeys),
                 CooldownUS = timer:seconds(?FLUSH_COOLDOWN) * 1000,
 
-                Now = os:timestamp(),
+                Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
                 ToFlush = maps:filter(fun(K, _V) ->
                     FlushTime = maps:get(K, FT, {0,0,0}),
                     timer:now_diff(Now, FlushTime) > CooldownUS
@@ -396,7 +396,7 @@ handle_info(flush, State = #state{
                         Futures = datastore_disc_writer:flush_async(ToFlush2),
                         gen_server:cast(Pid, {wait_flush, Ref, Futures}),
 
-                        Timestamp = os:timestamp(),
+                        Timestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module
                         FT2 = maps:fold(fun(K, _V, Acc) ->
                             maps:put(K, Timestamp, Acc)
                         end, FT, ToFlush2),
@@ -936,7 +936,7 @@ check_inactivate(#state{
     link_tokens = LT,
     inactivate_timer = OldTimer
 } = State) ->
-    Now = os:timestamp(),
+    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
 
     {ToExpire2, ExpireMaxTime} =
         maps:fold(fun(K, {Timestamp, Expiry}, {Acc, MaxTime}) ->
@@ -1000,7 +1000,7 @@ get_link_token(_Batch, Token) ->
 set_link_token(Tokens, #link_token{restart_token = Token} = FullToken,
     #link_token{restart_token = {cached_token, Token2}}) ->
     {FullToken#link_token{restart_token = {cached_token, Token2}},
-        maps:put(Token2, {Token, os:timestamp()}, Tokens)};
+        maps:put(Token2, {Token, os:timestamp()}, Tokens)}; % @TODO VFS-6841 switch to the clock module
 set_link_token(Tokens, Token, #link_token{} = OldToken) ->
     Token2 = erlang:make_ref(),
     set_link_token(Tokens, Token,
