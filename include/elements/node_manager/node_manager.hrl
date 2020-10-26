@@ -22,9 +22,11 @@
     scheduler_info = undefined :: undefined | list(),
     % TODO - better task manager
     task_control = false,
+    % @TODO VFS-6841 switch to the clock module
     last_cache_cleaning = {0, 0, 0},
     cache_cleaning_pid = undefined :: undefined | pid(),
     % {timestamp of last_analysis, pid that performs analysis}
+    % @TODO VFS-6841 switch to the clock module
     last_state_analysis = {{0, 0, 0}, undefined} :: {erlang:timestamp(), undefined | pid()},
     throttling = true,
     scheduled_service_healthchecks = #{} :: #{internal_service:service_name() => TimerRef :: reference()}

@@ -299,7 +299,7 @@ reschedule_service_healthcheck(NodeOrPid, ServiceName, MasterNodeId, NewInterval
         Pid when is_pid(Pid) -> Pid;
         Node when is_atom(Node) -> {?NODE_MANAGER_NAME, Node}
     end,
-    gen_server2:cast(GenServerName, {schedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval}).
+    gen_server2:cast(GenServerName, {reschedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -528,7 +528,7 @@ handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, Stat
         ServiceName, State#state.scheduled_service_healthchecks
     )}};
 
-handle_cast({schedule_service_healthcheck, ServiceName, MasterNodeId, Interval}, State) ->
+handle_cast({reschedule_service_healthcheck, ServiceName, MasterNodeId, Interval}, State) ->
     TimerRef = erlang:send_after(Interval, ?NODE_MANAGER_NAME,
         {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}
     ),
@@ -725,7 +725,6 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 %%--------------------------------------------------------------------
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
-    clock:try_to_restore_previous_synchronization(),
     ?info("Successfully connected to cluster manager"),
     ?info("Starting regular heartbeat to cluster manager"),
     gen_server2:cast(self(), do_heartbeat),
