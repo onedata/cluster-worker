@@ -29,7 +29,11 @@
     % @TODO VFS-6841 switch to the clock module
     last_state_analysis = {{0, 0, 0}, undefined} :: {erlang:timestamp(), undefined | pid()},
     throttling = true,
-    scheduled_service_healthchecks = #{} :: #{internal_service:service_name() => TimerRef :: reference()}
+    % Holds a unique reference for each service that is regenerated only upon
+    % rescheduling of periodic healthchecks and otherwise stays the same through
+    % all consecutive runs. Used to detect that a scheduled healthcheck has been
+    % overriden in the meantime and should be ignored.
+    service_healthcheck_generations = #{} :: #{internal_service:service_name() => reference()}
 }).
 
 -endif.

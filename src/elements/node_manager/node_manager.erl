@@ -292,14 +292,24 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
--spec reschedule_service_healthcheck(node() | pid(), internal_services_manager:unique_service_name(),
+-spec reschedule_service_healthcheck(node(), internal_services_manager:unique_service_name(),
     internal_services_manager:node_id(), internal_service:healthcheck_interval()) -> ok.
-reschedule_service_healthcheck(NodeOrPid, ServiceName, MasterNodeId, NewInterval) ->
+reschedule_service_healthcheck(Node, ServiceName, MasterNodeId, NewInterval) ->
+    schedule_service_healthcheck(Node, override, make_ref(), ServiceName, MasterNodeId, NewInterval).
+
+%% @private
+-spec schedule_service_healthcheck(node() | pid(), Strategy :: override | continue,
+    Generation :: reference(), internal_services_manager:unique_service_name(),
+    internal_services_manager:node_id(), internal_service:healthcheck_interval()) -> ok.
+schedule_service_healthcheck(NodeOrPid, Strategy, Generation, ServiceName, MasterNodeId, NewInterval) ->
     GenServerName = case NodeOrPid of
         Pid when is_pid(Pid) -> Pid;
         Node when is_atom(Node) -> {?NODE_MANAGER_NAME, Node}
     end,
-    gen_server2:cast(GenServerName, {reschedule_service_healthcheck, ServiceName, MasterNodeId, NewInterval}).
+    gen_server2:cast(
+        GenServerName,
+        {schedule_service_healthcheck, Strategy, Generation, ServiceName, MasterNodeId, NewInterval}
+    ).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -513,37 +523,44 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
-handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, State) ->
-    % run the healthcheck asynchronously to allow calling the node_manager from within the healthcheck procedure
-    NodeManager = self(),
-    spawn(fun() ->
-        case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
-            {ok, NewInterval} ->
-                reschedule_service_healthcheck(NodeManager, ServiceName, MasterNodeId, NewInterval);
-            ignore ->
-                ok
-        end
-    end),
-    {noreply, State#state{scheduled_service_healthchecks = maps:remove(
-        ServiceName, State#state.scheduled_service_healthchecks
-    )}};
-
-handle_cast({reschedule_service_healthcheck, ServiceName, MasterNodeId, Interval}, State) ->
-    TimerRef = erlang:send_after(Interval, ?NODE_MANAGER_NAME,
-        {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}
-    ),
-    PreviousHealthchecks = State#state.scheduled_service_healthchecks,
-    % check if any healthcheck is currently scheduled, in such case cancel it
-    % (service_healthcheck normally removes the triggering timer, so this means
-    % that the healthcheck has been rescheduled)
-    PrunedHealthchecks = case maps:take(ServiceName, PreviousHealthchecks) of
-        error ->
-            PreviousHealthchecks;
-        {PreviousTimer, NewMap} ->
-            erlang:cancel_timer(PreviousTimer),
-            NewMap
+handle_cast({service_healthcheck, Generation, ServiceName, MasterNodeId, LastInterval}, State) ->
+    case maps:get(ServiceName, State#state.service_healthcheck_generations) of
+        Generation ->
+            % run the healthcheck asynchronously to allow calling the node_manager from within the healthcheck procedure
+            NodeManager = self(),
+            spawn(fun() ->
+                case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
+                    {ok, NewInterval} ->
+                        schedule_service_healthcheck(
+                            NodeManager, continue, Generation, ServiceName, MasterNodeId, NewInterval
+                        );
+                    ignore ->
+                        ok
+                end
+            end);
+        _ ->
+            % ignore as the generation has changed in the meantime -> healthchecks have been rescheduled
+            ok
     end,
-    {noreply, State#state{scheduled_service_healthchecks = PrunedHealthchecks#{ServiceName => TimerRef}}};
+    {noreply, State};
+
+handle_cast({schedule_service_healthcheck, override, Generation, ServiceName, MasterNodeId, Interval}, State) ->
+    NewState = State#state{service_healthcheck_generations = maps:put(
+        ServiceName, Generation, State#state.service_healthcheck_generations
+    )},
+    handle_cast({schedule_service_healthcheck, continue, Generation, ServiceName, MasterNodeId, Interval}, NewState);
+
+handle_cast({schedule_service_healthcheck, continue, Generation, ServiceName, MasterNodeId, Interval}, State) ->
+    case maps:get(ServiceName, State#state.service_healthcheck_generations) of
+        Generation ->
+            erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+                {timer, {service_healthcheck, Generation, ServiceName, MasterNodeId, Interval}}
+            );
+        _ ->
+            % the generation has changed in the meantime -> healthchecks have been rescheduled
+            ok
+    end,
+    {noreply, State};
 
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
     NewState = update_lb_advices(State, Advices),
