@@ -551,15 +551,9 @@ handle_cast({schedule_service_healthcheck, override, Generation, ServiceName, Ma
     handle_cast({schedule_service_healthcheck, continue, Generation, ServiceName, MasterNodeId, Interval}, NewState);
 
 handle_cast({schedule_service_healthcheck, continue, Generation, ServiceName, MasterNodeId, Interval}, State) ->
-    case maps:get(ServiceName, State#state.service_healthcheck_generations) of
-        Generation ->
-            erlang:send_after(Interval, ?NODE_MANAGER_NAME,
-                {timer, {service_healthcheck, Generation, ServiceName, MasterNodeId, Interval}}
-            );
-        _ ->
-            % the generation has changed in the meantime -> healthchecks have been rescheduled
-            ok
-    end,
+    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+        {timer, {service_healthcheck, Generation, ServiceName, MasterNodeId, Interval}}
+    ),
     {noreply, State};
 
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->

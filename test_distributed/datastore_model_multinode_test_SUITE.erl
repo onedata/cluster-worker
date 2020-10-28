@@ -278,7 +278,6 @@ service_healthcheck_rescheduling_test(Config) ->
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, reschedule_healthcheck, [
         ha_test_utils, <<"test_service_reschedule">>, NodeSelector, 1000
     ])),
-    timer:sleep(1000),
     ha_test_utils:assert_healthcheck_done(ServiceName, Node1, StartTimestamp).
 
 
