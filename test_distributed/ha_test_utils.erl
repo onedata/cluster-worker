@@ -16,8 +16,9 @@
 -include_lib("ctool/include/test/assertions.hrl").
 
 %% API
--export([start_service/2, set_envs/3, healthcheck_fun/1, stop_service/2,
-    check_service/3, check_healthcheck/3, clearAndCheckMessages/3]).
+-export([start_service/2, set_envs/3, healthcheck_fun/1, stop_service/2]).
+-export([assert_service_started/3, assert_healthcheck_done/3, assert_healthcheck_not_done/2]).
+-export([flush_and_check_messages/3]).
 
 %%%===================================================================
 %%% API
@@ -33,6 +34,7 @@ set_envs(Workers, ServiceName, MasterProc) ->
 
 healthcheck_fun(_LastInterval) ->
     {ok, {ServiceName, MasterProc}} = application:get_env(ha_test_utils_data),
+    % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     MasterProc ! {healthcheck, ServiceName, node(), os:timestamp()},
     ok.
 
@@ -42,20 +44,23 @@ stop_service(ServiceName, _MasterProc) ->
     Pid ! stop,
     ok.
 
-check_service(ServiceName, ExpectedNode, MinTimestamp) ->
-    check(ServiceName, ExpectedNode, MinTimestamp, undefined, service_message).
+assert_service_started(ServiceName, ExpectedNode, MinTimestamp) ->
+    check_msg_received(ServiceName, ExpectedNode, MinTimestamp, undefined, service_message).
 
-check_healthcheck(ServiceName, ExpectedNode, MinTimestamp) ->
-    check(ServiceName, ExpectedNode, MinTimestamp, undefined, healthcheck).
+assert_healthcheck_done(ServiceName, ExpectedNode, MinTimestamp) ->
+    check_msg_received(ServiceName, ExpectedNode, MinTimestamp, undefined, healthcheck).
 
-clearAndCheckMessages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
+assert_healthcheck_not_done(ServiceName, ExpectedNode) ->
+    ?assertNotReceivedMatch({healthcheck, ServiceName, ExpectedNode, _}, 5000).
+
+flush_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
     receive
         {ServiceName, Node, Timestamp} ->
             case timer:now_diff(Timestamp, CheckMinTimestamp) > 0 of
                 true -> ?assertNotEqual(ExcludedNode, Node);
                 false -> ok
             end,
-            clearAndCheckMessages(ServiceName, ExcludedNode, CheckMinTimestamp)
+            flush_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp)
     after
         0 -> ok
     end.
@@ -72,7 +77,7 @@ service_proc(ServiceName, MasterProc) ->
         1000 -> service_proc(ServiceName, MasterProc)
     end.
 
-check(ServiceName, ExpectedNode, MinTimestamp, LastMessage, MessageType) ->
+check_msg_received(ServiceName, ExpectedNode, MinTimestamp, LastMessage, MessageType) ->
     Ans = receive
         {MessageType, ServiceName, Node, Timestamp} -> {ok, Node, Timestamp}
     after
@@ -81,5 +86,5 @@ check(ServiceName, ExpectedNode, MinTimestamp, LastMessage, MessageType) ->
     {ok, TestNode, TestTimestamp} = ?assertMatch({ok, _, _}, Ans),
     case ExpectedNode =:= TestNode andalso timer:now_diff(TestTimestamp, MinTimestamp) >= 0 of
         true -> ok;
-        false -> check(ServiceName, ExpectedNode, MinTimestamp, Ans, MessageType)
+        false -> check_msg_received(ServiceName, ExpectedNode, MinTimestamp, Ans, MessageType)
     end.

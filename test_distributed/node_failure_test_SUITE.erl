@@ -52,12 +52,12 @@ failure_test(Config) ->
         rpc:call(Worker0, consistent_hashing, get_routing_info, [Seed]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
-    StartTimestamp = os:timestamp(),
+    StartTimestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
         [ha_test_utils, <<"test_service">>, start_service, stop_service, [ServiceName, MasterProc], Seed])),
     {TraverseID, TasksWorkers} = start_traverse(CallWorker, Node1),
 
-    ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
+    ha_test_utils:assert_service_started(ServiceName, Node1, StartTimestamp),
     RecAns = receive
         {stop, Node1} -> ok
     after
@@ -77,7 +77,7 @@ failure_test(Config) ->
     ?assertMatch({ok, #document{value = #traverse_task{status = finished}}},
         rpc:call(CallWorker, traverse_task, get, [?POOL, TraverseID]), ?ATTEMPTS),
 
-    ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
+    ha_test_utils:assert_service_started(ServiceName, Node2, StopTimestamp),
     traverse_test_pool:check_schedulers_after_test(CallWorker, lists:usort(TasksWorkers ++ [Node2]), ?POOL).
 
 start_traverse(CallWorker, ExpectedNode) ->

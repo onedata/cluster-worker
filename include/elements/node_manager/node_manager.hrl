@@ -22,11 +22,18 @@
     scheduler_info = undefined :: undefined | list(),
     % TODO - better task manager
     task_control = false,
+    % @TODO VFS-6841 switch to the clock module
     last_cache_cleaning = {0, 0, 0},
     cache_cleaning_pid = undefined :: undefined | pid(),
     % {timestamp of last_analysis, pid that performs analysis}
+    % @TODO VFS-6841 switch to the clock module
     last_state_analysis = {{0, 0, 0}, undefined} :: {erlang:timestamp(), undefined | pid()},
-    throttling = true
+    throttling = true,
+    % Holds a unique reference for each service that is regenerated only upon
+    % rescheduling of periodic healthchecks and otherwise stays the same through
+    % all consecutive runs. Used to detect that a scheduled healthcheck has been
+    % overriden in the meantime and should be ignored.
+    service_healthcheck_generations = #{} :: #{internal_service:service_name() => reference()}
 }).
 
 -endif.

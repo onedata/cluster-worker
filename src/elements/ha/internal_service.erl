@@ -38,7 +38,7 @@
     takeover_function_args :: service_fun_args(),
     migrate_function_args :: service_fun_args(),
     stop_function_args :: service_fun_args(),
-    healthcheck_interval :: non_neg_integer(),
+    healthcheck_interval :: healthcheck_interval(),
     async_start :: boolean()
 }).
 
@@ -46,6 +46,7 @@
 -type service_name() :: binary().
 -type service_fun_name() :: atom().
 -type service_fun_args() :: list().
+-type healthcheck_interval() :: clock:millis().
 -type options() :: #{
     start_function := service_fun_name(),
     start_function_args => service_fun_args(),
@@ -56,7 +57,7 @@
     stop_function => service_fun_name(),
     stop_function_args => service_fun_args(),
     healthcheck_fun => service_fun_name(),
-    healthcheck_interval => non_neg_integer(),
+    healthcheck_interval => healthcheck_interval(),
     allow_override => boolean(), % allows overriding of existing service ; if it is false (default),
                                  % an error is returned if service using the name already exists
     async_start => boolean()
@@ -67,6 +68,7 @@
                                        % all changes in metadata connected with the service will be reversed.
 
 -export_type([service/0, service_name/0, service_fun_name/0, service_fun_args/0, options/0]).
+-export_type([healthcheck_interval/0]).
 
 -define(HEALTHCHECK_DEFAULT_INTERVAL,
     application:get_env(?CLUSTER_WORKER_APP_NAME, service_healthcheck_default_interval, 1000)).
@@ -144,8 +146,8 @@ apply_migrate_fun(#internal_service{module = Module, migrate_function = Fun, mig
         _ -> apply(Module, Fun, Args)
     end.
 
--spec apply_healthcheck_fun(service(), non_neg_integer()) ->
-    {Result :: term(), Interval :: non_neg_integer()} | {error, undefined_fun}.
+-spec apply_healthcheck_fun(service(), healthcheck_interval()) ->
+    {Result :: term(), healthcheck_interval()} | {error, undefined_fun}.
 apply_healthcheck_fun(#internal_service{healthcheck_fun = undefined}, _LastInterval) ->
     {error, undefined_fun};
 apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun,
@@ -155,7 +157,7 @@ apply_healthcheck_fun(#internal_service{module = Module, healthcheck_fun = Fun,
         Result -> {Result, DefaultInterval}
     end.
 
--spec get_healthcheck_interval(service()) -> non_neg_integer().
+-spec get_healthcheck_interval(service()) -> healthcheck_interval().
 get_healthcheck_interval(#internal_service{healthcheck_interval = Interval}) ->
     Interval.
 
@@ -169,7 +171,7 @@ apply_with_retry(Module, Fun, Args, Async) ->
             apply_with_retry(Module, Fun, Args, ?INITIAL_SLEEP, ?RETRIES_NUM)
     end.
 
--spec apply_with_retry(module(), service_fun_name(), service_fun_args(), non_neg_integer(), non_neg_integer()) ->
+-spec apply_with_retry(module(), service_fun_name(), service_fun_args(), clock:millis(), non_neg_integer()) ->
     init_fun_answer().
 apply_with_retry(Module, Fun, Args, _Sleep, 0) ->
     apply(Module, Fun, Args);

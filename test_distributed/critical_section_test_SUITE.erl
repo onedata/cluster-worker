@@ -187,7 +187,7 @@ performance_test_base(Config) ->
     ].
 
 check_time(Fun, Workers) ->
-    StartTime = os:timestamp(),
+    StartTime = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     run_fun(Fun, Workers, [], 100),
     Now = os:timestamp(),
     timer:now_diff(Now, StartTime).

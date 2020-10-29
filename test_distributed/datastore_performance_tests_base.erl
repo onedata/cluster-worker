@@ -74,7 +74,7 @@ run_stress_proc(Key, Worker, NextWorker, Repeats, ManyKeys, MemoryOnly, CheckNex
             end,
             Doc = #document{key = Key, value = #performance_test_record{}},
 
-            Time0 = os:timestamp(),
+            Time0 = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
             save_loop(Doc, ManyKeys, Ctx, CheckNextWorker, NextWorker, Repeats),
 
             Master ! {slave_ans, {ok, timer:now_diff(os:timestamp(), Time0)}}

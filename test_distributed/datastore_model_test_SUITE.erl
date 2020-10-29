@@ -890,7 +890,7 @@ link_del_should_delay_inactivate(Config) ->
     ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
         ?KEY, ?LINK_TREE_ID, LinksNames
     ])),
-    Now = os:timestamp(),
+    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
         ?KEY, ?LINK_TREE_ID, LinksNames
     ])),

@@ -126,7 +126,7 @@ handle_call(healthcheck, _From, #state{last_update = LastUpdate} = State) ->
                 _ ->
                     {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, disp_out_of_sync_threshold),
                     % Threshold is in millisecs, LastUpdate is in millisecs
-                    case (time_utils:timestamp_millis() - LastUpdate) > Threshold of
+                    case (clock:timestamp_millis() - LastUpdate) > Threshold of
                         true -> out_of_sync;
                         false -> ok
                     end
@@ -154,7 +154,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({update_lb_advice, LBAdvice}, State) ->
     % Update LB advice
     ets:insert(?WORKER_MAP_ETS, {?LB_ADVICE_KEY, LBAdvice}),
-    {noreply, State#state{last_update = time_utils:timestamp_millis()}};
+    {noreply, State#state{last_update = clock:timestamp_millis()}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};

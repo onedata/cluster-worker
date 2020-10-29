@@ -24,3 +24,6 @@ _build
 compile_commands.json
 cluster_manager
 ebin
+
+rebar3.crashdump
+erl_crash.dump

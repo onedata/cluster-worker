@@ -420,7 +420,7 @@ check_reconect_retry() ->
     StartTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
         db_connection_timestamp, {0, 0, 0}),
 
-    Now = os:timestamp(),
+    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     timer:now_diff(Now, StartTime) < TimeoutUs.
 
 %% @private

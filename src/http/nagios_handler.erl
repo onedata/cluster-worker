@@ -71,7 +71,7 @@ format_reply(AppStatus, NodeStatuses) ->
         {NodeName, [{name, atom_to_list(Node)}, {status, atom_to_list(NodeStatus)}], NodeDetails}
     end, NodeStatuses),
 
-    {{YY, MM, DD}, {Hour, Min, Sec}} = time_utils:seconds_to_datetime(time_utils:timestamp_seconds()),
+    {{YY, MM, DD}, {Hour, Min, Sec}} = time_format:seconds_to_datetime(clock:timestamp_seconds()),
     DateString = str_utils:format("~4..0w/~2..0w/~2..0w ~2..0w:~2..0w:~2..0w", [YY, MM, DD, Hour, Min, Sec]),
 
     % Create the reply

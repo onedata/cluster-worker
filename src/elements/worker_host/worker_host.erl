@@ -289,7 +289,7 @@ state_to_map(Plugin) ->
 -spec proc_request(Plugin :: atom(), Request :: #worker_request{}) -> Result when
     Result :: atom().
 proc_request(Plugin, Request = #worker_request{req = Msg}) ->
-    BeforeProcessingRequest = os:timestamp(),
+    BeforeProcessingRequest = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     Response =
         try
             Plugin:handle(Msg)
@@ -337,7 +337,7 @@ send_response(Plugin, BeforeProcessingRequest, #worker_request{id = ReqId, reply
             ReplyTo(Response)
     end,
 
-    AfterProcessingRequest = os:timestamp(),
+    AfterProcessingRequest = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     Time = timer:now_diff(AfterProcessingRequest, BeforeProcessingRequest),
     gen_server2:cast(Plugin, {progress_report, {BeforeProcessingRequest, Time}}).
 
