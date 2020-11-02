@@ -217,11 +217,17 @@ init_pool_service(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Op
             throw({error, already_exists})
     end,
 
-    ParallelOrdersPerNodeLimitDefault = max(1, ceil(ParallelOrdersLimit / length(consistent_hashing:get_all_nodes()))),
-    ParallelOrdersPerNodeLimit = maps:get(parallel_orders_per_node_limit, Options, ParallelOrdersPerNodeLimitDefault),
-    ok = traverse_tasks_scheduler:init(PoolName, ParallelOrdersLimit, ParallelOrdersPerNodeLimit),
+    try
+        ParallelOrdersPerNodeLimitDefault = max(1, ceil(ParallelOrdersLimit / length(consistent_hashing:get_all_nodes()))),
+        ParallelOrdersPerNodeLimit = maps:get(parallel_orders_per_node_limit, Options, ParallelOrdersPerNodeLimitDefault),
+        ok = traverse_tasks_scheduler:init(PoolName, ParallelOrdersLimit, ParallelOrdersPerNodeLimit),
 
-    restart_tasks(PoolName, Options, node()).
+        restart_tasks(PoolName, Options, node())
+    catch
+        _:Reason ->
+            catch stop_pool_service(PoolName),
+            throw(Reason)
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -268,8 +274,8 @@ stop_pool(PoolName) ->
 %%--------------------------------------------------------------------
 -spec stop_pool_service(pool()) -> ok.
 stop_pool_service(PoolName) ->
-    ok = worker_pool:stop_sup_pool(?MASTER_POOL_NAME(PoolName)),
     ok = worker_pool:stop_sup_pool(?SLAVE_POOL_NAME(PoolName)),
+    ok = worker_pool:stop_sup_pool(?MASTER_POOL_NAME(PoolName)),
 
     case traverse_tasks_scheduler:clear(PoolName) of
         ok -> ok;
@@ -848,7 +854,7 @@ repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TaskIdToCtxMap, Fix
                 JobError ->
                     ?warning("Error getting main job ~p for task id ~p (pool ~p, executor ~p, node ~p): ~p",
                         [MainJobId, Id, Pool, Executor, Node, JobError]),
-                    TaskIdToCtxMap#{Id => ctx_not_found}
+                    {not_found, TaskIdToCtxMap#{Id => ctx_not_found}}
             end;
         {ok, #task_execution_info{}} ->
             {other_node, TaskIdToCtxMap};
