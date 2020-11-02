@@ -224,9 +224,10 @@ init_pool_service(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Op
 
         restart_tasks(PoolName, Options, node())
     catch
-        _:Reason ->
+        Error:Reason ->
+            ?error_stacktrace("Error initializing pool service ~p: ~p:~p", [PoolName, Error, Reason]),
             catch stop_pool_service(PoolName),
-            throw(Reason)
+            throw({pool_init_error, Reason})
     end.
 
 %%--------------------------------------------------------------------
@@ -939,7 +940,11 @@ clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, Call
 clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node) ->
     lists:foreach(fun(TaskId) ->
         ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
-        traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true),
+
+        case ExtendedCtx of
+            ctx_not_found -> ok; % Ctx could not been created - ignore
+            _ -> traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true)
+        end,
 
         clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
     end, TasksToCancel),
