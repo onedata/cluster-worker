@@ -58,6 +58,7 @@
 -author("Michal Wrzeszcz").
 
 -include("traverse/traverse.hrl").
+-include("modules/datastore/datastore.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -216,11 +217,18 @@ init_pool_service(PoolName, MasterJobsNum, SlaveJobsNum, ParallelOrdersLimit, Op
             throw({error, already_exists})
     end,
 
-    ParallelOrdersPerNodeLimitDefault = max(1, ceil(ParallelOrdersLimit / length(consistent_hashing:get_all_nodes()))),
-    ParallelOrdersPerNodeLimit = maps:get(parallel_orders_per_node_limit, Options, ParallelOrdersPerNodeLimitDefault),
-    ok = traverse_tasks_scheduler:init(PoolName, ParallelOrdersLimit, ParallelOrdersPerNodeLimit),
+    try
+        ParallelOrdersPerNodeLimitDefault = max(1, ceil(ParallelOrdersLimit / length(consistent_hashing:get_all_nodes()))),
+        ParallelOrdersPerNodeLimit = maps:get(parallel_orders_per_node_limit, Options, ParallelOrdersPerNodeLimitDefault),
+        ok = traverse_tasks_scheduler:init(PoolName, ParallelOrdersLimit, ParallelOrdersPerNodeLimit),
 
-    restart_tasks(PoolName, Options, node()).
+        restart_tasks(PoolName, Options, node())
+    catch
+        Error:Reason ->
+            ?error_stacktrace("Error initializing pool service ~p: ~p:~p", [PoolName, Error, Reason]),
+            catch stop_pool_service(PoolName),
+            throw({pool_init_error, Reason})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -267,8 +275,8 @@ stop_pool(PoolName) ->
 %%--------------------------------------------------------------------
 -spec stop_pool_service(pool()) -> ok.
 stop_pool_service(PoolName) ->
-    ok = worker_pool:stop_sup_pool(?MASTER_POOL_NAME(PoolName)),
     ok = worker_pool:stop_sup_pool(?SLAVE_POOL_NAME(PoolName)),
+    ok = worker_pool:stop_sup_pool(?MASTER_POOL_NAME(PoolName)),
 
     case traverse_tasks_scheduler:clear(PoolName) of
         ok -> ok;
@@ -847,7 +855,7 @@ repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TaskIdToCtxMap, Fix
                 JobError ->
                     ?warning("Error getting main job ~p for task id ~p (pool ~p, executor ~p, node ~p): ~p",
                         [MainJobId, Id, Pool, Executor, Node, JobError]),
-                    TaskIdToCtxMap#{Id => ctx_not_found}
+                    {not_found, TaskIdToCtxMap#{Id => ctx_not_found}}
             end;
         {ok, #task_execution_info{}} ->
             {other_node, TaskIdToCtxMap};
@@ -908,7 +916,7 @@ get_tasks_jobs(PoolName, CallbackModule, Node, Executor, InitialTaskIdToCtxMap) 
     pool_options(), node()) -> {TasksToRestart :: [id()], TasksToCancel :: [id()]} | no_return().
 clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Options, Node) ->
     ShouldRestart = maps:get(restart, Options, true),
-    DBError = datastore_worker:get_application_closing_status() =:= last_closing_procedure_failed,
+    DBError = datastore_worker:get_application_closing_status() =:= ?CLOSING_PROCEDURE_FAILED,
     LocalNode = node(),
     TasksWithJobs = maps:keys(JobsPerTask),
     OtherTasks = maps:keys(maps:without(TasksWithJobs, TaskIdToCtxMap)),
@@ -932,7 +940,11 @@ clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, Call
 clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node) ->
     lists:foreach(fun(TaskId) ->
         ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
-        traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true),
+
+        case ExtendedCtx of
+            ctx_not_found -> ok; % Ctx could not been created - ignore
+            _ -> traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true)
+        end,
 
         clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
     end, TasksToCancel),
