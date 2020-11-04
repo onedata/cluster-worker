@@ -190,7 +190,10 @@ finish(ExtendedCtx, Pool, CallbackModule, TaskId, Cancel) ->
     end,
     case datastore_model:update(ExtendedCtx, ?DOC_ID(Pool, TaskId), Diff) of
         {ok, #document{value = #traverse_task{start_time = StartTimestamp, executor = Executor}}} ->
-            ok = traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp),
+            case traverse_task_list:add_link(ExtendedCtx, Pool, ended, Executor, TaskId, Timestamp) of
+                ok -> ok;
+                {error, already_exists} -> ok % Possible during restart after node failure
+            end,
             ok = traverse_task_list:delete_link(ExtendedCtx, Pool, ongoing, Executor, TaskId, StartTimestamp);
         Other ->
             Other
