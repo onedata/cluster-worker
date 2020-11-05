@@ -144,6 +144,7 @@
 -type task_callback() :: task_started | task_finished | task_canceled | on_cancel_init.
 % Types used by functions that restart tasks after node restart
 -type tasks_ctxs() :: #{id() => ctx() | ctx_not_found}.
+-type tasks_link_keys() :: #{id() => traverse_task_list:link_key()}.
 -type jobs_per_task() :: #{id() => [{job_id(), job()}]}.
 
 -export_type([pool/0, id/0, task/0, group/0, task_execution_info/0, job/0, job_id/0, job_status/0,
@@ -244,7 +245,7 @@ restart_tasks(PoolName, Options, Node) ->
     LocalNode = node(),
     ok = traverse_tasks_scheduler:reset_node_ongoing_tasks(PoolName, Node),
 
-    TaskIdToCtxMap = repair_ongoing_tasks(PoolName, Executor, Node),
+    {TaskIdToCtxMap, TaskIdToLinkKeyMap} = repair_ongoing_tasks(PoolName, Executor, Node),
     lists:foreach(fun(CallbackModule) ->
         {JobsPerTask, JobsWitoutCtx, UpdatedTaskIdToCtxMap} =
             get_tasks_jobs(PoolName, CallbackModule, Node, Executor, TaskIdToCtxMap),
@@ -252,7 +253,8 @@ restart_tasks(PoolName, Options, Node) ->
             UpdatedTaskIdToCtxMap, JobsPerTask, PoolName, CallbackModule, Options, Node),
 
         traverse_tasks_scheduler:change_node_ongoing_tasks(PoolName, LocalNode, length(TasksToRestart)),
-        clean_tasks_and_jobs(UpdatedTaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node),
+        clean_tasks_and_jobs(UpdatedTaskIdToCtxMap, TaskIdToLinkKeyMap, JobsPerTask, TasksToCancel,
+            JobsWitoutCtx, PoolName, CallbackModule, Node, Executor),
         restart_jobs(UpdatedTaskIdToCtxMap, maps:with(TasksToRestart, JobsPerTask), PoolName, CallbackModule, Executor, Node)
     end, CallbackModules),
 
@@ -827,15 +829,15 @@ to_string(CallbackModule, Job) ->
             str_utils:format_bin("~p", [Job])
     end.
 
--spec repair_ongoing_tasks(pool(), environment_id(), node()) -> tasks_ctxs().
+-spec repair_ongoing_tasks(pool(), environment_id(), node()) -> {tasks_ctxs(), tasks_link_keys()}.
 repair_ongoing_tasks(Pool, Executor, Node) ->
-    {ok, TaskIds, _} = traverse_task_list:list(Pool, ongoing, #{tree_id => Executor}),
+    {ok, Tasks, _} = traverse_task_list:list_tasks_with_link_keys(Pool, ongoing, #{tree_id => Executor}),
 
     % Repair all tasks found using links (links repair is not needed)
-    lists:foldl(fun(Id, Acc) ->
-        {_, UpdatedAcc} = repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, Acc, false),
-        UpdatedAcc
-    end, #{}, TaskIds).
+    lists:foldl(fun({Id, LinkKey}, {TasksCtxs, TasksLinkKeys}) ->
+        {_, UpdatedTasksCtxs} = repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TasksCtxs, false),
+        {UpdatedTasksCtxs, TasksLinkKeys#{Id => LinkKey}}
+    end, {#{}, #{}}, Tasks).
 
 -spec repair_ongoing_task_and_add_to_map(pool(), environment_id(), node(), id(), tasks_ctxs(), boolean()) ->
     {ok | other_node | not_found, tasks_ctxs()}.
@@ -935,21 +937,36 @@ clasiffy_tasks_to_restart_and_cancel(TaskIdToCtxMap, JobsPerTask, PoolName, Call
             {[], maps:keys(TaskIdToCtxMap)}
     end.
 
--spec clean_tasks_and_jobs(tasks_ctxs(), jobs_per_task(), [id()], [job_id()],
-    pool(), callback_module(), node()) -> ok.
-clean_tasks_and_jobs(TaskIdToCtxMap, JobsPerTask, TasksToCancel, JobsWitoutCtx, PoolName, CallbackModule, Node) ->
+-spec clean_tasks_and_jobs(tasks_ctxs(), tasks_link_keys(), jobs_per_task(), [id()], [job_id()],
+    pool(), callback_module(), node(), environment_id()) -> ok.
+clean_tasks_and_jobs(TaskIdToCtxMap, TaskIdToLinkKeyMap, JobsPerTask, TasksToCancel,
+    JobsWitoutCtx, PoolName, CallbackModule, Node, Executor) ->
     lists:foreach(fun(TaskId) ->
         ExtendedCtx = maps:get(TaskId, TaskIdToCtxMap),
 
-        case ExtendedCtx of
-            ctx_not_found -> ok; % Ctx could not been created - ignore
-            _ -> traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true)
+        case {ExtendedCtx, Executor} of
+            {ctx_not_found, ?DEFAULT_ENVIRONMENT_ID} ->
+                LocalCtx = traverse_task:get_ctx(),
+                traverse_task:finish(LocalCtx, PoolName, CallbackModule, TaskId, true),
+                delete_ongoing_task_link(TaskIdToLinkKeyMap, TaskId, PoolName, Executor, LocalCtx);
+            {ctx_not_found, _} ->
+                ok; % Ctx could not been created and environment is custom - ignore
+            _ ->
+                traverse_task:finish(ExtendedCtx, PoolName, CallbackModule, TaskId, true),
+                delete_ongoing_task_link(TaskIdToLinkKeyMap, TaskId, PoolName, Executor, ExtendedCtx)
         end,
 
         clean_jobs(maps:get(TaskId, JobsPerTask, []), PoolName, CallbackModule, Node)
     end, TasksToCancel),
 
     clean_jobs(JobsWitoutCtx, PoolName, CallbackModule, Node).
+
+-spec delete_ongoing_task_link(tasks_link_keys(), id(), pool(), environment_id(), ctx()) -> ok.
+delete_ongoing_task_link(TaskIdToLinkKeyMap, TaskId, PoolName, Executor, Ctx) ->
+    ok = case maps:get(TaskId, TaskIdToLinkKeyMap, undefined) of
+        undefined -> ok;
+        LinkKey -> traverse_task_list:delete_link(Ctx, PoolName, ongoing, Executor, LinkKey)
+    end.
 
 -spec clean_jobs([job_id()], pool(), callback_module(), node()) -> ok.
 clean_jobs(JobIds, PoolName, CallbackModule, Node) ->

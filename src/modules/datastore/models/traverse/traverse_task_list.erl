@@ -28,10 +28,11 @@
 -include("modules/datastore/datastore_links.hrl").
 
 %% List API
--export([list/2, list/3, list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_node_jobs/3]).
+-export([list/2, list/3, list_tasks_with_link_keys/3,
+    list_scheduled/3, list_scheduled/4, get_first_scheduled_link/3, list_node_jobs/3]).
 %% Modify API
 -export([add_link/6, add_scheduled_link/6, add_job_link/3,
-    delete_link/6, delete_scheduled_link/6, delete_job_link/4]).
+    delete_link/6, delete_link/5, delete_scheduled_link/6, delete_job_link/4]).
 
 %% For tests
 -export([forest_key/2]).
@@ -75,7 +76,7 @@
     prev_traverse => {tree(), link_key()}
 }.
 
--export_type([forest_type/0, tree/0]).
+-export_type([forest_type/0, tree/0, link_key/0]).
 
 %%%===================================================================
 %%% List API
@@ -100,7 +101,18 @@ list(Pool, Type) ->
     {ok, [traverse:id()], restart_info()} | {error, term()}.
 list(Pool, Type, Opts) ->
     Forest = forest_key(Pool, Type),
-    list_internal(Forest, Opts).
+    list_internal(Forest, Opts, false).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Lists tasks connected with particular forest. Returns tuples {TaskID, LinkKey}.
+%% @end
+%%--------------------------------------------------------------------
+-spec list_tasks_with_link_keys(traverse:pool(), forest_type(), list_opts()) ->
+    {ok, [{traverse:id(), link_key()}], restart_info()} | {error, term()}.
+list_tasks_with_link_keys(Pool, Type, Opts) ->
+    Forest = forest_key(Pool, Type),
+    list_internal(Forest, Opts, true).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -122,7 +134,7 @@ list_scheduled(Pool, GroupId, EnvironmentId) ->
 list_scheduled(Pool, GroupId, EnvironmentId, Opts) ->
     ForestKey = forest_key(Pool, scheduled),
     GroupForestKey = ?LOAD_BALANCING_FOREST_KEY(ForestKey, GroupId, EnvironmentId),
-    list_internal(GroupForestKey, Opts).
+    list_internal(GroupForestKey, Opts, false).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -207,13 +219,24 @@ add_job_link(Pool, CallbackModule, JobId) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes link from main tree of tasks.
+%% Deletes link from main tree of tasks. Uses id and timestamp to create link key.
 %% @end
 %%--------------------------------------------------------------------
 -spec delete_link(traverse_task:ctx(), traverse:pool(), forest_type(),
     tree(), traverse:id(), traverse:timestamp()) -> ok.
 delete_link(Ctx, Pool, Type, Tree, Id, Timestamp) ->
     delete_link_with_timestamp(Ctx, forest_key(Pool, Type), Tree, Id, Timestamp).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes link from main tree of tasks.
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_link(traverse_task:ctx(), traverse:pool(), forest_type(),
+    tree(), link_key()) -> ok.
+delete_link(Ctx, Pool, Type, Tree, LinkKey) ->
+    [ok] = datastore_model:delete_links(Ctx, forest_key(Pool, Type), Tree, [LinkKey]),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -276,8 +299,9 @@ forest_key(Pool, ongoing) ->
 forest_key(Pool, ended) ->
     ?ENDED_FOREST_KEY(Pool).
 
--spec list_internal(forest_key(), list_opts()) -> {ok, [traverse:id()], restart_info()} | {error, term()}.
-list_internal(Forest, Opts) ->
+-spec list_internal(forest_key(), list_opts(), boolean()) -> 
+    {ok, [traverse:id() | {traverse:id(), link_key()}], restart_info()} | {error, term()}.
+list_internal(Forest, Opts, ExtendAnswerWithLinkKeys) ->
     Ctx0 = traverse_task:get_ctx(),
     Ctx = maps:merge(Ctx0, maps:get(sync_info, Opts, #{})),
     ListOpts = #{offset => maps:get(offset, Opts, 0)},
@@ -299,19 +323,22 @@ list_internal(Forest, Opts) ->
 
     Tree = maps:get(tree_id, Opts, all),
     Result = datastore_model:fold_links(Ctx, Forest, Tree, fun
-        (#link{target = Target, tree_id = TargetTree}, Acc) -> {ok, [{Target, TargetTree} | Acc]}
+        (Link, Acc) -> {ok, [Link | Acc]}
     end, [], ListOpts4),
 
     case Result of
-        {{ok, Links}, Token2} -> prepare_list_ans(Links, #{token => Token2});
-        {ok, Links} -> prepare_list_ans(Links, #{});
+        {{ok, Links}, Token2} -> prepare_list_ans(Links, #{token => Token2}, ExtendAnswerWithLinkKeys);
+        {ok, Links} -> prepare_list_ans(Links, #{}, ExtendAnswerWithLinkKeys);
         {error, Reason} -> {error, Reason}
     end.
 
--spec prepare_list_ans([{traverse:id(), tree()}], restart_info()) ->
-    {ok, [traverse:id()], restart_info()}.
-prepare_list_ans([], Info) ->
+-spec prepare_list_ans([#link{}], restart_info(), boolean()) ->
+    {ok, [traverse:id() | {traverse:id(), link_key()}], restart_info()}.
+prepare_list_ans([], Info, _ExtendAnswerWithLinkKeys) ->
     {ok, [], Info};
-prepare_list_ans([{LastTarget, LastTree} | _] = Links, Info) ->
-    Links2 = lists:map(fun({Target, _}) -> Target end, lists:reverse(Links)),
+prepare_list_ans([#link{target = LastTarget, tree_id = LastTree} | _] = Links, Info, ExtendAnswerWithLinkKeys) ->
+    Links2 = case ExtendAnswerWithLinkKeys of
+        true -> lists:map(fun(#link{name = Name, target = Target}) -> {Target, Name} end, lists:reverse(Links));
+        false -> lists:map(fun(#link{target = Target}) -> Target end, lists:reverse(Links))
+    end,    
     {ok, Links2, Info#{prev_traverse => {LastTarget, LastTree}}}.
