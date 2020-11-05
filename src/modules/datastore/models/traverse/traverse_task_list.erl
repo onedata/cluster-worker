@@ -273,9 +273,10 @@ delete_job_link(Pool, CallbackModule, Node, JobId) ->
 -spec add_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
 add_link_with_timestamp(Ctx, Key, Tree, Id, Timestamp) ->
-    [{ok, _}] = datastore_model:add_links(Ctx,
-        Key, Tree, [{link_key(Id, Timestamp), Id}]),
-    ok.
+    case datastore_model:add_links(Ctx, Key, Tree, [{link_key(Id, Timestamp), Id}]) of
+        [{ok, _}] -> ok;
+        [{error, already_exists}] -> ok
+    end.
 
 -spec delete_link_with_timestamp(traverse_task:ctx(), forest_key(), tree(),
     traverse:id(), traverse:timestamp()) -> ok.
