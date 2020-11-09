@@ -419,7 +419,7 @@ check_reconect_retry() ->
     TimeoutUs = Timeout * 1000,
     StartTime = node_cache:get(db_connection_timestamp, {0, 0, 0}),
 
-    Now = os:timestamp(),
+    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     timer:now_diff(Now, StartTime) < TimeoutUs.
 
 %% @private

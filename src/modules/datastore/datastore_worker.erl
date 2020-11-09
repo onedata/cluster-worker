@@ -84,8 +84,9 @@ handle(Request) ->
     Result :: ok | {error, Error},
     Error :: timeout | term().
 cleanup() ->
+    ?info("Attempting to gracefully stop in-memory database - persisting documents..."),
     wait_for_database_flush(),
-    ?info("All regural documents flushed. Saving information about application closing"),
+    ?info("All in-memory documents persisted on disk, saving information about graceful shutdown"),
     persist_application_closing_info().
 
 %%%===================================================================

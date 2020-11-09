@@ -26,6 +26,7 @@
     save_should_succeed/1,
     disk_fetch_should_succeed/1,
     services_migration_test/1,
+    service_healthcheck_rescheduling_test/1,
 
     saves_should_propagate_to_backup_node_cast_ha_test/1,
     saves_should_propagate_to_backup_node_call_ha_test/1,
@@ -92,6 +93,7 @@ all() ->
         save_should_succeed,
         disk_fetch_should_succeed,
         services_migration_test,
+        service_healthcheck_rescheduling_test,
 
         saves_should_propagate_to_backup_node_cast_ha_test,
         saves_should_propagate_to_backup_node_call_ha_test,
@@ -217,7 +219,7 @@ services_migration_test(Config) ->
         rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
-    StartTimestamp = os:timestamp(),
+    StartTimestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
     ServiceOptions = #{
         start_function => start_service,
         stop_function => stop_service,
@@ -227,25 +229,56 @@ services_migration_test(Config) ->
     ha_test_utils:set_envs(Workers, ServiceName, MasterProc),
     ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service,
         [ha_test_utils, <<"test_service">>, NodeSelector, ServiceOptions])),
-    ha_test_utils:check_service(ServiceName, Node1, StartTimestamp),
-    ha_test_utils:check_healthcheck(ServiceName, Node1, StartTimestamp),
+    ha_test_utils:assert_service_started(ServiceName, Node1, StartTimestamp),
+    ha_test_utils:assert_healthcheck_done(ServiceName, Node1, StartTimestamp),
 
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     StopTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, takeover, [Node1])),
-    ha_test_utils:check_service(ServiceName, Node2, StopTimestamp),
-    ha_test_utils:check_healthcheck(ServiceName, Node2, StopTimestamp),
+    ha_test_utils:assert_service_started(ServiceName, Node2, StopTimestamp),
+    ha_test_utils:assert_healthcheck_done(ServiceName, Node2, StopTimestamp),
     timer:sleep(5000), % Wait for first healthcheck on master node to end healthcheck cycle
 
     MigrationTimestamp = os:timestamp(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, migrate_to_recovered_master, [Node1])),
     MigrationFinishTimestamp = os:timestamp(),
-    ha_test_utils:check_service(ServiceName, Node1, MigrationTimestamp),
-    ha_test_utils:check_healthcheck(ServiceName, Node1, MigrationTimestamp),
+    ha_test_utils:assert_service_started(ServiceName, Node1, MigrationTimestamp),
+    ha_test_utils:assert_healthcheck_done(ServiceName, Node1, MigrationTimestamp),
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
     timer:sleep(timer:seconds(5)), % Wait for unwanted messages to verify migration
-    ha_test_utils:clearAndCheckMessages(ServiceName, Node2, MigrationFinishTimestamp).
+    ha_test_utils:flush_and_check_messages(ServiceName, Node2, MigrationFinishTimestamp).
 
+service_healthcheck_rescheduling_test(Config) ->
+    [Worker0 | _] = Workers = ?config(cluster_worker_nodes, Config),
+
+    NodeSelector = <<"service_healthcheck_rescheduling_test">>,
+    ServiceName = test_service,
+    MasterProc = self(),
+    #node_routing_info{assigned_nodes = [Node1 | _] = AssignedNodes} =
+        rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
+    [CallWorker | _] = Workers -- AssignedNodes,
+
+    StartTimestamp = os:timestamp(),
+    ServiceOptions = #{
+        start_function => start_service,
+        stop_function => stop_service,
+        healthcheck_fun => healthcheck_fun,
+        healthcheck_interval => 3600000,  % healthcheck should be called in an hour
+        start_function_args => [ServiceName, MasterProc]
+    },
+    ha_test_utils:set_envs(Workers, ServiceName, MasterProc),
+    ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, start_service, [
+        ha_test_utils, <<"test_service_reschedule">>, NodeSelector, ServiceOptions
+    ])),
+    ha_test_utils:assert_service_started(ServiceName, Node1, StartTimestamp),
+    % the healthcheck should not be done yet
+    ha_test_utils:assert_healthcheck_not_done(ServiceName, Node1),
+
+    % after rescheduling, the healthcheck should be done in a second
+    ?assertEqual(ok, rpc:call(CallWorker, internal_services_manager, reschedule_healthcheck, [
+        ha_test_utils, <<"test_service_reschedule">>, NodeSelector, 1000
+    ])),
+    ha_test_utils:assert_healthcheck_done(ServiceName, Node1, StartTimestamp).
 
 
 %%%===================================================================
@@ -542,7 +575,8 @@ node_transition_test(Config, Method, SimulateSlowUpdate, DelayRingRepair) ->
             true ->
                 % Spawn process that will start update function before calling master up but will end it after
                 % next update is called (due to sleep in update fun)
-                spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
+                spawn(fun() ->
+                    ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
                 timer:sleep(500);
             _ ->
                 ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
@@ -602,7 +636,8 @@ cluster_reorganization_test(Config, Method, SimulateSlowUpdate, DelayLastCheck, 
             true ->
                 % Spawn process that will start update function before node adding but will end it after
                 % next update is called (due to sleep in update fun)
-                spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
+                spawn(fun() ->
+                    ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
                 timer:sleep(500);
             _ ->
                 ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
@@ -670,7 +705,8 @@ cluster_reorganization_multikey_test(Config, Method, SimulateSlowUpdate, DelayLa
                 true ->
                     % Spawn process that will start update function before node adding but will end it after
                     % next update is called (due to sleep in update fun)
-                    spawn(fun() -> ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
+                    spawn(fun() ->
+                        ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun])) end),
                     timer:sleep(500);
                 _ ->
                     ?assertMatch({ok, #document{}}, rpc:call(TestWorker, Model, update, [Key, UpdateFun]))
@@ -812,7 +848,7 @@ prepare_cluster_reorganization_data(Config, add, ReconfiguredNodeChoice) ->
             [TestWorker | _] = Workers -- [KeyNode, KeySlaveNode],
             {Key, KeyNode, KeySlaveNode, TestWorker, Workers, FinalRing, InitialRing};
         % Different nodes are responsible for key in rings
-        {OtherNode, next} when OtherNode =/= KeyNode , OtherNode =/= KeySlaveNode ->
+        {OtherNode, next} when OtherNode =/= KeyNode, OtherNode =/= KeySlaveNode ->
             consistent_hashing:cleanup(),
             [TestWorker | _] = Workers -- [KeyNode, OtherNode],
             {Key, KeyNode, OtherNode, TestWorker, Workers, FinalRing, InitialRing};

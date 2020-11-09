@@ -48,7 +48,7 @@
     log_monitoring_stats/3]).
 -export([init_report/0, init_counters/0]).
 -export([get_cluster_status/0, get_cluster_status/1, get_cluster_ips/0]).
--export([init_service_healthcheck/3]).
+-export([reschedule_service_healthcheck/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -292,12 +292,24 @@ start_worker(Module, Args, Options) ->
             {error, Error}
     end.
 
--spec init_service_healthcheck(internal_service:service_name(), internal_services_manager:node_id(),
-    non_neg_integer()) -> ok.
-init_service_healthcheck(ServiceName, MasterNodeId, Interval) ->
-    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
-        {timer, {service_healthcheck, ServiceName, MasterNodeId, Interval}}),
-    ok.
+-spec reschedule_service_healthcheck(node(), internal_services_manager:unique_service_name(),
+    internal_services_manager:node_id(), internal_service:healthcheck_interval()) -> ok.
+reschedule_service_healthcheck(Node, ServiceName, MasterNodeId, NewInterval) ->
+    schedule_service_healthcheck(Node, override, make_ref(), ServiceName, MasterNodeId, NewInterval).
+
+%% @private
+-spec schedule_service_healthcheck(node() | pid(), Strategy :: override | continue,
+    Generation :: reference(), internal_services_manager:unique_service_name(),
+    internal_services_manager:node_id(), internal_service:healthcheck_interval()) -> ok.
+schedule_service_healthcheck(NodeOrPid, Strategy, Generation, ServiceName, MasterNodeId, NewInterval) ->
+    GenServerName = case NodeOrPid of
+        Pid when is_pid(Pid) -> Pid;
+        Node when is_atom(Node) -> {?NODE_MANAGER_NAME, Node}
+    end,
+    gen_server2:cast(
+        GenServerName,
+        {schedule_service_healthcheck, Strategy, Generation, ServiceName, MasterNodeId, NewInterval}
+    ).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -511,30 +523,37 @@ handle_cast(do_heartbeat, #state{cm_con_status = Status} = State) ->
 handle_cast({heartbeat_state_update, {NewMonState, NewLSA}}, State) ->
     {noreply, State#state{monitoring_state = NewMonState, last_state_analysis = NewLSA}};
 
-handle_cast({service_healthcheck, ServiceName, MasterNodeId, LastInterval}, State) ->
-    % run the healthcheck asynchronously to allow calling the node_manager from
-    % within the healthcheck procedure
-    NodeManager = self(),
-    spawn(fun() ->
-        case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
-            {ok, NewInterval} ->
-                erlang:send_after(NewInterval, NodeManager,
-                    {timer, {service_healthcheck, ServiceName, MasterNodeId, NewInterval}}
-                );
-            ignore ->
-                ok
-        end
-    end),
+handle_cast({service_healthcheck, Generation, ServiceName, MasterNodeId, LastInterval}, State) ->
+    case maps:get(ServiceName, State#state.service_healthcheck_generations) of
+        Generation ->
+            % run the healthcheck asynchronously to allow calling the node_manager from within the healthcheck procedure
+            NodeManager = self(),
+            spawn(fun() ->
+                case internal_services_manager:do_healthcheck(ServiceName, MasterNodeId, LastInterval) of
+                    {ok, NewInterval} ->
+                        schedule_service_healthcheck(
+                            NodeManager, continue, Generation, ServiceName, MasterNodeId, NewInterval
+                        );
+                    ignore ->
+                        ok
+                end
+            end);
+        _ ->
+            % ignore as the generation has changed in the meantime -> healthchecks have been rescheduled
+            ok
+    end,
     {noreply, State};
 
-handle_cast(synchronize_clock, State) ->
-    % periodical synchronization is best-effort - should not crash the node,
-    % errors should be logged within the synchronize_clock/0 callback
-    ?debug("Attempted node's clock synchronization with result: ~p", [
-        plugins:apply(node_manager_plugin, synchronize_clock, [])
-    ]),
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, clock_synchronization_interval_seconds),
-    erlang:send_after(timer:seconds(Interval), self(), {timer, synchronize_clock}),
+handle_cast({schedule_service_healthcheck, override, Generation, ServiceName, MasterNodeId, Interval}, State) ->
+    NewState = State#state{service_healthcheck_generations = maps:put(
+        ServiceName, Generation, State#state.service_healthcheck_generations
+    )},
+    handle_cast({schedule_service_healthcheck, continue, Generation, ServiceName, MasterNodeId, Interval}, NewState);
+
+handle_cast({schedule_service_healthcheck, continue, Generation, ServiceName, MasterNodeId, Interval}, State) ->
+    erlang:send_after(Interval, ?NODE_MANAGER_NAME,
+        {timer, {service_healthcheck, Generation, ServiceName, MasterNodeId, Interval}}
+    ),
     {noreply, State};
 
 handle_cast(?UPDATE_LB_ADVICES(Advices), State) ->
@@ -718,11 +737,6 @@ connect_to_cm(State = #state{cm_con_status = not_connected}) ->
 -spec cluster_init_step(cluster_manager_server:cluster_init_step()) -> ok | async.
 cluster_init_step(?INIT_CONNECTION) ->
     ?info("Successfully connected to cluster manager"),
-    ?info("Synchronizing node's clock..."),
-    ok = plugins:apply(node_manager_plugin, synchronize_clock, []),
-    ?info("Clock synchronized successfully"),
-    {ok, Interval} = application:get_env(?CLUSTER_WORKER_APP_NAME, clock_synchronization_interval_seconds),
-    erlang:send_after(timer:seconds(Interval), self(), {timer, synchronize_clock}),
     ?info("Starting regular heartbeat to cluster manager"),
     gen_server2:cast(self(), do_heartbeat),
     ok;
@@ -969,6 +983,7 @@ init_workers(Workers) ->
     end, Workers),
     ok.
 
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -1026,7 +1041,7 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
     ?update_counter(?EXOMETER_NAME(memory_node), MemUsage),
     ?update_counter(?EXOMETER_NAME(cpu_node), CPU * 100),
 
-    Now = os:timestamp(),
+    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
     TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
     MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
     MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),
@@ -1341,7 +1356,7 @@ get_cluster_ips() ->
 get_current_cluster_generation() ->
     case cluster_generation:get() of
         {ok, Generation} -> {ok, Generation};
-        {error, not_found} -> 
+        {error, not_found} ->
             AllGens = ?CALL_PLUGIN(cluster_generations, []),
             {InstalledGen, _} = lists:last(AllGens),
             {ok, InstalledGen};

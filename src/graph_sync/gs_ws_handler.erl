@@ -234,7 +234,7 @@ kill(WebsocketPid) when WebsocketPid /= undefined ->
     ok.
 
 
--spec keepalive_interval() -> time_utils:seconds().
+-spec keepalive_interval() -> clock:seconds().
 keepalive_interval() ->
     ?KEEPALIVE_INTERVAL_MILLIS div 1000.
 
