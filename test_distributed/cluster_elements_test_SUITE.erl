@@ -117,11 +117,9 @@ throttling_test(Config) ->
         {A1, A2} = ?call_test(Worker1, configure_throttling, []),
         ?assertMatch({ok, _}, {A1, A2}),
 
-        NMConfig = case test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-            {ok, V} ->
-                V;
-            OtherConfig ->
-                OtherConfig
+        NMConfig = case rpc:call(Worker1, node_cache, get, [?MNESIA_THROTTLING_KEY, undefined]) of
+            undefined -> undefined;
+            V -> V
         end,
         ?assertEqual(ThrottlingConfig, NMConfig),
 
@@ -139,7 +137,7 @@ throttling_test(Config) ->
     end,
 
     VerifyIdle = fun(Ans) ->
-        {ok, Idle} = test_utils:get_env(Worker1, ?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY),
+        Idle = rpc:call(Worker1, node_cache, get, [?MEMORY_PROC_IDLE_KEY]),
         ?assertEqual(Idle, Ans)
     end,
 

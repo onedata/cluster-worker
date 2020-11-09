@@ -417,8 +417,7 @@ check_reconect_retry() ->
     Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
         couchbase_changes_restart_timeout, timer:minutes(1)),
     TimeoutUs = Timeout * 1000,
-    StartTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        db_connection_timestamp, {0, 0, 0}),
+    StartTime = node_cache:get(db_connection_timestamp, {0, 0, 0}),
 
     Now = os:timestamp(),
     timer:now_diff(Now, StartTime) < TimeoutUs.

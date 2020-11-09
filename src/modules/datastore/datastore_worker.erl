@@ -166,7 +166,7 @@ check_db_connection() ->
 
 -spec get_application_closing_status() -> closing_status().
 get_application_closing_status() ->
-    application:get_env(?CLUSTER_WORKER_APP_NAME, ?APPLICATION_CLOSING_STATUS_ENV, undefined).
+    node_cache:get(?APPLICATION_CLOSING_STATUS_ENV, undefined).
 
 %%%===================================================================
 %%% Internal functions
@@ -240,11 +240,9 @@ read_application_closing_status() ->
 
 -spec set_application_closing_status(datastore:doc() | undefined) -> ok.
 set_application_closing_status(#document{value = ?TEST_DOC_INIT_VALUE}) ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME,
-        ?APPLICATION_CLOSING_STATUS_ENV, ?CLOSING_PROCEDURE_FAILED);
+    node_cache:put(?APPLICATION_CLOSING_STATUS_ENV, ?CLOSING_PROCEDURE_FAILED);
 set_application_closing_status(#document{value = ?TEST_DOC_FINAL_VALUE}) ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME,
-        ?APPLICATION_CLOSING_STATUS_ENV, ?CLOSING_PROCEDURE_SUCCEEDED);
+    node_cache:put(?APPLICATION_CLOSING_STATUS_ENV, ?CLOSING_PROCEDURE_SUCCEEDED);
 set_application_closing_status(_) ->
     ok.
 

@@ -46,20 +46,16 @@ get_hosts() ->
 %%--------------------------------------------------------------------
 -spec get_buckets() -> [bucket()].
 get_buckets() ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, couchbase_buckets) of
-        {ok, Buckets} ->
-            Buckets;
-        _ ->
-            DbHost = lists_utils:random_element(get_hosts()),
-            Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
-            {ok, 200, _, Body} = http_client:get(Url),
-            Ans = lists:map(fun(BucketMap) ->
-                maps:get(<<"name">>, BucketMap)
-            end, jiffy:decode(Body, [return_maps])),
-            catch application:set_env(?CLUSTER_WORKER_APP_NAME,
-                couchbase_buckets, Ans),
-            Ans
-    end.
+    {ok, Buckets} = node_cache:acquire(couchbase_buckets, fun() ->
+        DbHost = lists_utils:random_element(get_hosts()),
+        Url = <<DbHost/binary, ":8091/pools/default/buckets">>,
+        {ok, 200, _, Body} = http_client:get(Url),
+        Ans = lists:map(fun(BucketMap) ->
+            maps:get(<<"name">>, BucketMap)
+        end, jiffy:decode(Body, [return_maps])),
+        {ok, Ans, infinity}
+    end),
+    Buckets.
 
 %%--------------------------------------------------------------------
 %% @doc
