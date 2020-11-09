@@ -37,7 +37,6 @@ start(_StartType, _StartArgs) ->
     {ok, SchedulersMonitoring} = application:get_env(?CLUSTER_WORKER_APP_NAME,
         schedulers_monitoring),
     erlang:system_flag(scheduler_wall_time, SchedulersMonitoring),
-    clock:try_to_restore_previous_synchronization(),
     cluster_worker_sup:start_link().
 
 %%--------------------------------------------------------------------
