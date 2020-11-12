@@ -256,8 +256,13 @@ delete_node(NodeId, State = #state{ctx = #{disc_driver := undefined} = Ctx,
     end;
 delete_node(NodeId, State = #state{ctx = #{disc_driver_ctx := DiscCtx} = Ctx,
     batch = Batch}) ->
-    Expiry = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        link_disk_expiry, ?DISK_EXPIRY),
+    Expiry = case Ctx of
+        #{sync_enabled := true} ->
+            application:get_env(?CLUSTER_WORKER_APP_NAME,
+                link_disk_expiry, ?DISK_EXPIRY);
+        _ ->
+            1
+    end,
 
     Ctx2 = Ctx#{disc_driver_ctx => couchbase_driver:set_expiry(DiscCtx, Expiry)},
     case datastore_doc:delete(Ctx2, NodeId, Batch) of
