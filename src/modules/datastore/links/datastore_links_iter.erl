@@ -446,10 +446,24 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
         {ok, Tree} ->
             case bp_tree:fold(FoldInit, Fun, [], Tree) of
                 {{ok, {Links, NodeId}}, Tree2} ->
-                    {{ok, #tree_it{
-                        links = filter_deleted(lists:reverse(Links), Cache),
-                        next_node_id = NodeId
-                    }}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}};
+                    FilteredLinks = filter_deleted(lists:reverse(Links), Cache),
+                    case {FilteredLinks, Links, Opts} of
+                        {[], [#link{name = LastMaskedLinkName} | _], #{node_id := _}} ->
+                            % All links are masked
+                            NewOpts = Opts#{
+                                prev_tree_id => TreeId,
+                                prev_link_name => LastMaskedLinkName,
+                                node_id => NodeId
+                            },
+                            init_tree_fold(TreeId,
+                                ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)},
+                                NewOpts);
+                        _ ->
+                            {{ok, #tree_it{
+                                links = FilteredLinks,
+                                next_node_id = NodeId
+                            }}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
+                    end;
                 {{error, not_found}, Tree2} ->
                     case Opts of
                         #{node_id := _, retry_using_prev_key := true} ->
