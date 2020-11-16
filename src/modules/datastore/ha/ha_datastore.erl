@@ -119,25 +119,22 @@ set_propagation_method_env(PropagationMethod) ->
 
 -spec get_slave_mode() -> slave_mode().
 get_slave_mode() ->
-    application:get_env(?CLUSTER_WORKER_APP_NAME, slave_mode, ?STANDBY_SLAVE_MODE).
+    node_cache:get(slave_mode, ?STANDBY_SLAVE_MODE).
 
 -spec set_slave_mode(slave_mode()) -> ok.
 set_slave_mode(SlaveMode) ->
-    application:set_env(?CLUSTER_WORKER_APP_NAME, slave_mode, SlaveMode).
+    node_cache:put(slave_mode, SlaveMode).
 
 
 -spec get_backup_nodes() -> [node()].
 get_backup_nodes() ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes) of
-        {ok, Env} ->
-            Env;
-        undefined ->
-            critical_section:run(?MODULE, fun() ->
-                Ans = get_backup_nodes(node()),
-                application:set_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes, Ans),
-                Ans
-            end)
-    end.
+    {ok, Env} = node_cache:acquire(ha_backup_nodes, fun() -> 
+        critical_section:run(?MODULE, fun() ->
+            Ans = get_backup_nodes(node()),
+            {ok, Ans, infinity}
+        end)
+    end),
+    Env.
 
 -spec get_backup_nodes(node()) -> [node()].
 get_backup_nodes(Node) ->
@@ -274,7 +271,7 @@ init_memory_backup() ->
 -spec clean_backup_nodes_cache() -> ok.
 clean_backup_nodes_cache() ->
     critical_section:run(?MODULE, fun() ->
-        application_controller:unset_env(?CLUSTER_WORKER_APP_NAME, ha_backup_nodes)
+        node_cache:clear(ha_backup_nodes)
     end),
     ok.
 

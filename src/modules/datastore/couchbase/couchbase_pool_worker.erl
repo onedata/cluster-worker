@@ -82,8 +82,7 @@ start_link(Bucket, Mode, Id, DbHosts, Client) ->
     {stop, Reason :: term()} | ignore.
 init([Bucket, Mode, Id, DbHosts, Client]) ->
     process_flag(trap_exit, true),
-    application:set_env(?CLUSTER_WORKER_APP_NAME, db_connection_timestamp,
-        os:timestamp()), % @TODO VFS-6841 switch to the clock module
+    node_cache:put(db_connection_timestamp, os:timestamp()), % @TODO VFS-6841 switch to the clock module
 
     Host = lists:foldl(fun(DbHost, Acc) ->
         <<Acc/binary, ";", DbHost/binary>>
@@ -178,8 +177,7 @@ terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) ->
         {shutdown, _} -> ok;
         _ ->
             % Catch as function can throw error when application is stopping
-            catch application:set_env(?CLUSTER_WORKER_APP_NAME,
-                db_connection_timestamp, os:timestamp()) % @TODO VFS-6841 switch to the clock module
+            catch node_cache:put(db_connection_timestamp, os:timestamp()) % @TODO VFS-6841 switch to the clock module
     end,
     catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
     ?log_terminate(Reason, State).

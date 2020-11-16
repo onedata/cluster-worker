@@ -98,8 +98,10 @@ throttle() ->
 %%--------------------------------------------------------------------
 -spec throttle(Config :: atom()) -> ok | ?THROTTLING_ERROR.
 throttle(Config) ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY) of
-        {ok, ConfigList} ->
+    case node_cache:get(?MNESIA_THROTTLING_KEY, undefined) of
+        undefined ->
+            ok;
+        ConfigList ->
             case proplists:get_value(Config, ConfigList) of
                 ok ->
                     ok;
@@ -108,9 +110,7 @@ throttle(Config) ->
                     ok;
                 overloaded ->
                     ?THROTTLING_ERROR
-            end;
-        _ ->
-            ok
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -120,12 +120,12 @@ throttle(Config) ->
 %%--------------------------------------------------------------------
 -spec get_idle_timeout() -> non_neg_integer().
 get_idle_timeout() ->
-    case application:get_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY) of
-        {ok, IdleTimeout} ->
-            IdleTimeout;
-        _ ->
+    case node_cache:get(?MEMORY_PROC_IDLE_KEY, undefined) of
+        undefined ->
             application:get_env(?CLUSTER_WORKER_APP_NAME,
-                datastore_writer_idle_timeout, timer:seconds(30))
+                datastore_writer_idle_timeout, timer:seconds(30));
+        IdleTimeout ->
+            IdleTimeout
     end.
 
 %%--------------------------------------------------------------------
@@ -164,8 +164,7 @@ configure_throttling(SendTo) ->
             [{ConfigName, configure_throttling(Values, Config, DefaultConfig)} | Acc]
         end, [], Configs),
 
-        application:set_env(?CLUSTER_WORKER_APP_NAME, ?MNESIA_THROTTLING_KEY,
-            ConfigResult),
+        node_cache:put(?MNESIA_THROTTLING_KEY, ConfigResult),
 
         FilteredConfigResult = lists:filter(fun
             ({_, ok}) -> false;
@@ -274,7 +273,7 @@ set_idle_time(ProcNum) ->
 
     log_monitoring_stats("New idle time: ~p", [NewIdleTimeout]),
 
-    application:set_env(?CLUSTER_WORKER_APP_NAME, ?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
+    node_cache:put(?MEMORY_PROC_IDLE_KEY, NewIdleTimeout).
 
 %%--------------------------------------------------------------------
 %% @doc

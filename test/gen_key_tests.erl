@@ -21,7 +21,11 @@
 %%%===================================================================
 
 gen_key_test_() ->
-    {timeout, 120, fun test_gen_key/0}.
+    {setup,
+        fun setup/0,
+        fun teardown/1, 
+        {timeout, 120, fun test_gen_key/0}
+    }.
 
 %%%===================================================================
 %%% Test functions
@@ -58,6 +62,12 @@ gen_key_test_base() ->
 %%%===================================================================
 %%% Internal
 %%%===================================================================
+
+setup() ->
+    node_cache:init().
+
+teardown(_) ->
+    node_cache:destroy().
 
 gen_hex(Size) ->
     hex_utils:hex(crypto:strong_rand_bytes(Size)).

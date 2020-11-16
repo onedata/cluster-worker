@@ -290,8 +290,7 @@ delete_job_links() ->
 traverse_restart_after_node_error_test(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
     DeleteMetadataFun = fun() ->
-        ?assertEqual(ok, rpc:call(Worker, application, set_env, [?CLUSTER_WORKER_APP_NAME,
-            application_closing_status, ?CLOSING_PROCEDURE_FAILED]))
+        ?assertEqual(ok, rpc:call(Worker, node_cache, put, [application_closing_status, ?CLOSING_PROCEDURE_FAILED]))
     end,
     traverse_restart_test_base(Config, <<"traverse_restart_after_node_error_test">>, DeleteMetadataFun, canceled).
 

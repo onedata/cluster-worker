@@ -51,6 +51,8 @@ start_link() ->
 -spec init(Args :: term()) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
+    node_cache:init(),
+    clock:try_to_restore_previous_synchronization(),
     {ok, {#{strategy => one_for_one, intensity => 5, period => 10}, [
         cluster_worker_specs:node_manager_spec(),
         cluster_worker_specs:request_dispatcher_spec()
