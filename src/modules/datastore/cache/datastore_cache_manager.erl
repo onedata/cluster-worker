@@ -19,12 +19,16 @@
 -author("Krzysztof Trzepla").
 
 -include("global_definitions.hrl").
+-include("exometer_utils.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
 -export([init/0, reset/2, get_size/1]).
 -export([mark_active/3, mark_inactive/2, mark_inactive/3]).
+-export([log_stats/0]).
+%% Exometer API
+-export([init_counters/0, init_report/0]).
 
 -record(entry, {
     key :: key() | '_',
@@ -47,6 +51,15 @@
 -type entry() :: #entry{}.
 
 -export_type([pool/0, pool_type/0]).
+
+-define(ADVANCED_LOGGING, application:get_env(
+    ?CLUSTER_WORKER_APP_NAME, datastore_cache_advanced_stats, false
+)).
+
+-define(EXOMETER_COUNTERS, [cache_memory_slots, cache_disc_slots,
+    cache_memory_active_slots, cache_memory_inactive_slots,
+    cache_disc_active_slots, cache_disc_inactive_slots]).
+-define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
 
 %%%===================================================================
 %%% API
@@ -148,6 +161,55 @@ mark_inactive(Pool, Selector) ->
                     end
             end,
             mark_inactive(Pool, Selector, Filter)
+    end.
+
+%%%===================================================================
+%%% Exometer API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Initializes exometer counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_counters() -> ok.
+init_counters() ->
+    Counters = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), uniform, [{size, 1}]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_counters(Counters).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets exometer report connected with counters used by this module.
+%% @end
+%%--------------------------------------------------------------------
+-spec init_report() -> ok.
+init_report() ->
+    Reports = lists:map(fun(Name) ->
+        {?EXOMETER_NAME(Name), [max]}
+    end, ?EXOMETER_COUNTERS),
+    ?init_reports(Reports).
+
+-spec log_stats() -> ok.
+log_stats() ->
+    MemoryTotalSize = get_total_size(memory),
+    DiscTotalSize = get_total_size(disc),
+
+    ?update_counter(?EXOMETER_NAME(cache_memory_slots), MemoryTotalSize),
+    ?update_counter(?EXOMETER_NAME(cache_disc_slots), DiscTotalSize),
+
+    case ?ADVANCED_LOGGING of
+        true ->
+            {MemoryActiveSlots, MemoryInactiveSlots} = get_active_and_inactive_sizes(memory),
+            ?update_counter(?EXOMETER_NAME(cache_memory_active_slots), MemoryActiveSlots),
+            ?update_counter(?EXOMETER_NAME(cache_memory_inactive_slots), MemoryInactiveSlots),
+
+            {DiscActiveSlots, DiscInactiveSlots} = get_active_and_inactive_sizes(disc),
+            ?update_counter(?EXOMETER_NAME(cache_disc_active_slots), DiscActiveSlots),
+            ?update_counter(?EXOMETER_NAME(cache_disc_inactive_slots), DiscInactiveSlots);
+        false ->
+            ok
     end.
 
 %%%===================================================================
@@ -408,3 +470,21 @@ inactivate(Pool, Entries) ->
         ets:delete(active(Pool), Key)
     end, Entries),
     true.
+
+%% @private
+-spec get_total_size(pool_type()) -> non_neg_integer().
+get_total_size(PoolType) ->
+    Pools = datastore_multiplier:get_names(PoolType),
+    lists:foldl(fun(Pool, Acc) ->
+        Acc + get_size(Pool)
+    end, 0, Pools).
+
+%% @private
+-spec get_active_and_inactive_sizes(pool_type()) ->
+    {ActiveSlots :: non_neg_integer(), InactiveSlots :: non_neg_integer()}.
+get_active_and_inactive_sizes(PoolType) ->
+    Pools = datastore_multiplier:get_names(PoolType),
+    lists:foldl(fun(Pool, {ActiveAcc, InactiveAcc}) ->
+        % subtract 2 from active pool size as each active pool ets stores 2 additional values
+        {ActiveAcc + ets:info(active(Pool), size) - 2, InactiveAcc + ets:info(inactive(Pool), size)}
+    end, {0, 0}, Pools).

@@ -154,6 +154,7 @@ configure_throttling() ->
 -spec configure_throttling(pid()) -> ok.
 configure_throttling(SendTo) ->
     CheckInterval = try
+        datastore_cache_manager:log_stats(),
         [TPNum, DBQueueMax, FlushQueue, DBQueueSum, TPSizesSum, MemUsage] =
             Values = get_values_and_update_counters(),
         set_idle_time(TPNum),
