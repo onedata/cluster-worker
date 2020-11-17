@@ -244,6 +244,8 @@ tree_fold_should_return_targets_from_not_existing_id(Config) ->
 
 tree_fold_should_return_targets_from_link_after_delete(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
+    % Links number and test cases are selected to reproduce error that has been observed when
+    % listing after link's delete started near ending of document storing links inside bp_tree.
     LinksNum = 1650,
 
     % Prepare test - create links
@@ -287,6 +289,8 @@ tree_fold_should_return_targets_from_link_after_delete(Config) ->
 
 tree_fold_should_return_targets_using_token_after_delete(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
+    % Links number and test cases are selected to reproduce error that has been observed when
+    % listing after link's delete started near ending of document storing links inside bp_tree.
     LinksNum = 1650,
 
     % Prepare test - create links
@@ -645,7 +649,7 @@ init_per_testcase(Case, Config) ->
     application:load(cluster_worker),
     application:set_env(cluster_worker, tp_subtrees_number, 1),
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 1),
-    % Use low tree order to better test splitting links to multiple documents
+    % Use low tree order for better test splitting links to multiple documents
     test_utils:set_env(Worker, cluster_worker, datastore_links_tree_order, 64),
 
     rpc:call(Worker, datastore_cache_manager, reset, [disc1]),
