@@ -29,6 +29,9 @@
     tree_fold_should_return_all_targets/1,
     tree_fold_should_return_targets_from_offset/1,
     tree_fold_should_return_targets_from_link/1,
+    tree_fold_should_return_targets_from_not_existing_id/1,
+    tree_fold_should_return_targets_from_link_after_delete/1,
+    tree_fold_should_return_targets_using_token_after_delete/1,
     tree_fold_should_return_targets_limited_by_size/1,
     tree_fold_should_return_targets_from_offset_and_limited_by_size/1,
     multi_tree_fold_should_return_all_targets/1,
@@ -61,6 +64,9 @@ all() ->
         tree_fold_should_return_all_targets,
         tree_fold_should_return_targets_from_offset,
         tree_fold_should_return_targets_from_link,
+        tree_fold_should_return_targets_from_not_existing_id,
+        tree_fold_should_return_targets_from_link_after_delete,
+        tree_fold_should_return_targets_using_token_after_delete,
         tree_fold_should_return_targets_limited_by_size,
         tree_fold_should_return_targets_from_offset_and_limited_by_size,
         multi_tree_fold_should_return_all_targets,
@@ -208,6 +214,146 @@ tree_fold_should_return_targets_from_link(Config) ->
         }),
         ?assertEqual(get_expected_links(AllLinks, Offset), Links)
     end, lists:zip(lists:seq(1, LinksNum), lists:sort(Names))).
+
+tree_fold_should_return_targets_from_not_existing_id(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    LinksNum = 1000,
+
+    NamesToAdd = lists:map(fun(N) -> ?LINK_NAME(N) end, lists:seq(1, LinksNum, 2)),
+    NamesToCheck = lists:map(fun(N) -> ?LINK_NAME(N) end, lists:seq(0, LinksNum, 2)),
+    SortedNamesToAdd = lists:sort(NamesToAdd),
+
+    lists:foreach(fun(LinkName) ->
+        ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
+            datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
+                [{LinkName, {LinkName, undefined}}]
+            ]]
+        ))
+    end, NamesToAdd),
+
+    lists:foreach(fun(Name) ->
+        ReturnedLinks = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
+            prev_tree_id => ?LINK_TREE_ID,
+            prev_link_name => Name
+        }),
+
+        ReturnedNames = lists:map(fun(#link{name = LinkName}) -> LinkName end, ReturnedLinks),
+        ExpectedNames = lists:dropwhile(fun(ExpectedName) -> ExpectedName < Name end, SortedNamesToAdd),
+        ?assertEqual(ExpectedNames, ReturnedNames)
+    end, NamesToCheck).
+
+tree_fold_should_return_targets_from_link_after_delete(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    % Links number and test cases are selected to reproduce error that has been observed when
+    % listing after link's delete started near ending of document storing links inside bp_tree.
+    LinksNum = 1650,
+
+    % Prepare test - create links
+    Names = lists:map(fun(N) -> ?LINK_NAME(N) end, lists:seq(1, LinksNum)),
+    lists:foreach(fun(LinkName) ->
+        ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
+            datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
+                [{LinkName, {LinkName, undefined}}]
+            ]]
+        ))
+    end, Names),
+
+    % Prepare test cases
+    SortedNames = lists:sort(Names),
+    BorderNames = [?LINK_NAME(412), ?LINK_NAME(432), ?LINK_NAME(641), ?LINK_NAME(815)],
+
+    % Execute each test case
+    lists:foldl(fun(DeleteUpTo, RemainingNames) ->
+        % Remove links before listing
+        ToDelete = lists:takewhile(fun(Name) -> Name =< DeleteUpTo end, RemainingNames),
+        lists:foreach(fun(LinkName) ->
+            ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
+                datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, delete, [
+                    [{LinkName, fun(_) -> true end}]
+                ]]
+            ))
+        end, ToDelete),
+        NamesAfterDelete = RemainingNames -- ToDelete,
+
+        % List links
+        LinksToCheck = fold_links(Worker, ?CTX(?KEY), ?KEY, #{
+            prev_tree_id => ?LINK_TREE_ID,
+            prev_link_name => DeleteUpTo
+        }),
+
+        % Verify answer
+        NamesToCheck = lists:map(fun(#link{name = Name}) -> Name end, LinksToCheck),
+        ?assertEqual(NamesAfterDelete, NamesToCheck),
+        NamesAfterDelete
+    end, SortedNames, BorderNames).
+
+tree_fold_should_return_targets_using_token_after_delete(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    % Links number and test cases are selected to reproduce error that has been observed when
+    % listing after link's delete started near ending of document storing links inside bp_tree.
+    LinksNum = 1650,
+
+    % Prepare test - create links
+    Names = lists:map(fun(N) -> ?LINK_NAME(N) end, lists:seq(1, LinksNum)),
+    lists:foreach(fun(LinkName) ->
+        ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
+            datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, add, [
+                [{LinkName, {LinkName, undefined}}]
+            ]]
+        ))
+    end, Names),
+
+    % Prepare test cases
+    SortedNames = lists:sort(Names),
+    TestCases = [{<<>>, ?LINK_NAME(412), false}, {?LINK_NAME(412), ?LINK_NAME(631), false},
+        {?LINK_NAME(641), ?LINK_NAME(825), true}, {?LINK_NAME(815), ?LINK_NAME(999), false}],
+
+    % Execute each test case
+    lists:foldl(fun({DeleteUpTo, ListUpTo, AdditionalLinksPossible}, {RemainingNames, Token, ListedTo}) ->
+        % Remove links before listing
+        ToDelete = lists:takewhile(fun(Name) -> Name =< DeleteUpTo end, RemainingNames),
+        lists:foreach(fun(LinkName) ->
+            ?assertMatch({{ok, [LinkName]}, _}, rpc:call(Worker,
+                datastore_links_crud, apply, [?CTX(?KEY), ?KEY, ?LINK_TREE_ID, delete, [
+                    [{LinkName, fun(_) -> true end}]
+                ]]
+            ))
+        end, ToDelete),
+        NamesAfterDelete = RemainingNames -- ToDelete,
+
+        % List links
+        ExpectedNames = lists:takewhile(fun(Name) -> Name =< ListUpTo end,
+            lists:dropwhile(fun(Name) -> Name =< ListedTo end, NamesAfterDelete)),
+        {{ok, ReversedLinksToCheck}, NewToken} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, datastore_links_iter,
+            fold, [?CTX(?KEY), ?KEY, all, fun(Link, Acc) ->
+                {ok, [Link | Acc]}
+            end, [], #{token => Token, size => length(ExpectedNames)}]
+        )),
+
+        % Verify answer
+        case AdditionalLinksPossible of
+            true ->
+                % Listing can return additional links cached in token
+                % Check possible number of additional links and fold once more
+                NamesToCheck = lists:map(fun(#link{name = Name}) -> Name end, lists:reverse(ReversedLinksToCheck)),
+                MissingLinks = ExpectedNames -- NamesToCheck,
+                {{ok, ReversedLinksToCheck2}, NewToken2} = ?assertMatch({{ok, _}, _}, rpc:call(Worker, datastore_links_iter,
+                    fold, [?CTX(?KEY), ?KEY, all, fun(Link, Acc) ->
+                        {ok, [Link | Acc]}
+                    end, [], #{token => NewToken, size => length(MissingLinks)}]
+                )),
+
+                % All expected links should be present in answer together with additional links
+                NamesToCheck2 = lists:map(fun(#link{name = Name}) -> Name end, lists:reverse(ReversedLinksToCheck2)),
+                ?assertEqual([], (ExpectedNames -- NamesToCheck) -- NamesToCheck2),
+                {NamesAfterDelete, NewToken2, ListUpTo};
+            false ->
+                % Listing should return expected links without any additional links
+                NamesToCheck = lists:map(fun(#link{name = Name}) -> Name end, lists:reverse(ReversedLinksToCheck)),
+                ?assertEqual(ExpectedNames, NamesToCheck),
+                {NamesAfterDelete, NewToken, ListUpTo}
+        end
+    end, {SortedNames, #link_token{}, <<>>}, TestCases).
 
 tree_fold_should_return_targets_limited_by_size(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -503,12 +649,15 @@ init_per_testcase(Case, Config) ->
     application:load(cluster_worker),
     application:set_env(cluster_worker, tp_subtrees_number, 1),
     test_utils:set_env(Worker, cluster_worker, tp_subtrees_number, 1),
+    % Use low tree order for better test splitting links to multiple documents
+    test_utils:set_env(Worker, cluster_worker, datastore_links_tree_order, 64),
 
     rpc:call(Worker, datastore_cache_manager, reset, [disc1]),
     rpc:call(Worker, datastore_cache_manager, resize, [disc1, cache_size(Case)]),
     Config.
 
 end_per_testcase(_Case, _Config) ->
+    timer:sleep(5000),
     ok.
 
 %%%===================================================================

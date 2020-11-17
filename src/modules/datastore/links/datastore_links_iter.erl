@@ -55,7 +55,9 @@
     % Datastore internal options
     node_id => links_node:id(),
     prev_tree_id => tree_id(), % Warning - link must exist with this opt!
-    node_prev_to_key => link_name() % To walk back with neg offset
+    node_prev_to_key => link_name(), % To walk back with neg offset
+    retry_using_prev_key => boolean () % True to retry using prev_key when node_id has not been found
+                                       % (used when listing with token as tree can change between calls)
 }.
 -type token() :: #link_token{}.
 
@@ -190,7 +192,7 @@ fold(Ctx, Key, TreeId, Fun, Acc, #{token := Token} = Opts, InitBatch)
     when Token#link_token.restart_token =/= undefined ->
     ForestIt = Token#link_token.restart_token#forest_it{batch = InitBatch},
     {Ans, ForestIt2} = step_forest_fold(Fun, Acc, ForestIt,
-        maps:remove(offset, Opts)),
+        maps:remove(offset, Opts#{retry_using_prev_key => true})),
 
     case Ans of
         {ok, _} ->
@@ -442,18 +444,38 @@ init_tree_fold(TreeId, ForestIt = #forest_it{
     end,
     case datastore_links:init_tree(Ctx, Key, TreeId, Batch, true) of
         {ok, Tree} ->
-            {Result, Tree3} = case bp_tree:fold(FoldInit, Fun, [], Tree) of
+            case bp_tree:fold(FoldInit, Fun, [], Tree) of
                 {{ok, {Links, NodeId}}, Tree2} ->
-                    {{ok, #tree_it{
-                        links = filter_deleted(lists:reverse(Links), Cache),
-                        next_node_id = NodeId
-                    }}, Tree2};
+                    FilteredLinks = filter_deleted(lists:reverse(Links), Cache),
+                    case {FilteredLinks, Links, Opts} of
+                        {[], [#link{name = LastMaskedLinkName} | _], #{node_id := _}} ->
+                            % All links are masked
+                            NewOpts = Opts#{
+                                prev_tree_id => TreeId,
+                                prev_link_name => LastMaskedLinkName,
+                                node_id => NodeId
+                            },
+                            init_tree_fold(TreeId,
+                                ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)},
+                                NewOpts);
+                        _ ->
+                            {{ok, #tree_it{
+                                links = FilteredLinks,
+                                next_node_id = NodeId
+                            }}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
+                    end;
                 {{error, not_found}, Tree2} ->
-                    {{ok, #tree_it{}}, Tree2};
+                    case Opts of
+                        #{node_id := _, retry_using_prev_key := true} ->
+                            init_tree_fold(TreeId,
+                                ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)},
+                                maps:remove(node_id, Opts));
+                        _ ->
+                            {{ok, #tree_it{}}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
+                    end;
                 {{error, Reason}, Tree2} ->
-                    {{error, Reason}, Tree2}
-            end,
-            {Result, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree3)}};
+                    {{error, Reason}, ForestIt#forest_it{batch = datastore_links:terminate_tree(Tree2)}}
+            end;
         Error ->
             {Error, ForestIt}
     end.
@@ -471,7 +493,7 @@ step_forest_fold(_Fun, Acc, ForestIt, #{size := 0}) ->
 step_forest_fold(Fun, Acc, ForestIt, Opts) ->
     case get_next_tree_it(ForestIt) of
         {{ok, Links}, ForestIt2} ->
-            case step_tree_fold(Links, ForestIt2) of
+            case step_tree_fold(Links, ForestIt2, Opts) of
                 {{ok, Link}, ForestIt3} ->
                     case process_link(Fun, Acc, Link, Opts) of
                         {ok, {Acc2, Opts2}} ->
@@ -493,22 +515,27 @@ step_forest_fold(Fun, Acc, ForestIt, Opts) ->
 %% If it it the last link in links tree accumulator tries to load next ones.
 %% @end
 %%--------------------------------------------------------------------
--spec step_tree_fold(tree_it(), forest_it()) ->
+-spec step_tree_fold(tree_it(), forest_it(), fold_opts()) ->
     {{ok, link()} | {error, term()}, forest_it()}.
-step_tree_fold(#tree_it{links = [Link], next_node_id = undefined}, ForestIt) ->
+step_tree_fold(#tree_it{links = [Link], next_node_id = undefined}, ForestIt, _FoldOpts) ->
     {{ok, Link}, ForestIt};
 step_tree_fold(#tree_it{
     links = [Link = #link{tree_id = TreeId, name = Name}],
     next_node_id = NodeId
-}, ForestIt) ->
-    Opts = #{prev_tree_id => TreeId, prev_link_name => Name, node_id => NodeId},
-    case init_tree_fold(TreeId, ForestIt, Opts) of
+}, ForestIt, FoldOpts) ->
+    FoldInit = #{
+        prev_tree_id => TreeId,
+        prev_link_name => Name,
+        node_id => NodeId,
+        retry_using_prev_key => maps:get(retry_using_prev_key, FoldOpts, false)
+    },
+    case init_tree_fold(TreeId, ForestIt, FoldInit) of
         {{ok, TreeIt}, ForestIt3} ->
             {{ok, Link}, add_tree_it(TreeIt, ForestIt3)};
         {{error, Reason}, ForestIt3} ->
             {{error, Reason}, ForestIt3}
     end;
-step_tree_fold(TreeIt = #tree_it{links = [Link | Links]}, ForestIt) ->
+step_tree_fold(TreeIt = #tree_it{links = [Link | Links]}, ForestIt, _FoldOpts) ->
     {{ok, Link}, add_tree_it(TreeIt#tree_it{links = Links}, ForestIt)}.
 
 %%--------------------------------------------------------------------
