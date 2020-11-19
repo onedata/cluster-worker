@@ -34,8 +34,7 @@ set_envs(Workers, ServiceName, MasterProc) ->
 
 healthcheck_fun(_LastInterval) ->
     {ok, {ServiceName, MasterProc}} = application:get_env(ha_test_utils_data),
-    % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
-    MasterProc ! {healthcheck, ServiceName, node(), os:timestamp()},
+    MasterProc ! {healthcheck, ServiceName, node(), global_clock:timestamp_millis()},
     ok.
 
 stop_service(ServiceName, _MasterProc) ->
@@ -56,7 +55,7 @@ assert_healthcheck_not_done(ServiceName, ExpectedNode) ->
 flush_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
     receive
         {ServiceName, Node, Timestamp} ->
-            case timer:now_diff(Timestamp, CheckMinTimestamp) > 0 of
+            case Timestamp > CheckMinTimestamp of
                 true -> ?assertNotEqual(ExcludedNode, Node);
                 false -> ok
             end,
@@ -70,7 +69,7 @@ flush_and_check_messages(ServiceName, ExcludedNode, CheckMinTimestamp) ->
 %%%===================================================================
 
 service_proc(ServiceName, MasterProc) ->
-    MasterProc ! {service_message, ServiceName, node(), os:timestamp()},
+    MasterProc ! {service_message, ServiceName, node(), global_clock:timestamp_millis()},
     receive
         stop -> ok
     after
@@ -84,7 +83,7 @@ check_msg_received(ServiceName, ExpectedNode, MinTimestamp, LastMessage, Message
         5000 -> {error, timeout, LastMessage}
     end,
     {ok, TestNode, TestTimestamp} = ?assertMatch({ok, _, _}, Ans),
-    case ExpectedNode =:= TestNode andalso timer:now_diff(TestTimestamp, MinTimestamp) >= 0 of
+    case ExpectedNode =:= TestNode andalso TestTimestamp >= MinTimestamp of
         true -> ok;
         false -> check_msg_received(ServiceName, ExpectedNode, MinTimestamp, Ans, MessageType)
     end.

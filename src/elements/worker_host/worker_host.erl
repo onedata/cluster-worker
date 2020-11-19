@@ -228,7 +228,7 @@ code_change(_OldVsn, State, _Extra) ->
 state_get(Plugin, Key) ->
     case ets:lookup(state_table_name(Plugin), Key) of
         [{_, Value}] -> Value;
-        []           -> undefined
+        [] -> undefined
     end.
 
 
@@ -289,26 +289,25 @@ state_to_map(Plugin) ->
 -spec proc_request(Plugin :: atom(), Request :: #worker_request{}) -> Result when
     Result :: atom().
 proc_request(Plugin, Request = #worker_request{req = Msg}) ->
-    BeforeProcessingRequest = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-    Response =
-        try
-            Plugin:handle(Msg)
-        catch
-            Type:Error ->
-                LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
-                {MsgFormat, FormatArgs} = case LogRequest of
-                    true ->
-                        MF = "Worker plug-in ~p error: ~p:~p, on request: ~p",
-                        FA = [Plugin, Type, Error, Request],
-                        {MF, FA};
-                    _ ->
-                        MF = "Worker plug-in ~p error: ~p:~p",
-                        FA = [Plugin, Type, Error],
-                        {MF, FA}
-                end,
-                ?error_stacktrace(MsgFormat, FormatArgs),
-                worker_plugin_error
-        end,
+    BeforeProcessingRequest = global_clock:timestamp_millis(),
+    Response = try
+        Plugin:handle(Msg)
+    catch
+        Type:Error ->
+            LogRequest = application:get_env(?CLUSTER_WORKER_APP_NAME, log_requests_on_error, false),
+            {MsgFormat, FormatArgs} = case LogRequest of
+                true ->
+                    MF = "Worker plug-in ~p error: ~p:~p, on request: ~p",
+                    FA = [Plugin, Type, Error, Request],
+                    {MF, FA};
+                _ ->
+                    MF = "Worker plug-in ~p error: ~p:~p",
+                    FA = [Plugin, Type, Error],
+                    {MF, FA}
+            end,
+            ?error_stacktrace(MsgFormat, FormatArgs),
+            worker_plugin_error
+    end,
     send_response(Plugin, BeforeProcessingRequest, Request, Response).
 
 %%--------------------------------------------------------------------
@@ -337,8 +336,8 @@ send_response(Plugin, BeforeProcessingRequest, #worker_request{id = ReqId, reply
             ReplyTo(Response)
     end,
 
-    AfterProcessingRequest = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-    Time = timer:now_diff(AfterProcessingRequest, BeforeProcessingRequest),
+    AfterProcessingRequest = global_clock:timestamp_millis(),
+    Time = AfterProcessingRequest - BeforeProcessingRequest,
     gen_server2:cast(Plugin, {progress_report, {BeforeProcessingRequest, Time}}).
 
 %%--------------------------------------------------------------------

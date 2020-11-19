@@ -34,8 +34,8 @@
     cached_keys_to_flush = #{} :: cached_keys(),
     keys_in_flush = #{} :: keys_in_flush(),
     keys_to_inactivate = #{} :: cached_keys(),
-    keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
-    flush_times = #{} :: #{key() => erlang:timestamp()},
+    keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}}, % @TODO VFS-7014 switch to unified time API
+    flush_times = #{} :: #{key() => erlang:timestamp()}, % @TODO VFS-7014 switch to unified time API
     requests_ref = undefined :: undefined | reference(),
     flush_timer :: undefined | reference(),
     inactivate_timer :: undefined | reference(),
@@ -57,7 +57,7 @@
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
-    #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
+    #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}. % @TODO VFS-7014 switch to unified time API
 -type is_failover_request() :: boolean(). % see ha_datastore.hrl for failover requests description
 -type remote_requests_processing_mode() :: ?HANDLE_LOCALLY | ?DELEGATE | ?IGNORE. % remote documents processing modes
                                                                          % (see datastore_protocol.hrl)
@@ -275,7 +275,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
-    Timestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module
+    Timestamp = os:timestamp(), % @TODO VFS-7014 switch to unified time API
     {KIF2, FT2, Flushed} = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             Filtered = maps:filter(fun(_K, {V, _}) ->
@@ -357,7 +357,7 @@ handle_info(flush, State = #state{
                 ToFlush0 = maps:without(KiFKeys, CachedKeys),
                 CooldownUS = timer:seconds(?FLUSH_COOLDOWN) * 1000,
 
-                Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
+                Now = os:timestamp(), % @TODO VFS-7014 switch to unified time API
                 ToFlush = maps:filter(fun(K, _V) ->
                     FlushTime = maps:get(K, FT, {0,0,0}),
                     timer:now_diff(Now, FlushTime) > CooldownUS
@@ -396,7 +396,7 @@ handle_info(flush, State = #state{
                         Futures = datastore_disc_writer:flush_async(ToFlush2),
                         gen_server:cast(Pid, {wait_flush, Ref, Futures}),
 
-                        Timestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module
+                        Timestamp = os:timestamp(), % @TODO VFS-7014 switch to unified time API
                         FT2 = maps:fold(fun(K, _V, Acc) ->
                             maps:put(K, Timestamp, Acc)
                         end, FT, ToFlush2),
@@ -936,7 +936,7 @@ check_inactivate(#state{
     link_tokens = LT,
     inactivate_timer = OldTimer
 } = State) ->
-    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
+    Now = os:timestamp(), % @TODO VFS-7014 switch to unified time API
 
     {ToExpire2, ExpireMaxTime} =
         maps:fold(fun(K, {Timestamp, Expiry}, {Acc, MaxTime}) ->
@@ -1000,7 +1000,7 @@ get_link_token(_Batch, Token) ->
 set_link_token(Tokens, #link_token{restart_token = Token} = FullToken,
     #link_token{restart_token = {cached_token, Token2}}) ->
     {FullToken#link_token{restart_token = {cached_token, Token2}},
-        maps:put(Token2, {Token, os:timestamp()}, Tokens)}; % @TODO VFS-6841 switch to the clock module
+        maps:put(Token2, {Token, os:timestamp()}, Tokens)}; % @TODO VFS-7014 switch to unified time API
 set_link_token(Tokens, Token, #link_token{} = OldToken) ->
     Token2 = erlang:make_ref(),
     set_link_token(Tokens, Token,

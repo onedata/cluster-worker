@@ -240,12 +240,12 @@ cberl_test_base(Config) ->
                     end, lists:seq(Num0 * BatchSize + 1 + ProcNum * Repeats * (BatchSize + 1),
                         Num0 * (BatchSize + 1) + ProcNum * Repeats * (BatchSize + 1))),
 
-                    T1 = clock:timestamp_micros(),
+                    Stopwatch1 = stopwatch:start(),
                     {ok, Ref2} = apply(cberl_nif, map_to_cberl_req(OperationType),
                         [From, Client, Connection, Requests]),
                     {ok, Response, ResponseList} = receive
                         {Ref2, R} ->
-                            Time = clock:timestamp_micros() - T1,
+                            Time1 = stopwatch:read_micros(Stopwatch1),
                             {ok, AnsList} = R,
                             lists:foreach(fun(A) ->
                                  case A of
@@ -254,7 +254,7 @@ cberl_test_base(Config) ->
                                      {_, {error, key_enoent}} -> ok
                                  end
                             end, AnsList),
-                            {ok, Time, AnsList}
+                            {ok, Time1, AnsList}
                     after
                         Timeout -> {error, timeout}
                     end,
@@ -265,13 +265,13 @@ cberl_test_base(Config) ->
                                 {K, Cas}
                             end, ResponseList),
 
-                            T2 = clock:timestamp_micros(),
+                            Stopwatch2 = stopwatch:start(),
                             {ok, Ref3} = apply(cberl_nif, durability,
                                 [From, Client, Connection, DurableRequests, {1, -1}]),
 
                             {ok, Response2} = receive
                                 {Ref3, R2} ->
-                                    Time2 = clock:timestamp_micros() - T2,
+                                    Time2 = stopwatch:read_micros(Stopwatch2),
                                     {ok, AnsList2} = R2,
                                     lists:foreach(fun(A) ->
                                         case A of
@@ -737,7 +737,7 @@ expired_doc_should_not_exist(Config) ->
         ?assertEqual({error, not_found}, rpc:call(Worker, couchbase_driver, get,
             [?CTX, ?KEY]
         ))
-    end, [os:system_time(second)+1, 1]).
+    end, [global_clock:timestamp_seconds()+1, 1]).
 
 %%%===================================================================
 %%% Init/teardown functions

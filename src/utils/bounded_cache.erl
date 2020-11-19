@@ -28,7 +28,7 @@
 %% Basic cache API
 -export([get_or_calculate/4, get_or_calculate/5, get/2,
     calculate_and_cache/4, calculate_and_cache/5,
-    invalidate/1, get_timestamp/0]).
+    invalidate/1]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2, cache_exists/1, terminate_cache/1, check_cache_size/1]).
 
@@ -41,7 +41,7 @@
 % elements in further work (e.g., calculating function can include datastore documents getting).
 -type callback() :: fun((callback_args()) -> {ok, value(), additional_info()} | {error, term()}).
 -type callback_args() :: term().
--type timestamp() :: non_neg_integer().
+-type timestamp() :: time:millis().
 -type cache_options() :: #{
     size := non_neg_integer(),
     check_frequency := non_neg_integer(),
@@ -208,8 +208,7 @@ invalidate(Cache) ->
 %%--------------------------------------------------------------------
 -spec get_timestamp() -> timestamp().
 get_timestamp() ->
-    {Mega, Sec, Micro} = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-    (Mega * 1000000 + Sec) * 1000000 + Micro.
+    global_clock:timestamp_millis().
 
 %%%===================================================================
 %%% Cache management API

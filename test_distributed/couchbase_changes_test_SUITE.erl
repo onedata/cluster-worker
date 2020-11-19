@@ -465,8 +465,7 @@ stream_should_ignore_changes3(Config) ->
 
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
         couchbase_changes_restart_timeout, timer:minutes(1)),
-    % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
-    rpc:call(Worker, node_cache, put, [db_connection_timestamp, os:timestamp()]), 
+    rpc:call(Worker, node_cache, put, [db_connection_timestamp, global_clock:timestamp_millis()]),
     Callback = fun(Any) -> Self ! Any end,
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]
@@ -571,7 +570,7 @@ stream_should_ignore_changes4(Config) ->
     ?assertAllMatch({ok, _, _},
         SaveAns -- lists:duplicate(length(WrongSeqs), {error,error})),
 
-    T1 = os:timestamp(),
+    T1 = global_clock:timestamp_millis(),
     test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
         couchbase_changes_restart_timeout, timer:minutes(1)),
     rpc:call(Worker, node_cache, put, [db_connection_timestamp, T1]),
@@ -588,7 +587,7 @@ stream_should_ignore_changes4(Config) ->
         end, SeqList, Docs)
     end, lists:seq(Since, Until - 1) -- WrongSeqs),
 
-    ?assert(timer:now_diff(os:timestamp(), T1) >= timer:minutes(1) * 1000),
+    ?assert(global_clock:timestamp_millis() - T1 >= timer:minutes(1)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT),
 
     SaveAns2 = lists_utils:pmap(fun(N) ->
@@ -597,7 +596,7 @@ stream_should_ignore_changes4(Config) ->
     ?assertAllMatch({ok, _, _},
         SaveAns2 -- lists:duplicate(length(WrongSeqs2), {error,error})),
 
-    T2 = os:timestamp(),
+    T2 = global_clock:timestamp_millis(),
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since2}, {until, Until2}]]
     )),
@@ -609,7 +608,7 @@ stream_should_ignore_changes4(Config) ->
         end, SeqList, Docs)
     end, lists:seq(Since2, Until2 - 1) -- WrongSeqs2),
 
-    ?assert(timer:now_diff(os:timestamp(), T2) =< timer:seconds(20) * 1000),
+    ?assert(global_clock:timestamp_millis() - T2 =< timer:seconds(20)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
 
 stream_should_return_all_changes_one_by_one(Config) ->
