@@ -34,7 +34,7 @@
     cached_keys_to_flush = #{} :: cached_keys(),
     keys_in_flush = #{} :: keys_in_flush(),
     keys_to_inactivate = #{} :: cached_keys(),
-    keys_to_expire = #{} :: #{key() => {stopwatch:instance(), non_neg_integer()}},
+    keys_to_expire = #{} :: #{key() => countdown_timer:instance()},
     flush_countdown_timers = #{} :: #{key() => countdown_timer:instance()},
     requests_ref = undefined :: undefined | reference(),
     flush_timer :: undefined | reference(),
@@ -297,12 +297,9 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         _ -> CurrentRef
     end,
 
-    StopWatch = stopwatch:start(),
     ToExpire2 = maps:fold(fun
-        (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc)
-            when Expiry > 0 ->
-            % Save expiry to compare with StopWatch in future
-            maps:put(K, {StopWatch, Expiry}, Acc);
+        (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc) when Expiry > 0 ->
+            maps:put(K, countdown_timer:start_seconds(Expiry), Acc);
         (_, _, Acc) ->
             Acc
     end, ToExpire, Flushed),
@@ -938,14 +935,12 @@ check_inactivate(#state{
     inactivate_timer = OldTimer
 } = State) ->
     {ToExpire2, ExpireMaxTime} =
-        maps:fold(fun(Key, {StopwatchInstance, Expiry} = Value, {Acc, MaxTime}) ->
-            StopWatchTime = stopwatch:read_seconds(StopwatchInstance),
-            case StopWatchTime >= Expiry of
-                true ->
+        maps:fold(fun(Key, ExpiryTimer, {Acc, MaxTime}) ->
+            case countdown_timer:seconds_left(ExpiryTimer) of
+                0 ->
                     {Acc, MaxTime};
-                _ ->
-                    {maps:put(Key, Value, Acc),
-                        max(MaxTime, Expiry - StopWatchTime)}
+                SecondsLeft ->
+                    {maps:put(Key, ExpiryTimer, Acc), max(MaxTime, SecondsLeft)}
             end
         end, {#{}, 1}, ToExpire),
 

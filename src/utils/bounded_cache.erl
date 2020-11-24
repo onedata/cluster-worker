@@ -28,7 +28,7 @@
 %% Basic cache API
 -export([get_or_calculate/4, get_or_calculate/5, get/2,
     calculate_and_cache/4, calculate_and_cache/5,
-    invalidate/1]).
+    invalidate/1, get_timestamp/0]).
 %% Cache management API
 -export([init_group_manager/0, init_cache/2, init_group/2, cache_exists/1, terminate_cache/1, check_cache_size/1]).
 
