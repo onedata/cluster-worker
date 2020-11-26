@@ -463,9 +463,7 @@ stream_should_ignore_changes3(Config) ->
         rpc:call(Worker, couchbase_driver, save, [?CTX, ?KEY(N), ?DOC(N)])
     end, lists:seq(1, DocNum))),
 
-    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_restart_timeout, timer:minutes(1)),
-    rpc:call(Worker, node_cache, put, [db_connection_timestamp, global_clock:timestamp_millis()]),
+    reset_reconnect_retry_timer(Worker, timer:minutes(1)),
     Callback = fun(Any) -> Self ! Any end,
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since}, {until, Until}]]
@@ -570,10 +568,8 @@ stream_should_ignore_changes4(Config) ->
     ?assertAllMatch({ok, _, _},
         SaveAns -- lists:duplicate(length(WrongSeqs), {error,error})),
 
-    T1 = global_clock:timestamp_millis(),
-    test_utils:set_env(Worker, ?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_restart_timeout, timer:minutes(1)),
-    rpc:call(Worker, node_cache, put, [db_connection_timestamp, T1]),
+    Stopwatch1 = stopwatch:start(),
+    reset_reconnect_retry_timer(Worker, timer:minutes(1)),
 
     Callback = fun(Any) -> Self ! Any end,
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
@@ -587,7 +583,7 @@ stream_should_ignore_changes4(Config) ->
         end, SeqList, Docs)
     end, lists:seq(Since, Until - 1) -- WrongSeqs),
 
-    ?assert(global_clock:timestamp_millis() - T1 >= timer:minutes(1)),
+    ?assert(stopwatch:read_millis(Stopwatch1) >= timer:minutes(1)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT),
 
     SaveAns2 = lists_utils:pmap(fun(N) ->
@@ -596,7 +592,7 @@ stream_should_ignore_changes4(Config) ->
     ?assertAllMatch({ok, _, _},
         SaveAns2 -- lists:duplicate(length(WrongSeqs2), {error,error})),
 
-    T2 = global_clock:timestamp_millis(),
+    Stopwatch2 = stopwatch:start(),
     ?assertMatch({ok, _}, rpc:call(Worker, couchbase_changes, stream,
         [?BUCKET, ?SCOPE, Callback, [{since, Since2}, {until, Until2}]]
     )),
@@ -608,7 +604,7 @@ stream_should_ignore_changes4(Config) ->
         end, SeqList, Docs)
     end, lists:seq(Since2, Until2 - 1) -- WrongSeqs2),
 
-    ?assert(global_clock:timestamp_millis() - T2 =< timer:seconds(20)),
+    ?assert(stopwatch:read_millis(Stopwatch2) =< timer:seconds(20)),
     ?assertReceivedNextMatch({ok, end_of_stream}, ?TIMEOUT).
 
 stream_should_return_all_changes_one_by_one(Config) ->
@@ -768,3 +764,10 @@ check_changes_from_stream(DocsRemaining, KeysList, BorderSeqNum) ->
             check_changes_from_stream(DocsRemaining - 1,
                 lists:delete(Doc#document.key, KeysList), BorderSeqNum)
     end.
+
+
+-spec reset_reconnect_retry_timer(node(), time:millis()) -> ok.
+reset_reconnect_retry_timer(Worker, Millis) ->
+    % the timer must be started on the worker node because it's based on node's monotonic time
+    CountdownTimer = rpc:call(Worker, countdown_timer, start_millis, [Millis]),
+    rpc:call(Worker, node_cache, put, [db_reconnect_retry_timer, CountdownTimer]).

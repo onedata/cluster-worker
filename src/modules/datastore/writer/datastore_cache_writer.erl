@@ -954,7 +954,7 @@ check_inactivate(#state{
         flush_countdown_timers = maps:with(Exclude, FT)},
 
     LT2 = maps:filter(fun(_K, {_, TimerInstance}) ->
-        countdown_timer:is_expired(TimerInstance)
+        not countdown_timer:is_expired(TimerInstance)
     end, LT),
 
     case maps:size(ToExpire2) + maps:size(State3#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of

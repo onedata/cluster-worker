@@ -82,7 +82,7 @@ start_link(Bucket, Mode, Id, DbHosts, Client) ->
     {stop, Reason :: term()} | ignore.
 init([Bucket, Mode, Id, DbHosts, Client]) ->
     process_flag(trap_exit, true),
-    node_cache:put(db_connection_timestamp, global_clock:timestamp_millis()),
+    reset_reconnect_retry_timer(),
 
     Host = lists:foldl(fun(DbHost, Acc) ->
         <<Acc/binary, ";", DbHost/binary>>
@@ -175,7 +175,7 @@ terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) ->
         normal -> ok;
         shutdown -> ok;
         {shutdown, _} -> ok;
-        _ -> node_cache:put(db_connection_timestamp, global_clock:timestamp_millis())
+        _ -> reset_reconnect_retry_timer()
     end,
     catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
     ?log_terminate(Reason, State).
@@ -521,3 +521,11 @@ dequeue(Count, Queue, Requests) ->
         {empty, Queue2} ->
             {lists:reverse(Requests), Queue2}
     end.
+
+
+%% @private
+-spec reset_reconnect_retry_timer() -> ok.
+reset_reconnect_retry_timer() ->
+    TimeoutMillis = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_restart_timeout, timer:minutes(1)),
+    node_cache:put(db_reconnect_retry_timer, countdown_timer:start_millis(TimeoutMillis)).

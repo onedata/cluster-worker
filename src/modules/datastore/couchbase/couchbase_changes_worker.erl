@@ -414,10 +414,8 @@ wait_for_worker(Pid, WorkersChecked) ->
 %%--------------------------------------------------------------------
 -spec check_reconnect_retry() -> boolean().
 check_reconnect_retry() ->
-    TimeoutMillis = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_restart_timeout, timer:minutes(1)),
-    StartTime = node_cache:get(db_connection_timestamp, 0),
-    global_clock:timestamp_millis() - StartTime < TimeoutMillis.
+    ReconnectRetryTimer = node_cache:get(db_reconnect_retry_timer, countdown_timer:start_millis(0)),
+    not countdown_timer:is_expired(ReconnectRetryTimer).
 
 %% @private
 -spec stream_docs([couchbase_changes:change()], couchbase_config:bucket(),

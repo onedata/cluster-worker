@@ -41,7 +41,7 @@
 % elements in further work (e.g., calculating function can include datastore documents getting).
 -type callback() :: fun((callback_args()) -> {ok, value(), additional_info()} | {error, term()}).
 -type callback_args() :: term().
--type timestamp() :: time:millis().
+-type timestamp() :: time:millis().  % @TODO VFS-7028 use countdown_timers rather than global clock timestamps
 -type cache_options() :: #{
     size := non_neg_integer(),
     check_frequency := non_neg_integer(),
