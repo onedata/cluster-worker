@@ -34,8 +34,8 @@
     cached_keys_to_flush = #{} :: cached_keys(),
     keys_in_flush = #{} :: keys_in_flush(),
     keys_to_inactivate = #{} :: cached_keys(),
-    keys_to_expire = #{} :: #{key() => {erlang:timestamp(), non_neg_integer()}},
-    flush_times = #{} :: #{key() => erlang:timestamp()},
+    keys_to_expire = #{} :: #{key() => countdown_timer:instance()},
+    flush_countdown_timers = #{} :: #{key() => countdown_timer:instance()},
     requests_ref = undefined :: undefined | reference(),
     flush_timer :: undefined | reference(),
     inactivate_timer :: undefined | reference(),
@@ -57,7 +57,7 @@
 -type request() :: term().
 -type state() :: #state{}.
 -type cached_token_map() ::
-    #{reference() => {datastore_links_iter:token(), erlang:timestamp()}}.
+    #{reference() => {datastore_links_iter:token(), countdown_timer:instance()}}.
 -type is_failover_request() :: boolean(). % see ha_datastore.hrl for failover requests description
 -type remote_requests_processing_mode() :: ?HANDLE_LOCALLY | ?DELEGATE | ?IGNORE. % remote documents processing modes
                                                                          % (see datastore_protocol.hrl)
@@ -271,11 +271,11 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     master_pid = Pid,
     keys_in_flush = KIF,
     keys_to_expire = ToExpire,
-    flush_times = FT
+    flush_countdown_timers = FT
 }) ->
     NewKeys = maps:merge(NotFlushed, CachedKeys),
 
-    Timestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module
+    FlushTimer = countdown_timer:start_seconds(?FLUSH_COOLDOWN),
     {KIF2, FT2, Flushed} = case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
         on ->
             Filtered = maps:filter(fun(_K, {V, _}) ->
@@ -284,7 +284,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
 
             Flushed0 = maps:without(maps:keys(Filtered), KIF),
             NewFT = maps:fold(fun(K, _V, Acc) ->
-                maps:put(K, Timestamp, Acc)
+                maps:put(K, FlushTimer, Acc)
             end, FT, Flushed0),
 
             {Filtered, NewFT, Flushed0};
@@ -298,10 +298,8 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
     end,
 
     ToExpire2 = maps:fold(fun
-        (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc)
-            when Expiry > 0 ->
-            % Save expiry in us (to compare with timer:now_diff fun result)
-            maps:put(K, {Timestamp, Expiry * 1000000}, Acc);
+        (K, {_, #{expiry := Expiry, disc_driver := undefined}}, Acc) when Expiry > 0 ->
+            maps:put(K, countdown_timer:start_seconds(Expiry), Acc);
         (_, _, Acc) ->
             Acc
     end, ToExpire, Flushed),
@@ -313,7 +311,7 @@ handle_cast({flushed, Ref, NotFlushed}, State = #state{
         requests_ref = NewRef,
         keys_in_flush = KIF2,
         keys_to_expire = ToExpire2,
-        flush_times = FT2
+        flush_countdown_timers = FT2
     }, ?FLUSH_INTERVAL))};
 handle_cast(?INTERNAL_MSG(Msg), #state{keys_in_flush = KiF} = State) ->
     NewKiF = ha_datastore_master:handle_internal_cast(Msg, KiF),
@@ -348,19 +346,19 @@ handle_info(flush, State = #state{
     keys_in_flush = KiF,
     cached_keys_to_flush = CachedKeys,
     keys_to_inactivate = ToInactivate,
-    flush_times = FT
+    flush_countdown_timers = FT
 }) ->
     {NewCachedKeys, NewKiF, NewFT, State2} =
         case application:get_env(?CLUSTER_WORKER_APP_NAME, tp_fast_flush, on) of
             on ->
                 KiFKeys = maps:keys(KiF),
                 ToFlush0 = maps:without(KiFKeys, CachedKeys),
-                CooldownUS = timer:seconds(?FLUSH_COOLDOWN) * 1000,
 
-                Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
                 ToFlush = maps:filter(fun(K, _V) ->
-                    FlushTime = maps:get(K, FT, {0,0,0}),
-                    timer:now_diff(Now, FlushTime) > CooldownUS
+                    case maps:get(K, FT, undefined) of
+                        undefined -> true;
+                        TimerInstance -> countdown_timer:is_expired(TimerInstance)
+                    end
                 end, ToFlush0),
 
                 case {maps:size(ToFlush), maps:size(ToFlush0)} of
@@ -396,9 +394,9 @@ handle_info(flush, State = #state{
                         Futures = datastore_disc_writer:flush_async(ToFlush2),
                         gen_server:cast(Pid, {wait_flush, Ref, Futures}),
 
-                        Timestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module
+                        Timer = countdown_timer:start_seconds(?FLUSH_COOLDOWN),
                         FT2 = maps:fold(fun(K, _V, Acc) ->
-                            maps:put(K, Timestamp, Acc)
+                            maps:put(K, Timer, Acc)
                         end, FT, ToFlush2),
 
                         {Waiting, KiF2, FT2, State}
@@ -424,7 +422,7 @@ handle_info(flush, State = #state{
         cached_keys_to_flush = NewCachedKeys,
         keys_in_flush = NewKiF,
         keys_to_inactivate = maps:merge(ToInactivate, CachedKeys),
-        flush_times = NewFT
+        flush_countdown_timers = NewFT
     },
 
     {noreply, State3};
@@ -932,23 +930,19 @@ check_inactivate(#state{
     cached_keys_to_flush = CachedKeys,
     keys_in_flush = KiF,
     keys_to_expire = ToExpire,
-    flush_times = FT,
+    flush_countdown_timers = FT,
     link_tokens = LT,
     inactivate_timer = OldTimer
 } = State) ->
-    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-
     {ToExpire2, ExpireMaxTime} =
-        maps:fold(fun(K, {Timestamp, Expiry}, {Acc, MaxTime}) ->
-            Diff = timer:now_diff(Now, Timestamp),
-            case Diff >= Expiry of
-                true ->
+        maps:fold(fun(Key, ExpiryTimer, {Acc, MaxTime}) ->
+            case countdown_timer:seconds_left(ExpiryTimer) of
+                0 ->
                     {Acc, MaxTime};
-                _ ->
-                    {maps:put(K, {Timestamp, Expiry}, Acc),
-                        max(MaxTime, Expiry - Diff)}
+                SecondsLeft ->
+                    {maps:put(Key, ExpiryTimer, Acc), max(MaxTime, SecondsLeft)}
             end
-        end, {#{}, 1000000}, ToExpire),
+        end, {#{}, 1}, ToExpire),
 
     Exclude = maps:keys(CachedKeys) ++ maps:keys(KiF) ++ maps:keys(ToExpire2),
     ToInactivate2 = maps:without(Exclude, ToInactivate),
@@ -957,20 +951,17 @@ check_inactivate(#state{
     datastore_cache:inactivate(ToInactivate2),
     State2 = handle_ha_inactivate(ToInactivate2, State),
     State3 = State2#state{keys_to_inactivate = ExcludeMap,
-        flush_times = maps:with(Exclude, FT)},
+        flush_countdown_timers = maps:with(Exclude, FT)},
 
-    MaxLinkTime = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        fold_cache_timeout, timer:seconds(30)),
-    MaxLinkTimeUS = MaxLinkTime * 1000,
-    LT2 = maps:filter(fun(_K, {_, Time}) ->
-        timer:now_diff(Now, Time) =< MaxLinkTimeUS
+    LT2 = maps:filter(fun(_K, {_, TimerInstance}) ->
+        not countdown_timer:is_expired(TimerInstance)
     end, LT),
 
     case maps:size(ToExpire2) + maps:size(State3#state.keys_to_inactivate) == 0 orelse OldTimer =/= undefined of
         true ->
             State3#state{link_tokens = LT2, keys_to_expire = ToExpire2};
         _ ->
-            Timer = erlang:send_after(ExpireMaxTime div 1000, self(), inactivate),
+            Timer = erlang:send_after(timer:seconds(ExpireMaxTime), self(), inactivate),
             State3#state{link_tokens = LT2, keys_to_expire = ToExpire2, inactivate_timer = Timer}
     end.
 
@@ -999,8 +990,11 @@ get_link_token(_Batch, Token) ->
     datastore_links_iter:token()) -> {datastore_links_iter:token(), cached_token_map()}.
 set_link_token(Tokens, #link_token{restart_token = Token} = FullToken,
     #link_token{restart_token = {cached_token, Token2}}) ->
+    CacheTimeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        fold_cache_timeout, timer:seconds(30)),
+    Timer = countdown_timer:start_millis(CacheTimeout),
     {FullToken#link_token{restart_token = {cached_token, Token2}},
-        maps:put(Token2, {Token, os:timestamp()}, Tokens)}; % @TODO VFS-6841 switch to the clock module
+        maps:put(Token2, {Token, Timer}, Tokens)};
 set_link_token(Tokens, Token, #link_token{} = OldToken) ->
     Token2 = erlang:make_ref(),
     set_link_token(Tokens, Token,

@@ -148,11 +148,11 @@ concurrent_active_clients_spawning_performance_base(Config) ->
                         {ok, #gs_resp_graph{}},
                         gs_client:graph_request(Auth, ?USER_1_GRI, get)
                     ),
-                    erlang:send_after(round(timer:seconds(RequestInterval)), self(), perform_request),
+                    erlang:send_after(timer:seconds(RequestInterval), self(), perform_request),
                     Loop()
             end
         end),
-        erlang:send_after(rand:uniform(round(timer:seconds(RequestInterval))), Pid, perform_request)
+        erlang:send_after(rand:uniform(timer:seconds(RequestInterval)), Pid, perform_request)
     end,
 
 

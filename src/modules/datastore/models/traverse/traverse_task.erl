@@ -597,7 +597,7 @@ decode_description(Term) ->
 get_timestamp(CallbackModule) ->
     case erlang:function_exported(CallbackModule, get_timestamp, 0) of
         true -> CallbackModule:get_timestamp();
-        _ -> {ok, clock:timestamp_seconds()}
+        _ -> {ok, global_clock:timestamp_seconds()}
     end.
 
 -spec decode_id(datastore:key()) -> {traverse:pool(), traverse:id()}.

@@ -30,10 +30,10 @@
 ]}).
 
 -define(begin_measurement(Name),
-    put(Name, os:timestamp()) % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
+    put(Name, stopwatch:start())
 ).
 -define(end_measurement(Name),
-    put(Name, timer:now_diff(os:timestamp(), get(Name)))
+    put(Name, stopwatch:read_micros(get(Name)))
 ).
 -define(derive_measurement(From, Name, TransformFun),
     put(Name, TransformFun(get(From)))

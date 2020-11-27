@@ -28,18 +28,6 @@
 -include_lib("ctool/include/global_definitions.hrl").
 -include_lib("cluster_manager/include/node_management_protocol.hrl").
 
--define(CLUSTER_WORKER_MODULES, [
-    {datastore_worker, [
-        {supervisor_flags, datastore_worker:supervisor_flags()},
-        {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
-    ], [{terminate_timeout, infinity}, {posthook, check_db_connection}]},
-    {tp_router, [
-        {supervisor_flags, tp_router:main_supervisor_flags()},
-        {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
-    ], [worker_first, {posthook, init_supervisors}]}
-]).
-
--define(HELPER_ETS, node_manager_helper_ets).
 
 %% API
 -export([start_link/0, stop/0, get_ip_address/0,
@@ -56,10 +44,13 @@
 %% for tests
 -export([init_workers/0, init_workers/1, upgrade_cluster/0]).
 
+
 -type state() :: #state{}.
 -type cluster_generation() :: non_neg_integer().
+% {timer since the last analysis, pid that performs analysis}
+-type last_state_analysis() :: {stopwatch:instance(), undefined | pid()}.
+-export_type([cluster_generation/0, last_state_analysis/0]).
 
--export_type([cluster_generation/0]).
 
 -define(EXOMETER_COUNTERS, [processes_num, memory_erlang, memory_node, cpu_node]).
 -define(EXOMETER_NAME(Param), ?exometer_name(?MODULE, Param)).
@@ -68,6 +59,19 @@
 -define(CALL_PLUGIN(Fun, Args), plugins:apply(node_manager_plugin, Fun, Args)).
 
 -define(DEFAULT_TERMINATE_TIMEOUT, 5000).
+
+-define(CLUSTER_WORKER_MODULES, [
+    {datastore_worker, [
+        {supervisor_flags, datastore_worker:supervisor_flags()},
+        {supervisor_children_spec, datastore_worker:supervisor_children_spec()}
+    ], [{terminate_timeout, infinity}, {posthook, check_db_connection}]},
+    {tp_router, [
+        {supervisor_flags, tp_router:main_supervisor_flags()},
+        {supervisor_children_spec, tp_router:main_supervisor_children_spec()}
+    ], [worker_first, {posthook, init_supervisors}]}
+]).
+
+-define(HELPER_ETS, node_manager_helper_ets).
 
 %%%===================================================================
 %%% API
@@ -883,8 +887,7 @@ perform_healthcheck(listeners, _) ->
 %% newest node states from node managers for calculations.
 %% @end
 %%--------------------------------------------------------------------
--spec do_heartbeat(State :: state()) ->
-    {monitoring:node_monitoring_state(), {erlang:timestamp(), pid()}}.
+-spec do_heartbeat(State :: state()) -> {monitoring:node_monitoring_state(), last_state_analysis()}.
 do_heartbeat(#state{cm_con_status = connected, monitoring_state = MonState, last_state_analysis = LSA,
     scheduler_info = SchedulerInfo} = _State) ->
     NewMonState = monitoring:update(MonState),
@@ -1019,9 +1022,8 @@ check_port(Port) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec analyse_monitoring_state(MonState :: monitoring:node_monitoring_state(),
-    SchedulerInfo :: undefined | list(), {LastAnalysisTime :: erlang:timestamp(),
-        LastAnalysisPid :: pid() | undefined}) -> {erlang:timestamp(), pid()}.
-analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysisPid}) ->
+    SchedulerInfo :: undefined | list(), last_state_analysis()) -> last_state_analysis().
+analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTimer, LastAnalysisPid}) ->
     {CPU, Mem, PNum} = monitoring:erlang_vm_stats(MonState),
     MemInt = proplists:get_value(total, Mem, 0),
 
@@ -1041,15 +1043,14 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
     ?update_counter(?EXOMETER_NAME(memory_node), MemUsage),
     ?update_counter(?EXOMETER_NAME(cpu_node), CPU * 100),
 
-    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-    TimeDiff = timer:now_diff(Now, LastAnalysisTime) div 1000,
+    TimeDiff = stopwatch:read_millis(LastAnalysisTimer),
     MaxTimeExceeded = TimeDiff >= timer:minutes(MaxInterval),
     MinTimeExceeded = TimeDiff >= timer:seconds(MinInterval),
-    MinTresholdExceeded = (MemInt >= MemThreshold) orelse
+    MinThresholdExceeded = (MemInt >= MemThreshold) orelse
         (PNum >= ProcThreshold) orelse (MemUsage >= MemToStartCleaning),
     LastPidAlive = LastAnalysisPid =/= undefined andalso
         erlang:is_process_alive(LastAnalysisPid),
-    case (MaxTimeExceeded orelse (MinTimeExceeded andalso MinTresholdExceeded))
+    case (MaxTimeExceeded orelse (MinTimeExceeded andalso MinThresholdExceeded))
         andalso not LastPidAlive of
         true ->
             Pid = spawn(fun() ->
@@ -1145,9 +1146,9 @@ analyse_monitoring_state(MonState, SchedulerInfo, {LastAnalysisTime, LastAnalysi
                         ok
                 end
             end),
-            {Now, Pid};
+            {stopwatch:start(), Pid};
         _ ->
-            {LastAnalysisTime, LastAnalysisPid}
+            {LastAnalysisTimer, LastAnalysisPid}
     end.
 
 %%--------------------------------------------------------------------

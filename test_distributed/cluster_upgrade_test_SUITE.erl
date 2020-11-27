@@ -13,7 +13,6 @@
 -author("Michal Stanisz").
 
 -include("global_definitions.hrl").
--include("elements/node_manager/node_manager.hrl").
 -include_lib("ctool/include/test/test_utils.hrl").
 -include_lib("ctool/include/test/performance.hrl").
 

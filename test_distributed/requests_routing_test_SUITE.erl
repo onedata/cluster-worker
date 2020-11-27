@@ -75,13 +75,14 @@ simple_call_test(Config) ->
 simple_call_test_base(Config) ->
     [Worker1, Worker2] = ?config(cluster_worker_nodes, Config),
 
-    T1 = clock:timestamp_millis(),
+    Stopwatch = stopwatch:start(),
+    T1 = stopwatch:read_millis(Stopwatch),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [datastore_worker, ping, ?REQUEST_TIMEOUT])),
-    T2 = clock:timestamp_millis(),
+    T2 = stopwatch:read_millis(Stopwatch),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{datastore_worker, Worker1}, ping, ?REQUEST_TIMEOUT])),
-    T3 = clock:timestamp_millis(),
+    T3 = stopwatch:read_millis(Stopwatch),
     ?assertEqual(pong, rpc:call(Worker1, worker_proxy, call, [{datastore_worker, Worker2}, ping, ?REQUEST_TIMEOUT])),
-    T4 = clock:timestamp_millis(),
+    T4 = stopwatch:read_millis(Stopwatch),
 
     [
         #parameter{name = dispatcher, value = T2 - T1, unit = "ms",
@@ -123,11 +124,10 @@ direct_cast_test_base(Config) ->
             ?assertEqual(ok, rpc:call(Worker, worker_proxy, cast, [datastore_worker, ping, {proc, Self}, MsgId]))
         end,
 
-        BeforeProcessing = clock:timestamp_millis(),
+        Stopwatch = stopwatch:start(),
         for(1, ProcSendNum, SendReq),
         count_answers(ProcSendNum),
-        AfterProcessing = clock:timestamp_millis(),
-        AfterProcessing - BeforeProcessing
+        stopwatch:read_millis(Stopwatch)
     end,
 
     Ans = spawn_and_check(TestProc, ProcNum),
@@ -167,11 +167,10 @@ redirect_cast_test_base(Config) ->
             ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker2}, ping, {proc, Self}, MsgId]))
         end,
 
-        BeforeProcessing = clock:timestamp_millis(),
+        Stopwatch = stopwatch:start(),
         for(1, ProcSendNum, SendReq),
         count_answers(ProcSendNum),
-        AfterProcessing = clock:timestamp_millis(),
-        AfterProcessing - BeforeProcessing
+        stopwatch:read_millis(Stopwatch)
     end,
 
     Ans = spawn_and_check(TestProc, ProcNum),
@@ -233,11 +232,10 @@ mixed_cast_test_core(Config) ->
             ?assertEqual(ok, rpc:call(Worker1, worker_proxy, cast, [{datastore_worker, Worker2}, ping, {proc, Self}, 2 * MsgId]))
         end,
 
-        BeforeProcessing = clock:timestamp_millis(),
+        Stopwatch = stopwatch:start(),
         for(1, ProcSendNum, SendReq),
         count_answers(2 * ProcSendNum),
-        AfterProcessing = clock:timestamp_millis(),
-        AfterProcessing - BeforeProcessing
+        stopwatch:read_millis(Stopwatch)
     end,
 
     Ans = spawn_and_check(TestProc, ProcNum),
@@ -354,37 +352,37 @@ test_get(Size) ->
     GBSet = gb_sets:from_ordset(List),
     GBTree = gb_trees:from_orddict(List),
 
-    T1 = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
+    Stopwatch1 = stopwatch:start(),
     lists:foreach(fun(I) ->
         erlang:element(I, Tuple)
     end, Seq),
-    Diff1 = timer:now_diff(os:timestamp(), T1),
+    Diff1 = stopwatch:read_micros(Stopwatch1),
 
-    T2 = os:timestamp(),
+    Stopwatch2 = stopwatch:start(),
     lists:foreach(fun(I) ->
         proplists:get_value(I, List)
     end, Seq),
-    Diff2 = timer:now_diff(os:timestamp(), T2),
+    Diff2 = stopwatch:read_micros(Stopwatch2),
 
-    T3 = os:timestamp(),
+    Stopwatch3 = stopwatch:start(),
     lists:foreach(fun(I) ->
         maps:get(I, Map)
     end, Seq),
-    Diff3 = timer:now_diff(os:timestamp(), T3),
+    Diff3 = stopwatch:read_micros(Stopwatch3),
 
-    T4 = os:timestamp(),
+    Stopwatch4 = stopwatch:start(),
     lists:foreach(fun(I) ->
         It = gb_sets:iterator_from({I, ?NIL}, GBSet),
         gb_sets:next(It)
     end, Seq),
-    Diff4 = timer:now_diff(os:timestamp(), T4),
+    Diff4 = stopwatch:read_micros(Stopwatch4),
 
-    T5 = os:timestamp(),
+    Stopwatch5 = stopwatch:start(),
     lists:foreach(fun(I) ->
         It = gb_trees:iterator_from(I, GBTree),
         gb_trees:next(It)
     end, Seq),
-    Diff5 = timer:now_diff(os:timestamp(), T5),
+    Diff5 = stopwatch:read_micros(Stopwatch5),
 
     ct:pal("Get test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
         [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
@@ -393,38 +391,38 @@ put_test(Size) ->
     Seq = lists:seq(1, Size),
     Tuple = list_to_tuple(lists:duplicate(Size, ?NIL)),
 
-    T1 = os:timestamp(),
+    Stopwatch1 = stopwatch:start(),
     lists:foreach(fun(I) ->
         lists:foreach(fun(I) ->
             X = erlang:element(I, Tuple),
             erlang:setelement(I, Tuple, X)
         end, lists:seq(I, Size))
     end, Seq),
-    Diff1 = timer:now_diff(os:timestamp(), T1),
+    Diff1 = stopwatch:read_micros(Stopwatch1),
 
-    T2 = os:timestamp(),
+    Stopwatch2 = stopwatch:start(),
     lists:foldl(fun(I, List) ->
         [{I, ?NIL} | proplists:delete(I, List)]
     end, [], Seq),
-    Diff2 = timer:now_diff(os:timestamp(), T2),
+    Diff2 = stopwatch:read_micros(Stopwatch2),
 
-    T3 = os:timestamp(),
+    Stopwatch3 = stopwatch:start(),
     lists:foldl(fun(I, Map) ->
         maps:put(I, ?NIL, Map)
     end, #{}, Seq),
-    Diff3 = timer:now_diff(os:timestamp(), T3),
+    Diff3 = stopwatch:read_micros(Stopwatch3),
 
-    T4 = os:timestamp(),
+    Stopwatch4 = stopwatch:start(),
     lists:foldl(fun(I, GBSet) ->
         gb_sets:add({I, ?NIL}, GBSet)
     end, gb_sets:new(), Seq),
-    Diff4 = timer:now_diff(os:timestamp(), T4),
+    Diff4 = stopwatch:read_micros(Stopwatch4),
 
-    T5 = os:timestamp(),
+    Stopwatch5 = stopwatch:start(),
     lists:foldl(fun(I, GBTree) ->
         gb_trees:insert(I, ?NIL, GBTree)
     end, gb_trees:empty(), Seq),
-    Diff5 = timer:now_diff(os:timestamp(), T5),
+    Diff5 = stopwatch:read_micros(Stopwatch5),
 
     ct:pal("Put test for size ~p: tuple ~p, list ~p, map ~p, gb_set ~p, gb_tree ~p",
         [Size, Diff1, Diff2, Diff3, Diff4, Diff5]).
@@ -436,31 +434,31 @@ del_test(Size) ->
     GBSet = gb_sets:from_ordset(List),
     GBTree = gb_trees:from_orddict(List),
 
-    T2 = os:timestamp(),
+    Stopwatch2 = stopwatch:start(),
     lists:foreach(fun(I) ->
         proplists:delete(I, List)
     end, Seq),
-    Diff2 = timer:now_diff(os:timestamp(), T2),
+    Diff2 = stopwatch:read_micros(Stopwatch2),
 
-    T3 = os:timestamp(),
+    Stopwatch3 = stopwatch:start(),
     lists:foreach(fun(I) ->
         maps:remove(I, Map)
     end, Seq),
-    Diff3 = timer:now_diff(os:timestamp(), T3),
+    Diff3 = stopwatch:read_micros(Stopwatch3),
 
-    T4 = os:timestamp(),
+    Stopwatch4 = stopwatch:start(),
     lists:foreach(fun(I) ->
         It = gb_sets:iterator_from({I, ?NIL}, GBSet),
         E = gb_sets:next(It),
         gb_sets:delete_any(E, GBSet)
     end, Seq),
-    Diff4 = timer:now_diff(os:timestamp(), T4),
+    Diff4 = stopwatch:read_micros(Stopwatch4),
 
-    T5 = os:timestamp(),
+    Stopwatch5 = stopwatch:start(),
     lists:foreach(fun(I) ->
         gb_trees:delete_any(I, GBTree)
     end, Seq),
-    Diff5 = timer:now_diff(os:timestamp(), T5),
+    Diff5 = stopwatch:read_micros(Stopwatch5),
 
     ct:pal("Del test for size ~p: list ~p, map ~p, gb_set ~p, gb_tree ~p",
         [Size, Diff2, Diff3, Diff4, Diff5]).
@@ -469,23 +467,23 @@ test_tree(Size) ->
     Seq = lists:seq(1, Size),
     Seq2 = lists:seq(1, Size, 2),
     Seq3 = lists:seq(1, Size, 2),
-    T1 = os:timestamp(),
+    Stopwatch1 = stopwatch:start(),
     Tree1 = lists:foldl(fun(I, GBTree) ->
         gb_trees:insert(I, ?NIL, GBTree)
     end, gb_trees:empty(), Seq),
-    Diff1 = timer:now_diff(os:timestamp(), T1),
+    Diff1 = stopwatch:read_micros(Stopwatch1),
 
-    T2 = os:timestamp(),
+    Stopwatch2 = stopwatch:start(),
     Tree2 = lists:foldl(fun(I, GBTree) ->
         gb_trees:delete_any(I, GBTree)
     end, Tree1, Seq2),
-    Diff2 = timer:now_diff(os:timestamp(), T2),
+    Diff2 = stopwatch:read_micros(Stopwatch2),
 
-    T3 = os:timestamp(),
+    Stopwatch3 = stopwatch:start(),
     lists:foldl(fun(I, GBTree) ->
         gb_trees:insert(I, ?NIL, GBTree)
     end, Tree2, Seq3),
-    Diff3 = timer:now_diff(os:timestamp(), T3),
+    Diff3 = stopwatch:read_micros(Stopwatch3),
 
     ct:pal("Tree test for size ~p: add 1: ~p, del half: ~p, add 2: ~p",
         [Size, Diff1, Diff2, Diff3]).

@@ -41,7 +41,7 @@
 % elements in further work (e.g., calculating function can include datastore documents getting).
 -type callback() :: fun((callback_args()) -> {ok, value(), additional_info()} | {error, term()}).
 -type callback_args() :: term().
--type timestamp() :: non_neg_integer().
+-type timestamp() :: time:millis().  % @TODO VFS-7028 use countdown_timers rather than global clock timestamps
 -type cache_options() :: #{
     size := non_neg_integer(),
     check_frequency := non_neg_integer(),
@@ -208,8 +208,7 @@ invalidate(Cache) ->
 %%--------------------------------------------------------------------
 -spec get_timestamp() -> timestamp().
 get_timestamp() ->
-    {Mega, Sec, Micro} = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-    (Mega * 1000000 + Sec) * 1000000 + Micro.
+    global_clock:timestamp_millis().
 
 %%%===================================================================
 %%% Cache management API

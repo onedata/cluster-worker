@@ -73,20 +73,22 @@ gen_hex(Size) ->
     hex_utils:hex(crypto:strong_rand_bytes(Size)).
 
 gen_key(Seed, Key) when is_binary(Seed) ->
-    Time1 = clock:timestamp_nanos(),
+    Stopwatch = stopwatch:start(),
+    Time1 = stopwatch:read_nanos(Stopwatch),
+
     Ctx = crypto:hash_init(md5),
+    Time2 = stopwatch:read_nanos(Stopwatch),
 
-    Time2 = clock:timestamp_nanos(),
     Ctx2 = crypto:hash_update(Ctx, Seed),
+    Time3 = stopwatch:read_nanos(Stopwatch),
 
-    Time3 = clock:timestamp_nanos(),
     Ctx3 = crypto:hash_update(Ctx2, Key),
+    Time4 = stopwatch:read_nanos(Stopwatch),
 
-    Time4 = clock:timestamp_nanos(),
     Digest = crypto:hash_final(Ctx3),
+    Time5 = stopwatch:read_nanos(Stopwatch),
 
-    Time5 = clock:timestamp_nanos(),
     hex_utils:hex(Digest),
-    Time6 = clock:timestamp_nanos(),
+    Time6 = stopwatch:read_nanos(Stopwatch),
 
     [Time2-Time1, Time3-Time2, Time4-Time3, Time5-Time4, Time6-Time5].
