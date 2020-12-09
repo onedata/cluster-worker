@@ -245,7 +245,9 @@ call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
     case call_async(Ctx, Key, Function, Args) of
         {{ok, Ref}, Pid} ->
             case wait(Ref, Pid) of
-                {error, interrupted_call} = InterruptedCallError ->
+                InterruptedCallError when
+                    InterruptedCallError =:= {error, interrupted_call} orelse
+                        InterruptedCallError =:= [{error, interrupted_call} | _] ->
                     case InterruptedCallRetries of
                         0 ->
                             ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
