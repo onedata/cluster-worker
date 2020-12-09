@@ -237,7 +237,7 @@ call(Ctx, Key, Function, Args) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Performs synchronous call to a datastore writer process associated
-%% with a key. Repeats in case of internal_call error.
+%% with a key. Repeats in case of interrupted_call error.
 %% @end
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
@@ -260,6 +260,8 @@ call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
                             timer:sleep(Sleep),
                             call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
                     end;
+                % TODO - VFS-6847 Currently if internal_call occurs, all elements of the list are the same.
+                % Get rid of this case after translating list with error to tuple in link operations handler
                 [{error, internal_call} | _] ->
                     {error, internal_call};
                 Other -> Other
