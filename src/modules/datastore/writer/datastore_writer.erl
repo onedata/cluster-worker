@@ -245,26 +245,25 @@ call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
     case call_async(Ctx, Key, Function, Args) of
         {{ok, Ref}, Pid} ->
             case wait(Ref, Pid) of
-                InterruptedCallError when
-                    InterruptedCallError =:= {error, interrupted_call} orelse
-                        InterruptedCallError =:= [{error, interrupted_call} | _] ->
-                    case InterruptedCallRetries of
-                        0 ->
+                % TODO - VFS-6847 Currently if internal_call occurs, all elements of the list are the same.
+                % Get rid of this case after translating list with error to tuple in link operations handler
+                [{error, internal_call} | _] ->
+                    {error, internal_call};
+                Other ->
+                    case {is_interrupted_call_error(Other), InterruptedCallRetries} of
+                        {false, _} ->
+                            Other;
+                        {true, 0} ->
                             ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
                             "no retries left", [Function, Args, Key, Ctx]),
-                            InterruptedCallError;
+                            Other;
                         _ ->
                             ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
                             "~p retries left, next retry in ~p ms",
                                 [Function, Args, Key, Ctx, InterruptedCallRetries, Sleep]),
                             timer:sleep(Sleep),
                             call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
-                    end;
-                % TODO - VFS-6847 Currently if internal_call occurs, all elements of the list are the same.
-                % Get rid of this case after translating list with error to tuple in link operations handler
-                [{error, internal_call} | _] ->
-                    {error, internal_call};
-                Other -> Other
+                    end
             end;
         {error, Reason} ->
             {error, Reason}
@@ -609,3 +608,12 @@ wait(Ref, Pid, Timeout, CheckAndRetry) ->
                 _ -> {error, timeout}
             end
     end.
+
+%% @private
+-spec is_interrupted_call_error(term()) -> boolean().
+is_interrupted_call_error({error, interrupted_call}) ->
+    true;
+is_interrupted_call_error([{error, interrupted_call} | _]) ->
+    true;
+is_interrupted_call_error(_) ->
+    false.
