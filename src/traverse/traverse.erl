@@ -848,7 +848,7 @@ repair_ongoing_task_and_add_to_map(Pool, Executor, Node, Id, TaskIdToCtxMap, Fix
                 JobError ->
                     ?warning("Error getting main job ~p for task id ~p (pool ~p, executor ~p, node ~p): ~p",
                         [MainJobId, Id, Pool, Executor, Node, JobError]),
-                    TaskIdToCtxMap#{Id => ctx_not_found}
+                    {not_found, TaskIdToCtxMap#{Id => ctx_not_found}}
             end;
         {ok, #task_execution_info{}} ->
             {other_node, TaskIdToCtxMap};
@@ -891,8 +891,8 @@ get_tasks_jobs(PoolName, CallbackModule, Node, Executor, InitialTaskIdToCtxMap) 
                         case repair_ongoing_task_and_add_to_map(PoolName, Executor, Node, TaskId, TaskIdToCtxMap, true) of
                             {ok, UpdatedTaskIdToCtxMap} ->
                                 {JobsPerTask#{TaskId => [{JobId, Job}]}, JobsWitoutCtx, UpdatedTaskIdToCtxMap};
-                            _ ->
-                                {JobsPerTask, [JobId | JobsWitoutCtx], TaskIdToCtxMap}
+                            {_, UpdatedTaskIdToCtxMap} ->
+                                {JobsPerTask, [JobId | JobsWitoutCtx], UpdatedTaskIdToCtxMap}
                         end;
                     _ExtendedCtx ->
                         TaskJobs = maps:get(TaskId, JobsPerTask, []),
