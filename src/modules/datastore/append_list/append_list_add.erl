@@ -48,7 +48,7 @@ add(Sentinel, FirstNode, Batch) ->
 %%=====================================================================
 
 -spec add_to_first_node(#node{}, [append_list:elem()], pos_integer()) -> 
-    {#node{}, [append_list:elem()], [append_list:key()]}.
+    {#node{}, [append_list:elem()]}.
 add_to_first_node(FirstNode, [] = _UniqueElements, _MaxElemsPerNode) ->
     % may happen when all elements from original batch already existed in structure
     {FirstNode, []};
@@ -63,7 +63,7 @@ add_to_first_node(#node{elements = ElementsInFirstNode} = FirstNode, UniqueEleme
     },
     case ElementsTail of
         [] -> ok;
-        [{MinInBatch, _} | _] ->
+        [{MinInBatch, _} | _] -> % fixme check if it is not reversed
             % update `min_on_left` value in all nodes that have minimal key greater that minimal 
             % key in batch (may happen when adding elements with lower keys than existing ones)
             case maps:size(ElementsInFirstNode) > 0 andalso lists:min(maps:keys(ElementsInFirstNode)) > MinInBatch of
@@ -159,7 +159,7 @@ overwrite_existing_elements_in_node(Node, Batch) ->
     {Node#node{elements = NewElements}, RemainingElems, Common}.
 
 
--spec split_batch_on_existing_elements(Batch :: [append_list:elem()], ElementsInNode :: [append_list:elem()]) -> 
+-spec split_batch_on_existing_elements([append_list:elem()], #{append_list:key() => append_list:value()}) -> 
     {ExistingElems :: [append_list:elem()], RemainingElems :: [append_list:elem()]}.
 split_batch_on_existing_elements(Batch, ElementsInNode) ->
     BatchKeys = [X || {X, _} <- Batch],

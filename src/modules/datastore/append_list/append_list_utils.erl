@@ -85,7 +85,7 @@ adjust_max_on_right(NodeId, CurrentMax) ->
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_key_in_prev_nodes(#node{}) -> append_list:key().
+-spec get_max_key_in_prev_nodes(undefined | #node{}) -> append_list:key().
 get_max_key_in_prev_nodes(undefined) -> undefined;
 get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight}) ->
     case maps:size(Elements) of

@@ -102,7 +102,7 @@ update_next_node_pointer(NextNodeId, CurrentNodeId) ->
     end.
 
 
--spec handle_deletion_finished(#node{}, #node{}, append_list:value()) -> ok.
+-spec handle_deletion_finished(#node{}, #node{}, append_list:key()) -> ok.
 handle_deletion_finished(CurrentNode, PrevNode, MaxOnRightBefore) ->
     #node{min_on_left = MinOnLeft, elements = Elements, next = Next} = CurrentNode,
     Min = lists:min([MinOnLeft | maps:keys(Elements)]),

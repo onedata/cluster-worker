@@ -41,8 +41,8 @@
     prev = undefined :: id() | undefined,
     next = undefined :: id() | undefined,
     elements = #{} :: #{key() => value()},
-    min_on_left :: integer() | undefined,
-    max_on_right :: integer() | undefined,
+    min_on_left :: key() | undefined,
+    max_on_right :: key() | undefined,
     % This value allows to continue listing after node, that previous listing finished on, was deleted.
     % Node num of prev node is always lower and similarly num of next node is always higher.
     % For more details consult `append_list_get:find_node/1`.
