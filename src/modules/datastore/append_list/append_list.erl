@@ -22,6 +22,7 @@
 %%% 
 %%% This structure stores elements in arbitrary order, i.e not necessarily sorted.
 %%% Adding new elements is only allowed to the beginning of the list. 
+%%% New elements provided in batch must be sorted ascending by key and keys must be unique.
 %%% It is highly recommended that each new element have key greater 
 %%% than those already existing (if not this structure might be inefficient).
 %%% Adding elements with the existing keys will result in overwriting of 
@@ -58,9 +59,6 @@
 -export([create/1, delete/1]).
 -export([add/2, delete_elems/2, get_many/2, get/2, get_highest/1]).
 
-%%-ifdef(TEST).
--compile(export_all). % fixme
-%%-endif.
 -compile({no_auto_import, [get/1]}).
 
 -export_type([id/0, key/0, value/0, elem/0]).
@@ -91,17 +89,18 @@ delete(StructId) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Adds elements given in Batch to the beginning of a structure. 
-%% Elements in structure should be sorted by Key and Keys should be unique.
+%% Elements in Batch must be sorted ascending by Key and Keys must be unique.
 %% @end
 %%--------------------------------------------------------------------
 -spec add(id(), [elem()]) -> ok | ?ERROR_NOT_FOUND.
 add(_SentinelId, []) ->
     ok;
-add(SentinelId, UnsortedBatch) ->
+add(SentinelId, Elem) when not is_list(Elem) ->
+    add(SentinelId, [Elem]);
+add(SentinelId, Batch) ->
     case fetch_or_create_first_node(SentinelId) of
         {error, _} = Error -> Error;
         {Sentinel, FirstNode} ->
-            Batch = lists:ukeysort(1, UnsortedBatch), % fixme maybe remove
             append_list_add:add(Sentinel, FirstNode, Batch)
     end.
 
