@@ -28,17 +28,20 @@
 %% @doc
 %% Adds elements given in Batch to the beginning of a structure. 
 %% Elements in structure should be sorted by Key and Keys should be unique.
+%% Returns list of keys that were overwritten.
 %% @end
 %%--------------------------------------------------------------------
--spec add(#sentinel{}, #node{}, [append_list:elem()]) -> ok.
+-spec add(#sentinel{}, #node{}, [append_list:elem()]) -> {ok, [append_list:elem()]}.
 add(Sentinel, FirstNode, Batch) ->
     #sentinel{max_elems_per_node = MaxElemsPerNode} = Sentinel,
 
-    {UpdatedFirstNode, UniqueElements} = overwrite_existing_elements(FirstNode, Batch),
+    {UpdatedFirstNode, UniqueElements, OverwrittenElems} = 
+        overwrite_existing_elements(FirstNode, Batch),
     
     {FinalFirstNode, ElementsTail} = 
         add_to_first_node(UpdatedFirstNode, UniqueElements, MaxElemsPerNode),
-    create_new_nodes(Sentinel, ElementsTail, FinalFirstNode).
+    ok = create_new_nodes(Sentinel, ElementsTail, FinalFirstNode),
+    {ok, lists:map(fun({Key, _Value}) -> Key end, OverwrittenElems)}.
 
 %%=====================================================================
 %% Internal functions
@@ -109,45 +112,51 @@ prepare_new_first_node(SentinelId, ElemsList, #node{
 
 
 -spec overwrite_existing_elements(#node{}, Batch :: [append_list:elem()]) -> 
-    {#node{}, UniqueElements :: [append_list:elem()]}.
+    {#node{}, UniqueElements :: [append_list:elem()], OverwrittenElems :: [append_list:elem()]}.
 overwrite_existing_elements(FirstNode, [{MinInBatch, _} | _] = Batch) ->
     #node{max_on_right = MaxOnRight, prev = Prev} = FirstNode,
-    {NewNode, RemainingElems} = overwrite_existing_elements_in_node(FirstNode, Batch),
+    {NewNode, RemainingElems, Overwritten} = overwrite_existing_elements_in_node(FirstNode, Batch),
     ReversedRemainingElems = lists:reverse(RemainingElems),
     case MaxOnRight == undefined orelse MinInBatch > MaxOnRight of
-        true -> {NewNode, ReversedRemainingElems};
-        false -> {NewNode, overwrite_existing_elements_in_prev_nodes(Prev, ReversedRemainingElems)}
+        true -> {NewNode, ReversedRemainingElems, Overwritten};
+        false ->
+            {FinalRemainingElems, OverwrittenInPrev} = 
+                overwrite_existing_elements_in_prev_nodes(Prev, ReversedRemainingElems),
+            {NewNode, FinalRemainingElems, Overwritten ++ OverwrittenInPrev}
     end.
 
 -spec overwrite_existing_elements_in_prev_nodes(#node{} | id() | undefined, Batch :: [append_list:elem()]) -> 
-    UniqueElements :: [append_list:elem()].
+    {UniqueElements :: [append_list:elem()], OverwrittenElems :: [append_list:elem()]}.
 overwrite_existing_elements_in_prev_nodes(undefined, Batch) ->
-    Batch;
+    {Batch, []};
 overwrite_existing_elements_in_prev_nodes(_, []) ->
-    [];
+    {[], []};
 overwrite_existing_elements_in_prev_nodes(#node{} = Node, [{MinInBatch, _} | _] = Batch) ->
     #node{max_on_right = MaxOnRight, prev = Prev} = Node,
-    {NewNode, RemainingElems} = overwrite_existing_elements_in_node(Node, Batch),
+    {NewNode, RemainingElems, Overwritten} = overwrite_existing_elements_in_node(Node, Batch),
     case NewNode of
         Node -> ok;
         _ -> append_list_persistence:save_node(Node#node.node_id, NewNode)
     end,
     ReversedRemainingElems = lists:reverse(RemainingElems),
     case MaxOnRight == undefined orelse MinInBatch > MaxOnRight of
-        true -> ReversedRemainingElems;
-        false -> overwrite_existing_elements_in_prev_nodes(Prev, ReversedRemainingElems)
+        true -> {ReversedRemainingElems, Overwritten};
+        false -> 
+            {FinalRemainingElems, OverwrittenInPrev} = 
+                overwrite_existing_elements_in_prev_nodes(Prev, ReversedRemainingElems),
+            {FinalRemainingElems, Overwritten ++ OverwrittenInPrev}
     end;
 overwrite_existing_elements_in_prev_nodes(NodeId, Batch) ->
     overwrite_existing_elements_in_prev_nodes(append_list_persistence:get_node(NodeId), Batch).
 
 
 -spec overwrite_existing_elements_in_node(#node{}, Batch :: [append_list:elem()]) -> 
-    {#node{}, UniqueElements :: [append_list:elem()]}.
+    {#node{}, UniqueElements :: [append_list:elem()], CommonElements :: [append_list:elem()]}.
 overwrite_existing_elements_in_node(Node, Batch) ->
     #node{elements = Elements} = Node,
     {Common, RemainingElems} = split_batch_on_existing_elements(Batch, Elements),
     NewElements = maps:merge(Elements, maps:from_list(Common)),
-    {Node#node{elements = NewElements}, RemainingElems}.
+    {Node#node{elements = NewElements}, RemainingElems, Common}.
 
 
 -spec split_batch_on_existing_elements(Batch :: [append_list:elem()], ElementsInNode :: [append_list:elem()]) -> 

@@ -31,7 +31,7 @@ append_list_test_() ->
             {"test_delete_struct", fun test_delete_struct/0},
             {"test_add_elements_multi_nodes", fun test_add_elements_multi_nodes/0},
             {"test_add_elements_one_node", fun test_add_elements_one_node/0},
-            {"test_add_only_existing", fun test_add_only_existing/0},
+            {"test_add_only_existing", fun test_add_only_existing_elements/0},
             {"test_add_with_overwrite", fun test_add_with_overwrite/0},
             {"test_get_many_with_listing_info", fun test_get_many_with_listing_info/0},
             {"test_delete_consecutive_elems_between_nodes", fun test_delete_consecutive_elems_between_nodes/0},
@@ -75,7 +75,7 @@ test_add_elements_one_node() ->
     ?assertMatch({[], _}, append_list:get_many(<<"dummy_id">>, 100)),
     ?assertEqual(ok, append_list:add(<<"dummy_id">>, [])),
     {ok, Id} = append_list:create(10),
-    append_list:add(Id, [{1, <<"1">>}]),
+    ?assertEqual({ok, []}, append_list:add(Id, [{1, <<"1">>}])),
     ?assertMatch({[{1, <<"1">>}], _}, append_list:get_many(Id, 100)).
 
 
@@ -87,11 +87,11 @@ test_add_elements_multi_nodes() ->
     ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
 
 
-test_add_only_existing() ->
+test_add_only_existing_elements() ->
     {ok, Id} = append_list:create(10),
     Batch = prepare_batch(10, 30),
-    append_list:add(Id, Batch),
-    append_list:add(Id, Batch),
+    ?assertEqual({ok, []}, append_list:add(Id, Batch)),
+    ?assertEqual({ok, lists:reverse(lists:seq(10, 30))}, append_list:add(Id, Batch)),
     Expected = lists:reverse(Batch),
     ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
 
@@ -99,12 +99,12 @@ test_add_only_existing() ->
 test_add_with_overwrite() ->
     {ok, Id} = append_list:create(10),
     Batch1 = prepare_batch(10, 30),
-    append_list:add(Id, Batch1),
+    ?assertEqual({ok, []}, append_list:add(Id, Batch1)),
     Batch2 = prepare_batch(10, 32, fun(A) -> integer_to_binary(2*A) end),
-    append_list:add(Id, Batch2),
+    ?assertEqual({ok, lists:reverse(lists:seq(10, 30))}, append_list:add(Id, Batch2)),
     Expected = lists:reverse(Batch2),
     ?assertMatch({Expected, _}, append_list:get_many(Id, 100)),
-    append_list:add(Id, [{20, <<"40">>}]),
+    ?assertEqual({ok, [20]}, append_list:add(Id, [{20, <<"40">>}])),
     ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
 
 
