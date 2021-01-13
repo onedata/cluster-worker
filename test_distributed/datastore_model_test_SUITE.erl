@@ -860,7 +860,7 @@ expired_doc_should_not_exist(Config) ->
         assert_on_disc(Worker, Model, Key),
         timer:sleep(8000),
         assert_not_on_disc(Worker, Model, Key)
-    end, [os:system_time(second)+5, 5]).
+    end, [global_clock:timestamp_seconds()+5, 5]).
 
 deleted_doc_should_expire(Config) ->
     [Worker | _] = ?config(cluster_worker_nodes, Config),
@@ -926,7 +926,7 @@ link_del_should_delay_inactivate(Config) ->
     ?assertAllMatch({ok, [#link{}]}, rpc:call(Worker, Model, get_links, [
         ?KEY, ?LINK_TREE_ID, LinksNames
     ])),
-    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
+    Now = global_clock:timestamp_millis(),
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
         ?KEY, ?LINK_TREE_ID, LinksNames
     ])),
@@ -953,7 +953,7 @@ link_del_should_delay_inactivate(Config) ->
     end,
 
     ?assertNotEqual(undefined, Timestamp),
-    ?assert(timer:now_diff(Timestamp, Now) > 5000000).
+    ?assert(Timestamp - Now > timer:seconds(5)).
 
 %%%===================================================================
 %%% Stress tests
@@ -1072,67 +1072,68 @@ links_performance_base(Config, Order) ->
     end, lists:seq(1, LinksNum, 2))),
     ExpectedLinksHalf2 = ExpectedLinks -- ExpectedLinksHalf,
 
-    T0Add = os:timestamp(),
+    Stopwatch = stopwatch:start(),
+    T0Add = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         Key, ?LINK_TREE_ID, ExpectedLinks
     ])),
-    T1Add = os:timestamp(),
+    T1Add = stopwatch:read_micros(Stopwatch),
 
-    T2Add = os:timestamp(),
+    T2Add = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         Key2, ?LINK_TREE_ID, ExpectedLinksHalf
     ])),
-    T3Add = os:timestamp(),
+    T3Add = stopwatch:read_micros(Stopwatch),
 
-    T4Add = os:timestamp(),
+    T4Add = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch({ok, #link{}}, rpc:call(Worker, Model, add_links, [
         Key2, ?LINK_TREE_ID, ExpectedLinksHalf2
     ])),
-    T5Add = os:timestamp(),
+    T5Add = stopwatch:read_micros(Stopwatch),
 
     % Test list
-    T0List = os:timestamp(),
+    T0List = stopwatch:read_micros(Stopwatch),
     {ok, Links} = ?assertMatch({ok, _}, rpc:call(Worker, Model, fold_links,
         [Key, all, fun(Link, Acc) -> {ok, [Link | Acc]} end, [], #{}]
     )),
-    T1List = os:timestamp(),
+    T1List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(Links)),
 
-    T2List = os:timestamp(),
+    T2List = stopwatch:read_micros(Stopwatch),
     Links2 = fold_links_offset(Key2, Worker, Model,
         #{size => 100, offset => 0}, LinksNum),
-    T3List = os:timestamp(),
+    T3List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(Links2)),
 
-    T4List = os:timestamp(),
+    T4List = stopwatch:read_micros(Stopwatch),
     Links3 = fold_links_offset(Key2, Worker, Model,
         #{size => 2000, offset => 0}, LinksNum),
-    T5List = os:timestamp(),
+    T5List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(Links3)),
 
-    T6List = os:timestamp(),
+    T6List = stopwatch:read_micros(Stopwatch),
     Links4 = fold_links_token(Key, Worker, Model,
         #{size => 100, offset => 0, token => #link_token{}}),
-    T7List = os:timestamp(),
+    T7List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(Links4)),
 
-    T8List = os:timestamp(),
+    T8List = stopwatch:read_micros(Stopwatch),
     Links5 = fold_links_token(Key, Worker, Model,
         #{size => 2000, offset => 0, token => #link_token{}}),
-    T9List = os:timestamp(),
+    T9List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(Links5)),
 
-    T10List = os:timestamp(),
+    T10List = stopwatch:read_micros(Stopwatch),
     LinksByOffset = fold_links_id(Key, Worker, Model,
         #{size => 2000, prev_link_name => <<>>}),
-    T11List = os:timestamp(),
+    T11List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(LinksByOffset)),
 
     timer:sleep(500),
-    T12List = os:timestamp(),
+    T12List = stopwatch:read_micros(Stopwatch),
     LinksByOffset = fold_links_id_and_neg_offset(Key, Worker, Model,
         #{size => 2000, prev_link_name => <<>>, offset => -100}, []),
-    T13List = os:timestamp(),
+    T13List = stopwatch:read_micros(Stopwatch),
     ?assertEqual(LinksNum, length(LinksByOffset)),
 
     % Test del
@@ -1141,20 +1142,20 @@ links_performance_base(Config, Order) ->
     end, lists:seq(1, LinksNum))),
     ExpectedLinkNamesReversed = lists:reverse(ExpectedLinkNames),
 
-    T0Del = os:timestamp(),
+    T0Del = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
         Key, ?LINK_TREE_ID, ExpectedLinkNames
     ])),
-    T1Del = os:timestamp(),
+    T1Del = stopwatch:read_micros(Stopwatch),
     Links6 = fold_links_token(Key, Worker, Model,
         #{size => 2000, offset => 0, token => #link_token{}}),
     ?assertEqual(0, length(Links6)),
 
-    T2Del = os:timestamp(),
+    T2Del = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
         Key2, ?LINK_TREE_ID, ExpectedLinkNamesReversed
     ])),
-    T3Del = os:timestamp(),
+    T3Del = stopwatch:read_micros(Stopwatch),
     Links7 = fold_links_token(Key2, Worker, Model,
         #{size => 2000, offset => 0, token => #link_token{}}),
     ?assertEqual(0, length(Links7)),
@@ -1167,11 +1168,11 @@ links_performance_base(Config, Order) ->
         ?LINK_NAME(N)
     end, lists:seq(1, LinksNum, 3))),
     ExpectedLinkNames3 = ExpectedLinkNames -- ExpectedLinkNames2,
-    T4Del = os:timestamp(),
+    T4Del = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
         Key, ?LINK_TREE_ID, ExpectedLinkNames2
     ])),
-    T5Del = os:timestamp(),
+    T5Del = stopwatch:read_micros(Stopwatch),
 
     ?assertAllMatch(ok, rpc:call(Worker, Model, delete_links, [
         Key, ?LINK_TREE_ID, ExpectedLinkNames3
@@ -1187,30 +1188,30 @@ links_performance_base(Config, Order) ->
         ?LINK_NAME(N)
     end, lists:seq(1, LinksNum)),
 
-    T6Del = os:timestamp(),
+    T6Del = stopwatch:read_micros(Stopwatch),
     ?assertAllMatch(ok, rpc:call(Worker, ?MODULE, del_one_by_one, [
         Model, Key, ?LINK_TREE_ID, ExpectedLinkNames4
     ])),
-    T7Del = os:timestamp(),
+    T7Del = stopwatch:read_micros(Stopwatch),
     Links9 = fold_links_token(Key, Worker, Model,
         #{size => 2000, offset => 0, token => #link_token{}}),
     ?assertEqual(0, length(Links9)),
 
     % Print results
-    AddTime1Diff = timer:now_diff(T1Add, T0Add),
-    AddTime2Diff = timer:now_diff(T3Add, T2Add),
-    AddTime3Diff = timer:now_diff(T5Add, T4Add),
-    ListTimeDiff1 = timer:now_diff(T1List, T0List),
-    ListTimeDiff2 = timer:now_diff(T3List, T2List),
-    ListTimeDiff3 = timer:now_diff(T5List, T4List),
-    ListTimeDiff4 = timer:now_diff(T7List, T6List),
-    ListTimeDiff5 = timer:now_diff(T9List, T8List),
-    ListTimeDiff6 = timer:now_diff(T11List, T10List),
-    ListTimeDiff7 = timer:now_diff(T13List, T12List),
-    DelTime1Diff = timer:now_diff(T1Del, T0Del),
-    DelTime2Diff = timer:now_diff(T3Del, T2Del),
-    DelTime3Diff = timer:now_diff(T5Del, T4Del),
-    DelTime4Diff = timer:now_diff(T7Del, T6Del),
+    AddTime1Diff = T1Add - T0Add,
+    AddTime2Diff = T3Add - T2Add,
+    AddTime3Diff = T5Add - T4Add,
+    ListTimeDiff1 = T1List - T0List,
+    ListTimeDiff2 = T3List - T2List,
+    ListTimeDiff3 = T5List - T4List,
+    ListTimeDiff4 = T7List - T6List,
+    ListTimeDiff5 = T9List - T8List,
+    ListTimeDiff6 = T11List - T10List,
+    ListTimeDiff7 = T13List - T12List,
+    DelTime1Diff = T1Del - T0Del,
+    DelTime2Diff = T3Del - T2Del,
+    DelTime3Diff = T5Del - T4Del,
+    DelTime4Diff = T7Del - T6Del,
     ct:pal("Results for order ~p, links num ~p:~n"
     "add all ~p, add half ~p, add second half ~p~n"
     "list all ~p, list offset (batch 100) ~p, list offset (batch 2000) ~p~n"
@@ -1233,25 +1234,26 @@ test_create_get() ->
     NonExistingId = ?KEY,
     % Use gs_subscriber as example of existing model
     % (model emulation affects results).
-    Time0 = os:timestamp(),
+    Stopwatch = stopwatch:start(),
+    Time0 = stopwatch:read_micros(Stopwatch),
     ?assertEqual({error, not_found}, gs_session:get(NonExistingId)),
-    Time1 = os:timestamp(),
+    Time1 = stopwatch:read_micros(Stopwatch),
     ?assertEqual({error, not_found}, gs_session:get(NonExistingId)),
-    Time2 = os:timestamp(),
+    Time2 = stopwatch:read_micros(Stopwatch),
     #gs_session{id = ExistingId} = ?assertMatch(
         #gs_session{}, gs_session:create(?USER(<<"123">>), self(), 4, dummyTranslator)
     ),
-    Time3 = os:timestamp(),
+    Time3 = stopwatch:read_micros(Stopwatch),
     ?assertMatch({ok, _}, gs_session:get(ExistingId)),
-    Time4 = os:timestamp(),
+    Time4 = stopwatch:read_micros(Stopwatch),
     ?assertMatch({ok, _}, gs_session:get(ExistingId)),
-    Time5 = os:timestamp(),
+    Time5 = stopwatch:read_micros(Stopwatch),
 
-    Diff1 = timer:now_diff(Time1, Time0),
-    Diff2 = timer:now_diff(Time2, Time1),
-    Diff3 = timer:now_diff(Time3, Time2),
-    Diff4 = timer:now_diff(Time4, Time3),
-    Diff5 = timer:now_diff(Time5, Time4),
+    Diff1 = Time1 - Time0,
+    Diff2 = Time2 - Time1,
+    Diff3 = Time3 - Time2,
+    Diff4 = Time4 - Time3,
+    Diff5 = Time5 - Time4,
     {ok, {Diff1, Diff2, Diff3, Diff4, Diff5}}.
 
 %%%===================================================================
@@ -1304,7 +1306,7 @@ init_per_testcase(link_del_should_delay_inactivate = Case, Config) ->
     ok = test_utils:mock_new(Workers, datastore_cache),
     ok = test_utils:mock_expect(Workers, datastore_cache, inactivate,
         fun(ToInactivate) ->
-            Master ! {inactivate, {ToInactivate, os:timestamp()}},
+            Master ! {inactivate, {ToInactivate, global_clock:timestamp_millis()}},
             meck:passthrough([ToInactivate])
         end),
 

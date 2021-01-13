@@ -335,7 +335,7 @@ query_view(#{bucket := Bucket} = Ctx, DesignName, ViewName, Opts) ->
 set_expiry(Ctx, Expiry) when Expiry =< 2592000 ->
     Ctx#{expiry => Expiry};
 set_expiry(Ctx, Expiry) ->
-    Ctx#{expiry => clock:timestamp_seconds() + Expiry}.
+    Ctx#{expiry => global_clock:timestamp_seconds() + Expiry}.
 
 %%%===================================================================
 %%% Internal functions

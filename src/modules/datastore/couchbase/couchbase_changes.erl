@@ -22,7 +22,7 @@
 -type callback() :: fun(({ok, [datastore:doc()] | end_of_stream}
                     | {error, since(), Reason :: term()}) -> any()).
 -type seq() :: non_neg_integer() | null.
--type timestamp() :: non_neg_integer() | null.
+-type timestamp() :: time:seconds() | null.
 -type since() :: seq().
 -type until() :: seq() | infinity.
 -type change() :: json_utils:json_term().

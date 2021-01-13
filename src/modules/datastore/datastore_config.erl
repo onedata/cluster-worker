@@ -78,10 +78,7 @@ get_throttled_models() ->
 %%--------------------------------------------------------------------
 -spec get_timestamp() -> datastore_doc:timestamp().
 get_timestamp() ->
-    case erlang:function_exported(?PLUGIN, get_timestamp, 0) of
-        true -> erlang:apply(?PLUGIN, get_timestamp, []);
-        false -> clock:timestamp_seconds()
-    end.
+    global_clock:timestamp_seconds().
 
 %%%===================================================================
 %%% Internal functions

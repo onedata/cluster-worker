@@ -219,7 +219,7 @@ services_migration_test(Config) ->
         rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
-    StartTimestamp = os:timestamp(), % @TODO VFS-6841 switch to the clock module (all occurrences in this module)
+    StartTimestamp = global_clock:timestamp_millis(),
     ServiceOptions = #{
         start_function => start_service,
         stop_function => stop_service,
@@ -233,15 +233,15 @@ services_migration_test(Config) ->
     ha_test_utils:assert_healthcheck_done(ServiceName, Node1, StartTimestamp),
 
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
-    StopTimestamp = os:timestamp(),
+    StopTimestamp = global_clock:timestamp_millis(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, takeover, [Node1])),
     ha_test_utils:assert_service_started(ServiceName, Node2, StopTimestamp),
     ha_test_utils:assert_healthcheck_done(ServiceName, Node2, StopTimestamp),
     timer:sleep(5000), % Wait for first healthcheck on master node to end healthcheck cycle
 
-    MigrationTimestamp = os:timestamp(),
+    MigrationTimestamp = global_clock:timestamp_millis(),
     ?assertEqual(ok, rpc:call(Node2, internal_services_manager, migrate_to_recovered_master, [Node1])),
-    MigrationFinishTimestamp = os:timestamp(),
+    MigrationFinishTimestamp = global_clock:timestamp_millis(),
     ha_test_utils:assert_service_started(ServiceName, Node1, MigrationTimestamp),
     ha_test_utils:assert_healthcheck_done(ServiceName, Node1, MigrationTimestamp),
     ?assertEqual(ok, rpc:call(Node1, ha_test_utils, stop_service, [ServiceName, MasterProc])),
@@ -258,7 +258,7 @@ service_healthcheck_rescheduling_test(Config) ->
         rpc:call(Worker0, consistent_hashing, get_routing_info, [NodeSelector]),
     [CallWorker | _] = Workers -- AssignedNodes,
 
-    StartTimestamp = os:timestamp(),
+    StartTimestamp = global_clock:timestamp_millis(),
     ServiceOptions = #{
         start_function => start_service,
         stop_function => stop_service,

@@ -355,7 +355,7 @@ ignore_change(Seq, State = #state{bucket = Bucket, scope = Scope},
                     end, [], couchbase_pool:get_workers(write)),
                     ignore_change(Seq, State, WorkersChecked2, false);
                 _ ->
-                    case check_reconect_retry() of
+                    case check_reconnect_retry() of
                         true ->
                             timer:sleep(1000),
                             ignore_change(Seq, State, WorkersChecked, false);
@@ -414,15 +414,10 @@ wait_for_worker(Pid, WorkersChecked) ->
 %% Checks if ignore check should be retry because of reconnects to db.
 %% @end
 %%--------------------------------------------------------------------
--spec check_reconect_retry() -> boolean().
-check_reconect_retry() ->
-    Timeout = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        couchbase_changes_restart_timeout, timer:minutes(1)),
-    TimeoutUs = Timeout * 1000,
-    StartTime = node_cache:get(db_connection_timestamp, {0, 0, 0}),
-
-    Now = os:timestamp(), % @TODO VFS-6841 switch to the clock module
-    timer:now_diff(Now, StartTime) < TimeoutUs.
+-spec check_reconnect_retry() -> boolean().
+check_reconnect_retry() ->
+    ReconnectRetryTimer = node_cache:get(db_reconnect_retry_timer, countdown_timer:start_millis(0)),
+    not countdown_timer:is_expired(ReconnectRetryTimer).
 
 %% @private
 -spec stream_docs([couchbase_changes:change()], couchbase_config:bucket(),

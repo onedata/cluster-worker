@@ -22,12 +22,7 @@
     scheduler_info = undefined :: undefined | list(),
     % TODO - better task manager
     task_control = false,
-    % @TODO VFS-6841 switch to the clock module
-    last_cache_cleaning = {0, 0, 0},
-    cache_cleaning_pid = undefined :: undefined | pid(),
-    % {timestamp of last_analysis, pid that performs analysis}
-    % @TODO VFS-6841 switch to the clock module
-    last_state_analysis = {{0, 0, 0}, undefined} :: {erlang:timestamp(), undefined | pid()},
+    last_state_analysis = {stopwatch:start(), undefined} :: node_manager:last_state_analysis(),
     throttling = true,
     % Holds a unique reference for each service that is regenerated only upon
     % rescheduling of periodic healthchecks and otherwise stays the same through

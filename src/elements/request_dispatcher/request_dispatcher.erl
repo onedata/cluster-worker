@@ -34,7 +34,7 @@
 %% This record is used by requests_dispatcher (it contains its state).
 -record(state, {
     % Time of last ld advice update received from dispatcher
-    last_update = 0 :: integer()
+    last_update = 0 :: time:millis()
 }).
 
 %% API
@@ -118,19 +118,18 @@ init(_) ->
     NewState :: term(),
     Timeout :: non_neg_integer() | infinity,
     Reason :: term().
-handle_call(healthcheck, _From, #state{last_update = LastUpdate} = State) ->
+handle_call(healthcheck, _From, #state{last_update = LastUpdateMillis} = State) ->
     % Report error as long as no LB advice has been received.
     Reply = case ets:lookup(?WORKER_MAP_ETS, ?LB_ADVICE_KEY) of
-                [{?LB_ADVICE_KEY, undefined}] ->
-                    {error, no_lb_advice_received};
-                _ ->
-                    {ok, Threshold} = application:get_env(?CLUSTER_WORKER_APP_NAME, disp_out_of_sync_threshold),
-                    % Threshold is in millisecs, LastUpdate is in millisecs
-                    case (clock:timestamp_millis() - LastUpdate) > Threshold of
-                        true -> out_of_sync;
-                        false -> ok
-                    end
-            end,
+        [{?LB_ADVICE_KEY, undefined}] ->
+            {error, no_lb_advice_received};
+        _ ->
+            {ok, ThresholdMillis} = application:get_env(?CLUSTER_WORKER_APP_NAME, disp_out_of_sync_threshold),
+            case global_clock:timestamp_millis() - LastUpdateMillis > ThresholdMillis of
+                true -> out_of_sync;
+                false -> ok
+            end
+    end,
     {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
@@ -154,7 +153,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({update_lb_advice, LBAdvice}, State) ->
     % Update LB advice
     ets:insert(?WORKER_MAP_ETS, {?LB_ADVICE_KEY, LBAdvice}),
-    {noreply, State#state{last_update = clock:timestamp_millis()}};
+    {noreply, State#state{last_update = global_clock:timestamp_millis()}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -223,7 +222,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Chooses to which worker (on which node) the request should be sent.
 %%
 %% NOTE: currently, all nodes host all workers, so worker type can be omitted.
-%% TODO 5983 - currently not used - should be integrated with consistent hashing or removed
+%% TODO VFS-5983 - currently not used - should be integrated with consistent hashing or removed
 %% @end
 %%--------------------------------------------------------------------
 -spec get_worker_node(WorkerName :: worker_name()) ->

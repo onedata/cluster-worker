@@ -46,7 +46,7 @@
 -type service_name() :: binary().
 -type service_fun_name() :: atom().
 -type service_fun_args() :: list().
--type healthcheck_interval() :: clock:millis().
+-type healthcheck_interval() :: time:millis().
 -type options() :: #{
     start_function := service_fun_name(),
     start_function_args => service_fun_args(),
@@ -171,7 +171,7 @@ apply_with_retry(Module, Fun, Args, Async) ->
             apply_with_retry(Module, Fun, Args, ?INITIAL_SLEEP, ?RETRIES_NUM)
     end.
 
--spec apply_with_retry(module(), service_fun_name(), service_fun_args(), clock:millis(), non_neg_integer()) ->
+-spec apply_with_retry(module(), service_fun_name(), service_fun_args(), time:millis(), non_neg_integer()) ->
     init_fun_answer().
 apply_with_retry(Module, Fun, Args, _Sleep, 0) ->
     apply(Module, Fun, Args);

@@ -82,7 +82,7 @@ start_link(Bucket, Mode, Id, DbHosts, Client) ->
     {stop, Reason :: term()} | ignore.
 init([Bucket, Mode, Id, DbHosts, Client]) ->
     process_flag(trap_exit, true),
-    node_cache:put(db_connection_timestamp, os:timestamp()), % @TODO VFS-6841 switch to the clock module
+    reset_reconnect_retry_timer(),
 
     Host = lists:foldl(fun(DbHost, Acc) ->
         <<Acc/binary, ";", DbHost/binary>>
@@ -175,9 +175,7 @@ terminate(Reason, #state{bucket = Bucket, mode = Mode, id = Id} = State) ->
         normal -> ok;
         shutdown -> ok;
         {shutdown, _} -> ok;
-        _ ->
-            % Catch as function can throw error when application is stopping
-            catch node_cache:put(db_connection_timestamp, os:timestamp()) % @TODO VFS-6841 switch to the clock module
+        _ -> reset_reconnect_retry_timer()
     end,
     catch couchbase_pool_sup:unregister_worker(Bucket, Mode, Id, self()),
     ?log_terminate(Reason, State).
@@ -347,15 +345,15 @@ handle_requests_batch(Connection, RequestsBatch) ->
 
     SaveResponses = handle_save_requests_batch(Connection, SaveRequests),
 
-    T1 = clock:timestamp_micros(),
+    GetStopwatch = stopwatch:start(),
     GetResponses = couchbase_crud:get(Connection, GetRequests),
-    Time = clock:timestamp_micros() - T1,
-    couchbase_batch:check_timeout(GetResponses, get, Time),
+    GetTime = stopwatch:read_micros(GetStopwatch),
+    couchbase_batch:check_timeout(GetResponses, get, GetTime),
 
-    T2 = clock:timestamp_micros(),
+    DeleteStopwatch = stopwatch:start(),
     DeleteResponses = couchbase_crud:delete(Connection, RemoveRequests),
-    Time2 = clock:timestamp_micros() - T2,
-    couchbase_batch:check_timeout(DeleteResponses, delete, Time2),
+    DeleteTime = stopwatch:read_micros(DeleteStopwatch),
+    couchbase_batch:check_timeout(DeleteResponses, delete, DeleteTime),
 
     #{
         save => SaveResponses,
@@ -443,9 +441,9 @@ wait(WaitFun, FunName) ->
     Num :: non_neg_integer(), atom()) -> {ok | timeout,
     {couchbase_crud:save_requests_map(), [couchbase_crud:save_response()]}}.
 wait(WaitFun, Num, FunName) ->
-    T1 = clock:timestamp_micros(),
+    Stopwatch = stopwatch:start(),
     {_, SaveResponses} = Ans = WaitFun(),
-    Time = clock:timestamp_micros() - T1,
+    Time = stopwatch:read_micros(Stopwatch),
     case couchbase_batch:check_timeout(SaveResponses, FunName, Time) of
         timeout when Num > 1 ->
             wait(WaitFun, Num - 1, FunName);
@@ -474,15 +472,15 @@ handle_request(_Connection, {delete, _, Key}, ResponsesBatch) ->
     RemoveResponses = maps:get(delete, ResponsesBatch),
     get_response(Key, RemoveResponses);
 handle_request(Connection, {get_counter, Key, Default}, _) ->
-    T1 = clock:timestamp_micros(),
+    Stopwatch = stopwatch:start(),
     Ans = couchbase_crud:get_counter(Connection, Key, Default),
-    Time = clock:timestamp_micros() - T1,
+    Time = stopwatch:read_micros(Stopwatch),
     couchbase_batch:check_timeout([Ans], get_counter, Time),
     Ans;
 handle_request(Connection, {update_counter, Key, Delta, Default}, _) ->
-    T1 = clock:timestamp_micros(),
+    Stopwatch = stopwatch:start(),
     Ans = couchbase_crud:update_counter(Connection, Key, Delta, Default),
-    Time = clock:timestamp_micros() - T1,
+    Time = stopwatch:read_micros(Stopwatch),
     couchbase_batch:check_timeout([Ans], update_counter, Time),
     Ans;
 handle_request(Connection, {save_design_doc, DesignName, EJson}, _) ->
@@ -523,3 +521,11 @@ dequeue(Count, Queue, Requests) ->
         {empty, Queue2} ->
             {lists:reverse(Requests), Queue2}
     end.
+
+
+%% @private
+-spec reset_reconnect_retry_timer() -> ok.
+reset_reconnect_retry_timer() ->
+    TimeoutMillis = application:get_env(?CLUSTER_WORKER_APP_NAME,
+        couchbase_changes_restart_timeout, timer:minutes(1)),
+    node_cache:put(db_reconnect_retry_timer, countdown_timer:start_millis(TimeoutMillis)).
