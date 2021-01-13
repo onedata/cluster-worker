@@ -25,6 +25,7 @@
 -module(traverse_task_list).
 -author("Michal Wrzeszcz").
 
+-include("modules/datastore/datastore_errors.hrl").
 -include("modules/datastore/datastore_links.hrl").
 
 %% List API
@@ -201,7 +202,7 @@ add_job_link(Pool, CallbackModule, JobId) ->
         [{JobId, JobId}]
     ) of
         [{ok, _}] -> ok;
-        [{error,already_exists}] -> ok % in case of restart
+        [{error, ?ALREADY_EXISTS}] -> ok % in case of restart
     end,
     ok.
 

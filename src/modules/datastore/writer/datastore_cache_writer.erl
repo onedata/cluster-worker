@@ -17,6 +17,7 @@
 -include("modules/datastore/datastore_protocol.hrl").
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/ha_datastore.hrl").
+-include("modules/datastore/datastore_errors.hrl").
 -include_lib("ctool/include/logging.hrl").
 
 %% API
@@ -541,6 +542,10 @@ batch_request(#datastore_request{function = save, ctx = Ctx, args = [Key, Doc]},
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:save(set_mutator_pid(Ctx), Key, Doc, Batch2)
     end);
+batch_request(#datastore_request{function = save_remote, ctx = Ctx, args = [Key, Doc, RemoteMutator]}, Batch, _LinkTokens) ->
+    batch_apply(Batch, fun(Batch2) ->
+        datastore_doc:save_remote(set_mutator_pid(Ctx), Key, Doc, RemoteMutator, Batch2)
+    end);
 batch_request(#datastore_request{function = update, ctx = Ctx, args = [Key, Diff]}, Batch, _LinkTokens) ->
     batch_apply(Batch, fun(Batch2) ->
         datastore_doc:update(set_mutator_pid(Ctx), Key, Diff, Batch2)
@@ -1014,7 +1019,7 @@ prepare_check_and_add_ans([], []) ->
 prepare_check_and_add_ans([{_, {error, not_found}} | FetchTail], [AddAns | AddTail]) ->
     [AddAns | prepare_check_and_add_ans(FetchTail, AddTail)];
 prepare_check_and_add_ans([{Ref, {ok, _}} | FetchTail], AddAnsList) ->
-    [{Ref, {error, already_exists}} | prepare_check_and_add_ans(FetchTail, AddAnsList)];
+    [{Ref, {error, ?ALREADY_EXISTS}} | prepare_check_and_add_ans(FetchTail, AddAnsList)];
 prepare_check_and_add_ans([FetchAns | FetchTail], AddAnsList) ->
     [FetchAns | prepare_check_and_add_ans(FetchTail, AddAnsList)].
 

@@ -15,7 +15,7 @@
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([create/3, save/3, update/3, update/4, create_backup/2]).
+-export([create/3, save/3, save_remote/4, update/3, update/4, create_backup/2]).
 -export([get/2, exists/2]).
 -export([delete/3, delete_all/2]).
 -export([add_links/4, check_and_add_links/5, get_links/4, delete_links/4, mark_links_deleted/4]).
@@ -35,8 +35,6 @@
                  local_fold => boolean(), % Fold links are added using local routing
                  local_fold_node => node(), % Node used to generate key for local fold
                  sync_enabled => boolean(),
-                 sync_change => boolean(), % should set to 'true' for save
-                                           % of remote change
                  hooks_disabled => boolean(),
                  local_links_tree_id => tree_id(),
                  volatile => boolean(),
@@ -127,6 +125,18 @@ create(Ctx, Key, Doc = #document{}) ->
 -spec save(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Key, Doc = #document{}) ->
     datastore_hooks:wrap(Ctx, Key, save, [Doc], fun
+        (Function, Args) -> datastore_router:route(Function, Args)
+    end).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves document created by other cluster in a datastore.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_remote(ctx(), key(), doc(), datastore_doc:mutator()) ->
+    {ok, doc(), datastore_doc:remote_mutation_info()} | {error, term()}.
+save_remote(Ctx, Key, Doc = #document{}, RemoteMutator) ->
+    datastore_hooks:wrap(Ctx, Key, save_remote, [Doc, RemoteMutator], fun
         (Function, Args) -> datastore_router:route(Function, Args)
     end).
 

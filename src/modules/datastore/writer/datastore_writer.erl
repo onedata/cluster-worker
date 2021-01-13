@@ -23,7 +23,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
+-export([create/3, save/3, save_remote/4, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
 -export([generic_call/2, call_if_alive/2]).
@@ -102,6 +102,16 @@ create(Ctx, Key, Doc = #document{}) ->
 -spec save(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Key, Doc = #document{}) ->
     call(Ctx, get_key(Ctx, Key, doc), save, [Key, Doc]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Synchronous and thread safe {@link datastore:save_remote/4} implementation.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_remote(ctx(), key(), doc(), datastore_doc:mutator()) ->
+    {ok, doc(), datastore_doc:remote_mutation_info()} | {error, term()}.
+save_remote(Ctx, Key, Doc = #document{}, RemoteMutator) ->
+    call(Ctx, get_key(Ctx, Key, doc), save_remote, [Key, Doc, RemoteMutator]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -237,7 +247,7 @@ call(Ctx, Key, Function, Args) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Performs synchronous call to a datastore writer process associated
-%% with a key. Repeats in case of internal_call error.
+%% with a key. Repeats in case of interrupted_call error.
 %% @end
 %%--------------------------------------------------------------------
 -spec call(ctx(), tp_key(), atom(), list(), non_neg_integer(), non_neg_integer()) -> term().
@@ -245,22 +255,25 @@ call(Ctx, Key, Function, Args, Sleep, InterruptedCallRetries) ->
     case call_async(Ctx, Key, Function, Args) of
         {{ok, Ref}, Pid} ->
             case wait(Ref, Pid) of
-                {error, interrupted_call} = InterruptedCallError ->
-                    case InterruptedCallRetries of
-                        0 ->
+                % TODO - VFS-6847 Currently if internal_call occurs, all elements of the list are the same.
+                % Get rid of this case after translating list with error to tuple in link operations handler
+                [{error, internal_call} | _] ->
+                    {error, internal_call};
+                Other ->
+                    case {is_interrupted_call_error(Other), InterruptedCallRetries} of
+                        {false, _} ->
+                            Other;
+                        {true, 0} ->
                             ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
                             "no retries left", [Function, Args, Key, Ctx]),
-                            InterruptedCallError;
+                            Other;
                         _ ->
                             ?debug("Interrupted call (fun: ~p, args ~p, key ~p, ctx ~p)~n"
                             "~p retries left, next retry in ~p ms",
                                 [Function, Args, Key, Ctx, InterruptedCallRetries, Sleep]),
                             timer:sleep(Sleep),
                             call(Ctx, Key, Function, Args, Sleep * 2, InterruptedCallRetries - 1)
-                    end;
-                [{error, internal_call} | _] ->
-                    {error, internal_call};
-                Other -> Other
+                    end
             end;
         {error, Reason} ->
             {error, Reason}
@@ -605,3 +618,12 @@ wait(Ref, Pid, Timeout, CheckAndRetry) ->
                 _ -> {error, timeout}
             end
     end.
+
+%% @private
+-spec is_interrupted_call_error(term()) -> boolean().
+is_interrupted_call_error({error, interrupted_call}) ->
+    true;
+is_interrupted_call_error([{error, interrupted_call} | _]) ->
+    true;
+is_interrupted_call_error(_) ->
+    false.

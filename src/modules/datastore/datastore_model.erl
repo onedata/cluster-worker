@@ -12,6 +12,7 @@
 -module(datastore_model).
 -author("Krzysztof Trzepla").
 
+-include("modules/datastore/datastore_errors.hrl").
 -include("modules/datastore/datastore_links.hrl").
 -include("modules/datastore/datastore_models.hrl").
 -include("global_definitions.hrl").
@@ -19,7 +20,7 @@
 
 %% API
 -export([init/1, get_unique_key/2]).
--export([create/2, save/2, save_with_routing_key/2, update/3, update/4]).
+-export([create/2, save/2, save_remote/3, save_with_routing_key/2, update/3, update/4]).
 -export([get/2, exists/2]).
 -export([delete/2, delete/3, delete_all/1]).
 -export([fold/3, fold/5, fold_keys/3, local_fold_all_nodes/3]).
@@ -123,6 +124,23 @@ save(Ctx, Doc = #document{key = undefined}) ->
     save(Ctx2, Doc2);
 save(Ctx, Doc = #document{key = Key}) ->
     Result = datastore_apply(Ctx, Key, fun datastore:save/3, save, [Doc]),
+    add_fold_link(Ctx, Key, Result).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves model document created by other cluster in a datastore.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_remote(ctx(), doc(), datastore_doc:mutator()) ->
+    {ok, doc(), datastore_doc:remote_mutation_info()} | {error, term()}.
+save_remote(#{secure_fold_enabled := true}, _Doc, _RemoteMutator) ->
+    {error, not_supported};
+save_remote(#{generated_key := true}, _Doc, _RemoteMutator) ->
+    {error, not_supported};
+save_remote(_Ctx, #document{key = undefined}, _RemoteMutator) ->
+    {error, not_supported};
+save_remote(Ctx, Doc = #document{key = Key}, RemoteMutator) ->
+    Result = datastore_apply(Ctx, Key, fun datastore:save_remote/4, save_remote, [Doc, RemoteMutator]),
     add_fold_link(Ctx, Key, Result).
 
 %%--------------------------------------------------------------------
@@ -497,13 +515,13 @@ datastore_apply_all(Ctx0, Key, Fun, _FunName, Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec add_fold_link(ctx(), key(), {ok, doc()} | {error, term()}) ->
-    {ok, doc()} | {error, term()}.
+    {ok, doc()} | {ok, doc(), datastore_doc:remote_mutation_info()} | {error, term()}.
 add_fold_link(Ctx = #{fold_enabled := true}, Key, {ok, Doc}) ->
     Ctx2 = Ctx#{sync_enabled => false},
     {Ctx3, ModelKey} = get_fold_ctx_and_key(Ctx2),
     case add_links(Ctx3, ModelKey, ?MODEL_ALL_TREE_ID, [{Key, <<>>}]) of
         [{ok, #link{}}] -> {ok, Doc};
-        [{error, already_exists}] -> {ok, Doc};
+        [{error, ?ALREADY_EXISTS}] -> {ok, Doc};
         [{error, Reason}] -> {error, Reason}
     end;
 add_fold_link(_Ctx, _Key, Result) ->

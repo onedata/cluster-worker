@@ -208,7 +208,7 @@ delete_internal_docs(State = #state{
             gen_server:cast(Pid, {processing_finished, End2, Cas2})
         catch
             _:Reason ->
-                ?error_stacktrace("Clearing changes intenal documents failed"
+                ?error_stacktrace("Clearing changes internal documents failed"
                 " due to: ~p (pid: ~p, scope: ~p, bucket: ~p)",
                     [Reason, Pid, Scope, Bucket]),
                 timer:sleep(?ERROR_SLEEP_TIME),

@@ -24,7 +24,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([start_link/2, start_link/4]).
+-export([start_link/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -52,17 +52,9 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% @equiv start_link(Bucket, Scope, undefined).
-%% @end
-%%--------------------------------------------------------------------
--spec start_link(couchbase_config:bucket(), datastore_doc:scope()) ->
-    {ok, pid()} | {error, Reason :: term()}.
-start_link(Bucket, Scope) ->
-    start_link(Bucket, Scope, undefined, undefined).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts CouchBase changes worker.
+%% API function used to start couchbase_changes_worker. When Callback and PropagationSince
+%% are undefined, couchbase_changes_worker updates only seq_safe number and
+%% couchbase_changes_stream is responsible for Callback execution.
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(couchbase_config:bucket(), datastore_doc:scope(),
@@ -106,7 +98,7 @@ init([Bucket, Scope, Callback, PropagationSince]) ->
             {ok, _, _} = couchbase_driver:update_counter(Ctx, SeqKey, Seq2 - Seq, Seq2),
 
             ?warning("Wrong seq and seq_safe for scope ~p: seq_safe = ~p, "
-            "seq = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, Seq2]),
+                "seq = ~p, new_seq = ~p", [Scope, SeqSafe, Seq, Seq2]),
             Seq2;
         _ ->
             Seq
@@ -199,10 +191,20 @@ handle_info(Info, #state{} = State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
+terminate(Reason, #state{callback = undefined} = State) ->
+    ?log_terminate(Reason, State);
 terminate(Reason, #state{callback = Callback, seq_safe = SeqSafe} = State) ->
     case Reason of
-        normal -> ok;
-        _ -> Callback({error, SeqSafe, Reason})
+        normal ->
+            ok;
+        _ ->
+            try
+                Callback({error, SeqSafe, Reason})
+            catch
+                CatchError:CatchReason ->
+                    ?error_stacktrace("~p terminate callback failed due to ~p:~p~n"
+                        "Termination on seq ~p", [?MODULE, CatchError, CatchReason, SeqSafe])
+            end
     end,
     ?log_terminate(Reason, State).
 

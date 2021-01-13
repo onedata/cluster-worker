@@ -87,6 +87,9 @@ mock_model(Model) ->
         {save, fun(Doc) ->
             datastore_model:save(get_ctx(Model), Doc)
         end},
+        {save_remote, fun(Doc, RemoteMutator) ->
+            datastore_model:save_remote(get_ctx(Model), Doc, RemoteMutator)
+        end},
         {update, fun(Key, Diff) ->
             datastore_model:update(get_ctx(Model), Key, Diff)
         end},

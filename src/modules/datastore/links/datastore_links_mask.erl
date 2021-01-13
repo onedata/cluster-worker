@@ -111,7 +111,7 @@ terminate(#mask{
         undefined -> Ctx;
         DriverCtx -> Ctx#{disc_driver_ctx => DriverCtx#{no_seq => true}}
     end,
-    Ctx3 = Ctx2#{sync_enabled => false, sync_change => false},
+    Ctx3 = Ctx2#{sync_enabled => false},
     MaskPtrId = datastore_links:get_mask_root_id(Key),
     Diff = fun(MaskPtr = #links_mask_root{heads = Heads, tails = Tails}) ->
         {ok, MaskPtr#links_mask_root{

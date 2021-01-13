@@ -28,31 +28,22 @@
 %%% API functions
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts CouchBase changes supervisor.
-%% @end
-%%--------------------------------------------------------------------
 -spec start_link() -> {ok, pid()} | ignore | {error, Reason :: term()}.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts CouchBase changes worker.
-%% @end
-%%--------------------------------------------------------------------
 -spec start_worker(couchbase_config:bucket(), datastore_doc:scope()) ->
     {ok, pid()} | {error, Reason :: term()}.
 start_worker(Bucket, Scope) ->
-    Spec = couchbase_changes_worker_spec(Bucket, Scope),
+    start_worker(Bucket, Scope, undefined, undefined).
+
+-spec start_worker(couchbase_config:bucket(), datastore_doc:scope(),
+    couchbase_changes:callback() | undefined, couchbase_changes:since() | undefined) ->
+    {ok, pid()} | {error, Reason :: term()}.
+start_worker(Bucket, Scope, Callback, PropagationSince) ->
+    Spec = couchbase_changes_worker_spec(Bucket, Scope, Callback, PropagationSince),
     supervisor:start_child(?MODULE, Spec).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Stops CouchBase changes worker.
-%% @end
-%%--------------------------------------------------------------------
 -spec stop_worker(couchbase_config:bucket(), datastore_doc:scope()) ->
     ok | {error, Reason :: term()}.
 stop_worker(Bucket, Scope) ->
@@ -88,12 +79,13 @@ init([]) ->
 %% Returns a supervisor child_spec for a CouchBase changes worker.
 %% @end
 %%--------------------------------------------------------------------
--spec couchbase_changes_worker_spec(couchbase_config:bucket(),
-    datastore_doc:scope()) -> supervisor:child_spec().
-couchbase_changes_worker_spec(Bucket, Scope) ->
+-spec couchbase_changes_worker_spec(couchbase_config:bucket(), datastore_doc:scope(),
+    couchbase_changes:callback() | undefined, couchbase_changes:since() | undefined) ->
+    supervisor:child_spec().
+couchbase_changes_worker_spec(Bucket, Scope, Callback, PropagationSince) ->
     #{
         id => {Bucket, Scope},
-        start => {couchbase_changes_worker, start_link, [Bucket, Scope]},
+        start => {couchbase_changes_worker, start_link, [Bucket, Scope, Callback, PropagationSince]},
         restart => transient,
         shutdown => timer:seconds(10),
         type => worker,

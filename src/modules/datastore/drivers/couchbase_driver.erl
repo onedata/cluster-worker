@@ -13,6 +13,8 @@
 -module(couchbase_driver).
 -author("Krzysztof Trzepla").
 
+-include("modules/datastore/datastore_errors.hrl").
+
 %% API
 -export([save_async/3, get_async/2, delete_async/2, wait/1]).
 -export([save/1, save/3, get/2, delete/2]).
@@ -117,7 +119,7 @@ wait(Futures) when is_list(Futures) ->
 wait(Future) ->
     case couchbase_pool:wait(Future, true) of
         {error, key_enoent} -> {error, not_found};
-        {error, key_eexists} -> {error, already_exists};
+        {error, key_eexists} -> {error, ?ALREADY_EXISTS};
         Other -> Other
     end.
 
