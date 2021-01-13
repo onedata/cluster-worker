@@ -42,13 +42,15 @@ get_many(#internal_listing_data{last_node_id = NodeId} = ListingData, _Size = 0,
 get_many(#internal_listing_data{
     last_node_id = NodeId,
     last_key = LastKey,
-    seen_node_num = SeenNodeNum
+    last_node_num = LastNodeNum
 } = ListingData, Size, Acc) ->
     case find_node(ListingData) of
         #node{elements = OrigElements, node_num = NodeNum} = Node ->
-            Elements = case LastKey == undefined orelse SeenNodeNum =/= NodeNum of
+            Elements = case LastKey == undefined orelse LastNodeNum =/= NodeNum of
                 true -> OrigElements;
                 false ->
+                    % when node since last listing was not deleted select only 
+                    % elements with key less than those already listed
                     maps:filter(fun(Key, _) -> Key < LastKey end, OrigElements)
             end,
             NumberOfElemsToTake = min(Size, maps:size(Elements)),
@@ -60,7 +62,7 @@ get_many(#internal_listing_data{
             end,
             get_many(ListingData#internal_listing_data{
                 last_node_id = NextNodeId,
-                seen_node_num = NodeNum
+                last_node_num = NodeNum
             }, Size - NumberOfElemsToTake, Acc ++ E)
     end.
 
@@ -105,17 +107,17 @@ get(NodeId, Key) ->
 %% @doc
 %% This function returns Node based on information included in ListingData.
 %% If node with given id exists it is returned. If not (it was deleted in 
-%% meantime) first node with number less than `seen_node_num` is returned.
+%% meantime) first node with number less than `last_node_num` is returned.
 %% Because last node is never deleted, such node always exists.
 %% @end
 %%--------------------------------------------------------------------
 -spec find_node(#internal_listing_data{}) -> #node{}.
-find_node(#internal_listing_data{last_node_id = NodeId, seen_node_num = SeenNodeNum, id = StructId} = ListingData) ->
+find_node(#internal_listing_data{last_node_id = NodeId, last_node_num = LastNodeNum, id = StructId} = ListingData) ->
     case append_list_persistence:get_node(NodeId) of
         ?ERROR_NOT_FOUND -> 
             #sentinel{first = First} = append_list_persistence:get_node(StructId),
             find_node(ListingData#internal_listing_data{last_node_id = First});
-        #node{node_num = NodeNum} = Node when not (is_integer(SeenNodeNum) andalso NodeNum > SeenNodeNum) ->
+        #node{node_num = NodeNum} = Node when not (is_integer(LastNodeNum) andalso NodeNum > LastNodeNum) ->
             Node;
         #node{prev = Prev} ->
             find_node(ListingData#internal_listing_data{last_node_id = Prev})

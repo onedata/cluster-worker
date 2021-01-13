@@ -43,9 +43,9 @@
     elements = #{} :: #{key() => value()},
     min_on_left :: integer() | undefined,
     max_on_right :: integer() | undefined,
-    % This value allows to continue listing after node, 
-    % that previous listing finished on, was deleted.
-    % For more details consult `find_node/1` doc.
+    % This value allows to continue listing after node, that previous listing finished on, was deleted.
+    % Node num of prev node is always lower and similarly num of next node is always higher.
+    % For more details consult `append_list_get:find_node/1`.
     node_num :: non_neg_integer()
 }).
 
@@ -54,8 +54,10 @@
 -record(internal_listing_data, {
     id :: id() | undefined,
     last_node_id :: id() | undefined,
+    % Highest key already listed from last node.
     last_key :: integer() | undefined,
-    seen_node_num :: integer() | undefined
+    % Lowest node number(node number of last node) that was encountered during elements listing.
+    last_node_num :: integer() | undefined
 }).
 
 % Record returned along with listing result, allows to start listing elements 
