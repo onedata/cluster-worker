@@ -58,14 +58,14 @@ encode(#document{value = Value, version = Version} = Doc) ->
     case lists:member(Model, datastore_config:get_models()) of
         true ->
             {Props} = encode_term(Value, Model:get_record_struct(Version)),
-            RemoteMutations = encode_term(Doc#document.remote_sequences, #{string => integer}),
+            RemoteSequences = encode_term(Doc#document.remote_sequences, #{string => integer}),
             {[
                 {<<"_key">>, Doc#document.key},
                 {<<"_scope">>, Doc#document.scope},
                 {<<"_mutators">>, Doc#document.mutators},
                 {<<"_revs">>, Doc#document.revs},
                 {<<"_seq">>, Doc#document.seq},
-                {<<"_remote_sequences">>, RemoteMutations},
+                {<<"_remote_sequences">>, RemoteSequences},
                 {<<"_timestamp">>, Doc#document.timestamp},
                 {<<"_deleted">>, Doc#document.deleted},
                 {<<"_version">>, Version} |
@@ -118,7 +118,7 @@ decode({Term} = EJson) when is_list(Term) ->
                         {{_, Value}, _} -> Value % Document has timestamp
                     end,
 
-                    RemoteMutations = decode_term(
+                    RemoteSequences = decode_term(
                         proplists:get_value(<<"_remote_sequences">>, Term, #{}), #{string => integer}),
 
                     #document{
@@ -128,7 +128,7 @@ decode({Term} = EJson) when is_list(Term) ->
                         mutators = Mutators,
                         revs = Revs,
                         seq = Seq,
-                        remote_sequences = RemoteMutations,
+                        remote_sequences = RemoteSequences,
                         timestamp = Timestamp,
                         deleted = Deleted,
                         version = Version2
