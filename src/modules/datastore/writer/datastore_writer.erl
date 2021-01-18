@@ -23,7 +23,7 @@
 -include_lib("ctool/include/logging.hrl").
 
 %% API
--export([create/3, save/3, update/3, update/4, create_backup/2, fetch/2, delete/3]).
+-export([create/3, save/3, save_remote/4, update/3, update/4, create_backup/2, fetch/2, delete/3]).
 -export([add_links/4, check_and_add_links/5, fetch_links/4, delete_links/4, mark_links_deleted/4]).
 -export([fold_links/6, fetch_links_trees/2]).
 -export([generic_call/2, call_if_alive/2]).
@@ -102,6 +102,16 @@ create(Ctx, Key, Doc = #document{}) ->
 -spec save(ctx(), key(), doc()) -> {ok, doc()} | {error, term()}.
 save(Ctx, Key, Doc = #document{}) ->
     call(Ctx, get_key(Ctx, Key, doc), save, [Key, Doc]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Synchronous and thread safe {@link datastore:save_remote/4} implementation.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_remote(ctx(), key(), doc(), datastore_doc:mutator()) ->
+    {ok, doc(), datastore_doc:remote_mutation_info()} | {error, term()}.
+save_remote(Ctx, Key, Doc = #document{}, RemoteMutator) ->
+    call(Ctx, get_key(Ctx, Key, doc), save_remote, [Key, Doc, RemoteMutator]).
 
 %%--------------------------------------------------------------------
 %% @doc

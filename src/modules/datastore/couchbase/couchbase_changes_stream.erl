@@ -173,7 +173,7 @@ handle_info({'EXIT', From, Reason} = Info,
     case lists:member(From, LinkedProcesses) of
         true ->
             ?info("Stopping stream ~p because linked process ~p "
-            "terrminated with ~p", [self(), From, Reason]),
+                "terrminated with ~p", [self(), From, Reason]),
             {stop, Reason, State};
         _ ->
             ?log_bad_request(Info),
@@ -195,9 +195,15 @@ handle_info(Info, #state{} = State) ->
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: state()) -> term().
 terminate(Reason, #state{since = Since, callback = Callback} = State) ->
-    case Reason of
-        normal -> Callback({ok, end_of_stream});
-        _ -> Callback({error, Since, Reason})
+    try
+        case Reason of
+            normal -> Callback({ok, end_of_stream});
+            _ -> Callback({error, Since, Reason})
+        end
+    catch
+        CatchError:CatchReason ->
+            ?error_stacktrace("~p terminate callback failed due to ~p:~p~n"
+                "Termination on seq ~p", [?MODULE, CatchError, CatchReason, Since])
     end,
     ?log_terminate(Reason, State).
 

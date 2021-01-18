@@ -21,11 +21,14 @@
 
 -record(document, {
     key :: datastore_doc:key(),
-    value :: datastore_doc:value(),
+    value :: term(), % the value of document is of type datastore_doc:value() but we use term()
+                     % to allow definition of type `doc(Value)` in datastore_doc module (type with arg
+                     % allows usage of any Value in future, thus dialyzer requires field to be term())
     scope = <<>> :: datastore_doc:scope(),
     mutators = [] :: [datastore_doc:mutator()],
     revs = [] :: [datastore_doc:rev()],
     seq = null :: datastore_doc:seq(),
+    remote_sequences = #{} :: datastore_doc:remote_sequences(),
     timestamp = null :: datastore_doc:timestamp(),
     deleted = false :: boolean(),
     version = 1 :: datastore_doc:version()

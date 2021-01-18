@@ -18,34 +18,53 @@
 -module(datastore_doc).
 -author("Krzysztof Trzepla").
 
+-include("modules/datastore/datastore.hrl").
+-include("modules/datastore/datastore_errors.hrl").
 -include("modules/datastore/datastore_models.hrl").
 
 %% API
--export([create/4, save/4, update/4, update/5]).
+-export([create/4, save/4, save_remote/5, update/4, update/5]).
 -export([get/3, fetch/3, fetch/4, fetch_deleted/3, exists/3]).
 -export([delete/3, delete/4]).
 -export([get_links/5, get_links_trees/3]).
+-export([model/1]).
 
 -type ctx() :: datastore:ctx().
 -type key() :: undefined | datastore_key:key().
--type value() :: term().
+-type value() :: tuple() |  % record defining model - typical value of document
+                 binary() | % binary is used by datastore_writer to test couchbase connection
+                 undefined. % undefined is used by datastore_cache when storing information
+                            % about not existing documents (to prevent calls to couchbase)
 -type rev() :: datastore_rev:rev().
 -type seq() :: couchbase_changes:seq().
+-type remote_seq() :: seq().
+% Type describing remote sequence overridden by remote write. The sequence can be
+% undefined in case of first remote write performed by particular remote cluster.
+-type overridden_seq() :: remote_seq() | undefined.
+-type remote_mutation_info() :: #remote_mutation_info{}.
 -type timestamp() :: couchbase_changes:timestamp().
 -type scope() :: binary().
 -type mutator() :: binary().
 -type version() :: datastore_versions:record_version().
 -type doc(Value) :: #document{value :: Value}.
+-type doc() :: doc(value()).
 -type diff(Value) :: fun((Value) -> {ok, Value} | {error, term()}).
 -type pred(Value) :: fun((Value) -> boolean()).
 -type tree_id() :: datastore_links:tree_id().
 -type link() :: datastore_links:link().
 -type link_name() :: datastore_links:link_name().
 -type batch() :: datastore_doc_batch:batch().
+% Map storing sequence numbers of remote providers seen during last handling of save_remote/5 function
+% (remote document appears with document's seq field value set by remote cluster but couchbase_driver
+% will change this field during save to local database so additional map is required to store information
+% about sequence numbers set by other clusters).
+-type remote_sequences() :: #{mutator() => datastore_doc:remote_seq()}.
 
 -export_type([doc/1]).
--export_type([key/0, value/0, rev/0, seq/0, timestamp/0, scope/0, mutator/0, version/0, batch/0]).
+-export_type([key/0, value/0, rev/0, seq/0, remote_seq/0, overridden_seq/0,
+    remote_mutation_info/0, timestamp/0, scope/0, mutator/0, version/0, batch/0]).
 -export_type([diff/1, pred/1]).
+-export_type([remote_sequences/0]).
 
 %%%===================================================================
 %%% Batch API
@@ -56,16 +75,16 @@
 %% Creates datastore document.
 %% @end
 %%--------------------------------------------------------------------
--spec create(ctx(), key(), doc(value()), batch()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+-spec create(ctx(), key(), doc(), batch()) ->
+    {{ok, doc()} | {error, term()}, batch()}.
 create(Ctx, Key, Doc, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc = #document{deleted = true}}, Batch2} ->
             Doc2 = fill(Ctx, Doc, PrevDoc),
             datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
         {{ok, _}, Batch2} ->
-            {{error, already_exists}, Batch2};
-        {{error, not_found}, Batch2} ->
+            {{error, ?ALREADY_EXISTS}, Batch2};
+        {{error, ?NOT_FOUND}, Batch2} ->
             Doc2 = fill(Ctx, Doc),
             datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
         {{error, Reason}, Batch2} ->
@@ -77,27 +96,51 @@ create(Ctx, Key, Doc, Batch) ->
 %% Saves datastore document.
 %% @end
 %%--------------------------------------------------------------------
--spec save(ctx(), key(), doc(value()), batch()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+-spec save(ctx(), key(), doc(), batch()) ->
+    {{ok, doc()} | {error, term()}, batch()}.
 save(Ctx = #{generated_key := true}, Key, Doc, Batch) ->
     Doc2 = fill(Ctx, Doc),
     datastore_doc_batch:create(Ctx, Key, Doc2, Batch);
 save(Ctx, Key, Doc, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc}, Batch2} ->
-            case resolve_conflict(Ctx, Doc, PrevDoc) of
-                {save, Doc2} ->
-                    datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
+            Doc2 = fill(Ctx, Doc, PrevDoc),
+            datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
+        {{error, ?NOT_FOUND}, Batch2} ->
+            Doc2 = fill(Ctx, Doc),
+            datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
+        {{error, Reason}, Batch2} ->
+            {{error, Reason}, Batch2}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Saves datastore document created by other cluster.
+%% @end
+%%--------------------------------------------------------------------
+-spec save_remote(ctx(), key(), doc(), mutator(), batch()) ->
+    {{ok, doc(), remote_mutation_info()} | {error, term()}, batch()}.
+save_remote(Ctx, Key, Doc, RemoteMutator, Batch) ->
+    case datastore_doc_batch:fetch(Ctx, Key, Batch) of
+        {{ok, PrevLocalDoc}, Batch2} ->
+            case resolve_conflict(Ctx, Doc, PrevLocalDoc, RemoteMutator) of
+                {save, ReconciledDoc} ->
+                    FinalDoc = update_remote_sequences(ReconciledDoc, Doc, PrevLocalDoc, RemoteMutator),
+                    {{ok, SavedDoc}, Batch3} = datastore_doc_batch:save(Ctx, Key, FinalDoc, Batch2),
+                    FinalAns = verify_if_remote_doc_existed_and_extend_save_remote_result(
+                        SavedDoc, Doc, PrevLocalDoc, RemoteMutator),
+                    {FinalAns, Batch3};
                 ignore ->
-                    {{error, ignored}, Batch2}
+                    FinalAns = verify_if_remote_doc_existed_and_extend_save_remote_result(
+                        ?IGNORED, Doc, PrevLocalDoc, RemoteMutator),
+                    {FinalAns, Batch2}
             end;
-        {{error, not_found}, Batch2} ->
-            case resolve_conflict(Ctx, Doc, #document{}) of
-                {save, Doc2} ->
-                    datastore_doc_batch:save(Ctx, Key, Doc2, Batch2);
-                ignore ->
-                    {{error, ignored}, Batch2}
-            end;
+        {{error, ?NOT_FOUND}, Batch2} ->
+            EmptyDoc = #document{},
+            RemoteMutationInfo = create_remote_mutation_info(Doc, EmptyDoc, RemoteMutator),
+            FinalDoc = update_remote_sequences(Doc, Doc, EmptyDoc, RemoteMutator),
+            {{ok, SavedDoc}, Batch3} = datastore_doc_batch:save(Ctx, Key, FinalDoc, Batch2),
+            {{ok, SavedDoc, RemoteMutationInfo}, Batch3};
         {{error, Reason}, Batch2} ->
             {{error, Reason}, Batch2}
     end.
@@ -108,11 +151,11 @@ save(Ctx, Key, Doc, Batch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec update(ctx(), key(), diff(value()), batch()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+    {{ok, doc()} | {error, term()}, batch()}.
 update(Ctx, Key, Diff, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, #document{deleted = true}}, Batch2} ->
-            {{error, not_found}, Batch2};
+            {{error, ?NOT_FOUND}, Batch2};
         {{ok, PrevDoc}, Batch2} ->
             case apply_diff(Diff, PrevDoc) of
                 {ok, Doc} ->
@@ -130,8 +173,8 @@ update(Ctx, Key, Diff, Batch) ->
 %% Updates datastore document. If document doesn't exist creates default one.
 %% @end
 %%--------------------------------------------------------------------
--spec update(ctx(), key(), diff(value()), doc(value()), batch()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+-spec update(ctx(), key(), diff(value()), doc(), batch()) ->
+    {{ok, doc()} | {error, term()}, batch()}.
 update(Ctx, Key, Diff, Default, Batch) ->
     case datastore_doc_batch:fetch(Ctx, Key, Batch) of
         {{ok, PrevDoc = #document{deleted = true}}, Batch2} ->
@@ -145,7 +188,7 @@ update(Ctx, Key, Diff, Default, Batch) ->
                 {error, Reason} ->
                     {{error, Reason}, Batch2}
             end;
-        {{error, not_found}, Batch2} ->
+        {{error, ?NOT_FOUND}, Batch2} ->
             Doc = fill(Ctx, Default),
             datastore_doc_batch:save(Ctx, Key, Doc, Batch2);
         {{error, Reason}, Batch2} ->
@@ -158,7 +201,7 @@ update(Ctx, Key, Diff, Default, Batch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch(ctx(), key(), undefined | batch()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+    {{ok, doc()} | {error, term()}, batch()}.
 fetch(Ctx, Key, Batch) ->
     fetch(Ctx, Key, Batch, false).
 
@@ -168,18 +211,18 @@ fetch(Ctx, Key, Batch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch(ctx(), key(), undefined | batch(), boolean()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+    {{ok, doc()} | {error, term()}, batch()}.
 fetch(#{include_deleted := true} = Ctx, Key, Batch, LinkFetch) ->
     case fetch_deleted(Ctx, Key, Batch, LinkFetch) of
         {{ok, #document{value = undefined, deleted = true}}, Batch2} ->
-            {{error, not_found}, Batch2};
+            {{error, ?NOT_FOUND}, Batch2};
         {Result, Batch2} ->
             {Result, Batch2}
     end;
 fetch(Ctx, Key, Batch, LinkFetch) ->
     case fetch_deleted(Ctx, Key, Batch, LinkFetch) of
         {{ok, #document{deleted = true}}, Batch2} ->
-            {{error, not_found}, Batch2};
+            {{error, ?NOT_FOUND}, Batch2};
         {Result, Batch2} ->
             {Result, Batch2}
     end.
@@ -190,7 +233,7 @@ fetch(Ctx, Key, Batch, LinkFetch) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_deleted(ctx(), key(), undefined | batch()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+    {{ok, doc()} | {error, term()}, batch()}.
 fetch_deleted(Ctx, Key, Batch) ->
     fetch_deleted(Ctx, Key, Batch, false).
 
@@ -223,12 +266,12 @@ delete(Ctx, Key, Pred, Batch) ->
                     {_, Batch3} = datastore_doc_batch:save(Ctx, Key, Doc3, Batch2),
                     {ok, Batch3};
                 false ->
-                    {{error, {not_satisfied, Value}}, Batch2}
+                    {{error, {?PREDICATE_NOT_SATISFIED, Value}}, Batch2}
             catch
                 _:Reason ->
                     {{error, {Reason, erlang:get_stacktrace()}}, Batch2}
             end;
-        {{error, not_found}, Batch2} ->
+        {{error, ?NOT_FOUND}, Batch2} ->
             {ok, Batch2};
         {{error, Reason}, Batch2} ->
             {{error, Reason}, Batch2}
@@ -244,19 +287,19 @@ delete(Ctx, Key, Pred, Batch) ->
 %% to persistent store if missing.
 %% @end
 %%--------------------------------------------------------------------
--spec get(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+-spec get(node(), ctx(), key()) -> {ok, doc()} | {error, term()}.
 get(FetchNode, #{include_deleted := true} = Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
-        {ok, #document{value = undefined, deleted = true}} -> {error, not_found};
+        {ok, #document{value = undefined, deleted = true}} -> {error, ?NOT_FOUND};
         {ok, Doc} -> {ok, Doc};
-        {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
+        {error, ?NOT_FOUND} -> fetch_missing(FetchNode, Ctx, Key);
         {error, Reason2} -> {error, Reason2}
     end;
 get(FetchNode, Ctx, Key) ->
     case datastore_cache:get(Ctx, Key) of
-        {ok, #document{deleted = true}} -> {error, not_found};
+        {ok, #document{deleted = true}} -> {error, ?NOT_FOUND};
         {ok, Doc} -> {ok, Doc};
-        {error, not_found} -> fetch_missing(FetchNode, Ctx, Key);
+        {error, ?NOT_FOUND} -> fetch_missing(FetchNode, Ctx, Key);
         {error, Reason2} -> {error, Reason2}
     end.
 
@@ -269,7 +312,7 @@ get(FetchNode, Ctx, Key) ->
 exists(FetchNode, Ctx, Key) ->
     case get(FetchNode, Ctx, Key) of
         {ok, _Doc} -> {ok, true};
-        {error, not_found} -> {ok, false};
+        {error, ?NOT_FOUND} -> {ok, false};
         {error, Reason} -> {error, Reason}
     end.
 
@@ -321,6 +364,14 @@ get_links_trees(FetchNode, Ctx, Key) ->
             datastore_router:execute_on_node(FetchNode, datastore_writer, fetch_links_trees, [Ctx, Key])
     end.
 
+-spec model(value()) -> datastore_model:model().
+model(Value) when is_tuple(Value) ->
+    element(1, Value);
+model(Value) ->
+    % Although value() type is `tuple() | binary() | undefined`, binary() and undefined values
+    % are used internally by datastore and cannot appear in documents handled by datastore_doc.
+    throw({wrong_doc_value_type, Value}).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -331,13 +382,13 @@ get_links_trees(FetchNode, Ctx, Key) ->
 %% Tries to fetch missing document via tp process if needed.
 %% @end
 %%--------------------------------------------------------------------
--spec fetch_missing(node(), ctx(), key()) -> {ok, doc(value())} | {error, term()}.
+-spec fetch_missing(node(), ctx(), key()) -> {ok, doc()} | {error, term()}.
 fetch_missing(FetchNode, Ctx, Key) ->
     case (maps:get(disc_driver, Ctx, undefined) =/= undefined) orelse (node() =/= FetchNode) of
         true ->
             datastore_router:execute_on_node(FetchNode, datastore_writer, fetch, [Ctx, Key]);
         _ ->
-            {error, not_found}
+            {error, ?NOT_FOUND}
     end.
 
 %%--------------------------------------------------------------------
@@ -347,14 +398,14 @@ fetch_missing(FetchNode, Ctx, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec fetch_deleted(ctx(), key(), undefined | batch(), boolean()) ->
-    {{ok, doc(value())} | {error, term()}, batch()}.
+    {{ok, doc()} | {error, term()}, batch()}.
 % This case is used for fetching link documents outside tp process
 % Errors should be thrown to prevent further processing
 fetch_deleted(#{throw_not_found := true} = Ctx, Key, Batch, _) ->
     case datastore_cache:get(Ctx, Key, false) of
-        {error, not_found} ->
+        {error, ?NOT_FOUND} ->
             % Throw tuple to prevent catching by bp_tree
-            throw({fetch_error, not_found});
+            throw({fetch_error, ?NOT_FOUND});
         Result ->
             {Result, Batch}
     end;
@@ -362,11 +413,60 @@ fetch_deleted(Ctx, Key, Batch = undefined, false) ->
     {datastore_cache:get(Ctx, Key, true), Batch};
 fetch_deleted(Ctx, Key, Batch = undefined, true) ->
     case datastore_cache:get(Ctx, Key, true) of
-        {error, not_found} -> {datastore_cache:get_remote(Ctx, Key), Batch};
+        {error, ?NOT_FOUND} -> {datastore_cache:get_remote(Ctx, Key), Batch};
         Other -> {Other, Batch}
     end;
 fetch_deleted(Ctx, Key, Batch, _) ->
     datastore_doc_batch:fetch(Ctx, Key, Batch).
+
+-spec create_remote_mutation_info(doc(), doc(), mutator()) -> remote_mutation_info().
+create_remote_mutation_info(#document{key = Key, value = Value, seq = RemoteSeq} = _RemoteDoc,
+    #document{remote_sequences = LocalRemoteSequences} = _LocalDoc,
+    RemoteMutator
+) ->
+    #remote_mutation_info{
+        key = Key,
+        model = model(Value),
+        new_seq = RemoteSeq,
+        overridden_seq = maps:get(RemoteMutator, LocalRemoteSequences, undefined)
+    }.
+
+-spec update_remote_sequences(doc(), doc(), doc(), mutator()) -> doc().
+update_remote_sequences(FinalDoc,
+    #document{seq = RemoteSeq} = _RemoteDoc,
+    #document{remote_sequences = LocalRemoteSequences} = _LocalDoc, RemoteMutator) ->
+    FinalDoc#document{remote_sequences = LocalRemoteSequences#{
+        RemoteMutator => RemoteSeq
+    }}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function verifies remote mutations and detects if revision or remote sequence has appeared before.
+%% In such a case it returns remote_doc_already_exists error. Otherwise, it extends correct answer 
+%% with remote_mutation_info or propagates information that document has been ignored.
+%% Revision or remote sequence can appear more than once in case of previous error of upper layer or if
+%% datastore_remote_driver read document before.
+%%--------------------------------------------------------------------
+-spec verify_if_remote_doc_existed_and_extend_save_remote_result(doc() | ?IGNORED, doc(), doc(), mutator()) ->
+    {ok, doc(), remote_mutation_info()} | {error, ?IGNORED | {?REMOTE_DOC_ALREADY_EXISTS, remote_mutation_info()}}.
+verify_if_remote_doc_existed_and_extend_save_remote_result(#document{} = _SaveRemoteResult,
+    #document{revs = [Rev | _]} = RemoteDoc,
+    #document{revs = [Rev | _]} = LocalDoc,
+    RemoteMutator
+) ->
+    RemoteMutationInfo = create_remote_mutation_info(RemoteDoc, LocalDoc, RemoteMutator),
+    {error, {?REMOTE_DOC_ALREADY_EXISTS, RemoteMutationInfo#remote_mutation_info{overridden_seq = undefined}}};
+verify_if_remote_doc_existed_and_extend_save_remote_result(SaveRemoteResult, RemoteDoc, LocalDoc, RemoteMutator) ->
+    RemoteMutationInfo = create_remote_mutation_info(RemoteDoc, LocalDoc, RemoteMutator),
+    case {RemoteMutationInfo, SaveRemoteResult} of
+        {#remote_mutation_info{new_seq = Seq, overridden_seq = Seq}, _} ->
+            {error, {?REMOTE_DOC_ALREADY_EXISTS, RemoteMutationInfo#remote_mutation_info{overridden_seq = undefined}}};
+        {_, #document{}} ->
+            {ok, SaveRemoteResult, RemoteMutationInfo};
+        {_, ?IGNORED} ->
+            {error, ?IGNORED}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -374,28 +474,45 @@ fetch_deleted(Ctx, Key, Batch, _) ->
 %% Resolve conflict using custom model resolution function.
 %% @end
 %%--------------------------------------------------------------------
--spec resolve_conflict(ctx(), doc(value()), doc(value())) ->
-    {save, doc(value())} | ignore.
-resolve_conflict(#{sync_change := true}, RemoteDoc, #document{revs = []}) ->
+-spec resolve_conflict(ctx(), doc(), doc(), mutator()) ->
+    {save, doc()} | ignore.
+resolve_conflict(_Ctx, RemoteDoc, #document{revs = []}, _RemoteMutator) ->
     {save, RemoteDoc};
-resolve_conflict(#{sync_change := true}, #document{revs = []}, _LocalDoc) ->
+resolve_conflict(_Ctx, #document{revs = []}, _LocalDoc, _RemoteMutator) ->
     ignore;
-resolve_conflict(Ctx = #{sync_change := true}, RemoteDoc, LocalDoc) ->
-    Model = element(1, RemoteDoc#document.value),
+resolve_conflict(_Ctx,
+    #document{seq = RemoteSeq, revs = [Rev | _]} = _RemoteDoc,
+    #document{remote_sequences = LocalRemoteSequences, revs = [Rev | _]} = LocalDoc,
+    RemoteMutator
+) ->
+    case maps:get(RemoteMutator, LocalRemoteSequences, 0) of
+        SmallerSeq when SmallerSeq < RemoteSeq ->
+            % Remote document has already been saved but its sequence in local database is smaller.
+            % It is possible when document has been previously saved by datastore_remote_driver and
+            % datastore_remote_driver has read this document before couchbase driver on remote cluster
+            % had updated its sequence number. Thus, remote_sequences must be fixed - it will be done
+            % saving local document once more (save updates remote sequences).
+            %% NOTE: wrong sequence number in local document is possible only for link documents as only 
+            %% they can be read by datastore_remote_driver. Such links documents are always written using 
+            %% save_remote function.
+            {save, LocalDoc};
+        _ ->
+            ignore
+    end;
+resolve_conflict(Ctx, RemoteDoc, LocalDoc, _RemoteMutator) ->
+    Model = model(RemoteDoc#document.value),
     case datastore_model_default:resolve_conflict(
         Model, Ctx, RemoteDoc, LocalDoc
     ) of
         {true, Doc} ->
             {save, fill(Ctx, Doc, LocalDoc)};
         {false, Doc} ->
-            {save, Doc};
+            {save, set_remote_sequences(Doc, LocalDoc)};
         ignore ->
             ignore;
         default ->
             default_resolve_conflict(RemoteDoc, LocalDoc)
-    end;
-resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
-    {save, fill(Ctx, RemoteDoc, LocalDoc)}.
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -403,14 +520,14 @@ resolve_conflict(Ctx, RemoteDoc, LocalDoc) ->
 %% Resolves conflict based on revision.
 %% @end
 %%--------------------------------------------------------------------
--spec default_resolve_conflict(doc(value()), doc(value())) ->
-    {save, doc(value())} | ignore.
+-spec default_resolve_conflict(doc(), doc()) ->
+    {save, doc()} | ignore.
 default_resolve_conflict(RemoteDoc, LocalDoc) ->
     #document{revs = [RemoteRev | _]} = RemoteDoc,
     #document{revs = [LocalRev | _]} = LocalDoc,
     case datastore_rev:is_greater(RemoteRev, LocalRev) of
         true ->
-            {save, RemoteDoc};
+            {save, set_remote_sequences(RemoteDoc, LocalDoc)};
         false ->
             ignore
     end.
@@ -420,7 +537,7 @@ default_resolve_conflict(RemoteDoc, LocalDoc) ->
 %% @equiv fill(Ctx, Doc, #document{})
 %% @end
 %%--------------------------------------------------------------------
--spec fill(ctx(), doc(value())) -> doc(value()).
+-spec fill(ctx(), doc()) -> doc().
 fill(Ctx, Doc) ->
     fill(Ctx, Doc, #document{}).
 
@@ -430,16 +547,20 @@ fill(Ctx, Doc) ->
 %% Fills document with mutator, scope, version and revision.
 %% @end
 %%--------------------------------------------------------------------
--spec fill(ctx(), doc(value()), doc(value())) -> doc(value()).
-fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
-    Doc2 = Doc#document{deleted = false},
+-spec fill(ctx(), doc(), doc()) -> doc().
+fill(Ctx, Doc, PrevDoc) ->
+    % TODO VFS-7076 Test deleted field management
+    Doc1 = Doc#document{deleted = false},
+    Doc2 = set_remote_sequences(Doc1, PrevDoc),
     Doc3 = set_mutator(Ctx, Doc2),
     Doc4 = set_scope(Ctx, Doc3),
     Doc5 = set_version(Doc4),
-    case Revs of
-        [] -> set_rev(Ctx, Doc5, undefined);
-        [PrevRev | _] -> set_rev(Ctx, Doc5, PrevRev)
-    end.
+    set_rev(Ctx, Doc5, PrevDoc).
+
+%% @private
+-spec set_remote_sequences(doc(), doc()) -> doc().
+set_remote_sequences(Doc, _PrevDoc = #document{remote_sequences = RemoteSequences}) ->
+    Doc#document{remote_sequences = RemoteSequences}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -447,8 +568,8 @@ fill(Ctx, Doc, _PrevDoc = #document{revs = Revs}) ->
 %% Applies diff function.
 %% @end
 %%--------------------------------------------------------------------
--spec apply_diff(diff(value()), doc(value())) ->
-    {ok, doc(value())} | {error, term()}.
+-spec apply_diff(diff(value()), doc()) ->
+    {ok, doc()} | {error, term()}.
 apply_diff(Diff, Doc = #document{value = Value}) ->
     try Diff(Value) of
         {ok, Value2} -> {ok, Doc#document{value = Value2}};
@@ -464,7 +585,7 @@ apply_diff(Diff, Doc = #document{value = Value}) ->
 %% Sets document mutator.
 %% @end
 %%--------------------------------------------------------------------
--spec set_mutator(ctx(), doc(value())) -> doc(value()).
+-spec set_mutator(ctx(), doc()) -> doc().
 set_mutator(#{mutator := Mutator}, Doc = #document{mutators = [Mutator | _]}) ->
     Doc;
 set_mutator(#{mutator := Mutator}, Doc = #document{mutators = Mutators}) ->
@@ -480,7 +601,7 @@ set_mutator(_Ctx, Doc) ->
 %% Sets document scope.
 %% @end
 %%--------------------------------------------------------------------
--spec set_scope(ctx(), doc(value())) -> doc(value()).
+-spec set_scope(ctx(), doc()) -> doc().
 set_scope(#{scope := Scope}, Doc) ->
     Doc#document{scope = Scope};
 set_scope(_Ctx, Doc) ->
@@ -492,9 +613,9 @@ set_scope(_Ctx, Doc) ->
 %% Sets document version.
 %% @end
 %%--------------------------------------------------------------------
--spec set_version(doc(value())) -> doc(value()).
+-spec set_version(doc()) -> doc().
 set_version(Doc = #document{value = Value}) when is_tuple(Value) ->
-    Model = element(1, Value),
+    Model = model(Value),
     Doc#document{version = datastore_model_default:get_record_version(Model)};
 set_version(Doc) ->
     Doc.
@@ -505,16 +626,30 @@ set_version(Doc) ->
 %% Sets document revision.
 %% @end
 %%--------------------------------------------------------------------
--spec set_rev(ctx(), doc(value()), undefined | rev()) -> doc(value()).
+-spec set_rev(ctx(), doc(), doc() | rev() | undefined) -> doc().
+set_rev(Ctx, Doc, _PrevDoc = #document{revs = []}) ->
+    set_rev(Ctx, Doc, undefined);
+set_rev(Ctx, Doc, _PrevDoc = #document{revs = [PrevRev | _]}) ->
+    set_rev(Ctx, Doc, PrevRev);
 set_rev(#{sync_enabled := true}, Doc = #document{revs = []}, undefined) ->
     Doc#document{revs = [datastore_rev:new(1)]};
-set_rev(Ctx, Doc = #document{revs = [Rev | _]}, undefined) ->
-    set_rev(Ctx, Doc, Rev);
-set_rev(#{sync_enabled := true}, Doc = #document{revs = Revs}, PrevRev) ->
-    Length = application:get_env(cluster_worker,
-        datastore_doc_revision_history_length, 1),
-    {Generation, _} = datastore_rev:parse(PrevRev),
-    Rev = datastore_rev:new(Generation + 1),
-    Doc#document{revs = lists:sublist([Rev | Revs], Length)};
+set_rev(#{sync_enabled := true}, Doc = #document{revs = [Rev | _]}, undefined) ->
+    set_new_rev(Doc, [Rev]);
+set_rev(#{sync_enabled := true}, Doc = #document{revs = []}, PrevRev) ->
+    set_new_rev(Doc, [PrevRev]);
+set_rev(#{sync_enabled := true}, Doc = #document{revs = [Rev | _]}, PrevRev) ->
+    set_new_rev(Doc, [Rev, PrevRev]);
 set_rev(_Ctx, Doc, _PrevRev) ->
     Doc.
+
+%% @private
+-spec set_new_rev(doc(), [rev()]) -> doc().
+set_new_rev(Doc, Revs) ->
+    Length = application:get_env(cluster_worker,
+        datastore_doc_revision_history_length, 1),
+    Generation = lists:max(lists:map(fun(Rev) ->
+        {RevGen, _} = datastore_rev:parse(Rev),
+        RevGen
+    end, Revs)),
+    Rev = datastore_rev:new(Generation + 1),
+    Doc#document{revs = lists:sublist([Rev | Revs], Length)}.

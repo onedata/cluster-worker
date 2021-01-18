@@ -15,6 +15,7 @@
 -include("datastore_test_utils.hrl").
 -include("global_definitions.hrl").
 -include("datastore_performance_tests_base.hrl").
+-include("modules/datastore/datastore.hrl").
 -include_lib("ctool/include/aai/aai.hrl").
 
 %% export for ct
@@ -27,6 +28,7 @@
     delete_all_should_succeed/1,
     create_should_return_already_exists_error/1,
     save_should_succeed/1,
+    save_remote_should_succeed/1,
     update_should_succeed/1,
     update_should_return_missing_error/1,
     update_should_save_default_when_missing/1,
@@ -80,6 +82,7 @@ all() ->
         delete_all_should_succeed,
         create_should_return_already_exists_error,
         save_should_succeed,
+        save_remote_should_succeed,
         update_should_succeed,
         update_should_return_missing_error,
         update_should_save_default_when_missing,
@@ -132,6 +135,11 @@ all() ->
 -define(HA_REPEATS, 5).
 -define(SUCCESS_RATE, 100).
 
+% Mutators used during test `save_remote_should_succeed`
+-define(REMOTE_MUTATOR, <<"RemoteMutator">>).
+-define(REMOTE_MUTATOR2, <<"RemoteMutator2">>).
+-define(REMOTE_MUTATOR3, <<"RemoteMutator3">>).
+
 %%%===================================================================
 %%% Test functions
 %%%===================================================================
@@ -175,6 +183,34 @@ save_should_succeed(Config) ->
         ),
         assert_in_memory(Worker, Model, Key),
         assert_on_disc(Worker, Model, Key)
+    end, ?TEST_MODELS).
+
+save_remote_should_succeed(Config) ->
+    [Worker | _] = ?config(cluster_worker_nodes, Config),
+    lists:foreach(fun(Model) ->
+        % Save doc for first time - no overridden sequence should appear
+        DocToSave = ?DOC(Model)#document{seq = 10, mutators = [?REMOTE_MUTATOR]},
+        {ok, #document{key = Key} = SavedDoc, _} = ?assertMatch({ok,
+            #document{remote_sequences = #{?REMOTE_MUTATOR := 10}},
+            #remote_mutation_info{key = Key, new_seq = 10, overridden_seq = undefined}
+        }, rpc:call(Worker, Model, save_remote, [DocToSave, ?REMOTE_MUTATOR])),
+        assert_in_memory(Worker, Model, Key),
+        assert_on_disc(Worker, Model, Key),
+
+        % Save doc for second time - overridden sequence should appear
+        {ok, SavedDoc2, _} = ?assertMatch({ok,
+            #document{remote_sequences = #{?REMOTE_MUTATOR := 20}},
+            #remote_mutation_info{key = Key, new_seq = 20, overridden_seq = 10}
+        }, rpc:call(Worker, Model, save_remote, [update_revision_ans_seq(SavedDoc, 20), ?REMOTE_MUTATOR])),
+
+        % Save doc for third time with two new mutators -
+        % only sequence of mutator from the argument should appear in final document
+        RemoteMapToSave = #{?REMOTE_MUTATOR => 100, ?REMOTE_MUTATOR2 => 5, ?REMOTE_MUTATOR3 => 15},
+        UpdatedSavedDoc3 = (update_revision_ans_seq(SavedDoc2, 30))#document{remote_sequences = RemoteMapToSave},
+        ?assertMatch({ok,
+            #document{remote_sequences = #{?REMOTE_MUTATOR := 20, ?REMOTE_MUTATOR2 := 30}},
+            #remote_mutation_info{key = Key, new_seq = 30, overridden_seq = undefined}
+        }, rpc:call(Worker, Model, save_remote, [UpdatedSavedDoc3, ?REMOTE_MUTATOR2]))
     end, ?TEST_MODELS).
 
 update_should_succeed(Config) ->
@@ -1531,3 +1567,8 @@ del_one_by_one(Model, Key, Tree, ExpectedLinkNames) ->
     lists:map(fun(Name) ->
         apply(Model, delete_links, [Key, Tree, Name])
     end, ExpectedLinkNames).
+
+update_revision_ans_seq(#document{revs = [Rev]} = Doc, Seq) ->
+    {Generation, _} = datastore_rev:parse(Rev),
+    NextRev = datastore_rev:new(Generation + 1),
+    Doc#document{seq = Seq, revs = [NextRev]}.
