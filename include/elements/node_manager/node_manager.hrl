@@ -20,7 +20,6 @@
     initialized = {false, 0} :: true | {false, TriesNum :: non_neg_integer()},
     monitoring_state = undefined :: monitoring:node_monitoring_state(),
     scheduler_info = undefined :: undefined | list(),
-    % TODO - better task manager
     task_control = false,
     last_state_analysis = {stopwatch:start(), undefined} :: node_manager:last_state_analysis(),
     throttling = true,
