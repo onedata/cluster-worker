@@ -14,6 +14,7 @@
 
 -ifdef(TEST).
 
+-include("modules/datastore/datastore_append_list.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("ctool/include/errors.hrl").
 
@@ -27,7 +28,6 @@ append_list_test_() ->
         fun setup/0,
         fun teardown/1,
         [
-            % fixme implement tests checking structure (nodes, elems in node, min_on_left, etc.)
             {"test_delete_struct", fun test_delete_struct/0},
             {"test_add_elements_multi_nodes", fun test_add_elements_multi_nodes/0},
             {"test_add_elements_one_node", fun test_add_elements_one_node/0},
@@ -47,7 +47,18 @@ append_list_test_() ->
             {"test_get", fun test_get/0},
             {"test_get_structure_not_sorted", fun test_get_structure_not_sorted/0},
             {"test_get_highest", fun test_get_highest/0},
-            {"test_get_highest_structure_not_sorted", fun test_get_highest_structure_not_sorted/0}
+            {"test_get_highest_structure_not_sorted", fun test_get_highest_structure_not_sorted/0},
+    
+            {"test_nodes_created_after_add", fun test_nodes_created_after_add/0},
+            {"test_min_on_left_after_add", fun test_min_on_left_after_add/0},
+            {"test_min_on_left_after_add_reversed", fun test_min_on_left_after_add_reversed/0},
+            {"test_max_on_right_after_add", fun test_max_on_right_after_add/0},
+            {"test_max_on_right_after_add_reversed", fun test_max_on_right_after_add_reversed/0},
+            {"test_node_num_after_add", fun test_node_num_after_add/0},
+            {"test_nodes_deleted_after_delete_elems", fun test_nodes_deleted_after_delete_elems/0},
+            {"test_nodes_after_delete_elems_from_last_node", fun test_nodes_after_delete_elems_from_last_node/0},
+            {"test_min_on_left_after_delete_elems", fun test_min_on_left_after_delete_elems/0},
+            {"test_max_on_right_after_delete_elems", fun test_max_on_right_after_delete_elems/0}
         ]
     }.
 
@@ -266,6 +277,141 @@ test_get_structure_not_sorted() ->
     append_list:delete_elems(Id, lists:seq(2, 99)),
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)).
 
+
+test_nodes_created_after_add() ->
+    {ok, Id} = append_list:create(1),
+    ?assertMatch(#sentinel{first = undefined, last = undefined}, append_list_persistence:get_node(Id)),
+    append_list:add(Id, prepare_batch(1, 1)),
+    ?assertNotMatch(#sentinel{last = undefined}, append_list_persistence:get_node(Id)),
+    #sentinel{last = LastNodeId} = append_list_persistence:get_node(Id),
+    ?assertMatch(#sentinel{first = LastNodeId}, append_list_persistence:get_node(Id)),
+    ?assertMatch(#node{next = undefined, prev = undefined}, append_list_persistence:get_node(LastNodeId)),
+    append_list:add(Id, prepare_batch(2, 2)),
+    ?assertNotMatch(#sentinel{first = LastNodeId}, append_list_persistence:get_node(Id)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    ?assertMatch(#node{next = FirstNodeId, prev = undefined}, append_list_persistence:get_node(LastNodeId)),
+    ?assertMatch(#node{next = undefined, prev = LastNodeId}, append_list_persistence:get_node(FirstNodeId)).
+
+
+test_min_on_left_after_add() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, prepare_batch(1, 10)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMinsOnLeft = [undefined] ++ lists:seq(10, 2, -1),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch(#node{min_on_left = Expected}, append_list_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
+
+
+test_min_on_left_after_add_reversed() ->
+    {ok, Id} = append_list:create(1),
+    lists:foreach(fun(Elem) ->
+        append_list:add(Id, Elem)
+    end, prepare_batch(10, 1, -1)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMinsOnLeft = [undefined] ++ lists:duplicate(9, 1),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch(#node{min_on_left = Expected}, append_list_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
+
+
+test_max_on_right_after_add() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, prepare_batch(1, 10)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMaxOnRight = lists:seq(9, 1, -1) ++ [undefined],
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch(#node{max_on_right = Expected}, append_list_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMaxOnRight)).
+
+
+test_max_on_right_after_add_reversed() ->
+    {ok, Id} = append_list:create(1),
+    lists:foreach(fun(Elem) ->
+        append_list:add(Id, Elem)
+    end, prepare_batch(10, 1, -1)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMinsOnLeft = lists:duplicate(9, 10) ++ [undefined],
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch(#node{max_on_right = Expected}, append_list_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
+
+
+test_node_num_after_add() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, prepare_batch(1, 10)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    #node{prev = PrevNodeId, node_num = FirstNodeNum} = append_list_persistence:get_node(FirstNodeId),
+    NodeIds = get_nodes_ids(PrevNodeId),
+    lists:foldl(fun(NodeId, NextNodeNum) ->
+        #node{node_num = Num} = append_list_persistence:get_node(NodeId),
+        ?assert(Num < NextNodeNum),
+        Num
+    end, FirstNodeNum, NodeIds).
+
+
+test_nodes_deleted_after_delete_elems() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, prepare_batch(1, 3)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
+    append_list:delete_elems(Id, [2]),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node2)),
+    ?assertMatch(#node{next = Node1}, append_list_persistence:get_node(Node3)),
+    ?assertMatch(#node{prev = Node3}, append_list_persistence:get_node(Node1)),
+    append_list:delete_elems(Id, [3]),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node1)),
+    ?assertMatch(#node{next = undefined}, append_list_persistence:get_node(Node3)),
+    ?assertMatch(#sentinel{first = Node3, last = Node3}, append_list_persistence:get_node(Id)).
+
+    
+test_nodes_after_delete_elems_from_last_node() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, prepare_batch(1, 3)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
+    append_list:delete_elems(Id, [1]),
+    ?assertMatch(#node{prev = Node3, next = Node1}, append_list_persistence:get_node(Node2)),
+    ?assertMatch(#node{next = Node2}, append_list_persistence:get_node(Node3)),
+    ?assertMatch(#node{prev = Node2}, append_list_persistence:get_node(Node1)),
+    #node{elements = M} = append_list_persistence:get_node(Node3),
+    ?assertEqual(#{}, M),
+    append_list:delete_elems(Id, [3]),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node1)),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node2)),
+    ?assertMatch(#node{next = undefined}, append_list_persistence:get_node(Node3)),
+    ?assertMatch(#sentinel{first = Node3, last = Node3}, append_list_persistence:get_node(Id)).
+
+
+test_min_on_left_after_delete_elems() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, prepare_batch(2, 10)),
+    append_list:add(Id, {1, <<"1">>}),
+    append_list:delete_elems(Id, [1]),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMinsOnLeft = [undefined] ++ lists:seq(10, 3, -1),
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch(#node{min_on_left = Expected}, append_list_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
+
+
+test_max_on_right_after_delete_elems() ->
+    {ok, Id} = append_list:create(1),
+    append_list:add(Id, {10, <<"10">>}),
+    append_list:add(Id, prepare_batch(1, 9)),
+    append_list:delete_elems(Id, [10]),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedMaxOnRight = lists:seq(8, 1, -1) ++ [undefined, undefined], % last node is never deleted
+    lists:foreach(fun({NodeId, Expected}) ->
+        ?assertMatch(#node{max_on_right = Expected}, append_list_persistence:get_node(NodeId))
+    end, lists:zip(NodesIds, ExpectedMaxOnRight)).
+    
 -endif.
 
 
@@ -283,3 +429,10 @@ prepare_batch(Start, End, ValueFun) when is_function(ValueFun, 1)->
 
 prepare_batch(Start, End, Step, ValueFun) ->
     lists:map(fun(A) -> {A, ValueFun(A)} end, lists:seq(Start, End, Step)).
+
+
+get_nodes_ids(undefined) -> [];
+get_nodes_ids(NodeId) ->
+    #node{prev = PrevNodeId} = append_list_persistence:get_node(NodeId),
+    [NodeId] ++ get_nodes_ids(PrevNodeId).
+    

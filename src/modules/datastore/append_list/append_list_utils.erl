@@ -25,7 +25,7 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% This function recursively updates `min_on_left` in given node and in all 
-%% nodes to the right(pointed by prev) that are outdated. When CheckToTheEnd 
+%% nodes to the right (pointed by prev) that are outdated. When CheckToTheEnd 
 %% is set to `true` function will always adjust this value until reaching last node.
 %% If elements are added to structure as recommended (i.e with increasing keys, 
 %% see `append_list` module doc) at most one node will be updated.
@@ -34,27 +34,33 @@
 -spec adjust_min_on_left(id() | undefined, append_list:key(), CheckToTheEnd :: boolean()) -> ok.
 adjust_min_on_left(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
-adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
-    Node = append_list_persistence:get_node(NodeId),
+adjust_min_on_left(#node{node_id = NodeId, min_on_left = PreviousMin} = Node, CurrentMin, CheckToTheEnd) ->
     UpdatedNode = Node#node{min_on_left = CurrentMin},
-    case UpdatedNode of
-        Node -> ok;
+    case PreviousMin of
+        CurrentMin -> ok;
         _ -> append_list_persistence:save_node(NodeId, UpdatedNode)
     end,
     Min = case maps:size(Node#node.elements) of
         0 -> CurrentMin;
         _ -> min(CurrentMin, lists:min(maps:keys(Node#node.elements)))
     end,
-    case not CheckToTheEnd andalso CurrentMin > Min of
-        true -> ok;
-        false -> adjust_min_on_left(Node#node.prev, Min, CheckToTheEnd)
-    end.
+    case CheckToTheEnd of
+        true -> adjust_min_on_left(Node#node.prev, Min, CheckToTheEnd);
+        _ -> 
+            case PreviousMin == CurrentMin andalso CurrentMin > Min of 
+                true -> ok;
+                false -> adjust_min_on_left(Node#node.prev, Min, CheckToTheEnd)
+            end
+    end;
+adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
+    Node = append_list_persistence:get_node(NodeId),
+    adjust_min_on_left(Node, CurrentMin, CheckToTheEnd).
 
 
 %%--------------------------------------------------------------------
 %% @doc
 %% This function recursively updates `max_on_right` in given node and in all 
-%% nodes to the left(pointed by next) that are outdated. 
+%% nodes to the left (pointed by next) that are outdated. 
 %% If elements are added to structure as recommended (i.e with increasing keys, 
 %% see `append_list` module doc) at most one node will be updated.
 %% @end
@@ -71,9 +77,9 @@ adjust_max_on_right(NodeId, CurrentMax) ->
         _ ->
             append_list_persistence:save_node(NodeId, UpdatedNode),
             MaxInNode = lists:max(maps:keys(Elements)),
-            case MaxInNode < CurrentMax of
-                true -> ok;
-                false -> adjust_max_on_right(Next, CurrentMax)
+            case CurrentMax of
+                undefined -> adjust_max_on_right(Next, MaxInNode);
+                _ -> adjust_max_on_right(Next, max(CurrentMax, MaxInNode))
             end
     end.
 
