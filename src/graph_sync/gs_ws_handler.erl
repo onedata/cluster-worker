@@ -132,13 +132,15 @@ websocket_handle({text, Data}, SessionData = #gs_session{protocol_version = Prot
             {reply, {text, json_utils:encode(ErrorJSONMap)}, SessionData}
     end;
 
-websocket_handle(ping, SessionData) ->
-    {ok, SessionData};
+websocket_handle(ping, State) ->
+    {ok, State};
 
-websocket_handle({ping, _Payload}, SessionData) ->
-    {ok, SessionData};
+websocket_handle({ping, _Payload}, State) ->
+    {ok, State};
 
-websocket_handle(pong, SessionData) ->
+websocket_handle(pong, #pre_handshake_state{} = State) ->
+    {ok, State};
+websocket_handle(pong, #gs_session{} = SessionData) ->
     % pongs are received in response to the keepalive pings sent to the client
     % (see 'keepalive' periodical message)
     gs_server:report_heartbeat(SessionData),
