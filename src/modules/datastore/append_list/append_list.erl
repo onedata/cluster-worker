@@ -59,7 +59,7 @@
 
 %% API
 -export([create_structure/1, delete_structure/1]).
--export([add/2, delete/2, list/2, get/2, get_highest/1]).
+-export([add/2, delete/2, list/2, get/2, get_highest/1, get_max_key/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -124,21 +124,34 @@ delete(SentinelId, Elems) ->
     end.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Lists elements from the beginning (last added). % fixme
+%% @end
+%%--------------------------------------------------------------------
 - spec list(id() | #listing_info{}, non_neg_integer()) -> {[append_list:elem()], #listing_info{}}.
 list(_, 0) ->
     {[], #listing_info{finished = true}};
 list(#listing_info{finished = true}, _Size) ->
     {[], #listing_info{finished = true}};
 list(#listing_info{internal_listing_data = ListingData}, Size) ->
-    append_list_get:get_many(ListingData, Size, []);
+    append_list_get:list(ListingData, Size, []);
 list(SentinelId, Size) ->
     case append_list_persistence:get_node(SentinelId) of
         ?ERROR_NOT_FOUND -> list(SentinelId, 0);
         #sentinel{first = FirstNodeId} ->
-            append_list_get:get_many(#internal_listing_data{
+            append_list_get:list(#internal_listing_data{
                 structure_id = SentinelId,
                 last_node_id = FirstNodeId
             }, Size, [])
+    end.
+
+
+-spec get(id(), key()) -> ?ERROR_NOT_FOUND | {ok, value()}.
+get(SentinelId, Key) ->
+    case append_list_persistence:get_node(SentinelId) of
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
+        Sentinel -> append_list_get:get(Sentinel#sentinel.first, Key)
     end.
 
 
@@ -150,11 +163,11 @@ get_highest(SentinelId) ->
     end.
 
 
--spec get(id(), key()) -> ?ERROR_NOT_FOUND | {ok, value()}.
-get(SentinelId, Key) ->
+-spec get_max_key(id()) -> key() | undefined.
+get_max_key(SentinelId) ->
     case append_list_persistence:get_node(SentinelId) of
         ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel -> append_list_get:get(Sentinel#sentinel.first, Key)
+        Sentinel -> append_list_get:get_max_key(Sentinel#sentinel.first)
     end.
 
 %%=====================================================================

@@ -57,7 +57,7 @@
     % Highest key already listed from last node.
     last_key :: integer() | undefined,
     % Lowest node number(node number of last node) that was encountered during elements listing.
-    last_node_num :: integer() | undefined
+    last_node_num :: non_neg_integer() | undefined
 }).
 
 % Record returned along with listing result, allows to start listing elements 

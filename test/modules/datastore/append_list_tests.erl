@@ -48,6 +48,8 @@ append_list_test_() ->
             {"test_get_structure_not_sorted", fun test_get_structure_not_sorted/0},
             {"test_get_highest", fun test_get_highest/0},
             {"test_get_highest_structure_not_sorted", fun test_get_highest_structure_not_sorted/0},
+            {"test_get_max_key", fun test_get_max_key/0},
+            {"test_get_max_key_structure_not_sorted", fun test_get_max_key_structure_not_sorted/0},
     
             {"test_nodes_created_after_add", fun test_nodes_created_after_add/0},
             {"test_min_on_left_after_add", fun test_min_on_left_after_add/0},
@@ -257,6 +259,30 @@ test_get_highest_structure_not_sorted() ->
     ?assertEqual({100, <<"100">>}, append_list:get_highest(Id)),
     append_list:delete(Id, lists:seq(2, 99)),
     ?assertEqual({100, <<"100">>}, append_list:get_highest(Id)).
+
+
+test_get_max_key() ->
+    ?assertEqual(?ERROR_NOT_FOUND, append_list:get_max_key(<<"dummy_id">>)),
+    {ok, Id} = append_list:create_structure(10),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list:get_max_key(Id)),
+    append_list:add(Id, prepare_batch(1, 100)),
+    ?assertEqual(100, append_list:get_max_key(Id)),
+    append_list:delete(Id, lists:seq(2, 99)),
+    ?assertEqual(100, append_list:get_max_key(Id)),
+    append_list:delete(Id, [100]),
+    ?assertEqual(1, append_list:get_max_key(Id)),
+    append_list:delete(Id, [1]),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list:get_max_key(Id)).
+
+
+test_get_max_key_structure_not_sorted() ->
+    {ok, Id} = append_list:create_structure(10),
+    lists:foreach(fun(Elem) ->
+        append_list:add(Id, Elem)
+    end, prepare_batch(100, 1, -1)),
+    ?assertEqual(100, append_list:get_max_key(Id)),
+    append_list:delete(Id, lists:seq(2, 99)),
+    ?assertEqual(100, append_list:get_max_key(Id)).
 
 
 test_get() ->

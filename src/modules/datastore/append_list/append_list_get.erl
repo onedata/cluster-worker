@@ -18,19 +18,19 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([get_many/3, get/2, get_highest/1]).
+-export([list/3, get/2, get_highest/1, get_max_key/1]).
 
 %%=====================================================================
 %% API
 %%=====================================================================
 
--spec get_many(#internal_listing_data{}, Size :: non_neg_integer(), [append_list:elem()]) ->
+-spec list(#internal_listing_data{}, Size :: non_neg_integer(), [append_list:elem()]) ->
     {[append_list:elem()], #listing_info{}}.
-get_many(#internal_listing_data{last_node_id = undefined}, _Size, Acc) ->
+list(#internal_listing_data{last_node_id = undefined}, _Size, Acc) ->
     {Acc, #listing_info{
         finished = true
     }};
-get_many(#internal_listing_data{last_node_id = NodeId} = ListingData, _Size = 0, Acc) ->
+list(#internal_listing_data{last_node_id = NodeId} = ListingData, _Size = 0, Acc) ->
     {L, _} = lists:last(Acc),
     {Acc, #listing_info{
         finished = false,
@@ -39,7 +39,7 @@ get_many(#internal_listing_data{last_node_id = NodeId} = ListingData, _Size = 0,
             last_key = L
         }
     }};
-get_many(#internal_listing_data{
+list(#internal_listing_data{
     last_node_id = NodeId,
     last_key = LastKey,
     last_node_num = LastNodeNum
@@ -60,10 +60,27 @@ get_many(#internal_listing_data{
                 [] -> Node#node.prev;
                 _ -> NodeId
             end,
-            get_many(ListingData#internal_listing_data{
+            list(ListingData#internal_listing_data{
                 last_node_id = NextNodeId,
                 last_node_num = NodeNum
             }, Size - NumberOfElemsToTake, Acc ++ E)
+    end.
+
+
+-spec get(id() | undefined, append_list:key()) -> ?ERROR_NOT_FOUND | {ok, append_list:value()}.
+get(undefined, _Key) ->
+    ?ERROR_NOT_FOUND;
+get(NodeId, Key) ->
+    case append_list_persistence:get_node(NodeId) of
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
+        #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev} ->
+            case maps:find(Key, Elements) of
+                {ok, Value} -> {ok, Value};
+                error -> case Key > MaxOnRight of
+                    true -> ?ERROR_NOT_FOUND;
+                    false -> get(Prev, Key)
+                end
+            end
     end.
 
 
@@ -83,20 +100,15 @@ get_highest(NodeId) ->
     end.
 
 
--spec get(id() | undefined, append_list:key()) -> ?ERROR_NOT_FOUND | {ok, append_list:value()}.
-get(undefined, _Key) ->
-    ?ERROR_NOT_FOUND;
-get(NodeId, Key) ->
+-spec get_max_key(undefined | id()) -> append_list:key() | ?ERROR_NOT_FOUND.
+get_max_key(undefined) -> ?ERROR_NOT_FOUND;
+get_max_key(NodeId) ->
     case append_list_persistence:get_node(NodeId) of
         ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev} ->
-            case maps:find(Key, Elements) of
-                {ok, Value} -> {ok, Value};
-                error -> case Key > MaxOnRight of
-                    true -> ?ERROR_NOT_FOUND;
-                    false -> get(Prev, Key)
-                end
-            end
+        Node -> case append_list_utils:get_max_key_in_prev_nodes(Node) of
+            undefined -> ?ERROR_NOT_FOUND;
+            Res -> Res
+        end
     end.
 
 %%=====================================================================
