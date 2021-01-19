@@ -33,7 +33,9 @@
 %%% During elements deletion if two adjacent nodes have less than 
 %%% MaxElemsPerNode elements combined, one of those nodes (the newer one) 
 %%% will be deleted, and all elements will be now stored in the other node.
-%%% Because of that last node can not be deleted during elements deletion.
+%%% Nodes merging is omitted if deletion finished in the last node of the 
+%%% resulting structure after deletions, as it would require additional fetch 
+%%% of next node.
 %%%
 %%% Each node stores also value `min_on_left`. It represents minimal value 
 %%% in all nodes, that are newer (are pointed by `next`) than this node. 
@@ -56,8 +58,8 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([create/1, delete/1]).
--export([add/2, delete_elems/2, get_many/2, get/2, get_highest/1]).
+-export([create_structure/1, delete_structure/1]).
+-export([add/2, delete/2, list/2, get/2, get_highest/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -67,20 +69,20 @@
 %% API
 %%=====================================================================
 
--spec create(pos_integer()) -> {ok, id()}.
-create(MaxElemsPerNode) ->
+-spec create_structure(pos_integer()) -> {ok, id()}.
+create_structure(MaxElemsPerNode) ->
     Id = datastore_key:new(),
     Sentinel = #sentinel{structure_id = Id, max_elems_per_node = MaxElemsPerNode},
     append_list_persistence:save_node(Id, Sentinel),
     {ok, Id}.
 
 
--spec delete(id()) -> ok | ?ERROR_NOT_FOUND.
-delete(StructId) ->
+-spec delete_structure(id()) -> ok | ?ERROR_NOT_FOUND.
+delete_structure(StructId) ->
     case append_list_persistence:get_node(StructId) of
         ?ERROR_NOT_FOUND -> ok;
         Sentinel ->
-            delete_all_nodes(Sentinel),
+            delete_all_nodes(Sentinel#sentinel.first),
             true = append_list_persistence:delete_node(Sentinel#sentinel.structure_id),
             ok
     end.
@@ -112,28 +114,29 @@ add(SentinelId, Batch) ->
 %% Returns ?ERROR_NOT_FOUND when there is no such structure. 
 %% @end
 %%--------------------------------------------------------------------
--spec delete_elems(id(), [key()]) -> ok | ?ERROR_NOT_FOUND.
-delete_elems(SentinelId, Elems) ->
+-spec delete(id(), [key()]) -> ok | ?ERROR_NOT_FOUND.
+delete(SentinelId, Elems) ->
     case fetch_last_node(SentinelId) of
         {error, _} = Error -> Error;
+        undefined -> ok;
         {Sentinel, LastNode} ->
             append_list_delete:delete_elems(Sentinel, LastNode, Elems)
     end.
 
 
-- spec get_many(id() | #listing_info{}, non_neg_integer()) -> {[append_list:elem()], #listing_info{}}.
-get_many(_, 0) ->
+- spec list(id() | #listing_info{}, non_neg_integer()) -> {[append_list:elem()], #listing_info{}}.
+list(_, 0) ->
     {[], #listing_info{finished = true}};
-get_many(#listing_info{finished = true}, _Size) ->
+list(#listing_info{finished = true}, _Size) ->
     {[], #listing_info{finished = true}};
-get_many(#listing_info{internal_listing_data = ListingData}, Size) ->
+list(#listing_info{internal_listing_data = ListingData}, Size) ->
     append_list_get:get_many(ListingData, Size, []);
-get_many(SentinelId, Size) ->
+list(SentinelId, Size) ->
     case append_list_persistence:get_node(SentinelId) of
-        ?ERROR_NOT_FOUND -> get_many(SentinelId, 0);
+        ?ERROR_NOT_FOUND -> list(SentinelId, 0);
         #sentinel{first = FirstNodeId} ->
             append_list_get:get_many(#internal_listing_data{
-                id = SentinelId,
+                structure_id = SentinelId,
                 last_node_id = FirstNodeId
             }, Size, [])
     end.
@@ -159,14 +162,12 @@ get(SentinelId, Key) ->
 %%=====================================================================
 
 -spec delete_all_nodes(#sentinel{}) -> ok.
-delete_all_nodes(#sentinel{first = undefined}) ->
+delete_all_nodes(undefined) ->
     ok;
-delete_all_nodes(#sentinel{first = NodeId} = Sentinel) ->
+delete_all_nodes(NodeId) ->
     #node{prev = Prev} = append_list_persistence:get_node(NodeId),
-    NewSentinel = Sentinel#sentinel{first = Prev},
-    append_list_persistence:save_node(Sentinel#sentinel.structure_id, NewSentinel),
     append_list_persistence:delete_node(NodeId),
-    delete_all_nodes(NewSentinel).
+    delete_all_nodes(Prev).
 
 
 -spec fetch_or_create_first_node(id()) -> {#sentinel{}, #node{}} | ?ERROR_NOT_FOUND.
@@ -189,6 +190,6 @@ fetch_or_create_first_node(SentinelId) ->
 fetch_last_node(SentinelId) ->
     case append_list_persistence:get_node(SentinelId) of
         ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        #sentinel{last = undefined} -> ?ERROR_NOT_FOUND;
+        #sentinel{last = undefined} = Sentinel-> undefined;
         #sentinel{last = Last} = Sentinel -> {Sentinel, append_list_persistence:get_node(Last)}
     end.

@@ -112,7 +112,7 @@ get(NodeId, Key) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec find_node(#internal_listing_data{}) -> #node{}.
-find_node(#internal_listing_data{last_node_id = NodeId, last_node_num = LastNodeNum, id = StructId} = ListingData) ->
+find_node(#internal_listing_data{last_node_id = NodeId, last_node_num = LastNodeNum, structure_id = StructId} = ListingData) ->
     case append_list_persistence:get_node(NodeId) of
         ?ERROR_NOT_FOUND -> 
             #sentinel{first = First} = append_list_persistence:get_node(StructId),

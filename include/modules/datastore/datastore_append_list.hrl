@@ -52,7 +52,7 @@
 % This record is used as cache during listing. Holds information where listing should start.
 % For more details consult `append_list_get:find_node/1` doc.
 -record(internal_listing_data, {
-    id :: id() | undefined,
+    structure_id :: id() | undefined,
     last_node_id :: id() | undefined,
     % Highest key already listed from last node.
     last_key :: integer() | undefined,

@@ -48,9 +48,6 @@ delete_elems(Sentinel, LastNode, Elems) ->
 ) -> ok.
 delete_elems_in_nodes(_Sentinel, undefined, _, _PrevNode) ->
     ok;
-delete_elems_in_nodes(_Sentinel, #node{} = CurrentNode, [], _PrevNode) ->
-    append_list_persistence:save_node(CurrentNode#node.node_id, CurrentNode),
-    ok;
 delete_elems_in_nodes(_Sentinel, _CurrentNode, [], _PrevNode) ->
     ok;
 delete_elems_in_nodes(Sentinel, #node{} = CurrentNode, ElemsToDelete, PrevNode) ->
@@ -80,8 +77,11 @@ delete_elems_in_nodes(Sentinel, #node{} = CurrentNode, ElemsToDelete, PrevNode) 
         true -> 
             MaxOnRightBefore = append_list_utils:get_max_key_in_prev_nodes(CurrentNode),
             handle_deletion_finished(UpdatedCurrentNode, PrevNode, MaxOnRightBefore),
-            % call one more time to save next node if it was updated
-            delete_elems_in_nodes(Sentinel, NextNodeOrId, [], UpdatedCurrentNode);
+            % save next node if it was updated
+            case NextNodeOrId of
+                #node{} -> append_list_persistence:save_node(NextNodeId, NextNodeOrId);
+                _ -> ok
+            end;
         false ->
             delete_elems_in_nodes(Sentinel, NextNodeOrId, NewElemsToDelete, UpdatedCurrentNode)
     end;
@@ -91,15 +91,13 @@ delete_elems_in_nodes(Sentinel, CurrentNodeId, ElemsToDelete, PrevNode) when is_
 
 
 -spec update_next_node_pointer(append_list:id(), append_list:id()) -> #node{} | undefined.
+update_next_node_pointer(undefined, _CurrentNodeId) ->
+    undefined;
 update_next_node_pointer(NextNodeId, CurrentNodeId) ->
-    case NextNodeId of
-        undefined -> undefined;
-        _ ->
-            NextNode = append_list_persistence:get_node(NextNodeId),
-            NextNode#node{
-                prev = CurrentNodeId
-            }
-    end.
+    NextNode = append_list_persistence:get_node(NextNodeId),
+    NextNode#node{
+        prev = CurrentNodeId
+    }.
 
 
 -spec handle_deletion_finished(#node{}, #node{}, append_list:key()) -> ok.

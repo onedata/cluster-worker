@@ -74,212 +74,213 @@ teardown(_) ->
 %%%===================================================================
 
 test_delete_struct() ->
-    ?assertEqual(ok, append_list:delete(<<"dummy_id">>)),
-    {ok, Id} = append_list:create(10),
+    ?assertEqual(ok, append_list:delete_structure(<<"dummy_id">>)),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 30)),
-    ?assertEqual(ok, append_list:delete(Id)),
+    ?assertEqual(ok, append_list:delete_structure(Id)),
     ?assertEqual([], ets:tab2list(append_list_persistence)).
 
 
 test_add_elements_one_node() ->
     ?assertEqual(?ERROR_NOT_FOUND, append_list:add(<<"dummy_id">>, prepare_batch(1, 100))),
-    ?assertMatch({[], _}, append_list:get_many(<<"dummy_id">>, 100)),
+    ?assertMatch({[], _}, append_list:list(<<"dummy_id">>, 100)),
     ?assertEqual(ok, append_list:add(<<"dummy_id">>, [])),
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     ?assertEqual({ok, []}, append_list:add(Id, [{1, <<"1">>}])),
-    ?assertMatch({[{1, <<"1">>}], _}, append_list:get_many(Id, 100)).
+    ?assertMatch({[{1, <<"1">>}], _}, append_list:list(Id, 100)).
 
 
 test_add_elements_multi_nodes() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     Batch = prepare_batch(10, 30),
     append_list:add(Id, Batch),
     Expected = lists:reverse(Batch),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_add_only_existing_elements() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     Batch = prepare_batch(10, 30),
     ?assertEqual({ok, []}, append_list:add(Id, Batch)),
     ?assertEqual({ok, lists:reverse(lists:seq(10, 30))}, append_list:add(Id, Batch)),
     Expected = lists:reverse(Batch),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_add_with_overwrite() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     Batch1 = prepare_batch(10, 30),
     ?assertEqual({ok, []}, append_list:add(Id, Batch1)),
     Batch2 = prepare_batch(10, 32, fun(A) -> integer_to_binary(2*A) end),
     ?assertEqual({ok, lists:reverse(lists:seq(10, 30))}, append_list:add(Id, Batch2)),
     Expected = lists:reverse(Batch2),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)),
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)),
     ?assertEqual({ok, [20]}, append_list:add(Id, [{20, <<"40">>}])),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_get_many_with_listing_info() ->
-    ?assertMatch({[], _}, append_list:get_many(<<"dummy_id">>, 1000)),
-    {ok, Id} = append_list:create(10),
-    ?assertMatch({[], _}, append_list:get_many(Id, 0)),
+    ?assertMatch({[], _}, append_list:list(<<"dummy_id">>, 1000)),
+    {ok, Id} = append_list:create_structure(10),
+    ?assertMatch({[], _}, append_list:list(Id, 0)),
     append_list:add(Id, prepare_batch(10, 30)),
     lists:foldl(fun(X, ListingInfo) ->
-        {Res, NewListingInfo} = append_list:get_many(ListingInfo, 1),
+        {Res, NewListingInfo} = append_list:list(ListingInfo, 1),
         ?assertEqual([{X, integer_to_binary(X)}], Res),
         NewListingInfo
     end, Id, lists:seq(30, 10, -1)),
-    {_, ListingInfo} = append_list:get_many(Id, 1000),
-    ?assertMatch({[], _}, append_list:get_many(ListingInfo, 100)).
+    {_, ListingInfo} = append_list:list(Id, 1000),
+    ?assertMatch({[], _}, append_list:list(ListingInfo, 100)).
 
 
 test_delete_consecutive_elems_between_nodes() ->
-    ?assertEqual(?ERROR_NOT_FOUND, append_list:delete_elems(<<"dummy_id">>, [])),
-    {ok, Id} = append_list:create(10),
-    ?assertEqual(?ERROR_NOT_FOUND, append_list:delete_elems(Id, [])),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list:delete(<<"dummy_id">>, [])),
+    {ok, Id} = append_list:create_structure(10),
+    ?assertEqual(ok, append_list:delete(Id, [])),
+    ?assertEqual(ok, append_list:delete(Id, [1,2,3,4,5])),
     append_list:add(Id, prepare_batch(10, 30)),
-    append_list:delete_elems(Id, lists:seq(10, 20)),
+    append_list:delete(Id, lists:seq(10, 20)),
     Expected = lists:reverse(prepare_batch(21, 30)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)),
-    append_list:delete_elems(Id, lists:seq(25, 30)),
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)),
+    append_list:delete(Id, lists:seq(25, 30)),
     Expected1 = lists:reverse(prepare_batch(21, 24)),
-    ?assertMatch({Expected1, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected1, _}, append_list:list(Id, 100)).
 
 
 test_delete_non_consecutive_elems_between_nodes() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(1, 100)),
-    append_list:delete_elems(Id, lists:seq(1,100, 2)),
+    append_list:delete(Id, lists:seq(1,100, 2)),
     Expected = lists:reverse(prepare_batch(2, 100 ,2)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_delete_all_elems_in_first_node() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 30)),
-    append_list:delete_elems(Id, [30]),
+    append_list:delete(Id, [30]),
     Expected = lists:reverse(prepare_batch(10, 29)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)),
-    append_list:delete_elems(Id, lists:seq(20, 30)),
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)),
+    append_list:delete(Id, lists:seq(20, 30)),
     Expected1 = lists:reverse(prepare_batch(10, 19)),
-    ?assertMatch({Expected1, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected1, _}, append_list:list(Id, 100)).
 
 
 test_delete_elems_all_but_first_node() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 30)),
-    append_list:delete_elems(Id, lists:seq(10, 29)),
+    append_list:delete(Id, lists:seq(10, 29)),
     Expected = lists:reverse(prepare_batch(30, 30)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_first_node_merge_during_delete() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 31)),
-    append_list:delete_elems(Id, lists:seq(10, 30)),
+    append_list:delete(Id, lists:seq(10, 30)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_delete_elems_one_by_one_descending() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 31)),
     lists:foreach(fun(Elem) ->
-        append_list:delete_elems(Id, [Elem])
+        append_list:delete(Id, [Elem])
     end, lists:seq(30, 10, -1)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_delete_elems_one_by_one_ascending() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 31)),
     lists:foreach(fun(Elem) ->
-        append_list:delete_elems(Id, [Elem])
+        append_list:delete(Id, [Elem])
     end, lists:seq(10, 30)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_delete_elems_structure_not_sorted() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(20, 31)),
     append_list:add(Id, prepare_batch(10, 20)),
     lists:foreach(fun(Elem) ->
-        append_list:delete_elems(Id, [Elem])
+        append_list:delete(Id, [Elem])
     end, lists:seq(30, 10, -1)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_merge_nodes_during_delete_structure_not_sorted() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
     end, prepare_batch(5, 1, -1)),
-    append_list:delete_elems(Id, [5]),
+    append_list:delete(Id, [5]),
     Expected = lists:reverse(prepare_batch(4, 1, -1)),
-    ?assertMatch({Expected, _}, append_list:get_many(Id, 100)).
+    ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
 test_delete_between_listings() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     append_list:add(Id, prepare_batch(10, 30)),
-    {_, ListingInfo} = append_list:get_many(Id, 2),
-    append_list:delete_elems(Id, [28, 27]),
-    {Res, _} = append_list:get_many(ListingInfo, 1),
+    {_, ListingInfo} = append_list:list(Id, 2),
+    append_list:delete(Id, [28, 27]),
+    {Res, _} = append_list:list(ListingInfo, 1),
     ?assertMatch([{26, <<"26">>}], Res),
-    append_list:delete_elems(Id, lists:seq(20, 29)),
+    append_list:delete(Id, lists:seq(20, 29)),
     Expected = lists:reverse(prepare_batch(10, 19)),
-    ?assertMatch({Expected, _}, append_list:get_many(ListingInfo, 100)).
+    ?assertMatch({Expected, _}, append_list:list(ListingInfo, 100)).
 
 
 test_get_highest() ->
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get_highest(<<"dummy_id">>)),
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get_highest(Id)),
     append_list:add(Id, prepare_batch(1, 100)),
     ?assertEqual({100, <<"100">>}, append_list:get_highest(Id)),
-    append_list:delete_elems(Id, lists:seq(2, 99)),
+    append_list:delete(Id, lists:seq(2, 99)),
     ?assertEqual({100, <<"100">>}, append_list:get_highest(Id)),
-    append_list:delete_elems(Id, [100]),
+    append_list:delete(Id, [100]),
     ?assertEqual({1, <<"1">>}, append_list:get_highest(Id)),
-    append_list:delete_elems(Id, [1]),
+    append_list:delete(Id, [1]),
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get_highest(Id)).
 
     
 test_get_highest_structure_not_sorted() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
     end, prepare_batch(100, 1, -1)),
     ?assertEqual({100, <<"100">>}, append_list:get_highest(Id)),
-    append_list:delete_elems(Id, lists:seq(2, 99)),
+    append_list:delete(Id, lists:seq(2, 99)),
     ?assertEqual({100, <<"100">>}, append_list:get_highest(Id)).
 
 
 test_get() ->
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(<<"dummy_id">>), 8),
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)),
     append_list:add(Id, lists:foldl(fun(A, Acc) -> [{A, A} | Acc] end, [], lists:seq(1,100))),
     ?assertEqual({ok, 8}, append_list:get(Id, 8)),
-    append_list:delete_elems(Id, lists:seq(2,99)),
+    append_list:delete(Id, lists:seq(2,99)),
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)).
 
 
 test_get_structure_not_sorted() ->
-    {ok, Id} = append_list:create(10),
+    {ok, Id} = append_list:create_structure(10),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
     end, prepare_batch(100, 1, -1)),
     ?assertEqual({ok, <<"8">>}, append_list:get(Id, 8)),
-    append_list:delete_elems(Id, lists:seq(2, 99)),
+    append_list:delete(Id, lists:seq(2, 99)),
     ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)).
 
 
 test_nodes_created_after_add() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     ?assertMatch(#sentinel{first = undefined, last = undefined}, append_list_persistence:get_node(Id)),
     append_list:add(Id, prepare_batch(1, 1)),
     ?assertNotMatch(#sentinel{last = undefined}, append_list_persistence:get_node(Id)),
@@ -294,7 +295,7 @@ test_nodes_created_after_add() ->
 
 
 test_min_on_left_after_add() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, prepare_batch(1, 10)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
@@ -305,7 +306,7 @@ test_min_on_left_after_add() ->
 
 
 test_min_on_left_after_add_reversed() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
     end, prepare_batch(10, 1, -1)),
@@ -318,7 +319,7 @@ test_min_on_left_after_add_reversed() ->
 
 
 test_max_on_right_after_add() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, prepare_batch(1, 10)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
@@ -329,7 +330,7 @@ test_max_on_right_after_add() ->
 
 
 test_max_on_right_after_add_reversed() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
     end, prepare_batch(10, 1, -1)),
@@ -342,7 +343,7 @@ test_max_on_right_after_add_reversed() ->
 
 
 test_node_num_after_add() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, prepare_batch(1, 10)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     #node{prev = PrevNodeId, node_num = FirstNodeNum} = append_list_persistence:get_node(FirstNodeId),
@@ -353,34 +354,36 @@ test_node_num_after_add() ->
         Num
     end, FirstNodeNum, NodeIds).
 
+% fixme test elems per node after add
+
 
 test_nodes_deleted_after_delete_elems() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, prepare_batch(1, 3)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
-    append_list:delete_elems(Id, [2]),
+    append_list:delete(Id, [2]),
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node2)),
     ?assertMatch(#node{next = Node1}, append_list_persistence:get_node(Node3)),
     ?assertMatch(#node{prev = Node3}, append_list_persistence:get_node(Node1)),
-    append_list:delete_elems(Id, [3]),
+    append_list:delete(Id, [3]),
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node1)),
     ?assertMatch(#node{next = undefined}, append_list_persistence:get_node(Node3)),
     ?assertMatch(#sentinel{first = Node3, last = Node3}, append_list_persistence:get_node(Id)).
 
     
 test_nodes_after_delete_elems_from_last_node() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, prepare_batch(1, 3)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
-    append_list:delete_elems(Id, [1]),
+    append_list:delete(Id, [1]),
     ?assertMatch(#node{prev = Node3, next = Node1}, append_list_persistence:get_node(Node2)),
     ?assertMatch(#node{next = Node2}, append_list_persistence:get_node(Node3)),
     ?assertMatch(#node{prev = Node2}, append_list_persistence:get_node(Node1)),
     #node{elements = M} = append_list_persistence:get_node(Node3),
     ?assertEqual(#{}, M),
-    append_list:delete_elems(Id, [3]),
+    append_list:delete(Id, [3]),
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node1)),
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node2)),
     ?assertMatch(#node{next = undefined}, append_list_persistence:get_node(Node3)),
@@ -388,10 +391,10 @@ test_nodes_after_delete_elems_from_last_node() ->
 
 
 test_min_on_left_after_delete_elems() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, prepare_batch(2, 10)),
     append_list:add(Id, {1, <<"1">>}),
-    append_list:delete_elems(Id, [1]),
+    append_list:delete(Id, [1]),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:seq(10, 3, -1),
@@ -401,10 +404,10 @@ test_min_on_left_after_delete_elems() ->
 
 
 test_max_on_right_after_delete_elems() ->
-    {ok, Id} = append_list:create(1),
+    {ok, Id} = append_list:create_structure(1),
     append_list:add(Id, {10, <<"10">>}),
     append_list:add(Id, prepare_batch(1, 9)),
-    append_list:delete_elems(Id, [10]),
+    append_list:delete(Id, [10]),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMaxOnRight = lists:seq(8, 1, -1) ++ [undefined, undefined], % last node is never deleted

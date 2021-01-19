@@ -34,23 +34,19 @@
 -spec adjust_min_on_left(id() | undefined, append_list:key(), CheckToTheEnd :: boolean()) -> ok.
 adjust_min_on_left(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
-adjust_min_on_left(#node{node_id = NodeId, min_on_left = PreviousMin} = Node, CurrentMin, CheckToTheEnd) ->
-    UpdatedNode = Node#node{min_on_left = CurrentMin},
-    case PreviousMin of
+adjust_min_on_left(#node{} = Node, CurrentMin, CheckToTheEnd) ->
+    #node{node_id = NodeId, min_on_left = PreviousMinOnLeft} = Node,
+    case PreviousMinOnLeft of
         CurrentMin -> ok;
-        _ -> append_list_persistence:save_node(NodeId, UpdatedNode)
+        _ -> append_list_persistence:save_node(NodeId, Node#node{min_on_left = CurrentMin})
     end,
     Min = case maps:size(Node#node.elements) of
         0 -> CurrentMin;
         _ -> min(CurrentMin, lists:min(maps:keys(Node#node.elements)))
     end,
-    case CheckToTheEnd of
+    case CheckToTheEnd orelse (PreviousMinOnLeft =/= CurrentMin orelse CurrentMin > Min) of
         true -> adjust_min_on_left(Node#node.prev, Min, CheckToTheEnd);
-        _ -> 
-            case PreviousMin == CurrentMin andalso CurrentMin > Min of 
-                true -> ok;
-                false -> adjust_min_on_left(Node#node.prev, Min, CheckToTheEnd)
-            end
+        _ -> ok
     end;
 adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
     Node = append_list_persistence:get_node(NodeId),
@@ -69,14 +65,13 @@ adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
 adjust_max_on_right(undefined, _) ->
     ok;
 adjust_max_on_right(NodeId, CurrentMax) ->
-    #node{node_id = NodeId, next = Next, elements = Elements} = Node = 
-        append_list_persistence:get_node(NodeId),
-    UpdatedNode = Node#node{max_on_right = CurrentMax},
-    case UpdatedNode of
-        Node -> ok;
+    #node{node_id = NodeId, next = Next, max_on_right = PreviousMaxOnRight} = 
+        Node = append_list_persistence:get_node(NodeId),
+    case CurrentMax of
+        PreviousMaxOnRight -> ok;
         _ ->
-            append_list_persistence:save_node(NodeId, UpdatedNode),
-            MaxInNode = lists:max(maps:keys(Elements)),
+            append_list_persistence:save_node(NodeId, Node#node{max_on_right = CurrentMax}),
+            MaxInNode = lists:max(maps:keys(Node#node.elements)),
             case CurrentMax of
                 undefined -> adjust_max_on_right(Next, MaxInNode);
                 _ -> adjust_max_on_right(Next, max(CurrentMax, MaxInNode))
@@ -87,7 +82,7 @@ adjust_max_on_right(NodeId, CurrentMax) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Based on `max_on_right` value and maximum key in given node, this 
-%% function returns highest key in all nodes to the right(pointed by prev) 
+%% function returns highest key in all nodes to the right (pointed by prev) 
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
