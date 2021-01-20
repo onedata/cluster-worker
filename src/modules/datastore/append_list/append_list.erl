@@ -59,7 +59,7 @@
 
 %% API
 -export([create_structure/1, delete_structure/1]).
--export([add/2, delete/2, list/2, list/3, get/2, get/3, get_highest/1, get_max_key/1]).
+-export([add/2, delete/2, list/2, list/3, list/4, get/2, get/3, get_highest/1, get_max_key/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -92,6 +92,7 @@ delete_structure(StructId) ->
 %% @doc
 %% Adds elements given in Batch to the beginning of a structure. 
 %% Elements in Batch must be sorted ascending by Key and Keys must be unique.
+%% Returns keys of elements that were overwritten (in reversed order).
 %% @end
 %%--------------------------------------------------------------------
 -spec add(id(), [elem()]) -> ok | ?ERROR_NOT_FOUND.
@@ -124,39 +125,57 @@ delete(SentinelId, Elems) ->
     end.
 
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Lists elements in structure. When elements where added as recommended (i.e with increasing keys, 
+%% consult module doc) elements are listed in the following order: 
+%%  * starting from beginning (StartFrom = first) -> returns elements reversed to adding order (descending)
+%%  * starting from end (StartFrom = last) -> return elements in the same order as they were added (ascending) 
+%% When elements are not added in recommended order there is no guarantee about listing order.
+%% @end
+%%--------------------------------------------------------------------
 - spec list(id() | #listing_info{}, non_neg_integer()) -> {[append_list:elem()], #listing_info{}}.
 list(IdOrListingInfo, Size) ->
     list(IdOrListingInfo, Size, first).
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Lists elements from the beginning (last added).
-% fixme doc elements returned in arbitrary order
-%% @end
-%%--------------------------------------------------------------------
-- spec list(id() | #listing_info{}, non_neg_integer(), first | last) -> 
+- spec list(id() | #listing_info{}, non_neg_integer(), first | last | append_list:fold_fun()) ->
     {[append_list:elem()], #listing_info{}}.
-list(_, 0, _StartFrom) ->
+list(IdOrListingInfo, Size, StartFrom) when is_atom(StartFrom) ->
+    list(IdOrListingInfo, Size, StartFrom, fun(Elem) -> {ok, Elem} end);
+list(IdOrListingInfo, Size, FoldFun) when is_function(FoldFun, 1)->
+    list(IdOrListingInfo, Size, first, FoldFun).
+
+
+- spec list(id() | #listing_info{}, non_neg_integer(), first | last, fold_fun()) -> 
+    {[append_list:elem()], #listing_info{}}.
+list(_, 0, _StartFrom, _Fun) ->
     {[], #listing_info{finished = true}};
-list(#listing_info{finished = true}, _Size, _StartFrom) ->
+list(#listing_info{finished = true}, _Size, _StartFrom, _FoldFun) ->
     {[], #listing_info{finished = true}};
-list(#listing_info{internal_listing_data = ListingData}, Size, _StartFrom) ->
-    append_list_get:list(ListingData, Size, []);
-list(SentinelId, Size, StartFrom) ->
+list(#listing_info{internal_listing_data = ListingData}, Size, _StartFrom, FoldFun) ->
+    append_list_get:list(ListingData, Size, FoldFun, []);
+list(SentinelId, Size, StartFrom, FoldFun) ->
     case append_list_persistence:get_node(SentinelId) of
-        ?ERROR_NOT_FOUND -> list(SentinelId, 0, StartFrom);
+        ?ERROR_NOT_FOUND -> list(SentinelId, 0, StartFrom, FoldFun);
         #sentinel{} = Sentinel ->
             StartingNodeId = append_list_utils:get_starting_node_id(StartFrom, Sentinel), 
             append_list_get:list(#internal_listing_data{
                 structure_id = SentinelId,
                 last_node_id = StartingNodeId,
                 start_from = StartFrom
-            }, Size, [])
+            }, Size, FoldFun, [])
     end.
 
 
-% fixme doc elements returned in arbitrary order
+%%--------------------------------------------------------------------
+%% @doc
+%% Retrieves elements value from structure. When elements where added as recommended (i.e with increasing keys, 
+%% consult module doc) elements are returned in the following order: 
+%%  * starting from beginning (StartFrom = first) -> returns elements reversed to adding order (descending)
+%%  * starting from end (StartFrom = last) -> return elements in the same order as they were added (ascending) 
+%% If elements were not added in recommended order there is no guarantee about returned elements order.
+%% @end
+%%--------------------------------------------------------------------
 -spec get(id(), key() | [key()]) -> ?ERROR_NOT_FOUND | [elem()].
 get(SentinelId, Keys) ->
     get(SentinelId, Keys, first).

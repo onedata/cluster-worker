@@ -23,6 +23,8 @@
 % representation of one element in batch of elements to add.
 -type elem() :: {key(), value()}.
 
+-type fold_fun() :: fun((append_list:elem()) -> {ok, term()} | stop).
+
 % This record holds pointers to the first and last node of list.
 % Only one record of this type is persisted for each structure 
 % so `id` of this record is equivalent to id of whole structure.

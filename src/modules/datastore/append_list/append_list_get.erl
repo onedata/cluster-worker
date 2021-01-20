@@ -18,25 +18,23 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([list/3, get/3, get_highest/1, get_max_key/1]).
+-export([list/4, get/3, get_highest/1, get_max_key/1]).
 
 %%=====================================================================
 %% API
 %%=====================================================================
 
--spec list(#internal_listing_data{}, Size :: non_neg_integer(), [append_list:elem()]) ->
+-spec list(#internal_listing_data{}, Size :: non_neg_integer(), append_list:fold_fun(), [append_list:elem()]) ->
     {[append_list:elem()], #listing_info{}}.
-list(#internal_listing_data{last_node_id = undefined}, _Size, Acc) ->
+list(#internal_listing_data{last_node_id = undefined}, _Size, _FoldFun, Acc) ->
     {Acc, #listing_info{
         finished = true
     }};
-list(#internal_listing_data{last_node_id = NodeId} = ListingData, _Size = 0, Acc) ->
-    {L, _} = lists:last(Acc),
+list(#internal_listing_data{last_node_id = NodeId} = ListingData, _Size = 0, _FoldFun, Acc) ->
     {Acc, #listing_info{
         finished = false,
         internal_listing_data = ListingData#internal_listing_data{
-            last_node_id = NodeId,
-            last_key = L
+            last_node_id = NodeId
         }
     }};
 list(#internal_listing_data{
@@ -44,7 +42,7 @@ list(#internal_listing_data{
     last_key = LastKey,
     last_node_num = LastNodeNum,
     start_from = StartFrom
-} = ListingData, Size, Acc) ->
+} = ListingData, Size, FoldFun, Acc) ->
     case find_node(ListingData) of
         #node{elements = OrigElements, node_num = NodeNum} = Node ->
             Elements = case LastKey == undefined orelse LastNodeNum =/= NodeNum of
@@ -63,14 +61,21 @@ list(#internal_listing_data{
                 last -> lists:sort(maps:to_list(Elements))
             end,
             {ListedElems, NotListedElems} = lists:split(NumberOfElemsToTake, NodeElements),
-            NeighbourNodeId = case NotListedElems of
+            NextStartNodeId = case NotListedElems of
                 [] -> select_neighbour(StartFrom, Node);
                 _ -> NodeId
             end,
+            {Status, FinalElems} = apply_fold_fun(FoldFun, ListedElems),
+            NewSize = case Status of
+                stop -> 0;
+                continue -> Size - NumberOfElemsToTake
+            end,
+            {LastListedKey, _} = lists:last(ListedElems),
             list(ListingData#internal_listing_data{
-                last_node_id = NeighbourNodeId,
-                last_node_num = NodeNum
-            }, Size - NumberOfElemsToTake, Acc ++ ListedElems);
+                last_node_id = NextStartNodeId,
+                last_node_num = NodeNum,
+                last_key = LastListedKey
+            }, NewSize, FoldFun, Acc ++ lists:reverse(FinalElems));
         {error, _} = Error -> Error
     end.
 
@@ -158,6 +163,18 @@ find_node(ListingData) ->
                     })
             end
     end.
+
+
+-spec apply_fold_fun(append_list:fold_fun(), [append_list:elem()]) -> {continue | stop, [term()]}.
+apply_fold_fun(FoldFun, OriginalElems) ->
+    lists:foldl(fun
+        (_Elem, {stop, Elems}) -> {stop, Elems};
+        (E, {continue, Elems}) ->
+            case FoldFun(E) of
+                stop -> {stop, Elems};
+                {ok, Res} -> {continue, [Res | Elems]}
+            end
+    end, {continue, []}, OriginalElems).
 
 
 -spec select_elems_from_node(#node{}, [append_list:key()], first | last) ->

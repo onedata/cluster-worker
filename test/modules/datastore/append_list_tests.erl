@@ -35,6 +35,8 @@ append_list_test_() ->
             {"test_add_with_overwrite", fun test_add_with_overwrite/0},
             {"test_list_with_listing_info", fun test_list_with_listing_info/0},
             {"test_list_start_from_last", fun test_list_start_from_last/0},
+            {"test_list_with_fold_fun", fun test_list_with_fold_fun/0},
+            {"test_list_with_fold_fun_stop", fun test_list_with_fold_fun_stop/0},
             {"test_delete_consecutive_elems_between_nodes", fun test_delete_consecutive_elems_between_nodes/0},
             {"test_delete_non_consecutive_elems_between_nodes", fun test_delete_non_consecutive_elems_between_nodes/0},
             {"test_delete_all_elems_in_first_node", fun test_delete_all_elems_in_first_node/0},
@@ -60,6 +62,8 @@ append_list_test_() ->
             {"test_max_on_right_after_add", fun test_max_on_right_after_add/0},
             {"test_max_on_right_after_add_reversed", fun test_max_on_right_after_add_reversed/0},
             {"test_node_num_after_add", fun test_node_num_after_add/0},
+            {"test_nodes_elements_after_add", fun test_nodes_elements_after_add/0},
+            {"test_nodes_elements_after_add_reversed", fun test_nodes_elements_after_add_reversed/0},
             {"test_nodes_deleted_after_delete_elems", fun test_nodes_deleted_after_delete_elems/0},
             {"test_nodes_after_delete_elems_from_last_node", fun test_nodes_after_delete_elems_from_last_node/0},
             {"test_min_on_left_after_delete_elems", fun test_min_on_left_after_delete_elems/0},
@@ -151,6 +155,37 @@ test_list_start_from_last() ->
     {Res, ListingInfo} = append_list:list(Id, 1000, last),
     ?assertEqual(Res, prepare_batch(10, 30)),
     ?assertMatch({[], _}, append_list:list(ListingInfo, 100)).
+
+
+test_list_with_fold_fun() ->
+    ?assertMatch({[], _}, append_list:list(<<"dummy_id">>, 1000)),
+    {ok, Id} = append_list:create_structure(10),
+    append_list:add(Id, prepare_batch(10, 30)),
+    lists:foldl(fun(X, ListingInfo) ->
+        {Res, NewListingInfo} = append_list:list(ListingInfo, 1, fun({_Key, Value}) -> {ok, Value} end),
+        ?assertEqual([integer_to_binary(X)], Res),
+        NewListingInfo
+    end, Id, lists:seq(30, 10, -1)),
+    {_, ListingInfo} = append_list:list(Id, 1000),
+    ?assertMatch({[], _}, append_list:list(ListingInfo, 100)).
+
+
+test_list_with_fold_fun_stop() ->
+    ?assertMatch({[], _}, append_list:list(<<"dummy_id">>, 1000)),
+    {ok, Id} = append_list:create_structure(10),
+    append_list:add(Id, prepare_batch(1, 30)),
+    Expected1 = lists:seq(1, 7),
+    ?assertMatch({Expected1, _},  append_list:list(Id, 100, last,
+        fun ({8, _Value}) -> stop;
+            ({Key, _Value}) -> {ok, Key} 
+        end)
+    ),
+    Expected2 = lists:seq(30, 9, -1),
+    ?assertMatch({Expected2, _},  append_list:list(Id, 100, 
+        fun ({8, _Value}) -> stop;
+            ({Key, _Value}) -> {ok, Key}
+        end)
+    ).
 
 
 test_delete_consecutive_elems_between_nodes() ->
@@ -426,7 +461,31 @@ test_node_num_after_add() ->
         Num
     end, FirstNodeNum, NodeIds).
 
-% fixme test elems per node after add
+
+test_nodes_elements_after_add() ->
+    {ok, Id} = append_list:create_structure(10),
+    append_list:add(Id, prepare_batch(1, 100)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedElementsPerNode = lists:map(fun(A) -> maps:from_list(prepare_batch(10*(A-1) + 1, 10*A)) end, lists:seq(10,1, -1)),
+    lists:foreach(fun({NodeId, Expected}) ->
+        #node{elements = ElementsInNode} = append_list_persistence:get_node(NodeId),
+        ?assertEqual(Expected, ElementsInNode)
+    end, lists:zip(NodesIds, ExpectedElementsPerNode)).
+
+
+test_nodes_elements_after_add_reversed() ->
+    {ok, Id} = append_list:create_structure(10),
+    lists:foreach(fun(Elem) ->
+        append_list:add(Id, Elem)
+    end, prepare_batch(100, 1, -1)),
+    #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
+    NodesIds = get_nodes_ids(FirstNodeId),
+    ExpectedElementsPerNode = lists:map(fun(A) -> maps:from_list(prepare_batch(10*(A-1) + 1, 10*A)) end, lists:seq(1,10)),
+    lists:foreach(fun({NodeId, Expected}) ->
+        #node{elements = ElementsInNode} = append_list_persistence:get_node(NodeId),
+        ?assertEqual(Expected, ElementsInNode)
+    end, lists:zip(NodesIds, ExpectedElementsPerNode)).
 
 
 test_nodes_deleted_after_delete_elems() ->

@@ -28,7 +28,7 @@
 %% @doc
 %% Adds elements given in Batch to the beginning of a structure. 
 %% Elements in structure should be sorted ascending by Key and Keys should 
-%% be unique. Returns list of keys that were overwritten.
+%% be unique. Returns list of keys that were overwritten (in reversed order).
 %% @end
 %%--------------------------------------------------------------------
 -spec add(#sentinel{}, #node{}, [append_list:elem()]) -> {ok, [append_list:elem()]}.
@@ -40,7 +40,7 @@ add(Sentinel, FirstNode, Batch) ->
     
     {FinalFirstNode, ElementsTail} = 
         add_unique_elements(UpdatedFirstNode, UniqueElements, MaxElemsPerNode),
-    ok = create_new_nodes(Sentinel, ElementsTail, FinalFirstNode),
+    ok = add_to_beginning(Sentinel, ElementsTail, FinalFirstNode),
     {ok, lists:map(fun({Key, _Value}) -> Key end, OverwrittenElems)}.
 
 %%=====================================================================
@@ -73,12 +73,18 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBa
     {Node, ElementsTail}.
 
 
--spec create_new_nodes(#sentinel{}, [append_list:elem()], #node{}) -> ok.
-create_new_nodes(#sentinel{structure_id = StructId} = Sentinel, [], #node{node_id = NodeId} = Node) ->
+%%--------------------------------------------------------------------
+%% @doc
+%% Adds elements given in Batch to the beginning of a structure. 
+%% Creates new nodes if necessary.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_to_beginning(#sentinel{}, [append_list:elem()], #node{}) -> ok.
+add_to_beginning(#sentinel{structure_id = StructId} = Sentinel, [], #node{node_id = NodeId} = Node) ->
     append_list_persistence:save_node(NodeId, Node),
     append_list_persistence:save_node(StructId, Sentinel#sentinel{first = NodeId}),
     ok;
-create_new_nodes(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
+add_to_beginning(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
     #sentinel{structure_id = StructId, max_elems_per_node = MaxElemsPerNode} = Sentinel,
     #node{node_id = PrevNodeId} = PrevNode,
     Size = min(length(Batch), MaxElemsPerNode),
@@ -89,7 +95,7 @@ create_new_nodes(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
         next = NewFirstNodeId,
         min_on_left = Min
     }),
-    create_new_nodes(Sentinel, Tail, NewFirstNode).
+    add_to_beginning(Sentinel, Tail, NewFirstNode).
 
 
 -spec prepare_new_first_node(id(), [append_list:elem()], PrevNode :: #node{}) -> 
