@@ -404,16 +404,14 @@ test_nodes_after_delete_elems_from_last_node() ->
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
     append_list:delete(Id, [1]),
-    ?assertMatch(#node{prev = Node3, next = Node1}, append_list_persistence:get_node(Node2)),
-    ?assertMatch(#node{next = Node2}, append_list_persistence:get_node(Node3)),
-    ?assertMatch(#node{prev = Node2}, append_list_persistence:get_node(Node1)),
-    #node{elements = M} = append_list_persistence:get_node(Node3),
-    ?assertEqual(#{}, M),
+    ?assertMatch(#node{prev = undefined, next = Node1}, append_list_persistence:get_node(Node2)),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node3)),
+    ?assertMatch(#node{prev = Node2, next = undefined}, append_list_persistence:get_node(Node1)),
     append_list:delete(Id, [3]),
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node3)),
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node1)),
-    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(Node2)),
-    ?assertMatch(#node{next = undefined}, append_list_persistence:get_node(Node3)),
-    ?assertMatch(#sentinel{first = Node3, last = Node3}, append_list_persistence:get_node(Id)).
+    ?assertMatch(#node{next = undefined, prev = undefined}, append_list_persistence:get_node(Node2)),
+    ?assertMatch(#sentinel{first = Node2, last = Node2}, append_list_persistence:get_node(Id)).
 
 
 test_min_on_left_after_delete_elems() ->
@@ -436,7 +434,7 @@ test_max_on_right_after_delete_elems() ->
     append_list:delete(Id, [10]),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
-    ExpectedMaxOnRight = lists:seq(8, 1, -1) ++ [undefined, undefined], % last node is never deleted
+    ExpectedMaxOnRight = lists:seq(8, 1, -1) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
         ?assertMatch(#node{max_on_right = Expected}, append_list_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxOnRight)).

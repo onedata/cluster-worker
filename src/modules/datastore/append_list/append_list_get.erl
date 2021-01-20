@@ -63,7 +63,8 @@ list(#internal_listing_data{
             list(ListingData#internal_listing_data{
                 last_node_id = NextNodeId,
                 last_node_num = NodeNum
-            }, Size - NumberOfElemsToTake, Acc ++ E)
+            }, Size - NumberOfElemsToTake, Acc ++ E);
+        {error, _} = Error -> Error
     end.
 
 
@@ -120,7 +121,6 @@ get_max_key(NodeId) ->
 %% This function returns Node based on information included in ListingData.
 %% If node with given id exists it is returned. If not (it was deleted in 
 %% meantime) first node with number less than `last_node_num` is returned.
-%% Because last node is never deleted, such node always exists.
 %% @end
 %%--------------------------------------------------------------------
 -spec find_node(#internal_listing_data{}) -> #node{}.
@@ -128,7 +128,10 @@ find_node(#internal_listing_data{last_node_id = NodeId, last_node_num = LastNode
     case append_list_persistence:get_node(NodeId) of
         ?ERROR_NOT_FOUND -> 
             #sentinel{first = First} = append_list_persistence:get_node(StructId),
-            find_node(ListingData#internal_listing_data{last_node_id = First});
+            case First of
+                undefined -> ?ERROR_NOT_FOUND;
+                _ -> find_node(ListingData#internal_listing_data{last_node_id = First})
+            end;
         #node{node_num = NodeNum} = Node when not (is_integer(LastNodeNum) andalso NodeNum > LastNodeNum) ->
             Node;
         #node{prev = Prev} ->

@@ -60,27 +60,38 @@ delete_elems_in_nodes(Sentinel, #node{} = CurrentNode, ElemsToDelete, PrevNode) 
     end,
     NewElemsToDelete = ElemsToDelete -- maps:keys(ElementsBeforeDeletion),
     ShouldMergeNodes = PrevNode =/= undefined andalso 
-        maps:size(ElementsInPreviousNode) + maps:size(NewElements) =< MaxElemsPerNode,
-    {#node{node_id = CurrentNodeId} = UpdatedCurrentNode, NextNodeOrId} = case ShouldMergeNodes of
+        maps:size(ElementsInPreviousNode) + maps:size(NewElements) =< 0.5 * MaxElemsPerNode,
+    {UpdatedCurrentNode, NextNodeOrId} = case ShouldMergeNodes of
         false -> 
-            {update_current_node(CurrentNode, NewElements, PrevNode), NextNodeId};
+            case maps:size(NewElements) == 0 of
+                true -> delete_node(Sentinel, CurrentNode, NextNodeId, PrevNode);
+                false -> {update_current_node(CurrentNode, NewElements, PrevNode), NextNodeId}
+            end;
         true -> 
             MergedNode = merge_nodes(
                 Sentinel, CurrentNode, PrevNode, maps:merge(ElementsInPreviousNode, NewElements)),
             NextNode = update_next_node_pointer(NextNodeId, MergedNode#node.node_id),
             {MergedNode, NextNode}
     end,
-    append_list_persistence:save_node(CurrentNodeId, UpdatedCurrentNode),
+    UpdatedCurrentNode =/= undefined andalso 
+        append_list_persistence:save_node(UpdatedCurrentNode#node.node_id, UpdatedCurrentNode),
     ShouldStop = NewElemsToDelete == [] orelse 
-        UpdatedCurrentNode#node.min_on_left > lists:max(NewElemsToDelete),
+        (UpdatedCurrentNode =/= undefined andalso 
+            UpdatedCurrentNode#node.min_on_left > lists:max(NewElemsToDelete)),
     case ShouldStop of
         true -> 
             MaxOnRightBefore = append_list_utils:get_max_key_in_prev_nodes(CurrentNode),
-            handle_deletion_finished(UpdatedCurrentNode, PrevNode, MaxOnRightBefore),
-            % save next node if it was updated
-            case NextNodeOrId of
-                #node{} -> append_list_persistence:save_node(NextNodeId, NextNodeOrId);
-                _ -> ok
+            case UpdatedCurrentNode of
+                undefined ->
+                    % this will always save updated next node
+                    ok = append_list_utils:adjust_max_on_right(NextNodeOrId, undefined);
+                _ -> 
+                    handle_deletion_finished(UpdatedCurrentNode, PrevNode, MaxOnRightBefore),
+                    % save next node if it was updated
+                    case NextNodeOrId of
+                        #node{} -> append_list_persistence:save_node(NextNodeId, NextNodeOrId);
+                        _ -> ok
+                end
             end;
         false ->
             delete_elems_in_nodes(Sentinel, NextNodeOrId, NewElemsToDelete, UpdatedCurrentNode)
@@ -89,6 +100,39 @@ delete_elems_in_nodes(Sentinel, CurrentNodeId, ElemsToDelete, PrevNode) when is_
     CurrentNode = append_list_persistence:get_node(CurrentNodeId),
     delete_elems_in_nodes(Sentinel, CurrentNode, ElemsToDelete, PrevNode).
 
+
+-spec delete_node(#sentinel{}, CurrentNode :: #node{}, append_list:id() | undefined, PrevNode :: #node{} | undefined) -> 
+    {UpdatedCurrentNode :: undefined | #node{}, UpdatedNextNode :: undefined | #node{}}.
+delete_node(Sentinel, #node{node_id = NodeId}, undefined, undefined) ->
+    % deleting last remaining node in the structure
+    append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = undefined, first = undefined}),
+    append_list_persistence:delete_node(NodeId),
+    {undefined, undefined};
+delete_node(Sentinel, #node{node_id = NodeId}, undefined, #node{node_id = PrevNodeId} = PrevNode) ->
+    % deleting first node
+    append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{first = PrevNodeId}),
+    UpdatedPrevNode = PrevNode#node{min_on_left = undefined, next = undefined},
+    append_list_persistence:delete_node(NodeId),
+    {UpdatedPrevNode, undefined};
+delete_node(Sentinel, #node{node_id = NodeId}, NextNodeId, undefined) ->
+    % deleting last node
+    append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = NextNodeId}),
+    #node{} = NextNode = append_list_persistence:get_node(NextNodeId),
+    UpdatedNextNode = NextNode#node{prev = undefined},
+    append_list_persistence:delete_node(NodeId),
+    {undefined, UpdatedNextNode};
+delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNode) ->
+    #node{} = NextNode = append_list_persistence:get_node(NextNodeId),
+    UpdatedNextNode = NextNode#node{
+        prev = PrevNode#node.node_id
+    },
+    UpdatedPrevNode = PrevNode#node{
+        next = NextNodeId,
+        min_on_left = CurrentNode#node.min_on_left
+    },
+    append_list_persistence:delete_node(NodeId),
+    {UpdatedPrevNode, UpdatedNextNode}.
+    
 
 -spec update_next_node_pointer(append_list:id(), append_list:id()) -> #node{} | undefined.
 update_next_node_pointer(undefined, _CurrentNodeId) ->
@@ -100,7 +144,7 @@ update_next_node_pointer(NextNodeId, CurrentNodeId) ->
     }.
 
 
--spec handle_deletion_finished(#node{}, #node{}, append_list:key()) -> ok.
+-spec handle_deletion_finished(#node{}, #node{} | undefined, append_list:key()) -> ok.
 handle_deletion_finished(#node{node_id = NodeId, prev = Prev} = Node, #node{node_id = NodeId}, MaxOnRightBefore) ->
     PrevNode = case Prev of
         undefined -> undefined;

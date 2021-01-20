@@ -61,12 +61,11 @@ adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
 %% see `append_list` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_max_on_right(undefined | append_list:id(), append_list:key()) -> ok.
+-spec adjust_max_on_right(undefined | append_list:id() | #node{}, append_list:key()) -> ok.
 adjust_max_on_right(undefined, _) ->
     ok;
-adjust_max_on_right(NodeId, CurrentMax) ->
-    #node{node_id = NodeId, next = Next, max_on_right = PreviousMaxOnRight} = 
-        Node = append_list_persistence:get_node(NodeId),
+adjust_max_on_right(#node{} = Node, CurrentMax) ->
+    #node{node_id = NodeId, next = Next, max_on_right = PreviousMaxOnRight} = Node,
     case CurrentMax of
         PreviousMaxOnRight -> ok;
         _ ->
@@ -76,7 +75,10 @@ adjust_max_on_right(NodeId, CurrentMax) ->
                 undefined -> adjust_max_on_right(Next, MaxInNode);
                 _ -> adjust_max_on_right(Next, max(CurrentMax, MaxInNode))
             end
-    end.
+    end;
+adjust_max_on_right(NodeId, CurrentMax) ->
+    Node = append_list_persistence:get_node(NodeId),
+    adjust_max_on_right(Node, CurrentMax).
 
 
 %%--------------------------------------------------------------------
