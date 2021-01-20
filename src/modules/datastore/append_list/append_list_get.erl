@@ -68,21 +68,26 @@ list(#internal_listing_data{
     end.
 
 
--spec get(id() | undefined, append_list:key()) -> ?ERROR_NOT_FOUND | {ok, append_list:value()}.
-get(undefined, _Key) ->
-    ?ERROR_NOT_FOUND;
-get(NodeId, Key) ->
+-spec get(id() | undefined, append_list:key()) -> [append_list:elem()].
+get(undefined, _Keys) ->
+    [];
+get(NodeId, Keys) ->
     case append_list_persistence:get_node(NodeId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev} ->
-            case maps:find(Key, Elements) of
-                {ok, Value} -> {ok, Value};
-                error -> case Key > MaxOnRight of
-                    true -> ?ERROR_NOT_FOUND;
-                    false -> get(Prev, Key)
-                end
+        ?ERROR_NOT_FOUND -> [];
+        #node{prev = Prev} = Node ->
+            {Selected, RemainingKeys} = select_from_node(Node, Keys),
+            case RemainingKeys of
+                [] -> Selected;
+                _ -> Selected ++ get(Prev, RemainingKeys)
             end
     end.
+
+
+-spec select_from_node(#node{}, [append_list:key()]) -> {[append_list:elem()], [append_list:key()]}.
+select_from_node(#node{elements = Elements, max_on_right = Max}, Keys) ->
+    Selected = maps:with(Keys, Elements),
+    RemainingKeys = Keys -- maps:keys(Selected),
+    {maps:to_list(Selected), [Key || Key <- RemainingKeys, Key =< Max]}.
 
 
 -spec get_highest(undefined | id()) -> append_list:elem() | ?ERROR_NOT_FOUND.

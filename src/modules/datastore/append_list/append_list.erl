@@ -147,11 +147,14 @@ list(SentinelId, Size) ->
     end.
 
 
--spec get(id(), key()) -> ?ERROR_NOT_FOUND | {ok, value()}.
-get(SentinelId, Key) ->
+% fixme doc elements returned in arbitrary order
+-spec get(id(), key() | [key()]) -> ?ERROR_NOT_FOUND | [elem()].
+get(SentinelId, Key) when not is_list(Key) ->
+    get(SentinelId, [Key]);
+get(SentinelId, Keys) ->
     case append_list_persistence:get_node(SentinelId) of
         ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel -> append_list_get:get(Sentinel#sentinel.first, Key)
+        Sentinel -> append_list_get:get(Sentinel#sentinel.first, Keys)
     end.
 
 

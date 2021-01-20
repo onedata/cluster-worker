@@ -33,7 +33,7 @@ append_list_test_() ->
             {"test_add_elements_one_node", fun test_add_elements_one_node/0},
             {"test_add_only_existing", fun test_add_only_existing_elements/0},
             {"test_add_with_overwrite", fun test_add_with_overwrite/0},
-            {"test_get_many_with_listing_info", fun test_get_many_with_listing_info/0},
+            {"test_list_with_listing_info", fun test_list_with_listing_info/0},
             {"test_delete_consecutive_elems_between_nodes", fun test_delete_consecutive_elems_between_nodes/0},
             {"test_delete_non_consecutive_elems_between_nodes", fun test_delete_non_consecutive_elems_between_nodes/0},
             {"test_delete_all_elems_in_first_node", fun test_delete_all_elems_in_first_node/0},
@@ -121,7 +121,7 @@ test_add_with_overwrite() ->
     ?assertMatch({Expected, _}, append_list:list(Id, 100)).
 
 
-test_get_many_with_listing_info() ->
+test_list_with_listing_info() ->
     ?assertMatch({[], _}, append_list:list(<<"dummy_id">>, 1000)),
     {ok, Id} = append_list:create_structure(10),
     ?assertMatch({[], _}, append_list:list(Id, 0)),
@@ -288,11 +288,13 @@ test_get_max_key_structure_not_sorted() ->
 test_get() ->
     ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(<<"dummy_id">>), 8),
     {ok, Id} = append_list:create_structure(10),
-    ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)),
-    append_list:add(Id, lists:foldl(fun(A, Acc) -> [{A, A} | Acc] end, [], lists:seq(1,100))),
-    ?assertEqual({ok, 8}, append_list:get(Id, 8)),
+    ?assertEqual([], append_list:get(Id, 8)),
+    append_list:add(Id, prepare_batch(1, 100)),
+    ?assertEqual([{8, <<"8">>}], append_list:get(Id, 8)),
+    ?assertEqual(prepare_batch(8, 50), lists:sort(append_list:get(Id, lists:seq(8,50)))),
     append_list:delete(Id, lists:seq(2,99)),
-    ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)).
+    ?assertEqual([], append_list:get(Id, 8)),
+    ?assertEqual([{1, <<"1">>}, {100, <<"100">>}], lists:sort(append_list:get(Id, lists:seq(1,100)))).
 
 
 test_get_structure_not_sorted() ->
@@ -300,9 +302,11 @@ test_get_structure_not_sorted() ->
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
     end, prepare_batch(100, 1, -1)),
-    ?assertEqual({ok, <<"8">>}, append_list:get(Id, 8)),
+    ?assertEqual([{8, <<"8">>}], append_list:get(Id, 8)),
+    ?assertEqual(prepare_batch(8, 50), lists:sort(append_list:get(Id, lists:seq(8,50)))),
     append_list:delete(Id, lists:seq(2, 99)),
-    ?assertEqual(?ERROR_NOT_FOUND, append_list:get(Id, 8)).
+    ?assertEqual([], append_list:get(Id, 8)),
+    ?assertEqual([{1, <<"1">>}, {100, <<"100">>}], lists:sort(append_list:get(Id, lists:seq(1,100)))).
 
 
 test_nodes_created_after_add() ->
