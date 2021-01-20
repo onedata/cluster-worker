@@ -34,6 +34,7 @@ append_list_test_() ->
             {"test_add_only_existing", fun test_add_only_existing_elements/0},
             {"test_add_with_overwrite", fun test_add_with_overwrite/0},
             {"test_list_with_listing_info", fun test_list_with_listing_info/0},
+            {"test_list_start_from_last", fun test_list_start_from_last/0},
             {"test_delete_consecutive_elems_between_nodes", fun test_delete_consecutive_elems_between_nodes/0},
             {"test_delete_non_consecutive_elems_between_nodes", fun test_delete_non_consecutive_elems_between_nodes/0},
             {"test_delete_all_elems_in_first_node", fun test_delete_all_elems_in_first_node/0},
@@ -134,6 +135,21 @@ test_list_with_listing_info() ->
         NewListingInfo
     end, Id, lists:seq(30, 10, -1)),
     {_, ListingInfo} = append_list:list(Id, 1000),
+    ?assertMatch({[], _}, append_list:list(ListingInfo, 100)).
+
+
+test_list_start_from_last() ->
+    ?assertMatch({[], _}, append_list:list(<<"dummy_id">>, 1000)),
+    {ok, Id} = append_list:create_structure(10),
+    ?assertMatch({[], _}, append_list:list(Id, 0, last)),
+    append_list:add(Id, prepare_batch(10, 30)),
+    lists:foldl(fun(X, ListingInfo) ->
+        {Res, NewListingInfo} = append_list:list(ListingInfo, 1, last),
+        ?assertEqual([{X, integer_to_binary(X)}], Res),
+        NewListingInfo
+    end, Id, lists:seq(10, 30)),
+    {Res, ListingInfo} = append_list:list(Id, 1000, last),
+    ?assertEqual(Res, prepare_batch(10, 30)),
     ?assertMatch({[], _}, append_list:list(ListingInfo, 100)).
 
 

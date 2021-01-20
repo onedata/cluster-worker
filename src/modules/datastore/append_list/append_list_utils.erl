@@ -16,7 +16,7 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([adjust_min_on_left/3, adjust_max_on_right/2, get_max_key_in_prev_nodes/1]).
+-export([adjust_min_on_left/3, adjust_max_on_right/2, get_max_key_in_prev_nodes/1, get_starting_node_id/2]).
 
 %%=====================================================================
 %% API
@@ -100,3 +100,8 @@ get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight})
                 _ -> max(MaxInNode, MaxOnRight)
             end
     end.
+
+
+-spec get_starting_node_id(first | last, #sentinel{}) -> append_list:id().
+get_starting_node_id(first, #sentinel{first = First}) -> First;
+get_starting_node_id(last, #sentinel{last = Last}) -> Last.

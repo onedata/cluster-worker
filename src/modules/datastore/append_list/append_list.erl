@@ -59,7 +59,7 @@
 
 %% API
 -export([create_structure/1, delete_structure/1]).
--export([add/2, delete/2, list/2, get/2, get/3, get_highest/1, get_max_key/1]).
+-export([add/2, delete/2, list/2, list/3, get/2, get/3, get_highest/1, get_max_key/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -124,25 +124,34 @@ delete(SentinelId, Elems) ->
     end.
 
 
+- spec list(id() | #listing_info{}, non_neg_integer()) -> {[append_list:elem()], #listing_info{}}.
+list(IdOrListingInfo, Size) ->
+    list(IdOrListingInfo, Size, first).
+
+
 %%--------------------------------------------------------------------
 %% @doc
-%% Lists elements from the beginning (last added). % fixme
+%% Lists elements from the beginning (last added).
+% fixme doc elements returned in arbitrary order
 %% @end
 %%--------------------------------------------------------------------
-- spec list(id() | #listing_info{}, non_neg_integer()) -> {[append_list:elem()], #listing_info{}}.
-list(_, 0) ->
+- spec list(id() | #listing_info{}, non_neg_integer(), first | last) -> 
+    {[append_list:elem()], #listing_info{}}.
+list(_, 0, _StartFrom) ->
     {[], #listing_info{finished = true}};
-list(#listing_info{finished = true}, _Size) ->
+list(#listing_info{finished = true}, _Size, _StartFrom) ->
     {[], #listing_info{finished = true}};
-list(#listing_info{internal_listing_data = ListingData}, Size) ->
+list(#listing_info{internal_listing_data = ListingData}, Size, _StartFrom) ->
     append_list_get:list(ListingData, Size, []);
-list(SentinelId, Size) ->
+list(SentinelId, Size, StartFrom) ->
     case append_list_persistence:get_node(SentinelId) of
-        ?ERROR_NOT_FOUND -> list(SentinelId, 0);
-        #sentinel{first = FirstNodeId} ->
+        ?ERROR_NOT_FOUND -> list(SentinelId, 0, StartFrom);
+        #sentinel{} = Sentinel ->
+            StartingNodeId = append_list_utils:get_starting_node_id(StartFrom, Sentinel), 
             append_list_get:list(#internal_listing_data{
                 structure_id = SentinelId,
-                last_node_id = FirstNodeId
+                last_node_id = StartingNodeId,
+                start_from = StartFrom
             }, Size, [])
     end.
 
@@ -159,11 +168,9 @@ get(SentinelId, Key, StartFrom) when not is_list(Key) ->
 get(SentinelId, Keys, StartFrom) ->
     case append_list_persistence:get_node(SentinelId) of
         ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel -> 
-            StartingNodeId = case StartFrom of
-                first -> Sentinel#sentinel.first;
-                last -> Sentinel#sentinel.last
-            end, append_list_get:get(StartingNodeId, Keys, StartFrom)
+        Sentinel ->
+            StartingNodeId = append_list_utils:get_starting_node_id(StartFrom, Sentinel), 
+            append_list_get:get(StartingNodeId, Keys, StartFrom)
     end.
 
 
