@@ -84,3 +84,10 @@ coverage:
 # Dialyzes the project.
 dialyzer:
 	$(REBAR) dialyzer
+
+##
+## Codetag tracker
+##
+
+codetag_tracker:
+	./bamboos/scripts/codetag_tracker.sh

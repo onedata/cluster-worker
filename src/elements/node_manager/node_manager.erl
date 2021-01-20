@@ -640,10 +640,6 @@ handle_info({nodedown, Node}, State) ->
                 [{nodedown, Node}]);
         true ->
             ok
-        % TODO maybe node_manager should be restarted along with all workers to
-        % avoid desynchronization of modules between nodes.
-%%             ?error("Connection to cluster manager lost, restarting node"),
-%%             throw(connection_to_cm_lost)
     end,
     {noreply, State};
 
