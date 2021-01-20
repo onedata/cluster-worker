@@ -18,7 +18,7 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([list/3, get/2, get_highest/1, get_max_key/1]).
+-export([list/3, get/3, get_highest/1, get_max_key/1]).
 
 %%=====================================================================
 %% API
@@ -68,26 +68,38 @@ list(#internal_listing_data{
     end.
 
 
--spec get(id() | undefined, append_list:key()) -> [append_list:elem()].
-get(undefined, _Keys) ->
+-spec get(id() | undefined, append_list:key(), first | last) -> [append_list:elem()].
+get(undefined, _Keys, _StartFrom) ->
     [];
-get(NodeId, Keys) ->
+get(NodeId, Keys, StartFrom) ->
     case append_list_persistence:get_node(NodeId) of
         ?ERROR_NOT_FOUND -> [];
-        #node{prev = Prev} = Node ->
-            {Selected, RemainingKeys} = select_from_node(Node, Keys),
+        #node{} = Node ->
+            {Selected, RemainingKeys} = select_elems_from_node(Node, Keys, StartFrom),
             case RemainingKeys of
                 [] -> Selected;
-                _ -> Selected ++ get(Prev, RemainingKeys)
+                _ -> Selected ++ get(select_neighbour(StartFrom, Node), RemainingKeys, StartFrom)
             end
     end.
 
 
--spec select_from_node(#node{}, [append_list:key()]) -> {[append_list:elem()], [append_list:key()]}.
-select_from_node(#node{elements = Elements, max_on_right = Max}, Keys) ->
+-spec select_elems_from_node(#node{}, [append_list:key()], first | last) -> 
+    {[append_list:elem()], [append_list:key()]}.
+select_elems_from_node(#node{elements = Elements} = Node, Keys, StartFrom) ->
     Selected = maps:with(Keys, Elements),
     RemainingKeys = Keys -- maps:keys(Selected),
-    {maps:to_list(Selected), [Key || Key <- RemainingKeys, Key =< Max]}.
+    {maps:to_list(Selected), filter_keys(StartFrom, Node, RemainingKeys)}.
+
+
+% fixme
+filter_keys(first, #node{max_on_right = Max}, Keys) ->
+    [Key || Key <- Keys, Key =< Max];
+filter_keys(last, #node{min_on_left = Min}, Keys) ->
+    [Key || Key <- Keys, Key >= Min].
+
+
+select_neighbour(first, #node{prev = Prev}) -> Prev;
+select_neighbour(last, #node{next = Next}) -> Next.
 
 
 -spec get_highest(undefined | id()) -> append_list:elem() | ?ERROR_NOT_FOUND.

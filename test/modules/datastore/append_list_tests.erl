@@ -46,6 +46,8 @@ append_list_test_() ->
             {"test_delete_between_listings", fun test_delete_between_listings/0},
             {"test_get", fun test_get/0},
             {"test_get_structure_not_sorted", fun test_get_structure_not_sorted/0},
+            {"test_get_start_from_last", fun test_get_start_from_last/0},
+            {"test_get_structure_not_sorted_start_from_last", fun test_get_structure_not_sorted_start_from_last/0},
             {"test_get_highest", fun test_get_highest/0},
             {"test_get_highest_structure_not_sorted", fun test_get_highest_structure_not_sorted/0},
             {"test_get_max_key", fun test_get_max_key/0},
@@ -309,6 +311,30 @@ test_get_structure_not_sorted() ->
     ?assertEqual([{1, <<"1">>}, {100, <<"100">>}], lists:sort(append_list:get(Id, lists:seq(1,100)))).
 
 
+test_get_start_from_last() ->
+    ?assertEqual(?ERROR_NOT_FOUND, append_list_persistence:get_node(<<"dummy_id">>), 8),
+    {ok, Id} = append_list:create_structure(10),
+    ?assertEqual([], append_list:get(Id, 8, last)),
+    append_list:add(Id, prepare_batch(1, 100)),
+    ?assertEqual([{8, <<"8">>}], append_list:get(Id, 8, last)),
+    ?assertEqual(prepare_batch(8, 50), lists:sort(append_list:get(Id, lists:seq(8,50), last))),
+    append_list:delete(Id, lists:seq(2,99)),
+    ?assertEqual([], append_list:get(Id, 8, last)),
+    ?assertEqual([{1, <<"1">>}, {100, <<"100">>}], lists:sort(append_list:get(Id, lists:seq(1,100), last))).
+
+
+test_get_structure_not_sorted_start_from_last() ->
+    {ok, Id} = append_list:create_structure(10),
+    lists:foreach(fun(Elem) ->
+        append_list:add(Id, Elem)
+    end, prepare_batch(100, 1, -1)),
+    ?assertEqual([{8, <<"8">>}], append_list:get(Id, 8, last)),
+    ?assertEqual(prepare_batch(8, 50), lists:sort(append_list:get(Id, lists:seq(8,50), last))),
+    append_list:delete(Id, lists:seq(2, 99)),
+    ?assertEqual([], append_list:get(Id, 8, last)),
+    ?assertEqual([{1, <<"1">>}, {100, <<"100">>}], lists:sort(append_list:get(Id, lists:seq(1,100), last))).
+
+
 test_nodes_created_after_add() ->
     {ok, Id} = append_list:create_structure(1),
     ?assertMatch(#sentinel{first = undefined, last = undefined}, append_list_persistence:get_node(Id)),
@@ -325,21 +351,21 @@ test_nodes_created_after_add() ->
 
 
 test_min_on_left_after_add() ->
-    {ok, Id} = append_list:create_structure(1),
-    append_list:add(Id, prepare_batch(1, 10)),
+    {ok, Id} = append_list:create_structure(10),
+    append_list:add(Id, prepare_batch(1, 100)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
-    ExpectedMinsOnLeft = [undefined] ++ lists:seq(10, 2, -1),
+    ExpectedMinsOnLeft = [undefined] ++ lists:seq(91, 11, -10),
     lists:foreach(fun({NodeId, Expected}) ->
         ?assertMatch(#node{min_on_left = Expected}, append_list_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).
 
 
 test_min_on_left_after_add_reversed() ->
-    {ok, Id} = append_list:create_structure(1),
+    {ok, Id} = append_list:create_structure(10),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
-    end, prepare_batch(10, 1, -1)),
+    end, prepare_batch(100, 1, -1)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
     ExpectedMinsOnLeft = [undefined] ++ lists:duplicate(9, 1),
@@ -349,24 +375,24 @@ test_min_on_left_after_add_reversed() ->
 
 
 test_max_on_right_after_add() ->
-    {ok, Id} = append_list:create_structure(1),
-    append_list:add(Id, prepare_batch(1, 10)),
+    {ok, Id} = append_list:create_structure(10),
+    append_list:add(Id, prepare_batch(1, 100)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
-    ExpectedMaxOnRight = lists:seq(9, 1, -1) ++ [undefined],
+    ExpectedMaxOnRight = lists:seq(90, 10, -10) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
         ?assertMatch(#node{max_on_right = Expected}, append_list_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMaxOnRight)).
 
 
 test_max_on_right_after_add_reversed() ->
-    {ok, Id} = append_list:create_structure(1),
+    {ok, Id} = append_list:create_structure(10),
     lists:foreach(fun(Elem) ->
         append_list:add(Id, Elem)
-    end, prepare_batch(10, 1, -1)),
+    end, prepare_batch(100, 1, -1)),
     #sentinel{first = FirstNodeId} = append_list_persistence:get_node(Id),
     NodesIds = get_nodes_ids(FirstNodeId),
-    ExpectedMinsOnLeft = lists:duplicate(9, 10) ++ [undefined],
+    ExpectedMinsOnLeft = lists:duplicate(9, 100) ++ [undefined],
     lists:foreach(fun({NodeId, Expected}) ->
         ?assertMatch(#node{max_on_right = Expected}, append_list_persistence:get_node(NodeId))
     end, lists:zip(NodesIds, ExpectedMinsOnLeft)).

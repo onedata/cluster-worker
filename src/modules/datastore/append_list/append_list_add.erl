@@ -51,7 +51,7 @@ add(Sentinel, FirstNode, Batch) ->
     {#node{}, [append_list:elem()]}.
 add_unique_elements(FirstNode, [] = _Elements, _MaxElemsPerNode) ->
     {FirstNode, []};
-add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, Elements, MaxElemsPerNode) ->
+add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBatch, _} | _] = Elements, MaxElemsPerNode) ->
     ToFill = MaxElemsPerNode - maps:size(ElementsInFirstNode),
     {ElemsToAdd, ElementsTail} = split_list(Elements, ToFill),
     Node = FirstNode#node{
@@ -60,9 +60,9 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, Elements,
             maps:from_list(ElemsToAdd)
         )
     },
-    case ElementsTail of
-        [] -> ok;
-        [{MinInBatch, _} | _] ->
+    case maps:size(ElementsInFirstNode) > 0 andalso MinInBatch > lists:min(maps:keys(ElementsInFirstNode)) of
+        true -> ok;
+        false ->
             % update `min_on_left` value in all nodes that have minimal key greater that minimal 
             % key in batch (may happen when adding elements with lower keys than existing ones)
             case maps:size(ElementsInFirstNode) > 0 andalso lists:min(maps:keys(ElementsInFirstNode)) > MinInBatch of

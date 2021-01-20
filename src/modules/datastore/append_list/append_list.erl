@@ -59,7 +59,7 @@
 
 %% API
 -export([create_structure/1, delete_structure/1]).
--export([add/2, delete/2, list/2, get/2, get_highest/1, get_max_key/1]).
+-export([add/2, delete/2, list/2, get/2, get/3, get_highest/1, get_max_key/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -149,12 +149,21 @@ list(SentinelId, Size) ->
 
 % fixme doc elements returned in arbitrary order
 -spec get(id(), key() | [key()]) -> ?ERROR_NOT_FOUND | [elem()].
-get(SentinelId, Key) when not is_list(Key) ->
-    get(SentinelId, [Key]);
 get(SentinelId, Keys) ->
+    get(SentinelId, Keys, first).
+
+
+-spec get(id(), key() | [key()], first | last) -> ?ERROR_NOT_FOUND | [elem()].
+get(SentinelId, Key, StartFrom) when not is_list(Key) ->
+    get(SentinelId, [Key], StartFrom);
+get(SentinelId, Keys, StartFrom) ->
     case append_list_persistence:get_node(SentinelId) of
         ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel -> append_list_get:get(Sentinel#sentinel.first, Keys)
+        Sentinel -> 
+            StartingNodeId = case StartFrom of
+                first -> Sentinel#sentinel.first;
+                last -> Sentinel#sentinel.last
+            end, append_list_get:get(StartingNodeId, Keys, StartFrom)
     end.
 
 
