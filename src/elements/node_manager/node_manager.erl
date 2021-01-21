@@ -794,10 +794,8 @@ cluster_init_step(?DB_AND_WORKERS_READY) ->
     async;
 cluster_init_step(?START_LISTENERS) ->
     lists:foreach(fun(Module) ->
-        ok = erlang:apply(Module, start, []),
-        ?info("   * ~p started", [Module])
-    end, node_manager:listeners()),
-    ok;
+        ok = erlang:apply(Module, start, [])
+    end, node_manager:listeners());
 cluster_init_step(?CLUSTER_READY) ->
     ?info("Cluster initialized successfully"),
     gen_server2:cast(?NODE_MANAGER_NAME, node_initialized),
