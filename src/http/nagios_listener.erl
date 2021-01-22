@@ -46,12 +46,17 @@ port() ->
 %%--------------------------------------------------------------------
 -spec start() -> ok | {error, Reason :: term()}.
 start() ->
-    {ok, NbAcceptors} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_number_of_acceptors),
-    {ok, MaxKeepAlive} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_max_keepalive),
-    {ok, Timeout} = application:get_env(?CLUSTER_WORKER_APP_NAME,
-        http_request_timeout),
+    ?info("Starting '~p' server...", [?NAGIOS_LISTENER]),
+
+    {ok, NbAcceptors} = application:get_env(
+        ?CLUSTER_WORKER_APP_NAME, http_number_of_acceptors
+    ),
+    {ok, MaxKeepAlive} = application:get_env(
+        ?CLUSTER_WORKER_APP_NAME, http_max_keepalive
+    ),
+    {ok, Timeout} = application:get_env(
+        ?CLUSTER_WORKER_APP_NAME, http_request_timeout
+    ),
 
     Dispatch = cowboy_router:compile([
         {'_', [
@@ -71,8 +76,11 @@ start() ->
             request_timeout => timer:seconds(Timeout)
         }),
     case Result of
-        {ok, _} -> ok;
-        _ -> Result
+        {ok, _} ->
+            ?info("Server '~p' started successfully", [?NAGIOS_LISTENER]);
+        _ ->
+            ?error("Could not start server '~p' - ~p", [?NAGIOS_LISTENER, Result]),
+            Result
     end.
 
 
@@ -83,12 +91,13 @@ start() ->
 %%--------------------------------------------------------------------
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
+    ?info("Stopping '~p' server...", [?NAGIOS_LISTENER]),
+
     case cowboy:stop_listener(?NAGIOS_LISTENER) of
         ok ->
-            ok;
+            ?info("Server '~p' stopped", [?NAGIOS_LISTENER]);
         {error, Error} ->
-            ?error("Error on stopping listener ~p: ~p",
-                [?NAGIOS_LISTENER, Error]),
+            ?error("Error on stopping server ~p: ~p", [?NAGIOS_LISTENER, Error]),
             {error, nagios_stop_error}
     end.
 
