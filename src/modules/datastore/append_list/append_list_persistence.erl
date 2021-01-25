@@ -12,7 +12,7 @@
 -module(append_list_persistence).
 -author("Michal Stanisz").
 
--include("modules/datastore/datastore_append_list.hrl").
+-include("modules/datastore/append_list.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 %% API

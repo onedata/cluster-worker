@@ -12,7 +12,7 @@
 -module(append_list_utils).
 -author("Michal Stanisz").
 
--include("modules/datastore/datastore_append_list.hrl").
+-include("modules/datastore/append_list.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 %% API
@@ -31,7 +31,7 @@
 %% see `append_list` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_min_on_left(id() | undefined, append_list:key(), CheckToTheEnd :: boolean()) -> ok.
+-spec adjust_min_on_left(append_list:id() | undefined, append_list:key(), CheckToTheEnd :: boolean()) -> ok.
 adjust_min_on_left(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
 adjust_min_on_left(#node{} = Node, CurrentMin, CheckToTheEnd) ->
@@ -61,7 +61,7 @@ adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
 %% see `append_list` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_max_on_right(undefined | append_list:id() | #node{}, append_list:key()) -> ok.
+-spec adjust_max_on_right(undefined | append_list:id() | #node{}, append_list:key() | undefined) -> ok.
 adjust_max_on_right(undefined, _) ->
     ok;
 adjust_max_on_right(#node{} = Node, CurrentMax) ->
@@ -88,7 +88,7 @@ adjust_max_on_right(NodeId, CurrentMax) ->
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_key_in_prev_nodes(undefined | #node{}) -> append_list:key().
+-spec get_max_key_in_prev_nodes(undefined | #node{}) -> append_list:key() | undefined.
 get_max_key_in_prev_nodes(undefined) -> undefined;
 get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight}) ->
     case maps:size(Elements) of
@@ -102,6 +102,6 @@ get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight})
     end.
 
 
--spec get_starting_node_id(first | last, #sentinel{}) -> append_list:id().
-get_starting_node_id(first, #sentinel{first = First}) -> First;
-get_starting_node_id(last, #sentinel{last = Last}) -> Last.
+-spec get_starting_node_id(append_list_get:direction(), #sentinel{}) -> append_list:id() | undefined.
+get_starting_node_id(back_from_newest, #sentinel{first = First}) -> First;
+get_starting_node_id(forward_from_oldest, #sentinel{last = Last}) -> Last.
