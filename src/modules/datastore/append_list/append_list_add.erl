@@ -156,7 +156,8 @@ overwrite_existing_elements_in_prev_nodes(#node{} = Node, [{MinInBatch, _} | _] 
             {FinalRemainingElements, Overwritten ++ OverwrittenInPrev}
     end;
 overwrite_existing_elements_in_prev_nodes(NodeId, Batch) ->
-    overwrite_existing_elements_in_prev_nodes(append_list_persistence:get_node(NodeId), Batch).
+    {ok, Node} = append_list_persistence:get_node(NodeId),
+    overwrite_existing_elements_in_prev_nodes(Node, Batch).
 
 
 %% @private

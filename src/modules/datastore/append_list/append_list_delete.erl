@@ -98,7 +98,7 @@ delete_elements_in_nodes(Sentinel, #node{} = CurrentNode, ElementsToDelete, Prev
             delete_elements_in_nodes(Sentinel, NextNodeOrId, NewElementsToDelete, UpdatedCurrentNode)
     end;
 delete_elements_in_nodes(Sentinel, CurrentNodeId, ElementsToDelete, PrevNode) when is_binary(CurrentNodeId)->
-    CurrentNode = append_list_persistence:get_node(CurrentNodeId),
+    {ok, CurrentNode} = append_list_persistence:get_node(CurrentNodeId),
     delete_elements_in_nodes(Sentinel, CurrentNode, ElementsToDelete, PrevNode).
 
 
@@ -119,12 +119,12 @@ delete_node(Sentinel, #node{node_id = NodeId}, undefined, #node{node_id = PrevNo
 delete_node(Sentinel, #node{node_id = NodeId}, NextNodeId, undefined) ->
     % deleting last node
     append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = NextNodeId}),
-    #node{} = NextNode = append_list_persistence:get_node(NextNodeId),
+    {ok, #node{} = NextNode} = append_list_persistence:get_node(NextNodeId),
     UpdatedNextNode = NextNode#node{prev = undefined},
     append_list_persistence:delete_node(NodeId),
     {undefined, UpdatedNextNode};
 delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNode) ->
-    #node{} = NextNode = append_list_persistence:get_node(NextNodeId),
+    {ok, #node{} = NextNode} = append_list_persistence:get_node(NextNodeId),
     UpdatedNextNode = NextNode#node{
         prev = PrevNode#node.node_id
     },
@@ -141,7 +141,7 @@ delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNo
 update_next_node_pointer(undefined, _CurrentNodeId) ->
     undefined;
 update_next_node_pointer(NextNodeId, CurrentNodeId) ->
-    NextNode = append_list_persistence:get_node(NextNodeId),
+    {ok, NextNode} = append_list_persistence:get_node(NextNodeId),
     NextNode#node{
         prev = CurrentNodeId
     }.
@@ -151,8 +151,11 @@ update_next_node_pointer(NextNodeId, CurrentNodeId) ->
 -spec handle_deletion_finished(#node{}, #node{} | undefined, append_list:key()) -> ok.
 handle_deletion_finished(#node{node_id = NodeId, prev = Prev} = Node, #node{node_id = NodeId}, MaxOnRightBefore) ->
     PrevNode = case Prev of
-        undefined -> undefined;
-        _ -> append_list_persistence:get_node(Prev)
+        undefined -> 
+            undefined;
+        _ -> 
+            {ok, N} = append_list_persistence:get_node(Prev),
+            N
     end,
     handle_deletion_finished(Node, PrevNode, MaxOnRightBefore);
 handle_deletion_finished(CurrentNode, PrevNode, MaxOnRightBefore) ->

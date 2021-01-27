@@ -106,11 +106,11 @@ create(MaxElementsPerNode) ->
 -spec destroy(id()) -> ok | {error, term()}.
 destroy(StructId) ->
     case append_list_persistence:get_node(StructId) of
-        ?ERROR_NOT_FOUND -> ok;
-        Sentinel ->
+        {ok, Sentinel} ->
             delete_all_nodes(Sentinel#sentinel.first),
             true = append_list_persistence:delete_node(Sentinel#sentinel.structure_id),
-            ok
+            ok;
+        ?ERROR_NOT_FOUND -> ok
     end.
 
 
@@ -125,9 +125,10 @@ destroy(StructId) ->
 insert_elements(_StructureId, []) ->
     ok;
 insert_elements(StructureId, Batch) ->
-    case fetch_or_create_first_node(StructureId) of
-        {ok, Sentinel, FirstNode} ->
-            append_list_add:insert_elements(Sentinel, FirstNode, utils:ensure_list(Batch));
+    case append_list_persistence:get_node(StructureId) of
+        {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
+            {ok, UpdatedSentinel, FirstNode} = fetch_or_create_first_node(Sentinel, FirstNodeId),
+            append_list_add:insert_elements(UpdatedSentinel, FirstNode, utils:ensure_list(Batch));
         {error, _} = Error -> Error
     end.
 
@@ -141,10 +142,11 @@ insert_elements(StructureId, Batch) ->
 %%--------------------------------------------------------------------
 -spec remove_elements(id(), key() | [key()]) -> ok | {error, term()}.
 remove_elements(StructureId, Elements) ->
-    case fetch_last_node(StructureId) of
-        {ok, Sentinel, LastNode} ->
+    case append_list_persistence:get_node(StructureId) of
+        {ok, #sentinel{last = undefined}} -> ok;
+        {ok, #sentinel{last = Last} = Sentinel} ->
+            {ok, LastNode} = append_list_persistence:get_node(Last),
             append_list_delete:delete_elements(Sentinel, LastNode, utils:ensure_list(Elements));
-        undefined -> ok;
         {error, _} = Error -> Error
     end.
 
@@ -186,37 +188,37 @@ fold_elements(Id, Size, Direction, FoldFun) when is_binary(Id) ->
 %% If elements were not added in recommended order there is no guarantee about returned elements order.
 %% @end
 %%--------------------------------------------------------------------
--spec get_elements(id(), key() | [key()]) -> [element()] | {error, term()}.
+-spec get_elements(id(), key() | [key()]) -> {ok, [element()]} | {error, term()}.
 get_elements(StructureId, Keys) ->
     get_elements(StructureId, Keys, back_from_newest).
 
 
 -spec get_elements(id(), key() | [key()], append_list_get:direction()) -> 
-    [element()] | {error, term()}.
-get_elements(StructureId, Key, StartFrom) when not is_list(Key) ->
-    get_elements(StructureId, [Key], StartFrom);
-get_elements(StructureId, Keys, StartFrom) ->
+    {ok, [element()]} | {error, term()}.
+get_elements(StructureId, Key, Direction) when not is_list(Key) ->
+    get_elements(StructureId, [Key], Direction);
+get_elements(StructureId, Keys, Direction) ->
     case append_list_persistence:get_node(StructureId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel ->
-            StartingNodeId = append_list_utils:get_starting_node_id(StartFrom, Sentinel), 
-            append_list_get:get_elements(StartingNodeId, Keys, StartFrom)
+        {ok, Sentinel} ->
+            StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel), 
+            {ok, append_list_get:get_elements(StartingNodeId, Keys, Direction)};
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
     end.
 
 
--spec get_highest(id()) -> element() | undefined.
+-spec get_highest(id()) -> {ok, element()} | {error, term()}.
 get_highest(StructureId) ->
     case append_list_persistence:get_node(StructureId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel -> append_list_get:get_highest(Sentinel#sentinel.first)
+        {ok, Sentinel} -> append_list_get:get_highest(Sentinel#sentinel.first);
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
     end.
 
 
--spec get_max_key(id()) -> key() | undefined.
+-spec get_max_key(id()) -> {ok, key()} | {error, term()}.
 get_max_key(StructureId) ->
     case append_list_persistence:get_node(StructureId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Sentinel -> append_list_get:get_max_key(Sentinel#sentinel.first)
+        {ok, Sentinel} -> append_list_get:get_max_key(Sentinel#sentinel.first);
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
     end.
 
 %%=====================================================================
@@ -224,37 +226,24 @@ get_max_key(StructureId) ->
 %%=====================================================================
 
 %% @private
--spec delete_all_nodes(id() | undefined) -> ok.
+-spec delete_all_nodes(node_id() | undefined) -> ok.
 delete_all_nodes(undefined) ->
     ok;
 delete_all_nodes(NodeId) ->
-    #node{prev = Prev} = append_list_persistence:get_node(NodeId),
+    {ok, #node{prev = Prev}} = append_list_persistence:get_node(NodeId),
     append_list_persistence:delete_node(NodeId),
     delete_all_nodes(Prev).
 
 
 %% @private
--spec fetch_or_create_first_node(id()) -> {ok, #sentinel{}, #node{}} | {error, term()}.
-fetch_or_create_first_node(StructureId) ->
-    case append_list_persistence:get_node(StructureId) of
-        ?ERROR_NOT_FOUND ->
-            ?ERROR_NOT_FOUND;
-        #sentinel{first = undefined} = Sentinel ->
-            NodeId = datastore_key:new(),
-            Sentinel1 = Sentinel#sentinel{first = NodeId, last = NodeId},
-            append_list_persistence:save_node(StructureId, Sentinel1),
-            Node = #node{node_id = NodeId, structure_id = StructureId, node_number = 0},
-            {ok, Sentinel1, Node};
-        #sentinel{first = FirstNodeId} = Sentinel ->
-            {ok, Sentinel, append_list_persistence:get_node(FirstNodeId)}
-    end.
-
-
-%% @private
--spec fetch_last_node(id()) -> {ok, #sentinel{}, #node{}} | undefined | {error, term()} .
-fetch_last_node(StructureId) ->
-    case append_list_persistence:get_node(StructureId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        #sentinel{last = undefined} -> undefined;
-        #sentinel{last = Last} = Sentinel -> {ok, Sentinel, append_list_persistence:get_node(Last)}
-    end.
+-spec fetch_or_create_first_node(#sentinel{}, node_id() | undefined) -> 
+    {ok, #sentinel{}, #node{}} | {error, term()}.
+fetch_or_create_first_node(#sentinel{structure_id = StructureId} = Sentinel, undefined) ->
+    NodeId = datastore_key:new(),
+    Sentinel1 = Sentinel#sentinel{first = NodeId, last = NodeId},
+    append_list_persistence:save_node(StructureId, Sentinel1),
+    FirstNode = #node{node_id = NodeId, structure_id = StructureId, node_number = 0},
+    {ok, Sentinel1, FirstNode};
+fetch_or_create_first_node(Sentinel, FirstNodeId) ->
+    {ok, FirstNode} = append_list_persistence:get_node(FirstNodeId),
+    {ok, Sentinel, FirstNode}.

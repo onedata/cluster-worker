@@ -51,57 +51,59 @@ fold(#listing_state{} = State, Size, _Direction, FoldFun) ->
     prepare_fold_result(continue_fold(State, Size, FoldFun, []));
 fold(StructureId, Size, Direction, FoldFun) when is_binary(StructureId) ->
     case append_list_persistence:get_node(StructureId) of
-        {error, _} = Error -> Error;
-        #sentinel{} = Sentinel ->
+        {ok, #sentinel{} = Sentinel} ->
             StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel),
             prepare_fold_result(continue_fold(#listing_state{
                 structure_id = StructureId,
                 last_node_id = StartingNodeId,
                 direction = Direction
-            }, Size, FoldFun, []))
+            }, Size, FoldFun, []));
+        {error, _} = Error -> Error
     end.
 
 
--spec get_elements(append_list:id() | undefined, [append_list:key()], direction()) -> [append_list:element()].
+-spec get_elements(append_list:id() | undefined, [append_list:key()], direction()) -> 
+    [append_list:element()].
 get_elements(undefined, _Keys, _Direction) ->
     [];
 get_elements(NodeId, Keys, Direction) ->
     case append_list_persistence:get_node(NodeId) of
-        ?ERROR_NOT_FOUND -> [];
-        #node{} = Node ->
+        {ok, #node{} = Node} ->
             {Selected, RemainingKeys} = select_elements_from_node(Node, Keys, Direction),
             case RemainingKeys of
                 [] -> Selected;
-                _ -> Selected ++ get_elements(select_neighbour(Direction, Node), RemainingKeys, Direction)
-            end
+                _ -> Selected ++ get_elements(
+                    select_neighbour(Direction, Node), RemainingKeys, Direction)
+            end;
+        ?ERROR_NOT_FOUND -> []
     end.
 
 
--spec get_highest(undefined | append_list:id()) -> append_list:element() | ?ERROR_NOT_FOUND.
+-spec get_highest(undefined | append_list:id()) -> {ok, append_list:element()} | {error, term()}.
 get_highest(undefined) -> ?ERROR_NOT_FOUND;
 get_highest(NodeId) ->
     case append_list_persistence:get_node(NodeId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev} ->
+        {ok, #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev}} ->
             case {Prev == undefined, maps:size(Elements) > 0 andalso lists:max(maps:keys(Elements))} of
                 {true, false} -> ?ERROR_NOT_FOUND;
-                {true, MaxInNode} -> {MaxInNode, maps:get(MaxInNode, Elements)};
-                {false, MaxInNode} when MaxInNode > MaxOnRight ->
-                    {MaxInNode, maps:get(MaxInNode, Elements)};
+                {true, MaxKeyInNode} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
+                {false, MaxKeyInNode} when MaxKeyInNode > MaxOnRight ->
+                    {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
                 {false, _} -> get_highest(Prev)
-            end
+            end;
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
     end.
 
 
--spec get_max_key(undefined | append_list:id()) -> append_list:key() | ?ERROR_NOT_FOUND.
+-spec get_max_key(undefined | append_list:id()) -> {ok, append_list:key()} | {error, term()}.
 get_max_key(undefined) -> ?ERROR_NOT_FOUND;
 get_max_key(NodeId) ->
     case append_list_persistence:get_node(NodeId) of
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND;
-        Node -> case append_list_utils:get_max_key_in_prev_nodes(Node) of
+        {ok, Node} -> case append_list_utils:get_max_key_in_prev_nodes(Node) of
             undefined -> ?ERROR_NOT_FOUND;
-            Res -> Res
-        end
+            Res -> {ok, Res}
+        end;
+        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
     end.
 
 %%=====================================================================
@@ -194,18 +196,11 @@ find_node(State) ->
         last_node_id = NodeId, 
         last_node_number = LastNodeNum, 
         structure_id = StructId, 
-        direction = StartFrom
+        direction = Direction
     } = State,
     case append_list_persistence:get_node(NodeId) of
-        ?ERROR_NOT_FOUND ->
-            StartingNodeId = append_list_utils:get_starting_node_id(
-                StartFrom, append_list_persistence:get_node(StructId)),
-            case StartingNodeId of
-                undefined -> ?ERROR_NOT_FOUND;
-                _ -> find_node(State#listing_state{last_node_id = StartingNodeId})
-            end;
-        #node{node_number = NodeNum} = Node  ->
-            NodeFound = case StartFrom of
+        {ok, #node{node_number = NodeNum} = Node}  ->
+            NodeFound = case Direction of
                 back_from_newest -> not (is_integer(LastNodeNum) andalso NodeNum > LastNodeNum);
                 forward_from_oldest -> not (is_integer(LastNodeNum) andalso NodeNum < LastNodeNum)
             end,
@@ -213,8 +208,15 @@ find_node(State) ->
                 true -> Node;
                 false ->
                     find_node(State#listing_state{
-                        last_node_id = select_neighbour(StartFrom, Node)
+                        last_node_id = select_neighbour(Direction, Node)
                     })
+            end;
+        ?ERROR_NOT_FOUND ->
+            {ok, Sentinel} = append_list_persistence:get_node(StructId),
+            StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel),
+            case StartingNodeId of
+                undefined -> ?ERROR_NOT_FOUND;
+                _ -> find_node(State#listing_state{last_node_id = StartingNodeId})
             end
     end.
 
@@ -235,10 +237,10 @@ apply_fold_fun(FoldFun, OriginalElements) ->
 %% @private
 -spec select_elements_from_node(#node{}, [append_list:key()], direction()) ->
     {[append_list:element()], [append_list:key()]}.
-select_elements_from_node(#node{elements = Elements} = Node, Keys, StartFrom) ->
+select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
     Selected = maps:with(Keys, Elements),
     RemainingKeys = Keys -- maps:keys(Selected),
-    {maps:to_list(Selected), filter_keys(StartFrom, Node, RemainingKeys)}.
+    {maps:to_list(Selected), filter_keys(Direction, Node, RemainingKeys)}.
 
 
 %% @private

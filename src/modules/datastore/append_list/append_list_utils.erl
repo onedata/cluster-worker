@@ -49,7 +49,7 @@ adjust_min_on_left(#node{} = Node, CurrentMin, CheckToTheEnd) ->
         _ -> ok
     end;
 adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
-    Node = append_list_persistence:get_node(NodeId),
+    {ok, Node} = append_list_persistence:get_node(NodeId),
     adjust_min_on_left(Node, CurrentMin, CheckToTheEnd).
 
 
@@ -77,7 +77,7 @@ adjust_max_on_right(#node{} = Node, CurrentMax) ->
             end
     end;
 adjust_max_on_right(NodeId, CurrentMax) ->
-    Node = append_list_persistence:get_node(NodeId),
+    {ok, Node} = append_list_persistence:get_node(NodeId),
     adjust_max_on_right(Node, CurrentMax).
 
 

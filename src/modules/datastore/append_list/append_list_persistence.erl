@@ -38,7 +38,7 @@ destroy_ets() ->
 get_node(Id) ->
 %%    io:format("get~n"),
     case ets:lookup(?MODULE, Id) of
-        [{Id, Node}] -> Node;
+        [{Id, Node}] -> {ok, Node};
         [] -> ?ERROR_NOT_FOUND
     end.
 
