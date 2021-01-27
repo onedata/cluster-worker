@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module contains functions that are responsible for adding new 
-%%% elements to sliding_proplist. For more details about this structure 
+%%% elements to sliding_proplist. For more details about sliding proplist
 %%% consult `sliding_proplist` module doc.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -15,7 +15,6 @@
 -author("Michal Stanisz").
 
 -include("modules/datastore/sliding_proplist.hrl").
--include_lib("ctool/include/errors.hrl").
 
 %% API
 -export([insert_elements/3]).
@@ -24,15 +23,8 @@
 %% API
 %%=====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Adds elements given in Batch to the beginning of a structure. 
-%% Elements in structure should be sorted ascending by Key and Keys should 
-%% be unique. Returns list of keys that were overwritten (in reversed order).
-%% @end
-%%--------------------------------------------------------------------
 -spec insert_elements(sliding_proplist:sentinel(), sliding_proplist:list_node(), [sliding_proplist:element()]) -> 
-    {ok, [sliding_proplist:element()]}.
+    {ok, [sliding_proplist:key()]}.
 insert_elements(Sentinel, FirstNode, Batch) ->
     #sentinel{max_elements_per_node = MaxElementsPerNode} = Sentinel,
 
@@ -79,7 +71,7 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBa
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Adds elements given in Batch to the beginning of a structure. 
+%% Adds elements given in Batch to the beginning of a sliding proplist instance. 
 %% Creates new nodes if necessary.
 %% @end
 %%--------------------------------------------------------------------

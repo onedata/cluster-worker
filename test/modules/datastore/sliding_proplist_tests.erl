@@ -16,7 +16,6 @@
 
 -include("modules/datastore/sliding_proplist.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("ctool/include/errors.hrl").
 
 
 %%%===================================================================
@@ -91,9 +90,9 @@ test_create_and_destroy() ->
 
 
 test_add_elements_one_node() ->
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, prepare_batch(1, 100))),
-    ?assertMatch(?ERROR_NOT_FOUND, sliding_proplist:fold_elements(<<"dummy_id">>, 100)),
-    ?assertEqual(ok, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, [])),
+    ?assertEqual({error, not_found}, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, prepare_batch(1, 100))),
+    ?assertMatch({error, not_found}, sliding_proplist:fold_elements(<<"dummy_id">>, 100)),
+    ?assertEqual({error, not_found}, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, [])),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual({ok, []}, sliding_proplist:insert_unique_sorted_elements(Id, [{1, <<"1">>}])),
     ?assertMatch({done, [{1, <<"1">>}]}, sliding_proplist:fold_elements(Id, 100)).
@@ -129,7 +128,7 @@ test_add_with_overwrite() ->
 
 
 test_list_with_listing_state() ->
-    ?assertMatch(?ERROR_NOT_FOUND, sliding_proplist:fold_elements(<<"dummy_id">>, 1000)),
+    ?assertMatch({error, not_found}, sliding_proplist:fold_elements(<<"dummy_id">>, 1000)),
     {ok, Id} = sliding_proplist:create(10),
     ?assertMatch({done, []}, sliding_proplist:fold_elements(Id, 0)),
     ?assertMatch({done, []}, sliding_proplist:fold_elements(Id, 10)),
@@ -143,7 +142,7 @@ test_list_with_listing_state() ->
 
 
 test_list_with_listing_state_start_from_last() ->
-    ?assertMatch(?ERROR_NOT_FOUND, sliding_proplist:fold_elements(<<"dummy_id">>, 1000)),
+    ?assertMatch({error, not_found}, sliding_proplist:fold_elements(<<"dummy_id">>, 1000)),
     {ok, Id} = sliding_proplist:create(10),
     ?assertMatch({done, []}, sliding_proplist:fold_elements(Id, 0, forward_from_oldest)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
@@ -189,7 +188,7 @@ test_list_with_fold_fun_stop() ->
 
 
 test_delete_consecutive_elems_between_nodes() ->
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:remove_elements(<<"dummy_id">>, [])),
+    ?assertEqual({error, not_found}, sliding_proplist:remove_elements(<<"dummy_id">>, [])),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual(ok, sliding_proplist:remove_elements(Id, [])),
     ?assertEqual(ok, sliding_proplist:remove_elements(Id, [1,2,3,4,5])),
@@ -291,9 +290,9 @@ test_delete_between_listings() ->
 
 
 test_get_highest() ->
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:get_highest(<<"dummy_id">>)),
+    ?assertEqual({error, not_found}, sliding_proplist:get_highest(<<"dummy_id">>)),
     {ok, Id} = sliding_proplist:create(10),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:get_highest(Id)),
+    ?assertEqual({error, not_found}, sliding_proplist:get_highest(Id)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     ?assertEqual({ok, {100, <<"100">>}}, sliding_proplist:get_highest(Id)),
     sliding_proplist:remove_elements(Id, lists:seq(2, 99)),
@@ -301,7 +300,7 @@ test_get_highest() ->
     sliding_proplist:remove_elements(Id, [100]),
     ?assertEqual({ok, {1, <<"1">>}}, sliding_proplist:get_highest(Id)),
     sliding_proplist:remove_elements(Id, [1]),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:get_highest(Id)).
+    ?assertEqual({error, not_found}, sliding_proplist:get_highest(Id)).
 
     
 test_get_highest_structure_not_sorted() ->
@@ -315,9 +314,9 @@ test_get_highest_structure_not_sorted() ->
 
 
 test_get_max_key() ->
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:get_max_key(<<"dummy_id">>)),
+    ?assertEqual({error, not_found}, sliding_proplist:get_max_key(<<"dummy_id">>)),
     {ok, Id} = sliding_proplist:create(10),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:get_max_key(Id)),
+    ?assertEqual({error, not_found}, sliding_proplist:get_max_key(Id)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     ?assertEqual({ok, 100}, sliding_proplist:get_max_key(Id)),
     sliding_proplist:remove_elements(Id, lists:seq(2, 99)),
@@ -325,7 +324,7 @@ test_get_max_key() ->
     sliding_proplist:remove_elements(Id, [100]),
     ?assertEqual({ok, 1}, sliding_proplist:get_max_key(Id)),
     sliding_proplist:remove_elements(Id, [1]),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist:get_max_key(Id)).
+    ?assertEqual({error, not_found}, sliding_proplist:get_max_key(Id)).
 
 
 test_get_max_key_structure_not_sorted() ->
@@ -339,7 +338,7 @@ test_get_max_key_structure_not_sorted() ->
 
 
 test_get_elements() ->
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(<<"dummy_id">>), 8),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(<<"dummy_id">>), 8),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual({ok, []}, sliding_proplist:get_elements(Id, 8)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
@@ -367,7 +366,7 @@ test_get_elements_structure_not_sorted() ->
 
 
 test_get_elements_forward_from_oldest() ->
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(<<"dummy_id">>), 8),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(<<"dummy_id">>), 8),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual({ok, []}, sliding_proplist:get_elements(Id, 8, forward_from_oldest)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
@@ -502,11 +501,11 @@ test_nodes_deleted_after_delete_elems() ->
     {ok, #sentinel{first = FirstNodeId}} = sliding_proplist_persistence:get_node(Id),
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
     sliding_proplist:remove_elements(Id, [2]),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(Node2)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node2)),
     ?assertMatch({ok, #node{next = Node1}}, sliding_proplist_persistence:get_node(Node3)),
     ?assertMatch({ok, #node{prev = Node3}}, sliding_proplist_persistence:get_node(Node1)),
     sliding_proplist:remove_elements(Id, [3]),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(Node1)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node1)),
     ?assertMatch({ok, #node{next = undefined}}, sliding_proplist_persistence:get_node(Node3)),
     ?assertMatch({ok, #sentinel{first = Node3, last = Node3}}, sliding_proplist_persistence:get_node(Id)).
 
@@ -518,11 +517,11 @@ test_nodes_after_delete_elems_from_last_node() ->
     [Node1, Node2, Node3] = get_nodes_ids(FirstNodeId),
     sliding_proplist:remove_elements(Id, [1]),
     ?assertMatch({ok, #node{prev = undefined, next = Node1}}, sliding_proplist_persistence:get_node(Node2)),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(Node3)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node3)),
     ?assertMatch({ok, #node{prev = Node2, next = undefined}}, sliding_proplist_persistence:get_node(Node1)),
     sliding_proplist:remove_elements(Id, [3]),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(Node3)),
-    ?assertEqual(?ERROR_NOT_FOUND, sliding_proplist_persistence:get_node(Node1)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node3)),
+    ?assertEqual({error, not_found}, sliding_proplist_persistence:get_node(Node1)),
     ?assertMatch({ok, #node{next = undefined, prev = undefined}}, sliding_proplist_persistence:get_node(Node2)),
     ?assertMatch({ok, #sentinel{first = Node2, last = Node2}}, sliding_proplist_persistence:get_node(Id)).
 

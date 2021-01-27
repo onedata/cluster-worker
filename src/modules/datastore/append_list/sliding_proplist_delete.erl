@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module contains functions that are responsible for deletion of 
-%%% elements in sliding_proplist. For more details about this structure 
+%%% elements in sliding_proplist. For more details about sliding proplist 
 %%% consult `sliding_proplist` module doc.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -15,7 +15,6 @@
 -author("Michal Stanisz").
 
 -include("modules/datastore/sliding_proplist.hrl").
--include_lib("ctool/include/errors.hrl").
 
 %% API
 -export([delete_elements/3]).
@@ -27,7 +26,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes given elements from structure. 
+%% Deletes given elements from a sliding proplist instance. 
 %% Elements that were not found are ignored.
 %% @end
 %%--------------------------------------------------------------------

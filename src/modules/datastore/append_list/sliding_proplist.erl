@@ -26,7 +26,7 @@
 %%% This structure stores elements in arbitrary order, i.e not necessarily sorted.
 %%% Inserting new elements is only allowed to the beginning of the list. New elements 
 %%% provided in batch must be sorted ascending by key and keys must be unique.
-%%% This requirement is due to implemented optimizations.
+%%% This requirement is due to optimizations when creating new nodes.
 %%% It is highly recommended that each new element have key greater 
 %%% than those already existing (if not this structure might be inefficient).
 %%% Adding elements with the existing keys will result in overwriting of 
@@ -59,7 +59,6 @@
 -author("Michal Stanisz").
 
 -include("modules/datastore/sliding_proplist.hrl").
--include_lib("ctool/include/errors.hrl").
 
 %% API
 -export([
@@ -80,11 +79,11 @@
 % id that allows for finding entities (nodes, sentinel) in persistence.
 -type id() :: binary().
 -type node_id() :: binary(). % fixme + opis powyżej
-% this type represents keys of elements which are stored as data in this structure.
+% this type represents keys of elements which are stored as data.
 -type key() :: integer().
-% this type represents values of elements which are stored as data in this structure.
+% this type represents values of elements which are stored as data.
 -type value() :: binary().
-% representation of one element in structure (key-value pair)
+% representation of one element in sliding proplist (key-value pair)
 -type element() :: {key(), value()}.
 % Each new node have number exactly 1 higher than previous one. 
 % Because of that number of next node is always higher that number of prev node.
@@ -119,19 +118,18 @@ destroy(StructId) ->
             delete_all_nodes(Sentinel#sentinel.first),
             true = sliding_proplist_persistence:delete_node(Sentinel#sentinel.structure_id),
             ok;
-        ?ERROR_NOT_FOUND -> ok
+        {error, not_found} -> ok
     end.
 
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Adds a Batch of elements to the beginning of a sliding proplist instance.
-%% Returns keys of elements that were overwritten (in arbitrary order).
+%% Returns unordered list of keys that were overwritten.
 %% @end
 %%--------------------------------------------------------------------
--spec insert_unique_sorted_elements(id(), [element()] | element()) -> ok | {error, term()}.
-insert_unique_sorted_elements(_StructureId, []) ->
-    ok;
+-spec insert_unique_sorted_elements(id(), [element()] | element()) -> 
+    {ok, OverwrittenKeys :: [key()]} | {error, term()}.
 insert_unique_sorted_elements(StructureId, Batch) ->
     case sliding_proplist_persistence:get_node(StructureId) of
         {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
@@ -143,9 +141,9 @@ insert_unique_sorted_elements(StructureId, Batch) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Deletes given elements from the structure. 
+%% Deletes given elements from the sliding proplist instance. 
 %% Elements that were not found are ignored.
-%% Returns ?ERROR_NOT_FOUND when there is no such structure. 
+%% Returns {error, not_found} when there is no such instance.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_elements(id(), key() | [key()]) -> ok | {error, term()}.
@@ -161,7 +159,7 @@ remove_elements(StructureId, Elements) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Lists elements in structure. When elements where added as recommended (i.e with increasing keys,  % fixme lists
+%% Folds on elements in sliding proplist instance. When elements where added as recommended (i.e with increasing keys,  % fixme lists
 %% consult module doc) elements are listed in the following order: 
 %%  * starting from beginning (StartFrom = first) -> returns elements reversed to adding order (descending) % fixme Startfrom
 %%  * starting from end (StartFrom = last) -> return elements in the same order as they were added (ascending) 
@@ -173,13 +171,13 @@ remove_elements(StructureId, Elements) ->
 fold_elements(Id, Size) when is_binary(Id) ->
     fold_elements(Id, Size, back_from_newest);
 fold_elements(State, Size) ->
-    fold_elements(State, Size, fun(Elem) -> {ok, Elem} end).
+    fold_elements(State, Size, ?DEFAULT_FOLD_FUN).
 
 -spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size(), 
     sliding_proplist_get:direction() | sliding_proplist_get:fold_fun()) ->
     sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
-    fold_elements(Id, Size, Direction, fun(Elem) -> {ok, Elem} end);
+    fold_elements(Id, Size, Direction, ?DEFAULT_FOLD_FUN);
 fold_elements(Id, Size, FoldFun) when is_binary(Id) and is_function(FoldFun, 1) ->
     fold_elements(Id, Size, back_from_newest, FoldFun);
 fold_elements(State, Size, FoldFun) when is_function(FoldFun, 1) ->
@@ -198,7 +196,7 @@ fold_elements(Id, Size, Direction, FoldFun) when is_binary(Id) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Retrieves elements value from the structure. When elements where added as recommended (i.e with increasing keys, 
+%% Retrieves elements value from the sliding proplist instance. When elements where added as recommended (i.e with increasing keys, 
 %% consult module doc) elements are returned in the following order: 
 %%  * starting from beginning (StartFrom = first) -> returns elements reversed to adding order (descending)
 %%  * starting from end (StartFrom = last) -> return elements in the same order as they were added (ascending) % fixme direction

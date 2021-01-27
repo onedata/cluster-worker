@@ -13,7 +13,6 @@
 -author("Michal Stanisz").
 
 -include("modules/datastore/sliding_proplist.hrl").
--include_lib("ctool/include/errors.hrl").
 
 %% API
 -export([adjust_min_on_left/3, adjust_max_on_right/2]).
@@ -29,8 +28,8 @@
 %% This function recursively updates `min_on_left` in given node and in all 
 %% nodes to the right (pointed by prev) that are outdated. When CheckToTheEnd 
 %% is set to `true` function will always adjust this value until reaching last node.
-%% If elements are added to structure as recommended (i.e with increasing keys, 
-%% see `sliding_proplist` module doc) at most one node will be updated.
+%% If elements were added to sliding proplist instance as recommended (i.e with increasing 
+%% keys, @see `sliding_proplist` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
 -spec adjust_min_on_left(sliding_proplist:id() | undefined, sliding_proplist:key(), CheckToTheEnd :: boolean()) -> ok.
@@ -59,8 +58,8 @@ adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
 %% @doc
 %% This function recursively updates `max_on_right` in given node and in all 
 %% nodes to the left (pointed by next) that are outdated. 
-%% If elements are added to structure as recommended (i.e with increasing keys, 
-%% see `sliding_proplist` module doc) at most one node will be updated.
+%% If elements were added to sliding proplist instance as recommended (i.e with 
+%% increasing keys, @see `sliding_proplist` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
 -spec adjust_max_on_right(undefined | sliding_proplist:id() | sliding_proplist:list_node(), sliding_proplist:key() | undefined) -> ok.

@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module contains functions that are responsible for retrieving
-%%% elements from sliding_proplist. For more details about this structure 
+%%% elements from sliding_proplist. For more details about sliding proplist 
 %%% consult `sliding_proplist` module doc.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -15,7 +15,6 @@
 -author("Michal Stanisz").
 
 -include("modules/datastore/sliding_proplist.hrl").
--include_lib("ctool/include/errors.hrl").
 
 %% API
 -export([fold/3, fold/5, get_elements/3, get_highest/1, get_max_key/1]).
@@ -79,35 +78,35 @@ get_elements(NodeId, Keys, Direction) ->
                 _ -> Selected ++ get_elements(
                     select_neighbour(Direction, Node), RemainingKeys, Direction)
             end;
-        ?ERROR_NOT_FOUND -> []
+        {error, not_found} -> []
     end.
 
 
 -spec get_highest(undefined | sliding_proplist:id()) -> {ok, sliding_proplist:element()} | {error, term()}.
-get_highest(undefined) -> ?ERROR_NOT_FOUND;
+get_highest(undefined) -> {error, not_found};
 get_highest(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
         {ok, #node{elements = Elements, max_on_right = MaxOnRight, prev = Prev}} ->
             case {Prev == undefined, maps:size(Elements) > 0 andalso lists:max(maps:keys(Elements))} of
-                {true, false} -> ?ERROR_NOT_FOUND;
+                {true, false} -> {error, not_found};
                 {true, MaxKeyInNode} -> {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
                 {false, MaxKeyInNode} when MaxKeyInNode > MaxOnRight ->
                     {ok, {MaxKeyInNode, maps:get(MaxKeyInNode, Elements)}};
                 {false, _} -> get_highest(Prev)
             end;
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
+        {error, _} = Error -> Error
     end.
 
 
 -spec get_max_key(undefined | sliding_proplist:id()) -> {ok, sliding_proplist:key()} | {error, term()}.
-get_max_key(undefined) -> ?ERROR_NOT_FOUND;
+get_max_key(undefined) -> {error, not_found};
 get_max_key(NodeId) ->
     case sliding_proplist_persistence:get_node(NodeId) of
         {ok, Node} -> case sliding_proplist_utils:get_max_key_in_prev_nodes(Node) of
-            undefined -> ?ERROR_NOT_FOUND;
+            undefined -> {error, not_found};
             Res -> {ok, Res}
         end;
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
+        {error, _} = Error -> Error
     end.
 
 %%=====================================================================
@@ -208,11 +207,11 @@ find_node(State) ->
                         last_node_id = select_neighbour(Direction, Node)
                     })
             end;
-        ?ERROR_NOT_FOUND ->
+        {error, not_found} ->
             {ok, Sentinel} = sliding_proplist_persistence:get_node(StructId),
             StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel),
             case StartingNodeId of
-                undefined -> ?ERROR_NOT_FOUND;
+                undefined -> {error, not_found};
                 _ -> find_node(State#listing_state{last_node_id = StartingNodeId})
             end
     end.
