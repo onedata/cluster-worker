@@ -6,11 +6,14 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module implements structure responsible for storing data in 
-%%% key -> value format.
-%%%
-%%% This structure is implemented as a bidirectional linked list, with each 
-%%% node storing up to MaxElementsPerNode elements (i.e key value pairs).
+%%% This module implements datastore internal structure that allows for 
+%%% storing elements in key -> value format. It allows for proplist-like operations.
+%%% It is optimized for inserting new elements with keys in ascending order and deleting 
+%%% those that were added first (like in FIFO queue). % fixme explain sliding?
+%%% 
+%%% Because there is no limit to the amount of stored elements, to allow for saving 
+%%% this structure in datastore, it is implemented as a bidirectional linked list, 
+%%% with each node storing up to MaxElementsPerNode elements (i.e key value pairs).
 %%% MaxElementsPerNode value is provided during structure creation.
 %%% 
 %%%                    +--------+             +--------+             
@@ -21,8 +24,9 @@
 %%%          next      +--------+    next     +--------+    next     
 %%% 
 %%% This structure stores elements in arbitrary order, i.e not necessarily sorted.
-%%% Adding new elements is only allowed to the beginning of the list. 
-%%% New elements provided in batch must be sorted ascending by key and keys must be unique.
+%%% Inserting new elements is only allowed to the beginning of the list. New elements 
+%%% provided in batch must be sorted ascending by key and keys must be unique.
+%%% This requirement is due to implemented optimizations.
 %%% It is highly recommended that each new element have key greater 
 %%% than those already existing (if not this structure might be inefficient).
 %%% Adding elements with the existing keys will result in overwriting of 
@@ -30,7 +34,7 @@
 %%%
 %%% Deletion of arbitrary elements is allowed, although it is recommended 
 %%% to delete elements from the list's end. 
-%%% During elements deletion if two adjacent nodes have less than 
+%%% During elements deletion if two adjacent nodes have less than half
 %%% MaxElementsPerNode elements combined, one of those nodes (the newer one) 
 %%% will be deleted, and all elements will be now stored in the other node.
 %%% Nodes merging is omitted if deletion finished in the last node of the 
@@ -51,10 +55,10 @@
 %%% and also when overwriting existing elements during addition.
 %%% @end
 %%%-------------------------------------------------------------------
--module(append_list).
+-module(sliding_proplist).
 -author("Michal Stanisz").
 
--include("modules/datastore/append_list.hrl").
+-include("modules/datastore/sliding_proplist.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 %% API
@@ -64,7 +68,7 @@
 ]).
 
 -export([
-    insert_elements/2, 
+    insert_unique_sorted_elements/2, 
     remove_elements/2, 
     fold_elements/2, fold_elements/3, fold_elements/4, 
     get_elements/2, get_elements/3, 
@@ -86,7 +90,7 @@
 % Because of that number of next node is always higher that number of prev node.
 % fixme
 -type node_number() :: non_neg_integer().
--type elements_map() :: #{append_list:key() => append_list:value()}.
+-type elements_map() :: #{sliding_proplist:key() => sliding_proplist:value()}.
 
 -type sentinel() :: #sentinel{}.
 -type list_node() :: #node{}.
@@ -104,16 +108,16 @@
 create(MaxElementsPerNode) ->
     Id = datastore_key:new(),
     Sentinel = #sentinel{structure_id = Id, max_elements_per_node = MaxElementsPerNode},
-    append_list_persistence:save_node(Id, Sentinel),
+    sliding_proplist_persistence:save_node(Id, Sentinel),
     {ok, Id}.
 
 
 -spec destroy(id()) -> ok | {error, term()}.
 destroy(StructId) ->
-    case append_list_persistence:get_node(StructId) of
+    case sliding_proplist_persistence:get_node(StructId) of
         {ok, Sentinel} ->
             delete_all_nodes(Sentinel#sentinel.first),
-            true = append_list_persistence:delete_node(Sentinel#sentinel.structure_id),
+            true = sliding_proplist_persistence:delete_node(Sentinel#sentinel.structure_id),
             ok;
         ?ERROR_NOT_FOUND -> ok
     end.
@@ -121,19 +125,18 @@ destroy(StructId) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Adds a Batch of elements to the beginning of an append list instance.
-%% Elements in Batch must be sorted ascending by key and keys must be unique.
-%% Returns keys of elements that were overwritten (in reversed order).
+%% Adds a Batch of elements to the beginning of a sliding proplist instance.
+%% Returns keys of elements that were overwritten (in arbitrary order).
 %% @end
 %%--------------------------------------------------------------------
--spec insert_elements(id(), [element()] | element()) -> ok | {error, term()}.
-insert_elements(_StructureId, []) ->
+-spec insert_unique_sorted_elements(id(), [element()] | element()) -> ok | {error, term()}.
+insert_unique_sorted_elements(_StructureId, []) ->
     ok;
-insert_elements(StructureId, Batch) ->
-    case append_list_persistence:get_node(StructureId) of
+insert_unique_sorted_elements(StructureId, Batch) ->
+    case sliding_proplist_persistence:get_node(StructureId) of
         {ok, #sentinel{first = FirstNodeId} = Sentinel} ->
             {ok, UpdatedSentinel, FirstNode} = fetch_or_create_first_node(Sentinel, FirstNodeId),
-            append_list_add:insert_elements(UpdatedSentinel, FirstNode, utils:ensure_list(Batch));
+            sliding_proplist_add:insert_elements(UpdatedSentinel, FirstNode, utils:ensure_list(Batch));
         {error, _} = Error -> Error
     end.
 
@@ -147,11 +150,11 @@ insert_elements(StructureId, Batch) ->
 %%--------------------------------------------------------------------
 -spec remove_elements(id(), key() | [key()]) -> ok | {error, term()}.
 remove_elements(StructureId, Elements) ->
-    case append_list_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_node(StructureId) of
         {ok, #sentinel{last = undefined}} -> ok;
         {ok, #sentinel{last = Last} = Sentinel} ->
-            {ok, LastNode} = append_list_persistence:get_node(Last),
-            append_list_delete:delete_elements(Sentinel, LastNode, utils:ensure_list(Elements));
+            {ok, LastNode} = sliding_proplist_persistence:get_node(Last),
+            sliding_proplist_delete:delete_elements(Sentinel, LastNode, utils:ensure_list(Elements));
         {error, _} = Error -> Error
     end.
 
@@ -165,30 +168,30 @@ remove_elements(StructureId, Elements) ->
 %% When elements are not added in recommended order there is no guarantee about listing order.
 %% @end
 %%--------------------------------------------------------------------
--spec fold_elements(id() | append_list_get:state(), append_list_get:batch_size()) ->
-    append_list_get:fold_result() | {error, term()}.
+-spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size()) ->
+    sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size) when is_binary(Id) ->
     fold_elements(Id, Size, back_from_newest);
 fold_elements(State, Size) ->
     fold_elements(State, Size, fun(Elem) -> {ok, Elem} end).
 
--spec fold_elements(id() | append_list_get:state(), append_list_get:batch_size(), 
-    append_list_get:direction() | append_list_get:fold_fun()) ->
-    append_list_get:fold_result() | {error, term()}.
+-spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size(), 
+    sliding_proplist_get:direction() | sliding_proplist_get:fold_fun()) ->
+    sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
     fold_elements(Id, Size, Direction, fun(Elem) -> {ok, Elem} end);
 fold_elements(Id, Size, FoldFun) when is_binary(Id) and is_function(FoldFun, 1) ->
     fold_elements(Id, Size, back_from_newest, FoldFun);
 fold_elements(State, Size, FoldFun) when is_function(FoldFun, 1) ->
-    append_list_get:fold(State, Size, FoldFun).
+    sliding_proplist_get:fold(State, Size, FoldFun).
 
--spec fold_elements(id(), append_list_get:batch_size(), append_list_get:direction(), append_list_get:fold_fun()) ->
-    append_list_get:fold_result() | {error, term()}.
+-spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), sliding_proplist_get:fold_fun()) ->
+    sliding_proplist_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction, FoldFun) when is_binary(Id) ->
-    case append_list_persistence:get_node(Id) of
+    case sliding_proplist_persistence:get_node(Id) of
         {ok, #sentinel{} = Sentinel} ->
-            StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel),
-            append_list_get:fold(Id, StartingNodeId, Size, Direction, FoldFun);
+            StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel),
+            sliding_proplist_get:fold(Id, StartingNodeId, Size, Direction, FoldFun);
         {error, _} = Error -> Error
     end.
 
@@ -207,31 +210,31 @@ get_elements(StructureId, Keys) ->
     get_elements(StructureId, Keys, back_from_newest).
 
 
--spec get_elements(id(), key() | [key()], append_list_get:direction()) -> 
+-spec get_elements(id(), key() | [key()], sliding_proplist_get:direction()) -> 
     {ok, [element()]} | {error, term()}.
 get_elements(StructureId, Key, Direction) when not is_list(Key) ->
     get_elements(StructureId, [Key], Direction);
 get_elements(StructureId, Keys, Direction) ->
-    case append_list_persistence:get_node(StructureId) of
+    case sliding_proplist_persistence:get_node(StructureId) of
         {ok, Sentinel} ->
-            StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel), 
-            {ok, append_list_get:get_elements(StartingNodeId, Keys, Direction)};
+            StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel), 
+            {ok, sliding_proplist_get:get_elements(StartingNodeId, Keys, Direction)};
         {error, _} = Error -> Error
     end.
 
 
 -spec get_highest(id()) -> {ok, element()} | {error, term()}.
 get_highest(StructureId) ->
-    case append_list_persistence:get_node(StructureId) of
-        {ok, Sentinel} -> append_list_get:get_highest(Sentinel#sentinel.first);
+    case sliding_proplist_persistence:get_node(StructureId) of
+        {ok, Sentinel} -> sliding_proplist_get:get_highest(Sentinel#sentinel.first);
         {error, _} = Error -> Error
     end.
 
 
 -spec get_max_key(id()) -> {ok, key()} | {error, term()}.
 get_max_key(StructureId) ->
-    case append_list_persistence:get_node(StructureId) of
-        {ok, Sentinel} -> append_list_get:get_max_key(Sentinel#sentinel.first);
+    case sliding_proplist_persistence:get_node(StructureId) of
+        {ok, Sentinel} -> sliding_proplist_get:get_max_key(Sentinel#sentinel.first);
         {error, _} = Error -> Error
     end.
 
@@ -244,8 +247,8 @@ get_max_key(StructureId) ->
 delete_all_nodes(undefined) ->
     ok;
 delete_all_nodes(NodeId) ->
-    {ok, #node{prev = Prev}} = append_list_persistence:get_node(NodeId),
-    append_list_persistence:delete_node(NodeId),
+    {ok, #node{prev = Prev}} = sliding_proplist_persistence:get_node(NodeId),
+    sliding_proplist_persistence:delete_node(NodeId),
     delete_all_nodes(Prev).
 
 
@@ -255,9 +258,9 @@ delete_all_nodes(NodeId) ->
 fetch_or_create_first_node(#sentinel{structure_id = StructureId} = Sentinel, undefined) ->
     NodeId = datastore_key:new(),
     Sentinel1 = Sentinel#sentinel{first = NodeId, last = NodeId},
-    append_list_persistence:save_node(StructureId, Sentinel1),
+    sliding_proplist_persistence:save_node(StructureId, Sentinel1),
     FirstNode = #node{node_id = NodeId, structure_id = StructureId, node_number = 0},
     {ok, Sentinel1, FirstNode};
 fetch_or_create_first_node(Sentinel, FirstNodeId) ->
-    {ok, FirstNode} = append_list_persistence:get_node(FirstNodeId),
+    {ok, FirstNode} = sliding_proplist_persistence:get_node(FirstNodeId),
     {ok, Sentinel, FirstNode}.

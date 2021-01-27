@@ -9,10 +9,10 @@
 % fixme This module will be reworked during integration with datastore
 %%% @end
 %%%-------------------------------------------------------------------
--module(append_list_persistence).
+-module(sliding_proplist_persistence).
 -author("Michal Stanisz").
 
--include("modules/datastore/append_list.hrl").
+-include("modules/datastore/sliding_proplist.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 %% API

@@ -6,13 +6,13 @@
 %%% @end
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% This module contains utility functions used across `append_list` modules.
+%%% This module contains utility functions used across `sliding_proplist` modules.
 %%% @end
 %%%-------------------------------------------------------------------
--module(append_list_utils).
+-module(sliding_proplist_utils).
 -author("Michal Stanisz").
 
--include("modules/datastore/append_list.hrl").
+-include("modules/datastore/sliding_proplist.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 %% API
@@ -30,17 +30,17 @@
 %% nodes to the right (pointed by prev) that are outdated. When CheckToTheEnd 
 %% is set to `true` function will always adjust this value until reaching last node.
 %% If elements are added to structure as recommended (i.e with increasing keys, 
-%% see `append_list` module doc) at most one node will be updated.
+%% see `sliding_proplist` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_min_on_left(append_list:id() | undefined, append_list:key(), CheckToTheEnd :: boolean()) -> ok.
+-spec adjust_min_on_left(sliding_proplist:id() | undefined, sliding_proplist:key(), CheckToTheEnd :: boolean()) -> ok.
 adjust_min_on_left(undefined, _CurrentMin, _CheckToTheEnd) ->
     ok;
 adjust_min_on_left(#node{} = Node, CurrentMin, CheckToTheEnd) ->
     #node{node_id = NodeId, min_on_left = PreviousMinOnLeft} = Node,
     case PreviousMinOnLeft of
         CurrentMin -> ok;
-        _ -> append_list_persistence:save_node(NodeId, Node#node{min_on_left = CurrentMin})
+        _ -> sliding_proplist_persistence:save_node(NodeId, Node#node{min_on_left = CurrentMin})
     end,
     Min = case maps:size(Node#node.elements) of
         0 -> CurrentMin;
@@ -51,7 +51,7 @@ adjust_min_on_left(#node{} = Node, CurrentMin, CheckToTheEnd) ->
         _ -> ok
     end;
 adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
-    {ok, Node} = append_list_persistence:get_node(NodeId),
+    {ok, Node} = sliding_proplist_persistence:get_node(NodeId),
     adjust_min_on_left(Node, CurrentMin, CheckToTheEnd).
 
 
@@ -60,10 +60,10 @@ adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
 %% This function recursively updates `max_on_right` in given node and in all 
 %% nodes to the left (pointed by next) that are outdated. 
 %% If elements are added to structure as recommended (i.e with increasing keys, 
-%% see `append_list` module doc) at most one node will be updated.
+%% see `sliding_proplist` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_max_on_right(undefined | append_list:id() | append_list:list_node(), append_list:key() | undefined) -> ok.
+-spec adjust_max_on_right(undefined | sliding_proplist:id() | sliding_proplist:list_node(), sliding_proplist:key() | undefined) -> ok.
 adjust_max_on_right(undefined, _) ->
     ok;
 adjust_max_on_right(#node{} = Node, CurrentMax) ->
@@ -71,7 +71,7 @@ adjust_max_on_right(#node{} = Node, CurrentMax) ->
     case CurrentMax of
         PreviousMaxOnRight -> ok;
         _ ->
-            append_list_persistence:save_node(NodeId, Node#node{max_on_right = CurrentMax}),
+            sliding_proplist_persistence:save_node(NodeId, Node#node{max_on_right = CurrentMax}),
             MaxInNode = lists:max(maps:keys(Node#node.elements)),
             case CurrentMax of
                 undefined -> adjust_max_on_right(Next, MaxInNode);
@@ -79,7 +79,7 @@ adjust_max_on_right(#node{} = Node, CurrentMax) ->
             end
     end;
 adjust_max_on_right(NodeId, CurrentMax) ->
-    {ok, Node} = append_list_persistence:get_node(NodeId),
+    {ok, Node} = sliding_proplist_persistence:get_node(NodeId),
     adjust_max_on_right(Node, CurrentMax).
 
 
@@ -90,7 +90,7 @@ adjust_max_on_right(NodeId, CurrentMax) ->
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_key_in_prev_nodes(undefined | append_list:list_node()) -> append_list:key() | undefined.
+-spec get_max_key_in_prev_nodes(undefined | sliding_proplist:list_node()) -> sliding_proplist:key() | undefined.
 get_max_key_in_prev_nodes(undefined) -> undefined;
 get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight}) ->
     case maps:size(Elements) of
@@ -104,7 +104,7 @@ get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight})
     end.
 
 
--spec get_starting_node_id(append_list_get:direction(), append_list:sentinel()) -> 
-    append_list:id() | undefined.
+-spec get_starting_node_id(sliding_proplist_get:direction(), sliding_proplist:sentinel()) -> 
+    sliding_proplist:id() | undefined.
 get_starting_node_id(back_from_newest, #sentinel{first = First}) -> First;
 get_starting_node_id(forward_from_oldest, #sentinel{last = Last}) -> Last.

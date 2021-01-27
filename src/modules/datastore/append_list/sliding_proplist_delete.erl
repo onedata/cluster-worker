@@ -1,4 +1,4 @@
-%%%-------------------------------------------------------------------
+%%%-------------------------------------------------------------------:
 %%% @author Michal Stanisz
 %%% @copyright (C) 2021 ACK CYFRONET AGH
 %%% This software is released under the MIT license
@@ -7,14 +7,14 @@
 %%%-------------------------------------------------------------------
 %%% @doc
 %%% This module contains functions that are responsible for deletion of 
-%%% elements in append_list. For more details about this structure 
-%%% consult `append_list` module doc.
+%%% elements in sliding_proplist. For more details about this structure 
+%%% consult `sliding_proplist` module doc.
 %%% @end
 %%%-------------------------------------------------------------------
--module(append_list_delete).
+-module(sliding_proplist_delete).
 -author("Michal Stanisz").
 
--include("modules/datastore/append_list.hrl").
+-include("modules/datastore/sliding_proplist.hrl").
 -include_lib("ctool/include/errors.hrl").
 
 %% API
@@ -31,7 +31,7 @@
 %% Elements that were not found are ignored.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_elements(append_list:sentinel(), append_list:list_node(), [append_list:key()]) -> ok.
+-spec delete_elements(sliding_proplist:sentinel(), sliding_proplist:list_node(), [sliding_proplist:key()]) -> ok.
 delete_elements(Sentinel, LastNode, Elements) ->
     delete_elements_in_nodes(Sentinel, LastNode, Elements, undefined).
 
@@ -42,10 +42,10 @@ delete_elements(Sentinel, LastNode, Elements) ->
 
 %% @private
 -spec delete_elements_in_nodes(
-    append_list:sentinel(),
-    CurrentNode :: undefined | append_list:list_node() | append_list:id(),
-    [append_list:key()], 
-    PrevNode :: undefined | append_list:list_node()
+    sliding_proplist:sentinel(),
+    CurrentNode :: undefined | sliding_proplist:list_node() | sliding_proplist:id(),
+    [sliding_proplist:key()], 
+    PrevNode :: undefined | sliding_proplist:list_node()
 ) -> ok.
 delete_elements_in_nodes(_Sentinel, undefined, _, _PrevNode) ->
     ok;
@@ -75,22 +75,22 @@ delete_elements_in_nodes(Sentinel, #node{} = CurrentNode, ElementsToDelete, Prev
             {MergedNode, NextNode}
     end,
     UpdatedCurrentNode =/= undefined andalso 
-        append_list_persistence:save_node(UpdatedCurrentNode#node.node_id, UpdatedCurrentNode),
+        sliding_proplist_persistence:save_node(UpdatedCurrentNode#node.node_id, UpdatedCurrentNode),
     ShouldStop = NewElementsToDelete == [] orelse 
         (UpdatedCurrentNode =/= undefined andalso 
             UpdatedCurrentNode#node.min_on_left > lists:max(NewElementsToDelete)),
     case ShouldStop of
         true -> 
-            MaxOnRightBefore = append_list_utils:get_max_key_in_prev_nodes(CurrentNode),
+            MaxOnRightBefore = sliding_proplist_utils:get_max_key_in_prev_nodes(CurrentNode),
             case UpdatedCurrentNode of
                 undefined ->
                     % this will always save updated next node
-                    ok = append_list_utils:adjust_max_on_right(NextNodeOrId, undefined);
+                    ok = sliding_proplist_utils:adjust_max_on_right(NextNodeOrId, undefined);
                 _ -> 
                     handle_deletion_finished(UpdatedCurrentNode, PrevNode, MaxOnRightBefore),
                     % save next node if it was updated
                     case NextNodeOrId of
-                        #node{} -> append_list_persistence:save_node(NextNodeId, NextNodeOrId);
+                        #node{} -> sliding_proplist_persistence:save_node(NextNodeId, NextNodeOrId);
                         _ -> ok
                 end
             end;
@@ -98,33 +98,33 @@ delete_elements_in_nodes(Sentinel, #node{} = CurrentNode, ElementsToDelete, Prev
             delete_elements_in_nodes(Sentinel, NextNodeOrId, NewElementsToDelete, UpdatedCurrentNode)
     end;
 delete_elements_in_nodes(Sentinel, CurrentNodeId, ElementsToDelete, PrevNode) when is_binary(CurrentNodeId)->
-    {ok, CurrentNode} = append_list_persistence:get_node(CurrentNodeId),
+    {ok, CurrentNode} = sliding_proplist_persistence:get_node(CurrentNodeId),
     delete_elements_in_nodes(Sentinel, CurrentNode, ElementsToDelete, PrevNode).
 
 
 %% @private
--spec delete_node(append_list:sentinel(), CurrentNode :: append_list:list_node(), append_list:id() | undefined, PrevNode :: append_list:list_node() | undefined) -> 
-    {UpdatedCurrentNode :: undefined | append_list:list_node(), UpdatedNextNode :: undefined | append_list:list_node()}.
+-spec delete_node(sliding_proplist:sentinel(), CurrentNode :: sliding_proplist:list_node(), sliding_proplist:id() | undefined, PrevNode :: sliding_proplist:list_node() | undefined) -> 
+    {UpdatedCurrentNode :: undefined | sliding_proplist:list_node(), UpdatedNextNode :: undefined | sliding_proplist:list_node()}.
 delete_node(Sentinel, #node{node_id = NodeId}, undefined, undefined) ->
     % deleting last remaining node in the structure
-    append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = undefined, first = undefined}),
-    append_list_persistence:delete_node(NodeId),
+    sliding_proplist_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = undefined, first = undefined}),
+    sliding_proplist_persistence:delete_node(NodeId),
     {undefined, undefined};
 delete_node(Sentinel, #node{node_id = NodeId}, undefined, #node{node_id = PrevNodeId} = PrevNode) ->
     % deleting first node
-    append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{first = PrevNodeId}),
+    sliding_proplist_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{first = PrevNodeId}),
     UpdatedPrevNode = PrevNode#node{min_on_left = undefined, next = undefined},
-    append_list_persistence:delete_node(NodeId),
+    sliding_proplist_persistence:delete_node(NodeId),
     {UpdatedPrevNode, undefined};
 delete_node(Sentinel, #node{node_id = NodeId}, NextNodeId, undefined) ->
     % deleting last node
-    append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = NextNodeId}),
-    {ok, #node{} = NextNode} = append_list_persistence:get_node(NextNodeId),
+    sliding_proplist_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = NextNodeId}),
+    {ok, #node{} = NextNode} = sliding_proplist_persistence:get_node(NextNodeId),
     UpdatedNextNode = NextNode#node{prev = undefined},
-    append_list_persistence:delete_node(NodeId),
+    sliding_proplist_persistence:delete_node(NodeId),
     {undefined, UpdatedNextNode};
 delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNode) ->
-    {ok, #node{} = NextNode} = append_list_persistence:get_node(NextNodeId),
+    {ok, #node{} = NextNode} = sliding_proplist_persistence:get_node(NextNodeId),
     UpdatedNextNode = NextNode#node{
         prev = PrevNode#node.node_id
     },
@@ -132,46 +132,46 @@ delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNo
         next = NextNodeId,
         min_on_left = CurrentNode#node.min_on_left
     },
-    append_list_persistence:delete_node(NodeId),
+    sliding_proplist_persistence:delete_node(NodeId),
     {UpdatedPrevNode, UpdatedNextNode}.
 
 
 %% @private
--spec update_next_node_pointer(append_list:id(), append_list:id()) -> append_list:list_node() | undefined.
+-spec update_next_node_pointer(sliding_proplist:id(), sliding_proplist:id()) -> sliding_proplist:list_node() | undefined.
 update_next_node_pointer(undefined, _CurrentNodeId) ->
     undefined;
 update_next_node_pointer(NextNodeId, CurrentNodeId) ->
-    {ok, NextNode} = append_list_persistence:get_node(NextNodeId),
+    {ok, NextNode} = sliding_proplist_persistence:get_node(NextNodeId),
     NextNode#node{
         prev = CurrentNodeId
     }.
 
 
 %% @private
--spec handle_deletion_finished(append_list:list_node(), append_list:list_node() | undefined, append_list:key()) -> ok.
+-spec handle_deletion_finished(sliding_proplist:list_node(), sliding_proplist:list_node() | undefined, sliding_proplist:key()) -> ok.
 handle_deletion_finished(#node{node_id = NodeId, prev = Prev} = Node, #node{node_id = NodeId}, MaxOnRightBefore) ->
     PrevNode = case Prev of
         undefined -> 
             undefined;
         _ -> 
-            {ok, N} = append_list_persistence:get_node(Prev),
+            {ok, N} = sliding_proplist_persistence:get_node(Prev),
             N
     end,
     handle_deletion_finished(Node, PrevNode, MaxOnRightBefore);
 handle_deletion_finished(CurrentNode, PrevNode, MaxOnRightBefore) ->
     #node{min_on_left = MinOnLeft, elements = Elements, next = Next} = CurrentNode,
     Min = lists:min([MinOnLeft | maps:keys(Elements)]),
-    PrevNode =/= undefined andalso append_list_utils:adjust_min_on_left(PrevNode#node.node_id, Min, true),
+    PrevNode =/= undefined andalso sliding_proplist_utils:adjust_min_on_left(PrevNode#node.node_id, Min, true),
     % if MaxOnRight did not change, there is no need to update this value in the next nodes
-    case append_list_utils:get_max_key_in_prev_nodes(CurrentNode) of
+    case sliding_proplist_utils:get_max_key_in_prev_nodes(CurrentNode) of
         MaxOnRightBefore -> ok;
-        CurrentMax -> append_list_utils:adjust_max_on_right(Next, CurrentMax)
+        CurrentMax -> sliding_proplist_utils:adjust_max_on_right(Next, CurrentMax)
     end.
 
 
 %% @private
--spec update_current_node(append_list:list_node(), #{append_list:key() => append_list:value()}, append_list:list_node() | undefined) -> 
-    append_list:list_node().
+-spec update_current_node(sliding_proplist:list_node(), #{sliding_proplist:key() => sliding_proplist:value()}, sliding_proplist:list_node() | undefined) -> 
+    sliding_proplist:list_node().
 update_current_node(CurrentNode, NewElements, PrevNode) ->
     PrevNodeId = case PrevNode of
         undefined -> undefined;
@@ -180,13 +180,13 @@ update_current_node(CurrentNode, NewElements, PrevNode) ->
     CurrentNode#node{
         elements = NewElements,
         prev = PrevNodeId,
-        max_on_right = append_list_utils:get_max_key_in_prev_nodes(PrevNode)
+        max_on_right = sliding_proplist_utils:get_max_key_in_prev_nodes(PrevNode)
     }.
 
 
 %% @private
--spec merge_nodes(append_list:sentinel(), CurrentNode :: append_list:list_node(), PrevNode :: append_list:list_node(), 
-    #{append_list:key() => append_list:value()}) -> append_list:list_node().
+-spec merge_nodes(sliding_proplist:sentinel(), CurrentNode :: sliding_proplist:list_node(), PrevNode :: sliding_proplist:list_node(), 
+    #{sliding_proplist:key() => sliding_proplist:value()}) -> sliding_proplist:list_node().
 merge_nodes(Sentinel, CurrentNode, PrevNode, Elements) ->
     MergedNode = PrevNode#node{
         elements = Elements,
@@ -195,9 +195,9 @@ merge_nodes(Sentinel, CurrentNode, PrevNode, Elements) ->
     },
     % if this is the first node, modify sentinel
     CurrentNode#node.next == undefined andalso 
-        append_list_persistence:save_node(
+        sliding_proplist_persistence:save_node(
             CurrentNode#node.structure_id, 
             Sentinel#sentinel{first = PrevNode#node.node_id}
         ),
-    append_list_persistence:delete_node(CurrentNode#node.node_id),
+    sliding_proplist_persistence:delete_node(CurrentNode#node.node_id),
     MergedNode.
