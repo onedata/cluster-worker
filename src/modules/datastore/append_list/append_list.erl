@@ -59,7 +59,7 @@
 
 %% API
 -export([
-    create/1, 
+    create/1,
     destroy/1
 ]).
 
@@ -88,8 +88,13 @@
 -type node_number() :: non_neg_integer().
 -type elements_map() :: #{append_list:key() => append_list:value()}.
 
+-type sentinel() :: #sentinel{}.
+-type list_node() :: #node{}.
+
+-define(DEFAULT_FOLD_FUN, fun(Elem) -> {ok, Elem} end).
 
 -export_type([id/0, key/0, value/0, element/0, node_number/0, elements_map/0]).
+-export_type([sentinel/0, list_node/0]).
 
 %%=====================================================================
 %% API
@@ -162,21 +167,30 @@ remove_elements(StructureId, Elements) ->
 %%--------------------------------------------------------------------
 -spec fold_elements(id() | append_list_get:state(), append_list_get:batch_size()) ->
     append_list_get:fold_result() | {error, term()}.
-fold_elements(IdOrListingState, Size) ->
-    fold_elements(IdOrListingState, Size, back_from_newest).
+fold_elements(Id, Size) when is_binary(Id) ->
+    fold_elements(Id, Size, back_from_newest);
+fold_elements(State, Size) ->
+    fold_elements(State, Size, fun(Elem) -> {ok, Elem} end).
 
 -spec fold_elements(id() | append_list_get:state(), append_list_get:batch_size(), 
     append_list_get:direction() | append_list_get:fold_fun()) ->
     append_list_get:fold_result() | {error, term()}.
-fold_elements(IdOrListingState, Size, Direction) when is_atom(Direction) ->
-    append_list_get:fold(IdOrListingState, Size, Direction, fun(Elem) -> {ok, Elem} end);
-fold_elements(IdOrListingState, Size, FoldFun) when is_function(FoldFun, 1)->
-    append_list_get:fold(IdOrListingState, Size, back_from_newest, FoldFun).
+fold_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
+    fold_elements(Id, Size, Direction, fun(Elem) -> {ok, Elem} end);
+fold_elements(Id, Size, FoldFun) when is_binary(Id) and is_function(FoldFun, 1) ->
+    fold_elements(Id, Size, back_from_newest, FoldFun);
+fold_elements(State, Size, FoldFun) when is_function(FoldFun, 1) ->
+    append_list_get:fold(State, Size, FoldFun).
 
 -spec fold_elements(id(), append_list_get:batch_size(), append_list_get:direction(), append_list_get:fold_fun()) ->
     append_list_get:fold_result() | {error, term()}.
 fold_elements(Id, Size, Direction, FoldFun) when is_binary(Id) ->
-    append_list_get:fold(Id, Size, Direction, FoldFun).
+    case append_list_persistence:get_node(Id) of
+        {ok, #sentinel{} = Sentinel} ->
+            StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel),
+            append_list_get:fold(Id, StartingNodeId, Size, Direction, FoldFun);
+        {error, _} = Error -> Error
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -202,7 +216,7 @@ get_elements(StructureId, Keys, Direction) ->
         {ok, Sentinel} ->
             StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel), 
             {ok, append_list_get:get_elements(StartingNodeId, Keys, Direction)};
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
+        {error, _} = Error -> Error
     end.
 
 
@@ -210,7 +224,7 @@ get_elements(StructureId, Keys, Direction) ->
 get_highest(StructureId) ->
     case append_list_persistence:get_node(StructureId) of
         {ok, Sentinel} -> append_list_get:get_highest(Sentinel#sentinel.first);
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
+        {error, _} = Error -> Error
     end.
 
 
@@ -218,7 +232,7 @@ get_highest(StructureId) ->
 get_max_key(StructureId) ->
     case append_list_persistence:get_node(StructureId) of
         {ok, Sentinel} -> append_list_get:get_max_key(Sentinel#sentinel.first);
-        ?ERROR_NOT_FOUND -> ?ERROR_NOT_FOUND
+        {error, _} = Error -> Error
     end.
 
 %%=====================================================================
@@ -236,8 +250,8 @@ delete_all_nodes(NodeId) ->
 
 
 %% @private
--spec fetch_or_create_first_node(#sentinel{}, node_id() | undefined) -> 
-    {ok, #sentinel{}, #node{}} | {error, term()}.
+-spec fetch_or_create_first_node(sentinel(), node_id() | undefined) -> 
+    {ok, sentinel(), list_node()} | {error, term()}.
 fetch_or_create_first_node(#sentinel{structure_id = StructureId} = Sentinel, undefined) ->
     NodeId = datastore_key:new(),
     Sentinel1 = Sentinel#sentinel{first = NodeId, last = NodeId},

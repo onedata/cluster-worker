@@ -18,7 +18,7 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([fold/4, get_elements/3, get_highest/1, get_max_key/1]).
+-export([fold/3, fold/5, get_elements/3, get_highest/1, get_max_key/1]).
 
 
 % This record is used as cache during listing. Holds information where listing should continue.
@@ -45,21 +45,25 @@
 %% API
 %%=====================================================================
 
--spec fold(#listing_state{} | append_list:id(), batch_size(), direction(), 
+-spec fold(state() | append_list:id(), batch_size(),
     fold_fun()) -> fold_result() | {error, term()}.
-fold(#listing_state{} = State, Size, _Direction, FoldFun) ->
-    prepare_fold_result(continue_fold(State, Size, FoldFun, []));
-fold(StructureId, Size, Direction, FoldFun) when is_binary(StructureId) ->
-    case append_list_persistence:get_node(StructureId) of
-        {ok, #sentinel{} = Sentinel} ->
-            StartingNodeId = append_list_utils:get_starting_node_id(Direction, Sentinel),
-            prepare_fold_result(continue_fold(#listing_state{
-                structure_id = StructureId,
-                last_node_id = StartingNodeId,
-                direction = Direction
-            }, Size, FoldFun, []));
+fold(#listing_state{} = InitialState, Size, FoldFun) ->
+    case continue_fold(InitialState, Size, FoldFun, []) of
+        {Result, #listing_state{finished = true}} -> {done, Result};
+        {Result, #listing_state{finished = false} = State} -> {more, Result, State};
         {error, _} = Error -> Error
     end.
+
+
+-spec fold(append_list:id(), append_list:node_id(), batch_size(), direction(), fold_fun()) -> 
+    fold_result() | {error, term()}.
+fold(Id, StartingNodeId, Size, Direction, FoldFun) when is_binary(Id) ->
+    State = #listing_state{
+        structure_id = Id,
+        last_node_id = StartingNodeId,
+        direction = Direction
+    },
+    fold(State, Size, FoldFun).
 
 
 -spec get_elements(append_list:id() | undefined, [append_list:key()], direction()) -> 
@@ -68,7 +72,7 @@ get_elements(undefined, _Keys, _Direction) ->
     [];
 get_elements(NodeId, Keys, Direction) ->
     case append_list_persistence:get_node(NodeId) of
-        {ok, #node{} = Node} ->
+        {ok, Node} ->
             {Selected, RemainingKeys} = select_elements_from_node(Node, Keys, Direction),
             case RemainingKeys of
                 [] -> Selected;
@@ -110,14 +114,7 @@ get_max_key(NodeId) ->
 %% Internal functions
 %%=====================================================================
 
-%% @private
--spec prepare_fold_result({[append_list:element()], state()}) -> fold_result().
-prepare_fold_result({Result, #listing_state{finished = true}}) ->
-    {done, Result};
-prepare_fold_result({Result, #listing_state{finished = false} = State}) ->
-    {more, Result, State}.
-
-
+% fixme name
 %% @private
 -spec continue_fold(state(), batch_size(), fold_fun(), [append_list:element()]) -> 
     {[append_list:element()], state()}.
@@ -190,7 +187,7 @@ retrieve_not_listed_elements(#listing_state{
 %% last node) than `last_node_num` is returned.
 %% @end
 %%--------------------------------------------------------------------
--spec find_node(#listing_state{}) -> #node{} | ?ERROR_NOT_FOUND.
+-spec find_node(#listing_state{}) -> append_list:list_node() | {error, term()}.
 find_node(State) ->
     #listing_state{
         last_node_id = NodeId, 
@@ -235,7 +232,7 @@ apply_fold_fun(FoldFun, OriginalElements) ->
 
 
 %% @private
--spec select_elements_from_node(#node{}, [append_list:key()], direction()) ->
+-spec select_elements_from_node(append_list:list_node(), [append_list:key()], direction()) ->
     {[append_list:element()], [append_list:key()]}.
 select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
     Selected = maps:with(Keys, Elements),
@@ -244,7 +241,7 @@ select_elements_from_node(#node{elements = Elements} = Node, Keys, Direction) ->
 
 
 %% @private
--spec filter_keys(direction(), #node{}, [append_list:key()]) -> [append_list:key()].
+-spec filter_keys(direction(), append_list:list_node(), [append_list:key()]) -> [append_list:key()].
 filter_keys(back_from_newest, #node{max_on_right = Max}, Keys) ->
     [Key || Key <- Keys, Key =< Max];
 filter_keys(forward_from_oldest, #node{min_on_left = Min}, Keys) ->
@@ -252,6 +249,6 @@ filter_keys(forward_from_oldest, #node{min_on_left = Min}, Keys) ->
 
 
 %% @private
--spec select_neighbour(direction(), #node{}) -> append_list:id().
+-spec select_neighbour(direction(), append_list:list_node()) -> append_list:id().
 select_neighbour(back_from_newest, #node{prev = Prev}) -> Prev;
 select_neighbour(forward_from_oldest, #node{next = Next}) -> Next.

@@ -16,7 +16,9 @@
 -include_lib("ctool/include/errors.hrl").
 
 %% API
--export([adjust_min_on_left/3, adjust_max_on_right/2, get_max_key_in_prev_nodes/1, get_starting_node_id/2]).
+-export([adjust_min_on_left/3, adjust_max_on_right/2]).
+-export([get_max_key_in_prev_nodes/1]).
+-export([get_starting_node_id/2]).
 
 %%=====================================================================
 %% API
@@ -61,7 +63,7 @@ adjust_min_on_left(NodeId, CurrentMin, CheckToTheEnd) ->
 %% see `append_list` module doc) at most one node will be updated.
 %% @end
 %%--------------------------------------------------------------------
--spec adjust_max_on_right(undefined | append_list:id() | #node{}, append_list:key() | undefined) -> ok.
+-spec adjust_max_on_right(undefined | append_list:id() | append_list:list_node(), append_list:key() | undefined) -> ok.
 adjust_max_on_right(undefined, _) ->
     ok;
 adjust_max_on_right(#node{} = Node, CurrentMax) ->
@@ -88,7 +90,7 @@ adjust_max_on_right(NodeId, CurrentMax) ->
 %% and given node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_max_key_in_prev_nodes(undefined | #node{}) -> append_list:key() | undefined.
+-spec get_max_key_in_prev_nodes(undefined | append_list:list_node()) -> append_list:key() | undefined.
 get_max_key_in_prev_nodes(undefined) -> undefined;
 get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight}) ->
     case maps:size(Elements) of
@@ -102,6 +104,7 @@ get_max_key_in_prev_nodes(#node{elements = Elements, max_on_right = MaxOnRight})
     end.
 
 
--spec get_starting_node_id(append_list_get:direction(), #sentinel{}) -> append_list:id() | undefined.
+-spec get_starting_node_id(append_list_get:direction(), append_list:sentinel()) -> 
+    append_list:id() | undefined.
 get_starting_node_id(back_from_newest, #sentinel{first = First}) -> First;
 get_starting_node_id(forward_from_oldest, #sentinel{last = Last}) -> Last.

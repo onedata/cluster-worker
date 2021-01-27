@@ -28,14 +28,13 @@ append_list_test_() ->
         fun setup/0,
         fun teardown/1,
         [
-            % fixme adjust tests names
-            {"test_delete_struct", fun test_delete_struct/0},
+            {"test_create_and_destroy", fun test_create_and_destroy/0},
             {"test_add_elements_one_node", fun test_add_elements_one_node/0},
             {"test_add_elements_multi_nodes", fun test_add_elements_multi_nodes/0},
             {"test_add_only_existing", fun test_add_only_existing_elements/0},
             {"test_add_with_overwrite", fun test_add_with_overwrite/0},
             {"test_list_with_listing_state", fun test_list_with_listing_state/0},
-            {"test_list_start_from_last", fun test_list_with_listing_state_start_from_last/0},
+            {"test_list_with_listing_state_start_from_last", fun test_list_with_listing_state_start_from_last/0},
             {"test_list_with_fold_fun", fun test_list_with_fold_fun/0},
             {"test_list_with_fold_fun_stop", fun test_list_with_fold_fun_stop/0},
             {"test_delete_consecutive_elems_between_nodes", fun test_delete_consecutive_elems_between_nodes/0},
@@ -48,10 +47,10 @@ append_list_test_() ->
             {"test_delete_elems_structure_not_sorted", fun test_delete_elems_structure_not_sorted/0},
             {"test_merge_nodes_during_delete_structure_not_sorted", fun test_merge_nodes_during_delete_structure_not_sorted/0},
             {"test_delete_between_listings", fun test_delete_between_listings/0},
-            {"test_get", fun test_get_elements/0},
-            {"test_get_structure_not_sorted", fun test_get_elements_structure_not_sorted/0},
-            {"test_get_start_from_last", fun test_get_elements_forward_from_oldest/0},
-            {"test_get_structure_not_sorted_start_from_last", fun test_get_structure_not_sorted_forward_from_oldest/0},
+            {"test_get_elements", fun test_get_elements/0},
+            {"test_get_elements_structure_not_sorted", fun test_get_elements_structure_not_sorted/0},
+            {"test_get_elements_forward_from_oldest", fun test_get_elements_forward_from_oldest/0},
+            {"test_get_structure_not_sorted_forward_from_oldest", fun test_get_structure_not_sorted_forward_from_oldest/0},
             {"test_get_highest", fun test_get_highest/0},
             {"test_get_highest_structure_not_sorted", fun test_get_highest_structure_not_sorted/0},
             {"test_get_max_key", fun test_get_max_key/0},
@@ -83,7 +82,7 @@ teardown(_) ->
 %%% Tests
 %%%===================================================================
 
-test_delete_struct() ->
+test_create_and_destroy() ->
     ?assertEqual(ok, append_list:destroy(<<"dummy_id">>)),
     {ok, Id} = append_list:create(10),
     append_list:insert_elements(Id, prepare_batch(10, 30)),
@@ -148,21 +147,26 @@ test_list_with_listing_state_start_from_last() ->
     {ok, Id} = append_list:create(10),
     ?assertMatch({done, []}, append_list:fold_elements(Id, 0, forward_from_oldest)),
     append_list:insert_elements(Id, prepare_batch(10, 30)),
-    FinalListingState = lists:foldl(fun(X, ListingState) ->
-        {more, Res, NewListingInfo} = append_list:fold_elements(ListingState, 1, forward_from_oldest),
-        ?assertEqual([{X, integer_to_binary(X)}], Res),
-        NewListingInfo
+    FinalListingState = lists:foldl(
+        fun (X, Id) when is_binary(Id) ->
+                {more, Res, NewListingState} = append_list:fold_elements(Id, 1, forward_from_oldest),
+                ?assertEqual([{X, integer_to_binary(X)}], Res),
+                NewListingState;
+            (X, ListingState) ->
+                {more, Res, NewListingState} = append_list:fold_elements(ListingState, 1),
+                ?assertEqual([{X, integer_to_binary(X)}], Res),
+                NewListingState
     end, Id, lists:seq(10, 29)),
-    ?assertMatch({done, [{30, <<"30">>}]}, append_list:fold_elements(FinalListingState, 1, forward_from_oldest)).
+    ?assertMatch({done, [{30, <<"30">>}]}, append_list:fold_elements(FinalListingState, 1)).
 
 
 test_list_with_fold_fun() ->
     {ok, Id} = append_list:create(10),
     append_list:insert_elements(Id, prepare_batch(10, 30)),
     FinalListingState = lists:foldl(fun(X, ListingState) ->
-        {more, Res, NewListingInfo} = append_list:fold_elements(ListingState, 1, fun({_Key, Value}) -> {ok, Value} end),
+        {more, Res, NewListingState} = append_list:fold_elements(ListingState, 1, fun({_Key, Value}) -> {ok, Value} end),
         ?assertEqual([integer_to_binary(X)], Res),
-        NewListingInfo
+        NewListingState
     end, Id, lists:seq(30, 11, -1)),
     ?assertMatch({done, [<<"10">>]}, append_list:fold_elements(FinalListingState, 1, fun({_Key, Value}) -> {ok, Value} end)).
 

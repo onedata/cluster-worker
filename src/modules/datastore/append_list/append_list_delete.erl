@@ -31,7 +31,7 @@
 %% Elements that were not found are ignored.
 %% @end
 %%--------------------------------------------------------------------
--spec delete_elements(#sentinel{}, #node{}, [append_list:key()]) -> ok.
+-spec delete_elements(append_list:sentinel(), append_list:list_node(), [append_list:key()]) -> ok.
 delete_elements(Sentinel, LastNode, Elements) ->
     delete_elements_in_nodes(Sentinel, LastNode, Elements, undefined).
 
@@ -42,10 +42,10 @@ delete_elements(Sentinel, LastNode, Elements) ->
 
 %% @private
 -spec delete_elements_in_nodes(
-    #sentinel{},
-    CurrentNode :: undefined | #node{} | append_list:id(),
+    append_list:sentinel(),
+    CurrentNode :: undefined | append_list:list_node() | append_list:id(),
     [append_list:key()], 
-    PrevNode :: undefined | #node{}
+    PrevNode :: undefined | append_list:list_node()
 ) -> ok.
 delete_elements_in_nodes(_Sentinel, undefined, _, _PrevNode) ->
     ok;
@@ -103,8 +103,8 @@ delete_elements_in_nodes(Sentinel, CurrentNodeId, ElementsToDelete, PrevNode) wh
 
 
 %% @private
--spec delete_node(#sentinel{}, CurrentNode :: #node{}, append_list:id() | undefined, PrevNode :: #node{} | undefined) -> 
-    {UpdatedCurrentNode :: undefined | #node{}, UpdatedNextNode :: undefined | #node{}}.
+-spec delete_node(append_list:sentinel(), CurrentNode :: append_list:list_node(), append_list:id() | undefined, PrevNode :: append_list:list_node() | undefined) -> 
+    {UpdatedCurrentNode :: undefined | append_list:list_node(), UpdatedNextNode :: undefined | append_list:list_node()}.
 delete_node(Sentinel, #node{node_id = NodeId}, undefined, undefined) ->
     % deleting last remaining node in the structure
     append_list_persistence:save_node(Sentinel#sentinel.structure_id, Sentinel#sentinel{last = undefined, first = undefined}),
@@ -137,7 +137,7 @@ delete_node(_Sentinel, #node{node_id = NodeId} = CurrentNode, NextNodeId, PrevNo
 
 
 %% @private
--spec update_next_node_pointer(append_list:id(), append_list:id()) -> #node{} | undefined.
+-spec update_next_node_pointer(append_list:id(), append_list:id()) -> append_list:list_node() | undefined.
 update_next_node_pointer(undefined, _CurrentNodeId) ->
     undefined;
 update_next_node_pointer(NextNodeId, CurrentNodeId) ->
@@ -148,7 +148,7 @@ update_next_node_pointer(NextNodeId, CurrentNodeId) ->
 
 
 %% @private
--spec handle_deletion_finished(#node{}, #node{} | undefined, append_list:key()) -> ok.
+-spec handle_deletion_finished(append_list:list_node(), append_list:list_node() | undefined, append_list:key()) -> ok.
 handle_deletion_finished(#node{node_id = NodeId, prev = Prev} = Node, #node{node_id = NodeId}, MaxOnRightBefore) ->
     PrevNode = case Prev of
         undefined -> 
@@ -170,8 +170,8 @@ handle_deletion_finished(CurrentNode, PrevNode, MaxOnRightBefore) ->
 
 
 %% @private
--spec update_current_node(#node{}, #{append_list:key() => append_list:value()}, #node{} | undefined) -> 
-    #node{}.
+-spec update_current_node(append_list:list_node(), #{append_list:key() => append_list:value()}, append_list:list_node() | undefined) -> 
+    append_list:list_node().
 update_current_node(CurrentNode, NewElements, PrevNode) ->
     PrevNodeId = case PrevNode of
         undefined -> undefined;
@@ -185,8 +185,8 @@ update_current_node(CurrentNode, NewElements, PrevNode) ->
 
 
 %% @private
--spec merge_nodes(#sentinel{}, CurrentNode :: #node{}, PrevNode :: #node{}, 
-    #{append_list:key() => append_list:value()}) -> #node{}.
+-spec merge_nodes(append_list:sentinel(), CurrentNode :: append_list:list_node(), PrevNode :: append_list:list_node(), 
+    #{append_list:key() => append_list:value()}) -> append_list:list_node().
 merge_nodes(Sentinel, CurrentNode, PrevNode, Elements) ->
     MergedNode = PrevNode#node{
         elements = Elements,

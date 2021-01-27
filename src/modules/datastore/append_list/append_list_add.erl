@@ -31,7 +31,8 @@
 %% be unique. Returns list of keys that were overwritten (in reversed order).
 %% @end
 %%--------------------------------------------------------------------
--spec insert_elements(#sentinel{}, #node{}, [append_list:element()]) -> {ok, [append_list:element()]}.
+-spec insert_elements(append_list:sentinel(), append_list:list_node(), [append_list:element()]) -> 
+    {ok, [append_list:element()]}.
 insert_elements(Sentinel, FirstNode, Batch) ->
     #sentinel{max_elements_per_node = MaxElementsPerNode} = Sentinel,
 
@@ -41,15 +42,16 @@ insert_elements(Sentinel, FirstNode, Batch) ->
     {FinalFirstNode, ElementsTail} = 
         add_unique_elements(UpdatedFirstNode, UniqueElements, MaxElementsPerNode),
     ok = add_to_beginning(Sentinel, ElementsTail, FinalFirstNode),
-    {ok, lists:map(fun({Key, _Value}) -> Key end, OverwrittenElements)}.
+    {OverwrittenKeys, _} = lists:unzip(OverwrittenElements),
+    {ok, OverwrittenKeys}.
 
 %%=====================================================================
 %% Internal functions
 %%=====================================================================
 
 %% @private
--spec add_unique_elements(#node{}, [append_list:element()], pos_integer()) -> 
-    {#node{}, [append_list:element()]}.
+-spec add_unique_elements(append_list:list_node(), [append_list:element()], pos_integer()) -> 
+    {append_list:list_node(), [append_list:element()]}.
 add_unique_elements(FirstNode, [] = _Elements, _MaxElementsPerNode) ->
     {FirstNode, []};
 add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBatch, _} | _] = Elements, MaxElementsPerNode) ->
@@ -81,7 +83,7 @@ add_unique_elements(#node{elements = ElementsInFirstNode} = FirstNode, [{MinInBa
 %% Creates new nodes if necessary.
 %% @end
 %%--------------------------------------------------------------------
--spec add_to_beginning(#sentinel{}, [append_list:element()], #node{}) -> ok.
+-spec add_to_beginning(append_list:sentinel(), [append_list:element()], append_list:list_node()) -> ok.
 add_to_beginning(#sentinel{structure_id = StructId} = Sentinel, [], #node{node_id = NodeId} = Node) ->
     append_list_persistence:save_node(NodeId, Node),
     append_list_persistence:save_node(StructId, Sentinel#sentinel{first = NodeId}),
@@ -101,8 +103,8 @@ add_to_beginning(Sentinel, [{Min, _} | _] = Batch, PrevNode) ->
 
 
 %% @private
--spec prepare_new_first_node(append_list:id(), [append_list:element()], PrevNode :: #node{}) -> 
-    NewNode :: #node{}.
+-spec prepare_new_first_node(append_list:id(), [append_list:element()], PrevNode :: append_list:list_node()) -> 
+    NewNode :: append_list:list_node().
 prepare_new_first_node(StructureId, ElementsList, #node{
     node_id = PrevNodeId, 
     node_number = PrevNodeNum
@@ -120,8 +122,8 @@ prepare_new_first_node(StructureId, ElementsList, #node{
 
 
 %% @private
--spec overwrite_existing_elements(#node{}, Batch :: [append_list:element()]) -> 
-    {#node{}, UniqueElements :: [append_list:element()], OverwrittenElements :: [append_list:element()]}.
+-spec overwrite_existing_elements(append_list:list_node(), Batch :: [append_list:element()]) -> 
+    {append_list:list_node(), UniqueElements :: [append_list:element()], OverwrittenElements :: [append_list:element()]}.
 overwrite_existing_elements(FirstNode, [{MinInBatch, _} | _] = Batch) ->
     #node{max_on_right = MaxOnRight, prev = Prev} = FirstNode,
     {NewNode, RemainingElements, Overwritten} = overwrite_existing_elements_in_node(FirstNode, Batch),
@@ -135,7 +137,7 @@ overwrite_existing_elements(FirstNode, [{MinInBatch, _} | _] = Batch) ->
 
 
 %% @private
--spec overwrite_existing_elements_in_prev_nodes(#node{} | append_list:id() | undefined, Batch :: [append_list:element()]) -> 
+-spec overwrite_existing_elements_in_prev_nodes(append_list:list_node() | append_list:id() | undefined, Batch :: [append_list:element()]) -> 
     {UniqueElements :: [append_list:element()], OverwrittenElements :: [append_list:element()]}.
 overwrite_existing_elements_in_prev_nodes(undefined, Batch) ->
     {Batch, []};
@@ -161,8 +163,8 @@ overwrite_existing_elements_in_prev_nodes(NodeId, Batch) ->
 
 
 %% @private
--spec overwrite_existing_elements_in_node(#node{}, Batch :: [append_list:element()]) -> 
-    {#node{}, UniqueElements :: [append_list:element()], CommonElements :: [append_list:element()]}.
+-spec overwrite_existing_elements_in_node(append_list:list_node(), Batch :: [append_list:element()]) -> 
+    {append_list:list_node(), UniqueElements :: [append_list:element()], CommonElements :: [append_list:element()]}.
 overwrite_existing_elements_in_node(Node, Batch) ->
     #node{elements = Elements} = Node,
     {Common, ReversedRemainingElements} = split_common_and_unique_elements(Batch, Elements),
