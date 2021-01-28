@@ -65,11 +65,13 @@
     create/1,
     destroy/1
 ]).
+% fixme min_on_left -> min_in_newer?
 
 -export([
     insert_unique_sorted_elements/2, 
-    remove_elements/2, 
-    fold_elements/2, fold_elements/3, fold_elements/4, 
+    remove_elements/2,
+    list/2, list/3,
+    fold_elements/4, fold_elements/5, 
     get_elements/2, get_elements/3, 
     get_highest/1, get_max_key/1
 ]).
@@ -94,7 +96,7 @@
 -type sentinel() :: #sentinel{}.
 -type list_node() :: #node{}.
 
--define(DEFAULT_FOLD_FUN, fun(Elem) -> {ok, Elem} end).
+-define(LIST_FOLD_FUN, fun(Elem, Acc) -> {ok, [Elem | Acc]} end).
 
 -export_type([id/0, key/0, value/0, element/0, node_number/0, elements_map/0]).
 -export_type([sentinel/0, list_node/0]).
@@ -157,6 +159,8 @@ remove_elements(StructureId, Elements) ->
     end.
 
 
+% fixme order not true
+% fixme fold -> list
 %%--------------------------------------------------------------------
 %% @doc
 %% Folds on elements in sliding proplist instance. When elements where added as recommended (i.e with increasing keys,  % fixme lists
@@ -166,30 +170,36 @@ remove_elements(StructureId, Elements) ->
 %% When elements are not added in recommended order there is no guarantee about listing order.
 %% @end
 %%--------------------------------------------------------------------
--spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size()) ->
-    sliding_proplist_get:fold_result() | {error, term()}.
-fold_elements(Id, Size) when is_binary(Id) ->
-    fold_elements(Id, Size, back_from_newest);
-fold_elements(State, Size) ->
-    fold_elements(State, Size, ?DEFAULT_FOLD_FUN).
+-spec list(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size()) ->
+    sliding_proplist_get:fold_result([element()]) | {error, term()}.
+list(Id, Size) when is_binary(Id) ->
+    list(Id, Size, back_from_newest);
+list(State, Size) ->
+    fold_elements(State, Size, ?LIST_FOLD_FUN, []).
 
--spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size(), 
-    sliding_proplist_get:direction() | sliding_proplist_get:fold_fun()) ->
-    sliding_proplist_get:fold_result() | {error, term()}.
-fold_elements(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
-    fold_elements(Id, Size, Direction, ?DEFAULT_FOLD_FUN);
-fold_elements(Id, Size, FoldFun) when is_binary(Id) and is_function(FoldFun, 1) ->
-    fold_elements(Id, Size, back_from_newest, FoldFun);
-fold_elements(State, Size, FoldFun) when is_function(FoldFun, 1) ->
-    sliding_proplist_get:fold(State, Size, FoldFun).
 
--spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), sliding_proplist_get:fold_fun()) ->
+-spec list(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction()) ->
+    sliding_proplist_get:fold_result([element()]) | {error, term()}.
+list(Id, Size, Direction) when is_binary(Id) and is_atom(Direction) ->
+    fold_elements(Id, Size, Direction, ?LIST_FOLD_FUN, []).
+
+
+
+% fixme doc?
+-spec fold_elements(id() | sliding_proplist_get:state(), sliding_proplist_get:batch_size(), sliding_proplist_get:fold_fun(), term()) ->
     sliding_proplist_get:fold_result() | {error, term()}.
-fold_elements(Id, Size, Direction, FoldFun) when is_binary(Id) ->
+fold_elements(Id, Size, FoldFun, Acc0) when is_binary(Id) and is_function(FoldFun, 2) ->
+    fold_elements(Id, Size, back_from_newest, FoldFun, Acc0);
+fold_elements(State, Size, FoldFun, Acc0) when is_function(FoldFun, 2) ->
+    sliding_proplist_get:fold(State, Size, FoldFun, Acc0).
+
+-spec fold_elements(id(), sliding_proplist_get:batch_size(), sliding_proplist_get:direction(), sliding_proplist_get:fold_fun(), term()) ->
+    sliding_proplist_get:fold_result() | {error, term()}.
+fold_elements(Id, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
     case sliding_proplist_persistence:get_node(Id) of
         {ok, #sentinel{} = Sentinel} ->
             StartingNodeId = sliding_proplist_utils:get_starting_node_id(Direction, Sentinel),
-            sliding_proplist_get:fold(Id, StartingNodeId, Size, Direction, FoldFun);
+            sliding_proplist_get:fold(Id, StartingNodeId, Size, Direction, FoldFun, Acc0);
         {error, _} = Error -> Error
     end.
 

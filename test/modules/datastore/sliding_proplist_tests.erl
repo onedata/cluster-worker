@@ -22,11 +22,12 @@
 %%% Setup and teardown
 %%%===================================================================
 
-sliding_prolist_test_() ->
+sliding_proplist_test_() ->
     {foreach,
         fun setup/0,
         fun teardown/1,
         [
+            % fixme nazwy funkcji nie odpowiadają nazwom właściwym
             {"test_create_and_destroy", fun test_create_and_destroy/0},
             {"test_add_elements_one_node", fun test_add_elements_one_node/0},
             {"test_add_elements_multi_nodes", fun test_add_elements_multi_nodes/0},
@@ -91,19 +92,18 @@ test_create_and_destroy() ->
 
 test_add_elements_one_node() ->
     ?assertEqual({error, not_found}, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, prepare_batch(1, 100))),
-    ?assertMatch({error, not_found}, sliding_proplist:fold_elements(<<"dummy_id">>, 100)),
+    ?assertMatch({error, not_found}, sliding_proplist:list(<<"dummy_id">>, 100)),
     ?assertEqual({error, not_found}, sliding_proplist:insert_unique_sorted_elements(<<"dummy_id">>, [])),
     {ok, Id} = sliding_proplist:create(10),
     ?assertEqual({ok, []}, sliding_proplist:insert_unique_sorted_elements(Id, [{1, <<"1">>}])),
-    ?assertMatch({done, [{1, <<"1">>}]}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, [{1, <<"1">>}]}, sliding_proplist:list(Id, 100)).
 
 
 test_add_elements_multi_nodes() ->
     {ok, Id} = sliding_proplist:create(10),
     Batch = prepare_batch(10, 30),
     sliding_proplist:insert_unique_sorted_elements(Id, Batch),
-    Expected = lists:reverse(Batch),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Batch}, sliding_proplist:list(Id, 100)).
 
 
 test_add_only_existing_elements() ->
@@ -111,8 +111,7 @@ test_add_only_existing_elements() ->
     Batch = prepare_batch(10, 30),
     ?assertEqual({ok, []}, sliding_proplist:insert_unique_sorted_elements(Id, Batch)),
     ?assertEqual({ok, lists:reverse(lists:seq(10, 30))}, sliding_proplist:insert_unique_sorted_elements(Id, Batch)),
-    Expected = lists:reverse(Batch),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Batch}, sliding_proplist:list(Id, 100)).
 
 
 test_add_with_overwrite() ->
@@ -121,53 +120,54 @@ test_add_with_overwrite() ->
     ?assertEqual({ok, []}, sliding_proplist:insert_unique_sorted_elements(Id, Batch1)),
     Batch2 = prepare_batch(10, 32, fun(A) -> integer_to_binary(2*A) end),
     ?assertEqual({ok, lists:reverse(lists:seq(10, 30))}, sliding_proplist:insert_unique_sorted_elements(Id, Batch2)),
-    Expected = lists:reverse(Batch2),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)),
+    ?assertMatch({done, Batch2}, sliding_proplist:list(Id, 100)),
     ?assertEqual({ok, [20]}, sliding_proplist:insert_unique_sorted_elements(Id, [{20, <<"40">>}])),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Batch2}, sliding_proplist:list(Id, 100)).
 
 
 test_list_with_listing_state() ->
-    ?assertMatch({error, not_found}, sliding_proplist:fold_elements(<<"dummy_id">>, 1000)),
+    ?assertMatch({error, not_found}, sliding_proplist:list(<<"dummy_id">>, 1000)),
     {ok, Id} = sliding_proplist:create(10),
-    ?assertMatch({done, []}, sliding_proplist:fold_elements(Id, 0)),
-    ?assertMatch({done, []}, sliding_proplist:fold_elements(Id, 10)),
+    ?assertMatch({done, []}, sliding_proplist:list(Id, 0)),
+    ?assertMatch({done, []}, sliding_proplist:list(Id, 10)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     FinalListingState = lists:foldl(fun(X, ListingState) ->
-        {more, Res, NewListingState} = sliding_proplist:fold_elements(ListingState, 1),
+        {more, Res, NewListingState} = sliding_proplist:list(ListingState, 1),
         ?assertEqual([{X, integer_to_binary(X)}], Res),
         NewListingState
     end, Id, lists:seq(30, 11, -1)),
-    ?assertMatch({done, [{10, <<"10">>}]}, sliding_proplist:fold_elements(FinalListingState, 1)).
+    ?assertMatch({done, [{10, <<"10">>}]}, sliding_proplist:list(FinalListingState, 1)).
 
 
 test_list_with_listing_state_start_from_last() ->
-    ?assertMatch({error, not_found}, sliding_proplist:fold_elements(<<"dummy_id">>, 1000)),
+    ?assertMatch({error, not_found}, sliding_proplist:list(<<"dummy_id">>, 1000)),
     {ok, Id} = sliding_proplist:create(10),
-    ?assertMatch({done, []}, sliding_proplist:fold_elements(Id, 0, forward_from_oldest)),
+    ?assertMatch({done, []}, sliding_proplist:list(Id, 0, forward_from_oldest)),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     FinalListingState = lists:foldl(
         fun (X, Id) when is_binary(Id) ->
-                {more, Res, NewListingState} = sliding_proplist:fold_elements(Id, 1, forward_from_oldest),
+                {more, Res, NewListingState} = sliding_proplist:list(Id, 1, forward_from_oldest),
                 ?assertEqual([{X, integer_to_binary(X)}], Res),
                 NewListingState;
             (X, ListingState) ->
-                {more, Res, NewListingState} = sliding_proplist:fold_elements(ListingState, 1),
+                {more, Res, NewListingState} = sliding_proplist:list(ListingState, 1),
                 ?assertEqual([{X, integer_to_binary(X)}], Res),
                 NewListingState
     end, Id, lists:seq(10, 29)),
-    ?assertMatch({done, [{30, <<"30">>}]}, sliding_proplist:fold_elements(FinalListingState, 1)).
+    ?assertMatch({done, [{30, <<"30">>}]}, sliding_proplist:list(FinalListingState, 1)).
 
 
 test_list_with_fold_fun() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     FinalListingState = lists:foldl(fun(X, ListingState) ->
-        {more, Res, NewListingState} = sliding_proplist:fold_elements(ListingState, 1, fun({_Key, Value}) -> {ok, Value} end),
+        {more, Res, NewListingState} = sliding_proplist:fold_elements(
+            ListingState, 1, fun({_Key, Value}, Acc) -> {ok, [Value | Acc]} end, []),
         ?assertEqual([integer_to_binary(X)], Res),
         NewListingState
     end, Id, lists:seq(30, 11, -1)),
-    ?assertMatch({done, [<<"10">>]}, sliding_proplist:fold_elements(FinalListingState, 1, fun({_Key, Value}) -> {ok, Value} end)).
+    ?assertMatch({done, [<<"10">>]}, sliding_proplist:fold_elements(
+        FinalListingState, 1, fun({_Key, Value}, Acc) -> {ok, [Value | Acc]} end, [])).
 
 
 test_list_with_fold_fun_stop() ->
@@ -175,15 +175,17 @@ test_list_with_fold_fun_stop() ->
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 30)),
     Expected1 = lists:seq(1, 7),
     ?assertMatch({done, Expected1},  sliding_proplist:fold_elements(Id, 100, forward_from_oldest,
-        fun ({8, _Value}) -> stop;
-            ({Key, _Value}) -> {ok, Key} 
-        end)
+        fun ({8, _Value}, _Acc) -> stop;
+            ({Key, _Value}, Acc) -> {ok, Acc ++ [Key]} 
+        end, 
+        [])
     ),
     Expected2 = lists:seq(30, 9, -1),
     ?assertMatch({done, Expected2},  sliding_proplist:fold_elements(Id, 100, 
-        fun ({8, _Value}) -> stop;
-            ({Key, _Value}) -> {ok, Key}
-        end)
+        fun ({8, _Value}, _Acc) -> stop;
+            ({Key, _Value}, Acc) -> {ok, Acc ++ [Key]}
+        end,
+        [])
     ).
 
 
@@ -194,30 +196,30 @@ test_delete_consecutive_elems_between_nodes() ->
     ?assertEqual(ok, sliding_proplist:remove_elements(Id, [1,2,3,4,5])),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     sliding_proplist:remove_elements(Id, lists:seq(10, 20)),
-    Expected = lists:reverse(prepare_batch(21, 30)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)),
+    Expected = prepare_batch(21, 30),
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)),
     sliding_proplist:remove_elements(Id, lists:seq(25, 30)),
-    Expected1 = lists:reverse(prepare_batch(21, 24)),
-    ?assertMatch({done, Expected1}, sliding_proplist:fold_elements(Id, 100)).
+    Expected1 = prepare_batch(21, 24),
+    ?assertMatch({done, Expected1}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_non_consecutive_elems_between_nodes() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(1, 100)),
     sliding_proplist:remove_elements(Id, lists:seq(1,100, 2)),
-    Expected = lists:reverse(prepare_batch(2, 100 ,2)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    Expected = prepare_batch(2, 100 ,2),
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_all_elems_in_first_node() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     sliding_proplist:remove_elements(Id, [30]),
-    Expected = lists:reverse(prepare_batch(10, 29)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)),
+    Expected = prepare_batch(10, 29),
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)),
     sliding_proplist:remove_elements(Id, lists:seq(20, 30)),
-    Expected1 = lists:reverse(prepare_batch(10, 19)),
-    ?assertMatch({done, Expected1}, sliding_proplist:fold_elements(Id, 100)).
+    Expected1 = prepare_batch(10, 19),
+    ?assertMatch({done, Expected1}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_elems_all_but_first_node() ->
@@ -225,7 +227,7 @@ test_delete_elems_all_but_first_node() ->
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
     sliding_proplist:remove_elements(Id, lists:seq(10, 29)),
     Expected = lists:reverse(prepare_batch(30, 30)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_first_node_merge_during_delete() ->
@@ -233,7 +235,7 @@ test_first_node_merge_during_delete() ->
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 31)),
     sliding_proplist:remove_elements(Id, lists:seq(10, 30)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_elems_one_by_one_descending() ->
@@ -243,7 +245,7 @@ test_delete_elems_one_by_one_descending() ->
         sliding_proplist:remove_elements(Id, [Elem])
     end, lists:seq(30, 10, -1)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_elems_one_by_one_ascending() ->
@@ -253,7 +255,7 @@ test_delete_elems_one_by_one_ascending() ->
         sliding_proplist:remove_elements(Id, [Elem])
     end, lists:seq(10, 30)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_elems_structure_not_sorted() ->
@@ -264,7 +266,7 @@ test_delete_elems_structure_not_sorted() ->
         sliding_proplist:remove_elements(Id, [Elem])
     end, lists:seq(30, 10, -1)),
     Expected = lists:reverse(prepare_batch(31, 31)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_merge_nodes_during_delete_structure_not_sorted() ->
@@ -273,20 +275,20 @@ test_merge_nodes_during_delete_structure_not_sorted() ->
         sliding_proplist:insert_unique_sorted_elements(Id, Elem)
     end, prepare_batch(5, 1, -1)),
     sliding_proplist:remove_elements(Id, [5]),
-    Expected = lists:reverse(prepare_batch(4, 1, -1)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(Id, 100)).
+    Expected = prepare_batch(4, 1, -1),
+    ?assertMatch({done, Expected}, sliding_proplist:list(Id, 100)).
 
 
 test_delete_between_listings() ->
     {ok, Id} = sliding_proplist:create(10),
     sliding_proplist:insert_unique_sorted_elements(Id, prepare_batch(10, 30)),
-    {more, _, ListingState} = sliding_proplist:fold_elements(Id, 2),
+    {more, _, ListingState} = sliding_proplist:list(Id, 2),
     sliding_proplist:remove_elements(Id, [28, 27]),
-    {more, Res, _} = sliding_proplist:fold_elements(ListingState, 1),
+    {more, Res, _} = sliding_proplist:list(ListingState, 1),
     ?assertMatch([{26, <<"26">>}], Res),
     sliding_proplist:remove_elements(Id, lists:seq(20, 29)),
-    Expected = lists:reverse(prepare_batch(10, 19)),
-    ?assertMatch({done, Expected}, sliding_proplist:fold_elements(ListingState, 100)).
+    Expected = prepare_batch(10, 19),
+    ?assertMatch({done, Expected}, sliding_proplist:list(ListingState, 100)).
 
 
 test_get_highest() ->

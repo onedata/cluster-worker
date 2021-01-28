@@ -17,11 +17,10 @@
 -include("modules/datastore/sliding_proplist.hrl").
 
 %% API
--export([fold/3, fold/5, get_elements/3, get_highest/1, get_max_key/1]).
+-export([fold/4, fold/6, get_elements/3, get_highest/1, get_max_key/1]).
 
 
 % This record is used as cache during listing. Holds information where listing should continue.
-% @see find_node/1 % fixme
 -record(listing_state, {
     structure_id :: sliding_proplist:id() | undefined,
     last_node_id :: sliding_proplist:id() | undefined,
@@ -32,37 +31,38 @@
     finished = false :: boolean()
 }).
 
--type fold_fun() :: fun((sliding_proplist:element()) -> {ok, term()} | stop).
+-type fold_fun() :: fun((sliding_proplist:element(), term()) -> {ok, term()} | stop).
 -type direction() :: back_from_newest | forward_from_oldest.
 -type batch_size() :: non_neg_integer().
--type fold_result() :: {more, [sliding_proplist:element()], state()} | {done, [sliding_proplist:element()]}.
+-type fold_result(Acc) :: {more, Acc, state()} | {done, Acc}.
+-type fold_result() :: fold_result(term()).
 -opaque state() :: #listing_state{}.
 
--export_type([fold_fun/0, direction/0, batch_size/0, fold_result/0, state/0]).
+-export_type([fold_fun/0, direction/0, batch_size/0, fold_result/0, fold_result/1, state/0]).
 
 %%=====================================================================
 %% API
 %%=====================================================================
 
--spec fold(state() | sliding_proplist:id(), batch_size(),
-    fold_fun()) -> fold_result() | {error, term()}.
-fold(#listing_state{} = InitialState, Size, FoldFun) ->
-    case continue_fold(InitialState, Size, FoldFun, []) of
+-spec fold(state() | sliding_proplist:id(), batch_size(), fold_fun(), term()) -> 
+    fold_result() | {error, term()}.
+fold(#listing_state{} = InitialState, Size, FoldFun, Acc0) ->
+    case continue_fold(InitialState, Size, FoldFun, Acc0) of
         {Result, #listing_state{finished = true}} -> {done, Result};
         {Result, #listing_state{finished = false} = State} -> {more, Result, State};
         {error, _} = Error -> Error
     end.
 
 
--spec fold(sliding_proplist:id(), sliding_proplist:node_id(), batch_size(), direction(), fold_fun()) -> 
+-spec fold(sliding_proplist:id(), sliding_proplist:node_id(), batch_size(), direction(), fold_fun(), term()) -> 
     fold_result() | {error, term()}.
-fold(Id, StartingNodeId, Size, Direction, FoldFun) when is_binary(Id) ->
+fold(Id, StartingNodeId, Size, Direction, FoldFun, Acc0) when is_binary(Id) ->
     State = #listing_state{
         structure_id = Id,
         last_node_id = StartingNodeId,
         direction = Direction
     },
-    fold(State, Size, FoldFun).
+    fold(State, Size, FoldFun, Acc0).
 
 
 -spec get_elements(sliding_proplist:id() | undefined, [sliding_proplist:key()], direction()) -> 
@@ -115,7 +115,7 @@ get_max_key(NodeId) ->
 
 % fixme name
 %% @private
--spec continue_fold(state(), batch_size(), fold_fun(), [sliding_proplist:element()]) -> 
+-spec continue_fold(state(), batch_size(), fold_fun(), term()) -> 
     {[sliding_proplist:element()], state()}.
 continue_fold(#listing_state{finished = true} = State, _Size, _FoldFun, Acc) ->
     {Acc, State};
@@ -129,14 +129,14 @@ continue_fold(#listing_state{
 } = State, Size, FoldFun, Acc) ->
     case find_node(State) of
         #node{elements = AllElementsInNode, node_number = NodeNumber} = Node ->
-            Elements = retrieve_not_listed_elements(State, AllElementsInNode, NodeNumber),
+            Elements = select_not_listed_elements(State, AllElementsInNode, NodeNumber),
             NumberOfElementsToTake = min(Size, length(Elements)),
             {ListedElements, NotListedElements} = lists:split(NumberOfElementsToTake, Elements),
             NextStartNodeId = case NotListedElements of
                 [] -> select_neighbour(Direction, Node);
                 _ -> NodeId
             end,
-            {Status, Result} = apply_fold_fun(FoldFun, ListedElements),
+            {Status, Result} = apply_fold_fun(FoldFun, Acc, ListedElements),
             Finished = case Status of
                 stop -> true;
                 continue -> false
@@ -147,15 +147,15 @@ continue_fold(#listing_state{
                 last_node_number = NodeNumber,
                 last_listed_key = LastListedKey,
                 finished = Finished
-            }, Size - NumberOfElementsToTake, FoldFun, Acc ++ lists:reverse(Result));
+            }, Size - NumberOfElementsToTake, FoldFun, Result);
         {error, _} = Error -> Error
     end.
 
 
 %% @private
--spec retrieve_not_listed_elements(state(), sliding_proplist:elements_map(), sliding_proplist:node_number()) -> 
+-spec select_not_listed_elements(state(), sliding_proplist:elements_map(), sliding_proplist:node_number()) -> 
     [sliding_proplist:element()].
-retrieve_not_listed_elements(#listing_state{
+select_not_listed_elements(#listing_state{
     last_listed_key = LastKey,
     last_node_number = LastNodeNum,
     direction = Direction
@@ -218,16 +218,16 @@ find_node(State) ->
 
 
 %% @private
--spec apply_fold_fun(fold_fun(), [sliding_proplist:element()]) -> {continue | stop, [term()]}.
-apply_fold_fun(FoldFun, OriginalElements) ->
+-spec apply_fold_fun(fold_fun(), term(), [sliding_proplist:element()]) -> {continue | stop, [term()]}.
+apply_fold_fun(FoldFun, Acc0, OriginalElements) ->
     lists:foldl(fun
-        (_Elem, {stop, Elements}) -> {stop, Elements};
-        (E, {continue, Elements}) ->
-            case FoldFun(E) of
-                stop -> {stop, Elements};
-                {ok, Res} -> {continue, [Res | Elements]}
+        (_Elem, {stop, Acc}) -> {stop, Acc};
+        (E, {continue, Acc}) ->
+            case FoldFun(E, Acc) of
+                stop -> {stop, Acc};
+                {ok, Res} -> {continue, Res}
             end
-    end, {continue, []}, OriginalElements).
+    end, {continue, Acc0}, OriginalElements).
 
 
 %% @private
